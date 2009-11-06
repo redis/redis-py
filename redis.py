@@ -3,8 +3,8 @@
 """ redis.py - A client for the Redis daemon.
 
 History:
-        - 20091106 added SPOP, SCARD, SDIFF, SDIFFSTORE and all sorted set (Z*) 
-          commands (Andy McCurdy)
+        - 20091106 added SPOP, SCARD, SRANDMEMBER, SDIFF, SDIFFSTORE
+          and all sorted set (Z*) commands (Andy McCurdy)
         - 20091106 added connection retry handling when the client gets disconnected,
           perhaps via the server timing the client out.
         - 20090603 fix missing errno import, add sunion and sunionstore commands,
