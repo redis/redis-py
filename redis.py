@@ -99,7 +99,6 @@ class Redis(object):
             return self._send_command(s)
         except ConnectionError:
             self.disconnect()
-            print 'retrying'
             return self._send_command(s)
             
             
@@ -378,7 +377,7 @@ class Redis(object):
         """
         return self.send_command('EXPIRE %s %s\r\n' % (name, time))
     
-    def push(self, name, value, tail=False):
+    def push(self, name, value, head=False):
         """
         >>> r = Redis(db=9)
         >>> r.delete('l')
@@ -396,7 +395,7 @@ class Redis(object):
         """
         value = self._encode(value)
         return self.send_command('%s %s %s\r\n%s\r\n' % (
-            'LPUSH' if tail else 'RPUSH', name, len(value), value
+            'LPUSH' if head else 'RPUSH', name, len(value), value
         ))
     
     def llen(self, name):
@@ -516,6 +515,36 @@ class Redis(object):
         >>> 
         """
         return self.send_command('%s %s\r\n' % ('RPOP' if tail else 'LPOP', name))
+        
+    def poppush(self, src, dst):
+        """
+        >>> r = Redis(db=9)
+        >>> r.delete('lsource')
+        0
+        >>> r.delete('ldestination')
+        0
+        >>> r.push('lsource', 'one', head=True)
+        'OK'
+        >>> r.push('lsource', 'two', head=True)
+        'OK'
+        >>> r.push('lsource', 'three', head=True)
+        'OK'
+        >>> r.poppush('lsource', 'ldestination')
+        u'one'
+        >>> r.lrange('lsource', 0, -1)
+        [u'three', u'two']
+        >>> r.lrange('ldestination', 0, -1)
+        [u'one']
+        >>> r.poppush('lsource', 'ldestination')
+        u'two'
+        >>> r.lrange('lsource', 0, -1)
+        [u'three']
+        >>> r.lrange('ldestination', 0, -1)
+        [u'two', u'one']
+        """
+        return self.send_command('RPOPLPUSH %s %s\r\n%s\r\n' % (
+            src, len(dst), dst
+        ))
     
     def lset(self, name, index, value):
         """
