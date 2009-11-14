@@ -28,9 +28,6 @@ import decimal
 import errno
 
 
-BUFSIZE = 4096
-
-
 class RedisError(Exception): pass
 class ConnectionError(RedisError): pass
 class ResponseError(RedisError): pass
@@ -40,11 +37,25 @@ class InvalidData(RedisError): pass
 
 class Redis(object):
     """The main Redis client.
+
+    >>> r = Redis(db=9)
+    >>> r['a'] = 24.0
+    >>> r['a']
+    Decimal("24.0")
+
+    >>> r = Redis(db=9, float_fn=float)
+    >>> r['a']
+    24.0
+
+    >>> del r['a']
+    >>> print r.get('a') # r['a'] will raise KeyError
+    None
+
     """
     
     def __init__(self, host=None, port=None, timeout=None,
             db=None, nodelay=None, charset='utf8', errors='strict',
-            retry_connection=True):
+            retry_connection=True, float_fn=decimal.Decimal):
         self.host = host or 'localhost'
         self.port = port or 6379
         if timeout:
@@ -52,6 +63,7 @@ class Redis(object):
         self.nodelay = nodelay
         self.charset = charset
         self.errors = errors
+        self.float_fn = float_fn
         if retry_connection:
             self.send_command = self._send_command_retry
         else:
@@ -151,6 +163,8 @@ class Redis(object):
         return self.send_command('%s %s %s\r\n%s\r\n' % (
                 command, name, len(value), value
             ))
+
+    __setitem__ = set
     
     def get(self, name):
         """
@@ -170,9 +184,15 @@ class Redis(object):
         >>> r.get('c')
         u' \\r\\naaa\\nbbb\\r\\ncccc\\nddd\\r\\n '
         >>> r.get('ajhsd')
-        >>> 
         """
         return self.send_command('GET %s\r\n' % name)
+
+    def __getitem__(self, name):
+        val = self.get(name)
+        if val is None:
+            raise KeyError
+        return val
+
     
     def getset(self, name, value):
         """
@@ -264,6 +284,8 @@ class Redis(object):
         >>> 
         """
         return self.send_command('DEL %s\r\n' % name)
+
+    __delitem__ = delete
 
     def get_type(self, name):
         """
@@ -1183,10 +1205,7 @@ class Redis(object):
                 num = int(data[1:])
             except (TypeError, ValueError):
                 raise InvalidResponse("Cannot convert multi-response header '%s' to integer" % data)
-            result = list()
-            for i in range(num):
-                result.append(self._get_value())
-            return result
+            return [self._get_value() for i in range(num)]
         return self._get_value(data)
     
     def _get_value(self, data=None):
@@ -1194,7 +1213,7 @@ class Redis(object):
         if data == '$-1':
             return None
         try:
-            c, i = data[0], (int(data[1:]) if data.find('.') == -1 else float(data[1:]))
+            c, i = data[0], (int(data[1:]) if not "." in data else float(data[1:]))
         except ValueError:
             raise InvalidResponse("Cannot convert data '%s' to integer" % data)
         if c == ':':
@@ -1202,15 +1221,14 @@ class Redis(object):
         if c != '$':
             raise InvalidResponse("Unkown response prefix for '%s'" % data)
         buf = []
-        while True:
+        while i >= 0:
             data = self._read()
             i -= len(data)
             buf.append(data)
-            if i < 0:
-                break
+
         data = ''.join(buf)[:-2]
         try:
-            return int(data) if data.find('.') == -1 else decimal.Decimal(data)
+            return int(data) if not '.' in data else self.float_fn(data)
         except (ValueError, decimal.InvalidOperation):
             return data.decode(self.charset)
     
@@ -1249,6 +1267,9 @@ class Redis(object):
                 
             
 if __name__ == '__main__':
+
+    # hack to make doctests pass in 2.6
+    decimal.Decimal.__repr__ = lambda self: 'Decimal("%s")' % str(self)
     import doctest
     doctest.testmod()
     
