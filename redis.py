@@ -3,6 +3,9 @@
 """ redis.py - A client for the Redis daemon.
 
 History:
+        - 20091115 implemented __getitem__, __setitem__, __delitem__ to make
+          gets/sets/deletes easy and pythonic. better py 2.6 decimal support
+          (thanks Brent Pedersen)
         - 20091106 added SPOP, SCARD, SRANDMEMBER, SDIFF, SDIFFSTORE
           and all sorted set (Z*) commands (Andy McCurdy)
         - 20091106 added connection retry handling when the client gets disconnected,
