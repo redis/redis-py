@@ -1,0 +1,4 @@
+* 0.6.0 Changed to Andy McCurdy's codebase on github
+* 0.5.5 Patch from David Moss, SHUTDOWN and doctest bugfix
+* 0.5.1-4 Bugfixes, no code changes, just packaging, 10/2/09
+* 0.5 Initial release, redis.py version 1.0.1, 10/2/09
