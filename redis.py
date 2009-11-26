@@ -673,7 +673,7 @@ class Redis(object):
         stmt = ['SORT', name]
         if by:
             stmt.append("BY %s" % by)
-        if start and num:
+        if start is not None and num is not None:
             stmt.append("LIMIT %s %s" % (start, num))
         if get is None:
             pass
