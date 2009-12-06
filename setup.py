@@ -29,7 +29,10 @@ sdict = {
         'Programming Language :: Python'],
 }
 
-from distutils.core import setup
+try:
+    from setuptools import setup
+except ImportError:
+    from distutils.core import setup
 #setup(**setupdict)
 setup(name=sdict['name'],
       version=sdict['version'],
