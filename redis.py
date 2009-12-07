@@ -29,6 +29,11 @@ __date__ = "$LastChangedDate: 2009-03-17 16:15:55 +0100 (Mar, 17 Mar 2009) $"[18
 import socket
 import decimal
 import errno
+import threading
+import thread
+
+# global threading manager
+connections = threading.local()
 
 
 class RedisError(Exception): pass
@@ -36,7 +41,6 @@ class ConnectionError(RedisError): pass
 class ResponseError(RedisError): pass
 class InvalidResponse(RedisError): pass
 class InvalidData(RedisError): pass
-
 
 class Redis(object):
     """The main Redis client.
@@ -58,9 +62,11 @@ class Redis(object):
     
     def __init__(self, host=None, port=None, timeout=None,
             db=None, nodelay=None, charset='utf8', errors='strict',
-            retry_connection=True, float_fn=decimal.Decimal):
+            retry_connection=True, float_fn=decimal.Decimal, pooled=False):
         self.host = host or 'localhost'
         self.port = port or 6379
+        self.db = db
+        self.connection_key = '%s:%s:%s' % (self.db,self.host, self.port)
         if timeout:
             socket.setdefaulttimeout(timeout)
         self.nodelay = nodelay
@@ -72,9 +78,10 @@ class Redis(object):
         else:
             self.send_command = self._send_command
         self.retry_connection = retry_connection
+        self._conn = None
         self._sock = None
         self._fp = None
-        self.db = db
+        
         
     def _encode(self, s):
         if isinstance(s, str):
@@ -1236,14 +1243,16 @@ class Redis(object):
             return data.decode(self.charset)
     
     def disconnect(self):
-        if isinstance(self._sock, socket.socket):
-            try:
+        try:
+            if self._sock:
                 self._sock.close()
-            except socket.error:
-                pass
+        except socket.error:
+            pass
         self._sock = None
         self._fp = None
-            
+        if hasattr(connections, self.connection_key ):
+            delattr(connections, self.connection_key)
+    
     def connect(self):
         """
         >>> r = Redis(db=9)
@@ -1256,19 +1265,25 @@ class Redis(object):
         if isinstance(self._sock, socket.socket):
             return
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.connect((self.host, self.port))
+            # connection pooling to thread local
+            if not hasattr(connections, self.connection_key):
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.connect((self.host, self.port))
+                if self.nodelay is not None:
+                    sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, self.nodelay)
+                setattr(connections,self.connection_key,sock)
+            else:
+                sock = getattr(connections, self.connection_key)
         except socket.error, e:
             raise ConnectionError("Error %s connecting to %s:%s. %s." % (e.args[0], self.host, self.port, e.args[1]))
         else:
+            # no exceptions
             self._sock = sock
             self._fp = self._sock.makefile('r')
             if self.db:
                 self.select(self.db)
-            if self.nodelay is not None:
-                self._sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, self.nodelay)
-                
-            
+    
+
 if __name__ == '__main__':
 
     # hack to make doctests pass in 2.6
