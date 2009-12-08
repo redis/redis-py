@@ -3,6 +3,7 @@
 """ redis.py - A client for the Redis daemon.
 
 History:
+        - 20091207 Redis conenctions are now thread safe.  Thanks Aaron Raddon
         - 20091115 implemented __getitem__, __setitem__, __delitem__ to make
           gets/sets/deletes easy and pythonic. better py 2.6 decimal support
           (thanks Brent Pedersen)
