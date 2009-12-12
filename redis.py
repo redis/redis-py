@@ -19,7 +19,7 @@ History:
 __author__ = "Ludovico Magnocavallo <ludo\x40qix\x2eit>"
 __copyright__ = "Copyright 2009, Ludovico Magnocavallo"
 __license__ = "MIT"
-__version__ = "0.5"
+__version__ = "0.6.1"
 __revision__ = "$LastChangedRevision: 175 $"[22:-2]
 __date__ = "$LastChangedDate: 2009-03-17 16:15:55 +0100 (Mar, 17 Mar 2009) $"[18:-2]
 
@@ -45,6 +45,7 @@ class InvalidData(RedisError): pass
 class Redis(object):
     """The main Redis client.
 
+    >>> from redis import Redis, ConnectionError, ResponseError
     >>> r = Redis(db=9)
     >>> r['a'] = 24.0
     >>> r['a']
@@ -307,8 +308,10 @@ class Redis(object):
         >>> 
         """
         res = self.send_command('TYPE %s\r\n' % name)
-        return None if res == 'none' else res
-    
+        if res == 'none':
+            return
+        return res
+
     def keys(self, pattern):
         """
         >>> r = Redis(db=9)
@@ -425,10 +428,11 @@ class Redis(object):
         >>> 
         """
         value = self._encode(value)
-        return self.send_command('%s %s %s\r\n%s\r\n' % (
-            'LPUSH' if head else 'RPUSH', name, len(value), value
-        ))
-    
+        command = 'RPUSH'
+        if head: command = 'LPUSH'
+        return self.send_command('%s %s %s\r\n%s\r\n' \
+            % (command, name, len(value), value))
+
     def llen(self, name):
         """
         >>> r = Redis(db=9)
@@ -543,10 +547,12 @@ class Redis(object):
         >>> r.pop('l')
         u'aaa'
         >>> r.pop('l')
-        >>> 
+        >>>
         """
-        return self.send_command('%s %s\r\n' % ('RPOP' if tail else 'LPOP', name))
-        
+        command = 'LPOP'
+        if tail: command = 'RPOP'
+        return self.send_command('%s %s\r\n' % (command, name))
+
     def poppush(self, src, dst):
         """
         >>> r = Redis(db=9)
@@ -1034,12 +1040,13 @@ class Redis(object):
         [u'c', u'a', u'b']
         >>> r.zrange('z1', 0, 1, desc=True)
         [u'c', u'a']
+        >>>
         """
-        command = 'ZREVRANGE' if desc else 'ZRANGE'
-        return self.send_command('%s %s %s %s\r\n' % (
-            command, key, start, end
-        ))
-        
+        command = 'ZRANGE'
+        if desc: command = 'ZREVRANGE'
+        return self.send_command('%s %s %s %s\r\n' \
+            % (command, key, start, end))
+
     def zrangebyscore(self, key, min, max):
         """
         >>> r = Redis(db=9)
@@ -1174,10 +1181,12 @@ class Redis(object):
         >>> r.flush()
         'OK'
         >>> # r.flush(all_dbs=True)
-        >>> 
+        >>>
         """
-        return self.send_command('%s\r\n' % ('FLUSHALL' if all_dbs else 'FLUSHDB'))
-    
+        command = 'FLUSHDB'
+        if all_dbs: command = 'FLUSHALL'
+        return self.send_command('%s\r\n' % command)
+
     def info(self):
         """
         >>> r = Redis(db=9)
@@ -1193,7 +1202,10 @@ class Redis(object):
             if not l:
                 continue
             k, v = l.split(':', 1)
-            info[k] = int(v) if v.isdigit() else v
+            if v.isdigit():
+                info[k] = int(v)
+            else:
+                info[k] = v
         return info
     
     def auth(self, passwd):
@@ -1206,7 +1218,10 @@ class Redis(object):
             raise ConnectionError("Socket closed on remote end")
         c = data[0]
         if c == '-':
-            raise ResponseError(data[5:] if data[:5] == '-ERR ' else data[1:])
+            err = data[1:]
+            if data[:5] == '-ERR ':
+                err = data[5:]
+            raise ResponseError(err)
         if c == '+':
             return data[1:]
         if c == '*':
@@ -1222,7 +1237,11 @@ class Redis(object):
         if data == '$-1':
             return None
         try:
-            c, i = data[0], (int(data[1:]) if not "." in data else float(data[1:]))
+            if not "." in data:
+                value = int(data[1:])
+            else:
+                value = float(data[1:])
+            c, i = data[0], value
         except ValueError:
             raise InvalidResponse("Cannot convert data '%s' to integer" % data)
         if c == ':':
@@ -1237,7 +1256,11 @@ class Redis(object):
 
         data = ''.join(buf)[:-2]
         try:
-            return int(data) if not '.' in data else self.float_fn(data)
+            if not '.' in data:
+                value = int(data)
+            else:
+                value = self.float_fn(data)
+            return value
         except (ValueError, decimal.InvalidOperation):
             return data.decode(self.charset)
     
@@ -1254,6 +1277,7 @@ class Redis(object):
     
     def connect(self):
         """
+        >>> import socket
         >>> r = Redis(db=9)
         >>> r.connect()
         >>> isinstance(r._sock, socket.socket)
