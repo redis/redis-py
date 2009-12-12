@@ -1162,6 +1162,13 @@ class Redis(object):
         else:
             return self.send_command('SAVE\r\n')
         
+    def shutdown(self):
+        """Close all client connections, dump database and quit the server."""
+        try:  
+            self.send_command('SHUTDOWN\r\n')
+        except ConnectionError:
+            return
+
     def lastsave(self):
         """
         >>> import time
