@@ -813,7 +813,7 @@ class Redis(object):
         ...     r.sinter()
         ... except ResponseError, e:
         ...     print e
-        wrong number of arguments
+        wrong number of arguments for 'sinter' command
         >>> try:
         ...     r.sinter('l')
         ... except ResponseError, e:
@@ -984,15 +984,15 @@ class Redis(object):
         """
         return self.send_command('SRANDMEMBER %s\r\n' % key)
         
-    def zadd(self, key, score, member):
+    def zadd(self, key, member, score):
         """
         >>> r = Redis(db=9)
         >>> res = r.delete('z1')
-        >>> r.zadd('z1', 5, 'abc')
+        >>> r.zadd('z1', 'abc', 5)
         1
-        >>> r.zadd('z1', 3, 'def')
+        >>> r.zadd('z1', 'def', 3)
         1
-        >>> r.zadd('z1', 2, 'abc')
+        >>> r.zadd('z1', 'abc', 2)
         0
         """
         member = self._encode(member)
@@ -1004,7 +1004,7 @@ class Redis(object):
         """
         >>> r = Redis(db=9)
         >>> res = r.delete('z1')
-        >>> r.zadd('z1', 5, 'abc')
+        >>> r.zadd('z1', 'abc', 5)
         1
         >>> r.zrem('z1', 'abc')
         1
@@ -1020,11 +1020,11 @@ class Redis(object):
         """
         >>> r = Redis(db=9)
         >>> res = r.delete('z1')
-        >>> r.zadd('z1', 5, 'a')
+        >>> r.zadd('z1', 'a', 5)
         1
-        >>> r.zadd('z1', 2, 'b')
+        >>> r.zadd('z1', 'b', 2)
         1
-        >>> r.zadd('z1', 7, 'c')
+        >>> r.zadd('z1', 'c', 7)
         1
         >>> r.zrange('z1', 0, 2)
         [u'b', u'a', u'c']
@@ -1044,13 +1044,13 @@ class Redis(object):
         """
         >>> r = Redis(db=9)
         >>> res = r.delete('z1')
-        >>> r.zadd('z1', 5, 'a')
+        >>> r.zadd('z1', 'a', 5)
         1
-        >>> r.zadd('z1', 2, 'b')
+        >>> r.zadd('z1', 'b', 2)
         1
-        >>> r.zadd('z1', 7, 'c')
+        >>> r.zadd('z1', 'c', 7)
         1
-        >>> r.zadd('z1', 10, 'd')
+        >>> r.zadd('z1', 'd', 10)
         1
         >>> r.zrangebyscore('z1', 5, 7)
         [u'a', u'c']
@@ -1064,11 +1064,11 @@ class Redis(object):
         >>> r = Redis(db=9)
         >>> res = r.delete('z1')
         >>> res = r.delete('z2')
-        >>> r.zadd('z1', 5, 'a')
+        >>> r.zadd('z1', 'a', 5)
         1
-        >>> r.zadd('z1', 2, 'b')
+        >>> r.zadd('z1', 'b', 2)
         1
-        >>> r.zadd('z1', 7, 'c')
+        >>> r.zadd('z1', 'c', 7)
         1
         >>> r.zcard('z1')
         3
@@ -1082,7 +1082,7 @@ class Redis(object):
         >>> r = Redis(db=9)
         >>> res = r.delete('z1')
         >>> res = r.delete('z2')
-        >>> r.zadd('z1', 5, 'a')
+        >>> r.zadd('z1', 'a', 5)
         1
         >>> r.zscore('z1', 'a')
         5
@@ -1092,6 +1092,22 @@ class Redis(object):
         member = self._encode(member)
         return self.send_command('ZSCORE %s %s\r\n%s\r\n' % (
             key, len(member), member
+        ))
+        
+    def zincr(self, key, member, value=1):
+        """
+        >>> r = Redis(db=9)
+        >>> res = r.delete('z1')
+        >>> r.zincr('z1', 'k1')
+        1
+        >>> r.zincr('z1', 'k1', 5)
+        6
+        >>> r.zincr('z1', 'k1', -4)
+        2
+        """
+        member = self._encode(member)
+        return self.send_command('ZINCRBY %s %s %s\r\n%s\r\n' % (
+            key, value, len(member), member
         ))
         
     def select(self, db):
@@ -1142,12 +1158,8 @@ class Redis(object):
         >>> r = Redis(db=9)
         >>> r.save()
         'OK'
-        >>> try:
-        ...     resp = r.save(background=True)
-        ... except ResponseError, e:
-        ...     assert str(e) == 'background save already in progress', str(e)
-        ... else:
-        ...     assert resp == 'OK'
+        >>> r.save(background=True)
+        'Background saving started'
         >>> 
         """
         if background:

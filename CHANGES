@@ -1,3 +1,4 @@
+* 0.6.1 Added support for ZINCRBY via the `zincr` command, swapped score and member parameters to zadd to make it more similar to other commands.
 * 0.6.0 Changed to Andy McCurdy's codebase on github
 * 0.5.5 Patch from David Moss, SHUTDOWN and doctest bugfix
 * 0.5.1-4 Bugfixes, no code changes, just packaging, 10/2/09
