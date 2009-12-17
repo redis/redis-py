@@ -31,6 +31,7 @@ import socket
 import decimal
 import errno
 import threading
+import warnings
 
 # global threading manager
 connections = threading.local()
@@ -411,7 +412,7 @@ class Redis(object):
         """
         return self.send_command('EXPIRE %s %s\r\n' % (name, time))
     
-    def push(self, name, value, head=False):
+    def push(self, name, value, head=False, **kwargs):
         """
         >>> r = Redis(db=9)
         >>> r.delete('l')
@@ -427,6 +428,16 @@ class Redis(object):
         Operation against a key holding the wrong kind of value
         >>> 
         """
+        if "tail" in kwargs:
+            tail = kwargs.pop("tail")
+            warnings.warn(DeprecationWarning(
+                "tail argument of push is deprecated, use head=False"))
+            head = not tail
+        if kwargs:
+            raise TypeError(
+                "push() got an unexpected keyword argument: %s" % (
+                    kwargs.keys()[0]))
+
         value = self._encode(value)
         command = 'RPUSH'
         if head: command = 'LPUSH'
