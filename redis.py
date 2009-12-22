@@ -491,11 +491,8 @@ class Redis(object):
         >>> r = Redis(db=9)
         >>> r.delete('l')
         1
-        >>> try:
-        ...     r.ltrim('l', 0, 1)
-        ... except ResponseError, e:
-        ...     print e
-        no such key
+        >>> r.ltrim('l', 0, 1)
+        'OK'
         >>> r.push('l', 'aaa')
         'OK'
         >>> r.push('l', 'bbb')
