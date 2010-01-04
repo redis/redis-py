@@ -279,7 +279,7 @@ class Redis(object):
         """
         return self.send_command('EXISTS %s\r\n' % name)
 
-    def delete(self, name):
+    def delete(self, *args):
         """
         >>> r = Redis(db=9)
         >>> r.delete('dsjhfksjdhfkdsjfh')
@@ -292,9 +292,19 @@ class Redis(object):
         0
         >>> r.delete('a')
         0
+        >>> r.set('a', 'a')
+        'OK'
+        >>> r.set('b', 'b')
+        'OK'
+        >>> r.delete('a', 'b')
+        2
+        >>> r.exists('a')
+        0
+        >>> r.exists('b')
+        0
         >>> 
         """
-        return self.send_command('DEL %s\r\n' % name)
+        return self.send_command('DEL %s\r\n' % ' '.join(args))
 
     __delitem__ = delete
 
