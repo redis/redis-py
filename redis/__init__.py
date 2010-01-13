@@ -1,8 +1,10 @@
 # legacy imports
-from redis.old_client import Redis, RedisError, ConnectionError
-from redis.old_client import ResponseError, InvalidResponse, InvalidData
+from redis.old_client import Redis
+from redis.exceptions import RedisError, ConnectionError
+from redis.exceptions import ResponseError, InvalidResponse, InvalidData
 
 __all__ = [
-    'Redis', 'RedisError', 'ConnectionError', # legacy
-    'ResponseError', 'InvalidResponse', 'InvalidData' # legacy
+    'Redis', # legacy
+    'RedisError', 'ConnectionError', 'ResponseError', # exceptions
+    'InvalidResponse', 'InvalidData', # exceptions
     ]
