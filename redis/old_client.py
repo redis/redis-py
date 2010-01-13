@@ -46,7 +46,6 @@ class InvalidData(RedisError): pass
 class Redis(object):
     """The main Redis client.
 
-    >>> from redis import Redis, ConnectionError, ResponseError
     >>> r = Redis(db=9)
     >>> r['a'] = 24.0
     >>> r['a']
@@ -1343,10 +1342,11 @@ class Redis(object):
                 self.select(self.db)
     
 
-if __name__ == '__main__':
-
+def run_doctests(module=None):
     # hack to make doctests pass in 2.6
     decimal.Decimal.__repr__ = lambda self: 'Decimal("%s")' % str(self)
     import doctest
-    doctest.testmod()
-    
+    doctest.testmod(m=module)
+
+if __name__ == '__main__':
+    run_doctests()
