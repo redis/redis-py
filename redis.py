@@ -1055,7 +1055,7 @@ class Redis(object):
         return self.send_command('%s %s %s %s\r\n' \
             % (command, key, start, end))
 
-    def zrangebyscore(self, key, min, max):
+    def zrangebyscore(self, key, min, max, offset=None, count=None):
         """
         >>> r = Redis(db=9)
         >>> res = r.delete('z1')
@@ -1070,8 +1070,13 @@ class Redis(object):
         >>> r.zrangebyscore('z1', 5, 7)
         [u'a', u'c']
         """
-        return self.send_command('ZRANGEBYSCORE %s %s %s\r\n' % (
-            key, min, max
+        if offset is not None and count is not None:
+            limit = " LIMIT %d %d" % (offset, count)
+        else:
+            limit = ""
+        
+        return self.send_command('ZRANGEBYSCORE %s %s %s%s\r\n' % (
+            key, min, max, limit
         ))
         
     def zcard(self, key):
