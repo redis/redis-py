@@ -1079,6 +1079,12 @@ class Redis(object):
         1
         >>> r.zrangebyscore('z1', 5, 7)
         [u'a', u'c']
+        >>> r.zadd('z1', 'e', 8)
+        1
+        >>> r.zrangebyscore('z1', 5, 8, offset=0, count=2)
+        [u'a', u'c']
+        >>> r.zrangebyscore('z1', 5, 8, offset=1, count=2)
+        [u'c', u'e']
         """
         if offset is not None and count is not None:
             limit = " LIMIT %d %d" % (offset, count)
