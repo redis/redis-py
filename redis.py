@@ -1040,7 +1040,7 @@ class Redis(object):
             key, len(member), member
         ))
         
-    def zrange(self, key, start, end, desc=False):
+    def zrange(self, key, start, end, desc=False, withscores=False):
         """
         >>> r = Redis(db=9)
         >>> res = r.delete('z1')
@@ -1062,8 +1062,9 @@ class Redis(object):
         """
         command = 'ZRANGE'
         if desc: command = 'ZREVRANGE'
-        return self.send_command('%s %s %s %s\r\n' \
-            % (command, key, start, end))
+        _withscores = withscores and ' withscores' or ''
+        return self.send_command('%s %s %s %s %s\r\n' \
+            % (command, key, start, end, _withscores))
 
     def zrangebyscore(self, key, min, max, offset=None, count=None):
         """
