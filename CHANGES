@@ -1,3 +1,5 @@
+* 0.7
+    * Completely refactored client
 * 0.6.1
     * Added support for ZINCRBY via the `zincr` command
     * Swapped score and member parameters to zadd to make it more similar to other commands.
