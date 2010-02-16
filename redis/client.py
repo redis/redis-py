@@ -193,6 +193,19 @@ class Redis(object):
         self.errors = errors
         self.select(host, port, db, password)
         
+    #### Legacty accessors of connection information ####
+    def _get_host(self):
+        return self.connection.host
+    host = property(_get_host)
+    
+    def _get_port(self):
+        return self.connection.port
+    port = property(_get_port)
+    
+    def _get_db(self):
+        return self.connection.db
+    db = property(_get_db)
+    
     def pipeline(self):
         return Pipeline(self.connection, self.encoding, self.errors)
         
