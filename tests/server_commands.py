@@ -2,7 +2,7 @@ import redis
 import unittest
 import datetime
 
-class ServerCommands(unittest.TestCase):
+class ServerCommandsTestCase(unittest.TestCase):
     
     def setUp(self):
         self.client = redis.Redis(host='localhost', port=6379, db=9)
