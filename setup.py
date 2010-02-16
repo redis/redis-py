@@ -22,7 +22,7 @@ sdict = {
     'maintainer_email' : 'sedrik@gmail.com',
     'keywords' : ['Redis', 'key-value store'],
     'license' : 'MIT',
-    'py_modules' : ['redis'],
+    'packages' : ['redis'],
     'test_suite' : 'tests.all_tests',
     'classifiers' : [
         'Development Status :: 4 - Beta',

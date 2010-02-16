@@ -254,6 +254,8 @@ class Redis(object):
         response = self._parse_response(command_name)
         if command_name in self.RESPONSE_CALLBACKS:
             return self.RESPONSE_CALLBACKS[command_name](response, **options)
+        elif isinstance(response, str):
+            return self.decode(response)
         return response
         
     def encode(self, value):
@@ -264,6 +266,10 @@ class Redis(object):
             return value.encode(self.encoding, self.errors)
         # not a string or unicode, attempt to convert to a string
         return str(value)
+        
+    def decode(self, value):
+        "Provides a hook for subclasses to add deserialization logic"
+        return value
         
     def format_inline(self, *args, **options):
         "Formats a request with the inline protocol"
