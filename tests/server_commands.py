@@ -634,4 +634,77 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.make_zset('a', {'a1' : 1, 'a2' : 2, 'a3' : 3})
         self.assertEquals(self.client.zscore('a', 'a2'), 2.0)
         
+    # SORT
+    def test_sort_bad_key(self):
+        # key is not set
+        self.assertEquals(self.client.sort('a'), None)
+        # key is a string value
+        self.client['a'] = 'a'
+        self.assertRaises(redis.ResponseError, self.client.sort, 'a')
+        del self.client['a']
+    
+    def test_sort_basic(self):
+        self.make_list('a', '3214')
+        self.assertEquals(self.client.sort('a'), ['1', '2', '3', '4'])
         
+    def test_sort_limited(self):
+        self.make_list('a', '3214')
+        self.assertEquals(self.client.sort('a', start=1, num=2), ['2', '3'])
+        
+    def test_sort_by(self):
+        self.client['score:1'] = 8
+        self.client['score:2'] = 3
+        self.client['score:3'] = 5
+        self.make_list('a_values', '123')
+        self.assertEquals(self.client.sort('a_values', by='score:*'),
+            ['2', '3', '1'])
+            
+    def test_sort_get(self):
+        self.client['user:1'] = 'u1'
+        self.client['user:2'] = 'u2'
+        self.client['user:3'] = 'u3'
+        self.make_list('a', '231')
+        self.assertEquals(self.client.sort('a', get='user:*'),
+            ['u1', 'u2', 'u3'])
+            
+    def test_sort_desc(self):
+        self.make_list('a', '231')
+        self.assertEquals(self.client.sort('a', desc=True), ['3', '2', '1'])
+        
+    def test_sort_alpha(self):
+        self.make_list('a', 'ecbda')
+        self.assertEquals(self.client.sort('a', alpha=True),
+            ['a', 'b', 'c', 'd', 'e'])
+        
+    def test_sort_store(self):
+        self.make_list('a', '231')
+        self.assertEquals(self.client.sort('a', store='sorted_values'), 3)
+        self.assertEquals(self.client.lrange('sorted_values', 0, 5),
+            ['1', '2', '3'])
+        
+    def test_sort_all_options(self):
+        self.client['user:1:username'] = 'zeus'
+        self.client['user:2:username'] = 'titan'
+        self.client['user:3:username'] = 'hermes'
+        self.client['user:4:username'] = 'hercules'
+        self.client['user:5:username'] = 'apollo'
+        self.client['user:6:username'] = 'athena'
+        self.client['user:7:username'] = 'hades'
+        self.client['user:8:username'] = 'dionysus'
+        
+        self.client['user:1:favorite_drink'] = 'yuengling'
+        self.client['user:2:favorite_drink'] = 'rum'
+        self.client['user:3:favorite_drink'] = 'vodka'
+        self.client['user:4:favorite_drink'] = 'milk'
+        self.client['user:5:favorite_drink'] = 'pinot noir'
+        self.client['user:6:favorite_drink'] = 'water'
+        self.client['user:7:favorite_drink'] = 'gin'
+        self.client['user:8:favorite_drink'] = 'apple juice'
+        
+        self.make_list('gods', '12345678')
+        num = self.client.sort('gods', start=2, num=4, by='user:*:username',
+            get='user:*:favorite_drink', desc=True, alpha=True, store='sorted')
+        self.assertEquals(num, 4)
+        self.assertEquals(self.client.lrange('sorted', 0, 10),
+            ['vodka', 'milk', 'gin', 'apple juice'])
+            

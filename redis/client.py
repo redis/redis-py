@@ -627,6 +627,9 @@ class Redis(object):
         * This method has been deprecated,
           use Redis.lpop or Redis.rpop instead *
         """
+        warnings.warn(DeprecationWarning(
+            "Redis.pop has been deprecated, "
+            "use Redis.lpop or Redis.rpop instead"))
         if tail:
             return self.rpop(name)
         return self.lpop(name)
