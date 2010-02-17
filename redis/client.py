@@ -335,7 +335,7 @@ class Redis(object):
         the appropriate database.
         """
         if self.connection.password:
-            if not self.auth(self.connection.password):
+            if not self.format_inline('AUTH', self.connection.password):
                 raise AuthenticationError("Invalid Password")
         self.format_inline('SELECT', self.connection.db)
         
@@ -350,10 +350,6 @@ class Redis(object):
         self.connection = self.get_connection(host, port, db, password)
         
     #### SERVER INFORMATION ####
-    def auth(self, password):
-        "Authenticate with the Redis server"
-        return self.format_inline('AUTH', password)
-        
     def bgsave(self):
         """
         Tell the Redis server to save its data to disk.  Unlike save(),
@@ -897,7 +893,15 @@ class Pipeline(Redis):
         At some other point, you can then run: pipe.execute(), 
         which will execute all commands queued in the pipe.
         """
-        self.command_stack.append((command_name, command, options))
+        # if the command_name is 'AUTH' or 'SELECT', then this command
+        # must have originated after a socket connection and a call to
+        # _setup_connection(). run these commands immediately without
+        # buffering them.
+        if command_name in ('AUTH', 'SELECT'):
+            response = self._execute([(command_name, command, options)])
+            return response[0]
+        else:
+            self.command_stack.append((command_name, command, options))
         return self
         
     def _execute(self, commands):
