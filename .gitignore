@@ -1,2 +1,5 @@
 *.pyc
 redis.egg-info
+build/
+dist/
+dump.rdb
