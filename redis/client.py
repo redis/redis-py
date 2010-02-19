@@ -544,6 +544,7 @@ class Redis(object):
         
         If timeout is 0, then block indefinitely.
         """
+        keys = list(keys)
         keys.append(timeout)
         return self.format_inline('BLPOP', *keys)
         
@@ -558,6 +559,7 @@ class Redis(object):
         
         If timeout is 0, then block indefinitely.
         """
+        keys = list(keys)
         keys.append(timeout)
         return self.format_inline('BRPOP', *keys)
         
