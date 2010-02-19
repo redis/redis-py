@@ -569,7 +569,7 @@ class ServerCommandsTestCase(unittest.TestCase):
             [('a1', 1.0), ('a2', 2.0)])
         self.assertEquals(self.client.zrange('a', 1, 2, withscores=True),
             [('a2', 2.0), ('a3', 3.0)])
-        # a non existant key should return an empty list
+        # a non existant key should return None
         self.assertEquals(self.client.zrange('b', 0, 1, withscores=True), None)
             
             
@@ -587,7 +587,7 @@ class ServerCommandsTestCase(unittest.TestCase):
             ['a3', 'a4'])
         self.assertEquals(self.client.zrangebyscore('a', 2, 4, withscores=True),
             [('a2', 2.0), ('a3', 3.0), ('a4', 4.0)])
-        # a non existant key should return an empty list
+        # a non existant key should return None
         self.assertEquals(self.client.zrangebyscore('b', 0, 1, withscores=True), None)
             
     def test_zrem(self):
