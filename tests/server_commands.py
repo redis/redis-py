@@ -293,19 +293,19 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(self.client.ltrim('a', 0, 1))
         self.assertEquals(self.client.lrange('a', 0, 5), ['a', 'b'])
         
-    def test_pop(self):
+    def test_lpop(self):
         # no key
-        self.assertEquals(self.client.pop('a'), None)
+        self.assertEquals(self.client.lpop('a'), None)
         # key is not a list
         self.client['a'] = 'b'
-        self.assertRaises(redis.ResponseError, self.client.pop, 'a')
+        self.assertRaises(redis.ResponseError, self.client.lpop, 'a')
         del self.client['a']
         # real logic
         self.make_list('a', 'abc')
-        self.assertEquals(self.client.pop('a'), 'a')
-        self.assertEquals(self.client.pop('a'), 'b')
-        self.assertEquals(self.client.pop('a'), 'c')
-        self.assertEquals(self.client.pop('a'), None)
+        self.assertEquals(self.client.lpop('a'), 'a')
+        self.assertEquals(self.client.lpop('a'), 'b')
+        self.assertEquals(self.client.lpop('a'), 'c')
+        self.assertEquals(self.client.lpop('a'), None)
         
     def test_rpop(self):
         # no key
