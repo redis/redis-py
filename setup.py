@@ -2,24 +2,28 @@
 
 """
 @file setup.py
-@author Paul Hubbard
-@date 10/2/09
+@author Andy McCurdy
+@date 2/12/2010
 @brief Setuptools configuration for redis client
 """
 
-version = '0.6.1'
+version = '1.34'
 
 sdict = {
     'name' : 'redis',
     'version' : version,
     'description' : 'Python client for Redis key-value store',
+    'long_description' : 'Python client for Redis key-value store',
     'url': 'http://github.com/andymccurdy/redis-py',
     'download_url' : 'http://cloud.github.com/downloads/andymccurdy/redis-py/redis-%s.tar.gz' % version,
     'author' : 'Andy McCurdy',
     'author_email' : 'sedrik@gmail.com',
     'maintainer' : 'Andy McCurdy',
     'maintainer_email' : 'sedrik@gmail.com',
-    'keywords': ['Redis', 'key-value store'],
+    'keywords' : ['Redis', 'key-value store'],
+    'license' : 'MIT',
+    'packages' : ['redis'],
+    'test_suite' : 'tests.all_tests',
     'classifiers' : [
         'Development Status :: 4 - Beta',
         'Environment :: Console',
@@ -33,17 +37,6 @@ try:
     from setuptools import setup
 except ImportError:
     from distutils.core import setup
-#setup(**setupdict)
-setup(name=sdict['name'],
-      version=sdict['version'],
-      author=sdict['author'],
-      author_email=sdict['author_email'],
-      maintainer=sdict['maintainer'],
-      maintainer_email=sdict['maintainer_email'],
-      url=sdict['url'],
-      classifiers=sdict['classifiers'],
-      description=sdict['description'],
-      long_description=sdict['description'],
-      download_url=sdict['download_url'],
-      license='MIT',
-      py_modules = ['redis'])
+    
+setup(**sdict)
+

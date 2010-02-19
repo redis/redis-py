@@ -33,20 +33,14 @@ import errno
 import threading
 import warnings
 
+from redis import exceptions
+
 # global threading manager
 connections = threading.local()
-
-
-class RedisError(Exception): pass
-class ConnectionError(RedisError): pass
-class ResponseError(RedisError): pass
-class InvalidResponse(RedisError): pass
-class InvalidData(RedisError): pass
 
 class Redis(object):
     """The main Redis client.
 
-    >>> from redis import Redis, ConnectionError, ResponseError
     >>> r = Redis(db=9)
     >>> r['a'] = 24.0
     >>> r['a']
@@ -91,7 +85,7 @@ class Redis(object):
             try:
                 return s.encode(self.charset, self.errors)
             except UnicodeEncodeError, e:
-                raise InvalidData("Error encoding unicode value '%s': %s" % (value.encode(self.charset, 'replace'), e))
+                raise exceptions.InvalidData("Error encoding unicode value '%s': %s" % (value.encode(self.charset, 'replace'), e))
         return str(s)
     
     def _send_command(self, s):
@@ -101,7 +95,7 @@ class Redis(object):
         >>> r._sock.close()
         >>> try:
         ...     r._send_command('pippo')
-        ... except ConnectionError, e:
+        ... except exceptions.ConnectionError, e:
         ...     print e
         Error 9 while writing to socket. Bad file descriptor.
         >>>
@@ -114,13 +108,13 @@ class Redis(object):
             if e.args[0] == 32:
                 # broken pipe
                 self.disconnect()
-            raise ConnectionError("Error %s while writing to socket. %s." % tuple(e.args))
+            raise exceptions.ConnectionError("Error %s while writing to socket. %s." % tuple(e.args))
         return self._get_response()
             
     def _send_command_retry(self, s):
         try:
             return self._send_command(s)
-        except ConnectionError:
+        except exceptions.ConnectionError:
             self.disconnect()
             return self._send_command(s)
             
@@ -132,10 +126,10 @@ class Redis(object):
             if e.args and e.args[0] == errno.EAGAIN:
                 return
             self.disconnect()
-            raise ConnectionError("Error %s while reading from socket. %s." % tuple(e.args))
+            raise exceptions.ConnectionError("Error %s while reading from socket. %s." % tuple(e.args))
         if not data:
             self.disconnect()
-            raise ConnectionError("Socket connection closed when reading.")
+            raise exceptions.ConnectionError("Socket connection closed when reading.")
         return data
     
     def ping(self):
@@ -364,14 +358,14 @@ class Redis(object):
         >>> r = Redis(db=9)
         >>> try:
         ...     r.rename('a', 'a')
-        ... except ResponseError, e:
+        ... except exceptions.ResponseError, e:
         ...     print e
         source and destination objects are the same
         >>> r.rename('a', 'b')
         'OK'
         >>> try:
         ...     r.rename('a', 'b')
-        ... except ResponseError, e:
+        ... except exceptions.ResponseError, e:
         ...     print e
         no such key
         >>> r.set('a', 1)
@@ -433,7 +427,7 @@ class Redis(object):
         'OK'
         >>> try:
         ...     r.push('a', 'a')
-        ... except ResponseError, e:
+        ... except exceptions.ResponseError, e:
         ...     print e
         Operation against a key holding the wrong kind of value
         >>> 
@@ -608,14 +602,14 @@ class Redis(object):
         1
         >>> try:
         ...     r.lset('l', 0, 'a')
-        ... except ResponseError, e:
+        ... except exceptions.ResponseError, e:
         ...     print e
         no such key
         >>> r.push('l', 'aaa')
         'OK'
         >>> try:
         ...     r.lset('l', 1, 'a')
-        ... except ResponseError, e:
+        ... except exceptions.ResponseError, e:
         ...     print e
         index out of range
         >>> r.lset('l', 0, 'bbb')
@@ -713,7 +707,7 @@ class Redis(object):
             for g in get:
                 stmt.append("GET %s" % g)
         else:
-            raise RedisError("Invalid parameter 'get' for Redis sort")
+            raise exceptions.RedisError("Invalid parameter 'get' for Redis sort")
         if desc:
             stmt.append("DESC")
         if alpha:
@@ -835,12 +829,12 @@ class Redis(object):
         1
         >>> try:
         ...     r.sinter()
-        ... except ResponseError, e:
+        ... except exceptions.ResponseError, e:
         ...     print e
         wrong number of arguments for 'sinter' command
         >>> try:
         ...     r.sinter('l')
-        ... except ResponseError, e:
+        ... except exceptions.ResponseError, e:
         ...     print e
         Operation against a key holding the wrong kind of value
         >>> r.sinter('s1', 's2', 's3')
@@ -884,7 +878,7 @@ class Redis(object):
         1
         >>> try:
         ...     r.smembers('l')
-        ... except ResponseError, e:
+        ... except exceptions.ResponseError, e:
         ...     print e
         Operation against a key holding the wrong kind of value
         >>> r.smembers('s')
@@ -1208,7 +1202,7 @@ class Redis(object):
         """Close all client connections, dump database and quit the server."""
         try:  
             self.send_command('SHUTDOWN\r\n')
-        except ConnectionError:
+        except exceptions.ConnectionError:
             return
 
     def lastsave(self):
@@ -1264,20 +1258,20 @@ class Redis(object):
         data = self._read().strip()
         if not data:
             self.disconnect()
-            raise ConnectionError("Socket closed on remote end")
+            raise exceptions.ConnectionError("Socket closed on remote end")
         c = data[0]
         if c == '-':
             err = data[1:]
             if data[:5] == '-ERR ':
                 err = data[5:]
-            raise ResponseError(err)
+            raise exceptions.ResponseError(err)
         if c == '+':
             return data[1:]
         if c == '*':
             try:
                 num = int(data[1:])
             except (TypeError, ValueError):
-                raise InvalidResponse("Cannot convert multi-response header '%s' to integer" % data)
+                raise exceptions.InvalidResponse("Cannot convert multi-response header '%s' to integer" % data)
             return [self._get_value() for i in range(num)]
         return self._get_value(data)
     
@@ -1292,11 +1286,11 @@ class Redis(object):
                 value = float(data[1:])
             c, i = data[0], value
         except ValueError:
-            raise InvalidResponse("Cannot convert data '%s' to integer" % data)
+            raise exceptions.InvalidResponse("Cannot convert data '%s' to integer" % data)
         if c == ':':
             return i
         if c != '$':
-            raise InvalidResponse("Unkown response prefix for '%s'" % data)
+            raise exceptions.InvalidResponse("Unkown response prefix for '%s'" % data)
         buf = []
         while i >= 0:
             data = self._read()
@@ -1346,7 +1340,7 @@ class Redis(object):
                 setattr(connections, self.connection_key, sock)
             sock = getattr(connections, self.connection_key)
         except socket.error, e:
-            raise ConnectionError("Error %s connecting to %s:%s. %s." % (e.args[0], self.host, self.port, e.args[1]))
+            raise exceptions.ConnectionError("Error %s connecting to %s:%s. %s." % (e.args[0], self.host, self.port, e.args[1]))
         else:
             # no exceptions
             self._sock = sock
@@ -1355,10 +1349,11 @@ class Redis(object):
                 self.select(self.db)
     
 
-if __name__ == '__main__':
-
+def run_doctests(module=None):
     # hack to make doctests pass in 2.6
     decimal.Decimal.__repr__ = lambda self: 'Decimal("%s")' % str(self)
     import doctest
-    doctest.testmod()
-    
+    doctest.testmod(m=module)
+
+if __name__ == '__main__':
+    run_doctests()

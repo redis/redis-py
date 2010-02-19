@@ -1,3 +1,4 @@
 include CHANGES
 include INSTALL
-include README
+include LICENSE
+include README.md
