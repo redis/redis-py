@@ -138,7 +138,7 @@ def zset_score_pairs(response, **options):
     If ``withscores`` is specified in the options, return the response as
     a list of (value, score) pairs
     """
-    if not options['withscores']:
+    if not response or not options['withscores']:
         return response
     return zip(response[::2], map(float, response[1::2]))
     
