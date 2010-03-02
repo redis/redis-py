@@ -409,6 +409,7 @@ class Redis(object):
     def exists(self, name):
         "Returns a boolean indicating whether key ``name`` exists"
         return self.format_inline('EXISTS', name)
+    __contains__ = exists
         
     def expire(self, name, time):
         "Set an expire on key ``name`` for ``time`` seconds"
