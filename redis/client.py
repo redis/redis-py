@@ -153,7 +153,6 @@ class Redis(object):
     Connection and Pipeline derive from this, implementing how
     the commands are sent and received to the Redis server
     """
-    
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict(
             'AUTH DEL EXISTS EXPIRE MOVE MSETNX RENAMENX SADD SISMEMBER SMOVE '
@@ -165,9 +164,14 @@ class Redis(object):
             'ZCARD ZREMRANGEBYSCORE',
             int
             ),
+        string_keys_to_dict(
+            # these return OK, or int if redis-server is >=1.3.4
+            'LPUSH RPUSH',
+            lambda r: isinstance(r, int) and r or r == 'OK'
+            ),
         string_keys_to_dict('ZSCORE ZINCRBY', float),
         string_keys_to_dict(
-            'FLUSHALL FLUSHDB LPUSH LSET LTRIM MSET RENAME RPUSH '
+            'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME '
             'SAVE SELECT SET SHUTDOWN',
             lambda r: r == 'OK'
             ),
