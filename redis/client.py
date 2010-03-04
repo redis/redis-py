@@ -74,7 +74,7 @@ class Connection(object):
 def list_or_args(command, keys, args):
     # returns a single list combining keys and args
     # if keys is not a list or args has items, issue a
-    # deprecation wanring
+    # deprecation warning
     oldapi = bool(args)
     try:
         i = iter(keys)
@@ -147,7 +147,7 @@ class Redis(object):
     """
     Implementation of the Redis protocol.
     
-    This abstract class proviles a Python interface to all Redis commands
+    This abstract class provides a Python interface to all Redis commands
     and an implementation of the Redis protocol.
     
     Connection and Pipeline derive from this, implementing how
@@ -347,7 +347,7 @@ class Redis(object):
     def bgsave(self):
         """
         Tell the Redis server to save its data to disk.  Unlike save(),
-        this method is asynchronus and returns immediately.
+        this method is asynchronous and returns immediately.
         """
         return self.format_inline('BGSAVE')
         
@@ -409,6 +409,7 @@ class Redis(object):
     def exists(self, name):
         "Returns a boolean indicating whether key ``name`` exists"
         return self.format_inline('EXISTS', name)
+    __contains__ = exists
         
     def expire(self, name, time):
         "Set an expire on key ``name`` for ``time`` seconds"
@@ -431,7 +432,7 @@ class Redis(object):
     def incr(self, name, amount=1):
         """
         Increments the value of ``key`` by ``amount``.  If no key exists,
-        the value will be initialied as ``amount``
+        the value will be initialized as ``amount``
         """
         return self.format_inline('INCRBY', name, amount)
         
@@ -449,14 +450,14 @@ class Redis(object):
         return self.format_inline('MGET', *keys)
         
     def mset(self, mapping):
-        "Sets each key in the ``mapping`` dict to it's corresponding value"
+        "Sets each key in the ``mapping`` dict to its corresponding value"
         items = []
         [items.extend(pair) for pair in mapping.iteritems()]
         return self.format_multi_bulk('MSET', *items)
         
     def msetnx(self, mapping):
         """
-        Sets each key in the ``mapping`` dict to it's corresponding value if
+        Sets each key in the ``mapping`` dict to its corresponding value if
         none of the keys are already set
         """
         items = []
@@ -675,7 +676,7 @@ class Redis(object):
             
         ``desc`` allows for reversing the sort
         
-        ``alpha`` allows for sorting lexographically rather than numerically
+        ``alpha`` allows for sorting lexicographically rather than numerically
         
         ``store`` allows for storing the result of the sort into 
             the key ``store``
@@ -869,8 +870,8 @@ class Pipeline(Redis):
     in one transmission.  This is convenient for batch processing, such as
     saving all the values in a list to Redis.
     
-    Note that pipelining does *not* guarentee all the commands will be executed
-    together atomically, nor does it guarentee any transactional consistency.
+    Note that pipelining does *not* guarantee all the commands will be executed
+    together atomically, nor does it guarantee any transactional consistency.
     If the third command in the batch fails, the first two will still have been
     executed and "committed"
     """
