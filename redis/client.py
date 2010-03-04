@@ -176,13 +176,13 @@ class Redis(object):
             ),
         string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE', zset_score_pairs),
         {
-            'BGSAVE' : lambda r: r == 'Background saving started',
-            'INFO' : parse_info,
-            'KEYS' : lambda r: r and r.split(' ') or [],
-            'LASTSAVE' : timestamp_to_datetime,
-            'PING' : lambda r: r == 'PONG',
-            'RANDOMKEY' : lambda r: r and r or None,
-            'TTL' : lambda r: r != -1 and r or None,
+            'BGSAVE': lambda r: r == 'Background saving started',
+            'INFO': parse_info,
+            'KEYS': lambda r: r and r.split(' ') or [],
+            'LASTSAVE': timestamp_to_datetime,
+            'PING': lambda r: r == 'PONG',
+            'RANDOMKEY': lambda r: r and r or None,
+            'TTL': lambda r: r != -1 and r or None,
         }
         )
     
@@ -810,7 +810,7 @@ class Redis(object):
         pieces = ['ZRANGE', name, start, end]
         if withscores:
             pieces.append('withscores')
-        return self.format_inline(*pieces, **{'withscores' : withscores})
+        return self.format_inline(*pieces, **{'withscores': withscores})
         
     def zrangebyscore(self, name, min, max, start=None, num=None, withscores=False):
         """
@@ -830,7 +830,7 @@ class Redis(object):
             pieces.extend(['LIMIT', start, num])
         if withscores:
             pieces.append('withscores')
-        return self.format_inline(*pieces, **{'withscores' : withscores})
+        return self.format_inline(*pieces, **{'withscores': withscores})
         
     def zrem(self, name, value):
         "Remove member ``value`` from sorted set ``name``"
@@ -856,7 +856,7 @@ class Redis(object):
         pieces = ['ZREVRANGE', name, start, num]
         if withscores:
             pieces.append('withscores')
-        return self.format_inline(*pieces, **{'withscores' : withscores})
+        return self.format_inline(*pieces, **{'withscores': withscores})
         
     def zscore(self, name, value):
         "Return the score of element ``value`` in sorted set ``name``"
