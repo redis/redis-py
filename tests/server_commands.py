@@ -1,6 +1,7 @@
 import redis
 import unittest
 import datetime
+from distutils.version import StrictVersion
 
 class ServerCommandsTestCase(unittest.TestCase):
     
@@ -237,8 +238,13 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertRaises(redis.ResponseError, self.client.lpush, 'a', 'a')
         del self.client['a']
         # real logic
-        self.assert_(self.client.lpush('a', 'b'))
-        self.assert_(self.client.lpush('a', 'a'))
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) >= StrictVersion('1.3.4'):
+            self.assertEqual(1, self.client.lpush('a', 'b'))
+            self.assertEqual(2, self.client.lpush('a', 'a'))
+        else:
+            self.assert_(self.client.lpush('a', 'b'))
+            self.assert_(self.client.lpush('a', 'a'))
         self.assertEquals(self.client.lindex('a', 0), 'a')
         self.assertEquals(self.client.lindex('a', 1), 'b')
         
