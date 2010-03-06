@@ -143,7 +143,7 @@ def zset_score_pairs(response, **options):
     return zip(response[::2], map(float, response[1::2]))
     
     
-class Redis(object):
+class Redis(threading.local):
     """
     Implementation of the Redis protocol.
     
