@@ -182,7 +182,6 @@ class Redis(threading.local):
         {
             'BGSAVE': lambda r: r == 'Background saving started',
             'INFO': parse_info,
-            'KEYS': lambda r: r and r.split(' ') or [],
             'LASTSAVE': timestamp_to_datetime,
             'PING': lambda r: r == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
@@ -866,6 +865,16 @@ class Redis(threading.local):
     def zscore(self, name, value):
         "Return the score of element ``value`` in sorted set ``name``"
         return self.format_bulk('ZSCORE', name, value)
+        
+    
+    #### HASH COMMANDS ####
+    def hget(self, name, key):
+        "Return the value of ``key`` within the hash ``name``"
+        return self.format_bulk('HGET', name, key)
+        
+    def hset(self, name, key, value):
+        "Set ``key`` to ``value`` within hash ``name``"
+        return self.format_multi_bulk('HSET', name, key, value)
         
     
 class Pipeline(Redis):

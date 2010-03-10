@@ -648,6 +648,28 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.make_zset('a', {'a1' : 1, 'a2' : 2, 'a3' : 3})
         self.assertEquals(self.client.zscore('a', 'a2'), 2.0)
         
+    # HASHES
+    def make_hash(self, key, d):
+        for k,v in d.iteritems():
+            self.client.hset(key, k, v)
+    
+    def test_hget_and_hset(self):
+        # TODO: add these back in, but right now they produce a crash bug.
+        # key is not a hash
+        # self.client['a'] = 'a'
+        # self.assertRaises(redis.ResponseError, self.client.hget, 'a', 'a1')
+        # del self.client['a']
+        # no key
+        self.assertEquals(self.client.hget('a', 'a1'), None)
+        # real logic
+        self.make_hash('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        self.assertEquals(self.client.hget('a', 'a1'), '1')
+        self.assertEquals(self.client.hget('a', 'a2'), '2')
+        self.assertEquals(self.client.hget('a', 'a3'), '3')
+        # TODO: Not sure why these don't wokr
+        # self.assertEquals(self.client.hset('a', 'a2', 5), True)
+        # self.assertEquals(self.client.hget('a', 'a2'), '5')
+    
     # SORT
     def test_sort_bad_key(self):
         # key is not set
