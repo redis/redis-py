@@ -666,9 +666,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.hget('a', 'a1'), '1')
         self.assertEquals(self.client.hget('a', 'a2'), '2')
         self.assertEquals(self.client.hget('a', 'a3'), '3')
-        # TODO: Not sure why these don't wokr
-        # self.assertEquals(self.client.hset('a', 'a2', 5), True)
-        # self.assertEquals(self.client.hget('a', 'a2'), '5')
+        self.assertEquals(self.client.hset('a', 'a2', 5), True)
+        self.assertEquals(self.client.hget('a', 'a2'), '5')
     
     # SORT
     def test_sort_bad_key(self):

@@ -181,6 +181,7 @@ class Redis(threading.local):
         string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE', zset_score_pairs),
         {
             'BGSAVE': lambda r: r == 'Background saving started',
+            'HSET': lambda r: True,
             'INFO': parse_info,
             'LASTSAVE': timestamp_to_datetime,
             'PING': lambda r: r == 'PONG',
