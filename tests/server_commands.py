@@ -353,6 +353,22 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.lrange('a', 0, 2), ['a1', 'a2'])
         self.assertEquals(self.client.lrange('b', 0, 4),
             ['a3', 'b1', 'b2', 'b3'])
+            
+    def test_rpush(self):
+        # key is not a list
+        self.client['a'] = 'b'
+        self.assertRaises(redis.ResponseError, self.client.rpush, 'a', 'a')
+        del self.client['a']
+        # real logic
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) >= StrictVersion('1.3.4'):
+            self.assertEqual(1, self.client.rpush('a', 'a'))
+            self.assertEqual(2, self.client.rpush('a', 'b'))
+        else:
+            self.assert_(self.client.rpush('a', 'a'))
+            self.assert_(self.client.rpush('a', 'b'))
+        self.assertEquals(self.client.lindex('a', 0), 'a')
+        self.assertEquals(self.client.lindex('a', 1), 'b')
         
     # Set commands
     def make_set(self, name, l):
@@ -666,8 +682,10 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.hget('a', 'a1'), '1')
         self.assertEquals(self.client.hget('a', 'a2'), '2')
         self.assertEquals(self.client.hget('a', 'a3'), '3')
-        self.assertEquals(self.client.hset('a', 'a2', 5), True)
+        self.assertEquals(self.client.hset('a', 'a2', 5), 0)
         self.assertEquals(self.client.hget('a', 'a2'), '5')
+        self.assertEquals(self.client.hset('a', 'a4', 4), 1)
+        self.assertEquals(self.client.hget('a', 'a4'), '4')
     
     # SORT
     def test_sort_bad_key(self):

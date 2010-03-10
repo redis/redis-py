@@ -181,7 +181,6 @@ class Redis(threading.local):
         string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE', zset_score_pairs),
         {
             'BGSAVE': lambda r: r == 'Background saving started',
-            'HSET': lambda r: True,
             'INFO': parse_info,
             'LASTSAVE': timestamp_to_datetime,
             'PING': lambda r: r == 'PONG',
@@ -874,7 +873,10 @@ class Redis(threading.local):
         return self.format_bulk('HGET', name, key)
         
     def hset(self, name, key, value):
-        "Set ``key`` to ``value`` within hash ``name``"
+        """
+        Set ``key`` to ``value`` within hash ``name``
+        Returns 1 if HSET created a new field, otherwise 0
+        """
         return self.format_multi_bulk('HSET', name, key, value)
         
     
