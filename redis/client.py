@@ -169,7 +169,8 @@ class Redis(threading.local):
             'LPUSH RPUSH',
             lambda r: isinstance(r, int) and r or r == 'OK'
             ),
-        string_keys_to_dict('ZSCORE ZINCRBY', float),
+        string_keys_to_dict('ZSCORE ZINCRBY',
+            lambda r: r is not None and float(r) or r),
         string_keys_to_dict(
             'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME '
             'SAVE SELECT SET SHUTDOWN',

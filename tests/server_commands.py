@@ -108,15 +108,15 @@ class ServerCommandsTestCase(unittest.TestCase):
             ['1', None, '2', '3'])
             
     def test_mset(self):
-        d = {'a' : '1', 'b' : '2', 'c' : '3'}
+        d = {'a': '1', 'b': '2', 'c': '3'}
         self.assert_(self.client.mset(d))
         for k,v in d.iteritems():
             self.assertEquals(self.client[k], v)
             
     def test_msetnx(self):
-        d = {'a' : '1', 'b' : '2', 'c' : '3'}
+        d = {'a': '1', 'b': '2', 'c': '3'}
         self.assert_(self.client.msetnx(d))
-        d2 = {'a' : 'x', 'd' : '4'}
+        d2 = {'a': 'x', 'd': '4'}
         self.assert_(not self.client.msetnx(d2))
         for k,v in d.iteritems():
             self.assertEquals(self.client[k], v)
@@ -554,7 +554,7 @@ class ServerCommandsTestCase(unittest.TestCase):
             self.client.zadd(name, k, v)
     
     def test_zadd(self):
-        self.make_zset('a', {'a1' : 1, 'a2' : 2, 'a3' : 3})
+        self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3})
         self.assertEquals(self.client.zrange('a', 0, 3), ['a1', 'a2', 'a3'])
         
     def test_zcard(self):
@@ -563,7 +563,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertRaises(redis.ResponseError, self.client.zcard, 'a')
         del self.client['a']
         # real logic
-        self.make_zset('a', {'a1' : 1, 'a2' : 2, 'a3' : 3})
+        self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3})
         self.assertEquals(self.client.zcard('a'), 3)
         
     def test_zincrby(self):
@@ -572,7 +572,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertRaises(redis.ResponseError, self.client.zincrby, 'a', 'a1')
         del self.client['a']
         # real logic
-        self.make_zset('a', {'a1' : 1, 'a2' : 2, 'a3' : 3})
+        self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3})
         self.assertEquals(self.client.zincrby('a', 'a2'), 3.0)
         self.assertEquals(self.client.zincrby('a', 'a3', amount=5), 8.0)
         self.assertEquals(self.client.zscore('a', 'a2'), 3.0)
@@ -584,7 +584,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertRaises(redis.ResponseError, self.client.zrange, 'a', 0, 1)
         del self.client['a']
         # real logic
-        self.make_zset('a', {'a1' : 1, 'a2' : 2, 'a3' : 3})
+        self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3})
         self.assertEquals(self.client.zrange('a', 0, 1), ['a1', 'a2'])
         self.assertEquals(self.client.zrange('a', 1, 2), ['a2', 'a3'])
         self.assertEquals(self.client.zrange('a', 0, 1, withscores=True),
@@ -602,7 +602,7 @@ class ServerCommandsTestCase(unittest.TestCase):
             'a', 0, 1)
         del self.client['a']
         # real logic
-        self.make_zset('a', {'a1' : 1, 'a2' : 2, 'a3' : 3, 'a4' : 4, 'a5' : 5})
+        self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3, 'a4': 4, 'a5': 5})
         self.assertEquals(self.client.zrangebyscore('a', 2, 4),
             ['a2', 'a3', 'a4'])
         self.assertEquals(self.client.zrangebyscore('a', 2, 4, start=1, num=2),
@@ -618,7 +618,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertRaises(redis.ResponseError, self.client.zrem, 'a', 'a1')
         del self.client['a']
         # real logic
-        self.make_zset('a', {'a1' : 1, 'a2' : 2, 'a3' : 3})
+        self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3})
         self.assertEquals(self.client.zrem('a', 'a2'), True)
         self.assertEquals(self.client.zrange('a', 0, 5), ['a1', 'a3'])
         self.assertEquals(self.client.zrem('a', 'b'), False)
@@ -631,7 +631,7 @@ class ServerCommandsTestCase(unittest.TestCase):
             'a', 0, 1)
         del self.client['a']
         # real logic
-        self.make_zset('a', {'a1' : 1, 'a2' : 2, 'a3' : 3, 'a4' : 4, 'a5' : 5})
+        self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3, 'a4': 4, 'a5': 5})
         self.assertEquals(self.client.zremrangebyscore('a', 2, 4), 3)
         self.assertEquals(self.client.zrange('a', 0, 5), ['a1', 'a5'])
         self.assertEquals(self.client.zremrangebyscore('a', 2, 4), 0)
@@ -644,7 +644,7 @@ class ServerCommandsTestCase(unittest.TestCase):
             'a', 0, 1)
         del self.client['a']
         # real logic
-        self.make_zset('a', {'a1' : 1, 'a2' : 2, 'a3' : 3})
+        self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3})
         self.assertEquals(self.client.zrevrange('a', 0, 1), ['a3', 'a2'])
         self.assertEquals(self.client.zrevrange('a', 1, 2), ['a2', 'a1'])
         self.assertEquals(self.client.zrevrange('a', 0, 1, withscores=True),
@@ -661,8 +661,10 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertRaises(redis.ResponseError, self.client.zscore, 'a', 'a1')
         del self.client['a']
         # real logic
-        self.make_zset('a', {'a1' : 1, 'a2' : 2, 'a3' : 3})
+        self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3})
         self.assertEquals(self.client.zscore('a', 'a2'), 2.0)
+        # test a non-existant member
+        self.assertEquals(self.client.zscore('a', 'a4'), None)
         
     # HASHES
     def make_hash(self, key, d):
