@@ -946,8 +946,9 @@ class Pipeline(Redis):
         return self
         
     def _execute(self, commands):
-        for name, command, options in commands:
-            self.connection.send(command, self)
+        # build up all commands into a single request to increase network perf
+        all_cmds = ''.join([c for _1, c, _2 in commands])
+        self.connection.send(all_cmds, self)
         # we only care about the last item in the response, which should be
         # the EXEC command
         for i in range(len(commands)-1):
