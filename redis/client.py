@@ -954,8 +954,8 @@ class Pipeline(Redis):
         # _setup_connection(). run these commands immediately without
         # buffering them.
         if command_name in ('AUTH', 'SELECT'):
-            response = self._execute([(command_name, command, options)])
-            return response[0]
+            return super(Pipeline, self).execute_command(
+                command_name, command, **options)
         else:
             self.command_stack.append((command_name, command, options))
         return self
