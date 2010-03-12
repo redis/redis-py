@@ -389,7 +389,7 @@ class Redis(threading.local):
         
     def delete(self, *names):
         "Delete one or more keys specified by ``names``"
-        return self.format_inline('DEL', ' '.join(names))
+        return self.format_inline('DEL', *names)
     __delitem__ = delete
     
     def flush(self, all_dbs=False):
