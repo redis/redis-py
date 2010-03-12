@@ -6,7 +6,27 @@ import warnings
 from redis.exceptions import ConnectionError, ResponseError, InvalidResponse
 from redis.exceptions import RedisError, AuthenticationError
 
-_connection_manager = threading.local()
+class ConnectionManager(threading.local):
+    "Manages a list of connections on the local thread"
+    def __init__(self):
+        self.connections = {}
+        
+    def make_connection_key(self, host, port, db):
+        "Create a unique key for the specified host, port and db"
+        return '%s:%s:%s' % (host, port, db)
+        
+    def get_connection(self, host, port, db, password):
+        "Return a specific connection for the specified host, port and db"
+        key = self.make_connection_key(host, port, db)
+        if key not in self.connections:
+            self.connections[key] = Connection(host, port, db, password)
+        return self.connections[key]
+        
+    def get_all_connections(self):
+        "Return a list of all connection objects the manager knows about"
+        return self.connections.values()
+        
+connection_manager = ConnectionManager()
 
 class Connection(object):
     "Manages TCP communication to and from a Redis server"
@@ -327,13 +347,7 @@ class Redis(threading.local):
     #### CONNECTION HANDLING ####
     def get_connection(self, host, port, db, password):
         "Returns a connection object"
-        key = '%s:%s:%s' % (host, port, db)
-        if not hasattr(_connection_manager, key):
-            setattr(
-                _connection_manager,
-                key, 
-                Connection(host, port, db, password))
-        conn = getattr(_connection_manager, key)
+        conn = connection_manager.get_connection(host, port, db, password)
         # if for whatever reason the connection gets a bad password, make
         # sure a subsequent attempt with the right password makes its way
         # to the connection

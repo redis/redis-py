@@ -15,9 +15,17 @@ class ConnectionPoolTestCase(unittest.TestCase):
         r2.select('localhost', 6379, db=10)
         self.assertNotEqual(r1.connection, r2.connection)
         
+        conns = [r1.connection, r2.connection]
+        conns.sort()
+        
         # but returning to the original state shares the object again
         r2.select('localhost', 6379, db=9)
         self.assertEquals(r1.connection, r2.connection)
+        
+        # the connection manager should still have just 2 connections
+        mgr_conns = redis.connection_manager.get_all_connections()
+        mgr_conns.sort()
+        self.assertEquals(conns, mgr_conns)
         
     def test_threaded_workers(self):
         r = redis.Redis(host='localhost', port=6379, db=9)
