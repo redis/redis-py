@@ -181,7 +181,7 @@ class Redis(threading.local):
             ),
         string_keys_to_dict(
             'DECRBY INCRBY LLEN SCARD SDIFFSTORE SINTERSTORE SUNIONSTORE '
-            'ZCARD ZREMRANGEBYSCORE',
+            'ZCARD ZRANK ZREMRANGEBYSCORE ZREVRANK',
             int
             ),
         string_keys_to_dict(
@@ -845,7 +845,8 @@ class Redis(threading.local):
             pieces.append('withscores')
         return self.format_inline(*pieces, **{'withscores': withscores})
         
-    def zrangebyscore(self, name, min, max, start=None, num=None, withscores=False):
+    def zrangebyscore(self, name, min, max,
+            start=None, num=None, withscores=False):
         """
         Return a range of values from the sorted set ``name`` with scores
         between ``min`` and ``max``.
@@ -864,6 +865,13 @@ class Redis(threading.local):
         if withscores:
             pieces.append('withscores')
         return self.format_inline(*pieces, **{'withscores': withscores})
+        
+    def zrank(self, name, value):
+        """
+        Returns a 0-based value indicating the rank of ``value`` in sorted set
+        ``name``
+        """
+        return self.format_bulk('ZRANK', name, value)
         
     def zrem(self, name, value):
         "Remove member ``value`` from sorted set ``name``"
@@ -890,6 +898,13 @@ class Redis(threading.local):
         if withscores:
             pieces.append('withscores')
         return self.format_inline(*pieces, **{'withscores': withscores})
+        
+    def zrevrank(self, name, value):
+        """
+        Returns a 0-based value indicating the descending rank of 
+        ``value`` in sorted set ``name``
+        """
+        return self.format_bulk('ZREVRANK', name, value)
         
     def zscore(self, name, value):
         "Return the score of element ``value`` in sorted set ``name``"
