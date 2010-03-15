@@ -175,8 +175,8 @@ class Redis(threading.local):
     """
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict(
-            'AUTH DEL EXISTS EXPIRE MOVE MSETNX RENAMENX SADD SISMEMBER SMOVE '
-            'SETNX SREM ZADD ZREM',
+            'AUTH DEL EXISTS EXPIRE HDEL MOVE MSETNX RENAMENX '
+            'SADD SISMEMBER SMOVE SETNX SREM ZADD ZREM',
             bool
             ),
         string_keys_to_dict(
@@ -912,6 +912,10 @@ class Redis(threading.local):
         
     
     #### HASH COMMANDS ####
+    def hdel(self, name, key):
+        "Delete ``key`` from hash ``name``"
+        return self.format_bulk('HDEL', name, key)
+    
     def hget(self, name, key):
         "Return the value of ``key`` within the hash ``name``"
         return self.format_bulk('HGET', name, key)

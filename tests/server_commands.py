@@ -697,11 +697,10 @@ class ServerCommandsTestCase(unittest.TestCase):
             self.client.hset(key, k, v)
     
     def test_hget_and_hset(self):
-        # TODO: add these back in, but right now they produce a crash bug.
         # key is not a hash
-        # self.client['a'] = 'a'
-        # self.assertRaises(redis.ResponseError, self.client.hget, 'a', 'a1')
-        # del self.client['a']
+        self.client['a'] = 'a'
+        self.assertRaises(redis.ResponseError, self.client.hget, 'a', 'a1')
+        del self.client['a']
         # no key
         self.assertEquals(self.client.hget('a', 'a1'), None)
         # real logic
@@ -713,6 +712,22 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.hget('a', 'a2'), '5')
         self.assertEquals(self.client.hset('a', 'a4', 4), 1)
         self.assertEquals(self.client.hget('a', 'a4'), '4')
+        # key inside of hash that doesn't exist returns null value
+        self.assertEquals(self.client.hget('a', 'b'), None)
+        
+    def test_hdel(self):
+        # key is not a hash
+        self.client['a'] = 'a'
+        self.assertRaises(redis.ResponseError, self.client.hdel, 'a', 'a1')
+        del self.client['a']
+        # no key
+        self.assertEquals(self.client.hdel('a', 'a1'), False)
+        # real logic
+        self.make_hash('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        self.assertEquals(self.client.hget('a', 'a2'), '2')
+        self.assert_(self.client.hdel('a', 'a2'))
+        self.assertEquals(self.client.hget('a', 'a2'), None)
+        
     
     # SORT
     def test_sort_bad_key(self):
