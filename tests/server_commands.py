@@ -736,7 +736,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         # no key
         self.assertEquals(self.client.hgetall('a'), None)
         # real logic
-        h = {'a1': 1, 'a2': 2, 'a3': 3}
+        h = {'a1': '1', 'a2': '2', 'a3': '3'}
         self.make_hash('a', h)
         remote_hash = self.client.hgetall('a')
         self.assertEquals(h, remote_hash)

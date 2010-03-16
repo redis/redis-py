@@ -155,7 +155,7 @@ def parse_info(response):
     
 def pairs_to_dict(response):
     "Create a dict given a list of key/value pairs"
-    return dict(zip(response[::2], map(float, response[1::2])))
+    return dict(zip(response[::2], response[1::2]))
     
 def zset_score_pairs(response, **options):
     """
