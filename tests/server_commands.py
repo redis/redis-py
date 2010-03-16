@@ -728,6 +728,51 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(self.client.hdel('a', 'a2'))
         self.assertEquals(self.client.hget('a', 'a2'), None)
         
+    def test_hgetall(self):
+        # key is not a hash
+        self.client['a'] = 'a'
+        self.assertRaises(redis.ResponseError, self.client.hgetall, 'a')
+        del self.client['a']
+        # no key
+        self.assertEquals(self.client.hgetall('a'), None)
+        # real logic
+        h = {'a1': 1, 'a2': 2, 'a3': 3}
+        self.make_hash('a', h)
+        remote_hash = self.client.hgetall('a')
+        self.assertEquals(h, remote_hash)
+        
+        
+    def test_hkeys(self):
+        # key is not a hash
+        self.client['a'] = 'a'
+        self.assertRaises(redis.ResponseError, self.client.hkeys, 'a')
+        del self.client['a']
+        # no key
+        self.assertEquals(self.client.hkeys('a'), None)
+        # real logic
+        h = {'a1': '1', 'a2': '2', 'a3': '3'}
+        self.make_hash('a', h)
+        keys = h.keys()
+        keys.sort()
+        remote_keys = self.client.hkeys('a')
+        remote_keys.sort()
+        self.assertEquals(keys, remote_keys)
+        
+    def test_hvals(self):
+        # key is not a hash
+        self.client['a'] = 'a'
+        self.assertRaises(redis.ResponseError, self.client.hvals, 'a')
+        del self.client['a']
+        # no key
+        self.assertEquals(self.client.hvals('a'), None)
+        # real logic
+        h = {'a1': '1', 'a2': '2', 'a3': '3'}
+        self.make_hash('a', h)
+        vals = h.values()
+        vals.sort()
+        remote_vals = self.client.hvals('a')
+        remote_vals.sort()
+        self.assertEquals(vals, remote_vals)
     
     # SORT
     def test_sort_bad_key(self):

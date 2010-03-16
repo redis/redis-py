@@ -153,6 +153,10 @@ def parse_info(response):
             info[key] = get_value(value)
     return info
     
+def pairs_to_dict(response):
+    "Create a dict given a list of key/value pairs"
+    return dict(zip(response[::2], map(float, response[1::2])))
+    
 def zset_score_pairs(response, **options):
     """
     If ``withscores`` is specified in the options, return the response as
@@ -202,6 +206,7 @@ class Redis(threading.local):
         string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE', zset_score_pairs),
         {
             'BGSAVE': lambda r: r == 'Background saving started',
+            'HGETALL': lambda r: r and pairs_to_dict(r) or None,
             'INFO': parse_info,
             'LASTSAVE': timestamp_to_datetime,
             'PING': lambda r: r == 'PONG',
@@ -920,6 +925,14 @@ class Redis(threading.local):
         "Return the value of ``key`` within the hash ``name``"
         return self.format_bulk('HGET', name, key)
         
+    def hgetall(self, name):
+        "Return a Python dict of the hash's name/value pairs"
+        return self.format_inline('HGETALL', name)
+        
+    def hkeys(self, name):
+        "Return the list of keys within hash ``name``"
+        return self.format_inline('HKEYS', name)
+        
     def hset(self, name, key, value):
         """
         Set ``key`` to ``value`` within hash ``name``
@@ -927,6 +940,9 @@ class Redis(threading.local):
         """
         return self.format_multi_bulk('HSET', name, key, value)
         
+    def hvals(self, name):
+        "Return the list of values within hash ``name``"
+        return self.format_inline('HVALS', name)
     
 class Pipeline(Redis):
     """
