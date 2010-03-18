@@ -1,3 +1,10 @@
+* 1.3.6
+    * Implementation of all Hash commands
+    * Pipelines now wrap their execution with MULTI and EXEC commands to
+      process all commands atomically.
+    * Connections can now set timeout. If command execution exceeds the
+      timeout, an exception is raised.
+    * Numerous bug fixes and more tests.
 * 1.3.4
     * Skipped version numbers ahead so that the client version matches the
       Redis version it is feature-compatible with. Going forward, the client

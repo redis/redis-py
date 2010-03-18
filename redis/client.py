@@ -15,11 +15,12 @@ class ConnectionManager(threading.local):
         "Create a unique key for the specified host, port and db"
         return '%s:%s:%s' % (host, port, db)
         
-    def get_connection(self, host, port, db, password):
+    def get_connection(self, host, port, db, password, socket_timeout):
         "Return a specific connection for the specified host, port and db"
         key = self.make_connection_key(host, port, db)
         if key not in self.connections:
-            self.connections[key] = Connection(host, port, db, password)
+            self.connections[key] = Connection(
+                host, port, db, password, socket_timeout)
         return self.connections[key]
         
     def get_all_connections(self):
@@ -30,11 +31,13 @@ connection_manager = ConnectionManager()
 
 class Connection(object):
     "Manages TCP communication to and from a Redis server"
-    def __init__(self, host='localhost', port=6379, db=0, password=None):
+    def __init__(self, host='localhost', port=6379, db=0, password=None,
+            socket_timeout=None):
         self.host = host
         self.port = port
         self.db = db
         self.password = password
+        self.socket_timeout = socket_timeout
         self._sock = None
         self._fp = None
         
@@ -49,6 +52,7 @@ class Connection(object):
             raise ConnectionError("Error %s connecting to %s:%s. %s." % \
                 (e.args[0], self.host, self.port, e.args[1]))
         sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
+        sock.settimeout(self.socket_timeout)
         self._sock = sock
         self._fp = sock.makefile('r')
         redis_instance._setup_connection()
@@ -179,13 +183,13 @@ class Redis(threading.local):
     """
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict(
-            'AUTH DEL EXISTS EXPIRE HDEL MOVE MSETNX RENAMENX '
+            'AUTH DEL EXISTS EXPIRE HDEL HEXISTS MOVE MSETNX RENAMENX '
             'SADD SISMEMBER SMOVE SETNX SREM ZADD ZREM',
             bool
             ),
         string_keys_to_dict(
-            'DECRBY INCRBY LLEN SCARD SDIFFSTORE SINTERSTORE SUNIONSTORE '
-            'ZCARD ZRANK ZREMRANGEBYSCORE ZREVRANK',
+            'DECRBY HLEN INCRBY LLEN SCARD SDIFFSTORE SINTERSTORE '
+            'SUNIONSTORE ZCARD ZRANK ZREMRANGEBYSCORE ZREVRANK',
             int
             ),
         string_keys_to_dict(
@@ -216,11 +220,11 @@ class Redis(threading.local):
         )
     
     def __init__(self, host='localhost', port=6379,
-                db=0, password=None,
+                db=0, password=None, socket_timeout=None,
                 charset='utf-8', errors='strict'):
         self.encoding = charset
         self.errors = errors
-        self.select(host, port, db, password)
+        self.select(host, port, db, password, socket_timeout)
         
     #### Legacty accessors of connection information ####
     def _get_host(self):
@@ -350,9 +354,10 @@ class Redis(threading.local):
             )
         
     #### CONNECTION HANDLING ####
-    def get_connection(self, host, port, db, password):
+    def get_connection(self, host, port, db, password, socket_timeout):
         "Returns a connection object"
-        conn = connection_manager.get_connection(host, port, db, password)
+        conn = connection_manager.get_connection(
+            host, port, db, password, socket_timeout)
         # if for whatever reason the connection gets a bad password, make
         # sure a subsequent attempt with the right password makes its way
         # to the connection
@@ -370,7 +375,7 @@ class Redis(threading.local):
                 raise AuthenticationError("Invalid Password")
         self.format_inline('SELECT', self.connection.db)
         
-    def select(self, host, port, db, password=None):
+    def select(self, host, port, db, password=None, socket_timeout=None):
         """
         Switch to a different database on the current host/port
         
@@ -378,7 +383,8 @@ class Redis(threading.local):
         prior to issuing the SELECT command.  This makes sure we protect
         the thread-safe connections
         """
-        self.connection = self.get_connection(host, port, db, password)
+        self.connection = self.get_connection(
+            host, port, db, password, socket_timeout)
         
     #### SERVER INFORMATION ####
     def bgsave(self):
@@ -920,6 +926,10 @@ class Redis(threading.local):
     def hdel(self, name, key):
         "Delete ``key`` from hash ``name``"
         return self.format_bulk('HDEL', name, key)
+        
+    def hexists(self, name, key):
+        "Returns a boolean indicating if ``key`` exists within hash ``name``"
+        return self.format_bulk('HEXISTS', name, key)
     
     def hget(self, name, key):
         "Return the value of ``key`` within the hash ``name``"
@@ -932,6 +942,10 @@ class Redis(threading.local):
     def hkeys(self, name):
         "Return the list of keys within hash ``name``"
         return self.format_inline('HKEYS', name)
+        
+    def hlen(self, name):
+        "Return the number of elements in hash ``name``"
+        return self.format_inline('HLEN', name)
         
     def hset(self, name, key, value):
         """

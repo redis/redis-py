@@ -728,6 +728,20 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(self.client.hdel('a', 'a2'))
         self.assertEquals(self.client.hget('a', 'a2'), None)
         
+    def test_hexists(self):
+        # key is not a hash
+        self.client['a'] = 'a'
+        self.assertRaises(redis.ResponseError, self.client.hexists, 'a', 'a1')
+        del self.client['a']
+        # no key
+        self.assertEquals(self.client.hexists('a', 'a1'), False)
+        # real logic
+        self.make_hash('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        self.assertEquals(self.client.hexists('a', 'a1'), True)
+        self.assertEquals(self.client.hexists('a', 'a4'), False)
+        self.client.hdel('a', 'a1')
+        self.assertEquals(self.client.hexists('a', 'a1'), False)
+        
     def test_hgetall(self):
         # key is not a hash
         self.client['a'] = 'a'
@@ -757,6 +771,19 @@ class ServerCommandsTestCase(unittest.TestCase):
         remote_keys = self.client.hkeys('a')
         remote_keys.sort()
         self.assertEquals(keys, remote_keys)
+        
+    def test_hlen(self):
+        # key is not a hash
+        self.client['a'] = 'a'
+        self.assertRaises(redis.ResponseError, self.client.hlen, 'a')
+        del self.client['a']
+        # no key
+        self.assertEquals(self.client.hlen('a'), 0)
+        # real logic
+        self.make_hash('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        self.assertEquals(self.client.hlen('a'), 3)
+        self.client.hdel('a', 'a3')
+        self.assertEquals(self.client.hlen('a'), 2)
         
     def test_hvals(self):
         # key is not a hash
