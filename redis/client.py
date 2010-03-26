@@ -224,7 +224,8 @@ class Redis(threading.local):
                 charset='utf-8', errors='strict'):
         self.encoding = charset
         self.errors = errors
-        self.select(host, port, db, password, socket_timeout)
+        self.connection = None
+        self.select(db, host, port, password, socket_timeout)
         
     #### Legacty accessors of connection information ####
     def _get_host(self):
@@ -375,14 +376,28 @@ class Redis(threading.local):
                 raise AuthenticationError("Invalid Password")
         self.format_inline('SELECT', self.connection.db)
         
-    def select(self, host, port, db, password=None, socket_timeout=None):
+    def select(self, db, host=None, port=None, password=None,
+            socket_timeout=None):
         """
-        Switch to a different database on the current host/port
+        Switch to a different Redis connection.
+        
+        If the host and port aren't provided and there's an existing
+        connection, use the existing connection's host and port instead.
         
         Note this method actually replaces the underlying connection object
         prior to issuing the SELECT command.  This makes sure we protect
         the thread-safe connections
         """
+        if host is None:
+            if self.connection is None:
+                raise RedisError("A valid hostname or IP address "
+                    "must be specified")
+            host = self.connection.host
+        if port is None:
+            if self.connection is None:
+                raise RedisError("A valid port must be specified")
+            port = self.connection.port
+        
         self.connection = self.get_connection(
             host, port, db, password, socket_timeout)
         
@@ -939,6 +954,10 @@ class Redis(threading.local):
         "Return a Python dict of the hash's name/value pairs"
         return self.format_inline('HGETALL', name)
         
+    def hincrby(self, name, key, amount=1):
+        "Increment the value of ``key`` in hash ``name`` by ``amount``"
+        return self.format_inline('HINCRBY', name, key, amount)
+        
     def hkeys(self, name):
         "Return the list of keys within hash ``name``"
         return self.format_inline('HKEYS', name)
@@ -1045,6 +1064,6 @@ class Pipeline(Redis):
             self.connection.disconnect()
             return self._execute(stack)
             
-    def select(self, host, port, db):
+    def select(self, *args, **kwargs):
         raise RedisError("Cannot select a different database from a pipeline")
         

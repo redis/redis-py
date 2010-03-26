@@ -12,14 +12,14 @@ class ConnectionPoolTestCase(unittest.TestCase):
         
         # if one o them switches, they should have
         # separate conncetion objects
-        r2.select('localhost', 6379, db=10)
+        r2.select(db=10, host='localhost', port=6379)
         self.assertNotEqual(r1.connection, r2.connection)
         
         conns = [r1.connection, r2.connection]
         conns.sort()
         
         # but returning to the original state shares the object again
-        r2.select('localhost', 6379, db=9)
+        r2.select(db=9, host='localhost', port=6379)
         self.assertEquals(r1.connection, r2.connection)
         
         # the connection manager should still have just 2 connections

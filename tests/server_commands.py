@@ -272,7 +272,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.lrem('a', 'a', 1), 1)
         self.assertEquals(self.client.lrange('a', 0, 3), ['a', 'a', 'a'])
         self.assertEquals(self.client.lrem('a', 'a'), 3)
-        self.assertEquals(self.client.lrange('a', 0, 1), [])
+        # remove all the elements in the list means the key is deleted
+        self.assertEquals(self.client.lrange('a', 0, 1), None)
         
     def test_lset(self):
         # no key
@@ -754,6 +755,25 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.make_hash('a', h)
         remote_hash = self.client.hgetall('a')
         self.assertEquals(h, remote_hash)
+        
+    def test_hincrby(self):
+        # key is not a hash
+        self.client['a'] = 'a'
+        self.assertRaises(redis.ResponseError, self.client.hincrby, 'a', 'a1')
+        del self.client['a']
+        # no key should create the hash and incr the key's value to 1
+        self.assertEquals(self.client.hincrby('a', 'a1'), 1)
+        # real logic
+        self.assertEquals(self.client.hincrby('a', 'a1'), 2)
+        self.assertEquals(self.client.hincrby('a', 'a1', amount=2), 4)
+        # negative values decrement
+        self.assertEquals(self.client.hincrby('a', 'a1', amount=-3), 1)
+        # hash that exists, but key that doesn't
+        self.assertEquals(self.client.hincrby('a', 'a2', amount=3), 3)
+        # finally a key that's not an int
+        self.client.hset('a', 'a3', 'foo')
+        self.assertEquals(self.client.hincrby('a', 'a3'), 1)
+        
         
         
     def test_hkeys(self):
