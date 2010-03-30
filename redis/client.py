@@ -1015,9 +1015,9 @@ class Redis(threading.local):
         "Listen for messages on channels this client has been subscribed to"
         while self.subscribed:
             r = self.parse_response('LISTEN')
-            message = {'type': r[0], 'channel': r[1], 'message': r[2]}
-            yield message
-            if message['type'] == 'unsubscribe' and message['message'] == 0:
+            message_type, channel, message = r[0], r[1], r[2]
+            yield (message_type, channel, message)
+            if message_type == 'unsubscribe' and message == 0:
                 self.subscribed = False
                 
 
