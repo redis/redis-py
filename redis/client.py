@@ -258,17 +258,15 @@ class Redis(threading.local):
                 "UNSUBSCRIBE while channels are open")
         try:
             self.connection.send(command, self)
-            response = self.parse_response(command_name, **options)
             if subscription_command:
                 return None
-            return response
+            return self.parse_response(command_name, **options)
         except ConnectionError:
             self.connection.disconnect()
             self.connection.send(command, self)
-            response = self.parse_response(command_name, **options)
             if subscription_command:
                 return None
-            return response
+            return self.parse_response(command_name, **options)
 
     def execute_command(self, *args, **options):
         "Sends the command to the redis server and returns it's response"
