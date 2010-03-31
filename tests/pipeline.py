@@ -20,9 +20,16 @@ class PipelineTestCase(unittest.TestCase):
                 True,
                 True,
                 2.0,
-                [('z1', 2.0), ('z2', 4)]
+                [('z1', 2.0), ('z2', 4)],
             ]
             )
+            
+    def test_pipeline_with_fresh_connection(self):
+        redis.client.connection_manager.connections.clear()
+        self.client = redis.Redis(host='localhost', port=6379, db=9)
+        pipe = self.client.pipeline()
+        pipe.set('a', 'b')
+        self.assertEquals(pipe.execute(), [True])
             
     def test_invalid_command_in_pipeline(self):
         # all commands but the invalid one should be excuted correctly
