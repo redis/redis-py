@@ -252,7 +252,6 @@ class Redis(threading.local):
 
     #### COMMAND EXECUTION AND PROTOCOL PARSING ####
     def _execute_command(self, command_name, command, **options):
-        "Sends the command to the Redis server and returns it's response"
         subscription_command = command_name in self.SUBSCRIPTION_COMMANDS
         if self.subscribed and not subscription_command:
             raise RedisError("Cannot issue commands other than SUBSCRIBE and "
@@ -272,7 +271,7 @@ class Redis(threading.local):
             return response
 
     def execute_command(self, *args, **options):
-        "Sends command to redis server and returns response"
+        "Sends the command to the redis server and returns it's response"
         cmd_count = len(args)
         cmds = []
         for i in args:
