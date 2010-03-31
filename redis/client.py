@@ -1043,6 +1043,7 @@ class Pipeline(Redis):
         self.connection = connection
         self.encoding = charset
         self.errors = errors
+        self.subscribed = False # NOTE not in use, but necessary
         self.reset()
         
     def reset(self):
