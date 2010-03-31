@@ -35,7 +35,7 @@ connection_manager = ConnectionManager()
 class Connection(object):
     "Manages TCP communication to and from a Redis server"
     def __init__(self, host='localhost', port=6379, db=0, password=None,
-            socket_timeout=None):
+                 socket_timeout=None):
         self.host = host
         self.port = port
         self.db = db
@@ -45,7 +45,7 @@ class Connection(object):
         self._fp = None
 
     def connect(self, redis_instance):
-        "Connects to the Redis server is not already connected"
+        "Connects to the Redis server if not already connected"
         if self._sock:
             return
         try:
@@ -225,8 +225,8 @@ class Redis(threading.local):
     SUBSCRIPTION_COMMANDS = set(['SUBSCRIBE', 'UNSUBSCRIBE'])
 
     def __init__(self, host='localhost', port=6379,
-                db=0, password=None, socket_timeout=None,
-                charset='utf-8', errors='strict'):
+                 db=0, password=None, socket_timeout=None,
+                 charset='utf-8', errors='strict'):
         self.encoding = charset
         self.errors = errors
         self.connection = None
