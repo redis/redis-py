@@ -5,10 +5,10 @@ class PipelineTestCase(unittest.TestCase):
     def setUp(self):
         self.client = redis.Redis(host='localhost', port=6379, db=9)
         self.client.flushdb()
-        
+
     def tearDown(self):
         self.client.flushdb()
-    
+
     def test_pipeline(self):
         pipe = self.client.pipeline()
         pipe.set('a', 'a1').get('a').zadd('z', 'z1', 1).zadd('z', 'z2', 4)
@@ -23,14 +23,14 @@ class PipelineTestCase(unittest.TestCase):
                 [('z1', 2.0), ('z2', 4)],
             ]
             )
-            
+
     def test_pipeline_with_fresh_connection(self):
         redis.client.connection_manager.connections.clear()
         self.client = redis.Redis(host='localhost', port=6379, db=9)
         pipe = self.client.pipeline()
         pipe.set('a', 'b')
         self.assertEquals(pipe.execute(), [True])
-            
+
     def test_invalid_command_in_pipeline(self):
         # all commands but the invalid one should be excuted correctly
         self.client['c'] = 'a'
@@ -53,10 +53,16 @@ class PipelineTestCase(unittest.TestCase):
         self.assertEquals(pipe.set('z', 'zzz').execute(), [True])
         self.assertEquals(self.client['z'], 'zzz')
         
-    def test_pipe_cannot_select(self):
+    def test_pipeline_cannot_select(self):
         pipe = self.client.pipeline()
         self.assertRaises(redis.RedisError,
             pipe.select, 'localhost', 6379, db=9)
-        
-        
-        
+
+    def test_pipeline_no_transaction(self):
+        pipe = self.client.pipeline(transaction=False)
+        pipe.set('a', 'a1').set('b', 'b1').set('c', 'c1')
+        self.assertEquals(pipe.execute(), [True, True, True])
+        self.assertEquals(self.client['a'], 'a1')
+        self.assertEquals(self.client['b'], 'b1')
+        self.assertEquals(self.client['c'], 'c1')
+
