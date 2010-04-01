@@ -212,6 +212,8 @@ class Redis(threading.local):
             ),
         string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE', zset_score_pairs),
         {
+            'BGREWRITEAOF': lambda r: \
+                r == 'Background rewriting of AOF file started',
             'BGSAVE': lambda r: r == 'Background saving started',
             'HGETALL': lambda r: r and pairs_to_dict(r) or None,
             'INFO': parse_info,
@@ -411,7 +413,12 @@ class Redis(threading.local):
         self.connection = self.get_connection(
             host, port, db, password, socket_timeout)
 
+
     #### SERVER INFORMATION ####
+    def bgrewriteaof(self):
+        "Tell the Redis server to rewrite the AOF file from data in memory."
+        return self.execute_command('BGREWRITEAOF')
+
     def bgsave(self):
         """
         Tell the Redis server to save its data to disk.  Unlike save(),
