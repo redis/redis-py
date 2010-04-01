@@ -53,8 +53,12 @@ class Connection(object):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect((self.host, self.port))
         except socket.error, e:
-            raise ConnectionError("Error %s connecting to %s:%s. %s." % \
-                (e.args[0], self.host, self.port, e.args[1]))
+            # args for socket.error can either be (errno, "message") or just "message"
+            if len(e.args) == 1:
+                error_message = "Error connecting to %s:%s. %s." % (self.host, self.port, e.args[0])
+            else:
+                error_message = "Error %s connecting %s:%s. %s." % (e.args[0], self.host, self.port, e.args[1])
+            raise ConnectionError(error_message)
         sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
         sock.settimeout(self.socket_timeout)
         self._sock = sock
