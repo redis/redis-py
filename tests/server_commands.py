@@ -250,7 +250,7 @@ class ServerCommandsTestCase(unittest.TestCase):
 
     def test_lrange(self):
         # no key
-        self.assertEquals(self.client.lrange('a', 0, 1), None)
+        self.assertEquals(self.client.lrange('a', 0, 1), [])
         # key is not a list
         self.client['a'] = 'b'
         self.assertRaises(redis.ResponseError, self.client.lrange, 'a', 0, 1)
@@ -273,7 +273,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.lrange('a', 0, 3), ['a', 'a', 'a'])
         self.assertEquals(self.client.lrem('a', 'a'), 3)
         # remove all the elements in the list means the key is deleted
-        self.assertEquals(self.client.lrange('a', 0, 1), None)
+        self.assertEquals(self.client.lrange('a', 0, 1), [])
 
     def test_lset(self):
         # no key
@@ -592,8 +592,8 @@ class ServerCommandsTestCase(unittest.TestCase):
             [('a1', 1.0), ('a2', 2.0)])
         self.assertEquals(self.client.zrange('a', 1, 2, withscores=True),
             [('a2', 2.0), ('a3', 3.0)])
-        # a non existant key should return None
-        self.assertEquals(self.client.zrange('b', 0, 1, withscores=True), None)
+        # a non existant key should return empty list
+        self.assertEquals(self.client.zrange('b', 0, 1, withscores=True), [])
 
 
     def test_zrangebyscore(self):
@@ -610,8 +610,8 @@ class ServerCommandsTestCase(unittest.TestCase):
             ['a3', 'a4'])
         self.assertEquals(self.client.zrangebyscore('a', 2, 4, withscores=True),
             [('a2', 2.0), ('a3', 3.0), ('a4', 4.0)])
-        # a non existant key should return None
-        self.assertEquals(self.client.zrangebyscore('b', 0, 1, withscores=True), None)
+        # a non existant key should return empty list
+        self.assertEquals(self.client.zrangebyscore('b', 0, 1, withscores=True), [])
 
     def test_zrank(self):
         # key is not a zset
@@ -665,8 +665,8 @@ class ServerCommandsTestCase(unittest.TestCase):
             [('a3', 3.0), ('a2', 2.0)])
         self.assertEquals(self.client.zrevrange('a', 1, 2, withscores=True),
             [('a2', 2.0), ('a1', 1.0)])
-        # a non existant key should return None
-        self.assertEquals(self.client.zrange('b', 0, 1, withscores=True), None)
+        # a non existant key should return empty list
+        self.assertEquals(self.client.zrange('b', 0, 1, withscores=True), [])
 
     def test_zrevrank(self):
         # key is not a zset
@@ -789,7 +789,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertRaises(redis.ResponseError, self.client.hkeys, 'a')
         del self.client['a']
         # no key
-        self.assertEquals(self.client.hkeys('a'), None)
+        self.assertEquals(self.client.hkeys('a'), [])
         # real logic
         h = {'a1': '1', 'a2': '2', 'a3': '3'}
         self.make_hash('a', h)
@@ -818,7 +818,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertRaises(redis.ResponseError, self.client.hvals, 'a')
         del self.client['a']
         # no key
-        self.assertEquals(self.client.hvals('a'), None)
+        self.assertEquals(self.client.hvals('a'), [])
         # real logic
         h = {'a1': '1', 'a2': '2', 'a3': '3'}
         self.make_hash('a', h)
@@ -831,7 +831,7 @@ class ServerCommandsTestCase(unittest.TestCase):
     # SORT
     def test_sort_bad_key(self):
         # key is not set
-        self.assertEquals(self.client.sort('a'), None)
+        self.assertEquals(self.client.sort('a'), [])
         # key is a string value
         self.client['a'] = 'a'
         self.assertRaises(redis.ResponseError, self.client.sort, 'a')
