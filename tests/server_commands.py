@@ -716,6 +716,13 @@ class ServerCommandsTestCase(unittest.TestCase):
         # key inside of hash that doesn't exist returns null value
         self.assertEquals(self.client.hget('a', 'b'), None)
 
+    def test_hmset(self):
+        d = {'a': '1', 'b': '2', 'c': '3'}
+        self.assert_(self.client.hmset('foo', d))
+        self.assertEqual(self.client.hgetall('foo'), d)
+        self.assertRaises(redis.ResponseError, self.client.hmset, 'foo', {})
+
+
     def test_hdel(self):
         # key is not a hash
         self.client['a'] = 'a'

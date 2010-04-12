@@ -190,7 +190,7 @@ class Redis(threading.local):
     """
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict(
-            'AUTH DEL EXISTS EXPIRE HDEL HEXISTS MOVE MSETNX RENAMENX '
+            'AUTH DEL EXISTS EXPIRE HDEL HEXISTS HMSET MOVE MSETNX RENAMENX '
             'SADD SISMEMBER SMOVE SETNX SREM ZADD ZREM',
             bool
             ),
@@ -1000,6 +1000,12 @@ class Redis(threading.local):
         Returns 1 if HSET created a new field, otherwise 0
         """
         return self.execute_command('HSET', name, key, value)
+
+    def hmset(self, key, mapping):
+        "Sets each key in the ``mapping`` dict to its corresponding value"
+        items = []
+        [items.extend(pair) for pair in mapping.iteritems()]
+        return self.execute_command('HMSET', key, *items)
 
     def hvals(self, name):
         "Return the list of values within hash ``name``"
