@@ -1,10 +1,10 @@
 # legacy imports
-from redis.client import Redis, connection_manager
+from redis.client import Redis, ConnectionPool
 from redis.exceptions import RedisError, ConnectionError, AuthenticationError
 from redis.exceptions import ResponseError, InvalidResponse, InvalidData
 
 __all__ = [
-    'Redis', 'connection_manager',
+    'Redis', 'ConnectionPool',
     'RedisError', 'ConnectionError', 'ResponseError', 'AuthenticationError'
     'InvalidResponse', 'InvalidData',
     ]

@@ -8,7 +8,7 @@ from redis.exceptions import ConnectionError, ResponseError, InvalidResponse
 from redis.exceptions import RedisError, AuthenticationError
 
 
-class ConnectionManager(threading.local):
+class ConnectionPool(threading.local):
     "Manages a list of connections on the local thread"
     def __init__(self):
         self.connections = {}
@@ -28,9 +28,6 @@ class ConnectionManager(threading.local):
     def get_all_connections(self):
         "Return a list of all connection objects the manager knows about"
         return self.connections.values()
-
-
-connection_manager = ConnectionManager()
 
 
 class Connection(object):
@@ -236,11 +233,13 @@ class Redis(threading.local):
 
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
+                 connection_pool=None,
                  charset='utf-8', errors='strict'):
         self.encoding = charset
         self.errors = errors
         self.connection = None
         self.subscribed = False
+        self.connection_pool = connection_pool and connection_pool or ConnectionPool()
         self.select(db, host, port, password, socket_timeout)
 
     #### Legacty accessors of connection information ####
@@ -376,7 +375,7 @@ class Redis(threading.local):
     #### CONNECTION HANDLING ####
     def get_connection(self, host, port, db, password, socket_timeout):
         "Returns a connection object"
-        conn = connection_manager.get_connection(
+        conn = self.connection_pool.get_connection(
             host, port, db, password, socket_timeout)
         # if for whatever reason the connection gets a bad password, make
         # sure a subsequent attempt with the right password makes its way
