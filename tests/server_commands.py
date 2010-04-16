@@ -722,6 +722,17 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEqual(self.client.hgetall('foo'), d)
         self.assertRaises(redis.ResponseError, self.client.hmset, 'foo', {})
 
+    def test_hmget(self):
+        d = {'a': 1, 'b': 2, 'c': 3}
+        self.assert_(self.client.hmset('foo', d))
+        self.assertEqual(self.client.hmget('foo', ['a', 'b', 'c']), ['1', '2', '3'])
+        self.assertEqual(self.client.hmget('foo', ['a', 'c']), ['1', '3'])
+
+    def test_hmget_empty(self):
+        self.assertEqual(self.client.hmget('foo', ['a', 'b']), [None, None])
+
+    def test_hmget_no_keys(self):
+        self.assertRaises(redis.ResponseError, self.client.hmget, 'foo', [])
 
     def test_hdel(self):
         # key is not a hash

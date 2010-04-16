@@ -1007,6 +1007,10 @@ class Redis(threading.local):
         [items.extend(pair) for pair in mapping.iteritems()]
         return self.execute_command('HMSET', key, *items)
 
+    def hmget(self, name, keys):
+        "Returns a list of values ordered identically to ``keys``"
+        return self.execute_command('HMGET', name, *keys)
+
     def hvals(self, name):
         "Return the list of values within hash ``name``"
         return self.execute_command('HVALS', name)
