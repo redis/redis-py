@@ -219,7 +219,7 @@ class Redis(threading.local):
             'BGREWRITEAOF': lambda r: \
                 r == 'Background rewriting of AOF file started',
             'BGSAVE': lambda r: r == 'Background saving started',
-            'HGETALL': lambda r: r and pairs_to_dict(r) or None,
+            'HGETALL': lambda r: r and pairs_to_dict(r) or {},
             'INFO': parse_info,
             'LASTSAVE': timestamp_to_datetime,
             'PING': lambda r: r == 'PONG',

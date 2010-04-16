@@ -767,7 +767,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertRaises(redis.ResponseError, self.client.hgetall, 'a')
         del self.client['a']
         # no key
-        self.assertEquals(self.client.hgetall('a'), None)
+        self.assertEquals(self.client.hgetall('a'), {})
         # real logic
         h = {'a1': '1', 'a2': '2', 'a3': '3'}
         self.make_hash('a', h)
