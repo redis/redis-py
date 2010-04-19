@@ -60,6 +60,17 @@ class ServerCommandsTestCase(unittest.TestCase):
 
 
     # KEYS
+    def test_append(self):
+        # invalid key type
+        self.client.rpush('a', 'a1')
+        self.assertRaises(redis.ResponseError, self.client.append, 'a', 'a1')
+        del self.client['a']
+        # real logic
+        self.assertEquals(self.client.append('a', 'a1'), 2)
+        self.assertEquals(self.client['a'], 'a1')
+        self.assert_(self.client.append('a', 'a2'), 4)
+        self.assertEquals(self.client['a'], 'a1a2')
+
     def test_decr(self):
         self.assertEquals(self.client.decr('a'), -1)
         self.assertEquals(self.client['a'], '-1')
@@ -147,6 +158,20 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client['a'], '1')
         self.assert_(not self.client.setnx('a', '2'))
         self.assertEquals(self.client['a'], '1')
+
+    def test_substr(self):
+        # invalid key type
+        self.client.rpush('a', 'a1')
+        self.assertRaises(redis.ResponseError, self.client.substr, 'a', 0)
+        del self.client['a']
+        # real logic
+        self.client['a'] = 'abcdefghi'
+        self.assertEquals(self.client.substr('a', 0), 'abcdefghi')
+        self.assertEquals(self.client.substr('a', 2), 'cdefghi')
+        self.assertEquals(self.client.substr('a', 3, 5), 'def')
+        self.assertEquals(self.client.substr('a', 3, -2), 'defgh')
+        self.client['a'] = 123456 # does substr work with ints?
+        self.assertEquals(self.client.substr('a', 2, -2), '345')
 
     def test_ttl(self):
         self.assertEquals(self.client.ttl('a'), None)

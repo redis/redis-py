@@ -481,6 +481,14 @@ class Redis(threading.local):
         return self.execute_command('SAVE')
 
     #### BASIC KEY COMMANDS ####
+    def append(self, key, value):
+        """
+        Appends the string ``value`` to the value at ``key``. If ``key``
+        doesn't already exist, create it with a value of ``value``.
+        Returns the new length of the value at ``key``.
+        """
+        return self.execute_command('APPEND', key, value)
+
     def decr(self, name, amount=1):
         """
         Decrements the value of ``key`` by ``amount``.  If no key exists,
@@ -605,6 +613,13 @@ class Redis(threading.local):
     def setnx(self, name, value):
         "Set the value of key ``name`` to ``value`` if key doesn't exist"
         return self.execute_command('SETNX', name, value)
+
+    def substr(self, name, start, end=-1):
+        """
+        Return a substring of the string at key ``name``. ``start`` and ``end``
+        are 0-based integers specifying the portion of the string to return.
+        """
+        return self.execute_command('SUBSTR', name, start, end)
 
     def ttl(self, name):
         "Returns the number of seconds until the key ``name`` will expire"
