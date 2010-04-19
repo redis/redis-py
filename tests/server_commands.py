@@ -460,6 +460,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client['a'] = 'a'
         self.assertRaises(redis.ResponseError, self.client.smembers, 'a')
         del self.client['a']
+        # set doesn't exist
+        self.assertEquals(self.client.smembers('a'), set())
         # real logic
         self.make_set('a', 'abc')
         self.assertEquals(self.client.smembers('a'), set(['a', 'b', 'c']))

@@ -212,7 +212,7 @@ class Redis(threading.local):
             lambda r: r == 'OK'
             ),
         string_keys_to_dict('SDIFF SINTER SMEMBERS SUNION',
-            lambda r: r and set(r) or r
+            lambda r: set(r)
             ),
         string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE', zset_score_pairs),
         {
@@ -342,8 +342,9 @@ class Redis(threading.local):
                 return [self._parse_response(command_name, catch_errors)
                     for i in range(length)]
             else:
-                # for pipelines, we need to read everything, including response errors.
-                # otherwise we'd completely mess up the receive buffer
+                # for pipelines, we need to read everything,
+                # including response errors. otherwise we'd
+                # completely mess up the receive buffer
                 data = []
                 for i in range(length):
                     try:
