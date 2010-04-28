@@ -611,6 +611,33 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.zscore('a', 'a2'), 3.0)
         self.assertEquals(self.client.zscore('a', 'a3'), 8.0)
 
+    def test_zinter(self):
+        self.make_zset('a', {'a1': 1, 'a2': 1, 'a3': 1})
+        self.make_zset('b', {'a1': 2, 'a3': 2, 'a4': 2})
+        self.make_zset('c', {'a1': 6, 'a3': 5, 'a4': 4})
+
+        # sum, no weight
+        self.assert_(self.client.zinter('z', ['a', 'b', 'c']))
+        self.assertEquals(
+            self.client.zrange('z', 0, -1, withscores=True),
+            [('a3', 8), ('a1', 9)]
+            )
+
+        # max, no weight
+        self.assert_(self.client.zinter('z', ['a', 'b', 'c'], aggregate='MAX'))
+        self.assertEquals(
+            self.client.zrange('z', 0, -1, withscores=True),
+            [('a3', 5), ('a1', 6)]
+            )
+
+        # with weight
+        self.assert_(self.client.zinter('z', {'a': 1, 'b': 2, 'c': 3}))
+        self.assertEquals(
+            self.client.zrange('z', 0, -1, withscores=True),
+            [('a3', 20), ('a1', 23)]
+            )
+        
+
     def test_zrange(self):
         # key is not a zset
         self.client['a'] = 'a'
@@ -723,6 +750,33 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.zscore('a', 'a2'), 2.0)
         # test a non-existant member
         self.assertEquals(self.client.zscore('a', 'a4'), None)
+
+    def test_zunion(self):
+        self.make_zset('a', {'a1': 1, 'a2': 1, 'a3': 1})
+        self.make_zset('b', {'a1': 2, 'a3': 2, 'a4': 2})
+        self.make_zset('c', {'a1': 6, 'a4': 5, 'a5': 4})
+        
+        # sum, no weight
+        self.assert_(self.client.zunion('z', ['a', 'b', 'c']))
+        self.assertEquals(
+            self.client.zrange('z', 0, -1, withscores=True),
+            [('a2', 1), ('a3', 3), ('a5', 4), ('a4', 7), ('a1', 9)]
+            )
+
+        # max, no weight
+        self.assert_(self.client.zunion('z', ['a', 'b', 'c'], aggregate='MAX'))
+        self.assertEquals(
+            self.client.zrange('z', 0, -1, withscores=True),
+            [('a2', 1), ('a3', 2), ('a5', 4), ('a4', 5), ('a1', 6)]
+            )
+
+        # with weight
+        self.assert_(self.client.zunion('z', {'a': 1, 'b': 2, 'c': 3}))
+        self.assertEquals(
+            self.client.zrange('z', 0, -1, withscores=True),
+            [('a2', 1), ('a3', 5), ('a5', 12), ('a4', 19), ('a1', 23)]
+            )
+
 
     # HASHES
     def make_hash(self, key, d):

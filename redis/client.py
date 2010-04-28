@@ -896,6 +896,14 @@ class Redis(threading.local):
         "Increment the score of ``value`` in sorted set ``name`` by ``amount``"
         return self.execute_command('ZINCRBY', name, amount, value)
 
+    def zinter(self, dest, keys, aggregate=None):
+        """
+        Intersect multiple sorted sets specified by ``keys`` into
+        a new sorted set, ``dest``. Scores in the destination will be
+        aggregated based on the ``aggregate``, or SUM if none is provided.
+        """
+        return self._zaggregate('ZINTER', dest, keys, aggregate)
+
     def zrange(self, name, start, end, desc=False, withscores=False):
         """
         Return a range of values from sorted set ``name`` between
@@ -980,6 +988,30 @@ class Redis(threading.local):
         "Return the score of element ``value`` in sorted set ``name``"
         return self.execute_command('ZSCORE', name, value)
 
+    def zunion(self, dest, keys, aggregate=None):
+        """
+        Union multiple sorted sets specified by ``keys`` into
+        a new sorted set, ``dest``. Scores in the destination will be
+        aggregated based on the ``aggregate``, or SUM if none is provided.
+        """
+        return self._zaggregate('ZUNION', dest, keys, aggregate)
+
+    def _zaggregate(self, command, dest, keys, aggregate=None):
+        pieces = [command, dest, len(keys)]
+        if isinstance(keys, dict):
+            items = keys.items()
+            keys = [i[0] for i in items]
+            weights = [i[1] for i in items]
+        else:
+            weights = None
+        pieces.extend(keys)
+        if weights:
+            pieces.append('WEIGHTS')
+            pieces.extend(weights)
+        if aggregate:
+            pieces.append('AGGREGATE')
+            pieces.append(aggregate)
+        return self.execute_command(*pieces)
 
     #### HASH COMMANDS ####
     def hdel(self, name, key):
