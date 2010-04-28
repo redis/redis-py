@@ -1017,8 +1017,11 @@ class Redis(threading.local):
         """
         return self.execute_command('HSET', name, key, value)
 
-    def hmset(self, key, mapping):
-        "Sets each key in the ``mapping`` dict to its corresponding value"
+    def hmset(self, name, mapping):
+        """
+        Sets each key in the ``mapping`` dict to its corresponding value
+        in the hash ``name``
+        """
         items = []
         [items.extend(pair) for pair in mapping.iteritems()]
         return self.execute_command('HMSET', key, *items)
@@ -1134,7 +1137,7 @@ class Pipeline(Redis):
         response = self.parse_response('_', catch_errors=True)
         if len(response) != len(commands):
             raise ResponseError("Wrong number of response items from "
-                "pipline execution")
+                "pipeline execution")
         # Run any callbacks for the commands run in the pipeline
         data = []
         for r, cmd in zip(response, commands):
