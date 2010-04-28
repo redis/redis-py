@@ -1024,7 +1024,7 @@ class Redis(threading.local):
         """
         items = []
         [items.extend(pair) for pair in mapping.iteritems()]
-        return self.execute_command('HMSET', key, *items)
+        return self.execute_command('HMSET', name, *items)
 
     def hmget(self, name, keys):
         "Returns a list of values ordered identically to ``keys``"
@@ -1036,6 +1036,25 @@ class Redis(threading.local):
 
 
     # channels
+    def psubscribe(self, patterns):
+        "Subscribe to all channels matching any pattern in ``patterns``"
+        if isinstance(patterns, basestring):
+            patterns = [patterns]
+        response = self.execute_command('PSUBSCRIBE', *patterns)
+        # this is *after* the SUBSCRIBE in order to allow for lazy and broken
+        # connections that need to issue AUTH and SELECT commands
+        self.subscribed = True
+        return response
+
+    def punsubscribe(self, patterns=[]):
+        """
+        Unsubscribe from any channel matching any pattern in ``patterns``.
+        If empty, unsubscribe from all channels.
+        """
+        if isinstance(patterns, basestring):
+            patterns = [patterns]
+        return self.execute_command('PUNSUBSCRIBE', *patterns)
+
     def subscribe(self, channels):
         "Subscribe to ``channels``, waiting for messages to be published"
         if isinstance(channels, basestring):
@@ -1047,7 +1066,10 @@ class Redis(threading.local):
         return response
 
     def unsubscribe(self, channels=[]):
-        "Unsubscribe to ``channels``. If empty, unsubscribe from all channels"
+        """
+        Unsubscribe from ``channels``. If empty, unsubscribe
+        from all channels
+        """
         if isinstance(channels, basestring):
             channels = [channels]
         return self.execute_command('UNSUBSCRIBE', *channels)
