@@ -684,6 +684,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.zrank('a', 'a3'), 2)
         self.assertEquals(self.client.zrank('a', 'a4'), 3)
         self.assertEquals(self.client.zrank('a', 'a5'), 4)
+        # non-existent value in zset
+        self.assertEquals(self.client.zrank('a', 'a6'), None)
 
     def test_zrem(self):
         # key is not a zset
@@ -746,8 +748,9 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertRaises(redis.ResponseError, self.client.zscore, 'a', 'a1')
         del self.client['a']
         # real logic
-        self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3})
-        self.assertEquals(self.client.zscore('a', 'a2'), 2.0)
+        self.make_zset('a', {'a1': 0, 'a2': 1, 'a3': 2})
+        self.assertEquals(self.client.zscore('a', 'a1'), 0.0)
+        self.assertEquals(self.client.zscore('a', 'a2'), 1.0)
         # test a non-existant member
         self.assertEquals(self.client.zscore('a', 'a4'), None)
 

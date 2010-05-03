@@ -178,6 +178,17 @@ def zset_score_pairs(response, **options):
         return response
     return zip(response[::2], map(float, response[1::2]))
 
+def int_or_none(response):
+    if response is None:
+        return None
+    return int(response)
+
+def float_or_none(response):
+    if response is None:
+        return None
+    return float(response)
+
+
 class Redis(threading.local):
     """
     Implementation of the Redis protocol.
@@ -196,7 +207,7 @@ class Redis(threading.local):
             ),
         string_keys_to_dict(
             'DECRBY HLEN INCRBY LLEN SCARD SDIFFSTORE SINTERSTORE '
-            'SUNIONSTORE ZCARD ZRANK ZREMRANGEBYSCORE ZREVRANK',
+            'SUNIONSTORE ZCARD ZREMRANGEBYSCORE ZREVRANK',
             int
             ),
         string_keys_to_dict(
@@ -204,8 +215,7 @@ class Redis(threading.local):
             'LPUSH RPUSH',
             lambda r: isinstance(r, int) and r or r == 'OK'
             ),
-        string_keys_to_dict('ZSCORE ZINCRBY',
-            lambda r: r is not None and float(r) or r),
+        string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
         string_keys_to_dict(
             'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME '
             'SAVE SELECT SET SHUTDOWN',
@@ -225,6 +235,7 @@ class Redis(threading.local):
             'PING': lambda r: r == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
             'TTL': lambda r: r != -1 and r or None,
+            'ZRANK': int_or_none,
         }
         )
 
