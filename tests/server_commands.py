@@ -879,8 +879,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.hincrby('a', 'a2', amount=3), 3)
         # finally a key that's not an int
         self.client.hset('a', 'a3', 'foo')
-        self.assertEquals(self.client.hincrby('a', 'a3'), 1)
-
+        self.assertRaises(redis.ResponseError, self.client.hincrby, 'a', 'a3')
 
 
     def test_hkeys(self):
