@@ -89,10 +89,24 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client['a'] = 'foo'
         self.assertEquals(self.client.exists('a'), True)
 
-    def expire(self):
-        self.assertEquals(self.client.expire('a'), False)
+    def test_expire_and_ttl(self):
+        self.assertEquals(self.client.expire('a', 10), False)
         self.client['a'] = 'foo'
-        self.assertEquals(self.client.expire('a'), True)
+        self.assertEquals(self.client.expire('a', 10), True)
+        self.assertEquals(self.client.ttl('a'), 10)
+
+    def test_expireat(self):
+        expire_at = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        self.assertEquals(self.client.expireat('a', expire_at), False)
+        self.client['a'] = 'foo'
+        # expire at in unix time
+        expire_at_seconds = int(time.mktime(expire_at.timetuple()))
+        self.assertEquals(self.client.expireat('a', expire_at_seconds), True)
+        self.assertEquals(self.client.ttl('a'), 60)
+        # expire at given a datetime object
+        self.client['b'] = 'bar'
+        self.assertEquals(self.client.expireat('b', expire_at), True)
+        self.assertEquals(self.client.ttl('b'), 60)
 
     def test_getset(self):
         self.assertEquals(self.client.getset('a', 'foo'), None)
@@ -158,6 +172,11 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client['a'], '1')
         self.assertEquals(self.client['b'], '2')
 
+    def test_setex(self):
+        self.assertEquals(self.client.setex('a', '1', 60), True)
+        self.assertEquals(self.client['a'], '1')
+        self.assertEquals(self.client.ttl('a'), 60  )
+
     def test_setnx(self):
         self.assert_(self.client.setnx('a', '1'))
         self.assertEquals(self.client['a'], '1')
@@ -177,15 +196,6 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.substr('a', 3, -2), 'defgh')
         self.client['a'] = 123456 # does substr work with ints?
         self.assertEquals(self.client.substr('a', 2, -2), '345')
-
-    def test_ttl(self):
-        self.assertEquals(self.client.ttl('a'), None)
-        self.client['a'] = '1'
-        self.assertEquals(self.client.ttl('a'), None)
-        self.client.expire('a', 10)
-        # this could potentially fail if for some reason there's a gap of
-        # time between these commands.
-        self.assertEquals(self.client.ttl('a'), 10)
 
     def test_type(self):
         self.assertEquals(self.client.type('a'), 'none')

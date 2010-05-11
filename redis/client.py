@@ -2,6 +2,7 @@ import datetime
 import errno
 import socket
 import threading
+import time
 import warnings
 from itertools import chain
 from redis.exceptions import ConnectionError, ResponseError, InvalidResponse
@@ -201,8 +202,8 @@ class Redis(threading.local):
     """
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict(
-            'AUTH DEL EXISTS EXPIRE HDEL HEXISTS HMSET MOVE MSETNX RENAMENX '
-            'SADD SISMEMBER SMOVE SETNX SREM ZADD ZREM',
+            'AUTH DEL EXISTS EXPIRE EXPIREAT HDEL HEXISTS HMSET MOVE MSETNX '
+            'RENAMENX SADD SISMEMBER SMOVE SETEX SETNX SREM ZADD ZREM',
             bool
             ),
         string_keys_to_dict(
@@ -513,8 +514,17 @@ class Redis(threading.local):
     __contains__ = exists
 
     def expire(self, name, time):
-        "Set an expire on key ``name`` for ``time`` seconds"
+        "Set an expire flag on key ``name`` for ``time`` seconds"
         return self.execute_command('EXPIRE', name, time)
+
+    def expireat(self, name, when):
+        """
+        Set an expire flag on key ``name``. ``when`` can be represented
+        as an integer indicating unix time or a Python datetime object.
+        """
+        if isinstance(when, datetime.datetime):
+            when = int(time.mktime(when.timetuple()))
+        return self.execute_command('EXPIREAT', name, when)
 
     def get(self, name):
         """
@@ -620,6 +630,13 @@ class Redis(threading.local):
                     return self.setnx(name, value)
         return self.execute_command('SET', name, value)
     __setitem__ = set
+
+    def setex(self, name, value, time):
+        """
+        Set the value of key ``name`` to ``value``
+        that expires in ``time`` seconds
+        """
+        return self.execute_command('SETEX', name, time, value)
 
     def setnx(self, name, value):
         "Set the value of key ``name`` to ``value`` if key doesn't exist"
