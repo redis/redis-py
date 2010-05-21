@@ -222,6 +222,7 @@ class Redis(threading.local):
             'SAVE SELECT SET SHUTDOWN',
             lambda r: r == 'OK'
             ),
+        string_keys_to_dict('BLPOP BRPOP', lambda r: r and tuple(r) or None),
         string_keys_to_dict('SDIFF SINTER SMEMBERS SUNION',
             lambda r: set(r)
             ),

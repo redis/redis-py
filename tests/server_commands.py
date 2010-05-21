@@ -219,24 +219,24 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_blpop(self):
         self.make_list('a', 'ab')
         self.make_list('b', 'cd')
-        self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), ['b', 'c'])
-        self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), ['b', 'd'])
-        self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), ['a', 'a'])
-        self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), ['a', 'b'])
+        self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), ('b', 'c'))
+        self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), ('b', 'd'))
+        self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), ('a', 'a'))
+        self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), ('a', 'b'))
         self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), None)
         self.make_list('c', 'a')
-        self.assertEquals(self.client.blpop('c', timeout=1), ['c', 'a'])
+        self.assertEquals(self.client.blpop('c', timeout=1), ('c', 'a'))
 
     def test_brpop(self):
         self.make_list('a', 'ab')
         self.make_list('b', 'cd')
-        self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), ['b', 'd'])
-        self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), ['b', 'c'])
-        self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), ['a', 'b'])
-        self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), ['a', 'a'])
+        self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), ('b', 'd'))
+        self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), ('b', 'c'))
+        self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), ('a', 'b'))
+        self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), ('a', 'a'))
         self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), None)
         self.make_list('c', 'a')
-        self.assertEquals(self.client.brpop('c', timeout=1), ['c', 'a'])
+        self.assertEquals(self.client.brpop('c', timeout=1), ('c', 'a'))
 
     def test_lindex(self):
         # no key
