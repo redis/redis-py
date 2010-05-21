@@ -930,7 +930,7 @@ class Redis(threading.local):
         a new sorted set, ``dest``. Scores in the destination will be
         aggregated based on the ``aggregate``, or SUM if none is provided.
         """
-        return self._zaggregate('ZINTER', dest, keys, aggregate)
+        return self._zaggregate('ZINTERSTORE', dest, keys, aggregate)
 
     def zrange(self, name, start, end, desc=False, withscores=False):
         """
@@ -1022,7 +1022,7 @@ class Redis(threading.local):
         a new sorted set, ``dest``. Scores in the destination will be
         aggregated based on the ``aggregate``, or SUM if none is provided.
         """
-        return self._zaggregate('ZUNION', dest, keys, aggregate)
+        return self._zaggregate('ZUNIONSTORE', dest, keys, aggregate)
 
     def _zaggregate(self, command, dest, keys, aggregate=None):
         pieces = [command, dest, len(keys)]
