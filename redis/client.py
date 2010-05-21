@@ -670,7 +670,10 @@ class Redis(threading.local):
 
         If timeout is 0, then block indefinitely.
         """
-        keys = list(keys)
+        if isinstance(keys, basestring):
+            keys = [keys]
+        else:
+            keys = list(keys)
         keys.append(timeout)
         return self.execute_command('BLPOP', *keys)
 
@@ -685,7 +688,10 @@ class Redis(threading.local):
 
         If timeout is 0, then block indefinitely.
         """
-        keys = list(keys)
+        if isinstance(keys, basestring):
+            keys = [keys]
+        else:
+            keys = list(keys)
         keys.append(timeout)
         return self.execute_command('BRPOP', *keys)
 
