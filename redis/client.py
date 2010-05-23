@@ -925,12 +925,18 @@ class Redis(threading.local):
         return self.execute_command('ZINCRBY', name, amount, value)
 
     def zinter(self, dest, keys, aggregate=None):
+        warnings.warn(DeprecationWarning(
+            "Redis.zinter has been deprecated, use Redis.zinterstore instead"
+            ))
+        return self.zinterstore(dest, keys, aggregate)
+
+    def zinterstore(self, dest, keys, aggregate=None):
         """
         Intersect multiple sorted sets specified by ``keys`` into
         a new sorted set, ``dest``. Scores in the destination will be
         aggregated based on the ``aggregate``, or SUM if none is provided.
         """
-        return self._zaggregate('ZINTER', dest, keys, aggregate)
+        return self._zaggregate('ZINTERSTORE', dest, keys, aggregate)
 
     def zrange(self, name, start, end, desc=False, withscores=False):
         """
@@ -1017,12 +1023,18 @@ class Redis(threading.local):
         return self.execute_command('ZSCORE', name, value)
 
     def zunion(self, dest, keys, aggregate=None):
+        warnings.warn(DeprecationWarning(
+            "Redis.zunion has been deprecated, use Redis.zunionstore instead"
+            ))
+        return self.zunionstore(dest, keys, aggregate)
+
+    def zunionstore(self, dest, keys, aggregate=None):
         """
         Union multiple sorted sets specified by ``keys`` into
         a new sorted set, ``dest``. Scores in the destination will be
         aggregated based on the ``aggregate``, or SUM if none is provided.
         """
-        return self._zaggregate('ZUNION', dest, keys, aggregate)
+        return self._zaggregate('ZUNIONSTORE', dest, keys, aggregate)
 
     def _zaggregate(self, command, dest, keys, aggregate=None):
         pieces = [command, dest, len(keys)]
