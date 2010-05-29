@@ -1089,6 +1089,13 @@ class Redis(threading.local):
         """
         return self.execute_command('HSET', name, key, value)
 
+    def hsetnx(self, name, key, value):
+        """
+        Set ``key`` to ``value`` within hash ``name`` if ``key`` does not
+        exist.  Returns 1 if HSETNX created a field, otherwise 0.
+        """
+        return self.execute_command("HSETNX", name, key, value)
+
     def hmset(self, name, mapping):
         """
         Sets each key in the ``mapping`` dict to its corresponding value

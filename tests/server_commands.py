@@ -648,7 +648,7 @@ class ServerCommandsTestCase(unittest.TestCase):
             self.client.zrange('z', 0, -1, withscores=True),
             [('a3', 20), ('a1', 23)]
             )
-        
+
 
     def test_zrange(self):
         # key is not a zset
@@ -770,7 +770,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.make_zset('a', {'a1': 1, 'a2': 1, 'a3': 1})
         self.make_zset('b', {'a1': 2, 'a3': 2, 'a4': 2})
         self.make_zset('c', {'a1': 6, 'a4': 5, 'a5': 4})
-        
+
         # sum, no weight
         self.assert_(self.client.zunionstore('z', ['a', 'b', 'c']))
         self.assertEquals(
@@ -818,6 +818,14 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.hget('a', 'a4'), '4')
         # key inside of hash that doesn't exist returns null value
         self.assertEquals(self.client.hget('a', 'b'), None)
+
+    def test_hsetnx(self):
+        # Initially set the hash field
+        self.client.hsetnx('a', 'a1', 1)
+        self.assertEqual(self.client.hget('a', 'a1'), '1')
+        # Try and set the existing hash field to a different value
+        self.client.hsetnx('a', 'a1', 2)
+        self.assertEqual(self.client.hget('a', 'a1'), '1')
 
     def test_hmset(self):
         d = {'a': '1', 'b': '2', 'c': '3'}
