@@ -16,6 +16,8 @@ class ServerCommandsTestCase(unittest.TestCase):
 
     def tearDown(self):
         self.client.flushdb()
+        for c in self.client.connection_pool.get_all_connections():
+            c.disconnect()
 
     # GENERAL SERVER COMMANDS
     def test_dbsize(self):
@@ -714,6 +716,17 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.zrange('a', 0, 5), ['a1', 'a3'])
         self.assertEquals(self.client.zrem('a', 'b'), False)
         self.assertEquals(self.client.zrange('a', 0, 5), ['a1', 'a3'])
+
+    def test_zremrangebyrank(self):
+        # key is not a zset
+        self.client['a'] = 'a'
+        self.assertRaises(redis.ResponseError, self.client.zremrangebyscore,
+            'a', 0, 1)
+        del self.client['a']
+        # real logic
+        self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3, 'a4': 4, 'a5': 5})
+        self.assertEquals(self.client.zremrangebyrank('a', 1, 3), 3)
+        self.assertEquals(self.client.zrange('a', 0, 5), ['a1', 'a5'])
 
     def test_zremrangebyscore(self):
         # key is not a zset

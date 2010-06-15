@@ -208,7 +208,7 @@ class Redis(threading.local):
             ),
         string_keys_to_dict(
             'DECRBY HLEN INCRBY LLEN SCARD SDIFFSTORE SINTERSTORE '
-            'SUNIONSTORE ZCARD ZREMRANGEBYSCORE ZREVRANK',
+            'SUNIONSTORE ZCARD ZREMRANGEBYRANK ZREMRANGEBYSCORE ZREVRANK',
             int
             ),
         string_keys_to_dict(
@@ -996,10 +996,19 @@ class Redis(threading.local):
         "Remove member ``value`` from sorted set ``name``"
         return self.execute_command('ZREM', name, value)
 
+    def zremrangebyrank(self, name, min, max):
+        """
+        Remove all elements in the sorted set ``name`` with ranks between
+        ``min`` and ``max``. Values are 0-based, ordered from smallest score
+        to largest. Values can be negative indicating the highest scores.
+        Returns the number of elements removed
+        """
+        return self.execute_command('ZREMRANGEBYRANK', name, min, max)
+
     def zremrangebyscore(self, name, min, max):
         """
         Remove all elements in the sorted set ``name`` with scores
-        between ``min`` and ``max``
+        between ``min`` and ``max``. Returns the number of elements removed.
         """
         return self.execute_command('ZREMRANGEBYSCORE', name, min, max)
 
@@ -1282,4 +1291,5 @@ class Pipeline(Redis):
 
     def select(self, *args, **kwargs):
         raise RedisError("Cannot select a different database from a pipeline")
+
 
