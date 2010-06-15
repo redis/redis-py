@@ -1315,7 +1315,7 @@ class Lock(object):
         self.name = name
         self.acquired_until = None
 
-    def acquire(self, blocking=True, timeout=None):
+    def acquire(self, blocking=True, timeout=None, sleep=0.1):
         """
         Use Redis to hold a shared, distributed lock named ``name``.
         Returns True once the lock is acquired.
@@ -1325,6 +1325,9 @@ class Lock(object):
 
         ``timeout`` indicates the maxium lifetime of the lock. If None,
         lock forever.
+        
+        ``sleep`` indicates the the amount of time to sleep during each loop
+        while attempting to acquire the lock when ``blocking``=True
 
         Note: If using ``timeout``, you should make sure all the hosts
         that are running clients are within the same timezone and are using
@@ -1351,7 +1354,7 @@ class Lock(object):
                     return True
             if not blocking:
                 return False
-            time.sleep(0.1)
+            time.sleep(sleep)
 
     def release(self):
         "Releases the already acquired lock"
