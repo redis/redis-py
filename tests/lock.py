@@ -1,3 +1,4 @@
+from __future__ import with_statement
 import redis
 import time
 import unittest
@@ -29,9 +30,9 @@ class LockTestCase(unittest.TestCase):
         lock2.release()
 
     def test_timeouts(self):
-        lock1 = self.client.lock('foo')
+        lock1 = self.client.lock('foo', timeout=1)
         lock2 = self.client.lock('foo')
-        self.assert_(lock1.acquire(timeout=1))
+        self.assert_(lock1.acquire())
         self.assertEquals(lock1.acquired_until, long(time.time()) + 1)
         self.assertEquals(lock1.acquired_until, long(self.client['foo']))
         self.assertFalse(lock2.acquire(blocking=False))
@@ -45,3 +46,8 @@ class LockTestCase(unittest.TestCase):
         self.assert_(lock1.acquired_until)
         lock1.release()
         self.assert_(lock1.acquired_until is None)
+
+    def test_context_manager(self):
+        with self.client.lock('foo'):
+            self.assertEquals(self.client['foo'], str(Lock.LOCK_FOREVER))
+        self.assertEquals(self.client['foo'], None)

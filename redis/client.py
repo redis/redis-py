@@ -283,12 +283,19 @@ class Redis(threading.local):
             self.errors
             )
 
-    def lock(self, name):
+    def lock(self, name, timeout=None, sleep=0.1):
         """
         Return a new Lock object using key ``name`` that mimics
-        the behavior of threading.Lock
+        the behavior of threading.Lock.
+
+        If specified, ``timeout`` indicates a maximum life for the lock.
+        By default, it will remain locked until release() is called.
+
+        ``sleep`` indicates the amount of time to sleep per loop iteration
+        when the lock is in blocking mode and another client is currently
+        holding the lock.
         """
-        return Lock(self, name)
+        return Lock(self, name, timeout=timeout, sleep=sleep)
 
     #### COMMAND EXECUTION AND PROTOCOL PARSING ####
     def _execute_command(self, command_name, command, **options):
@@ -799,7 +806,7 @@ class Redis(threading.local):
         return self.execute_command('RPUSH', name, value)
 
     def sort(self, name, start=None, num=None, by=None, get=None,
-            desc=False, alpha=False, store=None):
+             desc=False, alpha=False, store=None):
         """
         Sort and return the list, set or sorted set at ``name``.
 
@@ -1310,29 +1317,44 @@ class Lock(object):
 
     LOCK_FOREVER = 2**31+1 # 1 past max unix time
 
-    def __init__(self, redis, name):
+    def __init__(self, redis, name, timeout=None, sleep=0.1):
+        """
+        Create a new Lock instnace named ``name`` using the Redis client
+        supplied by ``redis``.
+
+        ``timeout`` indicates a maximum life for the lock.
+        By default, it will remain locked until release() is called.
+
+        ``sleep`` indicates the amount of time to sleep per loop iteration
+        when the lock is in blocking mode and another client is currently
+        holding the lock.
+
+        Note: If using ``timeout``, you should make sure all the hosts
+        that are running clients are within the same timezone and are using
+        a network time service like ntp.
+        """
         self.redis = redis
         self.name = name
         self.acquired_until = None
+        self.timeout = timeout
+        self.sleep = sleep
 
-    def acquire(self, blocking=True, timeout=None, sleep=0.1):
+    def __enter__(self):
+        return self.acquire()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.release()
+
+    def acquire(self, blocking=True):
         """
         Use Redis to hold a shared, distributed lock named ``name``.
         Returns True once the lock is acquired.
 
         If ``blocking`` is False, always return immediately. If the lock
         was acquired, return True, otherwise return False.
-
-        ``timeout`` indicates the maxium lifetime of the lock. If None,
-        lock forever.
-        
-        ``sleep`` indicates the the amount of time to sleep during each loop
-        while attempting to acquire the lock when ``blocking``=True
-
-        Note: If using ``timeout``, you should make sure all the hosts
-        that are running clients are within the same timezone and are using
-        a network time service like ntp.
         """
+        sleep = self.sleep
+        timeout = self.timeout
         while 1:
             unixtime = int(time.time())
             if timeout:
