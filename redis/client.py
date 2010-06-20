@@ -242,7 +242,7 @@ class Redis(threading.local):
         )
 
     # commands that should NOT pull data off the network buffer when executed
-    SUBSCRIPTION_COMMANDS = set(['SUBSCRIBE', 'UNSUBSCRIBE'])
+    SUBSCRIPTION_COMMANDS = set(['SUBSCRIBE', 'UNSUBSCRIBE', 'PSUBSCRIBE', 'PUNSUBSCRIBE'])
 
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
