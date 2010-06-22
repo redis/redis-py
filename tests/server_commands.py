@@ -1072,7 +1072,9 @@ class ServerCommandsTestCase(unittest.TestCase):
             if len(messages) == num_messages_to_expect:
                 break
         sent_types, sent_channels = {}, {}
-        for msg_type, channel, _ in messages:
+        for msg in messages:
+            msg_type = msg['type']
+            channel = msg['channel']
             sent_types.setdefault(msg_type, 0)
             sent_types[msg_type] += 1
             if msg_type == 'message':

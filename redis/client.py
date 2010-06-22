@@ -242,7 +242,9 @@ class Redis(threading.local):
         )
 
     # commands that should NOT pull data off the network buffer when executed
-    SUBSCRIPTION_COMMANDS = set(['SUBSCRIBE', 'UNSUBSCRIBE', 'PSUBSCRIBE', 'PUNSUBSCRIBE'])
+    SUBSCRIPTION_COMMANDS = set([
+        'SUBSCRIBE', 'UNSUBSCRIBE', 'PSUBSCRIBE', 'PUNSUBSCRIBE'
+        ])
 
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
@@ -1193,9 +1195,17 @@ class Redis(threading.local):
         "Listen for messages on channels this client has been subscribed to"
         while self.subscribed:
             r = self.parse_response('LISTEN')
-            message_type, channel, message = r[0], r[1], r[2]
-            yield (message_type, channel, message)
-            if message_type == 'unsubscribe' and message == 0:
+            if r[0] == 'pmessage':
+                msg = {
+                'type': r[0],
+                'pattern': r[1],
+                'channel': r[2],
+                'data': r[3]
+                }
+            else:
+                msg = {'type': r[0], 'channel': r[1], 'data': r[2]}
+            yield msg
+            if r[0] == 'unsubscribe' and r[2] == 0:
                 self.subscribed = False
 
 
