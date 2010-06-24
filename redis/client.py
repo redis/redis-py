@@ -1203,10 +1203,15 @@ class Redis(threading.local):
                 'data': r[3]
                 }
             else:
-                msg = {'type': r[0], 'channel': r[1], 'data': r[2]}
-            yield msg
+                msg = {
+                'type': r[0],
+                'pattern': None,
+                'channel': r[1],
+                'data': r[2]
+                }
             if r[0] == 'unsubscribe' and r[2] == 0:
                 self.subscribed = False
+            yield msg
 
 
 class Pipeline(Redis):
