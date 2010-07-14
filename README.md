@@ -28,7 +28,6 @@ $ sudo pip install redis
 
 From sources:
 
-$ cd redis
 $ sudo python setup.py install
 
 API Reference
