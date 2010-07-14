@@ -20,15 +20,15 @@ http://code.google.com/p/redis/wiki/CommandReference
 Installation
 ------------
 
-$ sudo easy-install redis
+    $ sudo easy-install redis
 
 alternatively:
 
-$ sudo pip install redis
+    $ sudo pip install redis
 
 From sources:
 
-$ sudo python setup.py install
+    $ sudo python setup.py install
 
 API Reference
 -------------
@@ -244,8 +244,7 @@ API Reference
 ### pop(self, name, tail=False)
   Pop and return the first or last element of list _name_
   
-  * This method has been deprecated,
-    use Redis.lpop or Redis.rpop instead *
+  This method has been deprecated, use _Redis.lpop_ or _Redis.rpop_ instead.
 
 ### psubscribe(self, patterns)
   Subscribe to all channels matching any pattern in _patterns_
@@ -261,8 +260,7 @@ API Reference
 ### push(self, name, value, head=False)
   Push _value_ onto list _name_.
   
-  * This method has been deprecated,
-    use Redis.lpush or Redis.rpush instead *
+  This method has been deprecated, use __Redis.lpush__ or __Redis.rpush__ instead.
 
 ### randomkey(self)
   Returns the name of a random key
