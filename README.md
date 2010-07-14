@@ -353,18 +353,18 @@ API Reference
   _start_ and _num_ allow for paging through the sorted data
   
   _by_ allows using an external key to weight and sort the items.
-      Use an "*" to indicate where in the key the item value is located
+  Use an "*" to indicate where in the key the item value is located
   
   _get_ allows for returning items from external keys rather than the
-      sorted data itself.  Use an "*" to indicate where int he key
-      the item value is located
+  sorted data itself.  Use an "*" to indicate where int he key
+  the item value is located
   
   _desc_ allows for reversing the sort
   
   _alpha_ allows for sorting lexicographically rather than numerically
   
   _store_ allows for storing the result of the sort into
-      the key _store_
+  the key _store_
 
 ### spop(self, name)
   Remove and return a random member of set _name_
@@ -427,7 +427,7 @@ API Reference
   _desc_ indicates to sort in descending order.
   
   _withscores_ indicates to return the scores along with the values.
-      The return type is a list of (value, score) pairs
+   The return type is a list of (value, score) pairs
 
 ### zrangebyscore(self, name, min, max, start=None, num=None, withscores=False)
   Return a range of values from the sorted set _name_ with scores
@@ -436,7 +436,7 @@ API Reference
   If _start_ and _num_ are specified, then return a slice of the range.
   
   _withscores_ indicates to return the scores along with the values.
-      The return type is a list of (value, score) pairs
+  The return type is a list of (value, score) pairs
 
 ### zrank(self, name, value)
   Returns a 0-based value indicating the rank of _value_ in sorted set
@@ -462,7 +462,7 @@ API Reference
   _start_ and _num_ can be negative, indicating the end of the range.
   
   _withscores_ indicates to return the scores along with the values
-      as a dictionary of value => score
+  as a dictionary of value => score
 
 ### zrevrank(self, name, value)
   Returns a 0-based value indicating the descending rank of
