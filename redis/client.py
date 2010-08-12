@@ -935,6 +935,9 @@ class Redis(threading.local):
         "Return the number of elements in the sorted set ``name``"
         return self.execute_command('ZCARD', name)
 
+    def zcount(self, name, min, max):
+        return self.execute_command('ZCOUNT', name, min, max)
+
     def zincr(self, key, member, value=1):
         "This has been deprecated, use zincrby instead"
         warnings.warn(DeprecationWarning(
