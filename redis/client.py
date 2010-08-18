@@ -224,7 +224,7 @@ class Redis(threading.local):
             ),
         string_keys_to_dict('BLPOP BRPOP', lambda r: r and tuple(r) or None),
         string_keys_to_dict('SDIFF SINTER SMEMBERS SUNION',
-            lambda r: set(r)
+            lambda r: r and set(r) or set()
             ),
         string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE', zset_score_pairs),
         {
