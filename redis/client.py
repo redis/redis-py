@@ -448,6 +448,17 @@ class Redis(threading.local):
         self.connection = self.get_connection(
             host, port, db, password, socket_timeout)
 
+    def shutdown(self):
+        "Shutdown the server"
+        if self.subscribed:
+            raise RedisError("Can't call 'shutdown' from a pipeline'")
+        try:
+            self.execute_command('SHUTDOWN')
+        except ConnectionError:
+            # a ConnectionError here is expected
+            return
+        raise RedisError("SHUTDOWN seems to have failed.")
+
 
     #### SERVER INFORMATION ####
     def bgrewriteaof(self):
