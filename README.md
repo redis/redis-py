@@ -30,6 +30,12 @@ From sources:
 
     $ sudo python setup.py install
 
+Versioning scheme
+-----------------
+
+redis-py is versioned after Redis. So, for example, redis-py 2.0.0 should 
+support all the commands available in Redis 2.0.0. 
+
 API Reference
 -------------
 
@@ -474,12 +480,6 @@ API Reference
   Union multiple sorted sets specified by _keys_ into
   a new sorted set, _dest_. Scores in the destination will be
   aggregated based on the _aggregate_, or SUM if none is provided.
-
-Versioning scheme
------------------
-
-redis-py is versioned after Redis. So, for example, redis-py 2.0.0 should 
-support all the commands available in Redis 2.0.0. 
 
 Author
 ------
