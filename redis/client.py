@@ -4,7 +4,7 @@ import socket
 import threading
 import time
 import warnings
-from itertools import chain
+from itertools import chain, imap
 from redis.exceptions import ConnectionError, ResponseError, InvalidResponse
 from redis.exceptions import RedisError, AuthenticationError
 
@@ -319,14 +319,11 @@ class Redis(threading.local):
 
     def execute_command(self, *args, **options):
         "Sends the command to the redis server and returns it's response"
-        cmd_count = len(args)
-        cmds = []
-        for i in args:
-            enc_value = self.encode(i)
-            cmds.append('$%s\r\n%s\r\n' % (len(enc_value), enc_value))
+        cmds = ['$%s\r\n%s\r\n' % (len(enc_value), enc_value)
+                for enc_value in imap(self.encode, args)]
         return self._execute_command(
             args[0],
-            '*%s\r\n%s' % (cmd_count, ''.join(cmds)),
+            '*%s\r\n%s' % (len(cmds), ''.join(cmds)),
             **options
             )
 
