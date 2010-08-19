@@ -587,7 +587,8 @@ class Redis(threading.local):
     def mset(self, mapping):
         "Sets each key in the ``mapping`` dict to its corresponding value"
         items = []
-        [items.extend(pair) for pair in mapping.iteritems()]
+        for pair in mapping.iteritems():
+            items.extend(pair)
         return self.execute_command('MSET', *items)
 
     def msetnx(self, mapping):
@@ -596,7 +597,8 @@ class Redis(threading.local):
         none of the keys are already set
         """
         items = []
-        [items.extend(pair) for pair in mapping.iteritems()]
+        for pair in mapping.iteritems():
+            items.extend(pair)
         return self.execute_command('MSETNX', *items)
 
     def move(self, name, db):
@@ -1144,7 +1146,8 @@ class Redis(threading.local):
         in the hash ``name``
         """
         items = []
-        [items.extend(pair) for pair in mapping.iteritems()]
+        for pair in mapping.iteritems():
+            items.extend(pair)
         return self.execute_command('HMSET', name, *items)
 
     def hmget(self, name, keys):
