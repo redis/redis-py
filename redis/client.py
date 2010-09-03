@@ -5,7 +5,7 @@ import threading
 import time
 import warnings
 from itertools import chain, imap
-from redis.exceptions import ConnectionError, ResponseError, InvalidResponse
+from redis.exceptions import ConnectionError, ResponseError, InvalidResponse, WatchError
 from redis.exceptions import RedisError, AuthenticationError
 
 
@@ -219,7 +219,7 @@ class Redis(threading.local):
         string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
         string_keys_to_dict(
             'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME '
-            'SAVE SELECT SET SHUTDOWN',
+            'SAVE SELECT SET SHUTDOWN WATCH',
             lambda r: r == 'OK'
             ),
         string_keys_to_dict('BLPOP BRPOP', lambda r: r and tuple(r) or None),
@@ -683,6 +683,14 @@ class Redis(threading.local):
         "Returns the type of key ``name``"
         return self.execute_command('TYPE', name)
 
+    def watch(self, name):
+        """
+        Watches the value at key ``name``, or None of the key doesn't exist
+        """
+        if self.subscribed:
+            raise RedisError("Can't call 'watch' from a pipeline'")
+
+        return self.execute_command('WATCH', name)
 
     #### LIST COMMANDS ####
     def blpop(self, keys, timeout=0):
@@ -1294,6 +1302,10 @@ class Pipeline(Redis):
             _ = self.parse_response('_')
         # parse the EXEC. we want errors returned as items in the response
         response = self.parse_response('_', catch_errors=True)
+
+        if response is None:
+            raise WatchError("Watched variable changed.")
+
         if len(response) != len(commands):
             raise ResponseError("Wrong number of response items from "
                 "pipeline execution")
