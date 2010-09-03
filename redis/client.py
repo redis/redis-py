@@ -692,14 +692,14 @@ class Redis(threading.local):
 
         return self.execute_command('WATCH', name)
 
-    def unwatch(self, name):
+    def unwatch(self):
         """
         Unwatches the value at key ``name``, or None of the key doesn't exist
         """
         if self.subscribed:
             raise RedisError("Can't call 'unwatch' from a pipeline'")
 
-        return self.execute_command('UNWATCH', name)
+        return self.execute_command('UNWATCH')
 
     #### LIST COMMANDS ####
     def blpop(self, keys, timeout=0):
