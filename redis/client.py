@@ -219,7 +219,7 @@ class Redis(threading.local):
         string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
         string_keys_to_dict(
             'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME '
-            'SAVE SELECT SET SHUTDOWN WATCH',
+            'SAVE SELECT SET SHUTDOWN WATCH UNWATCH',
             lambda r: r == 'OK'
             ),
         string_keys_to_dict('BLPOP BRPOP', lambda r: r and tuple(r) or None),
@@ -691,6 +691,15 @@ class Redis(threading.local):
             raise RedisError("Can't call 'watch' from a pipeline'")
 
         return self.execute_command('WATCH', name)
+
+    def unwatch(self, name):
+        """
+        Unwatches the value at key ``name``, or None of the key doesn't exist
+        """
+        if self.subscribed:
+            raise RedisError("Can't call 'unwatch' from a pipeline'")
+
+        return self.execute_command('UNWATCH', name)
 
     #### LIST COMMANDS ####
     def blpop(self, keys, timeout=0):
