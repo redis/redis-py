@@ -213,6 +213,25 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client.zadd('a', '1', 1)
         self.assertEquals(self.client.type('a'), 'zset')
 
+    def test_watch(self):
+        self.client.set("a", 1)
+
+        self.client.watch("a")
+        pipeline = self.client.pipeline()
+        pipeline.set("a", 2)
+        self.assertEquals(pipeline.execute(), [True])
+
+        self.client.set("b", 1)
+        self.client.watch("b")
+        self.get_client().set("b", 2)
+        pipeline = self.client.pipeline()
+        pipeline.set("b", 3)
+
+        self.assertRaises(redis.exceptions.WatchError, pipeline.execute)
+
+    def test_unwatch(self):
+        self.assertEquals(self.client.unwatch(), True)
+
     # LISTS
     def make_list(self, name, l):
         for i in l:
