@@ -7,7 +7,7 @@
 @brief Setuptools configuration for redis client
 """
 
-version = '2.0.0'
+version = '2.0.1'
 
 sdict = {
     'name' : 'redis',
