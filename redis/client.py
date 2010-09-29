@@ -713,6 +713,8 @@ class Redis(threading.local):
 
         If timeout is 0, then block indefinitely.
         """
+        if timeout is None:
+            timeout = 0
         if isinstance(keys, basestring):
             keys = [keys]
         else:
@@ -731,6 +733,8 @@ class Redis(threading.local):
 
         If timeout is 0, then block indefinitely.
         """
+        if timeout is None:
+            timeout = 0
         if isinstance(keys, basestring):
             keys = [keys]
         else:
