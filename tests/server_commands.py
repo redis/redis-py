@@ -272,6 +272,24 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.lindex('a', '1'), 'b')
         self.assertEquals(self.client.lindex('a', '2'), 'c')
 
+    def test_linsert(self):
+        # no key
+        self.assertEquals(self.client.linsert('a', 'after', 'x', 'y'), 0)
+        # key is not a list
+        self.client['a'] = 'b'
+        self.assertRaises(
+            redis.ResponseError, self.client.linsert, 'a', 'after', 'x', 'y'
+            )
+        del self.client['a']
+        # real logic
+        self.make_list('a', 'abc')
+        self.assertEquals(self.client.linsert('a', 'after', 'b', 'b1'), 4)
+        self.assertEquals(self.client.lrange('a', 0, -1),
+            ['a', 'b', 'b1', 'c'])
+        self.assertEquals(self.client.linsert('a', 'before', 'b', 'a1'), 5)
+        self.assertEquals(self.client.lrange('a', 0, -1),
+            ['a', 'a1', 'b', 'b1', 'c'])
+
     def test_llen(self):
         # no key
         self.assertEquals(self.client.llen('a'), 0)
@@ -312,6 +330,18 @@ class ServerCommandsTestCase(unittest.TestCase):
             self.assert_(self.client.lpush('a', 'a'))
         self.assertEquals(self.client.lindex('a', 0), 'a')
         self.assertEquals(self.client.lindex('a', 1), 'b')
+
+    def test_lpushx(self):
+        # key is not a list
+        self.client['a'] = 'b'
+        self.assertRaises(redis.ResponseError, self.client.lpushx, 'a', 'a')
+        del self.client['a']
+        # real logic
+        self.assertEquals(self.client.lpushx('a', 'b'), 0)
+        self.assertEquals(self.client.lrange('a', 0, -1), [])
+        self.make_list('a', 'abc')
+        self.assertEquals(self.client.lpushx('a', 'd'), 4)
+        self.assertEquals(self.client.lrange('a', 0, -1), ['d', 'a', 'b', 'c'])
 
     def test_lrange(self):
         # no key
@@ -435,6 +465,18 @@ class ServerCommandsTestCase(unittest.TestCase):
             self.assert_(self.client.rpush('a', 'b'))
         self.assertEquals(self.client.lindex('a', 0), 'a')
         self.assertEquals(self.client.lindex('a', 1), 'b')
+
+    def test_rpushx(self):
+        # key is not a list
+        self.client['a'] = 'b'
+        self.assertRaises(redis.ResponseError, self.client.rpushx, 'a', 'a')
+        del self.client['a']
+        # real logic
+        self.assertEquals(self.client.rpushx('a', 'b'), 0)
+        self.assertEquals(self.client.lrange('a', 0, -1), [])
+        self.make_list('a', 'abc')
+        self.assertEquals(self.client.rpushx('a', 'd'), 4)
+        self.assertEquals(self.client.lrange('a', 0, -1), ['a', 'b', 'c', 'd'])
 
     # Set commands
     def make_set(self, name, l):
