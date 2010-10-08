@@ -207,8 +207,9 @@ class Redis(threading.local):
             bool
             ),
         string_keys_to_dict(
-            'DECRBY HLEN INCRBY LINSERT LLEN LPUSHX RPUSHX SCARD SDIFFSTORE SINTERSTORE '
-            'SUNIONSTORE ZCARD ZREMRANGEBYRANK ZREMRANGEBYSCORE ZREVRANK',
+            'DECRBY HLEN INCRBY LINSERT LLEN LPUSHX RPUSHX SCARD SDIFFSTORE '
+            'SINTERSTORE SUNIONSTORE ZCARD ZREMRANGEBYRANK ZREMRANGEBYSCORE '
+            'ZREVRANK',
             int
             ),
         string_keys_to_dict(
@@ -753,10 +754,11 @@ class Redis(threading.local):
     
     def linsert(self, name, where, refvalue, value):
         """
-        Insert ``value`` in list ``name`` either immediately before or after [``where``] ``refvalue``
+        Insert ``value`` in list ``name`` either immediately before or after
+        [``where``] ``refvalue``
         
-        Returns positive int length of the list on success, -1 if ``refvalue`` is not in the list, 
-        0 if ``name`` is not a list.
+        Returns the new length of the list on success or -1 if ``refvalue``
+        is not in the list.
         """
         return self.execute_command('LINSERT', name, where, refvalue, value)
     
