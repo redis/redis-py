@@ -207,7 +207,7 @@ class Redis(threading.local):
             bool
             ),
         string_keys_to_dict(
-            'DECRBY HLEN INCRBY LLEN SCARD SDIFFSTORE SINTERSTORE '
+            'DECRBY HLEN INCRBY LINSERT LLEN LPUSHX RPUSHX SCARD SDIFFSTORE SINTERSTORE '
             'SUNIONSTORE ZCARD ZREMRANGEBYRANK ZREMRANGEBYSCORE ZREVRANK',
             int
             ),
@@ -750,7 +750,16 @@ class Redis(threading.local):
         end of the list
         """
         return self.execute_command('LINDEX', name, index)
-
+    
+    def linsert(self, name, where, refvalue, value):
+        """
+        Insert ``value`` in list ``name`` either immediately before or after [``where``] ``refvalue``
+        
+        Returns positive int length of the list on success, -1 if ``refvalue`` is not in the list, 
+        0 if ``name`` is not a list.
+        """
+        return self.execute_command('LINSERT', name, where, refvalue, value)
+    
     def llen(self, name):
         "Return the length of the list ``name``"
         return self.execute_command('LLEN', name)
@@ -762,6 +771,10 @@ class Redis(threading.local):
     def lpush(self, name, value):
         "Push ``value`` onto the head of the list ``name``"
         return self.execute_command('LPUSH', name, value)
+    
+    def lpushx(self, name, value):
+        "Push ``value`` onto the head of the list ``name`` if ``name`` exists"
+        return self.execute_command('LPUSHX', name, value)
 
     def lrange(self, name, start, end):
         """
@@ -837,6 +850,10 @@ class Redis(threading.local):
     def rpush(self, name, value):
         "Push ``value`` onto the tail of the list ``name``"
         return self.execute_command('RPUSH', name, value)
+
+    def rpushx(self, name, value):
+        "Push ``value`` onto the tail of the list ``name`` if ``name`` exists"
+        return self.execute_command('RPUSHX', name, value)
 
     def sort(self, name, start=None, num=None, by=None, get=None,
              desc=False, alpha=False, store=None):
