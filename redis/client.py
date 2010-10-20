@@ -891,8 +891,17 @@ class Redis(threading.local):
             pieces.append(start)
             pieces.append(num)
         if get is not None:
-            pieces.append('GET')
-            pieces.append(get)
+            # If get is a string assume we want to get a single value.
+            # Otherwise assume it's an interable and we want to get multiple
+            # values. We can't just iterate blindly because strings are
+            # iterable.
+            if isinstance(get, basestring):
+                pieces.append('GET')
+                pieces.append(get)
+            else:
+                for g in get:
+                    pieces.append('GET')
+                    pieces.append(g)
         if desc:
             pieces.append('DESC')
         if alpha:

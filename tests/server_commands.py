@@ -1071,6 +1071,14 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.sort('a', get='user:*'),
             ['u1', 'u2', 'u3'])
 
+    def test_sort_get_multi(self):
+        self.client['user:1'] = 'u1'
+        self.client['user:2'] = 'u2'
+        self.client['user:3'] = 'u3'
+        self.make_list('a', '231')
+        self.assertEquals(self.client.sort('a', get=('user:*', '#')),
+            ['u1', '1', 'u2', '2', 'u3', '3'])
+
     def test_sort_desc(self):
         self.make_list('a', '231')
         self.assertEquals(self.client.sort('a', desc=True), ['3', '2', '1'])
