@@ -510,7 +510,7 @@ class Redis(threading.local):
         "Ping the Redis server"
         try:
             return self.execute_command('PING')
-        except:
+        except ConnectionError:
             return False
 
     def save(self):
