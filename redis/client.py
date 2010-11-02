@@ -49,6 +49,7 @@ class Connection(object):
             return
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(self.socket_timeout)
             sock.connect((self.host, self.port))
         except socket.error, e:
             # args for socket.error can either be (errno, "message")
@@ -61,7 +62,6 @@ class Connection(object):
                     (e.args[0], self.host, self.port, e.args[1])
             raise ConnectionError(error_message)
         sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
-        sock.settimeout(self.socket_timeout)
         self._sock = sock
         self._fp = sock.makefile('r')
         redis_instance._setup_connection()
