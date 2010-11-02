@@ -16,6 +16,8 @@ class ServerCommandsTestCase(unittest.TestCase):
 
     def tearDown(self):
         self.client.flushdb()
+        for c in self.client.connection_pool.get_all_connections():
+            c.disconnect()
 
     # GENERAL SERVER COMMANDS
     def test_dbsize(self):
@@ -211,6 +213,25 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client.zadd('a', '1', 1)
         self.assertEquals(self.client.type('a'), 'zset')
 
+    def test_watch(self):
+        self.client.set("a", 1)
+
+        self.client.watch("a")
+        pipeline = self.client.pipeline()
+        pipeline.set("a", 2)
+        self.assertEquals(pipeline.execute(), [True])
+
+        self.client.set("b", 1)
+        self.client.watch("b")
+        self.get_client().set("b", 2)
+        pipeline = self.client.pipeline()
+        pipeline.set("b", 3)
+
+        self.assertRaises(redis.exceptions.WatchError, pipeline.execute)
+
+    def test_unwatch(self):
+        self.assertEquals(self.client.unwatch(), True)
+
     # LISTS
     def make_list(self, name, l):
         for i in l:
@@ -219,20 +240,24 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_blpop(self):
         self.make_list('a', 'ab')
         self.make_list('b', 'cd')
-        self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), ['b', 'c'])
-        self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), ['b', 'd'])
-        self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), ['a', 'a'])
-        self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), ['a', 'b'])
+        self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), ('b', 'c'))
+        self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), ('b', 'd'))
+        self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), ('a', 'a'))
+        self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), ('a', 'b'))
         self.assertEquals(self.client.blpop(['b', 'a'], timeout=1), None)
+        self.make_list('c', 'a')
+        self.assertEquals(self.client.blpop('c', timeout=1), ('c', 'a'))
 
     def test_brpop(self):
         self.make_list('a', 'ab')
         self.make_list('b', 'cd')
-        self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), ['b', 'd'])
-        self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), ['b', 'c'])
-        self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), ['a', 'b'])
-        self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), ['a', 'a'])
+        self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), ('b', 'd'))
+        self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), ('b', 'c'))
+        self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), ('a', 'b'))
+        self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), ('a', 'a'))
         self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), None)
+        self.make_list('c', 'a')
+        self.assertEquals(self.client.brpop('c', timeout=1), ('c', 'a'))
 
     def test_lindex(self):
         # no key
@@ -246,6 +271,24 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.lindex('a', '0'), 'a')
         self.assertEquals(self.client.lindex('a', '1'), 'b')
         self.assertEquals(self.client.lindex('a', '2'), 'c')
+
+    def test_linsert(self):
+        # no key
+        self.assertEquals(self.client.linsert('a', 'after', 'x', 'y'), 0)
+        # key is not a list
+        self.client['a'] = 'b'
+        self.assertRaises(
+            redis.ResponseError, self.client.linsert, 'a', 'after', 'x', 'y'
+            )
+        del self.client['a']
+        # real logic
+        self.make_list('a', 'abc')
+        self.assertEquals(self.client.linsert('a', 'after', 'b', 'b1'), 4)
+        self.assertEquals(self.client.lrange('a', 0, -1),
+            ['a', 'b', 'b1', 'c'])
+        self.assertEquals(self.client.linsert('a', 'before', 'b', 'a1'), 5)
+        self.assertEquals(self.client.lrange('a', 0, -1),
+            ['a', 'a1', 'b', 'b1', 'c'])
 
     def test_llen(self):
         # no key
@@ -287,6 +330,18 @@ class ServerCommandsTestCase(unittest.TestCase):
             self.assert_(self.client.lpush('a', 'a'))
         self.assertEquals(self.client.lindex('a', 0), 'a')
         self.assertEquals(self.client.lindex('a', 1), 'b')
+
+    def test_lpushx(self):
+        # key is not a list
+        self.client['a'] = 'b'
+        self.assertRaises(redis.ResponseError, self.client.lpushx, 'a', 'a')
+        del self.client['a']
+        # real logic
+        self.assertEquals(self.client.lpushx('a', 'b'), 0)
+        self.assertEquals(self.client.lrange('a', 0, -1), [])
+        self.make_list('a', 'abc')
+        self.assertEquals(self.client.lpushx('a', 'd'), 4)
+        self.assertEquals(self.client.lrange('a', 0, -1), ['d', 'a', 'b', 'c'])
 
     def test_lrange(self):
         # no key
@@ -410,6 +465,18 @@ class ServerCommandsTestCase(unittest.TestCase):
             self.assert_(self.client.rpush('a', 'b'))
         self.assertEquals(self.client.lindex('a', 0), 'a')
         self.assertEquals(self.client.lindex('a', 1), 'b')
+
+    def test_rpushx(self):
+        # key is not a list
+        self.client['a'] = 'b'
+        self.assertRaises(redis.ResponseError, self.client.rpushx, 'a', 'a')
+        del self.client['a']
+        # real logic
+        self.assertEquals(self.client.rpushx('a', 'b'), 0)
+        self.assertEquals(self.client.lrange('a', 0, -1), [])
+        self.make_list('a', 'abc')
+        self.assertEquals(self.client.rpushx('a', 'd'), 4)
+        self.assertEquals(self.client.lrange('a', 0, -1), ['a', 'b', 'c', 'd'])
 
     # Set commands
     def make_set(self, name, l):
@@ -609,6 +676,17 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3})
         self.assertEquals(self.client.zcard('a'), 3)
 
+    def test_zcount(self):
+        # key is not a zset
+        self.client['a'] = 'a'
+        self.assertRaises(redis.ResponseError, self.client.zcount, 'a', 0, 0)
+        del self.client['a']
+        # real logic
+        self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        self.assertEquals(self.client.zcount('a', '-inf', '+inf'), 3)
+        self.assertEquals(self.client.zcount('a', 1, 2), 2)
+        self.assertEquals(self.client.zcount('a', 10, 20), 0)
+
     def test_zincrby(self):
         # key is not a zset
         self.client['a'] = 'a'
@@ -621,32 +699,34 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.zscore('a', 'a2'), 3.0)
         self.assertEquals(self.client.zscore('a', 'a3'), 8.0)
 
-    def test_zinter(self):
+    def test_zinterstore(self):
         self.make_zset('a', {'a1': 1, 'a2': 1, 'a3': 1})
         self.make_zset('b', {'a1': 2, 'a3': 2, 'a4': 2})
         self.make_zset('c', {'a1': 6, 'a3': 5, 'a4': 4})
 
         # sum, no weight
-        self.assert_(self.client.zinter('z', ['a', 'b', 'c']))
+        self.assert_(self.client.zinterstore('z', ['a', 'b', 'c']))
         self.assertEquals(
             self.client.zrange('z', 0, -1, withscores=True),
             [('a3', 8), ('a1', 9)]
             )
 
         # max, no weight
-        self.assert_(self.client.zinter('z', ['a', 'b', 'c'], aggregate='MAX'))
+        self.assert_(
+            self.client.zinterstore('z', ['a', 'b', 'c'], aggregate='MAX')
+            )
         self.assertEquals(
             self.client.zrange('z', 0, -1, withscores=True),
             [('a3', 5), ('a1', 6)]
             )
 
         # with weight
-        self.assert_(self.client.zinter('z', {'a': 1, 'b': 2, 'c': 3}))
+        self.assert_(self.client.zinterstore('z', {'a': 1, 'b': 2, 'c': 3}))
         self.assertEquals(
             self.client.zrange('z', 0, -1, withscores=True),
             [('a3', 20), ('a1', 23)]
             )
-        
+
 
     def test_zrange(self):
         # key is not a zset
@@ -709,6 +789,17 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.zrem('a', 'b'), False)
         self.assertEquals(self.client.zrange('a', 0, 5), ['a1', 'a3'])
 
+    def test_zremrangebyrank(self):
+        # key is not a zset
+        self.client['a'] = 'a'
+        self.assertRaises(redis.ResponseError, self.client.zremrangebyscore,
+            'a', 0, 1)
+        del self.client['a']
+        # real logic
+        self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3, 'a4': 4, 'a5': 5})
+        self.assertEquals(self.client.zremrangebyrank('a', 1, 3), 3)
+        self.assertEquals(self.client.zrange('a', 0, 5), ['a1', 'a5'])
+
     def test_zremrangebyscore(self):
         # key is not a zset
         self.client['a'] = 'a'
@@ -764,27 +855,29 @@ class ServerCommandsTestCase(unittest.TestCase):
         # test a non-existant member
         self.assertEquals(self.client.zscore('a', 'a4'), None)
 
-    def test_zunion(self):
+    def test_zunionstore(self):
         self.make_zset('a', {'a1': 1, 'a2': 1, 'a3': 1})
         self.make_zset('b', {'a1': 2, 'a3': 2, 'a4': 2})
         self.make_zset('c', {'a1': 6, 'a4': 5, 'a5': 4})
-        
+
         # sum, no weight
-        self.assert_(self.client.zunion('z', ['a', 'b', 'c']))
+        self.assert_(self.client.zunionstore('z', ['a', 'b', 'c']))
         self.assertEquals(
             self.client.zrange('z', 0, -1, withscores=True),
             [('a2', 1), ('a3', 3), ('a5', 4), ('a4', 7), ('a1', 9)]
             )
 
         # max, no weight
-        self.assert_(self.client.zunion('z', ['a', 'b', 'c'], aggregate='MAX'))
+        self.assert_(
+            self.client.zunionstore('z', ['a', 'b', 'c'], aggregate='MAX')
+            )
         self.assertEquals(
             self.client.zrange('z', 0, -1, withscores=True),
             [('a2', 1), ('a3', 2), ('a5', 4), ('a4', 5), ('a1', 6)]
             )
 
         # with weight
-        self.assert_(self.client.zunion('z', {'a': 1, 'b': 2, 'c': 3}))
+        self.assert_(self.client.zunionstore('z', {'a': 1, 'b': 2, 'c': 3}))
         self.assertEquals(
             self.client.zrange('z', 0, -1, withscores=True),
             [('a2', 1), ('a3', 5), ('a5', 12), ('a4', 19), ('a1', 23)]
@@ -814,6 +907,14 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.hget('a', 'a4'), '4')
         # key inside of hash that doesn't exist returns null value
         self.assertEquals(self.client.hget('a', 'b'), None)
+
+    def test_hsetnx(self):
+        # Initially set the hash field
+        self.client.hsetnx('a', 'a1', 1)
+        self.assertEqual(self.client.hget('a', 'a1'), '1')
+        # Try and set the existing hash field to a different value
+        self.client.hsetnx('a', 'a1', 2)
+        self.assertEqual(self.client.hget('a', 'a1'), '1')
 
     def test_hmset(self):
         d = {'a': '1', 'b': '2', 'c': '3'}
@@ -970,6 +1071,14 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.sort('a', get='user:*'),
             ['u1', 'u2', 'u3'])
 
+    def test_sort_get_multi(self):
+        self.client['user:1'] = 'u1'
+        self.client['user:2'] = 'u2'
+        self.client['user:3'] = 'u3'
+        self.make_list('a', '231')
+        self.assertEquals(self.client.sort('a', get=('user:*', '#')),
+            ['u1', '1', 'u2', '2', 'u3', '3'])
+
     def test_sort_desc(self):
         self.make_list('a', '231')
         self.assertEquals(self.client.sort('a', desc=True), ['3', '2', '1'])
@@ -1018,6 +1127,9 @@ class ServerCommandsTestCase(unittest.TestCase):
         channels = ('a1', 'a2', 'a3')
         for c in channels:
             r.subscribe(c)
+        # state variable should be flipped
+        self.assertEquals(r.subscribed, True)
+
         channels_to_publish_to = channels + ('a4',)
         messages_per_channel = 4
         def publish():
@@ -1025,34 +1137,40 @@ class ServerCommandsTestCase(unittest.TestCase):
                 for c in channels_to_publish_to:
                     self.client.publish(c, 'a message')
                     time.sleep(0.01)
-        t = threading.Thread(target=publish)
+            for c in channels_to_publish_to:
+                self.client.publish(c, 'unsubscribe')
+                time.sleep(0.01)
+
         messages = []
-        # should receive a message for each subscribe command
+        # should receive a message for each subscribe/unsubscribe command
         # plus a message for each iteration of the loop * num channels
-        num_messages_to_expect = len(channels) + \
+        # we hide the data messages that tell the client to unsubscribe
+        num_messages_to_expect = len(channels)*2 + \
             (messages_per_channel*len(channels))
-        thread_started = False
+        t = threading.Thread(target=publish)
+        t.start()
         for msg in r.listen():
-            if not thread_started:
-                # start the thread delayed so that we are intermingling
-                # publish commands with pulling messsages off the socket
-                # with subscribe
-                thread_started = True
-                t.start()
-            messages.append(msg)
-            if len(messages) == num_messages_to_expect:
-                break
+            if msg['data'] == 'unsubscribe':
+                r.unsubscribe(msg['channel'])
+            else:
+                messages.append(msg)
+
+        self.assertEquals(r.subscribed, False)
+        self.assertEquals(len(messages), num_messages_to_expect)
         sent_types, sent_channels = {}, {}
-        for msg_type, channel, _ in messages:
+        for msg in messages:
+            msg_type = msg['type']
+            channel = msg['channel']
             sent_types.setdefault(msg_type, 0)
             sent_types[msg_type] += 1
             if msg_type == 'message':
                 sent_channels.setdefault(channel, 0)
                 sent_channels[channel] += 1
         for channel in channels:
+            self.assert_(channel in sent_channels)
             self.assertEquals(sent_channels[channel], messages_per_channel)
-            self.assert_(channel in channels)
         self.assertEquals(sent_types['subscribe'], len(channels))
+        self.assertEquals(sent_types['unsubscribe'], len(channels))
         self.assertEquals(sent_types['message'],
             len(channels) * messages_per_channel)
 
