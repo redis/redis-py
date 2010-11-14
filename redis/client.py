@@ -4,7 +4,7 @@ import socket
 import threading
 import time
 import warnings
-from itertools import chain, imap
+from itertools import chain, imap, izip
 from redis.exceptions import ConnectionError, ResponseError, InvalidResponse, WatchError
 from redis.exceptions import RedisError, AuthenticationError
 
@@ -166,9 +166,26 @@ def parse_info(response):
             info[key] = get_value(value)
     return info
 
+def split_response(response):
+    it = iter(response)
+    while True:
+        yield it.next(),it.next()
+        
+def split_float_response(response):
+    it = iter(response)
+    while True:
+        yield it.next(),float(it.next())
+        
+def split_response(response):
+    it = iter(response)
+    while True:
+        yield it.next(),it.next()
+    
+        
 def pairs_to_dict(response):
     "Create a dict given a list of key/value pairs"
-    return dict(zip(response[::2], response[1::2]))
+    #return dict(zip(response[::2], response[1::2]))
+    return dict(split_response(response))
 
 def zset_score_pairs(response, **options):
     """
@@ -177,7 +194,11 @@ def zset_score_pairs(response, **options):
     """
     if not response or not options['withscores']:
         return response
-    return zip(response[::2], map(float, response[1::2]))
+    # we should return the generator really.
+    # But tests fail (which can be fixed) and, more importantly,
+    # it may cause problems to existing implementations. So lets unpack the generator.
+    #return zip(response[::2], map(float, response[1::2]))
+    return list(split_float_response(response))
 
 def int_or_none(response):
     if response is None:
@@ -1352,7 +1373,7 @@ class Pipeline(Redis):
                 "pipeline execution")
         # Run any callbacks for the commands run in the pipeline
         data = []
-        for r, cmd in zip(response, commands):
+        for r, cmd in izip(response, commands):
             if not isinstance(r, Exception):
                 if cmd[0] in self.RESPONSE_CALLBACKS:
                     r = self.RESPONSE_CALLBACKS[cmd[0]](r, **cmd[2])
