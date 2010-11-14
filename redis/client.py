@@ -166,26 +166,11 @@ def parse_info(response):
             info[key] = get_value(value)
     return info
 
-def split_response(response):
-    it = iter(response)
-    while True:
-        yield it.next(),it.next()
-        
-def split_float_response(response):
-    it = iter(response)
-    while True:
-        yield it.next(),float(it.next())
-        
-def split_response(response):
-    it = iter(response)
-    while True:
-        yield it.next(),it.next()
-    
         
 def pairs_to_dict(response):
     "Create a dict given a list of key/value pairs"
-    #return dict(zip(response[::2], response[1::2]))
-    return dict(split_response(response))
+    return dict(izip(response[::2], response[1::2]))
+
 
 def zset_score_pairs(response, **options):
     """
@@ -194,11 +179,10 @@ def zset_score_pairs(response, **options):
     """
     if not response or not options['withscores']:
         return response
-    # we should return the generator really.
+    # We should return the izip iterator relly.
     # But tests fail (which can be fixed) and, more importantly,
-    # it may cause problems to existing implementations. So lets unpack the generator.
-    #return zip(response[::2], map(float, response[1::2]))
-    return list(split_float_response(response))
+    # it may cause problems to existing implementations. So lets stick with zip.
+    return zip(response[::2], map(float, response[1::2]))
 
 def int_or_none(response):
     if response is None:
