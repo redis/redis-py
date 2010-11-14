@@ -179,7 +179,7 @@ def zset_score_pairs(response, **options):
     """
     if not response or not options['withscores']:
         return response
-    # We should return the izip iterator relly.
+    # We should return the izip iterator really.
     # But tests fail (which can be fixed) and, more importantly,
     # it may cause problems to existing implementations. So lets stick with zip.
     return zip(response[::2], map(float, response[1::2]))
