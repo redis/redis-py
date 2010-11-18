@@ -85,8 +85,12 @@ class Connection(object):
         except socket.error, e:
             if e.args[0] == errno.EPIPE:
                 self.disconnect()
+            if isinstance(e.args, basestring):
+                errno, errmsg = 'UNKNOWN', e.args
+            else:
+                errno, errmsg = e.args
             raise ConnectionError("Error %s while writing to socket. %s." % \
-                e.args)
+                (errno, errmsg))
 
     def read(self, length=None):
         """
