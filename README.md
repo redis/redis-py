@@ -402,7 +402,7 @@ API Reference
   Unsubscribe from _channels_. If empty, unsubscribe
   from all channels
 
-### zadd(self, name, value, score)
+### zadd(self, name, score, value)
   Add member _value_ with score _score_ to sorted set _name_
 
 ### zcard(self, name)

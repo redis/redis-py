@@ -777,10 +777,6 @@ class Redis(threading.local):
     def lpush(self, name, value):
         "Push ``value`` onto the head of the list ``name``"
         return self.execute_command('LPUSH', name, value)
-    
-    def lpushx(self, name, value):
-        "Push ``value`` onto the head of the list ``name`` if ``name`` exists"
-        return self.execute_command('LPUSHX', name, value)
 
     def lrange(self, name, start, end):
         """
@@ -856,10 +852,6 @@ class Redis(threading.local):
     def rpush(self, name, value):
         "Push ``value`` onto the tail of the list ``name``"
         return self.execute_command('RPUSH', name, value)
-
-    def rpushx(self, name, value):
-        "Push ``value`` onto the tail of the list ``name`` if ``name`` exists"
-        return self.execute_command('RPUSHX', name, value)
 
     def sort(self, name, start=None, num=None, by=None, get=None,
              desc=False, alpha=False, store=None):
@@ -990,7 +982,7 @@ class Redis(threading.local):
 
 
     #### SORTED SET COMMANDS ####
-    def zadd(self, name, value, score):
+    def zadd(self, name, score, value):
         "Add member ``value`` with score ``score`` to sorted set ``name``"
         return self.execute_command('ZADD', name, score, value)
 

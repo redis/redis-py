@@ -11,7 +11,7 @@ class PipelineTestCase(unittest.TestCase):
 
     def test_pipeline(self):
         pipe = self.client.pipeline()
-        pipe.set('a', 'a1').get('a').zadd('z', 'z1', 1).zadd('z', 'z2', 4)
+        pipe.set('a', 'a1').get('a').zadd('z', 1, 'z1').zadd('z', 4, 'z2')
         pipe.zincrby('z', 'z1').zrange('z', 0, 5, withscores=True)
         self.assertEquals(pipe.execute(),
             [
