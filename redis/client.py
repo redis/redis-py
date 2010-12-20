@@ -193,6 +193,11 @@ def float_or_none(response):
         return None
     return float(response)
 
+def parse_config(response, **options):
+    # this is stupid, but don't have a better option right now
+    if options['parse'] == 'GET':
+        return response and pairs_to_dict(response) or {}
+    return response == 'OK'
 
 class Redis(threading.local):
     """
@@ -207,13 +212,13 @@ class Redis(threading.local):
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict(
             'AUTH DEL EXISTS EXPIRE EXPIREAT HDEL HEXISTS HMSET MOVE MSETNX '
-            'RENAMENX SADD SISMEMBER SMOVE SETEX SETNX SREM ZADD ZREM',
+            'PERSIST RENAMENX SADD SISMEMBER SMOVE SETEX SETNX SREM ZADD ZREM',
             bool
             ),
         string_keys_to_dict(
-            'DECRBY HLEN INCRBY LINSERT LLEN LPUSHX RPUSHX SCARD SDIFFSTORE '
-            'SINTERSTORE SUNIONSTORE ZCARD ZREMRANGEBYRANK ZREMRANGEBYSCORE '
-            'ZREVRANK',
+            'DECRBY GETBIT HLEN INCRBY LINSERT LLEN LPUSHX RPUSHX SCARD '
+            'SDIFFSTORE SETBIT SETRANGE SINTERSTORE STRLEN SUNIONSTORE ZCARD '
+            'ZREMRANGEBYRANK ZREMRANGEBYSCORE ZREVRANK',
             int
             ),
         string_keys_to_dict(
@@ -224,7 +229,7 @@ class Redis(threading.local):
         string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
         string_keys_to_dict(
             'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME '
-            'SAVE SELECT SET SHUTDOWN WATCH UNWATCH',
+            'SAVE SELECT SET SHUTDOWN SLAVEOF WATCH UNWATCH',
             lambda r: r == 'OK'
             ),
         string_keys_to_dict('BLPOP BRPOP', lambda r: r and tuple(r) or None),
@@ -236,6 +241,8 @@ class Redis(threading.local):
             'BGREWRITEAOF': lambda r: \
                 r == 'Background rewriting of AOF file started',
             'BGSAVE': lambda r: r == 'Background saving started',
+            'BRPOPLPUSH': lambda r: r and r or None,
+            'CONFIG': parse_config,
             'HGETALL': lambda r: r and pairs_to_dict(r) or {},
             'INFO': parse_info,
             'LASTSAVE': timestamp_to_datetime,
@@ -474,6 +481,14 @@ class Redis(threading.local):
         """
         return self.execute_command('BGSAVE')
 
+    def config_get(self, pattern="*"):
+        "Return a dictionary of configuration based on the ``pattern``"
+        return self.execute_command('CONFIG', 'GET', pattern, parse='GET')
+
+    def config_set(self, name, value):
+        "Set config item ``name`` with ``value``"
+        return self.execute_command('CONFIG', 'SET', name, value, parse='SET')
+
     def dbsize(self):
         "Returns the number of keys in the current database"
         return self.execute_command('DBSIZE')
@@ -521,6 +536,16 @@ class Redis(threading.local):
         """
         return self.execute_command('SAVE')
 
+    def slaveof(self, host=None, port=None):
+        """
+        Set the server to be a replicated slave of the instance identified
+        by the ``host`` and ``port``. If called without arguements, the
+        instance is promoted to a master instead.
+        """
+        if host is None and port is None:
+            return self.execute_command("SLAVEOF NO ONE")
+        return self.execute_command("SLAVEOF", host, port)
+
     #### BASIC KEY COMMANDS ####
     def append(self, key, value):
         """
@@ -561,6 +586,10 @@ class Redis(threading.local):
         """
         return self.execute_command('GET', name)
     __getitem__ = get
+
+    def getbit(self, name, offset):
+        "Returns a boolean indicating the value of ``offset`` in ``name``"
+        return self.execute_command('GETBIT', name, offset)
 
     def getset(self, name, value):
         """
@@ -609,6 +638,10 @@ class Redis(threading.local):
     def move(self, name, db):
         "Moves the key ``name`` to a different Redis database ``db``"
         return self.execute_command('MOVE', name, db)
+
+    def persist(self, name):
+        "Removes an expiration on ``name``"
+        return self.execute_command('PERSIST', name)
 
     def randomkey(self):
         "Returns the name of a random key"
@@ -662,6 +695,14 @@ class Redis(threading.local):
         return self.execute_command('SET', name, value)
     __setitem__ = set
 
+    def setbit(self, name, offset, value):
+        """
+        Flag the ``offset`` in ``name`` as ``value``. Returns a boolean
+        indicating the previous value of ``offset``.
+        """
+        value = value and 1 or 0
+        return self.execute_command('SETBIT', name, offset, value)
+
     def setex(self, name, value, time):
         """
         Set the value of key ``name`` to ``value``
@@ -672,6 +713,23 @@ class Redis(threading.local):
     def setnx(self, name, value):
         "Set the value of key ``name`` to ``value`` if key doesn't exist"
         return self.execute_command('SETNX', name, value)
+
+    def setrange(self, name, offset, value):
+        """
+        Overwrite bytes in the value of ``name`` starting at ``offset`` with
+        ``value``. If ``offset`` plus the length of ``value`` exceeds the
+        length of the original value, the new value will be larger than before.
+        If ``offset`` exceeds the length of the original value, null bytes
+        will be used to pad between the end of the previous value and the start
+        of what's being injected.
+
+        Returns the length of the new string.
+        """
+        return self.execute_command('SETRANGE', name, offset, value)
+
+    def strlen(self, name):
+        "Return the number of bytes stored in the value of ``name``"
+        return self.execute_command('STRLEN', name)
 
     def substr(self, name, start, end=-1):
         """
@@ -746,6 +804,19 @@ class Redis(threading.local):
             keys = list(keys)
         keys.append(timeout)
         return self.execute_command('BRPOP', *keys)
+
+    def brpoplpush(self, src, dst, timeout=0):
+        """
+        Pop a value off the tail of ``src``, push it on the head of ``dst``
+        and then return it.
+
+        This command blocks until a value is in ``src`` or until ``timeout``
+        seconds elapse, whichever is first. A ``timeout`` value of 0 blocks
+        forever.
+        """
+        if timeout is None:
+            timeout = 0
+        return self.execute_command('BRPOPLPUSH', src, dst, timeout)
 
     def lindex(self, name, index):
         """

@@ -1,58 +1,8 @@
-* 1.3.6
-    * Implementation of all Hash commands
-    * Pipelines now wrap their execution with MULTI and EXEC commands to
-      process all commands atomically.
-    * Connections can now set timeout. If command execution exceeds the
-      timeout, an exception is raised.
-    * Numerous bug fixes and more tests.
-* 1.3.4
-    * Skipped version numbers ahead so that the client version matches the
-      Redis version it is feature-compatible with. Going forward, the client
-      will stay in sync with Redis version numbers when client updates are
-      made.
-    * Completely refactored the client library. It's now trivial to maintain
-      and add new commands. The library is also much more consistent.
-    * With the exception of "Response value type inference" (see below), the
-      client should be backwards compatible with 0.6.1. Some older, less
-      consistent methods will emit DeprecationWarnings, indicating that you
-      should use another command or option, but these should continue to
-      work as expected for the next few releases.
-    * WARNING: BACKWARDS INCOMPATIBLE CHANGE: "Response value type inference"
-      Previously, all values returned from Redis went through a decoding
-      process. In this process, if the response was numeric, it would be
-      automatically converted to an int or float type prior to being returned.
-      Otherwise the response would be decoded as a unicode string. This meant
-      that storing the string "123" would actually return an integer 123, and
-      that the string "foo" would be returned as the unicode object u"foo".
-      This fundamentally breaks the retrieval of binary data (byte strings) and
-      values that might accidentally look like a number (a hash value). After
-      discussing this in detail with a number of users and on the Redis mailing
-      list (http://groups.google.com/group/redis-db/browse_thread/thread/9888eb9ff383c90c/ec44fe80b6400f7b#ec44fe80b6400f7b)
-      *ALL* values returned from methods such as get() now return raw
-      Python strings. It is now your responsibility to convert that data to
-      whatever datatype you need. Other methods that *always* return integer
-      or float values, such as INCR, DECR, LLEN, ZSCORE, etc., will continue
-      returning values of the appropriate type. This resolves issue #2, #8
-      and #11:
-      http://github.com/andymccurdy/redis-py/issues#issue/2
-      http://github.com/andymccurdy/redis-py/issues#issue/8
-      http://github.com/andymccurdy/redis-py/issues#issue/11
-    * The "select" method now takes a "host" and "port" argument in addition
-      to the database. Behind the scenes, select() swaps out the underlying
-      socket connection. This resolves issue #4:
-      http://github.com/andymccurdy/redis-py/issues#issue/4
-    * The client now supports pipelining of Redis commands. Use the pipeline()
-      method to create a new Pipeline object. Each command called on the
-      pipeline object will be buffered until the pipeline if executed.
-      A list of each command's results will be returned by execution.  Use
-      this for batch processing in order to eliminate multiple request/response
-      cycles.
-      
-* 0.6.1
-    * Added support for ZINCRBY via the `zincr` command
-    * Swapped score and member parameters to zadd to make it more similar to other commands.
-    * Added support for Python 2.4 (thanks David Moss)
-* 0.6.0 Changed to Andy McCurdy's codebase on github
-* 0.5.5 Patch from David Moss, SHUTDOWN and doctest bugfix
-* 0.5.1-4 Bugfixes, no code changes, just packaging, 10/2/09
-* 0.5 Initial release, redis.py version 1.0.1, 10/2/09
+* 2.2.0
+    * Implemented SLAVEOF
+    * Implemented CONFIG as config_get and config_set
+    * Implemented GETBIT/SETBIT
+    * Implemented BRPOPLPUSH
+    * Implemented STRLEN
+    * Implemented PERSIST
+    * Implemented SETRANGE

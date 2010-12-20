@@ -52,6 +52,22 @@ class ServerCommandsTestCase(unittest.TestCase):
         del self.client['a']
         self.assertEquals(self.client['a'], None)
 
+    def test_config_get(self):
+        data = self.client.config_get()
+        self.assert_('maxmemory' in data)
+        self.assert_(data['maxmemory'].isdigit())
+
+    def test_config_set(self):
+        data = self.client.config_get()
+        rdbname = data['dbfilename']
+        self.assert_(self.client.config_set('dbfilename', 'redis_py_test.rdb'))
+        self.assertEquals(
+            self.client.config_get()['dbfilename'],
+            'redis_py_test.rdb'
+            )
+        self.assert_(self.client.config_set('dbfilename', rdbname))
+        self.assertEquals(self.client.config_get()['dbfilename'], rdbname)
+
     def test_info(self):
         self.client['a'] = 'foo'
         self.client['b'] = 'bar'
@@ -91,11 +107,13 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client['a'] = 'foo'
         self.assertEquals(self.client.exists('a'), True)
 
-    def test_expire_and_ttl(self):
+    def test_expire(self):
         self.assertEquals(self.client.expire('a', 10), False)
         self.client['a'] = 'foo'
         self.assertEquals(self.client.expire('a', 10), True)
         self.assertEquals(self.client.ttl('a'), 10)
+        self.assertEquals(self.client.persist('a'), True)
+        self.assertEquals(self.client.ttl('a'), None)
 
     def test_expireat(self):
         expire_at = datetime.datetime.now() + datetime.timedelta(minutes=1)
@@ -109,6 +127,17 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client['b'] = 'bar'
         self.assertEquals(self.client.expireat('b', expire_at), True)
         self.assertEquals(self.client.ttl('b'), 60)
+
+    def test_get_set_bit(self):
+        self.assertEquals(self.client.getbit('a', 5), False)
+        self.assertEquals(self.client.setbit('a', 5, True), False)
+        self.assertEquals(self.client.getbit('a', 5), True)
+        self.assertEquals(self.client.setbit('a', 4, False), False)
+        self.assertEquals(self.client.getbit('a', 4), False)
+        self.assertEquals(self.client.setbit('a', 4, True), False)
+        self.assertEquals(self.client.setbit('a', 5, True), True)
+        self.assertEquals(self.client.getbit('a', 4), True)
+        self.assertEquals(self.client.getbit('a', 5), True)
 
     def test_getset(self):
         self.assertEquals(self.client.getset('a', 'foo'), None)
@@ -185,6 +214,17 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(not self.client.setnx('a', '2'))
         self.assertEquals(self.client['a'], '1')
 
+    def test_setrange(self):
+        self.assertEquals(self.client.setrange('a', 5, 'abcdef'), 11)
+        self.assertEquals(self.client['a'], '\0\0\0\0\0abcdef')
+        self.client['a'] = 'Hello World'
+        self.assertEquals(self.client.setrange('a', 6, 'Redis'), 11)
+        self.assertEquals(self.client['a'], 'Hello Redis')
+
+    def test_strlen(self):
+        self.client['a'] = 'abcdef'
+        self.assertEquals(self.client.strlen('a'), 6)
+
     def test_substr(self):
         # invalid key type
         self.client.rpush('a', 'a1')
@@ -258,6 +298,15 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.brpop(['b', 'a'], timeout=1), None)
         self.make_list('c', 'a')
         self.assertEquals(self.client.brpop('c', timeout=1), ('c', 'a'))
+
+    def test_brpoplpush(self):
+        self.make_list('a', '12')
+        self.make_list('b', '34')
+        self.assertEquals(self.client.brpoplpush('a', 'b'), '2')
+        self.assertEquals(self.client.brpoplpush('a', 'b'), '1')
+        self.assertEquals(self.client.brpoplpush('a', 'b', timeout=1), None)
+        self.assertEquals(self.client.lrange('a', 0, -1), [])
+        self.assertEquals(self.client.lrange('b', 0, -1), ['1', '2', '3', '4'])
 
     def test_lindex(self):
         # no key
