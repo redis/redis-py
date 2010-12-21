@@ -1,21 +1,13 @@
 #!/usr/bin/env python
-
-"""
-@file setup.py
-@author Andy McCurdy
-@date 2/12/2010
-@brief Setuptools configuration for redis client
-"""
-
-version = '2.2.0'
+from redis import __version__
 
 sdict = {
     'name' : 'redis',
-    'version' : version,
+    'version' : __version__,
     'description' : 'Python client for Redis key-value store',
     'long_description' : 'Python client for Redis key-value store',
     'url': 'http://github.com/andymccurdy/redis-py',
-    'download_url' : 'http://cloud.github.com/downloads/andymccurdy/redis-py/redis-%s.tar.gz' % version,
+    'download_url' : 'http://cloud.github.com/downloads/andymccurdy/redis-py/redis-py-%s.tar.gz' % __version__,
     'author' : 'Andy McCurdy',
     'author_email' : 'sedrik@gmail.com',
     'maintainer' : 'Andy McCurdy',
@@ -25,7 +17,7 @@ sdict = {
     'packages' : ['redis'],
     'test_suite' : 'tests.all_tests',
     'classifiers' : [
-        'Development Status :: 4 - Beta',
+        'Development Status :: 5 - Production/Stable',
         'Environment :: Console',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: MIT License',
