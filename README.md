@@ -19,12 +19,11 @@ http://code.google.com/p/redis/wiki/CommandReference
 
 Installation
 ------------
-
-    $ sudo easy-install redis
+    $ sudo pip install redis
 
 alternatively:
 
-    $ sudo pip install redis
+    $ sudo easy_install redis
 
 From sources:
 
