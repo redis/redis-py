@@ -402,6 +402,9 @@ API Reference
   Unsubscribe from _channels_. If empty, unsubscribe
   from all channels
 
+### watch(self, name):
+  Watches the value at key _name_.
+
 ### zadd(self, name, value, score)
   Add member _value_ with score _score_ to sorted set _name_
 
