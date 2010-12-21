@@ -891,6 +891,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.zrevrank('a', 'a3'), 2)
         self.assertEquals(self.client.zrevrank('a', 'a4'), 3)
         self.assertEquals(self.client.zrevrank('a', 'a5'), 4)
+        self.assertEquals(self.client.zrevrank('a', 'b'), None)
 
     def test_zscore(self):
         # key is not a zset

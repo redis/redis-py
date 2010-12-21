@@ -218,7 +218,7 @@ class Redis(threading.local):
         string_keys_to_dict(
             'DECRBY GETBIT HLEN INCRBY LINSERT LLEN LPUSHX RPUSHX SCARD '
             'SDIFFSTORE SETBIT SETRANGE SINTERSTORE STRLEN SUNIONSTORE ZCARD '
-            'ZREMRANGEBYRANK ZREMRANGEBYSCORE ZREVRANK',
+            'ZREMRANGEBYRANK ZREMRANGEBYSCORE',
             int
             ),
         string_keys_to_dict(
@@ -237,6 +237,7 @@ class Redis(threading.local):
             lambda r: r and set(r) or set()
             ),
         string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE', zset_score_pairs),
+        string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
         {
             'BGREWRITEAOF': lambda r: \
                 r == 'Background rewriting of AOF file started',
@@ -249,7 +250,6 @@ class Redis(threading.local):
             'PING': lambda r: r == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
             'TTL': lambda r: r != -1 and r or None,
-            'ZRANK': int_or_none,
         }
         )
 
