@@ -543,7 +543,7 @@ class Redis(threading.local):
         instance is promoted to a master instead.
         """
         if host is None and port is None:
-            return self.execute_command("SLAVEOF NO ONE")
+            return self.execute_command("SLAVEOF", "NO", "ONE")
         return self.execute_command("SLAVEOF", host, port)
 
     #### BASIC KEY COMMANDS ####
