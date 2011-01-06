@@ -336,6 +336,7 @@ class Redis(threading.local):
         if self.subscribed and not subscription_command:
             raise RedisError("Cannot issue commands other than SUBSCRIBE and "
                 "UNSUBSCRIBE while channels are open")
+        command = self._encode_command(command)
         try:
             self.connection.send(command, self)
             if subscription_command:
@@ -347,14 +348,17 @@ class Redis(threading.local):
             if subscription_command:
                 return None
             return self.parse_response(command_name, **options)
+    
+    def _encode_command(self, args):
+        cmds = ['$%s\r\n%s\r\n' % (len(enc_value), enc_value)
+                for enc_value in imap(self.encode, args)]
+        return '*%s\r\n%s' % (len(cmds), ''.join(cmds))
 
     def execute_command(self, *args, **options):
         "Sends the command to the redis server and returns it's response"
-        cmds = ['$%s\r\n%s\r\n' % (len(enc_value), enc_value)
-                for enc_value in imap(self.encode, args)]
         return self._execute_command(
             args[0],
-            '*%s\r\n%s' % (len(cmds), ''.join(cmds)),
+            args,
             **options
             )
 
@@ -1426,10 +1430,10 @@ class Pipeline(Redis):
     def _execute_transaction(self, commands):
         # wrap the commands in MULTI ... EXEC statements to indicate an
         # atomic operation
-        all_cmds = ''.join([c for _1, c, _2 in chain(
-            (('', 'MULTI\r\n', ''),),
+        all_cmds = ''.join([self._encode_command(c) for _1, c, _2 in chain(
+            (('', ('MULTI',), ''),),
             commands,
-            (('', 'EXEC\r\n', ''),)
+            (('', ('EXEC',), ''),)
             )])
         self.connection.send(all_cmds, self)
         # parse off the response for MULTI and all commands prior to EXEC
@@ -1455,7 +1459,7 @@ class Pipeline(Redis):
 
     def _execute_pipeline(self, commands):
         # build up all commands into a single request to increase network perf
-        all_cmds = ''.join([c for _1, c, _2 in commands])
+        all_cmds = ''.join([self._encode_command(c) for _1, c, _2 in commands])
         self.connection.send(all_cmds, self)
         data = []
         for command_name, _, options in commands:
