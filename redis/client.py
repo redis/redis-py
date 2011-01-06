@@ -159,6 +159,14 @@ def dict_merge(*dicts):
     [merged.update(d) for d in dicts]
     return merged
 
+def repr_command(args):
+    "Represents a command as a string."
+    command = [args[0]]
+    if len(args) > 1:
+        command.extend(repr(x) for x in args[1:])
+
+    return ' '.join(command)
+
 def parse_info(response):
     "Parse the result of Redis's INFO command into a Python dict"
     info = {}
