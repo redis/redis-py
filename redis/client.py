@@ -58,6 +58,7 @@ class Connection(object):
         "Connects to the Redis server if not already connected"
         if self._sock:
             return
+        log.debug("connecting to %s:%d/%d", self.host, self.port, self.db)
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(self.socket_timeout)
@@ -81,6 +82,7 @@ class Connection(object):
         "Disconnects from the Redis server"
         if self._sock is None:
             return
+        log.debug("disconnecting from %s:%d/%d", self.host, self.port, self.db)
         try:
             self._sock.close()
         except socket.error:
