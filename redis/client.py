@@ -1,5 +1,6 @@
 import datetime
 import errno
+import logging
 import socket
 import threading
 import time
@@ -8,6 +9,16 @@ from itertools import chain, imap
 from redis.exceptions import ConnectionError, ResponseError, InvalidResponse, WatchError
 from redis.exceptions import RedisError, AuthenticationError
 
+try:
+    NullHandler = logging.NullHandler
+except AttributeError:
+    class NullHandler(logging.Handler):
+        def emit(self, record): pass
+
+log = logging.getLogger("redis")
+# Add a no-op handler to avoid error messages if the importing module doesn't
+# configure logging.
+log.addHandler(NullHandler())
 
 class ConnectionPool(threading.local):
     "Manages a list of connections on the local thread"
