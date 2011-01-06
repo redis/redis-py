@@ -336,6 +336,7 @@ class Redis(threading.local):
         if self.subscribed and not subscription_command:
             raise RedisError("Cannot issue commands other than SUBSCRIBE and "
                 "UNSUBSCRIBE while channels are open")
+        log.debug(repr_command(command))
         command = self._encode_command(command)
         try:
             self.connection.send(command, self)
@@ -1435,6 +1436,10 @@ class Pipeline(Redis):
             commands,
             (('', ('EXEC',), ''),)
             )])
+        log.debug("MULTI")
+        for command in commands:
+            log.debug("TRANSACTION> "+ repr_command(command[1]))
+        log.debug("EXEC")
         self.connection.send(all_cmds, self)
         # parse off the response for MULTI and all commands prior to EXEC
         for i in range(len(commands)+1):
@@ -1460,6 +1465,8 @@ class Pipeline(Redis):
     def _execute_pipeline(self, commands):
         # build up all commands into a single request to increase network perf
         all_cmds = ''.join([self._encode_command(c) for _1, c, _2 in commands])
+        for command in commands:
+            log.debug("PIPELINE> " + repr_command(command[1]))
         self.connection.send(all_cmds, self)
         data = []
         for command_name, _, options in commands:

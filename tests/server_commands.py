@@ -3,6 +3,8 @@ import unittest
 import datetime
 import threading
 import time
+import logging
+import logging.handlers
 from distutils.version import StrictVersion
 
 class ServerCommandsTestCase(unittest.TestCase):
@@ -1257,3 +1259,55 @@ class ServerCommandsTestCase(unittest.TestCase):
         # check that it is possible to get list content by key name
         for key in mapping.keys():
             self.assertEqual(self.client.lrange(key, 0, -1), list(mapping[key]))
+
+class BufferingHandler(logging.handlers.BufferingHandler):
+
+    def __init__(self):
+        logging.handlers.BufferingHandler.__init__(self, None)
+
+    def shouldFlush(self, record):
+        return False
+
+class LoggingTestCase(unittest.TestCase):
+
+    def get_client(self):
+        return redis.Redis(host='localhost', port=6379, db=9)
+
+    def setUp(self):
+        self.client = self.get_client()
+        self.client.flushdb()
+
+        self.log = logging.getLogger("redis")
+        self.log.setLevel(logging.DEBUG)
+        self.handler = BufferingHandler()
+        self.log.addHandler(self.handler)
+        self.buffer = self.handler.buffer
+
+    def tearDown(self):
+        self.client.flushdb()
+        for c in self.client.connection_pool.get_all_connections():
+            c.disconnect()
+
+    def test_command_logging(self):
+        self.client.get("foo")
+
+        self.assertEqual(len(self.buffer), 1)
+        self.assertEqual(self.buffer[0].msg, "GET 'foo'")
+
+    def test_command_logging_pipeline(self):
+        pipe = self.client.pipeline(transaction=False)
+        pipe.get("foo")
+        pipe.execute()
+
+        self.assertEqual(len(self.buffer), 1)
+        self.assertEqual(self.buffer[0].msg, "PIPELINE> GET 'foo'")
+
+    def test_command_logging_transaction(self):
+        txn = self.client.pipeline(transaction=True)
+        txn.get("foo")
+        txn.execute()
+
+        self.assertEqual(len(self.buffer), 3)
+        messages = [x.msg for x in self.buffer]
+        self.assertEqual(messages,
+                ["MULTI", "TRANSACTION> GET 'foo'", "EXEC"])
