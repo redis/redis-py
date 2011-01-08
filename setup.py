@@ -7,7 +7,7 @@ sdict = {
     'description' : 'Python client for Redis key-value store',
     'long_description' : 'Python client for Redis key-value store',
     'url': 'http://github.com/andymccurdy/redis-py',
-    'download_url' : 'http://cloud.github.com/downloads/andymccurdy/redis-py/redis-py-%s.tar.gz' % __version__,
+    'download_url' : 'http://cloud.github.com/downloads/andymccurdy/redis-py/redis-%s.tar.gz' % __version__,
     'author' : 'Andy McCurdy',
     'author_email' : 'sedrik@gmail.com',
     'maintainer' : 'Andy McCurdy',

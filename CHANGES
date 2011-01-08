@@ -1,6 +1,11 @@
 * 2.2.2
     * Fixed a bug in ZREVRANK where retriving the rank of a value not in
       the zset would raise an error.
+    * Fixed a bug in Connection.send where the errno import was getting
+      overwritten by a local variable.
+    * Fixed a bug in SLAVEOF when promoting an existing slave to a master.
+    * Reverted change of download URL back to redis-VERSION.tar.gz. 2.2.1's
+      change of this actually broke Pypi for Pip installs. Sorry!
 * 2.2.1
     * Changed archive name to redis-py-VERSION.tar.gz to not conflict
       with the Redis server archive.
