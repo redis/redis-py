@@ -1284,6 +1284,8 @@ class LoggingTestCase(unittest.TestCase):
         self.buffer = self.handler.buffer
         self.formatter = logging.Formatter()
 
+        self.client.debug = True
+
     def messages(self):
         return [self.formatter.format(r) for r in self.buffer]
 

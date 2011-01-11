@@ -281,6 +281,7 @@ class Redis(threading.local):
     SUBSCRIPTION_COMMANDS = set([
         'SUBSCRIBE', 'UNSUBSCRIBE', 'PSUBSCRIBE', 'PUNSUBSCRIBE'
         ])
+    debug = False
 
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
@@ -314,12 +315,15 @@ class Redis(threading.local):
         pipelines are useful for batch loading of data as they reduce the
         number of back and forth network operations between client and server.
         """
-        return Pipeline(
+        pipe = Pipeline(
             self.connection,
             transaction,
             self.encoding,
             self.errors
             )
+        pipe.debug = self.debug
+
+        return pipe
 
     def lock(self, name, timeout=None, sleep=0.1):
         """
@@ -1400,6 +1404,8 @@ class Pipeline(Redis):
     ResponseError exceptions, such as those raised when issuing a command
     on a key of a different datatype.
     """
+    debug = False
+
     def __init__(self, connection, transaction, charset, errors):
         self.connection = connection
         self.transaction = transaction
@@ -1472,9 +1478,7 @@ class Pipeline(Redis):
     def _execute_pipeline(self, commands):
         # build up all commands into a single request to increase network perf
         all_cmds = ''.join([self._encode_command(c) for _1, c, _2 in commands])
-        if log_enabled(log):
-            for command in commands:
-                log.debug("PIPELINE> " + repr_command(command[1]))
+        log_commands(self, log, [x[1] for x in commands], prefix="PIPELINE>")
         self.connection.send(all_cmds, self)
         data = []
         for command_name, _, options in commands:
