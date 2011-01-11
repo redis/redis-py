@@ -1317,4 +1317,4 @@ class LoggingTestCase(unittest.TestCase):
 
         messages = self.messages()
         self.assertEqual(messages,
-                ["MULTI", "TRANSACTION> GET 'foo'", "EXEC"])
+                ["TRANSACTION> MULTI", "TRANSACTION> GET 'foo'", "TRANSACTION> EXEC"])

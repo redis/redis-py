@@ -161,16 +161,19 @@ def dict_merge(*dicts):
     [merged.update(d) for d in dicts]
     return merged
 
-def log_enabled(log, level=logging.DEBUG):
-    return log.isEnabledFor(level)
+def log_commands(instance, logger, commands, level=logging.DEBUG, prefix=""):
+    # Return quickly if logging isn't desired to avoid wasting time. Least
+    # expensive checks are performed first.
+    if not commands or not getattr(instance, "debug", False) \
+            or not logger.isEnabledFor(level):
+        return
 
-def repr_command(args):
-    "Represents a command as a string."
-    command = [args[0]]
-    if len(args) > 1:
-        command.extend(repr(x) for x in args[1:])
-
-    return ' '.join(command)
+    for args in commands:
+        format = ["%s"]
+        if prefix:
+            format.insert(0, prefix)
+        format.extend("%r" for arg in args[1:])
+        logger.log(level, ' '.join(format), *args)
 
 def parse_info(response):
     "Parse the result of Redis's INFO command into a Python dict"
@@ -345,8 +348,7 @@ class Redis(threading.local):
         if self.subscribed and not subscription_command:
             raise RedisError("Cannot issue commands other than SUBSCRIBE and "
                 "UNSUBSCRIBE while channels are open")
-        if log_enabled(log):
-            log.debug(repr_command(command))
+        log_commands(self, log, [command])
         command = self._encode_command(command)
         try:
             self.connection.send(command, self)
@@ -1448,11 +1450,8 @@ class Pipeline(Redis):
             commands,
             (('', ('EXEC',), ''),)
             )])
-        if log_enabled(log):
-            log.debug("MULTI")
-            for command in commands:
-                log.debug("TRANSACTION> "+ repr_command(command[1]))
-            log.debug("EXEC")
+        log_cmds = chain((("MULTI",),), (x[1] for x in commands), (("EXEC",),))
+        log_commands(self, log, log_cmds, prefix="TRANSACTION>")
         self.connection.send(all_cmds, self)
         # parse off the response for MULTI and all commands prior to EXEC
         for i in range(len(commands)+1):
