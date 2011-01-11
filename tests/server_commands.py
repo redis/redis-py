@@ -1282,6 +1282,10 @@ class LoggingTestCase(unittest.TestCase):
         self.handler = BufferingHandler()
         self.log.addHandler(self.handler)
         self.buffer = self.handler.buffer
+        self.formatter = logging.Formatter()
+
+    def messages(self):
+        return [self.formatter.format(r) for r in self.buffer]
 
     def tearDown(self):
         self.client.flushdb()
@@ -1291,23 +1295,24 @@ class LoggingTestCase(unittest.TestCase):
     def test_command_logging(self):
         self.client.get("foo")
 
-        self.assertEqual(len(self.buffer), 1)
-        self.assertEqual(self.buffer[0].msg, "GET 'foo'")
+        messages = self.messages()
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0], "GET 'foo'")
 
     def test_command_logging_pipeline(self):
         pipe = self.client.pipeline(transaction=False)
         pipe.get("foo")
         pipe.execute()
 
-        self.assertEqual(len(self.buffer), 1)
-        self.assertEqual(self.buffer[0].msg, "PIPELINE> GET 'foo'")
+        messages = self.messages()
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0], "PIPELINE> GET 'foo'")
 
     def test_command_logging_transaction(self):
         txn = self.client.pipeline(transaction=True)
         txn.get("foo")
         txn.execute()
 
-        self.assertEqual(len(self.buffer), 3)
-        messages = [x.msg for x in self.buffer]
+        messages = self.messages()
         self.assertEqual(messages,
                 ["MULTI", "TRANSACTION> GET 'foo'", "EXEC"])
