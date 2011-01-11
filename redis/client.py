@@ -164,7 +164,7 @@ def dict_merge(*dicts):
     return merged
 
 def log_enabled(log, level=logging.DEBUG):
-    return log.isEnabledFor(log, level)
+    return log.isEnabledFor(level)
 
 def repr_command(args):
     "Represents a command as a string."
