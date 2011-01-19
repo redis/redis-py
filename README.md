@@ -15,7 +15,7 @@ Usage
     'bar'
 
 For a complete list of commands, check out the list of Redis commands here:
-http://code.google.com/p/redis/wiki/CommandReference
+http://redis.io/commands
 
 Installation
 ------------
