@@ -123,7 +123,7 @@ class Redis(threading.local):
         string_keys_to_dict(
             # these return OK, or int if redis-server is >=1.3.4
             'LPUSH RPUSH',
-            lambda r: isinstance(r, int) and r or r == 'OK'
+            lambda r: isinstance(r, long) and r or r == 'OK'
             ),
         string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
         string_keys_to_dict(

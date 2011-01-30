@@ -124,7 +124,7 @@ class PythonConnection(BaseConnection):
             return response
         # int value
         elif byte == ':':
-            return int(response)
+            return long(response)
         # bulk response
         elif byte == '$':
             length = int(response)
