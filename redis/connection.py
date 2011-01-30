@@ -25,7 +25,7 @@ class ConnectionPool(threading.local):
         return self.connections.values()
 
 
-class Connection(object):
+class BaseConnection(object):
     "Manages TCP communication to and from a Redis server"
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None):
@@ -102,6 +102,7 @@ class Connection(object):
                     e.args[1])
         return ''
 
+class PythonConnection(BaseConnection):
     def read_response(self, command_name, catch_errors):
         response = self.read()[:-2] # strip last two characters (\r\n)
         if not response:
@@ -155,3 +156,37 @@ class Connection(object):
                 return data
 
         raise InvalidResponse("Unknown response type for: %s" % command_name)
+
+class HiredisConnection(BaseConnection):
+    def connect(self, redis_instance):
+        if self._sock == None:
+            self._reader = hiredis.Reader(
+                    protocolError=InvalidResponse,
+                    replyError=ResponseError)
+        super(HiredisConnection, self).connect(redis_instance)
+
+    def disconnect(self):
+        if self._sock:
+            self._reader = None
+        super(HiredisConnection, self).disconnect()
+
+    def read_response(self, command_name, catch_errors):
+        response = self._reader.gets()
+        while response is False:
+            buffer = self._sock.recv(4096)
+            if not buffer:
+                self.disconnect()
+                raise ConnectionError("Socket closed on remote end")
+            self._reader.feed(buffer)
+            response = self._reader.gets()
+
+        if isinstance(response, ResponseError):
+            raise response
+
+        return response
+
+try:
+    import hiredis
+    Connection = HiredisConnection
+except ImportError:
+    Connection = PythonConnection
