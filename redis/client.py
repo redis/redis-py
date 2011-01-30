@@ -108,6 +108,60 @@ class Connection(object):
                     e.args[1])
         return ''
 
+    def read_response(self, command_name, catch_errors):
+        response = self.read()[:-2] # strip last two characters (\r\n)
+        if not response:
+            self.disconnect()
+            raise ConnectionError("Socket closed on remote end")
+
+        # server returned a null value
+        if response in ('$-1', '*-1'):
+            return None
+        byte, response = response[0], response[1:]
+
+        # server returned an error
+        if byte == '-':
+            if response.startswith('ERR '):
+                response = response[4:]
+            raise ResponseError(response)
+        # single value
+        elif byte == '+':
+            return response
+        # int value
+        elif byte == ':':
+            return int(response)
+        # bulk response
+        elif byte == '$':
+            length = int(response)
+            if length == -1:
+                return None
+            response = length and self.read(length) or ''
+            self.read(2) # read the \r\n delimiter
+            return response
+        # multi-bulk response
+        elif byte == '*':
+            length = int(response)
+            if length == -1:
+                return None
+            if not catch_errors:
+                return [self.read_response(command_name, catch_errors)
+                    for i in range(length)]
+            else:
+                # for pipelines, we need to read everything,
+                # including response errors. otherwise we'd
+                # completely mess up the receive buffer
+                data = []
+                for i in range(length):
+                    try:
+                        data.append(
+                            self.read_response(command_name, catch_errors)
+                            )
+                    except Exception, e:
+                        data.append(e)
+                return data
+
+        raise InvalidResponse("Unknown response type for: %s" % command_name)
+
 def list_or_args(command, keys, args):
     # returns a single list combining keys and args
     # if keys is not a list or args has items, issue a
@@ -339,64 +393,9 @@ class Redis(threading.local):
             **options
             )
 
-    def _parse_response(self, command_name, catch_errors):
-        conn = self.connection
-        response = conn.read()[:-2] # strip last two characters (\r\n)
-        if not response:
-            self.connection.disconnect()
-            raise ConnectionError("Socket closed on remote end")
-
-        # server returned a null value
-        if response in ('$-1', '*-1'):
-            return None
-        byte, response = response[0], response[1:]
-
-        # server returned an error
-        if byte == '-':
-            if response.startswith('ERR '):
-                response = response[4:]
-            raise ResponseError(response)
-        # single value
-        elif byte == '+':
-            return response
-        # int value
-        elif byte == ':':
-            return int(response)
-        # bulk response
-        elif byte == '$':
-            length = int(response)
-            if length == -1:
-                return None
-            response = length and conn.read(length) or ''
-            conn.read(2) # read the \r\n delimiter
-            return response
-        # multi-bulk response
-        elif byte == '*':
-            length = int(response)
-            if length == -1:
-                return None
-            if not catch_errors:
-                return [self._parse_response(command_name, catch_errors)
-                    for i in range(length)]
-            else:
-                # for pipelines, we need to read everything,
-                # including response errors. otherwise we'd
-                # completely mess up the receive buffer
-                data = []
-                for i in range(length):
-                    try:
-                        data.append(
-                            self._parse_response(command_name, catch_errors)
-                            )
-                    except Exception, e:
-                        data.append(e)
-                return data
-
-        raise InvalidResponse("Unknown response type for: %s" % command_name)
-
     def parse_response(self, command_name, catch_errors=False, **options):
         "Parses a response from the Redis server"
-        response = self._parse_response(command_name, catch_errors)
+        response = self.connection.read_response(command_name, catch_errors)
         if command_name in self.RESPONSE_CALLBACKS:
             return self.RESPONSE_CALLBACKS[command_name](response, **options)
         return response
