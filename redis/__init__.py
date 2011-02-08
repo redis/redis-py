@@ -3,7 +3,7 @@ from redis.client import Redis, ConnectionPool
 from redis.exceptions import RedisError, ConnectionError, AuthenticationError
 from redis.exceptions import ResponseError, InvalidResponse, InvalidData
 
-__version__ = '2.2.2'
+__version__ = '2.2.3'
 
 __all__ = [
     'Redis', 'ConnectionPool',

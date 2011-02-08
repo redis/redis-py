@@ -1,3 +1,7 @@
+* 2.2.3
+    * Added support for Hiredis. To use, simply "pip install hiredis" or 
+      "easy_install hiredis". Thanks for Pieter Noordhuis for the hiredis-py
+      bindings and the patch to redis-py.
 * 2.2.2
     * Fixed a bug in ZREVRANK where retriving the rank of a value not in
       the zset would raise an error.
