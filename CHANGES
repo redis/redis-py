@@ -2,6 +2,10 @@
     * Added support for Hiredis. To use, simply "pip install hiredis" or 
       "easy_install hiredis". Thanks for Pieter Noordhuis for the hiredis-py
       bindings and the patch to redis-py.
+    * The connection class is chosed based on whether hiredis is installed
+      or not. To force the use of the PythonConnection, simply create
+      your own ConnectionPool instance with the connection_class argument
+      assigned to to PythonConnection class.
 * 2.2.2
     * Fixed a bug in ZREVRANK where retriving the rank of a value not in
       the zset would raise an error.

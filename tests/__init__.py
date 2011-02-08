@@ -4,6 +4,13 @@ from connection_pool import ConnectionPoolTestCase
 from pipeline import PipelineTestCase
 from lock import LockTestCase
 
+use_hiredis = False
+try:
+    import hiredis
+    use_hiredis = True
+except ImportError:
+    pass
+
 def all_tests():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(ServerCommandsTestCase))
