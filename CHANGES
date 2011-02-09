@@ -7,6 +7,8 @@
       your own ConnectionPool instance with the connection_class argument
       assigned to to PythonConnection class.
     * Added missing command ZREVRANGEBYSCORE. Thanks Jay Baird for the patch.
+    * The INFO command should be parsed correctly on 2.2.x server versions
+      and is backwards compatible with older versions. Thanks Brett Hoerner.
 * 2.2.2
     * Fixed a bug in ZREVRANK where retriving the rank of a value not in
       the zset would raise an error.
