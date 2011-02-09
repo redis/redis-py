@@ -135,7 +135,7 @@ class Redis(threading.local):
         string_keys_to_dict('SDIFF SINTER SMEMBERS SUNION',
             lambda r: r and set(r) or set()
             ),
-        string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE', zset_score_pairs),
+        string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE', zset_score_pairs),
         string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
         {
             'BGREWRITEAOF': lambda r: \
@@ -1019,6 +1019,27 @@ class Redis(threading.local):
             as a dictionary of value => score
         """
         pieces = ['ZREVRANGE', name, start, num]
+        if withscores:
+            pieces.append('withscores')
+        return self.execute_command(*pieces, **{'withscores': withscores})
+    
+    def zrevrangebyscore(self, name, min, max,
+            start=None, num=None, withscores=False):
+        """
+        Return a range of values from the sorted set ``name`` with scores
+        between ``min`` and ``max`` reversed.
+
+        If ``start`` and ``num`` are specified, then return a slice of the range.
+
+        ``withscores`` indicates to return the scores along with the values.
+            The return type is a list of (value, score) pairs
+        """
+        if (start is not None and num is None) or \
+                (num is not None and start is None):
+            raise RedisError("``start`` and ``num`` must both be specified")
+        pieces = ['ZREVRANGEBYSCORE', name, min, max]
+        if start is not None and num is not None:
+            pieces.extend(['LIMIT', start, num])
         if withscores:
             pieces.append('withscores')
         return self.execute_command(*pieces, **{'withscores': withscores})
