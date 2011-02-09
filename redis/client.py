@@ -135,7 +135,9 @@ class Redis(threading.local):
         string_keys_to_dict('SDIFF SINTER SMEMBERS SUNION',
             lambda r: r and set(r) or set()
             ),
-        string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE', zset_score_pairs),
+        string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
+            zset_score_pairs
+            ),
         string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
         {
             'BGREWRITEAOF': lambda r: \
@@ -951,7 +953,7 @@ class Redis(threading.local):
         ``desc`` indicates to sort in descending order.
 
         ``withscores`` indicates to return the scores along with the values.
-            The return type is a list of (value, score) pairs
+        The return type is a list of (value, score) pairs
         """
         if desc:
             return self.zrevrange(name, start, end, withscores)
@@ -966,10 +968,11 @@ class Redis(threading.local):
         Return a range of values from the sorted set ``name`` with scores
         between ``min`` and ``max``.
 
-        If ``start`` and ``num`` are specified, then return a slice of the range.
+        If ``start`` and ``num`` are specified, then return a slice
+        of the range.
 
         ``withscores`` indicates to return the scores along with the values.
-            The return type is a list of (value, score) pairs
+        The return type is a list of (value, score) pairs
         """
         if (start is not None and num is None) or \
                 (num is not None and start is None):
@@ -1016,7 +1019,7 @@ class Redis(threading.local):
         ``start`` and ``num`` can be negative, indicating the end of the range.
 
         ``withscores`` indicates to return the scores along with the values
-            as a dictionary of value => score
+        as a dictionary of value => score
         """
         pieces = ['ZREVRANGE', name, start, num]
         if withscores:
@@ -1027,12 +1030,13 @@ class Redis(threading.local):
             start=None, num=None, withscores=False):
         """
         Return a range of values from the sorted set ``name`` with scores
-        between ``min`` and ``max`` reversed.
+        between ``min`` and ``max`` in descending order.
 
-        If ``start`` and ``num`` are specified, then return a slice of the range.
+        If ``start`` and ``num`` are specified, then return a slice
+        of the range.
 
         ``withscores`` indicates to return the scores along with the values.
-            The return type is a list of (value, score) pairs
+        The return type is a list of (value, score) pairs
         """
         if (start is not None and num is None) or \
                 (num is not None and start is None):
