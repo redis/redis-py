@@ -55,7 +55,7 @@ def parse_info(response):
             return value
         sub_dict = {}
         for item in value.split(','):
-            k, v = item.split('=')
+            k, v = item.rsplit('=', 1)
             try:
                 sub_dict[k] = int(v)
             except ValueError:
@@ -64,7 +64,7 @@ def parse_info(response):
     for line in response.splitlines():
         key, value = line.split(':')
         try:
-            info[key] = int(value)
+            info[key] = float(value) if '.' in value else int(value)
         except ValueError:
             info[key] = get_value(value)
     return info
