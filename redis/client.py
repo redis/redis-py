@@ -162,13 +162,13 @@ class Redis(threading.local):
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
                  connection_pool=None,
-                 charset='utf-8', errors='strict'):
+                 charset='utf-8', errors='strict', autodecode=''):
         self.encoding = charset
         self.errors = errors
         self.connection = None
         self.subscribed = False
         self.connection_pool = connection_pool and connection_pool or ConnectionPool()
-        self.select(db, host, port, password, socket_timeout)
+        self.select(db, host, port, password, socket_timeout, autodecode)
 
     #### Legacty accessors of connection information ####
     def _get_host(self):
@@ -257,10 +257,10 @@ class Redis(threading.local):
         return str(value)
 
     #### CONNECTION HANDLING ####
-    def get_connection(self, host, port, db, password, socket_timeout):
+    def get_connection(self, host, port, db, password, socket_timeout, autodecode):
         "Returns a connection object"
         conn = self.connection_pool.get_connection(
-            host, port, db, password, socket_timeout)
+            host, port, db, password, socket_timeout, autodecode)
         # if for whatever reason the connection gets a bad password, make
         # sure a subsequent attempt with the right password makes its way
         # to the connection
@@ -279,7 +279,7 @@ class Redis(threading.local):
         self.execute_command('SELECT', self.connection.db)
 
     def select(self, db, host=None, port=None, password=None,
-            socket_timeout=None):
+            socket_timeout=None, autodecode=''):
         """
         Switch to a different Redis connection.
 
@@ -301,7 +301,7 @@ class Redis(threading.local):
             port = self.connection.port
 
         self.connection = self.get_connection(
-            host, port, db, password, socket_timeout)
+            host, port, db, password, socket_timeout, autodecode)
 
     def shutdown(self):
         "Shutdown the server"

@@ -6,7 +6,7 @@ from redis.exceptions import ConnectionError, ResponseError, InvalidResponse
 class BaseConnection(object):
     "Manages TCP communication to and from a Redis server"
     def __init__(self, host='localhost', port=6379, db=0, password=None,
-                 socket_timeout=None):
+                 socket_timeout=None, autodecode=''):
         self.host = host
         self.port = port
         self.db = db
@@ -14,6 +14,7 @@ class BaseConnection(object):
         self.socket_timeout = socket_timeout
         self._sock = None
         self._fp = None
+        self.autodecode = autodecode
 
     def connect(self, redis_instance):
         "Connects to the Redis server if not already connected"
@@ -138,9 +139,15 @@ class PythonConnection(BaseConnection):
 class HiredisConnection(BaseConnection):
     def connect(self, redis_instance):
         if self._sock == None:
-            self._reader = hiredis.Reader(
-                    protocolError=InvalidResponse,
-                    replyError=ResponseError)
+            if self.autodecode != '':
+                self._reader = hiredis.Reader(
+                        encoding=self.autodecode,
+                        protocolError=InvalidResponse,
+                        replyError=ResponseError)
+            else:
+                self._reader = hiredis.Reader(    
+                        protocolError=InvalidResponse,
+                        replyError=ResponseError)                            
         super(HiredisConnection, self).connect(redis_instance)
 
     def disconnect(self):
@@ -175,16 +182,16 @@ class ConnectionPool(threading.local):
         self.connections = {}
         self.connection_class = connection_class or Connection
 
-    def make_connection_key(self, host, port, db):
+    def make_connection_key(self, host, port, db, autodecode):
         "Create a unique key for the specified host, port and db"
-        return '%s:%s:%s' % (host, port, db)
+        return '%s:%s:%s:%s' % (host, port, db, autodecode)
 
-    def get_connection(self, host, port, db, password, socket_timeout):
+    def get_connection(self, host, port, db, password, socket_timeout, autodecode):
         "Return a specific connection for the specified host, port and db"
-        key = self.make_connection_key(host, port, db)
+        key = self.make_connection_key(host, port, db, autodecode)
         if key not in self.connections:
             self.connections[key] = self.connection_class(
-                host, port, db, password, socket_timeout)
+                host, port, db, password, socket_timeout, autodecode)
         return self.connections[key]
 
     def get_all_connections(self):
