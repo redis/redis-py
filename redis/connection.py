@@ -23,7 +23,7 @@ class BaseConnection(object):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(self.socket_timeout)
             sock.connect((self.host, self.port))
-        except socket.error, e:
+        except socket.error as e:
             # args for socket.error can either be (errno, "message")
             # or just "message"
             if len(e.args) == 1:
@@ -35,7 +35,7 @@ class BaseConnection(object):
             raise ConnectionError(error_message)
         sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
         self._sock = sock
-        self._fp = sock.makefile('r')
+        self._fp = sock.makefile('rb')
         redis_instance._setup_connection()
 
     def disconnect(self):
@@ -53,11 +53,11 @@ class BaseConnection(object):
         "Send ``command`` to the Redis server. Return the result."
         self.connect(redis_instance)
         try:
-            self._sock.sendall(command)
-        except socket.error, e:
+            self._sock.sendall(command.encode())
+        except socket.error as e:
             if e.args[0] == errno.EPIPE:
                 self.disconnect()
-            if isinstance(e.args, basestring):
+            if isinstance(e.args, str):
                 _errno, errmsg = 'UNKNOWN', e.args
             else:
                 _errno, errmsg = e.args
@@ -71,18 +71,23 @@ class BaseConnection(object):
         """
         try:
             if length is not None:
-                return self._fp.read(length)
-            return self._fp.readline()
-        except socket.error, e:
+                result = self._fp.read(length)
+            else: result = self._fp.readline()
+            try: result = result.decode()
+            finally: return result
+        except socket.error as e:
             self.disconnect()
             if e.args and e.args[0] == errno.EAGAIN:
                 raise ConnectionError("Error while reading from socket: %s" % \
                     e.args[1])
         return ''
+    
+    def __lt__(self, other):
+        return id(self) < id(other)
 
 class PythonConnection(BaseConnection):
     def read_response(self, command_name, catch_errors):
-        response = self.read()[:-2] # strip last two characters (\r\n)
+        response = self.read().strip() # strip last two characters (\r\n)
         if not response:
             self.disconnect()
             raise ConnectionError("Socket closed on remote end")
@@ -102,7 +107,7 @@ class PythonConnection(BaseConnection):
             return response
         # int value
         elif byte == ':':
-            return long(response)
+            return int(response)
         # bulk response
         elif byte == '$':
             length = int(response)
@@ -129,7 +134,7 @@ class PythonConnection(BaseConnection):
                         data.append(
                             self.read_response(command_name, catch_errors)
                             )
-                    except Exception, e:
+                    except Exception as e:
                         data.append(e)
                 return data
 
@@ -189,4 +194,4 @@ class ConnectionPool(threading.local):
 
     def get_all_connections(self):
         "Return a list of all connection objects the manager knows about"
-        return self.connections.values()
+        return list(self.connections.values())

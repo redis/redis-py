@@ -1,4 +1,4 @@
-from __future__ import with_statement
+
 import redis
 import time
 import unittest
@@ -33,8 +33,8 @@ class LockTestCase(unittest.TestCase):
         lock1 = self.client.lock('foo', timeout=1)
         lock2 = self.client.lock('foo')
         self.assert_(lock1.acquire())
-        self.assertEquals(lock1.acquired_until, long(time.time()) + 1)
-        self.assertEquals(lock1.acquired_until, long(self.client['foo']))
+        self.assertEquals(lock1.acquired_until, int(time.time()) + 1)
+        self.assertEquals(lock1.acquired_until, int(self.client['foo']))
         self.assertFalse(lock2.acquire(blocking=False))
         time.sleep(2) # need to wait up to 2 seconds for lock to timeout
         self.assert_(lock2.acquire(blocking=False))

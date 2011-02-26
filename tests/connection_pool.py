@@ -40,7 +40,7 @@ class ConnectionPoolTestCase(unittest.TestCase):
 
         def _keys_worker():
             for i in range(50):
-                _ = r.keys()
+                _ = list(r.keys())
                 time.sleep(0.01)
 
         t1 = threading.Thread(target=_info_worker)

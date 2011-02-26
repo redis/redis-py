@@ -1,6 +1,8 @@
 redis-py
 ========
 
+Ported to Python 3 by algebraic-brain (bineev@gmail.com)
+
 This is the Python interface to the Redis key-value store.
 
 
