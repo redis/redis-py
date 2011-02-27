@@ -1041,7 +1041,7 @@ class Redis(threading.local):
         if (start is not None and num is None) or \
                 (num is not None and start is None):
             raise RedisError("``start`` and ``num`` must both be specified")
-        pieces = ['ZREVRANGEBYSCORE', name, min, max]
+        pieces = ['ZREVRANGEBYSCORE', name, max, min]
         if start is not None and num is not None:
             pieces.extend(['LIMIT', start, num])
         if withscores:
