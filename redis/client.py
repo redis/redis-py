@@ -62,11 +62,12 @@ def parse_info(response):
                 sub_dict[k] = v
         return sub_dict
     for line in response.splitlines():
-        key, value = line.split(':')
-        try:
-            info[key] = float(value) if '.' in value else int(value)
-        except ValueError:
-            info[key] = get_value(value)
+        if line and not line.startswith('#'):
+            key, value = line.split(':')
+            try:
+                info[key] = float(value) if '.' in value else int(value)
+            except ValueError:
+                info[key] = get_value(value)
     return info
 
 def pairs_to_dict(response):
