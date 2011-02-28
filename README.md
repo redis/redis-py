@@ -179,7 +179,7 @@ API Reference
 ### llen(self, name)
   Return the length of the list _name_
 
-###lock(self, name, timeout=None, sleep=0.10000000000000001)
+### lock(self, name, timeout=None, sleep=0.10000000000000001)
   Return a new Lock object using key _name_ that mimics
   the behavior of threading.Lock.
   
@@ -326,7 +326,7 @@ API Reference
   If _getset_ is True, set the value only if key doesn't already exist
   and return the resulting value of key
 
-### setex(self, name, value, time)
+### setex(self, name, time, value)
   Set the value of key _name_ to _value_
   that expires in _time_ seconds
 
@@ -349,13 +349,13 @@ API Reference
 ### smove(self, src, dst, value)
   Move _value_ from set _src_ to set _dst_ atomically
 
-### sort(self, name, start=None, num=None, by=None, get=None, desc=False, alpha=False, store=None)
+### sort(self, name, by=None, start=None, num=None, get=None, desc=False, alpha=False, store=None)
   Sort and return the list, set or sorted set at _name_.
-  
-  _start_ and _num_ allow for paging through the sorted data
-  
+    
   _by_ allows using an external key to weight and sort the items.
   Use an "*" to indicate where in the key the item value is located
+
+  _start_ and _num_ allow for paging through the sorted data
   
   _get_ allows for returning items from external keys rather than the
   sorted data itself.  Use an "*" to indicate where int he key
@@ -404,7 +404,7 @@ API Reference
 ### watch(self, name):
   Watches the value at key _name_.
 
-### zadd(self, name, value, score)
+### zadd(self, name, score, value)
   Add member _value_ with score _score_ to sorted set _name_
 
 ### zcard(self, name)
@@ -413,7 +413,7 @@ API Reference
 ### zincr(self, key, member, value=1)
   This has been deprecated, use zincrby instead
 
-### zincrby(self, name, value, amount=1)
+### zincrby(self, name, amount, value)
   Increment the score of _value_ in sorted set _name_ by _amount_
 
 ### zinter(self, dest, keys, aggregate=None)
@@ -434,14 +434,16 @@ API Reference
   _withscores_ indicates to return the scores along with the values.
    The return type is a list of (value, score) pairs
 
-### zrangebyscore(self, name, min, max, start=None, num=None, withscores=False)
+### zrangebyscore(self, name, min, max, desc=False, withscores=False, start=None, num=None)
   Return a range of values from the sorted set _name_ with scores
   between _min_ and _max_.
-  
-  If _start_ and _num_ are specified, then return a slice of the range.
+
+  _desc_ indicates to sort in descending order.
   
   _withscores_ indicates to return the scores along with the values.
-  The return type is a list of (value, score) pairs
+  The return type is a list of (value, score) pairs.
+  
+  If _start_ and _num_ are specified, then return a slice of the range.
 
 ### zrank(self, name, value)
   Returns a 0-based value indicating the rank of _value_ in sorted set
@@ -468,6 +470,15 @@ API Reference
   
   _withscores_ indicates to return the scores along with the values
   as a dictionary of value => score
+
+### zrevrangebyscore(self, name, min, max, withscores=False, start=None, num=None)
+  Return a range of values from the sorted set _name_ with scores
+  between _min_ and _max_ in descending order.
+
+  _withscores_ indicates to return the scores along with the values.
+  The return type is a list of (value, score) pairs.
+
+  If _start_ and _num_ are specified, then return a slice of the range.
 
 ### zrevrank(self, name, value)
   Returns a 0-based value indicating the descending rank of
