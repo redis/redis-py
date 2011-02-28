@@ -549,7 +549,7 @@ class Redis(threading.local):
         value = value and 1 or 0
         return self.execute_command('SETBIT', name, offset, value)
 
-    def setex(self, name, value, time):
+    def setex(self, name, time, value):
         """
         Set the value of key ``name`` to ``value``
         that expires in ``time`` seconds
@@ -709,7 +709,7 @@ class Redis(threading.local):
         """
         return self.execute_command('LRANGE', name, start, end)
 
-    def lrem(self, name, value, num=0):
+    def lrem(self, name, num, value):
         """
         Remove the first ``num`` occurrences of ``value`` from list ``name``
 
@@ -778,7 +778,7 @@ class Redis(threading.local):
         "Push ``value`` onto the tail of the list ``name`` if ``name`` exists"
         return self.execute_command('RPUSHX', name, value)
 
-    def sort(self, name, start=None, num=None, by=None, get=None,
+    def sort(self, name, by=None, start=None, num=None, get=None,
              desc=False, alpha=False, store=None):
         """
         Sort and return the list, set or sorted set at ``name``.
@@ -907,7 +907,7 @@ class Redis(threading.local):
 
 
     #### SORTED SET COMMANDS ####
-    def zadd(self, name, value, score):
+    def zadd(self, name, score, value):
         "Add member ``value`` with score ``score`` to sorted set ``name``"
         return self.execute_command('ZADD', name, score, value)
 
@@ -918,14 +918,14 @@ class Redis(threading.local):
     def zcount(self, name, min, max):
         return self.execute_command('ZCOUNT', name, min, max)
 
-    def zincr(self, key, member, value=1):
+    def zincr(self, key, member, amount=1):
         "This has been deprecated, use zincrby instead"
         warnings.warn(DeprecationWarning(
             "Redis.zincr has been deprecated, use Redis.zincrby instead"
             ))
-        return self.zincrby(key, member, value)
+        return self.zincrby(key, amount, member)
 
-    def zincrby(self, name, value, amount=1):
+    def zincrby(self, name, amount, value):
         "Increment the score of ``value`` in sorted set ``name`` by ``amount``"
         return self.execute_command('ZINCRBY', name, amount, value)
 
@@ -962,18 +962,22 @@ class Redis(threading.local):
             pieces.append('withscores')
         return self.execute_command(*pieces, **{'withscores': withscores})
 
-    def zrangebyscore(self, name, min, max,
-            start=None, num=None, withscores=False):
+    def zrangebyscore(self, name, min, max, desc=False, 
+			withscores=False, start=None, num=None):
         """
         Return a range of values from the sorted set ``name`` with scores
         between ``min`` and ``max``.
 
-        If ``start`` and ``num`` are specified, then return a slice
-        of the range.
+        ``desc`` indicates to sort in descending order.
 
         ``withscores`` indicates to return the scores along with the values.
-        The return type is a list of (value, score) pairs
+        The return type is a list of (value, score) pairs.
+
+        If ``start`` and ``num`` are specified, then return a slice
+        of the range.
         """
+		if desc:
+			return self.zrevrangebyscore(name, min, max, withscores, start, num)
         if (start is not None and num is None) or \
                 (num is not None and start is None):
             raise RedisError("``start`` and ``num`` must both be specified")
@@ -1027,7 +1031,7 @@ class Redis(threading.local):
         return self.execute_command(*pieces, **{'withscores': withscores})
     
     def zrevrangebyscore(self, name, min, max,
-            start=None, num=None, withscores=False):
+            withscores=False, start=None, num=None):
         """
         Return a range of values from the sorted set ``name`` with scores
         between ``min`` and ``max`` in descending order.
