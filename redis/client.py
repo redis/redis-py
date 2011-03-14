@@ -287,6 +287,7 @@ class Redis(threading.local):
         connection object calls this method to authenticate and select
         the appropriate database.
         """
+        self.subscribed = False
         if self.connection.password:
             if not self.execute_command('AUTH', self.connection.password):
                 raise AuthenticationError("Invalid Password")
