@@ -1,5 +1,13 @@
+* 2.2.4 (in-development)
+    * WARNING: Potential backwards incompatible change - Changed order of
+      parameters of ZREVRANGEBYSCORE to match those of the actual Redis command.
+      This is only backwards-incompatible if you were passing max and min via
+      keyword args. If passing by normal args, nothing in user code should have
+      to change. Thanks Stéphane Angel for the fix.
+    * Fixed INFO to properly parse the Redis data correctly for both 2.2.x and
+      2.3+. Thanks Stéphane Angel for the fix.
 * 2.2.3
-    * Added support for Hiredis. To use, simply "pip install hiredis" or 
+    * Added support for Hiredis. To use, simply "pip install hiredis" or
       "easy_install hiredis". Thanks for Pieter Noordhuis for the hiredis-py
       bindings and the patch to redis-py.
     * The connection class is chosen based on whether hiredis is installed
