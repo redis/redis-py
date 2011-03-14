@@ -12,6 +12,8 @@
     * Broke out some code that was Python 2.4 incompatible. redis-py should
       now be useable on 2.4, but this hasn't actually been tested. Thanks
       Dan Colish for the patch.
+    * Optimized some code using izip and islice. Should have a pretty good
+      speed up on larger data sets. Thanks Dan Colish.
 * 2.2.3
     * Added support for Hiredis. To use, simply "pip install hiredis" or
       "easy_install hiredis". Thanks for Pieter Noordhuis for the hiredis-py
