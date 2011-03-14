@@ -1332,6 +1332,9 @@ class Pipeline(Redis):
     def select(self, *args, **kwargs):
         raise RedisError("Cannot select a different database from a pipeline")
 
+class LockError(RedisError):
+    "Errors thrown from the Lock"
+    pass
 
 class Lock(object):
     """
@@ -1342,7 +1345,7 @@ class Lock(object):
     multiple clients play nicely together.
     """
 
-    LOCK_FOREVER = 2**31+1 # 1 past max unix time
+    LOCK_FOREVER = float(2**31+1) # 1 past max unix time
 
     def __init__(self, redis, name, timeout=None, sleep=0.1):
         """
@@ -1365,6 +1368,8 @@ class Lock(object):
         self.acquired_until = None
         self.timeout = timeout
         self.sleep = sleep
+        if self.timeout and self.sleep > self.timeout:
+            raise LockError("'sleep' must be less than 'timeout'")
 
     def __enter__(self):
         return self.acquire()
@@ -1388,15 +1393,16 @@ class Lock(object):
                 timeout_at = unixtime + timeout
             else:
                 timeout_at = Lock.LOCK_FOREVER
+            timeout_at = float(timeout_at)
             if self.redis.setnx(self.name, timeout_at):
                 self.acquired_until = timeout_at
                 return True
             # We want blocking, but didn't acquire the lock
             # check to see if the current lock is expired
-            existing = long(self.redis.get(self.name) or 1)
+            existing = float(self.redis.get(self.name) or 1)
             if existing < unixtime:
                 # the previous lock is expired, attempt to overwrite it
-                existing = long(self.redis.getset(self.name, timeout_at) or 1)
+                existing = float(self.redis.getset(self.name, timeout_at) or 1)
                 if existing < unixtime:
                     # we successfully acquired the lock
                     self.acquired_until = timeout_at
@@ -1409,7 +1415,7 @@ class Lock(object):
         "Releases the already acquired lock"
         if self.acquired_until is None:
             raise ValueError("Cannot release an unlocked lock")
-        existing = long(self.redis.get(self.name) or 1)
+        existing = float(self.redis.get(self.name) or 1)
         # if the lock time is in the future, delete the lock
         if existing >= self.acquired_until:
             self.redis.delete(self.name)
