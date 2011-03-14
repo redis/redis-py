@@ -57,8 +57,8 @@ class BaseConnection(object):
         except socket.error, e:
             if e.args[0] == errno.EPIPE:
                 self.disconnect()
-            if isinstance(e.args, basestring):
-                _errno, errmsg = 'UNKNOWN', e.args
+            if len(e.args) == 1:
+                _errno, errmsg = 'UNKNOWN', e.args[0]
             else:
                 _errno, errmsg = e.args
             raise ConnectionError("Error %s while writing to socket. %s." % \
