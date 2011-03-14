@@ -593,14 +593,14 @@ class Redis(threading.local):
         "Returns the type of key ``name``"
         return self.execute_command('TYPE', name)
 
-    def watch(self, name):
+    def watch(self, *names):
         """
-        Watches the value at key ``name``, or None of the key doesn't exist
+        Watches the values at keys ``names``, or None if the key doesn't exist
         """
         if self.subscribed:
             raise RedisError("Can't call 'watch' from a pipeline'")
 
-        return self.execute_command('WATCH', name)
+        return self.execute_command('WATCH', *names)
 
     def unwatch(self):
         """

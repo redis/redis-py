@@ -255,11 +255,13 @@ class ServerCommandsTestCase(unittest.TestCase):
 
     def test_watch(self):
         self.client.set("a", 1)
+        self.client.set("b", 2)
 
-        self.client.watch("a")
+        self.client.watch("a", "b")
         pipeline = self.client.pipeline()
         pipeline.set("a", 2)
-        self.assertEquals(pipeline.execute(), [True])
+        pipeline.set("b", 3)
+        self.assertEquals(pipeline.execute(), [True, True])
 
         self.client.set("b", 1)
         self.client.watch("b")
