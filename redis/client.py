@@ -1153,7 +1153,7 @@ class Redis(threading.local):
         """
         items = []
         if len(mapping) == 0:
-            raise DataError
+            raise DataError("'hmset' with 'mapping' of length 0")
         for pair in mapping.iteritems():
             items.extend(pair)
         return self.execute_command('HMSET', name, *items)
