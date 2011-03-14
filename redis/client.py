@@ -673,17 +673,17 @@ class Redis(threading.local):
         end of the list
         """
         return self.execute_command('LINDEX', name, index)
-    
+
     def linsert(self, name, where, refvalue, value):
         """
         Insert ``value`` in list ``name`` either immediately before or after
         [``where``] ``refvalue``
-        
+
         Returns the new length of the list on success or -1 if ``refvalue``
         is not in the list.
         """
         return self.execute_command('LINSERT', name, where, refvalue, value)
-    
+
     def llen(self, name):
         "Return the length of the list ``name``"
         return self.execute_command('LLEN', name)
@@ -695,7 +695,7 @@ class Redis(threading.local):
     def lpush(self, name, value):
         "Push ``value`` onto the head of the list ``name``"
         return self.execute_command('LPUSH', name, value)
-    
+
     def lpushx(self, name, value):
         "Push ``value`` onto the head of the list ``name`` if ``name`` exists"
         return self.execute_command('LPUSHX', name, value)
@@ -1026,8 +1026,8 @@ class Redis(threading.local):
         if withscores:
             pieces.append('withscores')
         return self.execute_command(*pieces, **{'withscores': withscores})
-    
-    def zrevrangebyscore(self, name, min, max,
+
+    def zrevrangebyscore(self, name, max, min,
             start=None, num=None, withscores=False):
         """
         Return a range of values from the sorted set ``name`` with scores

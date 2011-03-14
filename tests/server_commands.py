@@ -888,17 +888,17 @@ class ServerCommandsTestCase(unittest.TestCase):
         # real logic
         self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3, 'a4': 4, 'a5': 5})
         self.assertEquals(
-            self.client.zrevrangebyscore('a', 2, 4),
+            self.client.zrevrangebyscore('a', 4, 2),
             ['a4', 'a3', 'a2'])
         self.assertEquals(
-            self.client.zrevrangebyscore('a', 2, 4, start=1, num=2),
+            self.client.zrevrangebyscore('a', 4, 2, start=1, num=2),
             ['a3', 'a2'])
         self.assertEquals(
-            self.client.zrevrangebyscore('a', 2, 4, withscores=True),
+            self.client.zrevrangebyscore('a', 4, 2, withscores=True),
             [('a4', 4.0), ('a3', 3.0), ('a2', 2.0)])
         # a non existant key should return empty list
         self.assertEquals(
-            self.client.zrevrangebyscore('b', 0, 1, withscores=True),
+            self.client.zrevrangebyscore('b', 1, 0, withscores=True),
             [])
 
     def test_zrevrank(self):
