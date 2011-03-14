@@ -16,6 +16,7 @@
       speed up on larger data sets. Thanks Dan Colish.
     * Better error handling when submitting an empty mapping to HMSET. Thanks
       Dan Colish.
+    * Subscription status is now reset after every (re)connection.
 * 2.2.3
     * Added support for Hiredis. To use, simply "pip install hiredis" or
       "easy_install hiredis". Thanks for Pieter Noordhuis for the hiredis-py
