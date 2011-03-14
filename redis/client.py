@@ -4,8 +4,15 @@ import time
 import warnings
 from itertools import chain, imap, islice, izip
 from redis.connection import ConnectionPool, Connection
-from redis.exceptions import ConnectionError, ResponseError, WatchError
-from redis.exceptions import RedisError, AuthenticationError
+from redis.exceptions import (
+    AuthenticationError,
+    ConnectionError,
+    DataError,
+    RedisError,
+    ResponseError,
+    WatchError,
+)
+
 
 def list_or_args(command, keys, args):
     # returns a single list combining keys and args
@@ -1145,6 +1152,8 @@ class Redis(threading.local):
         in the hash ``name``
         """
         items = []
+        if len(mapping) == 0:
+            raise DataError
         for pair in mapping.iteritems():
             items.extend(pair)
         return self.execute_command('HMSET', name, *items)

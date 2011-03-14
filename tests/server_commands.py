@@ -994,7 +994,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         d = {'a': '1', 'b': '2', 'c': '3'}
         self.assert_(self.client.hmset('foo', d))
         self.assertEqual(self.client.hgetall('foo'), d)
-        self.assertRaises(redis.ResponseError, self.client.hmset, 'foo', {})
+        self.assertRaises(redis.DataError, self.client.hmset, 'foo', {})
 
     def test_hmget(self):
         d = {'a': 1, 'b': 2, 'c': 3}

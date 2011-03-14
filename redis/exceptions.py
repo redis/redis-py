@@ -15,7 +15,7 @@ class ResponseError(RedisError):
 class InvalidResponse(RedisError):
     pass
 
-class InvalidData(RedisError):
+class DataError(RedisError):
     pass
 
 class WatchError(RedisError):
