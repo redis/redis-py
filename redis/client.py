@@ -2,7 +2,7 @@ import datetime
 import threading
 import time
 import warnings
-from itertools import chain, imap
+from itertools import chain, imap, islice, izip
 from redis.connection import ConnectionPool, Connection
 from redis.exceptions import ConnectionError, ResponseError, WatchError
 from redis.exceptions import RedisError, AuthenticationError
@@ -75,7 +75,8 @@ def parse_info(response):
 
 def pairs_to_dict(response):
     "Create a dict given a list of key/value pairs"
-    return dict(zip(response[::2], response[1::2]))
+    return dict(izip(islice(response, None, None, 2),
+                    islice(response, 1, None, 2)))
 
 def zset_score_pairs(response, **options):
     """
@@ -84,7 +85,8 @@ def zset_score_pairs(response, **options):
     """
     if not response or not options['withscores']:
         return response
-    return zip(response[::2], map(float, response[1::2]))
+    return list(izip(islice(response, None, None, 2),
+                     imap(float, islice(response, 1, None, 2))))
 
 def int_or_none(response):
     if response is None:
@@ -1300,7 +1302,7 @@ class Pipeline(Redis):
                 "pipeline execution")
         # Run any callbacks for the commands run in the pipeline
         data = []
-        for r, cmd in zip(response, commands):
+        for r, cmd in izip(response, commands):
             if not isinstance(r, Exception):
                 if cmd[0] in self.RESPONSE_CALLBACKS:
                     r = self.RESPONSE_CALLBACKS[cmd[0]](r, **cmd[2])
