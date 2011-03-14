@@ -65,7 +65,10 @@ def parse_info(response):
         if line and not line.startswith('#'):
             key, value = line.split(':')
             try:
-                info[key] = float(value) if '.' in value else int(value)
+                if '.' in value:
+                    info[key] = float(value)
+                else:
+                    info[key] = int(value)
             except ValueError:
                 info[key] = get_value(value)
     return info
