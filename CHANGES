@@ -6,6 +6,8 @@
       to change. Thanks Stéphane Angel for the fix.
     * Fixed INFO to properly parse the Redis data correctly for both 2.2.x and
       2.3+. Thanks Stéphane Angel for the fix.
+    * Lock objects now store their timeout value as a float. This allows floats
+      to be used as timeout values. No changes to existing code required.
 * 2.2.3
     * Added support for Hiredis. To use, simply "pip install hiredis" or
       "easy_install hiredis". Thanks for Pieter Noordhuis for the hiredis-py
