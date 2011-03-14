@@ -5,6 +5,7 @@ from redis.exceptions import (
     ConnectionError,
     DataError,
     InvalidResponse,
+    PubSubError,
     RedisError,
     ResponseError,
     )
@@ -15,5 +16,5 @@ __version__ = '2.2.3'
 __all__ = [
     'Redis', 'ConnectionPool',
     'RedisError', 'ConnectionError', 'ResponseError', 'AuthenticationError',
-    'InvalidResponse', 'DataError',
+    'InvalidResponse', 'DataError', 'PubSubError',
     ]

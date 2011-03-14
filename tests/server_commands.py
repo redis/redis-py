@@ -1216,6 +1216,7 @@ class ServerCommandsTestCase(unittest.TestCase):
                 time.sleep(0.01)
 
         messages = []
+        self.assertRaises(redis.PubSubError, r.set, 'foo', 'bar')
         # should receive a message for each subscribe/unsubscribe command
         # plus a message for each iteration of the loop * num channels
         # we hide the data messages that tell the client to unsubscribe

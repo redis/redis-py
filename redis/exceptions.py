@@ -18,5 +18,9 @@ class InvalidResponse(RedisError):
 class DataError(RedisError):
     pass
 
+class PubSubError(RedisError):
+    pass
+
 class WatchError(RedisError):
     pass
+

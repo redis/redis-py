@@ -8,6 +8,7 @@ from redis.exceptions import (
     AuthenticationError,
     ConnectionError,
     DataError,
+    PubSubError,
     RedisError,
     ResponseError,
     WatchError,
@@ -229,8 +230,8 @@ class Redis(threading.local):
     def _execute_command(self, command_name, command, **options):
         subscription_command = command_name in self.SUBSCRIPTION_COMMANDS
         if self.subscribed and not subscription_command:
-            raise RedisError("Cannot issue commands other than SUBSCRIBE and "
-                "UNSUBSCRIBE while channels are open")
+            raise PubSubError("Cannot issue commands other than SUBSCRIBE and "
+                              "UNSUBSCRIBE while channels are open")
         try:
             self.connection.send(command, self)
             if subscription_command:
@@ -319,7 +320,7 @@ class Redis(threading.local):
     def shutdown(self):
         "Shutdown the server"
         if self.subscribed:
-            raise RedisError("Can't call 'shutdown' from a pipeline'")
+            raise PubSubError("Can't call 'shutdown' when 'subscribed'")
         try:
             self.execute_command('SHUTDOWN')
         except ConnectionError:
@@ -610,7 +611,7 @@ class Redis(threading.local):
         Watches the values at keys ``names``, or None if the key doesn't exist
         """
         if self.subscribed:
-            raise RedisError("Can't call 'watch' from a pipeline'")
+            raise PubSubError("Can't call 'watch' when 'subscribed'")
 
         return self.execute_command('WATCH', *names)
 
@@ -619,7 +620,7 @@ class Redis(threading.local):
         Unwatches the value at key ``name``, or None of the key doesn't exist
         """
         if self.subscribed:
-            raise RedisError("Can't call 'unwatch' from a pipeline'")
+            raise PubSubError("Can't call 'unwatch' when 'subscribed'")
 
         return self.execute_command('UNWATCH')
 
