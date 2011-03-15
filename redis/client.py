@@ -48,7 +48,7 @@ def timestamp_to_datetime(response):
     return datetime.datetime.fromtimestamp(response)
 
 def string_keys_to_dict(key_string, callback):
-    return dict([(key, callback) for key in key_string.split()])
+    return dict.fromkeys(key_string.split(), callback)
 
 def dict_merge(*dicts):
     merged = {}
@@ -83,8 +83,8 @@ def parse_info(response):
 
 def pairs_to_dict(response):
     "Create a dict given a list of key/value pairs"
-    return dict(izip(islice(response, None, None, 2),
-                    islice(response, 1, None, 2)))
+    it = iter(response)
+    return dict(izip(it, it))
 
 def zset_score_pairs(response, **options):
     """
@@ -1091,9 +1091,7 @@ class Redis(threading.local):
     def _zaggregate(self, command, dest, keys, aggregate=None):
         pieces = [command, dest, len(keys)]
         if isinstance(keys, dict):
-            items = keys.items()
-            keys = [i[0] for i in items]
-            weights = [i[1] for i in items]
+            keys, weights = keys.keys(), keys.values()
         else:
             weights = None
         pieces.extend(keys)
@@ -1153,9 +1151,9 @@ class Redis(threading.local):
         Sets each key in the ``mapping`` dict to its corresponding value
         in the hash ``name``
         """
-        items = []
-        if len(mapping) == 0:
+        if not mapping:
             raise DataError("'hmset' with 'mapping' of length 0")
+        items = []
         for pair in mapping.iteritems():
             items.extend(pair)
         return self.execute_command('HMSET', name, *items)
