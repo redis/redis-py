@@ -93,8 +93,8 @@ def zset_score_pairs(response, **options):
     """
     if not response or not options['withscores']:
         return response
-    return list(izip(islice(response, None, None, 2),
-                     imap(float, islice(response, 1, None, 2))))
+    it = iter(response)
+    return zip(it, imap(float, it))
 
 def int_or_none(response):
     if response is None:
