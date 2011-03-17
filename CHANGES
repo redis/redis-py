@@ -1,4 +1,4 @@
-* 2.2.4 (in-development)
+* 2.2.4
     * WARNING: Potential backwards incompatible change - Changed order of
       parameters of ZREVRANGEBYSCORE to match those of the actual Redis command.
       This is only backwards-incompatible if you were passing max and min via
