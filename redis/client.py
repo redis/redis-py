@@ -2,7 +2,17 @@ import datetime
 import threading
 import time
 import warnings
-from itertools import chain, imap, islice, izip
+from itertools import chain, islice
+
+from redis.compat import (
+    basestring,
+    bytes,
+    imap,
+    izip,
+    long,
+    MAJOR_VERSION,
+    unicode,
+    )
 from redis.connection import ConnectionPool, Connection
 from redis.exceptions import (
     AuthenticationError,
@@ -246,8 +256,19 @@ class Redis(threading.local):
 
     def execute_command(self, *args, **options):
         "Sends the command to the redis server and returns it's response"
-        cmds = ['$%s\r\n%s\r\n' % (len(enc_value), enc_value)
-                for enc_value in imap(self.encode, args)]
+        cmds = []
+        if MAJOR_VERSION >= 3:
+            for enc_value in imap(self.encode, args):
+                if isinstance(enc_value, bytes):
+                    cmds += ['$%s\r\n%s\r\n' % (len(enc_value),
+                                                enc_value.decode())]
+                else:
+                    cmds += ['$%s\r\n%s\r\n' % (len(enc_value),
+                                                 enc_value)]
+        else:
+            for enc_value in imap(self.encode, args):
+                cmds += ['$%s\r\n%s\r\n' % (len(enc_value),
+                                            enc_value)]
         return self._execute_command(
             args[0],
             '*%s\r\n%s' % (len(cmds), ''.join(cmds)),
@@ -263,7 +284,7 @@ class Redis(threading.local):
 
     def encode(self, value):
         "Encode ``value`` using the instance's charset"
-        if isinstance(value, str):
+        if isinstance(value, bytes):
             return value
         if isinstance(value, unicode):
             return value.encode(self.encoding, self.errors)
@@ -481,7 +502,7 @@ class Redis(threading.local):
     def mset(self, mapping):
         "Sets each key in the ``mapping`` dict to its corresponding value"
         items = []
-        for pair in mapping.iteritems():
+        for pair in mapping.items():
             items.extend(pair)
         return self.execute_command('MSET', *items)
 
@@ -491,7 +512,7 @@ class Redis(threading.local):
         none of the keys are already set
         """
         items = []
-        for pair in mapping.iteritems():
+        for pair in mapping.items():
             items.extend(pair)
         return self.execute_command('MSETNX', *items)
 
@@ -1155,7 +1176,7 @@ class Redis(threading.local):
         items = []
         if len(mapping) == 0:
             raise DataError("'hmset' with 'mapping' of length 0")
-        for pair in mapping.iteritems():
+        for pair in mapping.items():
             items.extend(pair)
         return self.execute_command('HMSET', name, *items)
 

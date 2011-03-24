@@ -1,7 +1,10 @@
 import errno
 import socket
+import sys
 import threading
+from redis.compat import long, MAJOR_VERSION
 from redis.exceptions import ConnectionError, ResponseError, InvalidResponse
+
 
 class BaseConnection(object):
     "Manages TCP communication to and from a Redis server"
@@ -23,7 +26,8 @@ class BaseConnection(object):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(self.socket_timeout)
             sock.connect((self.host, self.port))
-        except socket.error, e:
+        except socket.error:
+            e = sys.exc_info()[1]
             # args for socket.error can either be (errno, "message")
             # or just "message"
             if len(e.args) == 1:
@@ -35,7 +39,11 @@ class BaseConnection(object):
             raise ConnectionError(error_message)
         sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
         self._sock = sock
-        self._fp = sock.makefile('r')
+        if MAJOR_VERSION >= 3:
+            fmode = 'rb'
+        else:
+            fmode = 'r'
+        self._fp = sock.makefile(fmode)
         redis_instance._setup_connection()
 
     def disconnect(self):
@@ -53,8 +61,11 @@ class BaseConnection(object):
         "Send ``command`` to the Redis server. Return the result."
         self.connect(redis_instance)
         try:
+            if MAJOR_VERSION >= 3:
+                command = command.encode()
             self._sock.sendall(command)
-        except socket.error, e:
+        except socket.error:
+            e = sys.exc_info()[1]
             if e.args[0] == errno.EPIPE:
                 self.disconnect()
             if len(e.args) == 1:
@@ -71,9 +82,14 @@ class BaseConnection(object):
         """
         try:
             if length is not None:
-                return self._fp.read(length)
-            return self._fp.readline()
-        except socket.error, e:
+                result = self._fp.read(length)
+            else:
+                result = self._fp.readline()
+            if sys.version_info.major >= 3:
+                result = result.decode()
+            return result
+        except socket.error:
+            e = sys.exc_info()[1]
             self.disconnect()
             if e.args and e.args[0] == errno.EAGAIN:
                 raise ConnectionError("Error while reading from socket: %s" % \
@@ -82,7 +98,7 @@ class BaseConnection(object):
 
 class PythonConnection(BaseConnection):
     def read_response(self, command_name, catch_errors):
-        response = self.read()[:-2] # strip last two characters (\r\n)
+        response = self.read().strip()  # strip last two characters (\r\n)
         if not response:
             self.disconnect()
             raise ConnectionError("Socket closed on remote end")
@@ -129,7 +145,8 @@ class PythonConnection(BaseConnection):
                         data.append(
                             self.read_response(command_name, catch_errors)
                             )
-                    except Exception, e:
+                    except Exception:
+                        e = sys.exc_info()[1]
                         data.append(e)
                 return data
 

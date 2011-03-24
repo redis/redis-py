@@ -14,18 +14,17 @@ class ConnectionPoolTestCase(unittest.TestCase):
         # if one of them switches, they should have
         # separate conncetion objects
         r2.select(db=10, host='localhost', port=6379)
-        self.assertNotEqual(r1.connection, r2.connection)
+        self.assertNotEqual(id(r1.connection), id(r2.connection))
 
         conns = [r1.connection, r2.connection]
-        conns.sort()
+        conns.sort(key=lambda x: id(x))
 
         # but returning to the original state shares the object again
         r2.select(db=9, host='localhost', port=6379)
         self.assertEquals(r1.connection, r2.connection)
 
         # the connection manager should still have just 2 connections
-        mgr_conns = pool.get_all_connections()
-        mgr_conns.sort()
+        mgr_conns = sorted(pool.get_all_connections(), key=lambda x: id(x))
         self.assertEquals(conns, mgr_conns)
 
     def test_threaded_workers(self):
@@ -40,7 +39,7 @@ class ConnectionPoolTestCase(unittest.TestCase):
 
         def _keys_worker():
             for i in range(50):
-                _ = r.keys()
+                _ = list(r.keys())
                 time.sleep(0.01)
 
         t1 = threading.Thread(target=_info_worker)
@@ -50,4 +49,3 @@ class ConnectionPoolTestCase(unittest.TestCase):
 
         for i in [t1, t2]:
             i.join()
-
