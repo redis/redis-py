@@ -1,3 +1,5 @@
+* 2.2.5 (in development)
+    * Support Jython, fixing #97.
 * 2.2.4
     * WARNING: Potential backwards incompatible change - Changed order of
       parameters of ZREVRANGEBYSCORE to match those of the actual Redis command.
