@@ -3,11 +3,6 @@ import socket
 import threading
 from redis.exceptions import ConnectionError, ResponseError, InvalidResponse
 
-# Jython doesn't define socket.SOL_TCP, but works fine with it's value, 6
-try:
-    SOL_TCP = socket.SOL_TCP
-except AttributeError:
-    SOL_TCP = 6
 
 class BaseConnection(object):
     "Manages TCP communication to and from a Redis server"
@@ -39,7 +34,7 @@ class BaseConnection(object):
                 error_message = "Error %s connecting %s:%s. %s." % \
                     (e.args[0], self.host, self.port, e.args[1])
             raise ConnectionError(error_message)
-        sock.setsockopt(SOL_TCP, socket.TCP_NODELAY, 1)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self._sock = sock
         self._fp = sock.makefile('r')
         redis_instance._setup_connection()
