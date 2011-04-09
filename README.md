@@ -173,13 +173,20 @@ API Reference
   Negative indexes are supported and will return an item at the
   end of the list
 
+### linsert(self, name, where, refvalue, value)
+  Insert _value_ in list _name_ either immediately before or after
+  (_where_) _refvalue_.
+  
+  Returns the new length of the list on success or -1 if _refvalue_
+  is not in the list.
+
 ### listen(self)
   Listen for messages on channels this client has been subscribed to
 
 ### llen(self, name)
   Return the length of the list _name_
 
-###lock(self, name, timeout=None, sleep=0.10000000000000001)
+### lock(self, name, timeout=None, sleep=0.10000000000000001)
   Return a new Lock object using key _name_ that mimics
   the behavior of threading.Lock.
   
