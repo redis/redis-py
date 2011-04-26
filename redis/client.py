@@ -452,9 +452,9 @@ class Redis(threading.local):
         Return the value at key ``name``, raises a KeyError if the key
         doesn't exist.
         """
-        _name = self.get(name)
-        if _name:
-            return _name
+        value = self.get(name)
+        if value:
+            return value
         else:
             raise KeyError(name)
 

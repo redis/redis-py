@@ -17,7 +17,7 @@ class LockTestCase(unittest.TestCase):
         self.assert_(lock.acquire())
         self.assertEquals(self.client['foo'], str(Lock.LOCK_FOREVER))
         lock.release()
-        self.assertEquals(self.client['foo'], None)
+        self.assertEquals(self.client.get('foo'), None)
 
     def test_competing_locks(self):
         lock1 = self.client.lock('foo')
@@ -50,7 +50,7 @@ class LockTestCase(unittest.TestCase):
     def test_context_manager(self):
         with self.client.lock('foo'):
             self.assertEquals(self.client['foo'], str(Lock.LOCK_FOREVER))
-        self.assertEquals(self.client['foo'], None)
+        self.assertEquals(self.client.get('foo'), None)
 
     def test_float_timeout(self):
         lock1 = self.client.lock('foo', timeout=1.5)
