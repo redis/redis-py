@@ -63,11 +63,21 @@ def parse_info(response):
             return value
         sub_dict = {}
         for item in value.split(','):
-            k, v = item.rsplit('=', 1)
             try:
-                sub_dict[k] = int(v)
+                k, v = item.rsplit('=', 1)
+                try:
+                    sub_dict[k] = int(v)
+                except ValueError:
+                    sub_dict[k] = v
             except ValueError:
-                sub_dict[k] = v
+                if item[:2] == ">=":
+                    k, v = item[2:].split("=")
+                    try:
+                        sub_dict[k] = int(v)
+                    except ValueError:
+                        sub_dict[k] = v
+                else:
+                    raise
         return sub_dict
     for line in response.splitlines():
         if line and not line.startswith('#'):
