@@ -97,6 +97,11 @@ class PythonConnection(BaseConnection):
         if byte == '-':
             if response.startswith('ERR '):
                 response = response[4:]
+            if response.startswith('LOADING '):
+                # If we're loading the dataset into memory, kill the socket
+                # so we re-initialize (and re-SELECT) next time.
+                self.disconnect()
+                response = response[8:]
             raise ResponseError(response)
         # single value
         elif byte == '+':
