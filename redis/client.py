@@ -453,10 +453,20 @@ class Redis(threading.local):
 
     def get(self, name):
         """
-        Return the value at key ``name``, or None of the key doesn't exist
+        Return the value at key ``name``, or None if the key doesn't exist
         """
         return self.execute_command('GET', name)
-    __getitem__ = get
+
+    def __getitem__(self, name):
+        """
+        Return the value at key ``name``, raises a KeyError if the key
+        doesn't exist.
+        """
+        value = self.get(name)
+        if value:
+            return value
+        else:
+            raise KeyError(name)
 
     def getbit(self, name, offset):
         "Returns a boolean indicating the value of ``offset`` in ``name``"

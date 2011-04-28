@@ -41,6 +41,7 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_getitem_and_setitem(self):
         self.client['a'] = 'bar'
         self.assertEquals(self.client['a'], 'bar')
+        self.assertRaises(KeyError, self.client.__getitem__, 'b')
 
     def test_delete(self):
         self.assertEquals(self.client.delete('a'), False)
@@ -50,7 +51,7 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_delitem(self):
         self.client['a'] = 'foo'
         del self.client['a']
-        self.assertEquals(self.client['a'], None)
+        self.assertEquals(self.client.get('a'), None)
 
     def test_config_get(self):
         data = self.client.config_get()
@@ -181,7 +182,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(not self.client.msetnx(d2))
         for k,v in d.iteritems():
             self.assertEquals(self.client[k], v)
-        self.assertEquals(self.client['d'], None)
+        self.assertEquals(self.client.get('d'), None)
 
     def test_randomkey(self):
         self.assertEquals(self.client.randomkey(), None)
@@ -193,7 +194,7 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_rename(self):
         self.client['a'] = '1'
         self.assert_(self.client.rename('a', 'b'))
-        self.assertEquals(self.client['a'], None)
+        self.assertEquals(self.client.get('a'), None)
         self.assertEquals(self.client['b'], '1')
 
     def test_renamenx(self):

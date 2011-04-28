@@ -1,5 +1,13 @@
 * 2.2.5 (in development)
     * Support Jython, fixing #97. Thanks to Adam Vandenberg for the patch.
+    * Using __getitem__ now properly raises a KeyError when the key is not
+      found. Thanks Ionuț Arțăriși for the patch.
+    * Newer Redis versions return a LOADING message for some commands while
+      the database is loading from disk during server start. This could cause
+      problems with SELECT. We now force a socket disconnection prior to
+      raising a ResponseError so subsuquent connections have to reconnect and
+      re-select the appropriate database. Thanks to Benjamin Anderson for
+      finding this and fixing.
 * 2.2.4
     * WARNING: Potential backwards incompatible change - Changed order of
       parameters of ZREVRANGEBYSCORE to match those of the actual Redis command.
