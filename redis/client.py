@@ -317,10 +317,6 @@ class Redis(threading.local):
                 if self.connection is None:
                     raise RedisError("A valid port must be specified")
                 port = self.connection.port
-        #else:
-        #    if self.connection is None:
-        #        raise RedisError("A valid path must be specified: %s" % path)
-        #    path = self.connection.path
 
         self.connection = self.get_connection(
             host, port, db, password, socket_timeout, path)
