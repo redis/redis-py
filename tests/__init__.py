@@ -3,6 +3,7 @@ from server_commands import ServerCommandsTestCase
 from connection_pool import ConnectionPoolTestCase
 from pipeline import PipelineTestCase
 from lock import LockTestCase
+from server_commands_unix_domain_sockets import ServerCommandsUDSTestCase
 
 use_hiredis = False
 try:
@@ -14,6 +15,7 @@ except ImportError:
 def all_tests():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(ServerCommandsTestCase))
+    suite.addTest(unittest.makeSuite(ServerCommandsUDSTestCase))
     suite.addTest(unittest.makeSuite(ConnectionPoolTestCase))
     suite.addTest(unittest.makeSuite(PipelineTestCase))
     suite.addTest(unittest.makeSuite(LockTestCase))
