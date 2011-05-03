@@ -176,13 +176,13 @@ class Redis(threading.local):
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
                  connection_pool=None,
-                 charset='utf-8', errors='strict'):
+                 charset='utf-8', errors='strict', path=None):
         self.encoding = charset
         self.errors = errors
         self.connection = None
         self.subscribed = False
         self.connection_pool = connection_pool and connection_pool or ConnectionPool()
-        self.select(db, host, port, password, socket_timeout)
+        self.select(db, host, port, password, socket_timeout, path)
 
     #### Legacty accessors of connection information ####
     def _get_host(self):
@@ -271,10 +271,10 @@ class Redis(threading.local):
         return str(value)
 
     #### CONNECTION HANDLING ####
-    def get_connection(self, host, port, db, password, socket_timeout):
+    def get_connection(self, host, port, db, password, socket_timeout, path):
         "Returns a connection object"
         conn = self.connection_pool.get_connection(
-            host, port, db, password, socket_timeout)
+            host, port, db, password, socket_timeout, path)
         # if for whatever reason the connection gets a bad password, make
         # sure a subsequent attempt with the right password makes its way
         # to the connection
@@ -294,29 +294,32 @@ class Redis(threading.local):
         self.execute_command('SELECT', self.connection.db)
 
     def select(self, db, host=None, port=None, password=None,
-            socket_timeout=None):
+            socket_timeout=None, path=None):
         """
         Switch to a different Redis connection.
 
         If the host and port aren't provided and there's an existing
         connection, use the existing connection's host and port instead.
+        
+        It takes in account if it's a unix domain socket connection and therefore a path exists
 
         Note this method actually replaces the underlying connection object
         prior to issuing the SELECT command.  This makes sure we protect
         the thread-safe connections
         """
-        if host is None:
-            if self.connection is None:
-                raise RedisError("A valid hostname or IP address "
-                    "must be specified")
-            host = self.connection.host
-        if port is None:
-            if self.connection is None:
-                raise RedisError("A valid port must be specified")
-            port = self.connection.port
+        if path is None:
+            if host is None:
+                if self.connection is None:
+                    raise RedisError("A valid hostname or IP address "
+                        "must be specified")
+                host = self.connection.host
+            if port is None:
+                if self.connection is None:
+                    raise RedisError("A valid port must be specified")
+                port = self.connection.port
 
         self.connection = self.get_connection(
-            host, port, db, password, socket_timeout)
+            host, port, db, password, socket_timeout, path)
 
     def shutdown(self):
         "Shutdown the server"

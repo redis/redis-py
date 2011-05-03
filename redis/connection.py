@@ -3,11 +3,10 @@ import socket
 import threading
 from redis.exceptions import ConnectionError, ResponseError, InvalidResponse
 
-
 class BaseConnection(object):
-    "Manages TCP communication to and from a Redis server"
+    "Manages TCP and Unix Domain Socket communication to and from a Redis server. If path is present, AF_UNIX will be used to connect."
     def __init__(self, host='localhost', port=6379, db=0, password=None,
-                 socket_timeout=None):
+                 socket_timeout=None, path=None):
         self.host = host
         self.port = port
         self.db = db
@@ -15,26 +14,35 @@ class BaseConnection(object):
         self.socket_timeout = socket_timeout
         self._sock = None
         self._fp = None
+        self._path = path
 
     def connect(self, redis_instance):
         "Connects to the Redis server if not already connected"
         if self._sock:
             return
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(self.socket_timeout)
-            sock.connect((self.host, self.port))
+            if self._path == None: 
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(self.socket_timeout)
+                sock.connect((self.host, self.port))
+            else:
+                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                sock.connect(self._path)
         except socket.error, e:
             # args for socket.error can either be (errno, "message")
             # or just "message"
-            if len(e.args) == 1:
-                error_message = "Error connecting to %s:%s. %s." % \
-                    (self.host, self.port, e.args[0])
+            if (self._path == None):
+                if len(e.args) == 1:
+                    error_message = "Error connecting to %s:%s. %s." % \
+                        (self.host, self.port, e.args[0])
+                else:
+                    error_message = "Error %s connecting %s:%s. %s." % \
+                        (e.args[0], self.host, self.port, e.args[1])
             else:
-                error_message = "Error %s connecting %s:%s. %s." % \
-                    (e.args[0], self.host, self.port, e.args[1])
+                error_message("Error connecting to %s" % self.path)
             raise ConnectionError(error_message)
-        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        
+        if (self._path == None): sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self._sock = sock
         self._fp = sock.makefile('r')
         redis_instance._setup_connection()
@@ -185,14 +193,19 @@ class ConnectionPool(threading.local):
         "Create a unique key for the specified host, port and db"
         return '%s:%s:%s' % (host, port, db)
 
-    def get_connection(self, host, port, db, password, socket_timeout):
-        "Return a specific connection for the specified host, port and db"
-        key = self.make_connection_key(host, port, db)
+    def get_connection(self, host, port, db, password, socket_timeout, path):
+        "Return a specific connection for the specified host, port and db or path"
+        if (path == None): 
+            key = self.make_connection_key(host, port, db)
+        else:
+            key = self.make_connection_key("unix:", path, db)
         if key not in self.connections:
             self.connections[key] = self.connection_class(
-                host, port, db, password, socket_timeout)
+                host, port, db, password, socket_timeout, path)
         return self.connections[key]
 
     def get_all_connections(self):
         "Return a list of all connection objects the manager knows about"
         return self.connections.values()
+
+
