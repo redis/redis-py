@@ -228,7 +228,7 @@ class Redis(threading.local):
 
     #### COMMAND EXECUTION AND PROTOCOL PARSING ####
     def execute_command(self, *args, **options):
-        command_name = options.get('command_name', args[0])
+        command_name = args[0]
         subscription_command = command_name in self.SUBSCRIPTION_COMMANDS
         if self.subscribed and not subscription_command:
             raise PubSubError("Cannot issue commands other than SUBSCRIBE and "
@@ -1298,7 +1298,7 @@ class Pipeline(Redis):
         for r, cmd in izip(response, commands):
             if not isinstance(r, Exception):
                 args, options = cmd
-                command_name = options.get('command_name', args[0])
+                command_name = args[0]
                 if command_name in self.RESPONSE_CALLBACKS:
                     r = self.RESPONSE_CALLBACKS[command_name](r, **options)
             data.append(r)
@@ -1309,8 +1309,7 @@ class Pipeline(Redis):
         all_cmds = ''.join(starmap(self.connection.pack_command,
                                    [args for args, options in commands]))
         self.connection.send_packed_command(all_cmds)
-        return [self.parse_response(
-                    options.get('command_name', args[0]), **options)
+        return [self.parse_response(args[0], **options)
                 for args, options in commands]
 
     def execute(self):
