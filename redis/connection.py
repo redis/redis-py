@@ -131,12 +131,12 @@ class Connection(object):
             raise ConnectionError(error_message)
 
         self._sock = sock
+        self.on_connect()
+
+    def on_connect(self):
+        "Initialize the connection, authenticate and select a database"
         self._parser.on_connect(self)
 
-        self.setup_connection()
-
-    def setup_connection(self):
-        "Authenticates and Selects the appropriate database"
         # if a password is specified, authenticate
         if self.password:
             self.send_command('AUTH', self.password)
