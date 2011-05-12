@@ -1196,59 +1196,59 @@ class ServerCommandsTestCase(unittest.TestCase):
             ['vodka', 'milk', 'gin', 'apple juice'])
 
     # PUBSUB
-    def test_pubsub(self):
-        # create a new client to not polute the existing one
-        r = self.get_client()
-        channels = ('a1', 'a2', 'a3')
-        for c in channels:
-            r.subscribe(c)
-        # state variable should be flipped
-        self.assertEquals(r.subscribed, True)
+    # def test_pubsub(self):
+    #     # create a new client to not polute the existing one
+    #     r = self.get_client()
+    #     channels = ('a1', 'a2', 'a3')
+    #     for c in channels:
+    #         r.subscribe(c)
+    #     # state variable should be flipped
+    #     self.assertEquals(r.subscribed, True)
 
-        channels_to_publish_to = channels + ('a4',)
-        messages_per_channel = 4
-        def publish():
-            for i in range(messages_per_channel):
-                for c in channels_to_publish_to:
-                    self.client.publish(c, 'a message')
-                    time.sleep(0.01)
-            for c in channels_to_publish_to:
-                self.client.publish(c, 'unsubscribe')
-                time.sleep(0.01)
+    #     channels_to_publish_to = channels + ('a4',)
+    #     messages_per_channel = 4
+    #     def publish():
+    #         for i in range(messages_per_channel):
+    #             for c in channels_to_publish_to:
+    #                 self.client.publish(c, 'a message')
+    #                 time.sleep(0.01)
+    #         for c in channels_to_publish_to:
+    #             self.client.publish(c, 'unsubscribe')
+    #             time.sleep(0.01)
 
-        messages = []
-        self.assertRaises(redis.PubSubError, r.set, 'foo', 'bar')
-        # should receive a message for each subscribe/unsubscribe command
-        # plus a message for each iteration of the loop * num channels
-        # we hide the data messages that tell the client to unsubscribe
-        num_messages_to_expect = len(channels)*2 + \
-            (messages_per_channel*len(channels))
-        t = threading.Thread(target=publish)
-        t.start()
-        for msg in r.listen():
-            if msg['data'] == 'unsubscribe':
-                r.unsubscribe(msg['channel'])
-            else:
-                messages.append(msg)
+    #     messages = []
+    #     self.assertRaises(redis.PubSubError, r.set, 'foo', 'bar')
+    #     # should receive a message for each subscribe/unsubscribe command
+    #     # plus a message for each iteration of the loop * num channels
+    #     # we hide the data messages that tell the client to unsubscribe
+    #     num_messages_to_expect = len(channels)*2 + \
+    #         (messages_per_channel*len(channels))
+    #     t = threading.Thread(target=publish)
+    #     t.start()
+    #     for msg in r.listen():
+    #         if msg['data'] == 'unsubscribe':
+    #             r.unsubscribe(msg['channel'])
+    #         else:
+    #             messages.append(msg)
 
-        self.assertEquals(r.subscribed, False)
-        self.assertEquals(len(messages), num_messages_to_expect)
-        sent_types, sent_channels = {}, {}
-        for msg in messages:
-            msg_type = msg['type']
-            channel = msg['channel']
-            sent_types.setdefault(msg_type, 0)
-            sent_types[msg_type] += 1
-            if msg_type == 'message':
-                sent_channels.setdefault(channel, 0)
-                sent_channels[channel] += 1
-        for channel in channels:
-            self.assert_(channel in sent_channels)
-            self.assertEquals(sent_channels[channel], messages_per_channel)
-        self.assertEquals(sent_types['subscribe'], len(channels))
-        self.assertEquals(sent_types['unsubscribe'], len(channels))
-        self.assertEquals(sent_types['message'],
-            len(channels) * messages_per_channel)
+    #     self.assertEquals(r.subscribed, False)
+    #     self.assertEquals(len(messages), num_messages_to_expect)
+    #     sent_types, sent_channels = {}, {}
+    #     for msg in messages:
+    #         msg_type = msg['type']
+    #         channel = msg['channel']
+    #         sent_types.setdefault(msg_type, 0)
+    #         sent_types[msg_type] += 1
+    #         if msg_type == 'message':
+    #             sent_channels.setdefault(channel, 0)
+    #             sent_channels[channel] += 1
+    #     for channel in channels:
+    #         self.assert_(channel in sent_channels)
+    #         self.assertEquals(sent_channels[channel], messages_per_channel)
+    #     self.assertEquals(sent_types['subscribe'], len(channels))
+    #     self.assertEquals(sent_types['unsubscribe'], len(channels))
+    #     self.assertEquals(sent_types['message'],
+    #         len(channels) * messages_per_channel)
 
     ## BINARY SAFE
     # TODO add more tests
