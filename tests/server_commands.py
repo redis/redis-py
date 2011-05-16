@@ -16,8 +16,7 @@ class ServerCommandsTestCase(unittest.TestCase):
 
     def tearDown(self):
         self.client.flushdb()
-        for c in self.client.connection_pool.get_all_connections():
-            c.disconnect()
+        self.client.connection_pool.disconnect()
 
     # GENERAL SERVER COMMANDS
     def test_dbsize(self):

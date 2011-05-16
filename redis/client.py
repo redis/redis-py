@@ -177,14 +177,21 @@ class Redis(threading.local):
                  db=0, password=None, socket_timeout=None,
                  connection_pool=None,
                  charset='utf-8', errors='strict'):
-        self.encoding = charset
-        self.errors = errors
-        self.connection = None
         self.subscribed = False
-        self.connection_pool = connection_pool and connection_pool or ConnectionPool()
-        self.select(db, host, port, password, socket_timeout)
+        if connection_pool:
+            self.connection_pool = connection_pool
+        else:
+            self.connection_pool = ConnectionPool(
+                host=host,
+                port=port,
+                db=db,
+                password=password,
+                socket_timeout=socket_timeout,
+                encoding=charset,
+                encoding_errors=errors
+                )
 
-    #### Legacty accessors of connection information ####
+    #### Legacy accessors of connection information ####
     def _get_host(self):
         return self.connection.host
     host = property(_get_host)
@@ -205,12 +212,7 @@ class Redis(threading.local):
         pipelines are useful for batch loading of data as they reduce the
         number of back and forth network operations between client and server.
         """
-        return Pipeline(
-            self.connection,
-            transaction,
-            self.encoding,
-            self.errors
-            )
+        return Pipeline(self.connection_pool, transaction)
 
     def lock(self, name, timeout=None, sleep=0.1):
         """
@@ -228,77 +230,38 @@ class Redis(threading.local):
 
     #### COMMAND EXECUTION AND PROTOCOL PARSING ####
     def execute_command(self, *args, **options):
-        command_name = args[0]
-        subscription_command = command_name in self.SUBSCRIPTION_COMMANDS
-        if self.subscribed and not subscription_command:
-            raise PubSubError("Cannot issue commands other than SUBSCRIBE and "
-                              "UNSUBSCRIBE while channels are open")
+        connection = self.connection_pool.get_connection()
         try:
-            self.connection.send_command(*args)
-            if subscription_command:
-                return None
-            return self.parse_response(command_name, **options)
-        except ConnectionError:
-            self.connection.disconnect()
-            self.connection.send_command(*args)
-            if subscription_command:
-                return None
-            return self.parse_response(command_name, **options)
+            command_name = args[0]
+            subscription_command = command_name in self.SUBSCRIPTION_COMMANDS
+            if self.subscribed and not subscription_command:
+                raise PubSubError("Cannot issue commands other than SUBSCRIBE "
+                                  "and UNSUBSCRIBE while channels are open")
+            try:
+                connection.send_command(*args)
+                if subscription_command:
+                    return None
+                return self.parse_response(connection, command_name, **options)
+            except ConnectionError:
+                connection.disconnect()
+                connection.send_command(*args)
+                if subscription_command:
+                    return None
+                return self.parse_response(connection, command_name, **options)
+        finally:
+            self.connection_pool.release(connection)
 
-    def parse_response(self, command_name, **options):
+    def parse_response(self, connection, command_name, **options):
         "Parses a response from the Redis server"
-        response = self.connection.read_response()
+        response = connection.read_response()
         if command_name in self.RESPONSE_CALLBACKS:
             return self.RESPONSE_CALLBACKS[command_name](response, **options)
         return response
 
     #### CONNECTION HANDLING ####
-    def get_connection(self, host, port, db, password, socket_timeout):
-        "Returns a connection object"
-        conn = self.connection_pool.get_connection(
-            host, port, db, password, socket_timeout)
-        # if for whatever reason the connection gets a bad password, make
-        # sure a subsequent attempt with the right password makes its way
-        # to the connection
-        conn.password = password
-        return conn
-
-    def _setup_connection(self):
-        """
-        After successfully opening a socket to the Redis server, the
-        connection object calls this method to authenticate and select
-        the appropriate database.
-        """
-        self.subscribed = False
-        if self.connection.password:
-            if not self.execute_command('AUTH', self.connection.password):
-                raise AuthenticationError("Invalid Password")
-        self.execute_command('SELECT', self.connection.db)
-
-    def select(self, db, host=None, port=None, password=None,
-            socket_timeout=None):
-        """
-        Switch to a different Redis connection.
-
-        If the host and port aren't provided and there's an existing
-        connection, use the existing connection's host and port instead.
-
-        Note this method actually replaces the underlying connection object
-        prior to issuing the SELECT command.  This makes sure we protect
-        the thread-safe connections
-        """
-        if host is None:
-            if self.connection is None:
-                raise RedisError("A valid hostname or IP address "
-                    "must be specified")
-            host = self.connection.host
-        if port is None:
-            if self.connection is None:
-                raise RedisError("A valid port must be specified")
-            port = self.connection.port
-
-        self.connection = self.get_connection(
-            host, port, db, password, socket_timeout)
+    def select(self, db):
+        "SELECT a differnet Redis database."
+        return self.execute_command('SELECT', db)
 
     def shutdown(self):
         "Shutdown the server"
@@ -1246,11 +1209,9 @@ class Pipeline(Redis):
     ResponseError exceptions, such as those raised when issuing a command
     on a key of a different datatype.
     """
-    def __init__(self, connection, transaction, charset, errors):
-        self.connection = connection
+    def __init__(self, connection_pool, transaction):
+        self.connection_pool = connection_pool
         self.transaction = transaction
-        self.encoding = charset
-        self.errors = errors
         self.subscribed = False # NOTE not in use, but necessary
         self.reset()
 
@@ -1275,42 +1236,51 @@ class Pipeline(Redis):
         return self
 
     def _execute_transaction(self, commands):
-        all_cmds = ''.join(starmap(self.connection.pack_command,
-                                   [args for args, options in commands]))
-        self.connection.send_packed_command(all_cmds)
-        # we don't care about the multi/exec any longer
-        commands = commands[1:-1]
-        # parse off the response for MULTI and all commands prior to EXEC
-        # the only data we care about is the response the EXEC, the last command
-        for i in range(len(commands)+1):
-            _ = self.parse_response('_')
-        # parse the EXEC.
-        response = self.parse_response('_')
+        connection = self.connection_pool.get_connection()
+        try:
+            all_cmds = ''.join(starmap(connection.pack_command,
+                                       [args for args, options in commands]))
+            connection.send_packed_command(all_cmds)
+            # we don't care about the multi/exec any longer
+            commands = commands[1:-1]
+            # parse off the response for MULTI and all commands prior to EXEC.
+            # the only data we care about is the response the EXEC
+            # which is the last command
+            for i in range(len(commands)+1):
+                _ = self.parse_response(connection, '_')
+            # parse the EXEC.
+            response = self.parse_response(connection, '_')
 
-        if response is None:
-            raise WatchError("Watched variable changed.")
+            if response is None:
+                raise WatchError("Watched variable changed.")
 
-        if len(response) != len(commands):
-            raise ResponseError("Wrong number of response items from "
-                "pipeline execution")
-        # We have to run response callbacks manually
-        data = []
-        for r, cmd in izip(response, commands):
-            if not isinstance(r, Exception):
-                args, options = cmd
-                command_name = args[0]
-                if command_name in self.RESPONSE_CALLBACKS:
-                    r = self.RESPONSE_CALLBACKS[command_name](r, **options)
-            data.append(r)
-        return data
+            if len(response) != len(commands):
+                raise ResponseError("Wrong number of response items from "
+                    "pipeline execution")
+            # We have to run response callbacks manually
+            data = []
+            for r, cmd in izip(response, commands):
+                if not isinstance(r, Exception):
+                    args, options = cmd
+                    command_name = args[0]
+                    if command_name in self.RESPONSE_CALLBACKS:
+                        r = self.RESPONSE_CALLBACKS[command_name](r, **options)
+                data.append(r)
+            return data
+        finally:
+            self.connection_pool.release(connection)
 
     def _execute_pipeline(self, commands):
         # build up all commands into a single request to increase network perf
-        all_cmds = ''.join(starmap(self.connection.pack_command,
-                                   [args for args, options in commands]))
-        self.connection.send_packed_command(all_cmds)
-        return [self.parse_response(args[0], **options)
-                for args, options in commands]
+        connection = self.connection_pool.get_connection()
+        try:
+            all_cmds = ''.join(starmap(connection.pack_command,
+                                       [args for args, options in commands]))
+            connection.send_packed_command(all_cmds)
+            return [self.parse_response(connection, args[0], **options)
+                    for args, options in commands]
+        finally:
+            self.connection_pool.release(connection)
 
     def execute(self):
         "Execute all the commands in the current pipeline"
@@ -1324,7 +1294,7 @@ class Pipeline(Redis):
         try:
             return execute(stack)
         except ConnectionError:
-            self.connection.disconnect()
+            connection.disconnect()
             return execute(stack)
 
     def select(self, *args, **kwargs):

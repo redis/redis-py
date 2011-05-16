@@ -116,9 +116,7 @@ class Connection(object):
         if self._sock:
             return
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(self.socket_timeout)
-            sock.connect((self.host, self.port))
+            sock = self._connect()
         except socket.error, e:
             # args for socket.error can either be (errno, "message")
             # or just "message"
@@ -132,6 +130,13 @@ class Connection(object):
 
         self._sock = sock
         self.on_connect()
+
+    def _connect(self):
+        "Create a TCP socket connection"
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(self.socket_timeout)
+        sock.connect((self.host, self.port))
+        return sock
 
     def on_connect(self):
         "Initialize the connection, authenticate and select a database"
@@ -199,7 +204,7 @@ class Connection(object):
         return response
 
     def encode(self, value):
-        "Return a bytestring of the value"
+        "Return a bytestring representation of the value"
         if isinstance(value, unicode):
             return value.encode(self.encoding, self.encoding_errors)
         return str(value)
@@ -210,24 +215,47 @@ class Connection(object):
                    for enc_value in imap(self.encode, args)]
         return '*%s\r\n%s' % (len(command), ''.join(command))
 
-class ConnectionPool(threading.local):
-    "Manages a list of connections on the local thread"
-    def __init__(self, connection_class=None):
-        self.connections = {}
-        self.connection_class = connection_class or Connection
+class UnixDomainSocketConnection(Connection):
+    def __init__(self, path='', db=0, password=None,
+                 socket_timeout=None, encoding='utf-8',
+                 encoding_errors='strict', parser_class=DefaultParser):
+        self.path = path
+        self.db = db
+        self.password = password
+        self.socket_timeout = socket_timeout
+        self.encoding = encoding
+        self.encoding_errors = encoding_errors
+        self._sock = None
+        self._parser = parser_class()
 
-    def make_connection_key(self, host, port, db):
-        "Create a unique key for the specified host, port and db"
-        return '%s:%s:%s' % (host, port, db)
+    def _connect(self):
+        "Create a Unix domain socket connection"
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(self.socket_timeout)
+        sock.connect(self.path)
+        return sock
 
-    def get_connection(self, host, port, db, password, socket_timeout):
-        "Return a specific connection for the specified host, port and db"
-        key = self.make_connection_key(host, port, db)
-        if key not in self.connections:
-            self.connections[key] = self.connection_class(
-                host, port, db, password, socket_timeout)
-        return self.connections[key]
+class ConnectionPool(object):
+    """
+    A connection pool that maintains only one connection. Great for
+    single-threaded apps with no sharding
+    """
+    def __init__(self, connection_class=Connection, **kwargs):
+        self.connection_class = connection_class
+        self.kwargs = kwargs
+        self._connection = None
 
-    def get_all_connections(self):
-        "Return a list of all connection objects the manager knows about"
-        return self.connections.values()
+    def get_connection(self, *args, **kwargs):
+        "Get a connection from the pool"
+        if not self._connection:
+            self._connection = self.connection_class(**self.kwargs)
+        return self._connection
+
+    def release(self, connection):
+        "Releases the connection back to the pool"
+        pass
+
+    def disconnect(self):
+        "Disconnects all connections in the pool"
+        if self._connection:
+            self._connection.disconnect()
