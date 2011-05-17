@@ -244,16 +244,25 @@ class ConnectionPool(object):
         self.connection_class = connection_class
         self.kwargs = kwargs
         self._connection = None
+        self._in_use = False
 
-    def get_connection(self, *args, **kwargs):
+    def copy(self):
+        "Return a new instance of this class with the same parameters"
+        return self.__class__(self.connection_class, **self.kwargs)
+
+    def get_connection(self, command_name, *keys):
         "Get a connection from the pool"
+        if self._in_use:
+            raise ConnectionError("Connection already in-use")
         if not self._connection:
             self._connection = self.connection_class(**self.kwargs)
+        self._in_use = True
         return self._connection
 
     def release(self, connection):
         "Releases the connection back to the pool"
-        pass
+        assert self._connection == connection
+        self._in_use = False
 
     def disconnect(self):
         "Disconnects all connections in the pool"

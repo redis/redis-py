@@ -191,19 +191,6 @@ class Redis(threading.local):
                 encoding_errors=errors
                 )
 
-    #### Legacy accessors of connection information ####
-    def _get_host(self):
-        return self.connection.host
-    host = property(_get_host)
-
-    def _get_port(self):
-        return self.connection.port
-    port = property(_get_port)
-
-    def _get_db(self):
-        return self.connection.db
-    db = property(_get_db)
-
     def pipeline(self, transaction=True):
         """
         Return a new pipeline object that can queue multiple commands for
@@ -230,9 +217,9 @@ class Redis(threading.local):
 
     #### COMMAND EXECUTION AND PROTOCOL PARSING ####
     def execute_command(self, *args, **options):
-        connection = self.connection_pool.get_connection()
+        command_name = args[0]
+        connection = self.connection_pool.get_connection(command_name)
         try:
-            command_name = args[0]
             subscription_command = command_name in self.SUBSCRIPTION_COMMANDS
             if self.subscribed and not subscription_command:
                 raise PubSubError("Cannot issue commands other than SUBSCRIBE "
@@ -1121,6 +1108,9 @@ class Redis(threading.local):
         "Return the list of values within hash ``name``"
         return self.execute_command('HVALS', name)
 
+    def pubsub(self):
+        return PubSub(self.connection_pool)
+
 
     # channels
     def psubscribe(self, patterns):
@@ -1236,7 +1226,7 @@ class Pipeline(Redis):
         return self
 
     def _execute_transaction(self, commands):
-        connection = self.connection_pool.get_connection()
+        connection = self.connection_pool.get_connection('MULTI')
         try:
             all_cmds = ''.join(starmap(connection.pack_command,
                                        [args for args, options in commands]))
@@ -1272,7 +1262,7 @@ class Pipeline(Redis):
 
     def _execute_pipeline(self, commands):
         # build up all commands into a single request to increase network perf
-        connection = self.connection_pool.get_connection()
+        connection = self.connection_pool.get_connection('MULTI')
         try:
             all_cmds = ''.join(starmap(connection.pack_command,
                                        [args for args, options in commands]))
