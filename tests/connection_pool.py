@@ -32,6 +32,7 @@ class ConnectionPoolTestCase(unittest.TestCase):
     #     self.assertEquals(conns, mgr_conns)
 
     def test_threaded_workers(self):
+        # TODO: review this, does it even make sense anymore?
         r = redis.Redis(host='localhost', port=6379, db=9)
         r.set('a', 'foo')
         r.set('b', 'bar')

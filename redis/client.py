@@ -1,5 +1,4 @@
 import datetime
-import threading
 import time
 import warnings
 from itertools import chain, imap, islice, izip, starmap
@@ -112,7 +111,7 @@ def parse_config(response, **options):
         return response and pairs_to_dict(response) or {}
     return response == 'OK'
 
-class Redis(threading.local):
+class Redis(object):
     """
     Implementation of the Redis protocol.
 
