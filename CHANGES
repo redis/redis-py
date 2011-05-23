@@ -1,4 +1,48 @@
-* 2.2.5 (in development)
+
+* 2.4 (in development)
+    * WARNING: 2.4 contains several backwards incompatible changes.
+    * Completely refactored Connection objects. Moved much of the Redis
+      protocol packing for requests here, and eliminated the nasty dependencies
+      it had on the client to do AUTH and SELECT commands on connect.
+    * Connection objects now have a parser attribute. Parsers are responsible
+      for reading data Redis sends. Two parsers ship with redis-py: a
+      PythonParser and the HiRedis parser. redis-py will automatically use the
+      HiRedis parser if you have the Python hiredis module installed, otherwise
+      it will fall back to the PythonParser. You can force or the other, or even
+      an external one by passing the `parser_class` argument to ConnectionPool.
+    * Added a UnixDomainSocketConnection for users wanting to talk to the Redis
+      instance running on a local machine only. You can use this connection
+      by passing it to the `connection_class` argument of the ConnectionPool.
+    * Connections no longer derive from threading.local. See threading.local
+      note below.
+    * ConnectionPool has been comletely refactored. The ConnectionPool now
+      maintains a list of connections. The redis-py client only hangs on to
+      a ConnectionPool instance, calling get_connection() anytime it needs to
+      send a command. When get_connection() is called, the command name and
+      any keys involved in the command are passed as arguments. Subclasses of
+      ConnectionPool could use this information to identify the shard the keys
+      belong to and return a connection to it. ConnectionPool also implements
+      disconnect() to force all connections in the pool to disconnect from
+      the Redis server.
+    * redis-py does not treat the SELECT command as special anymore. Previously,
+      redis-py tried to make sure you didn't shoot yourself in the foot by
+      SELECTing a different database, then reusing that connection later and
+      expecting it to be set. In practice, this caused more headaches than it
+      was worth. So you can use SELECT if you really want to, although it's
+      highly recommended to instead create a separate client instance and
+      connection pool for each Redis database you want to talk to.
+    * Completely refactored Publish/Subscribe support. The subscribe and listen
+      commands are no longer available on the redis-py Client class. Instead,
+      the `pubsub` method returns an instance of the PubSub class which contains
+      all publish/subscribe support. Note, you can still PUBLISH from the
+      redis-py client class if you desire.
+    * Removed support for all previously deprecated commands or options.
+    * redis-py no longer uses threading.local in any way. Since the Client
+      class no longer holds on to a connection, it's no longer needed. You can
+      now pass client instances between threads, and commands run on those
+      threads will retrieve an available connection from the pool, use it and
+      release it. It should now be trivial to use redis-py with eventlet or
+      greenlet.
     * Support Jython, fixing #97. Thanks to Adam Vandenberg for the patch.
     * Using __getitem__ now properly raises a KeyError when the key is not
       found. Thanks Ionuț Arțăriși for the patch.
