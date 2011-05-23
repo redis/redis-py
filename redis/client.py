@@ -167,16 +167,10 @@ class Redis(object):
         }
         )
 
-    # commands that should NOT pull data off the network buffer when executed
-    SUBSCRIPTION_COMMANDS = set([
-        'SUBSCRIBE', 'UNSUBSCRIBE', 'PSUBSCRIBE', 'PUNSUBSCRIBE'
-        ])
-
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
                  connection_pool=None,
                  charset='utf-8', errors='strict'):
-        self.subscribed = False
         if connection_pool:
             self.connection_pool = connection_pool
         else:
@@ -214,26 +208,20 @@ class Redis(object):
         """
         return Lock(self, name, timeout=timeout, sleep=sleep)
 
+    def pubsub(self):
+        return PubSub(self.connection_pool)
+
     #### COMMAND EXECUTION AND PROTOCOL PARSING ####
     def execute_command(self, *args, **options):
         command_name = args[0]
         connection = self.connection_pool.get_connection(command_name)
         try:
-            subscription_command = command_name in self.SUBSCRIPTION_COMMANDS
-            if self.subscribed and not subscription_command:
-                raise PubSubError("Cannot issue commands other than SUBSCRIBE "
-                                  "and UNSUBSCRIBE while channels are open")
-            try:
-                connection.send_command(*args)
-                if subscription_command:
-                    return None
-                return self.parse_response(connection, command_name, **options)
-            except ConnectionError:
-                connection.disconnect()
-                connection.send_command(*args)
-                if subscription_command:
-                    return None
-                return self.parse_response(connection, command_name, **options)
+            connection.send_command(*args)
+            return self.parse_response(connection, command_name, **options)
+        except ConnectionError:
+            connection.disconnect()
+            connection.send_command(*args)
+            return self.parse_response(connection, command_name, **options)
         finally:
             self.connection_pool.release(connection)
 
@@ -243,23 +231,6 @@ class Redis(object):
         if command_name in self.RESPONSE_CALLBACKS:
             return self.RESPONSE_CALLBACKS[command_name](response, **options)
         return response
-
-    #### CONNECTION HANDLING ####
-    def select(self, db):
-        "SELECT a differnet Redis database."
-        return self.execute_command('SELECT', db)
-
-    def shutdown(self):
-        "Shutdown the server"
-        if self.subscribed:
-            raise PubSubError("Can't call 'shutdown' when 'subscribed'")
-        try:
-            self.execute_command('SHUTDOWN')
-        except ConnectionError:
-            # a ConnectionError here is expected
-            return
-        raise RedisError("SHUTDOWN seems to have failed.")
-
 
     #### SERVER INFORMATION ####
     def bgrewriteaof(self):
@@ -327,6 +298,19 @@ class Redis(object):
         blocking until the save is complete
         """
         return self.execute_command('SAVE')
+
+    def select(self, db):
+        "Select a differnet Redis database"
+        return self.execute_command('SELECT', db)
+
+    def shutdown(self):
+        "Shutdown the server"
+        try:
+            self.execute_command('SHUTDOWN')
+        except ConnectionError:
+            # a ConnectionError here is expected
+            return
+        raise RedisError("SHUTDOWN seems to have failed.")
 
     def slaveof(self, host=None, port=None):
         """
@@ -552,18 +536,12 @@ class Redis(object):
         """
         Watches the values at keys ``names``, or None if the key doesn't exist
         """
-        if self.subscribed:
-            raise PubSubError("Can't call 'watch' when 'subscribed'")
-
         return self.execute_command('WATCH', *names)
 
     def unwatch(self):
         """
         Unwatches the value at key ``name``, or None of the key doesn't exist
         """
-        if self.subscribed:
-            raise PubSubError("Can't call 'unwatch' when 'subscribed'")
-
         return self.execute_command('UNWATCH')
 
     #### LIST COMMANDS ####
@@ -1107,20 +1085,63 @@ class Redis(object):
         "Return the list of values within hash ``name``"
         return self.execute_command('HVALS', name)
 
-    def pubsub(self):
-        return PubSub(self.connection_pool)
+    def publish(self, channel, message):
+        """
+        Publish ``message`` on ``channel``.
+        Returns the number of subscribers the message was delivered to.
+        """
+        return self.execute_command('PUBLISH', channel, message)
 
 
-    # channels
+class PubSub(object):
+    def __init__(self, connection_pool):
+        self.connection_pool = connection_pool
+        self.connection = None
+        self.channels = set()
+        self.patterns = set()
+        self.subscription_count = 0
+        self.subscribe_commands = set(
+            ('subscribe', 'psusbscribe', 'unsubscribe', 'punsubscribe')
+            )
+
+    def execute_command(self, *args, **kwargs):
+        "Execute a publish/subscribe command"
+        if self.connection is None:
+            self.connection = self.connection_pool.get_connection('pubsub')
+        connection = self.connection
+        try:
+            connection.send_command(*args)
+            return self.parse_response()
+        except ConnectionError:
+            connection.disconnect()
+            # resubscribe to all channels and patterns before
+            # resending the current command
+            for channel in self.channels:
+                self.subscribe(channel)
+            for pattern in self.patterns:
+                self.psubscribe(pattern)
+            connection.send_command(*args)
+            return self.parse_response()
+
+    def parse_response(self):
+        "Parse the response from a publish/subscribe command"
+        response = self.connection.read_response()
+        if response[0] in self.subscribe_commands:
+            self.subscription_count = response[2]
+            # if we've just unsubscribed from the remaining channels,
+            # release the connection back to the pool
+            if not self.subscription_count:
+                self.connection_pool.release(self.connection)
+                self.connection = None
+        return response
+
     def psubscribe(self, patterns):
         "Subscribe to all channels matching any pattern in ``patterns``"
         if isinstance(patterns, basestring):
             patterns = [patterns]
-        response = self.execute_command('PSUBSCRIBE', *patterns)
-        # this is *after* the SUBSCRIBE in order to allow for lazy and broken
-        # connections that need to issue AUTH and SELECT commands
-        self.subscribed = True
-        return response
+        for pattern in patterns:
+            self.patterns.add(pattern)
+        return self.execute_command('PSUBSCRIBE', *patterns)
 
     def punsubscribe(self, patterns=[]):
         """
@@ -1129,17 +1150,20 @@ class Redis(object):
         """
         if isinstance(patterns, basestring):
             patterns = [patterns]
+        for pattern in patterns:
+            try:
+                self.patterns.remove(pattern)
+            except KeyError:
+                pass
         return self.execute_command('PUNSUBSCRIBE', *patterns)
 
     def subscribe(self, channels):
         "Subscribe to ``channels``, waiting for messages to be published"
         if isinstance(channels, basestring):
             channels = [channels]
-        response = self.execute_command('SUBSCRIBE', *channels)
-        # this is *after* the SUBSCRIBE in order to allow for lazy and broken
-        # connections that need to issue AUTH and SELECT commands
-        self.subscribed = True
-        return response
+        for channel in channels:
+            self.channels.add(channel)
+        return self.execute_command('SUBSCRIBE', *channels)
 
     def unsubscribe(self, channels=[]):
         """
@@ -1148,6 +1172,11 @@ class Redis(object):
         """
         if isinstance(channels, basestring):
             channels = [channels]
+        for channel in channels:
+            try:
+                self.channels.remove(channel)
+            except KeyError:
+                pass
         return self.execute_command('UNSUBSCRIBE', *channels)
 
     def publish(self, channel, message):
@@ -1159,24 +1188,22 @@ class Redis(object):
 
     def listen(self):
         "Listen for messages on channels this client has been subscribed to"
-        while self.subscribed:
-            r = self.parse_response('LISTEN')
+        while self.subscription_count:
+            r = self.parse_response()
             if r[0] == 'pmessage':
                 msg = {
-                'type': r[0],
-                'pattern': r[1],
-                'channel': r[2],
-                'data': r[3]
+                    'type': r[0],
+                    'pattern': r[1],
+                    'channel': r[2],
+                    'data': r[3]
                 }
             else:
                 msg = {
-                'type': r[0],
-                'pattern': None,
-                'channel': r[1],
-                'data': r[2]
+                    'type': r[0],
+                    'pattern': None,
+                    'channel': r[1],
+                    'data': r[2]
                 }
-            if r[0] == 'unsubscribe' and r[2] == 0:
-                self.subscribed = False
             yield msg
 
 
@@ -1201,7 +1228,6 @@ class Pipeline(Redis):
     def __init__(self, connection_pool, transaction):
         self.connection_pool = connection_pool
         self.transaction = transaction
-        self.subscribed = False # NOTE not in use, but necessary
         self.reset()
 
     def reset(self):
