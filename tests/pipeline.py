@@ -46,11 +46,6 @@ class PipelineTestCase(unittest.TestCase):
         self.assertEquals(pipe.set('z', 'zzz').execute(), [True])
         self.assertEquals(self.client['z'], 'zzz')
 
-    def test_pipeline_cannot_select(self):
-        pipe = self.client.pipeline()
-        self.assertRaises(redis.RedisError,
-            pipe.select, 'localhost', 6379, db=9)
-
     def test_pipeline_no_transaction(self):
         pipe = self.client.pipeline(transaction=False)
         pipe.set('a', 'a1').set('b', 'b1').set('c', 'c1')

@@ -1,12 +1,10 @@
 import datetime
 import time
-from itertools import chain, imap, islice, izip, starmap
-from redis.connection import ConnectionPool, Connection
+from itertools import chain, imap, izip, starmap
+from redis.connection import ConnectionPool
 from redis.exceptions import (
-    AuthenticationError,
     ConnectionError,
     DataError,
-    PubSubError,
     RedisError,
     ResponseError,
     WatchError,
