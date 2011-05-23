@@ -1011,7 +1011,7 @@ class PubSub(object):
         self.patterns = set()
         self.subscription_count = 0
         self.subscribe_commands = set(
-            ('subscribe', 'psusbscribe', 'unsubscribe', 'punsubscribe')
+            ('subscribe', 'psubscribe', 'unsubscribe', 'punsubscribe')
             )
 
     def execute_command(self, *args, **kwargs):

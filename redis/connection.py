@@ -262,7 +262,7 @@ class ConnectionPool(object):
     def make_connection(self):
         "Create a new connection"
         if self._created_connections >= self.max_connections:
-            raise Exception("Too many connections")
+            raise ConnectionError("Too many connections")
         self._created_connections += 1
         return self.connection_class(**self.connection_kwargs)
 
