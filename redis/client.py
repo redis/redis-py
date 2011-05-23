@@ -1,6 +1,5 @@
 import datetime
 import time
-import warnings
 from itertools import chain, imap, islice, izip, starmap
 from redis.connection import ConnectionPool, Connection
 from redis.exceptions import (
@@ -436,15 +435,7 @@ class Redis(object):
         return self.execute_command('RENAMENX', src, dst)
 
     def set(self, name, value):
-        """
-        Set the value at key ``name`` to ``value``
-
-        * The following flags have been deprecated *
-        If ``preserve`` is True, set the value only if key doesn't already
-        exist
-        If ``getset`` is True, set the value only if key doesn't already exist
-        and return the resulting value of key
-        """
+        "Set the value at key ``name`` to ``value``"
         return self.execute_command('SET', name, value)
     __setitem__ = set
 
@@ -632,34 +623,6 @@ class Redis(object):
         """
         return self.execute_command('LTRIM', name, start, end)
 
-    def pop(self, name, tail=False):
-        """
-        Pop and return the first or last element of list ``name``
-
-        * This method has been deprecated,
-          use Redis.lpop or Redis.rpop instead *
-        """
-        warnings.warn(DeprecationWarning(
-            "Redis.pop has been deprecated, "
-            "use Redis.lpop or Redis.rpop instead"))
-        if tail:
-            return self.rpop(name)
-        return self.lpop(name)
-
-    def push(self, name, value, head=False):
-        """
-        Push ``value`` onto list ``name``.
-
-        * This method has been deprecated,
-          use Redis.lpush or Redis.rpush instead *
-        """
-        warnings.warn(DeprecationWarning(
-            "Redis.push has been deprecated, "
-            "use Redis.lpush or Redis.rpush instead"))
-        if head:
-            return self.lpush(name, value)
-        return self.rpush(name, value)
-
     def rpop(self, name):
         "Remove and return the last item of the list ``name``"
         return self.execute_command('RPOP', name)
@@ -819,22 +782,9 @@ class Redis(object):
     def zcount(self, name, min, max):
         return self.execute_command('ZCOUNT', name, min, max)
 
-    def zincr(self, key, member, value=1):
-        "This has been deprecated, use zincrby instead"
-        warnings.warn(DeprecationWarning(
-            "Redis.zincr has been deprecated, use Redis.zincrby instead"
-            ))
-        return self.zincrby(key, member, value)
-
     def zincrby(self, name, value, amount=1):
         "Increment the score of ``value`` in sorted set ``name`` by ``amount``"
         return self.execute_command('ZINCRBY', name, amount, value)
-
-    def zinter(self, dest, keys, aggregate=None):
-        warnings.warn(DeprecationWarning(
-            "Redis.zinter has been deprecated, use Redis.zinterstore instead"
-            ))
-        return self.zinterstore(dest, keys, aggregate)
 
     def zinterstore(self, dest, keys, aggregate=None):
         """
