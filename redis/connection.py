@@ -23,9 +23,9 @@ class PythonParser(object):
             if length is not None:
                 return self._fp.read(length+2)[:-2]
             return self._fp.readline()[:-2]
-        except socket.error, e:
+        except (socket.error, socket.timeout), e:
             raise ConnectionError("Error while reading from socket: %s" % \
-                e.args[1])
+                (e.args,))
 
     def read_response(self):
         response = self.read()
@@ -78,7 +78,11 @@ class HiredisParser(object):
     def read_response(self):
         response = self._reader.gets()
         while response is False:
-            buffer = self._sock.recv(4096)
+            try:
+                buffer = self._sock.recv(4096)
+            except (socket.error, socket.timeout), e:
+                raise ConnectionError("Error while reading from socket: %s" % \
+                    (e.args,))
             if not buffer:
                 raise ConnectionError("Socket closed on remote end")
             self._reader.feed(buffer)
@@ -264,8 +268,6 @@ class ConnectionPool(object):
 
     def release(self, connection):
         "Releases the connection back to the pool"
-        # assert self._connection == connection
-        # self._in_use = False
         self._in_use_connections.remove(connection)
         self._available_connections.append(connection)
 
