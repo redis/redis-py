@@ -24,13 +24,11 @@
       belong to and return a connection to it. ConnectionPool also implements
       disconnect() to force all connections in the pool to disconnect from
       the Redis server.
-    * redis-py does not treat the SELECT command as special anymore. Previously,
-      redis-py tried to make sure you didn't shoot yourself in the foot by
-      SELECTing a different database, then reusing that connection later and
-      expecting it to be set. In practice, this caused more headaches than it
-      was worth. So you can use SELECT if you really want to, although it's
-      highly recommended to instead create a separate client instance and
-      connection pool for each Redis database you want to talk to.
+    * redis-py no longer support the SELECT command. You can still connect to
+      a specific database by specifing it when instantiating a client instance
+      or by creating a connection pool. If you need to talk to multiplate
+      databases within your application, you should use a separate client
+      instance for each database you want to talk to.
     * Completely refactored Publish/Subscribe support. The subscribe and listen
       commands are no longer available on the redis-py Client class. Instead,
       the `pubsub` method returns an instance of the PubSub class which contains

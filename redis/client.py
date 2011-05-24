@@ -294,16 +294,6 @@ class Redis(object):
         """
         return self.execute_command('SAVE')
 
-    def select(self, db):
-        """
-        Select a differnet Redis database.
-
-        WARNING: this could have severe consequences for pooled connections.
-        It's highly advised to use a separate connection pool and client
-        instance to work with multiple databases. Use this at your own risk.
-        """
-        return self.execute_command('SELECT', db)
-
     def shutdown(self):
         "Shutdown the server"
         try:
