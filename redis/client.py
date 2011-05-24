@@ -158,7 +158,7 @@ class Redis(object):
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
                  connection_pool=None,
-                 charset='utf-8', errors='strict', path=None):
+                 charset='utf-8', errors='strict', unix_socket_path=None):
         if not connection_pool:
             kwargs = {
                 'db': db,
@@ -168,9 +168,9 @@ class Redis(object):
                 'encoding_errors': errors
                 }
             # based on input, setup appropriate connection args
-            if path:
+            if unix_socket_path:
                 kwargs.update({
-                    'path': path,
+                    'path': unix_socket_path,
                     'connection_class': UnixDomainSocketConnection
                 })
             else:
