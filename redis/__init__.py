@@ -1,5 +1,9 @@
-# legacy imports
-from redis.client import Redis, ConnectionPool
+from redis.client import Redis
+from redis.connection import (
+    ConnectionPool,
+    Connection,
+    UnixDomainSocketConnection
+    )
 from redis.exceptions import (
     AuthenticationError,
     ConnectionError,
@@ -14,7 +18,7 @@ from redis.exceptions import (
 __version__ = '2.2.4'
 
 __all__ = [
-    'Redis', 'ConnectionPool',
+    'Redis', 'ConnectionPool', 'Connection', 'UnixDomainSocketConnection',
     'RedisError', 'ConnectionError', 'ResponseError', 'AuthenticationError',
     'InvalidResponse', 'DataError', 'PubSubError',
     ]
