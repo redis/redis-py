@@ -1,7 +1,7 @@
 import datetime
 import time
 from itertools import chain, imap, izip, starmap
-from redis.connection import ConnectionPool
+from redis.connection import ConnectionPool, UnixDomainSocketConnection
 from redis.exceptions import (
     ConnectionError,
     DataError,
@@ -158,19 +158,28 @@ class Redis(object):
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
                  connection_pool=None,
-                 charset='utf-8', errors='strict'):
-        if connection_pool:
-            self.connection_pool = connection_pool
-        else:
-            self.connection_pool = ConnectionPool(
-                host=host,
-                port=port,
-                db=db,
-                password=password,
-                socket_timeout=socket_timeout,
-                encoding=charset,
-                encoding_errors=errors
-                )
+                 charset='utf-8', errors='strict', path=None):
+        if not connection_pool:
+            kwargs = {
+                'db': db,
+                'password': password,
+                'socket_timeout': socket_timeout,
+                'encoding': charset,
+                'encoding_errors': errors
+                }
+            # based on input, setup appropriate connection args
+            if path:
+                kwargs.update({
+                    'path': path,
+                    'connection_class': UnixDomainSocketConnection
+                })
+            else:
+                kwargs.update({
+                    'host': host,
+                    'port': port
+                })
+            connection_pool = ConnectionPool(**kwargs)
+        self.connection_pool = connection_pool
 
     def pipeline(self, transaction=True, shard_hint=None):
         """
