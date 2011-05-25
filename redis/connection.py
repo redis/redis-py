@@ -250,7 +250,7 @@ class ConnectionPool(object):
         self._available_connections = []
         self._in_use_connections = set()
 
-    def get_connection(self, command_name, *keys):
+    def get_connection(self, command_name, *keys, **options):
         "Get a connection from the pool"
         try:
             connection = self._available_connections.pop()

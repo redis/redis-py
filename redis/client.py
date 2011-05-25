@@ -216,8 +216,9 @@ class Redis(object):
     #### COMMAND EXECUTION AND PROTOCOL PARSING ####
     def execute_command(self, *args, **options):
         "Execute a command and return a parsed response"
+        pool = self.connection_pool
         command_name = args[0]
-        connection = self.connection_pool.get_connection(command_name)
+        connection = pool.get_connection(command_name, **options)
         try:
             connection.send_command(*args)
             return self.parse_response(connection, command_name, **options)
@@ -226,7 +227,7 @@ class Redis(object):
             connection.send_command(*args)
             return self.parse_response(connection, command_name, **options)
         finally:
-            self.connection_pool.release(connection)
+            pool.release(connection)
 
     def parse_response(self, connection, command_name, **options):
         "Parses a response from the Redis server"
