@@ -1,5 +1,4 @@
-
-* 2.4 (in development)
+* 2.4.0
     * WARNING: 2.4 contains several backwards incompatible changes.
     * Completely refactored Connection objects. Moved much of the Redis
       protocol packing for requests here, and eliminated the nasty dependencies
