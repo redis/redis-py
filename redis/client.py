@@ -182,6 +182,12 @@ class Redis(object):
             connection_pool = ConnectionPool(**kwargs)
         self.connection_pool = connection_pool
 
+        self.response_callbacks = self.__class__.RESPONSE_CALLBACKS.copy()
+
+    def set_response_callback(self, command, callback):
+        "Set a custom Response Callback"
+        self.response_callbacks[command] = callback
+
     def pipeline(self, transaction=True, shard_hint=None):
         """
         Return a new pipeline object that can queue multiple commands for
@@ -233,8 +239,8 @@ class Redis(object):
     def parse_response(self, connection, command_name, **options):
         "Parses a response from the Redis server"
         response = connection.read_response()
-        if command_name in self.RESPONSE_CALLBACKS:
-            return self.RESPONSE_CALLBACKS[command_name](response, **options)
+        if command_name in self.response_callbacks:
+            return self.response_callbacks[command_name](response, **options)
         return response
 
     #### SERVER INFORMATION ####
@@ -1022,6 +1028,13 @@ class Redis(object):
 
 
 class PubSub(object):
+    """
+    PubSub provides publish, subscribe and listen support to Redis channels.
+
+    After subscribing to one or more channels, the listen() method will block
+    until a message arrives on one of the subscribed channels. That message
+    will be returned and it's safe to start listening again.
+    """
     def __init__(self, connection_pool, shard_hint=None):
         self.connection_pool = connection_pool
         self.shard_hint = shard_hint
@@ -1211,8 +1224,8 @@ class Pipeline(Redis):
                 if not isinstance(r, Exception):
                     args, options = cmd
                     command_name = args[0]
-                    if command_name in self.RESPONSE_CALLBACKS:
-                        r = self.RESPONSE_CALLBACKS[command_name](r, **options)
+                    if command_name in self.response_callbacks:
+                        r = self.response_callbacks[command_name](r, **options)
                 data.append(r)
             return data
         finally:
