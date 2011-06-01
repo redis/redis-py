@@ -18,6 +18,17 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client.flushdb()
         self.client.connection_pool.disconnect()
 
+    def test_response_callbacks(self):
+        self.assertEquals(
+            self.client.response_callbacks,
+            redis.Redis.RESPONSE_CALLBACKS)
+        self.assertNotEquals(
+            id(self.client.response_callbacks),
+            id(redis.Redis.RESPONSE_CALLBACKS))
+        self.client.set_response_callback('GET', lambda x: 'static')
+        self.client.set('a', 'foo')
+        self.assertEquals(self.client.get('a'), 'static')
+
     # GENERAL SERVER COMMANDS
     def test_dbsize(self):
         self.client['a'] = 'foo'
@@ -35,7 +46,9 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(self.client.set('unicode_string', unicode_string))
         self.assertEquals(self.client.get('byte_string'), byte_string)
         self.assertEquals(self.client.get('integer'), str(integer))
-        self.assertEquals(self.client.get('unicode_string').decode('utf-8'), unicode_string)
+        self.assertEquals(
+                self.client.get('unicode_string').decode('utf-8'),
+                unicode_string)
 
     def test_getitem_and_setitem(self):
         self.client['a'] = 'bar'

@@ -196,7 +196,11 @@ class Redis(object):
         atomic, pipelines are useful for reducing the back-and-forth overhead
         between the client and server.
         """
-        return Pipeline(self.connection_pool, transaction, shard_hint)
+        return Pipeline(
+            self.connection_pool,
+            self.response_callbacks,
+            transaction,
+            shard_hint)
 
     def lock(self, name, timeout=None, sleep=0.1):
         """
@@ -1170,8 +1174,10 @@ class Pipeline(Redis):
     ResponseError exceptions, such as those raised when issuing a command
     on a key of a different datatype.
     """
-    def __init__(self, connection_pool, transaction, shard_hint):
+    def __init__(self, connection_pool, response_callbacks, transaction,
+                 shard_hint):
         self.connection_pool = connection_pool
+        self.response_callbacks = response_callbacks
         self.transaction = transaction
         self.shard_hint = shard_hint
         self.reset()
