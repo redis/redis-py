@@ -15,7 +15,7 @@ from redis.exceptions import (
     )
 
 
-__version__ = '2.2.4'
+__version__ = '2.4.0'
 
 __all__ = [
     'Redis', 'ConnectionPool', 'Connection', 'UnixDomainSocketConnection',
