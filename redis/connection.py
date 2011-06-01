@@ -1,18 +1,21 @@
 import errno
-import os
 import socket
 from itertools import chain, imap
 from redis.exceptions import ConnectionError, ResponseError, InvalidResponse
 
 class PythonParser(object):
+    def __init__(self):
+        self._fp = None
+
     def on_connect(self, connection):
         "Called when the socket connects"
         self._fp = connection._sock.makefile('r')
 
     def on_disconnect(self):
         "Called when the socket disconnects"
-        self._fp.close()
-        self._fp = None
+        if self._fp is not None:
+            self._fp.close()
+            self._fp = None
 
     def read(self, length=None):
         """
