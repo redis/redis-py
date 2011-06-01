@@ -771,7 +771,12 @@ class Redis(object):
 
     #### SORTED SET COMMANDS ####
     def zadd(self, name, value=None, score=None, **pairs):
-        "Add a member to a sorted set. If value and score"
+        """
+        For each kwarg in ``pairs``, add that item and it's score to the
+        sorted set ``name``.
+
+        The ``value`` and ``score`` arguments are deprecated.
+        """
         all_pairs = []
         if value is not None or score is not None:
             if value is None or score is None:
@@ -882,7 +887,7 @@ class Redis(object):
         ``start`` and ``num`` can be negative, indicating the end of the range.
 
         ``withscores`` indicates to return the scores along with the values
-        as a dictionary of value => score
+        The return type is a list of (value, score) pairs
         """
         pieces = ['ZREVRANGE', name, start, num]
         if withscores:
