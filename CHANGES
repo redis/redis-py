@@ -41,6 +41,11 @@
       threads will retrieve an available connection from the pool, use it and
       release it. It should now be trivial to use redis-py with eventlet or
       greenlet.
+    * ZADD now accepts pairs of value=score keyword arguements. This should help
+      resolve the long standing #72. The older value and score arguements have
+      been deprecated in favor of the keyword argument style.
+    * Client instances now get their own copy of RESPONSE_CALLBACKS. The new
+      set_response_callback method adds a user defined callback to the instance.
     * Support Jython, fixing #97. Thanks to Adam Vandenberg for the patch.
     * Using __getitem__ now properly raises a KeyError when the key is not
       found. Thanks Ionuț Arțăriși for the patch.
