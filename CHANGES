@@ -1,4 +1,4 @@
-* 2.4.1 (in development)
+* 2.4.1
     * Fixed a bug in the PythonParser if disconnect is called before connect.
 * 2.4.0
     * WARNING: 2.4 contains several backwards incompatible changes.
