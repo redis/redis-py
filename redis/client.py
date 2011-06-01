@@ -1,6 +1,7 @@
 import datetime
 import time
-from itertools import chain, imap, izip, starmap
+import warnings
+from itertools import imap, izip, starmap
 from redis.connection import ConnectionPool, UnixDomainSocketConnection
 from redis.exceptions import (
     ConnectionError,
@@ -769,9 +770,22 @@ class Redis(object):
 
 
     #### SORTED SET COMMANDS ####
-    def zadd(self, name, value, score):
-        "Add member ``value`` with score ``score`` to sorted set ``name``"
-        return self.execute_command('ZADD', name, score, value)
+    def zadd(self, name, value=None, score=None, **pairs):
+        "Add a member to a sorted set. If value and score"
+        all_pairs = []
+        if value is not None or score is not None:
+            if value is None or score is None:
+                raise RedisError("Both 'value' and 'score' must be specified " \
+                                 "to ZADD")
+            warnings.warn(DeprecationWarning(
+                "Passing 'value' and 'score' has been deprecated. " \
+                "Please pass via kwargs instead."))
+            all_pairs.append(score)
+            all_pairs.append(value)
+        for pair in pairs.iteritems():
+            all_pairs.append(pair[1])
+            all_pairs.append(pair[0])
+        return self.execute_command('ZADD', name, *all_pairs)
 
     def zcard(self, name):
         "Return the number of elements in the sorted set ``name``"

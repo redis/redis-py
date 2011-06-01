@@ -250,7 +250,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client.sadd('a', '1')
         self.assertEquals(self.client.type('a'), 'set')
         del self.client['a']
-        self.client.zadd('a', '1', 1)
+        self.client.zadd('a', **{'1': 1})
         self.assertEquals(self.client.type('a'), 'zset')
 
     def test_watch(self):
@@ -712,7 +712,7 @@ class ServerCommandsTestCase(unittest.TestCase):
     # SORTED SETS
     def make_zset(self, name, d):
         for k,v in d.items():
-            self.client.zadd(name, k, v)
+            self.client.zadd(name, **{k: v})
 
     def test_zadd(self):
         self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3})
