@@ -124,7 +124,7 @@ class Connection(object):
         try:
             sock = self._connect()
         except socket.error, e:
-            raise ConnectionError(self._error_mesage(e))
+            raise ConnectionError(self._error_message(e))
 
         self._sock = sock
         self.on_connect()

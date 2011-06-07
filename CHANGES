@@ -1,3 +1,5 @@
+* 2.4.4
+    * Fix a typo introduced in 2.4.3
 * 2.4.3
     * Fixed a bug in the UnixDomainSocketConnection caused when trying to
       form an error message after a socket error.
