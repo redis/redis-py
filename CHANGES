@@ -1,3 +1,9 @@
+* 2.4.3
+    * Fixed a bug in the UnixDomainSocketConnection caused when trying to
+      form an error message after a socket error.
+* 2.4.2
+    * Fixed a bug in pipeline that caused an exception while trying to
+      reconnect after a connection timeout.
 * 2.4.1
     * Fixed a bug in the PythonParser if disconnect is called before connect.
 * 2.4.0

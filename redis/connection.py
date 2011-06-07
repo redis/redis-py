@@ -124,15 +124,7 @@ class Connection(object):
         try:
             sock = self._connect()
         except socket.error, e:
-            # args for socket.error can either be (errno, "message")
-            # or just "message"
-            if len(e.args) == 1:
-                error_message = "Error connecting to %s:%s. %s." % \
-                    (self.host, self.port, e.args[0])
-            else:
-                error_message = "Error %s connecting %s:%s. %s." % \
-                    (e.args[0], self.host, self.port, e.args[1])
-            raise ConnectionError(error_message)
+            raise ConnectionError(self._error_mesage(e))
 
         self._sock = sock
         self.on_connect()
@@ -143,6 +135,17 @@ class Connection(object):
         sock.settimeout(self.socket_timeout)
         sock.connect((self.host, self.port))
         return sock
+
+    def _error_message(self, exception):
+        # args for socket.error can either be (errno, "message")
+        # or just "message"
+        if len(exception.args) == 1:
+            return "Error connecting to %s:%s. %s." % \
+                (self.host, self.port, exception.args[0])
+        else:
+            return "Error %s connecting %s:%s. %s." % \
+                (exception.args[0], self.host, self.port, exception.args[1])
+
 
     def on_connect(self):
         "Initialize the connection, authenticate and select a database"
@@ -240,6 +243,17 @@ class UnixDomainSocketConnection(Connection):
         sock.settimeout(self.socket_timeout)
         sock.connect(self.path)
         return sock
+
+    def _error_message(self, exception):
+        # args for socket.error can either be (errno, "message")
+        # or just "message"
+        if len(exception.args) == 1:
+            return "Error connecting to unix socket: %s. %s." % \
+                (self.path, exception.args[0])
+        else:
+            return "Error %s connecting to unix socket: %s. %s." % \
+                (exception.args[0], self.path, exception.args[1])
+
 
 # TODO: add ability to block waiting on a connection to be released
 class ConnectionPool(object):
