@@ -45,17 +45,21 @@ ConnectionPools manage a set of Connection instances. redis-py ships with two
 types of Connections. The default, Connection, is a normal TCP socket based
 connection. The UnixDomainSocketConnection allows for clients running on the
 same device as the server to connect via a unix domain socket. To use a
-UnixDomainSocketConnection connection, simply pass the class to the
-connection_class argument of either the Redis or ConnectionPool class. You must
-also specify the path argument, which is a string to the unix domain socket
-file. Additionally, make sure the unixsocket parameter is defined in your
-redis.conf file. It's commented out by default.
+UnixDomainSocketConnection connection, simply pass the path argument, which is
+a string to the unix domain socket file. Additionally, make sure the unixsocket
+parameter is defined in your redis.conf file. It's commented out by default.
 
-    >>> r = redis.Redis(connection_class=redis.UnixDomainSocketConnection,
-    >>>                 path='/tmp/redis.sock')
+    >>> r = redis.Redis(path='/tmp/redis.sock')
 
-You can create your own Connection subclasses in this way as well. This may be
-useful if you want to control the socket behavior within an async framework.
+You can create your own Connection subclasses as well. This may be useful if
+you want to control the socket behavior within an async framework. To
+instantiate a client class using your own connection, you need to create
+a connection pool, passing your class to the connection_class argument.
+Other keyword parameters your pass to the pool will be passed to the class
+specified during initialization.
+
+    >>> pool = redis.ConnectionPool(connection_class=YourConnectionClass,
+                                    your_arg='...', ...)
 
 ### Parsers
 
