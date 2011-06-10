@@ -1009,6 +1009,11 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEqual(self.client.hgetall('foo'), d)
         self.assertRaises(redis.DataError, self.client.hmset, 'foo', {})
 
+    def test_hmset_empty_value(self):
+        d = {'a': '1', 'b': '2', 'c': ''}
+        self.assert_(self.client.hmset('foo', d))
+        self.assertEqual(self.client.hgetall('foo'), d)
+
     def test_hmget(self):
         d = {'a': 1, 'b': 2, 'c': 3}
         self.assert_(self.client.hmset('foo', d))

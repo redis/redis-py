@@ -57,7 +57,7 @@ class PythonParser(object):
             length = int(response)
             if length == -1:
                 return None
-            response = length and self.read(length) or ''
+            response = self.read(length)
             return response
         # multi-bulk response
         elif byte == '*':
