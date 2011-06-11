@@ -592,9 +592,10 @@ class Redis(object):
         "Remove and return the first item of the list ``name``"
         return self.execute_command('LPOP', name)
 
-    def lpush(self, name, value):
-        "Push ``value`` onto the head of the list ``name``"
-        return self.execute_command('LPUSH', name, value)
+    def lpush(self, name, *values):
+        "Push ``values`` onto the head of the list ``name``"
+        keys = list_or_args(name, values)
+        return self.execute_command('LPUSH', *keys)
 
     def lpushx(self, name, value):
         "Push ``value`` onto the head of the list ``name`` if ``name`` exists"
@@ -643,9 +644,10 @@ class Redis(object):
         """
         return self.execute_command('RPOPLPUSH', src, dst)
 
-    def rpush(self, name, value):
-        "Push ``value`` onto the tail of the list ``name``"
-        return self.execute_command('RPUSH', name, value)
+    def rpush(self, name, *values):
+        "Push ``values`` onto the tail of the list ``name``"
+        keys = list_or_args(name, values)
+        return self.execute_command('RPUSH', *keys)
 
     def rpushx(self, name, value):
         "Push ``value`` onto the tail of the list ``name`` if ``name`` exists"
