@@ -707,9 +707,10 @@ class Redis(object):
 
 
     #### SET COMMANDS ####
-    def sadd(self, name, value):
-        "Add ``value`` to set ``name``"
-        return self.execute_command('SADD', name, value)
+    def sadd(self, name, *values):
+        "Add ``value(s)`` to set ``name``"
+        keys = list_or_args(name, values)
+        return self.execute_command('SADD', *keys)
 
     def scard(self, name):
         "Return the number of elements in set ``name``"
@@ -761,9 +762,10 @@ class Redis(object):
         "Return a random member of set ``name``"
         return self.execute_command('SRANDMEMBER', name)
 
-    def srem(self, name, value):
-        "Remove ``value`` from set ``name``"
-        return self.execute_command('SREM', name, value)
+    def srem(self, name, *values):
+        "Remove ``values`` from set ``name``"
+        keys = list_or_args(name, values)
+        return self.execute_command('SREM', *keys)
 
     def sunion(self, keys, *args):
         "Return the union of sets specifiued by ``keys``"
@@ -869,9 +871,10 @@ class Redis(object):
         """
         return self.execute_command('ZRANK', name, value)
 
-    def zrem(self, name, value):
-        "Remove member ``value`` from sorted set ``name``"
-        return self.execute_command('ZREM', name, value)
+    def zrem(self, name, *values):
+        "Remove member ``values`` from sorted set ``name``"
+        keys = list_or_args(name, values)
+        return self.execute_command('ZREM', *keys)
 
     def zremrangebyrank(self, name, min, max):
         """
