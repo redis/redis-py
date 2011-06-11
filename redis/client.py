@@ -964,9 +964,10 @@ class Redis(object):
         return self.execute_command(*pieces)
 
     #### HASH COMMANDS ####
-    def hdel(self, name, key):
-        "Delete ``key`` from hash ``name``"
-        return self.execute_command('HDEL', name, key)
+    def hdel(self, name, *keys):
+        "Delete ``keys`` from hash ``name``"
+        keys = list_or_args(name, keys)
+        return self.execute_command('HDEL', *keys)
 
     def hexists(self, name, key):
         "Returns a boolean indicating if ``key`` exists within hash ``name``"
