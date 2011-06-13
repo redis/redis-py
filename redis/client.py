@@ -592,9 +592,10 @@ class Redis(object):
         "Remove and return the first item of the list ``name``"
         return self.execute_command('LPOP', name)
 
-    def lpush(self, name, value):
-        "Push ``value`` onto the head of the list ``name``"
-        return self.execute_command('LPUSH', name, value)
+    def lpush(self, name, *values):
+        "Push ``values`` onto the head of the list ``name``"
+        keys = list_or_args(name, values)
+        return self.execute_command('LPUSH', *keys)
 
     def lpushx(self, name, value):
         "Push ``value`` onto the head of the list ``name`` if ``name`` exists"
@@ -643,9 +644,10 @@ class Redis(object):
         """
         return self.execute_command('RPOPLPUSH', src, dst)
 
-    def rpush(self, name, value):
-        "Push ``value`` onto the tail of the list ``name``"
-        return self.execute_command('RPUSH', name, value)
+    def rpush(self, name, *values):
+        "Push ``values`` onto the tail of the list ``name``"
+        keys = list_or_args(name, values)
+        return self.execute_command('RPUSH', *keys)
 
     def rpushx(self, name, value):
         "Push ``value`` onto the tail of the list ``name`` if ``name`` exists"
@@ -707,9 +709,10 @@ class Redis(object):
 
 
     #### SET COMMANDS ####
-    def sadd(self, name, value):
-        "Add ``value`` to set ``name``"
-        return self.execute_command('SADD', name, value)
+    def sadd(self, name, *values):
+        "Add ``value(s)`` to set ``name``"
+        keys = list_or_args(name, values)
+        return self.execute_command('SADD', *keys)
 
     def scard(self, name):
         "Return the number of elements in set ``name``"
@@ -761,9 +764,10 @@ class Redis(object):
         "Return a random member of set ``name``"
         return self.execute_command('SRANDMEMBER', name)
 
-    def srem(self, name, value):
-        "Remove ``value`` from set ``name``"
-        return self.execute_command('SREM', name, value)
+    def srem(self, name, *values):
+        "Remove ``values`` from set ``name``"
+        keys = list_or_args(name, values)
+        return self.execute_command('SREM', *keys)
 
     def sunion(self, keys, *args):
         "Return the union of sets specifiued by ``keys``"
@@ -869,9 +873,10 @@ class Redis(object):
         """
         return self.execute_command('ZRANK', name, value)
 
-    def zrem(self, name, value):
-        "Remove member ``value`` from sorted set ``name``"
-        return self.execute_command('ZREM', name, value)
+    def zrem(self, name, *values):
+        "Remove member ``values`` from sorted set ``name``"
+        keys = list_or_args(name, values)
+        return self.execute_command('ZREM', *keys)
 
     def zremrangebyrank(self, name, min, max):
         """
@@ -961,9 +966,10 @@ class Redis(object):
         return self.execute_command(*pieces)
 
     #### HASH COMMANDS ####
-    def hdel(self, name, key):
-        "Delete ``key`` from hash ``name``"
-        return self.execute_command('HDEL', name, key)
+    def hdel(self, name, *keys):
+        "Delete ``keys`` from hash ``name``"
+        keys = list_or_args(name, keys)
+        return self.execute_command('HDEL', *keys)
 
     def hexists(self, name, key):
         "Returns a boolean indicating if ``key`` exists within hash ``name``"
