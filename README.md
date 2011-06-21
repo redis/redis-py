@@ -122,6 +122,8 @@ If you use multiple Redis databases within the same application, you should
 create a separate client instance (and possibly a separate connection pool) for
 each database.
 
+It is not save to pass PubSub objects between threads.
+
 ## API Reference
 
 The official Redis documentation does a great job of explaining each command in
@@ -146,6 +148,8 @@ arguments as the official spec. There are a few exceptions noted here:
   execute non-pubsub commands. Calling the pubsub method from the Redis client
   will return a PubSub instance where you can subscribe to channels and listen
   for messages. You can call PUBLISH from both classes.
+* LREM: Order of 'num' and 'value' arguments reversed such that 'num' can
+  provide a default value of zero.
 
 ## Versioning scheme
 
