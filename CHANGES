@@ -1,3 +1,6 @@
+* 2.4.6 (in development)
+    * Variadic arguments for SADD, SREM, ZREN, HDEL, LPUSH, and RPUSH. Thanks
+      Raphaël Vinot.
 * 2.4.5
     * The PythonParser now works better when reading zero length strings.
 * 2.4.4
