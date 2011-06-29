@@ -594,8 +594,7 @@ class Redis(object):
 
     def lpush(self, name, *values):
         "Push ``values`` onto the head of the list ``name``"
-        keys = list_or_args(name, values)
-        return self.execute_command('LPUSH', *keys)
+        return self.execute_command('LPUSH', name, *values)
 
     def lpushx(self, name, value):
         "Push ``value`` onto the head of the list ``name`` if ``name`` exists"
@@ -646,8 +645,7 @@ class Redis(object):
 
     def rpush(self, name, *values):
         "Push ``values`` onto the tail of the list ``name``"
-        keys = list_or_args(name, values)
-        return self.execute_command('RPUSH', *keys)
+        return self.execute_command('RPUSH', name, *values)
 
     def rpushx(self, name, value):
         "Push ``value`` onto the tail of the list ``name`` if ``name`` exists"
@@ -711,8 +709,7 @@ class Redis(object):
     #### SET COMMANDS ####
     def sadd(self, name, *values):
         "Add ``value(s)`` to set ``name``"
-        keys = list_or_args(name, values)
-        return self.execute_command('SADD', *keys)
+        return self.execute_command('SADD', name, *values)
 
     def scard(self, name):
         "Return the number of elements in set ``name``"
@@ -766,8 +763,7 @@ class Redis(object):
 
     def srem(self, name, *values):
         "Remove ``values`` from set ``name``"
-        keys = list_or_args(name, values)
-        return self.execute_command('SREM', *keys)
+        return self.execute_command('SREM', name, *values)
 
     def sunion(self, keys, *args):
         "Return the union of sets specifiued by ``keys``"
@@ -875,8 +871,7 @@ class Redis(object):
 
     def zrem(self, name, *values):
         "Remove member ``values`` from sorted set ``name``"
-        keys = list_or_args(name, values)
-        return self.execute_command('ZREM', *keys)
+        return self.execute_command('ZREM', name, *values)
 
     def zremrangebyrank(self, name, min, max):
         """
@@ -968,8 +963,7 @@ class Redis(object):
     #### HASH COMMANDS ####
     def hdel(self, name, *keys):
         "Delete ``keys`` from hash ``name``"
-        keys = list_or_args(name, keys)
-        return self.execute_command('HDEL', *keys)
+        return self.execute_command('HDEL', name, *keys)
 
     def hexists(self, name, key):
         "Returns a boolean indicating if ``key`` exists within hash ``name``"
