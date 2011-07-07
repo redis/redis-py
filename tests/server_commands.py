@@ -284,6 +284,15 @@ class ServerCommandsTestCase(unittest.TestCase):
 
         self.assertRaises(redis.exceptions.WatchError, pipeline.execute)
 
+        self.client.set("b", 1)
+        self.client.watch("b")
+        self.client.set("b", 2)
+        pipeline = self.client.pipeline()
+        pipeline.set("b", 3)
+
+        self.assertEquals(self.client.get("b"), "2")
+        self.assertRaises(redis.exceptions.WatchError, pipeline.execute)
+
     def test_unwatch(self):
         self.assertEquals(self.client.unwatch(), True)
 
