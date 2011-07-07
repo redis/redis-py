@@ -224,6 +224,26 @@ class Redis(object):
         """
         return PubSub(self.connection_pool, shard_hint)
 
+    def connection(self):
+        """
+        Returns an instance of ``RedisSingleConnection`` which is bound to one
+        connection, allowing transactional commands to run in a thread-safe
+        manner.
+
+        Note that, unlike ``Redis``, ``RedisSingleConnection`` may raise a
+        ``ConnectionError`` which should be handled by the caller.
+
+        >>> with redis.connection() as cxn:
+        ...     cxn.watch('foo')
+        ...     old_foo = cxn.get('foo')
+        ...     cxn.multi()
+        ...     cxn.set('foo', old_foo + 1)
+        ...     cxn.execute()
+        ...
+        >>>
+        """
+        return RedisSingleConnection(connection_pool=self.connection_pool)
+
     #### COMMAND EXECUTION AND PROTOCOL PARSING ####
     def execute_command(self, *args, **options):
         "Execute a command and return a parsed response"
@@ -498,18 +518,6 @@ class Redis(object):
     def type(self, name):
         "Returns the type of key ``name``"
         return self.execute_command('TYPE', name)
-
-    def watch(self, *names):
-        """
-        Watches the values at keys ``names``, or None if the key doesn't exist
-        """
-        return self.execute_command('WATCH', *names)
-
-    def unwatch(self):
-        """
-        Unwatches the value at key ``name``, or None of the key doesn't exist
-        """
-        return self.execute_command('UNWATCH')
 
     #### LIST COMMANDS ####
     def blpop(self, keys, timeout=0):
@@ -1264,6 +1272,98 @@ class Pipeline(Redis):
             return execute(conn, stack)
         finally:
             self.connection_pool.release(conn)
+
+
+class RedisSingleConnection(Redis):
+    """
+    A ``Redis`` which is bound to one single connection, allowing transactional
+    commands to be run in a thread-safe manner.
+
+    Note that, unlike ``Redis``, ``RedisSingleConnection`` may raise a
+    ``ConnectionError`` which should be handled by the caller.
+
+    See also: ``Redis.connection()``.
+    """
+
+    connection = None
+
+    def get_connection(self, command_name, options):
+        if self.connection is None:
+            # XXX: how is the 'command_name' used?
+            self.connection = self.connection_pool.get_connection(command_name,
+                                                                  **options)
+        return self.connection
+
+    def execute_command(self, *args, **options):
+        """
+        Execute a command and return a parsed response.
+
+        Note: unlike Redis.execute_command, this may raise a
+        ``ConnectionError``, which should be handled by the calling code.
+        """
+
+        command_name = args[0]
+        connection = self.get_connection(command_name, options)
+        connection.send_command(*args)
+        return self.parse_response(connection, command_name, **options)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def close(self):
+        "If a connection exists, return it to the connection pool."
+        if self.connection is not None:
+            # XXX: some logic could be added here to only call ``discard`` if
+            # ``multi`` or ``watch`` were issued.
+            self.discard()
+            self.connection_pool.release(self.connection)
+            self.connection = None
+
+    def pipeline(self, transaction=True, shard_hint=None):
+        # XXX: I don't think pipelines make any sense on a connection which is
+        # "bound" like this. Am I wrong in this?
+        raise Exception("not done yet")
+
+    def watch(self, *names):
+        """
+        Watches the values at keys ``names``, or None if the key doesn't exist
+        """
+        return self.execute_command('WATCH', *names)
+
+    def unwatch(self):
+        """
+        Unwatches the all watched keys.
+        """
+        return self.execute_command('UNWATCH')
+
+    def multi(self):
+        """
+        Marks the start of a transaction block.
+
+        All further commands will return None until ``execute`` is called.
+        """
+        self.execute_command('MULTI')
+
+    def execute(self):
+        """
+        Executes all commands which have been executed since the last ``multi``.
+
+        Returns a list of each command's result.
+        """
+        self.execute_command('EXEC')
+        # XXX: Need to collect the results and return them
+        # XXX: update the docs to note that the command is 'execute' not 'exec'.
+        raise Exception("not done yet")
+
+    def discard(self):
+        """
+        Discards all commands which have been executed since the last ``multi``.
+        """
+        self.execute_command('DISCARD')
+
 
 
 class LockError(RedisError):
