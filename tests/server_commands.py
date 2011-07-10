@@ -1279,3 +1279,11 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_('allocation_stats' in parsed)
         self.assert_('6' in parsed['allocation_stats'])
         self.assert_('>=256' in parsed['allocation_stats'])
+
+    def test_eval(self):
+        self.assertEquals(self.client.eval("return {KEYS[1], KEYS[2], ARGV[1], ARGV[2]}", \
+                                               2, "key1", "key2", "argument1", "argument2"), \
+                              ["key1", "key2", "argument1", "argument2"])
+        self.assertEquals(self.client.eval("return {ok='Testing OK Message'}", 0), \
+                              "Testing OK Message")
+        self.assertRaises(redis.ResponseError, self.client.eval, "return {err='Testing error message", 0)
