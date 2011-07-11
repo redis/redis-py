@@ -1192,6 +1192,7 @@ class Pipeline(Redis):
 
         self._real_exec = self.default_execute_command
         self._pipe_exec = self.pipeline_execute_command
+        self._watching = False
         self.reset()
 
     def _get_watch(self):
@@ -1205,9 +1206,23 @@ class Pipeline(Redis):
 
     def reset(self):
         self.command_stack = []
+        # make sure to reset the connection state in the event that we were
+        # watching something
+        if self.watching and self.connection:
+            try:
+                # call this manually since our unwatch or
+                # default_execute_command methods can call reset()
+                self.connection.send_command('UNWATCH')
+                self.connection.read_response()
+            except ConnectionError:
+                # disconnect will also remove any previous WATCHes
+                self.connection.disconnect()
+        # clean up the other instance attributes
         self.watching = False
         if self.transaction:
             self.execute_command('MULTI')
+        # we can safely return the connection to the pool here since we're
+        # sure we're no longer WATCHing anything
         if self.connection:
             self.connection_pool.release(self.connection)
             self.connection = None
@@ -1286,7 +1301,7 @@ class Pipeline(Redis):
         return data
 
     def _execute_pipeline(self, connection, commands):
-    # build up all commands into a single request to increase network perf
+        # build up all commands into a single request to increase network perf
         all_cmds = ''.join(starmap(connection.pack_command,
                                    [args for args, options in commands]))
         connection.send_packed_command(all_cmds)
