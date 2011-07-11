@@ -24,6 +24,14 @@ class PipelineTestCase(unittest.TestCase):
             ]
             )
 
+    def test_pipeline_no_transaction(self):
+        pipe = self.client.pipeline(transaction=False)
+        pipe.set('a', 'a1').set('b', 'b1').set('c', 'c1')
+        self.assertEquals(pipe.execute(), [True, True, True])
+        self.assertEquals(self.client['a'], 'a1')
+        self.assertEquals(self.client['b'], 'b1')
+        self.assertEquals(self.client['c'], 'c1')
+
     def test_invalid_command_in_pipeline(self):
         # all commands but the invalid one should be excuted correctly
         self.client['c'] = 'a'
@@ -46,11 +54,43 @@ class PipelineTestCase(unittest.TestCase):
         self.assertEquals(pipe.set('z', 'zzz').execute(), [True])
         self.assertEquals(self.client['z'], 'zzz')
 
-    def test_pipeline_no_transaction(self):
-        pipe = self.client.pipeline(transaction=False)
-        pipe.set('a', 'a1').set('b', 'b1').set('c', 'c1')
-        self.assertEquals(pipe.execute(), [True, True, True])
-        self.assertEquals(self.client['a'], 'a1')
-        self.assertEquals(self.client['b'], 'b1')
-        self.assertEquals(self.client['c'], 'c1')
+    def test_watch_succeed(self):
+        self.client.set('a', 1)
+        self.client.set('b', 2)
 
+        pipe = self.client.pipeline()
+        pipe.watch('a', 'b')
+        self.assertEquals(pipe.watching, True)
+        a = pipe.get('a')
+        b = pipe.get('b')
+        self.assertEquals(a, '1')
+        self.assertEquals(b, '2')
+        pipe.multi()
+
+        pipe.set('c', 3)
+        self.assertEquals(pipe.execute(), [True])
+        self.assertEquals(pipe.watching, False)
+
+    def test_watch_failure(self):
+        self.client.set('a', 1)
+        self.client.set('b', 2)
+
+        pipe = self.client.pipeline()
+        pipe.watch('a', 'b')
+        self.client.set('b', 3)
+        pipe.multi()
+        pipe.get('a')
+        self.assertRaises(redis.WatchError, pipe.execute)
+        self.assertEquals(pipe.watching, False)
+
+    def test_unwatch(self):
+        self.client.set('a', 1)
+        self.client.set('b', 2)
+
+        pipe = self.client.pipeline()
+        pipe.watch('a', 'b')
+        self.client.set('b', 3)
+        pipe.unwatch()
+        self.assertEquals(pipe.watching, False)
+        pipe.get('a')
+        self.assertEquals(pipe.execute(), ['1'])

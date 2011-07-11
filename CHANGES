@@ -1,7 +1,10 @@
 * 2.4.6 (in development)
     * Variadic arguments for SADD, SREM, ZREN, HDEL, LPUSH, and RPUSH. Thanks
       Raphaël Vinot.
-    * Fix for #153, only check for \n rather than \r\n.
+    * Fixed a bug in the Hiredis Parser causing pooled connections to get
+      corrupted occasionally.
+    * Pipelines now contain WATCH and UNWATCH. Calling WATCH or UNWATCH from
+      the base client class will result in a deprecation warning.
 * 2.4.5
     * The PythonParser now works better when reading zero length strings.
 * 2.4.4
