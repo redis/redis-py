@@ -1143,13 +1143,6 @@ class PubSub(object):
                 pass
         return self.execute_command('UNSUBSCRIBE', *channels)
 
-    def publish(self, channel, message):
-        """
-        Publish ``message`` on ``channel``.
-        Returns the number of subscribers the message was delivered to.
-        """
-        return self.execute_command('PUBLISH', channel, message)
-
     def listen(self):
         "Listen for messages on channels this client has been subscribed to"
         while self.subscription_count:
