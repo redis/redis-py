@@ -791,7 +791,6 @@ class ServerCommandsTestCase(unittest.TestCase):
             [('a3', 20), ('a1', 23)]
             )
 
-
     def test_zrange(self):
         # key is not a zset
         self.client['a'] = 'a'
@@ -805,9 +804,12 @@ class ServerCommandsTestCase(unittest.TestCase):
             [('a1', 1.0), ('a2', 2.0)])
         self.assertEquals(self.client.zrange('a', 1, 2, withscores=True),
             [('a2', 2.0), ('a3', 3.0)])
+        # test a custom score casting function returns the correct value
+        self.assertEquals(
+            self.client.zrange('a', 0, 1, withscores=True, score_cast_func=int),
+            [('a1', 1), ('a2', 2)])
         # a non existant key should return empty list
         self.assertEquals(self.client.zrange('b', 0, 1, withscores=True), [])
-
 
     def test_zrangebyscore(self):
         # key is not a zset

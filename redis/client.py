@@ -81,8 +81,9 @@ def zset_score_pairs(response, **options):
     """
     if not response or not options['withscores']:
         return response
+    score_cast_func = options.get('score_cast_func', float)
     it = iter(response)
-    return zip(it, imap(float, it))
+    return zip(it, imap(score_cast_func, it))
 
 def int_or_none(response):
     if response is None:
@@ -821,27 +822,31 @@ class Redis(object):
         """
         return self._zaggregate('ZINTERSTORE', dest, keys, aggregate)
 
-    def zrange(self, name, start, end, desc=False, withscores=False):
+    def zrange(self, name, start, end, desc=False, withscores=False,
+               score_cast_func=float):
         """
         Return a range of values from sorted set ``name`` between
         ``start`` and ``end`` sorted in ascending order.
 
         ``start`` and ``end`` can be negative, indicating the end of the range.
 
-        ``desc`` indicates to sort in descending order.
+        ``desc`` a boolean indicating whether to sort the results descendingly
 
         ``withscores`` indicates to return the scores along with the values.
         The return type is a list of (value, score) pairs
+
+        ``score_cast_func`` a callable used to cast the score return value
         """
         if desc:
             return self.zrevrange(name, start, end, withscores)
         pieces = ['ZRANGE', name, start, end]
         if withscores:
             pieces.append('withscores')
-        return self.execute_command(*pieces, **{'withscores': withscores})
+        options = {'withscores': withscores, 'score_cast_func': score_cast_func}
+        return self.execute_command(*pieces, **options)
 
     def zrangebyscore(self, name, min, max,
-            start=None, num=None, withscores=False):
+            start=None, num=None, withscores=False, score_cast_func=float):
         """
         Return a range of values from the sorted set ``name`` with scores
         between ``min`` and ``max``.
@@ -851,6 +856,8 @@ class Redis(object):
 
         ``withscores`` indicates to return the scores along with the values.
         The return type is a list of (value, score) pairs
+
+        `score_cast_func`` a callable used to cast the score return value
         """
         if (start is not None and num is None) or \
                 (num is not None and start is None):
@@ -860,7 +867,8 @@ class Redis(object):
             pieces.extend(['LIMIT', start, num])
         if withscores:
             pieces.append('withscores')
-        return self.execute_command(*pieces, **{'withscores': withscores})
+        options = {'withscores': withscores, 'score_cast_func': score_cast_func}
+        return self.execute_command(*pieces, **options)
 
     def zrank(self, name, value):
         """
@@ -889,7 +897,8 @@ class Redis(object):
         """
         return self.execute_command('ZREMRANGEBYSCORE', name, min, max)
 
-    def zrevrange(self, name, start, num, withscores=False):
+    def zrevrange(self, name, start, num, withscores=False,
+                  score_cast_func=float):
         """
         Return a range of values from sorted set ``name`` between
         ``start`` and ``num`` sorted in descending order.
@@ -898,14 +907,17 @@ class Redis(object):
 
         ``withscores`` indicates to return the scores along with the values
         The return type is a list of (value, score) pairs
+
+        ``score_cast_func`` a callable used to cast the score return value
         """
         pieces = ['ZREVRANGE', name, start, num]
         if withscores:
             pieces.append('withscores')
-        return self.execute_command(*pieces, **{'withscores': withscores})
+        options = {'withscores': withscores, 'score_cast_func': score_cast_func}
+        return self.execute_command(*pieces, **options)
 
     def zrevrangebyscore(self, name, max, min,
-            start=None, num=None, withscores=False):
+            start=None, num=None, withscores=False, score_cast_func=float):
         """
         Return a range of values from the sorted set ``name`` with scores
         between ``min`` and ``max`` in descending order.
@@ -915,6 +927,8 @@ class Redis(object):
 
         ``withscores`` indicates to return the scores along with the values.
         The return type is a list of (value, score) pairs
+
+        ``score_cast_func`` a callable used to cast the score return value
         """
         if (start is not None and num is None) or \
                 (num is not None and start is None):
@@ -924,7 +938,8 @@ class Redis(object):
             pieces.extend(['LIMIT', start, num])
         if withscores:
             pieces.append('withscores')
-        return self.execute_command(*pieces, **{'withscores': withscores})
+        options = {'withscores': withscores, 'score_cast_func': score_cast_func}
+        return self.execute_command(*pieces, **options)
 
     def zrevrank(self, name, value):
         """
