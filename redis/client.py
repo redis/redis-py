@@ -1090,7 +1090,8 @@ class PubSub(object):
     def parse_response(self):
         "Parse the response from a publish/subscribe command"
         response = self.connection.read_response()
-        if response[0] in self.subscribe_commands:
+        if not isinstance(response, long) and \
+                response[0] in self.subscribe_commands:
             self.subscription_count = response[2]
             # if we've just unsubscribed from the remaining channels,
             # release the connection back to the pool
