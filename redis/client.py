@@ -1190,19 +1190,8 @@ class Pipeline(Redis):
         self.transaction = transaction
         self.shard_hint = shard_hint
 
-        self._real_exec = self.default_execute_command
-        self._pipe_exec = self.pipeline_execute_command
-        self._watching = False
+        self.watching = False
         self.reset()
-
-    def _get_watch(self):
-        return self._watching
-
-    def _set_watch(self, value):
-        self._watching = value
-        self.execute_command = value and self._real_exec or self._pipe_exec
-
-    watching = property(_get_watch, _set_watch)
 
     def reset(self):
         self.command_stack = []
@@ -1211,7 +1200,7 @@ class Pipeline(Redis):
         if self.watching and self.connection:
             try:
                 # call this manually since our unwatch or
-                # default_execute_command methods can call reset()
+                # immediate_execute_command methods can call reset()
                 self.connection.send_command('UNWATCH')
                 self.connection.read_response()
             except ConnectionError:
@@ -1219,8 +1208,7 @@ class Pipeline(Redis):
                 self.connection.disconnect()
         # clean up the other instance attributes
         self.watching = False
-        if self.transaction:
-            self.execute_command('MULTI')
+        self.explicit_transaction = False
         # we can safely return the connection to the pool here since we're
         # sure we're no longer WATCHing anything
         if self.connection:
@@ -1232,13 +1220,24 @@ class Pipeline(Redis):
         Start a transactional block of the pipeline after WATCH commands
         are issued. End the transactional block with `execute`.
         """
-        self.execute_command = self._pipe_exec
+        if self.explicit_transaction:
+            raise RedisError('Cannot issue nested calls to MULTI')
+        if self.command_stack:
+            raise RedisError('Commands without an initial WATCH have already '
+                             'been issued')
+        self.transaction = True
+        self.explicit_transaction = True
 
-    def default_execute_command(self, *args, **options):
+    def execute_command(self, *args, **kwargs):
+        if self.watching and not self.explicit_transaction:
+            return self.immediate_execute_command(*args, **kwargs)
+        return self.pipeline_execute_command(*args, **kwargs)
+
+    def immediate_execute_command(self, *args, **options):
         """
-        Execute a command, but don't auto-retry on a ConnectionError. Used
-        when issuing WATCH or subsequent commands retrieving their values
-        but before MULTI is called.
+        Execute a command immediately, but don't auto-retry on a
+        ConnectionError. Used when issuing WATCH or subsequent commands
+        retrieving their values but before MULTI is called.
         """
         command_name = args[0]
         conn = self.connection
@@ -1310,12 +1309,12 @@ class Pipeline(Redis):
 
     def execute(self):
         "Execute all the commands in the current pipeline"
+        stack = self.command_stack
         if self.transaction:
-            self.execute_command('EXEC')
+            stack = [(('MULTI' ,), {})] + stack + [(('EXEC', ), {})]
             execute = self._execute_transaction
         else:
             execute = self._execute_pipeline
-        stack = self.command_stack
         conn = self.connection or \
                    self.connection_pool.get_connection('MULTI', self.shard_hint)
         try:
@@ -1334,11 +1333,8 @@ class Pipeline(Redis):
         """
         Watches the values at keys ``names``
         """
-        if not self.transaction:
-            raise RedisError("Can only WATCH when using transactions")
-        # if more than 'MULTI' is in the command_stack, we can't WATCH anymore
-        if self.watching and len(self.command_stack) > 1:
-            raise RedisError("Can only WATCH before issuing pipeline commands")
+        if self.explicit_transaction:
+            raise RedisError('Cannot issue a WATCH after a MULTI')
         self.watching = True
         return self.execute_command('WATCH', *names)
 
@@ -1346,13 +1342,7 @@ class Pipeline(Redis):
         """
         Unwatches all previously specified keys
         """
-        if not self.transaction:
-            raise RedisError("Can only UNWATCH when using transactions")
-        # if more than 'MULTI' is in the command_stack, we can't UNWATCH anymore
         if self.watching:
-            if len(self.command_stack) > 1:
-                raise RedisError("Can only UNWATCH before issuing "
-                                 "pipeline commands")
             response = self.execute_command('UNWATCH')
         else:
             response = True
