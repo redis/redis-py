@@ -1282,11 +1282,12 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_('>=256' in parsed['allocation_stats'])
 
     def test_evalsha(self):
-        script = "return {ok='Test OK'}"
+        now = datetime.datetime.now().isoformat()
+        script = "return {ok='%s'}" % now
         digest = hashlib.sha1(script).hexdigest()
         self.assertRaises(redis.InvalidResponse, self.client.evalsha, digest, 0)
         self.client._evalscript(script, 0)
-        self.assertEquals(self.client.evalsha(digest, 0), "Test OK")
+        self.assertEquals(self.client.evalsha(digest, 0), now)
 
     def test_eval(self):
         self.assertEquals(self.client.eval("return {KEYS[1], KEYS[2], ARGV[1], ARGV[2]}", \
