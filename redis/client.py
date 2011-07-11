@@ -1225,7 +1225,6 @@ class Pipeline(Redis):
         if self.command_stack:
             raise RedisError('Commands without an initial WATCH have already '
                              'been issued')
-        self.transaction = True
         self.explicit_transaction = True
 
     def execute_command(self, *args, **kwargs):
@@ -1310,7 +1309,7 @@ class Pipeline(Redis):
     def execute(self):
         "Execute all the commands in the current pipeline"
         stack = self.command_stack
-        if self.transaction:
+        if self.transaction or self.explicit_transaction:
             stack = [(('MULTI' ,), {})] + stack + [(('EXEC', ), {})]
             execute = self._execute_transaction
         else:
