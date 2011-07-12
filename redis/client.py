@@ -1202,6 +1202,9 @@ class Pipeline(Redis):
     ResponseError exceptions, such as those raised when issuing a command
     on a key of a different datatype.
     """
+
+    UNWATCH_COMMANDS = set(('DISCARD', 'EXEC', 'UNWATCH'))
+
     def __init__(self, connection_pool, response_callbacks, transaction,
                  shard_hint):
         self.connection_pool = connection_pool
@@ -1326,6 +1329,13 @@ class Pipeline(Redis):
         return [self.parse_response(connection, args[0], **options)
                 for args, options in commands]
 
+    def parse_response(self, connection, command_name, **options):
+        if command_name in self.__class__.UNWATCH_COMMANDS:
+            self.watching = False
+        if command_name is 'WATCH':
+            self.watching = True
+        return Redis.parse_response(self, connection, command_name, **options)
+
     def execute(self):
         "Execute all the commands in the current pipeline"
         stack = self.command_stack
@@ -1365,9 +1375,6 @@ class Pipeline(Redis):
             response = self.execute_command('UNWATCH')
         else:
             response = True
-        # it's safe to reset() here because we are no longer bound to a
-        # single connection and we're sure the command stack is empty.
-        self.reset()
         return response
 
 class LockError(RedisError):
