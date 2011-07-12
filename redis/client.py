@@ -1342,10 +1342,10 @@ class Pipeline(Redis):
             return execute(conn, stack)
         except ConnectionError:
             conn.disconnect()
-            # if we watching a variable, the watch is no longer valid since
-            # this conncetion has died.
+            # if we were watching a variable, the watch is no longer valid since
+            # this connection has died.
             if self.watching:
-                raise WatchError("Watched variable changed.")
+                raise
             return execute(conn, stack)
         finally:
             self.reset()
