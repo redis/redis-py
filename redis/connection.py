@@ -89,9 +89,9 @@ class HiredisParser(object):
             if not buffer:
                 raise ConnectionError("Socket closed on remote end")
             self._reader.feed(buffer)
-            # if the data received doesn't end with \r\n, then there's more in
-            # the socket
-            if not buffer.endswith('\r\n'):
+            # proactively, but not conclusively, check if more data is in the
+            # buffer. if the data received doesn't end with \n, there's more.
+            if not buffer.endswith('\n'):
                 continue
             response = self._reader.gets()
         return response
