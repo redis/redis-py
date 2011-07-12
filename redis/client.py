@@ -225,26 +225,6 @@ class Redis(object):
         """
         return PubSub(self.connection_pool, shard_hint)
 
-    def connection(self):
-        """
-        Returns an instance of ``RedisSingleConnection`` which is bound to one
-        connection, allowing transactional commands to run in a thread-safe
-        manner.
-
-        Note that, unlike ``Redis``, ``RedisSingleConnection`` may raise a
-        ``ConnectionError`` which should be handled by the caller.
-
-        >>> with redis.connection() as cxn:
-        ...     cxn.watch('foo')
-        ...     old_foo = cxn.get('foo')
-        ...     cxn.multi()
-        ...     cxn.set('foo', old_foo + 1)
-        ...     cxn.execute()
-        ...
-        >>>
-        """
-        return RedisConnection(connection_pool=self.connection_pool)
-
     #### COMMAND EXECUTION AND PROTOCOL PARSING ####
     def execute_command(self, *args, **options):
         "Execute a command and return a parsed response"
@@ -1330,10 +1310,11 @@ class Pipeline(Redis):
                 for args, options in commands]
 
     def parse_response(self, connection, command_name, **options):
-        result = Redis.parse_response(self, connection, command_name, **options)
+        result = super(Pipeline, self).parse_response(
+            connection, command_name, **options)
         if command_name in self.__class__.UNWATCH_COMMANDS:
             self.watching = False
-        if command_name is 'WATCH':
+        if command_name == 'WATCH':
             self.watching = True
         return result
 
