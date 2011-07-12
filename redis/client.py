@@ -1330,11 +1330,12 @@ class Pipeline(Redis):
                 for args, options in commands]
 
     def parse_response(self, connection, command_name, **options):
+        result = Redis.parse_response(self, connection, command_name, **options)
         if command_name in self.__class__.UNWATCH_COMMANDS:
             self.watching = False
         if command_name is 'WATCH':
             self.watching = True
-        return Redis.parse_response(self, connection, command_name, **options)
+        return result
 
     def execute(self):
         "Execute all the commands in the current pipeline"
