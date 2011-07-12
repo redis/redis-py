@@ -32,6 +32,31 @@ class PipelineTestCase(unittest.TestCase):
         self.assertEquals(self.client['b'], 'b1')
         self.assertEquals(self.client['c'], 'c1')
 
+    def test_pipeline_no_transaction_watch(self):
+        self.client.set('a', 0)
+
+        pipe = self.client.pipeline(transaction=False)
+        pipe.watch('a')
+        a = pipe.get('a')
+
+        pipe.multi()
+        pipe.set('a', int(a) + 1)
+        result = pipe.execute()
+        self.assertEquals(result, [True])
+
+    def test_pipeline_no_transaction_watch_failure(self):
+        self.client.set('a', 0)
+
+        pipe = self.client.pipeline(transaction=False)
+        pipe.watch('a')
+        a = pipe.get('a')
+
+        self.client.set('a', 'bad')
+
+        pipe.multi()
+        pipe.set('a', int(a) + 1)
+        self.assertRaises(redis.WatchError, pipe.execute)
+
     def test_invalid_command_in_pipeline(self):
         # all commands but the invalid one should be excuted correctly
         self.client['c'] = 'a'
