@@ -225,6 +225,26 @@ class Redis(object):
         """
         return PubSub(self.connection_pool, shard_hint)
 
+    def connection(self):
+        """
+        Returns an instance of ``RedisSingleConnection`` which is bound to one
+        connection, allowing transactional commands to run in a thread-safe
+        manner.
+
+        Note that, unlike ``Redis``, ``RedisSingleConnection`` may raise a
+        ``ConnectionError`` which should be handled by the caller.
+
+        >>> with redis.connection() as cxn:
+        ...     cxn.watch('foo')
+        ...     old_foo = cxn.get('foo')
+        ...     cxn.multi()
+        ...     cxn.set('foo', old_foo + 1)
+        ...     cxn.execute()
+        ...
+        >>>
+        """
+        return RedisConnection(connection_pool=self.connection_pool)
+
     #### COMMAND EXECUTION AND PROTOCOL PARSING ####
     def execute_command(self, *args, **options):
         "Execute a command and return a parsed response"
@@ -504,13 +524,13 @@ class Redis(object):
         """
         Watches the values at keys ``names``, or None if the key doesn't exist
         """
-        return self.execute_command('WATCH', *names)
+        warnings.warn(DeprecationWarning('Call WATCH from a Pipeline object'))
 
     def unwatch(self):
         """
         Unwatches the value at key ``name``, or None of the key doesn't exist
         """
-        return self.execute_command('UNWATCH')
+        warnings.warn(DeprecationWarning('Call UNWATCH from a Pipeline object'))
 
     #### LIST COMMANDS ####
     def blpop(self, keys, timeout=0):
@@ -1182,20 +1202,80 @@ class Pipeline(Redis):
     ResponseError exceptions, such as those raised when issuing a command
     on a key of a different datatype.
     """
+
+    UNWATCH_COMMANDS = set(('DISCARD', 'EXEC', 'UNWATCH'))
+
     def __init__(self, connection_pool, response_callbacks, transaction,
                  shard_hint):
         self.connection_pool = connection_pool
+        self.connection = None
         self.response_callbacks = response_callbacks
         self.transaction = transaction
         self.shard_hint = shard_hint
+
+        self.watching = False
         self.reset()
 
     def reset(self):
         self.command_stack = []
-        if self.transaction:
-            self.execute_command('MULTI')
+        # make sure to reset the connection state in the event that we were
+        # watching something
+        if self.watching and self.connection:
+            try:
+                # call this manually since our unwatch or
+                # immediate_execute_command methods can call reset()
+                self.connection.send_command('UNWATCH')
+                self.connection.read_response()
+            except ConnectionError:
+                # disconnect will also remove any previous WATCHes
+                self.connection.disconnect()
+        # clean up the other instance attributes
+        self.watching = False
+        self.explicit_transaction = False
+        # we can safely return the connection to the pool here since we're
+        # sure we're no longer WATCHing anything
+        if self.connection:
+            self.connection_pool.release(self.connection)
+            self.connection = None
 
-    def execute_command(self, *args, **options):
+    def multi(self):
+        """
+        Start a transactional block of the pipeline after WATCH commands
+        are issued. End the transactional block with `execute`.
+        """
+        if self.explicit_transaction:
+            raise RedisError('Cannot issue nested calls to MULTI')
+        if self.command_stack:
+            raise RedisError('Commands without an initial WATCH have already '
+                             'been issued')
+        self.explicit_transaction = True
+
+    def execute_command(self, *args, **kwargs):
+        if self.watching and not self.explicit_transaction:
+            return self.immediate_execute_command(*args, **kwargs)
+        return self.pipeline_execute_command(*args, **kwargs)
+
+    def immediate_execute_command(self, *args, **options):
+        """
+        Execute a command immediately, but don't auto-retry on a
+        ConnectionError. Used when issuing WATCH or subsequent commands
+        retrieving their values but before MULTI is called.
+        """
+        command_name = args[0]
+        conn = self.connection
+        # if this is the first call, we need a connection
+        if not conn:
+            conn = self.connection_pool.get_connection(command_name,
+                                                       self.shard_hint)
+            self.connection = conn
+        try:
+            conn.send_command(*args)
+            return self.parse_response(conn, command_name, **options)
+        except ConnectionError:
+            self.reset()
+            raise
+
+    def pipeline_execute_command(self, *args, **options):
         """
         Stage a command to be executed when execute() is next called
 
@@ -1229,7 +1309,7 @@ class Pipeline(Redis):
 
         if len(response) != len(commands):
             raise ResponseError("Wrong number of response items from "
-                "pipeline execution")
+                                "pipeline execution")
         # We have to run response callbacks manually
         data = []
         for r, cmd in izip(response, commands):
@@ -1242,31 +1322,61 @@ class Pipeline(Redis):
         return data
 
     def _execute_pipeline(self, connection, commands):
-    # build up all commands into a single request to increase network perf
+        # build up all commands into a single request to increase network perf
         all_cmds = ''.join(starmap(connection.pack_command,
                                    [args for args, options in commands]))
         connection.send_packed_command(all_cmds)
         return [self.parse_response(connection, args[0], **options)
                 for args, options in commands]
 
+    def parse_response(self, connection, command_name, **options):
+        result = Redis.parse_response(self, connection, command_name, **options)
+        if command_name in self.__class__.UNWATCH_COMMANDS:
+            self.watching = False
+        if command_name is 'WATCH':
+            self.watching = True
+        return result
+
     def execute(self):
         "Execute all the commands in the current pipeline"
-        if self.transaction:
-            self.execute_command('EXEC')
+        stack = self.command_stack
+        if self.transaction or self.explicit_transaction:
+            stack = [(('MULTI' ,), {})] + stack + [(('EXEC', ), {})]
             execute = self._execute_transaction
         else:
             execute = self._execute_pipeline
-        stack = self.command_stack
-        self.reset()
-        conn = self.connection_pool.get_connection('MULTI', self.shard_hint)
+        conn = self.connection or \
+                   self.connection_pool.get_connection('MULTI', self.shard_hint)
         try:
             return execute(conn, stack)
         except ConnectionError:
             conn.disconnect()
+            # if we were watching a variable, the watch is no longer valid since
+            # this connection has died.
+            if self.watching:
+                raise WatchError("Watched variable changed.")
             return execute(conn, stack)
         finally:
-            self.connection_pool.release(conn)
+            self.reset()
 
+    def watch(self, *names):
+        """
+        Watches the values at keys ``names``
+        """
+        if self.explicit_transaction:
+            raise RedisError('Cannot issue a WATCH after a MULTI')
+        self.watching = True
+        return self.execute_command('WATCH', *names)
+
+    def unwatch(self):
+        """
+        Unwatches all previously specified keys
+        """
+        if self.watching:
+            response = self.execute_command('UNWATCH')
+        else:
+            response = True
+        return response
 
 class LockError(RedisError):
     "Errors thrown from the Lock"
