@@ -210,6 +210,7 @@ will be called automatically... But it can also be called manually, like this:
     ...         pipe.watch('OUR-SEQUENCE-KEY')
     ...         ...
     ...         pipe.execute()
+    ...         break
     ...     except WatchError:
     ...         continue
     ...     finally:
