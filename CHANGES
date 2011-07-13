@@ -14,7 +14,8 @@
       the base client class will result in a deprecation warning. After
       WATCHing one or more keys, the pipeline will be placed in immediate
       execution mode until UNWATCH or MULTI are called. Refer to the new
-      pipeline docs in the README for more information.
+      pipeline docs in the README for more information. Thanks to David Wolever
+      and Randall Leeds for greatly helping with this.
 * 2.4.5
     * The PythonParser now works better when reading zero length strings.
 * 2.4.4
