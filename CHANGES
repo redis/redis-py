@@ -1,9 +1,9 @@
-* 2.4.6 (in development)
+* 2.4.6
     * Variadic arguments for SADD, SREM, ZREN, HDEL, LPUSH, and RPUSH. Thanks
       Raphaël Vinot.
-    * Fixed an error in the Hiredis parser that occasionally caused the
-      socket connection to become corrupted and unusable. This became noticeable
-      once connection pools started to be used.
+    * (CRITICAL) Fixed an error in the Hiredis parser that occasionally caused
+      the socket connection to become corrupted and unusable. This became
+      noticeable once connection pools started to be used.
     * ZRANGE, ZREVRANGE, ZRANGEBYSCORE, and ZREVRANGEBYSCORE now take an
       additional optional argument, score_cast_func, which is a callable used
       to cast the score value in the return type. The default is float.
@@ -11,7 +11,10 @@
       [P]SUBSCRIBEd cannot issue PUBLISH commands, so it doesn't make to have
       it here.
     * Pipelines now contain WATCH and UNWATCH. Calling WATCH or UNWATCH from
-      the base client class will result in a deprecation warning.
+      the base client class will result in a deprecation warning. After
+      WATCHing one or more keys, the pipeline will be placed in immediate
+      execution mode until UNWATCH or MULTI are called. Refer to the new
+      pipeline docs in the README for more information.
 * 2.4.5
     * The PythonParser now works better when reading zero length strings.
 * 2.4.4
