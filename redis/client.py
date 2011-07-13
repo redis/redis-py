@@ -1343,10 +1343,11 @@ class Pipeline(Redis):
             # if we were watching a variable, the watch is no longer valid since
             # this connection has died. raise a WatchError, which indicates
             # the user should retry his transaction. If this is more than a
-            # complete failure, the WATCH that the user next issue will fail,
+            # temporary failure, the WATCH that the user next issue will fail,
             # propegating the real ConnectionError
             if self.watching:
-                raise WatchError("Watched variable changed.")
+                raise WatchError("A ConnectionError occured on while watching "
+                                 "one or more keys")
             # otherwise, it's safe to retry since the transaction isn't
             # predicated on any state
             return execute(conn, stack)
