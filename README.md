@@ -176,27 +176,33 @@ could do something like this:
 
     >>> pipe = r.pipeline()
     >>> while 1:
-    >>>     try:
-    >>>         # put a WATCH on the key that holds our sequence value
-    >>>         pipe.watch('OUR-SEQUENCE-KEY')
-    >>>         # after WATCHing, the pipeline is put into immediate execution
-    >>>         # mode until we tell it to start buffering commands again.
-    >>>         # this allows us to get the current value of our sequence
-    >>>         current_value = pipe.get('OUR-SEQUENCE-KEY')
-    >>>         next_value = int(current_value) + 1
-    >>>         # now we can put the pipeline back into buffered mode with MULTI
-    >>>         pipe.multi()
-    >>>         pipe.set('OUR-SEQUENCE-KEY', next_value)
-    >>>         # and finally, execute the pipeline (the set command)
-    >>>         pipe.execute()
-    >>>         # if a WatchError wasn't raised during execution, everything
-    >>>         # we just did happened atomically.
-    >>>         break
-    >>>    except WatchError:
-    >>>         # another client must have changed 'OUR-SEQUENCE-KEY' between
-    >>>         # the time we started WATCHing it and the pipeline's execution.
-    >>>         # our best bet is to just retry.
-    >>>         continue
+    ...     try:
+    ...         # put a WATCH on the key that holds our sequence value
+    ...         pipe.watch('OUR-SEQUENCE-KEY')
+    ...         # after WATCHing, the pipeline is put into immediate execution
+    ...         # mode until we tell it to start buffering commands again.
+    ...         # this allows us to get the current value of our sequence
+    ...         current_value = pipe.get('OUR-SEQUENCE-KEY')
+    ...         next_value = int(current_value) + 1
+    ...         # now we can put the pipeline back into buffered mode with MULTI
+    ...         pipe.multi()
+    ...         pipe.set('OUR-SEQUENCE-KEY', next_value)
+    ...         # and finally, execute the pipeline (the set command)
+    ...         pipe.execute()
+    ...         # if a WatchError wasn't raised during execution, everything
+    ...         # we just did happened atomically.
+    ...         break
+    ...    except WatchError:
+    ...         # another client must have changed 'OUR-SEQUENCE-KEY' between
+    ...         # the time we started WATCHing it and the pipeline's execution.
+    ...         # our best bet is to just retry.
+    ...         continue
+    ...    finally:
+    ...         # Ensure that the pipe's connection has been returned to the
+    ...         # pool (this will normally be done in `pipe.execute()`, but
+    ...         # it should also be done here in case an exception is raised
+    ...         # before `pip.execute()` can be called).
+    ...         pipe.reset()
 
 ## API Reference
 
