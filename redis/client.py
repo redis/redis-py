@@ -1334,8 +1334,14 @@ class Pipeline(Redis):
             execute = self._execute_transaction
         else:
             execute = self._execute_pipeline
-        conn = self.connection or \
-                   self.connection_pool.get_connection('MULTI', self.shard_hint)
+
+        conn = self.connection
+        if not conn:
+            conn = self.connection_pool.get_connection('MULTI', self.shard_hint)
+            # assign to self.connection so reset() releases the connection
+            # back to the pool after we're done
+            self.connection = conn
+
         try:
             return execute(conn, stack)
         except ConnectionError:

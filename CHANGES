@@ -1,3 +1,6 @@
+* 2.4.7 (in developmen)
+    * Fixed a bug where some connections we're getting released back to the
+      connection pool during pipelines.
 * 2.4.6
     * Variadic arguments for SADD, SREM, ZREN, HDEL, LPUSH, and RPUSH. Thanks
       Raphaël Vinot.
