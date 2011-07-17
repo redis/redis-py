@@ -203,6 +203,22 @@ class Redis(object):
             transaction,
             shard_hint)
 
+    def transaction(self, func, *watches, **kwargs):
+        """
+        Convenience method for executing the callable `func` as a transaction
+        while watching all keys specified in `watches`. The 'func' callable
+        should expect a single arguement which is a Pipeline object.
+        """
+        shard_hint = kwargs.pop('shard_hint', None)
+        with self.pipeline(True, shard_hint) as pipe:
+            while 1:
+                try:
+                    pipe.watch(*watches)
+                    func(pipe)
+                    return pipe.execute()
+                except WatchError:
+                    continue
+
     def lock(self, name, timeout=None, sleep=0.1):
         """
         Return a new Lock object using key ``name`` that mimics

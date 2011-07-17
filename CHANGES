@@ -4,6 +4,9 @@
     * Pipelines can now be used as context managers. This is the preferred way
       of use to ensure that connections get cleaned up properly. Thanks
       David Wolever.
+    * Added a convenience method called transaction() on the base Redis class.
+      This method eliminates much of the boilerplate used when using pipelines
+      to watch Redis keys. See the documentation for details on usage.
 * 2.4.6
     * Variadic arguments for SADD, SREM, ZREN, HDEL, LPUSH, and RPUSH. Thanks
       Raphaël Vinot.
