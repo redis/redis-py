@@ -220,7 +220,7 @@ explicity calling reset():
 A convenience method named "transaction" exists for handling all the
 boilerplate of handling and retrying watch errors. It takes a callable that
 should expect a single parameter, a pipeline object, and any number of keys to
-be WATCHED. Our client-side INCR command above can be written like this,
+be WATCHed. Our client-side INCR command above can be written like this,
 which is much easier to read:
 
     >>> def client_side_incr(pipe):
