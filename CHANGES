@@ -1,4 +1,4 @@
-* 2.4.7 (in development)
+* 2.4.7
     * Fixed a bug where some connections were not getting released back to the
       connection pool after pipeline execution.
     * Pipelines can now be used as context managers. This is the preferred way
