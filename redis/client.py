@@ -1196,6 +1196,12 @@ class Pipeline(Redis):
         self.watching = False
         self.reset()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.reset()
+
     def reset(self):
         self.command_stack = []
         # make sure to reset the connection state in the event that we were

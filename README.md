@@ -198,11 +198,12 @@ could do something like this:
     ...             # our best bet is to just retry.
     ...             continue
 
-Note that, because the `Pipeline` must bind to a single connection for the
-duration of a `watch`, care must be taken to ensure that he connection is
-returned to the connection pool by calling the `reset()` method. If the
-`Pipeline` is used as a context manager (as in the example above) `reset()`
-will be called automatically... But it can also be called manually, like this:
+Note that, because the Pipeline must bind to a single connection for the
+duration of a WATCH, care must be taken to ensure that he connection is
+returned to the connection pool by calling the reset() method. If the
+Pipeline is used as a context manager (as in the example above) reset()
+will be called automatically. Of course you can do this the manual way as by
+explicity calling reset():
 
     >>> pipe = r.pipeline()
     >>> while 1:
