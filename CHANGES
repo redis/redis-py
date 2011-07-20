@@ -1,3 +1,5 @@
+* 2.4.8
+    * Imported with_statement from __future__ for Python 2.5 compatability.
 * 2.4.7
     * Fixed a bug where some connections were not getting released back to the
       connection pool after pipeline execution.
