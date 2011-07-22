@@ -1,3 +1,7 @@
+* 2.4.9 (in development)
+    * Removed socket retry logic in Connection. This is the responsbility of
+      the caller to determine if the command is safe and can be retried. Thanks
+      David Wolver.
 * 2.4.8
     * Imported with_statement from __future__ for Python 2.5 compatability.
 * 2.4.7

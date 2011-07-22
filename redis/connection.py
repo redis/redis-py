@@ -174,8 +174,8 @@ class Connection(object):
             pass
         self._sock = None
 
-    def _send(self, command):
-        "Send the command to the socket"
+    def send_packed_command(self, command):
+        "Send an already packed command to the Redis server"
         if not self._sock:
             self.connect()
         try:
@@ -189,17 +189,6 @@ class Connection(object):
                 _errno, errmsg = e.args
             raise ConnectionError("Error %s while writing to socket. %s." % \
                 (_errno, errmsg))
-
-    def send_packed_command(self, command):
-        "Send an already packed command to the Redis server"
-        try:
-            self._send(command)
-        except ConnectionError:
-            # retry the command once in case the socket connection simply
-            # timed out
-            self.disconnect()
-            # if this _send() call fails, then the error will be raised
-            self._send(command)
 
     def send_command(self, *args):
         "Pack and send a command to the Redis server"
