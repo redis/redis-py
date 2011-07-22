@@ -181,14 +181,16 @@ class Connection(object):
         try:
             self._sock.sendall(command)
         except socket.error, e:
-            if e.args[0] == errno.EPIPE:
-                self.disconnect()
+            self.disconnect()
             if len(e.args) == 1:
                 _errno, errmsg = 'UNKNOWN', e.args[0]
             else:
                 _errno, errmsg = e.args
             raise ConnectionError("Error %s while writing to socket. %s." % \
                 (_errno, errmsg))
+        except:
+            self.disconnect()
+            raise
 
     def send_command(self, *args):
         "Pack and send a command to the Redis server"
@@ -196,7 +198,11 @@ class Connection(object):
 
     def read_response(self):
         "Read the response from a previously sent command"
-        response = self._parser.read_response()
+        try:
+            response = self._parser.read_response()
+        except:
+            self.disconnect()
+            raise
         if response.__class__ == ResponseError:
             raise response
         return response
