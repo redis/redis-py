@@ -3,6 +3,7 @@ import unittest
 import datetime
 import time
 from distutils.version import StrictVersion
+import signal
 from redis.client import parse_info
 
 class ServerCommandsTestCase(unittest.TestCase):
@@ -1260,3 +1261,39 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_('allocation_stats' in parsed)
         self.assert_('6' in parsed['allocation_stats'])
         self.assert_('>=256' in parsed['allocation_stats'])
+
+    def test_interrupt(self):
+        self.client.delete('test_interrupt')
+
+        class Alarm(Exception):
+            pass
+
+        error = Alarm
+
+        def alarm_handler(*args):
+            raise error
+
+        old_alarm = signal.signal(signal.SIGALRM, alarm_handler)
+        try:
+            signal.alarm(1)
+            try:
+                self.client.brpop('test_interrupt')
+            except Alarm:
+                pass
+            finally:
+                signal.alarm(0) # shut off alarm
+
+            error = Alarm('lpush() blocked for more than 1 second')
+            signal.alarm(1)
+            try:
+                # the connection is borked now
+                # pushing will block because the server still blocking on brpop
+                self.client.lpush('test2', 'hello')
+            finally:
+                signal.alarm(0)
+
+        finally:
+            # no alarm can be pending.  Safe to restore old handler.
+            signal.signal(signal.SIGALRM, old_alarm)
+            # disable sending FLUSHDB because it will also block
+            self.tearDown = lambda *args: None
