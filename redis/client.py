@@ -248,7 +248,6 @@ class Redis(object):
         pool = self.connection_pool
         command_name = args[0]
         connection = pool.get_connection(command_name, **options)
-        borked_connection = False
         try:
             connection.send_command(*args)
             return self.parse_response(connection, command_name, **options)
@@ -257,13 +256,10 @@ class Redis(object):
             connection.send_command(*args)
             return self.parse_response(connection, command_name, **options)
         except:
-            borked_connection = True
+            connection.disconnect()
             raise
         finally:
-            if borked_connection:
-                connection.disconnect()
-            else:
-                pool.release(connection)
+            pool.release(connection)
 
     def parse_response(self, connection, command_name, **options):
         "Parses a response from the Redis server"
