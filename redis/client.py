@@ -255,6 +255,9 @@ class Redis(object):
             connection.disconnect()
             connection.send_command(*args)
             return self.parse_response(connection, command_name, **options)
+        except:
+            connection.disconnect()
+            raise
         finally:
             pool.release(connection)
 
