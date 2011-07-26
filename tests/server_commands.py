@@ -7,8 +7,8 @@ from redis.client import parse_info
 
 class ServerCommandsTestCase(unittest.TestCase):
 
-    def get_client(self):
-        return redis.Redis(host='localhost', port=6379, db=9)
+    def get_client(self, cls=redis.Redis):
+        return cls(host='localhost', port=6379, db=9)
 
     def setUp(self):
         self.client = self.get_client()
@@ -438,20 +438,6 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(self.client.ltrim('a', 0, 1))
         self.assertEquals(self.client.lrange('a', 0, 5), ['a', 'b'])
 
-    def test_lpop(self):
-        # no key
-        self.assertEquals(self.client.lpop('a'), None)
-        # key is not a list
-        self.client['a'] = 'b'
-        self.assertRaises(redis.ResponseError, self.client.lpop, 'a')
-        del self.client['a']
-        # real logic
-        self.make_list('a', 'abc')
-        self.assertEquals(self.client.lpop('a'), 'a')
-        self.assertEquals(self.client.lpop('a'), 'b')
-        self.assertEquals(self.client.lpop('a'), 'c')
-        self.assertEquals(self.client.lpop('a'), None)
-
     def test_rpop(self):
         # no key
         self.assertEquals(self.client.rpop('a'), None)
@@ -875,7 +861,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         # a non existant key should return empty list
         self.assertEquals(self.client.zrange('b', 0, 1, withscores=True), [])
 
-    def test_zrangebyscore(self):
+    def test_zrevrangebyscore(self):
         # key is not a zset
         self.client['a'] = 'a'
         self.assertRaises(redis.ResponseError, self.client.zrevrangebyscore,
@@ -1192,6 +1178,21 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(num, 4)
         self.assertEquals(self.client.lrange('sorted', 0, 10),
             ['vodka', 'milk', 'gin', 'apple juice'])
+
+    def test_strict_zadd(self):
+        client = self.get_client(redis.StrictRedis)
+        client.zadd('a', 1.0, 'a1', 2.0, 'a2', a3=3.0)
+        self.assertEquals(client.zrange('a', 0, 3, withscores=True),
+                          [('a1', 1.0), ('a2', 2.0), ('a3', 3.0)])
+
+    def test_strict_lrem(self):
+        client = self.get_client(redis.StrictRedis)
+        client.rpush('a', 'a1')
+        client.rpush('a', 'a2')
+        client.rpush('a', 'a3')
+        client.rpush('a', 'a1')
+        client.lrem('a', 0, 'a1')
+        self.assertEquals(client.lrange('a', 0, -1), ['a2', 'a3'])
 
     ## BINARY SAFE
     # TODO add more tests

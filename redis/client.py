@@ -102,7 +102,7 @@ def parse_config(response, **options):
         return response and pairs_to_dict(response) or {}
     return response == 'OK'
 
-class Redis(object):
+class StrictRedis(object):
     """
     Implementation of the Redis protocol.
 
@@ -628,13 +628,17 @@ class Redis(object):
         """
         return self.execute_command('LRANGE', name, start, end)
 
-    def lrem(self, name, value, num=0):
+    def lrem(self, name, count, value):
         """
-        Remove the first ``num`` occurrences of ``value`` from list ``name``
+        Remove the first ``count`` occurrences of elements equal to ``value``
+        from the list stored at ``name``.
 
-        If ``num`` is 0, then all occurrences will be removed
+        The count argument influences the operation in the following ways:
+            count > 0: Remove elements equal to value moving from head to tail.
+            count < 0: Remove elements equal to value moving from tail to head.
+            count = 0: Remove all elements equal to value.
         """
-        return self.execute_command('LREM', name, num, value)
+        return self.execute_command('LREM', name, count, value)
 
     def lset(self, name, index, value):
         "Set ``position`` of list ``name`` to ``value``"
@@ -798,27 +802,27 @@ class Redis(object):
 
 
     #### SORTED SET COMMANDS ####
-    def zadd(self, name, value=None, score=None, **pairs):
+    def zadd(self, name, *args, **kwargs):
         """
-        For each kwarg in ``pairs``, add that item and it's score to the
-        sorted set ``name``.
+        Set any number of score, element-name pairs to the key ``name``. Pairs
+        can be specified in two ways:
 
-        The ``value`` and ``score`` arguments are deprecated.
+        As *args, in the form of: score1, name1, score2, name2, ...
+        or as **kwargs, in the form of: name1=score1, name2=score2, ...
+
+        The following example would add four values to the 'my-key' key:
+        redis.zadd('my-key', 1.1, 'name1', 2.2, 'name2', name3=3.3, name4=4.4)
         """
-        all_pairs = []
-        if value is not None or score is not None:
-            if value is None or score is None:
-                raise RedisError("Both 'value' and 'score' must be specified " \
-                                 "to ZADD")
-            warnings.warn(DeprecationWarning(
-                "Passing 'value' and 'score' has been deprecated. " \
-                "Please pass via kwargs instead."))
-            all_pairs.append(score)
-            all_pairs.append(value)
-        for pair in pairs.iteritems():
-            all_pairs.append(pair[1])
-            all_pairs.append(pair[0])
-        return self.execute_command('ZADD', name, *all_pairs)
+        pieces = []
+        if args:
+            if len(args) % 2 != 0:
+                raise RedisError("ZADD requires an equal number of "
+                                 "values and scores")
+            pieces.extend(args)
+        for pair in kwargs.iteritems():
+            pieces.append(pair[1])
+            pieces.append(pair[0])
+        return self.execute_command('ZADD', name, *pieces)
 
     def zcard(self, name):
         "Return the number of elements in the sorted set ``name``"
@@ -1061,6 +1065,59 @@ class Redis(object):
         Returns the number of subscribers the message was delivered to.
         """
         return self.execute_command('PUBLISH', channel, message)
+
+
+class Redis(StrictRedis):
+    """
+    Provides backwards compatibility with older versions of redis-py that
+    changed arguemnts to some commands to be more Pythonic, sane, or
+    accident.
+    """
+
+    def lrem(self, name, value, num=0):
+        """
+        Remove the first ``num`` occurrences of elements equal to ``value``
+        from the list stored at ``name``.
+
+        The ``num`` argument influences the operation in the following ways:
+            num > 0: Remove elements equal to value moving from head to tail.
+            num < 0: Remove elements equal to value moving from tail to head.
+            num = 0: Remove all elements equal to value.
+        """
+        return self.execute_command('LREM', name, num, value)
+
+    def zadd(self, name, *args, **kwargs):
+        """
+        NOTE: The order of arguments differs from that of the official ZADD
+        command. For backwards compatability, this method accepts arguments
+        in the form of name1, score1, name2, score2, while the official Redis
+        documents expects score1, name1, score2, name2.
+
+        If you're looking to use the standard syntax, consider using the
+        StrictRedis class. See the API Reference section of the docs for more
+        information.
+
+        Set any number of element-name, score pairs to the key ``name``. Pairs
+        can be specified in two ways:
+
+        As *args, in the form of: name1, score1, name2, score2, ...
+        or as **kwargs, in the form of: name1=score1, name2=score2, ...
+
+        The following example would add four values to the 'my-key' key:
+        redis.zadd('my-key', 'name1', 1.1, 'name2', 2.2, name3=3.3, name4=4.4)
+        """
+        pieces = []
+        if args:
+            if len(args) % 2 != 0:
+                raise RedisError("ZADD requires an equal number of "
+                                 "values and scores")
+            temp_args = args
+            temp_args.reverse()
+            pieces.extend(temp_args)
+        for pair in kwargs.iteritems():
+            pieces.append(pair[1])
+            pieces.append(pair[0])
+        return self.execute_command('ZADD', name, *pieces)
 
 
 class PubSub(object):
