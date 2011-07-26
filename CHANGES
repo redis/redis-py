@@ -1,3 +1,8 @@
+* 2.4.10 (in development)
+    * Renamed the base client class to StrictRedis, replacing ZADD and LREM in
+      favor of their official argument order. The Redis class is now a subclass
+      of StrictRedis, implementing the legacy redis-py implementations of ZADD
+      and LREM. Docs have been updated to suggesting the use of StrictRedis.
 * 2.4.9
     * Removed socket retry logic in Connection. This is the responsbility of
       the caller to determine if the command is safe and can be retried. Thanks
