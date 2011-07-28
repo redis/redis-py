@@ -6,18 +6,18 @@
 Welcome to redis-py's documentation!
 ====================================
 
+Indices and tables
+------------------
+
+* :ref:`genindex`
+* :ref:`modindex`
+* :ref:`search`
+
 Contents:
+---------
 
 .. toctree::
    :maxdepth: 2
 
 .. automodule:: redis
    :members:
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
-
