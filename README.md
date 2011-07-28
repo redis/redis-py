@@ -73,7 +73,7 @@ are managed.
     >>> pool = redis.ConnectionPool(host='localhost', port=6379, db=0)
     >>> r = redis.Redis(connection_pool=pool)
 
-### Connetions
+### Connections
 
 ConnectionPools manage a set of Connection instances. redis-py ships with two
 types of Connections. The default, Connection, is a normal TCP socket based
