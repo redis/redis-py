@@ -474,7 +474,7 @@ class StrictRedis(object):
         value = value and 1 or 0
         return self.execute_command('SETBIT', name, offset, value)
 
-    def setex(self, name, value, time):
+    def setex(self, name, time, value):
         """
         Set the value of key ``name`` to ``value``
         that expires in ``time`` seconds
@@ -1070,9 +1070,16 @@ class StrictRedis(object):
 class Redis(StrictRedis):
     """
     Provides backwards compatibility with older versions of redis-py that
-    changed arguemnts to some commands to be more Pythonic, sane, or
+    changed arguments to some commands to be more Pythonic, sane, or by
     accident.
     """
+
+    def setex(self, name, value, time):
+        """
+        Set the value of key ``name`` to ``value``
+        that expires in ``time`` seconds
+        """
+        return self.execute_command('SETEX', name, time, value)
 
     def lrem(self, name, value, num=0):
         """
