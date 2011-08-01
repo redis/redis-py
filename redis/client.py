@@ -1118,9 +1118,7 @@ class Redis(StrictRedis):
             if len(args) % 2 != 0:
                 raise RedisError("ZADD requires an equal number of "
                                  "values and scores")
-            temp_args = args
-            temp_args.reverse()
-            pieces.extend(temp_args)
+            pieces.extend(reversed(args))
         for pair in kwargs.iteritems():
             pieces.append(pair[1])
             pieces.append(pair[0])
