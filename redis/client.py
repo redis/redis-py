@@ -198,7 +198,7 @@ class StrictRedis(object):
         atomic, pipelines are useful for reducing the back-and-forth overhead
         between the client and server.
         """
-        return Pipeline(
+        return StrictPipeline(
             self.connection_pool,
             self.response_callbacks,
             transaction,
@@ -1074,6 +1074,20 @@ class Redis(StrictRedis):
     accident.
     """
 
+    def pipeline(self, transaction=True, shard_hint=None):
+        """
+        Return a new pipeline object that can queue multiple commands for
+        later execution. ``transaction`` indicates whether all commands
+        should be executed atomically. Apart from making a group of operations
+        atomic, pipelines are useful for reducing the back-and-forth overhead
+        between the client and server.
+        """
+        return Pipeline(
+            self.connection_pool,
+            self.response_callbacks,
+            transaction,
+            shard_hint)
+
     def setex(self, name, value, time):
         """
         Set the value of key ``name`` to ``value``
@@ -1243,7 +1257,7 @@ class PubSub(object):
             yield msg
 
 
-class Pipeline(Redis):
+class BasePipeline(object):
     """
     Pipelines provide a way to transmit multiple commands to the Redis server
     in one transmission.  This is convenient for batch processing, such as
@@ -1403,8 +1417,8 @@ class Pipeline(Redis):
                 for args, options in commands]
 
     def parse_response(self, connection, command_name, **options):
-        result = super(Pipeline, self).parse_response(
-            connection, command_name, **options)
+        result = StrictRedis.parse_response(
+            self, connection, command_name, **options)
         if command_name in self.UNWATCH_COMMANDS:
             self.watching = False
         elif command_name == 'WATCH':
@@ -1459,6 +1473,14 @@ class Pipeline(Redis):
         """
         return self.watching and self.execute_command('UNWATCH') or True
 
+
+class StrictPipeline(BasePipeline, StrictRedis):
+    "Pipeline for the StrictRedis class"
+    pass
+
+class Pipeline(BasePipeline, Redis):
+    "Pipeline for the Redis class"
+    pass
 
 class LockError(RedisError):
     "Errors thrown from the Lock"
