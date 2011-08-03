@@ -115,13 +115,13 @@ class StrictRedis(object):
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict(
             'AUTH DEL EXISTS EXPIRE EXPIREAT HDEL HEXISTS HMSET MOVE MSETNX '
-            'PERSIST RENAMENX SADD SISMEMBER SMOVE SETEX SETNX SREM ZREM',
+            'PERSIST RENAMENX SISMEMBER SMOVE SETEX SETNX SREM ZREM',
             bool
             ),
         string_keys_to_dict(
             'DECRBY GETBIT HLEN INCRBY LINSERT LLEN LPUSHX RPUSHX SCARD'
             'SDIFFSTORE SETBIT SETRANGE SINTERSTORE STRLEN SUNIONSTORE ZCARD '
-            'ZREMRANGEBYRANK ZREMRANGEBYSCORE ZADD',
+            'ZREMRANGEBYRANK ZREMRANGEBYSCORE ZADD SADD',
             int
             ),
         string_keys_to_dict(
