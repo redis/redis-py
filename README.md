@@ -56,6 +56,7 @@ versions of redis-py:
   accidentally when being implemented and not discovered until after people
   were already using it. The Redis class expects *args in the form of:
       name1, score1, name2, score2, ...
+* SETEX: Order of 'time' and 'value' arguments reversed.
 
 
 ## More Detail
