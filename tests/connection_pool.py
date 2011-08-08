@@ -25,12 +25,6 @@ class ConnectionPoolTestCase(unittest.TestCase):
         c2 = pool.get_connection('_')
         self.assert_(c1 != c2)
 
-    def test_max_connections(self):
-        pool = self.get_pool(max_connections=2)
-        c1 = pool.get_connection('_')
-        c2 = pool.get_connection('_')
-        self.assertRaises(redis.ConnectionError, pool.get_connection, '_')
-
     def test_release(self):
         pool = self.get_pool()
         c1 = pool.get_connection('_')

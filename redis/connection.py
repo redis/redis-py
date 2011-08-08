@@ -1,5 +1,6 @@
 import errno
 import socket
+import Queue
 from itertools import chain, imap
 from redis.exceptions import ConnectionError, ResponseError, InvalidResponse
 
@@ -257,34 +258,30 @@ class ConnectionPool(object):
                  **connection_kwargs):
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
-        self.max_connections = max_connections or 2**31
-        self._created_connections = 0
-        self._available_connections = []
+        self.max_connections = max_connections or 100 # anything more is useless
+        self._connections = []
+        self._available_connections = Queue.LifoQueue()
         self._in_use_connections = set()
+        for _ in xrange(self.max_connections):
+            connection = self.connection_class(**self.connection_kwargs)
+            self._connections.append(connection)
+            self._available_connections.put(connection)
 
     def get_connection(self, command_name, *keys, **options):
         "Get a connection from the pool"
         try:
-            connection = self._available_connections.pop()
-        except IndexError:
-            connection = self.make_connection()
-        self._in_use_connections.add(connection)
-        return connection
-
-    def make_connection(self):
-        "Create a new connection"
-        if self._created_connections >= self.max_connections:
-            raise ConnectionError("Too many connections")
-        self._created_connections += 1
-        return self.connection_class(**self.connection_kwargs)
+            connection = self._available_connections.get(block=options.get("block", True))
+            self._in_use_connections.add(connection)
+            return connection
+        except Queue.Empty:
+            raise ConnectionError("No connection available.")
 
     def release(self, connection):
         "Releases the connection back to the pool"
         self._in_use_connections.remove(connection)
-        self._available_connections.append(connection)
+        self._available_connections.put(connection)
 
     def disconnect(self):
         "Disconnects all connections in the pool"
-        all_conns = chain(self._available_connections, self._in_use_connections)
-        for connection in all_conns:
+        for connection in self._connections:
             connection.disconnect()
