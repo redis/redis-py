@@ -1510,8 +1510,8 @@ class Lock(object):
         holding the lock.
 
         Note: If using ``timeout``, you should make sure all the hosts
-        that are running clients are within the same timezone and are using
-        a network time service like ntp.
+        that are running clients have their time synchronized with a network time
+        service like ntp.
         """
         self.redis = redis
         self.name = name
