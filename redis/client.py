@@ -2,7 +2,16 @@ from __future__ import with_statement
 import datetime
 import time
 import warnings
-from itertools import imap, izip, starmap
+from itertools import starmap
+from redis.compat import (
+    basestring,
+    bytes,
+    imap,
+    izip,
+    long,
+    MAJOR_VERSION,
+    unicode,
+    )
 from redis.connection import ConnectionPool, UnixDomainSocketConnection
 from redis.exceptions import (
     ConnectionError,
@@ -84,7 +93,7 @@ def zset_score_pairs(response, **options):
         return response
     score_cast_func = options.get('score_cast_func', float)
     it = iter(response)
-    return zip(it, imap(score_cast_func, it))
+    return list(zip(it, imap(score_cast_func, it)))
 
 def int_or_none(response):
     if response is None:
@@ -425,7 +434,7 @@ class StrictRedis(object):
     def mset(self, mapping):
         "Sets each key in the ``mapping`` dict to its corresponding value"
         items = []
-        for pair in mapping.iteritems():
+        for pair in mapping.items():
             items.extend(pair)
         return self.execute_command('MSET', *items)
 
@@ -435,7 +444,7 @@ class StrictRedis(object):
         none of the keys are already set
         """
         items = []
-        for pair in mapping.iteritems():
+        for pair in mapping.items():
             items.extend(pair)
         return self.execute_command('MSETNX', *items)
 
@@ -819,7 +828,7 @@ class StrictRedis(object):
                 raise RedisError("ZADD requires an equal number of "
                                  "values and scores")
             pieces.extend(args)
-        for pair in kwargs.iteritems():
+        for pair in kwargs.items():
             pieces.append(pair[1])
             pieces.append(pair[0])
         return self.execute_command('ZADD', name, *pieces)
@@ -1047,7 +1056,7 @@ class StrictRedis(object):
         if not mapping:
             raise DataError("'hmset' with 'mapping' of length 0")
         items = []
-        for pair in mapping.iteritems():
+        for pair in mapping.items():
             items.extend(pair)
         return self.execute_command('HMSET', name, *items)
 
@@ -1133,7 +1142,7 @@ class Redis(StrictRedis):
                 raise RedisError("ZADD requires an equal number of "
                                  "values and scores")
             pieces.extend(reversed(args))
-        for pair in kwargs.iteritems():
+        for pair in kwargs.items():
             pieces.append(pair[1])
             pieces.append(pair[0])
         return self.execute_command('ZADD', name, *pieces)
