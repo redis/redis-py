@@ -1429,7 +1429,7 @@ class BasePipeline(object):
         "Execute all the commands in the current pipeline"
         stack = self.command_stack
         if self.transaction or self.explicit_transaction:
-            stack = [(('MULTI' ,), {})] + stack + [(('EXEC', ), {})]
+            stack = [(('MULTI', ), {})] + stack + [(('EXEC', ), {})]
             execute = self._execute_transaction
         else:
             execute = self._execute_pipeline
