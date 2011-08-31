@@ -79,6 +79,8 @@ class HiredisParser(object):
         self._reader = None
 
     def read_response(self):
+        if not self._reader:
+            raise ConnectionError("Socket closed on remote end")
         response = self._reader.gets()
         while response is False:
             try:
