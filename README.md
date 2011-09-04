@@ -171,7 +171,7 @@ Pipelines are quite simple to use:
     >>> r = redis.Redis(...)
     >>> r.set('bing', 'baz')
     >>> # Use the pipeline() method to create a pipeline instance
-    >>> pipe = redis.pipeline()
+    >>> pipe = r.pipeline()
     >>> # The following SET commands are buffered
     >>> pipe.set('foo', 'bar')
     >>> pipe.get('bing')
