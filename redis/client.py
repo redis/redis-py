@@ -242,6 +242,9 @@ class StrictRedis(object):
         """
         return PubSub(self.connection_pool, shard_hint)
 
+    def monitor(self, shard_hint=None):
+        return Monitor(self.connection_pool, shard_hint)
+
     #### COMMAND EXECUTION AND PROTOCOL PARSING ####
     def execute_command(self, *args, **options):
         "Execute a command and return a parsed response"
@@ -1137,6 +1140,51 @@ class Redis(StrictRedis):
             pieces.append(pair[1])
             pieces.append(pair[0])
         return self.execute_command('ZADD', name, *pieces)
+
+
+class Monitor(object):
+    def __init__(self, connection_pool, shard_hint=None):
+        self.connection_pool = connection_pool
+        self.shard_hint = shard_hint
+        self.connection = None
+        self.monitor_command = set(('monitor',))
+
+    def execute_command(self, *args, **kwargs):
+        "Execute a Monitor command"
+        if self.connection is None:
+            self.connection = self.connection_pool.get_connection(
+                'monitor',
+                self.shard_hint
+                )
+        connection = self.connection
+        try:
+            connection.send_command(*args)
+            return self.parse_response()
+        except ConnectionError:
+            connection.disconnect()
+            connection.send_command(*args)
+            return self.parse_response()
+
+    def parse_response(self):
+        "Parse the response from a publish/subscribe command"
+        response = self.connection.read_response()
+        if response == 'OK':
+            return response
+        time, command = response.split(' ',1)
+        return float(time), command
+
+    def listen(self):
+        "Listen for messages on channels this client has been subscribed to"
+        while 1:
+            r = self.parse_response()
+            msg = {
+                'time': r[0],
+                'command': r[1]
+            }
+            yield msg
+
+    def monitor(self):
+        return self.execute_command('MONITOR')
 
 
 class PubSub(object):
