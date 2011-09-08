@@ -1143,6 +1143,12 @@ class Redis(StrictRedis):
 
 
 class Monitor(object):
+    """
+    Monitor is useful for handling the MONITOR command to the redis server.
+
+    After calling the monitor() method, the listen() method blocks until
+    the server receives a message and that message will be returned.
+    """
     def __init__(self, connection_pool, shard_hint=None):
         self.connection_pool = connection_pool
         self.shard_hint = shard_hint
@@ -1166,15 +1172,16 @@ class Monitor(object):
             return self.parse_response()
 
     def parse_response(self):
-        "Parse the response from a publish/subscribe command"
+        "Parse the response from a monitor command"
         response = self.connection.read_response()
+        # This part with the OK is only needed when we connect initially.
         if response == 'OK':
             return response
         time, command = response.split(' ',1)
         return float(time), command
 
     def listen(self):
-        "Listen for messages on channels this client has been subscribed to"
+        "Listen for commands coming to the server."
         while 1:
             r = self.parse_response()
             msg = {
@@ -1184,6 +1191,7 @@ class Monitor(object):
             yield msg
 
     def monitor(self):
+        "Start the monitoring."
         return self.execute_command('MONITOR')
 
 
