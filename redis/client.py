@@ -6,6 +6,7 @@ import warnings
 import time
 import threading
 import time as mod_time
+import re
 import hashlib
 from redis._compat import (basestring, imap, iteritems, iterkeys,
                            itervalues, izip, long, nativestr, safe_unicode)
@@ -763,6 +764,9 @@ class Redis(object):
         them.
         """
         return PubSub(self.connection_pool, **kwargs)
+
+    def monitor(self):
+        return Monitor(self.connection_pool)
 
     # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
@@ -2920,6 +2924,51 @@ class Redis(object):
 
 
 StrictRedis = Redis
+
+
+class Monitor(object):
+    """
+    Monitor is useful for handling the MONITOR command to the redis server.
+    next_command() method returns one command from monitor
+    listen() method yields commands from monitor.
+    """
+    def __init__(self, connection_pool):
+        self.connection_pool = connection_pool
+        self.connection = self.connection_pool.get_connection('MONITOR')
+
+    def __enter__(self):
+        self.connection.send_command('MONITOR')
+        # check that monitor returns 'OK', but don't return it to user
+        response = self.connection.read_response()
+        if not bool_ok(response):
+            raise RedisError('MONITOR failed: %s' % response)
+        return self
+
+    def __exit__(self, *args):
+        self.connection.disconnect()
+        self.connection_pool.release(self.connection)
+
+    def next_command(self):
+        "Parse the response from a monitor command"
+        response = self.connection.read_response()
+        if isinstance(response, bytes):
+            response = self.connection.encoder.decode(response, force=True)
+        command_time, command_data = response.split(' ', 1)
+        m = re.match(r'\[(\d+) (.+):(\d+)\] (.*)', command_data)
+        db_id, client_address, client_port, command = m.groups()
+        command = re.match(r'"(\w*)"+', command).groups()
+        return {
+            'time': float(command_time),
+            'db': db_id,
+            'client_address': client_address,
+            'client_port': client_port,
+            'command': command
+        }
+
+    def listen(self):
+        "Listen for commands coming to the server."
+        while 1:
+            yield self.next_command()
 
 
 class PubSub(object):

@@ -675,6 +675,18 @@ supported:
     >>> r.pubsub_numpat()
     1204
 
+Monitor
+^^^^^^^
+redis-py includes a `Monitor` object that that streams back every command
+processed by the Redis server. Use `listen` on the `Monitor` object to block
+until message available.
+
+.. code-block:: pycon
+
+    >>> r = redis.StrictRedis(...)
+    >>> with sr.monitor() as m:
+    >>>   for command in m.listen():
+    >>>     print(command)
 
 Lua Scripting
 ^^^^^^^^^^^^^
