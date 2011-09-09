@@ -2,7 +2,6 @@ from redis.exceptions import ConnectionError
 
 import redis
 import unittest
-import time
 
 class PubSubTestCase(unittest.TestCase):
     def setUp(self):
