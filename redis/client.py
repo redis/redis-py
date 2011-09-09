@@ -1176,6 +1176,7 @@ class PubSub(object):
             # to one more time
             if self.tries_to_reconnect:
                 self.tries_to_reconnect = False
+                connection.disconnect()
                 return None
             self.tries_to_reconnect = True
             connection.disconnect()
