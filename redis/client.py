@@ -1157,6 +1157,7 @@ class PubSub(object):
         self.subscribe_commands = set(
             ('subscribe', 'psubscribe', 'unsubscribe', 'punsubscribe')
             )
+        self.tries_to_reconnect = False
 
     def execute_command(self, *args, **kwargs):
         "Execute a publish/subscribe command"
@@ -1168,8 +1169,15 @@ class PubSub(object):
         connection = self.connection
         try:
             connection.send_command(*args)
+            self.tries_to_reconnect = False
             return self.parse_response()
         except ConnectionError:
+            # We got a connection error. Try to reconnect, but only up
+            # to one more time
+            if self.tries_to_reconnect:
+                self.tries_to_reconnect = False
+                return None
+            self.tries_to_reconnect = True
             connection.disconnect()
             # resubscribe to all channels and patterns before
             # resending the current command
@@ -1177,6 +1185,8 @@ class PubSub(object):
                 self.subscribe(channel)
             for pattern in self.patterns:
                 self.psubscribe(pattern)
+            # The connection will raise a ConnectionError if it cannot
+            # connect.
             connection.send_command(*args)
             return self.parse_response()
 
