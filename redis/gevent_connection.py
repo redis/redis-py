@@ -1,4 +1,7 @@
-#!/usr/bin/env python
+"""
+Helper for gevent socket.
+"""
+
 from gevent import socket
 from . import connection
 
