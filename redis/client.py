@@ -178,7 +178,7 @@ class StrictRedis(object):
         :type socket_timeout: int
         :param connection_pool: redis password
         :type connection_pool: str
-        :param charset: charset to use to encode string throw the socket
+        :param charset: charset to use to encode strings through the socket
         :type charset: str
         :param errors: encoding error level
         :type errors: str
