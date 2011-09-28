@@ -161,7 +161,32 @@ class StrictRedis(object):
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
                  connection_pool=None,
-                 charset='utf-8', errors='strict', unix_socket_path=None):
+                 charset='utf-8', errors='strict', unix_socket_path=None,
+                 gevent_socket=None):
+        """
+        Create the redis protocol instance
+        :param host: ip or hostname of the redis server
+        :type host: str
+        :param port: tcp port the redis server is listening
+        :type port: int
+        :param db: database
+        :type db: int
+        :param password: redis password
+        :type password: str
+        :param socket_timeout: socket timeout parameter 
+            `socket.socket.settimeout`
+        :type socket_timeout: int
+        :param connection_pool: redis password
+        :type connection_pool: str
+        :param charset: charset to use to encode string throw the socket
+        :type charset: str
+        :param errors: encoding error level
+        :type errors: str
+        :param unix_socket_path: use an unix socket connection
+        :type unix_socket_path: bool
+        :param gevent_socket: use redis client with gevent without monkeypatch
+        :type gevent_socket: bool
+        """
         if not connection_pool:
             kwargs = {
                 'db': db,
@@ -175,6 +200,13 @@ class StrictRedis(object):
                 kwargs.update({
                     'path': unix_socket_path,
                     'connection_class': UnixDomainSocketConnection
+                })
+            elif gevent_socket:
+                from . import gevent_connection
+                kwargs.update({
+                    'connection_class': gevent_connection.Connection,
+                    'host': host,
+                    'port': port
                 })
             else:
                 kwargs.update({
