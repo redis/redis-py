@@ -183,7 +183,7 @@ class StrictRedis(object):
         :param errors: encoding error level
         :type errors: str
         :param unix_socket_path: use an unix socket connection
-        :type unix_socket_path: bool
+        :type unix_socket_path: str
         :param gevent_socket: use redis client with gevent without monkeypatch
         :type gevent_socket: bool
         """
