@@ -1,4 +1,8 @@
 * 2.4.10 (in development)
+    * StrictRedis's TTL command now returns a -1 when querying a key with no
+      expiration. The Redis class continues to return None.
+    * ZADD and SADD now return integer values indicating the number of items
+      added. Thanks Homer Strong.
     * Renamed the base client class to StrictRedis, replacing ZADD and LREM in
       favor of their official argument order. The Redis class is now a subclass
       of StrictRedis, implementing the legacy redis-py implementations of ZADD
