@@ -1178,6 +1178,9 @@ class PubSub(object):
             return self.parse_response()
         except ConnectionError:
             connection.disconnect()
+            # Connect manually here. If the Redis server is down, this will
+            # fail and raise a ConnectionError as desired.
+            connection.connect()
             # resubscribe to all channels and patterns before
             # resending the current command
             for channel in self.channels:
