@@ -293,6 +293,10 @@ class StrictRedis(object):
         return self.execute_command('DEL', *names)
     __delitem__ = delete
 
+    def echo(self, value):
+        "Echo the string back from the server"
+        return self.execute_command('ECHO', value)
+
     def flushall(self):
         "Delete all keys in all databases on the current host"
         return self.execute_command('FLUSHALL')

@@ -81,6 +81,9 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(self.client.config_set('dbfilename', rdbname))
         self.assertEquals(self.client.config_get()['dbfilename'], rdbname)
 
+    def test_echo(self):
+        self.assertEquals(self.client.echo('foo bar'), 'foo bar')
+
     def test_info(self):
         self.client['a'] = 'foo'
         self.client['b'] = 'bar'
