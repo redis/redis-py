@@ -1,3 +1,5 @@
+from redis.exceptions import ConnectionError
+
 import redis
 import unittest
 

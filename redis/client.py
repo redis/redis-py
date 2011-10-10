@@ -1164,6 +1164,7 @@ class PubSub(object):
         self.subscribe_commands = set(
             ('subscribe', 'psubscribe', 'unsubscribe', 'punsubscribe')
             )
+        self.tries_to_reconnect = False
 
     def execute_command(self, *args, **kwargs):
         "Execute a publish/subscribe command"
@@ -1175,8 +1176,16 @@ class PubSub(object):
         connection = self.connection
         try:
             connection.send_command(*args)
+            self.tries_to_reconnect = False
             return self.parse_response()
         except ConnectionError:
+            # We got a connection error. Try to reconnect, but only up
+            # to one more time
+            if self.tries_to_reconnect:
+                self.tries_to_reconnect = False
+                connection.disconnect()
+                return None
+            self.tries_to_reconnect = True
             connection.disconnect()
             # Connect manually here. If the Redis server is down, this will
             # fail and raise a ConnectionError as desired.
@@ -1187,6 +1196,8 @@ class PubSub(object):
                 self.subscribe(channel)
             for pattern in self.patterns:
                 self.psubscribe(pattern)
+            # The connection will raise a ConnectionError if it cannot
+            # connect.
             connection.send_command(*args)
             return self.parse_response()
 
