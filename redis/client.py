@@ -674,7 +674,7 @@ class StrictRedis(object):
         return self.execute_command('RPUSHX', name, value)
 
     def sort(self, name, start=None, num=None, by=None, get=None,
-             desc=False, alpha=False, store=None):
+             desc=False, alpha=False, store=None, tuples=False):
         """
         Sort and return the list, set or sorted set at ``name``.
 
@@ -693,6 +693,11 @@ class StrictRedis(object):
 
         ``store`` allows for storing the result of the sort into
             the key ``store``
+
+        ``tuples`` if set to True and if ``get`` contains at least two
+        elements, will return a list of tuples matching the keys given
+        as arguments to ``get``.
+            
         """
         if (start is not None and num is None) or \
                 (num is not None and start is None):
@@ -725,7 +730,17 @@ class StrictRedis(object):
         if store is not None:
             pieces.append('STORE')
             pieces.append(store)
-        return self.execute_command('SORT', *pieces)
+
+        sorted_list = self.execute_command('SORT', *pieces)
+
+        if tuples:
+            if not get or isinstance(get, basestring) or len(get) < 2:
+                raise DataError("``get`` argument must be specified and "
+                                 "contain at least two keys")
+            n = len(get)
+            return zip(*[sorted_list[i::n] for i in range(n)])
+
+        return sorted_list
 
 
     #### SET COMMANDS ####

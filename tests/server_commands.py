@@ -1138,6 +1138,50 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.sort('a', get=('user:*', '#')),
             ['u1', '1', 'u2', '2', 'u3', '3'])
 
+    def test_sort_get_tuples_two(self):
+        self.client['user:1'] = 'u1'
+        self.client['user:2'] = 'u2'
+        self.client['user:3'] = 'u3'
+        self.make_list('a', '231')
+        self.assertEquals(
+            self.client.sort('a', get=('user:*', '#'), tuples=True),
+            [('u1', '1'), ('u2', '2'), ('u3', '3')])
+
+    def test_sort_tuples_string_get(self):
+        self.client['user:1'] = 'u1'
+        self.client['user:2'] = 'u2'
+        self.client['user:3'] = 'u3'
+        self.make_list('a', '231')
+        self.assertRaises(redis.DataError, self.client.sort, 'a',
+                          get='user:*', tuples=True)
+
+    def test_sort_tuples_just_one_get(self):
+        self.client['user:1'] = 'u1'
+        self.client['user:2'] = 'u2'
+        self.client['user:3'] = 'u3'
+        self.make_list('a', '231')
+        self.assertRaises(redis.DataError, self.client.sort, 'a',
+                          get=['user:*'], tuples=True)
+
+    def test_sort_tuples_no_get(self):
+        self.client['user:1'] = 'u1'
+        self.client['user:2'] = 'u2'
+        self.client['user:3'] = 'u3'
+        self.make_list('a', '231')
+        self.assertRaises(redis.DataError, self.client.sort, 'a', tuples=True)
+
+    def test_sort_tuples_three_gets(self):
+        self.client['user:1'] = 'u1'
+        self.client['user:2'] = 'u2'
+        self.client['user:3'] = 'u3'
+        self.client['door:1'] = 'd1'
+        self.client['door:2'] = 'd2'
+        self.client['door:3'] = 'd3'
+        self.make_list('a', '231')
+        self.assertEquals(
+            self.client.sort('a', get=('user:*', 'door:*', '#'), tuples=True),
+            [('u1', 'd1', '1'), ('u2', 'd2', '2'), ('u3', 'd3', '3')])
+
     def test_sort_desc(self):
         self.make_list('a', '231')
         self.assertEquals(self.client.sort('a', desc=True), ['3', '2', '1'])
