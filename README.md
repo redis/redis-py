@@ -157,7 +157,7 @@ If you use multiple Redis databases within the same application, you should
 create a separate client instance (and possibly a separate connection pool) for
 each database.
 
-It is not safe to pass PubSub objects between threads.
+It is not safe to pass PubSub or Pipeline objects between threads.
 
 ## Pipelines
 
