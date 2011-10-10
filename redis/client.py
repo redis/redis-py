@@ -154,7 +154,6 @@ class StrictRedis(object):
             'LASTSAVE': timestamp_to_datetime,
             'PING': lambda r: r == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
-            'TTL': lambda r: r != -1 and r or None,
         }
         )
 
@@ -1073,6 +1072,14 @@ class Redis(StrictRedis):
     changed arguments to some commands to be more Pythonic, sane, or by
     accident.
     """
+
+    # Overridden callbacks
+    RESPONSE_CALLBACKS = dict_merge(
+        StrictRedis.RESPONSE_CALLBACKS,
+        {
+            'TTL': lambda r: r != -1 and r or None,
+        }
+    )
 
     def pipeline(self, transaction=True, shard_hint=None):
         """
