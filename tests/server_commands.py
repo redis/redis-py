@@ -81,6 +81,9 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(self.client.config_set('dbfilename', rdbname))
         self.assertEquals(self.client.config_get()['dbfilename'], rdbname)
 
+    def test_echo(self):
+        self.assertEquals(self.client.echo('foo bar'), 'foo bar')
+
     def test_info(self):
         self.client['a'] = 'foo'
         self.client['b'] = 'bar'
@@ -1193,6 +1196,24 @@ class ServerCommandsTestCase(unittest.TestCase):
         client.rpush('a', 'a1')
         client.lrem('a', 0, 'a1')
         self.assertEquals(client.lrange('a', 0, -1), ['a2', 'a3'])
+
+    def test_strict_setex(self):
+        "SETEX swaps the order of the value and timeout"
+        client = self.get_client(redis.StrictRedis)
+        self.assertEquals(client.setex('a', 60, '1'), True)
+        self.assertEquals(client['a'], '1')
+        self.assertEquals(client.ttl('a'), 60)
+
+
+    def test_strict_expire(self):
+        "TTL is -1 by default in StrictRedis"
+        client = self.get_client(redis.StrictRedis)
+        self.assertEquals(client.expire('a', 10), False)
+        self.client['a'] = 'foo'
+        self.assertEquals(client.expire('a', 10), True)
+        self.assertEquals(client.ttl('a'), 10)
+        self.assertEquals(client.persist('a'), True)
+        self.assertEquals(client.ttl('a'), -1)
 
     ## BINARY SAFE
     # TODO add more tests

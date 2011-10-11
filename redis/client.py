@@ -115,13 +115,13 @@ class StrictRedis(object):
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict(
             'AUTH DEL EXISTS EXPIRE EXPIREAT HDEL HEXISTS HMSET MOVE MSETNX '
-            'PERSIST RENAMENX SADD SISMEMBER SMOVE SETEX SETNX SREM ZADD ZREM',
+            'PERSIST RENAMENX SISMEMBER SMOVE SETEX SETNX SREM ZREM',
             bool
             ),
         string_keys_to_dict(
-            'DECRBY GETBIT HLEN INCRBY LINSERT LLEN LPUSHX RPUSHX SCARD '
+            'DECRBY GETBIT HLEN INCRBY LINSERT LLEN LPUSHX RPUSHX SCARD'
             'SDIFFSTORE SETBIT SETRANGE SINTERSTORE STRLEN SUNIONSTORE ZCARD '
-            'ZREMRANGEBYRANK ZREMRANGEBYSCORE',
+            'ZREMRANGEBYRANK ZREMRANGEBYSCORE ZADD SADD',
             int
             ),
         string_keys_to_dict(
@@ -154,7 +154,6 @@ class StrictRedis(object):
             'LASTSAVE': timestamp_to_datetime,
             'PING': lambda r: r == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
-            'TTL': lambda r: r != -1 and r or None,
         }
         )
 
@@ -325,6 +324,10 @@ class StrictRedis(object):
         "Delete one or more keys specified by ``names``"
         return self.execute_command('DEL', *names)
     __delitem__ = delete
+
+    def echo(self, value):
+        "Echo the string back from the server"
+        return self.execute_command('ECHO', value)
 
     def flushall(self):
         "Delete all keys in all databases on the current host"
@@ -1106,6 +1109,14 @@ class Redis(StrictRedis):
     accident.
     """
 
+    # Overridden callbacks
+    RESPONSE_CALLBACKS = dict_merge(
+        StrictRedis.RESPONSE_CALLBACKS,
+        {
+            'TTL': lambda r: r != -1 and r or None,
+        }
+    )
+
     def pipeline(self, transaction=True, shard_hint=None):
         """
         Return a new pipeline object that can queue multiple commands for
@@ -1203,6 +1214,9 @@ class PubSub(object):
             return self.parse_response()
         except ConnectionError:
             connection.disconnect()
+            # Connect manually here. If the Redis server is down, this will
+            # fail and raise a ConnectionError as desired.
+            connection.connect()
             # resubscribe to all channels and patterns before
             # resending the current command
             for channel in self.channels:
@@ -1461,7 +1475,7 @@ class BasePipeline(object):
         "Execute all the commands in the current pipeline"
         stack = self.command_stack
         if self.transaction or self.explicit_transaction:
-            stack = [(('MULTI' ,), {})] + stack + [(('EXEC', ), {})]
+            stack = [(('MULTI', ), {})] + stack + [(('EXEC', ), {})]
             execute = self._execute_transaction
         else:
             execute = self._execute_pipeline
