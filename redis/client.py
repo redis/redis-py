@@ -175,16 +175,14 @@ class StrictRedis(object):
         :param socket_timeout: socket timeout parameter 
             `socket.socket.settimeout`
         :type socket_timeout: int
-        :param connection_pool: redis password
-        :type connection_pool: str
+        :param connection_pool: connection pool
+        :type connection_pool: a :class:`redis.client.ConnectionPool` instance
         :param charset: charset to use to encode strings through the socket
         :type charset: str
         :param errors: encoding error level
         :type errors: str
         :param unix_socket_path: use an unix socket connection
         :type unix_socket_path: str
-        :param gevent_socket: use redis client with gevent without monkeypatch
-        :type gevent_socket: bool
         """
         if not connection_pool:
             kwargs = {
@@ -199,13 +197,6 @@ class StrictRedis(object):
                 kwargs.update({
                     'path': unix_socket_path,
                     'connection_class': UnixDomainSocketConnection
-                })
-            elif gevent_socket:
-                from . import gevent_connection
-                kwargs.update({
-                    'connection_class': gevent_connection.Connection,
-                    'host': host,
-                    'port': port
                 })
             else:
                 kwargs.update({
