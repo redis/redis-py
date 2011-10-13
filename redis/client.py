@@ -44,6 +44,20 @@ def dict_merge(*dicts):
     [merged.update(d) for d in dicts]
     return merged
 
+def parse_debug_object(response):
+  "Parse the results of Redis's DEBUG OBJECT command into a Python dict"
+  res = dict([kv.split(':') for kv in ('type:' + response).split()])
+  
+  # parse some expected int values from the string response
+  # note: this cmd isn't spec'd so these may not appear in all redis versions
+  possible_int_fields = ['refcount', 'serializedlength', 
+                         'lru', 'lru_seconds_idle']
+  for field in possible_int_fields:
+    if field in res:
+      res[field] = int(res[field])
+
+  return res
+
 def parse_info(response):
     "Parse the result of Redis's INFO command into a Python dict"
     info = {}
@@ -151,6 +165,7 @@ class StrictRedis(object):
             'CONFIG': parse_config,
             'HGETALL': lambda r: r and pairs_to_dict(r) or {},
             'INFO': parse_info,
+            'DEBUG' : parse_debug_object,
             'LASTSAVE': timestamp_to_datetime,
             'PING': lambda r: r == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
@@ -308,6 +323,10 @@ class StrictRedis(object):
     def info(self):
         "Returns a dictionary containing information about the Redis server"
         return self.execute_command('INFO')
+
+    def debug_object(self, key):
+      """Returns version specific metainformation about a give key"""
+      return self.execute_command('DEBUG', 'OBJECT', key)
 
     def lastsave(self):
         """
