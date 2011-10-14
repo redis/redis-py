@@ -91,6 +91,15 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(isinstance(info, dict))
         self.assertEquals(info['db9']['keys'], 2)
 
+    def test_debug_object(self):
+      self.client['a'] = 'foo'
+      debug_info = self.client.debug_object('a')
+      self.assert_(len(debug_info) > 0)
+      self.assertEquals(1, debug_info['refcount'])
+      self.assert_(debug_info['serializedlength'] > 0)
+      self.client.rpush('b', 'a1')
+      debug_info = self.client.debug_object('a')
+      
     def test_lastsave(self):
         self.assert_(isinstance(self.client.lastsave(), datetime.datetime))
 
