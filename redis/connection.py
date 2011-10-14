@@ -4,8 +4,15 @@ from itertools import chain, imap
 from redis.exceptions import ConnectionError, ResponseError, InvalidResponse
 
 class PythonParser(object):
+    "Plain Python parsing class"
     def __init__(self):
         self._fp = None
+
+    def __del__(self):
+        try:
+            self.on_disconnect()
+        except:
+            pass
 
     def on_connect(self, connection):
         "Called when the socket connects"
@@ -68,6 +75,13 @@ class PythonParser(object):
         raise InvalidResponse("Protocol Error")
 
 class HiredisParser(object):
+    "Parser class for connections using Hiredis"
+    def __del__(self):
+        try:
+            self.on_disconnect()
+        except:
+            pass
+
     def on_connect(self, connection):
         self._sock = connection._sock
         self._reader = hiredis.Reader(
@@ -119,6 +133,12 @@ class Connection(object):
         self._sock = None
         self._parser = parser_class()
 
+    def __del__(self):
+        try:
+            self.disconnect()
+        except:
+            pass
+
     def connect(self):
         "Connects to the Redis server if not already connected"
         if self._sock:
@@ -147,7 +167,6 @@ class Connection(object):
         else:
             return "Error %s connecting %s:%s. %s." % \
                 (exception.args[0], self.host, self.port, exception.args[1])
-
 
     def on_connect(self):
         "Initialize the connection, authenticate and select a database"

@@ -1169,6 +1169,22 @@ class PubSub(object):
             ('subscribe', 'psubscribe', 'unsubscribe', 'punsubscribe')
             )
 
+    def __del__(self):
+        try:
+            # if this object went out of scope prior to shutting down
+            # subscriptions, close the connection manually before
+            # returning it to the connection pool
+            if self.connection and (self.channels or self.patterns):
+                self.connection.disconnect()
+            self.reset()
+        except:
+            pass
+
+    def reset(self):
+        if self.connection:
+            self.connection_pool.release(self.connection)
+            self.connection = None
+
     def execute_command(self, *args, **kwargs):
         "Execute a publish/subscribe command"
         if self.connection is None:
@@ -1202,8 +1218,7 @@ class PubSub(object):
             # if we've just unsubscribed from the remaining channels,
             # release the connection back to the pool
             if not self.subscription_count:
-                self.connection_pool.release(self.connection)
-                self.connection = None
+                self.reset()
         return response
 
     def psubscribe(self, patterns):
@@ -1308,6 +1323,12 @@ class BasePipeline(object):
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.reset()
+
+    def __del__(self):
+        try:
+            self.reset()
+        except:
+            pass
 
     def reset(self):
         self.command_stack = []
