@@ -1,7 +1,8 @@
 * 2.4.10 (in development)
     * Added __del__ methods for classes that hold on to resources that need to
       be cleaned up. This should prevent resource leakage when these objects
-      leave scope due to misuse or unhandled exceptions.
+      leave scope due to misuse or unhandled exceptions. Thanks David Wolever
+      for the suggestion.
     * Added the ECHO command for completeness.
     * Fixed a bug where attempting to subscribe to a PubSub channel of a Redis
       server that's down would blow out the stack. Fixes #179 and #195. Thanks
