@@ -2,6 +2,7 @@ from __future__ import with_statement
 import datetime
 import time
 import warnings
+import hashlib
 from itertools import imap, izip, starmap
 from redis.connection import ConnectionPool, UnixDomainSocketConnection
 from redis.exceptions import (
@@ -1091,6 +1092,25 @@ class StrictRedis(object):
         """
         return self.execute_command('PUBLISH', channel, message)
 
+    #### EVAL COMMANDS ####
+    def eval(self, script, *values):
+        """
+        Evaluate ``script`` with supplied ``values``
+        Attempt to use EVALSHA command, unless it returns an error.
+        """
+        digest = hashlib.sha1(script).hexdigest()
+        try:
+            return self.evalsha(digest, *values)
+        except RedisError:
+            return self._evalscript(script, *values)
+
+    def _evalscript(self, script, *values):
+        "Evaluate ``script`` with supplied ``values``"
+        return self.execute_command('EVAL', script, *values)
+
+    def evalsha(self, digest, *values):
+        "Evaluate the script matching the hash ``digest``"
+        return self.execute_command('EVALSHA', digest, *values)
 
 class Redis(StrictRedis):
     """

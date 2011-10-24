@@ -2,6 +2,7 @@ import redis
 import unittest
 import datetime
 import time
+import hashlib
 from distutils.version import StrictVersion
 from redis.client import parse_info
 
@@ -1291,3 +1292,22 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_('allocation_stats' in parsed)
         self.assert_('6' in parsed['allocation_stats'])
         self.assert_('>=256' in parsed['allocation_stats'])
+
+    def test_evalsha(self):
+        now = datetime.datetime.now().isoformat()
+        script = "return {ok='%s'}" % now
+        digest = hashlib.sha1(script).hexdigest()
+        self.assertRaises(redis.InvalidResponse, self.client.evalsha, digest, 0)
+        self.client._evalscript(script, 0)
+        self.assertEquals(self.client.evalsha(digest, 0), now)
+
+    def test_eval(self):
+        self.assertEquals(self.client.eval("return {KEYS[1], KEYS[2], ARGV[1], ARGV[2]}", \
+                                               2, "key1", "key2", "argument1", "argument2"), \
+                              ["key1", "key2", "argument1", "argument2"])
+        self.assertEquals(self.client.eval("return {ok='Testing OK Message'}", 0), \
+                              "Testing OK Message")
+        self.assertRaises(redis.InvalidResponse, self.client.eval, "return {err='Test'}", 0)
+        self.assertRaises(redis.ResponseError, self.client.eval, "retuEM {err='INVALID script()", 0)
+        self.assertEquals(self.client.eval("return redis.call('SET', 'foo', 'bar')", 0), "OK")
+        self.assertEquals(self.client.eval("return redis.call('GET', 'foo')", 0), "bar")
