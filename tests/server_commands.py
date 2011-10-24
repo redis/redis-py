@@ -93,13 +93,13 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(info['db9']['keys'], 2)
 
     def test_debug_object(self):
-      self.client['a'] = 'foo'
-      debug_info = self.client.debug_object('a')
-      self.assert_(len(debug_info) > 0)
-      self.assertEquals(1, debug_info['refcount'])
-      self.assert_(debug_info['serializedlength'] > 0)
-      self.client.rpush('b', 'a1')
-      debug_info = self.client.debug_object('a')
+        self.client['a'] = 'foo'
+        debug_info = self.client.debug_object('a')
+        self.assert_(len(debug_info) > 0)
+        self.assertEquals(debug_info['refcount'], 1)
+        self.assert_(debug_info['serializedlength'] > 0)
+        self.client.rpush('b', 'a1')
+        debug_info = self.client.debug_object('a')
 
     def test_lastsave(self):
         self.assert_(isinstance(self.client.lastsave(), datetime.datetime))
@@ -1213,7 +1213,6 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(client.setex('a', 60, '1'), True)
         self.assertEquals(client['a'], '1')
         self.assertEquals(client.ttl('a'), 60)
-
 
     def test_strict_expire(self):
         "TTL is -1 by default in StrictRedis"
