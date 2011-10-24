@@ -1,10 +1,17 @@
-import errno
 import socket
 from itertools import chain, imap
 from redis.exceptions import ConnectionError, ResponseError, InvalidResponse
 
+try:
+    from cStringIO import StringIO
+except ImportError:
+    from StringIO import StringIO
+
+
 class PythonParser(object):
     "Plain Python parsing class"
+    MAX_READ_LENGTH = 1000000
+
     def __init__(self):
         self._fp = None
 
@@ -31,7 +38,22 @@ class PythonParser(object):
         """
         try:
             if length is not None:
-                return self._fp.read(length+2)[:-2]
+                bytes_left = length + 2 # read the line ending
+                if length > self.MAX_READ_LENGTH:
+                    # apparently reading more than 1MB or so from a windows
+                    # socket can cause MemoryErrors. See:
+                    # https://github.com/andymccurdy/redis-py/issues/205
+                    # read smaller chunks at a time to work around this
+                    buf = StringIO()
+                    while bytes_left > 0:
+                        read_len = min(bytes_left, self.MAX_READ_LENGTH)
+                        buf.write(self._fp.read(read_len))
+                        bytes_left -= read_len
+                    buf.seek(0)
+                    return buf.read(length)
+                return self._fp.read(bytes_left)[:-2]
+
+            # no length, read a full line
             return self._fp.readline()[:-2]
         except (socket.error, socket.timeout), e:
             raise ConnectionError("Error while reading from socket: %s" % \

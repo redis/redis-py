@@ -2,6 +2,7 @@ import redis
 import unittest
 import datetime
 import time
+from string import letters
 from distutils.version import StrictVersion
 from redis.client import parse_info
 
@@ -99,7 +100,7 @@ class ServerCommandsTestCase(unittest.TestCase):
       self.assert_(debug_info['serializedlength'] > 0)
       self.client.rpush('b', 'a1')
       debug_info = self.client.debug_object('a')
-      
+
     def test_lastsave(self):
         self.assert_(isinstance(self.client.lastsave(), datetime.datetime))
 
@@ -1291,3 +1292,13 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_('allocation_stats' in parsed)
         self.assert_('6' in parsed['allocation_stats'])
         self.assert_('>=256' in parsed['allocation_stats'])
+
+    def test_large_responses(self):
+        "The PythonParser has some special cases for return values > 1MB"
+        # load up 5MB of data into a key
+        data = []
+        for i in range(5000000/len(letters)):
+            data.append(letters)
+        data = ''.join(data)
+        self.client.set('a', data)
+        self.assertEquals(self.client.get('a'), data)
