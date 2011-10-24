@@ -1,4 +1,5 @@
 * 2.4.10 (in development)
+    * Added the DEBUG OBJECT command.
     * Added __del__ methods for classes that hold on to resources that need to
       be cleaned up. This should prevent resource leakage when these objects
       leave scope due to misuse or unhandled exceptions. Thanks David Wolever
