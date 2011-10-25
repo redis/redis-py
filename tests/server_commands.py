@@ -107,7 +107,6 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_ping(self):
         self.assertEquals(self.client.ping(), True)
 
-
     # KEYS
     def test_append(self):
         # invalid key type
@@ -197,7 +196,7 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_mset(self):
         d = {'a': '1', 'b': '2', 'c': '3'}
         self.assert_(self.client.mset(d))
-        for k,v in d.iteritems():
+        for k, v in d.iteritems():
             self.assertEquals(self.client[k], v)
 
     def test_msetnx(self):
@@ -205,7 +204,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(self.client.msetnx(d))
         d2 = {'a': 'x', 'd': '4'}
         self.assert_(not self.client.msetnx(d2))
-        for k,v in d.iteritems():
+        for k, v in d.iteritems():
             self.assertEquals(self.client[k], v)
         self.assertEquals(self.client.get('d'), None)
 
@@ -232,7 +231,7 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_setex(self):
         self.assertEquals(self.client.setex('a', '1', 60), True)
         self.assertEquals(self.client['a'], '1')
-        self.assertEquals(self.client.ttl('a'), 60  )
+        self.assertEquals(self.client.ttl('a'), 60)
 
     def test_setnx(self):
         self.assert_(self.client.setnx('a', '1'))
@@ -702,7 +701,7 @@ class ServerCommandsTestCase(unittest.TestCase):
 
     # SORTED SETS
     def make_zset(self, name, d):
-        for k,v in d.items():
+        for k, v in d.items():
             self.client.zadd(name, **{k: v})
 
     def test_zadd(self):
@@ -950,10 +949,9 @@ class ServerCommandsTestCase(unittest.TestCase):
             [('a2', 1), ('a3', 5), ('a5', 12), ('a4', 19), ('a1', 23)]
             )
 
-
     # HASHES
     def make_hash(self, key, d):
-        for k,v in d.iteritems():
+        for k, v in d.iteritems():
             self.client.hset(key, k, v)
 
     def test_hget_and_hset(self):
@@ -1063,7 +1061,6 @@ class ServerCommandsTestCase(unittest.TestCase):
         # finally a key that's not an int
         self.client.hset('a', 'a3', 'foo')
         self.assertRaises(redis.ResponseError, self.client.hincrby, 'a', 'a3')
-
 
     def test_hkeys(self):
         # key is not a hash

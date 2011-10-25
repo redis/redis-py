@@ -7,7 +7,6 @@ try:
 except ImportError:
     from StringIO import StringIO
 
-
 class PythonParser(object):
     "Plain Python parsing class"
     MAX_READ_LENGTH = 1000000
