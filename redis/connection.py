@@ -44,13 +44,16 @@ class PythonParser(object):
                     # socket can cause MemoryErrors. See:
                     # https://github.com/andymccurdy/redis-py/issues/205
                     # read smaller chunks at a time to work around this
-                    buf = StringIO()
-                    while bytes_left > 0:
-                        read_len = min(bytes_left, self.MAX_READ_LENGTH)
-                        buf.write(self._fp.read(read_len))
-                        bytes_left -= read_len
-                    buf.seek(0)
-                    return buf.read(length)
+                    try:
+                        buf = StringIO()
+                        while bytes_left > 0:
+                            read_len = min(bytes_left, self.MAX_READ_LENGTH)
+                            buf.write(self._fp.read(read_len))
+                            bytes_left -= read_len
+                        buf.seek(0)
+                        return buf.read(length)
+                    finally:
+                        buf.close()
                 return self._fp.read(bytes_left)[:-2]
 
             # no length, read a full line
