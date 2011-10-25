@@ -10,9 +10,9 @@ the basic usage is as follows:
         foo = p.get('foo')
         bar = p.smembers('bar')
         
-    print foo() #prints the result inside foo
+    print foo #prints the result inside foo
     
-    print bar() #prints the result inside bar
+    print bar #prints the result inside bar
  
 '''
 
@@ -24,20 +24,24 @@ class PipelineContextError(Exception):
     pass
 
 
-class PipedResult(object):
+    
+class PipedResult:
     """
     This is a container class that holds the result after the pipeline has been executed.
     It has an internal return value which is set by the context manager,
     and a state telling it whether it has been initialized or not
     """
     
+    
+    
     #members which we always return from this instance
-    __reservedMembers = set(('_doCommand_', '_setValue_', '__getattribute__', '_pipeline','_value','_state'))
+    __reservedMembers = set(('_doCommand_', '_setValue_', '_pipeline','_value','_state', '__bases__'))
     
     ST_NEW = 1
     ST_SENT = 2
     ST_RETURNED = 3
     
+       
     def __init__(self, pipeline):
         """
         Constructor. Remember the pipeline object to extract the right call from it, and init our state
@@ -46,24 +50,26 @@ class PipedResult(object):
         self._value = None
         self._state = PipedResult.ST_NEW
         
-        
-    def __getattribute__(self, *args, **kwargs):
+    def __getattr__( self, name ):
         """
         Catchall
         """
+        
+        
         #if this is a reserved member, just return it
-        if  args[0] in PipedResult.__reservedMembers:
-            return object.__getattribute__(self, *args, **kwargs)
+        if  name in PipedResult.__reservedMembers:
+            
+            return getattr( self, '__dict__')[name] 
         #if this is a command
         if self._state == PipedResult.ST_NEW:
             #make sure the pipeline has it
-            if hasattr(self._pipeline, args[0]):
-                cmd = args[0]
-                
+            if hasattr(self._pipeline, name):
                 #return a lambda to be used for executing the command
-                return lambda *args, **kwargs: self._doCommand_(cmd, *args, **kwargs)
-        #WTF?
-        raise AttributeError("Invalid Attribute %s" % args[0])
+                return lambda *args, **kwargs: self._doCommand_(name, *args, **kwargs)
+        elif self._state == PipedResult.ST_RETURNED:
+            return getattr(self._value, name)
+        
+        raise AttributeError("Invalid Attribute %s" % name)
         
     def _doCommand_(self, command, *args, **kwargs):
         """
@@ -81,13 +87,6 @@ class PipedResult(object):
         self._value = value
         self._state = PipedResult.ST_RETURNED
         
-    def __call__(self):
-        
-        if self._state == PipedResult.ST_RETURNED: 
-            return self._value
-        
-        raise PipelineContextError("Trying to access a pipeline's result before it has been executed!")
-    
         
 class PipelineContext(object):
     '''
@@ -139,20 +138,34 @@ class PipelineContext(object):
             #add it to the list of responses waiting for execution
             object.__getattribute__(self, ('_values')).append(action)
             #now let the response object deal with it
-            return action.__getattribute__(*args, **kwargs)
+            return getattr(action, args[0])
         
         #this is a call to our member
         return object.__getattribute__(self, *args, **kwargs)
 
 
-#if __name__ == '__main__':
-#    
-#    redis.Redis().set('foo', 'bar')
-#    with PipelineContext() as pipe:
-#        
-#        pipe.sadd('bar', 'baz')
-#        pipe.get('foo')
-#        pipe.smembers('bar')
-        
+class Proxy:
+    def __init__( self, subject ):
+        self.__subject = subject
+    def __getattr__( self, name ):
+        return getattr( self.__subject, name ) 
+
+if __name__ == '__main__':
     
-            
+    
+    redis.Redis().set('foo', 'bar')
+    with PipelineContext() as pipe:
+        
+        
+        pipe.sadd('bar', 'baz')
+        x = pipe.get('foo')
+        y = pipe.smembers('bar')
+        
+    print x.upper()
+    print len(x)
+    print y
+    print [c for c in x]
+    print isinstance(x, str)
+#        
+#    
+#            
