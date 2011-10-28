@@ -60,6 +60,12 @@ def parse_debug_object(response):
 
     return response
 
+def parse_object(response, infotype):
+    "Parse the results of an OBJECT command"
+    if infotype in ('idletime', 'refcount'):
+        return int(response)
+    return response
+
 def parse_info(response):
     "Parse the result of Redis's INFO command into a Python dict"
     info = {}
@@ -166,10 +172,11 @@ class StrictRedis(object):
             'BGSAVE': lambda r: r == 'Background saving started',
             'BRPOPLPUSH': lambda r: r and r or None,
             'CONFIG': parse_config,
+            'DEBUG': parse_debug_object,
             'HGETALL': lambda r: r and pairs_to_dict(r) or {},
             'INFO': parse_info,
-            'DEBUG': parse_debug_object,
             'LASTSAVE': timestamp_to_datetime,
+            'OBJECT': parse_object,
             'PING': lambda r: r == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
         }
@@ -306,6 +313,10 @@ class StrictRedis(object):
         "Returns the number of keys in the current database"
         return self.execute_command('DBSIZE')
 
+    def debug_object(self, key):
+        "Returns version specific metainformation about a give key"
+        return self.execute_command('DEBUG', 'OBJECT', key)
+
     def delete(self, *names):
         "Delete one or more keys specified by ``names``"
         return self.execute_command('DEL', *names)
@@ -327,16 +338,16 @@ class StrictRedis(object):
         "Returns a dictionary containing information about the Redis server"
         return self.execute_command('INFO')
 
-    def debug_object(self, key):
-        "Returns version specific metainformation about a give key"
-        return self.execute_command('DEBUG', 'OBJECT', key)
-
     def lastsave(self):
         """
         Return a Python datetime object representing the last time the
         Redis database was saved to disk
         """
         return self.execute_command('LASTSAVE')
+
+    def object(self, infotype, key):
+        "Return the encoding, idletime, or refcount about the key"
+        return self.execute_command('OBJECT', infotype, key, infotype=infotype)
 
     def ping(self):
         "Ping the Redis server"
