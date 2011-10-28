@@ -1,7 +1,7 @@
 * 2.4.10 (in development)
     * Buffer reads from socket in the PythonParser. Fix for a Windows-specific
       bug (#205).
-    * Added the DEBUG OBJECT command.
+    * Added the OBJECT and DEBUG OBJECT commands.
     * Added __del__ methods for classes that hold on to resources that need to
       be cleaned up. This should prevent resource leakage when these objects
       leave scope due to misuse or unhandled exceptions. Thanks David Wolever
