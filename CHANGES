@@ -1,4 +1,4 @@
-* 2.4.10 (in development)
+* 2.4.10
     * Buffer reads from socket in the PythonParser. Fix for a Windows-specific
       bug (#205).
     * Added the OBJECT and DEBUG OBJECT commands.
