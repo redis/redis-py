@@ -73,6 +73,9 @@ class PythonParser(object):
             if response.startswith('ERR '):
                 response = response[4:]
                 return ResponseError(response)
+            if response.startswith('NOSCRIPT '):
+                response = response[9:]
+                return ResponseError(response)
             if response.startswith('LOADING '):
                 # If we're loading the dataset into memory, kill the socket
                 # so we re-initialize (and re-SELECT) next time.
