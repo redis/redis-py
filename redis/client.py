@@ -125,6 +125,14 @@ def parse_config(response, **options):
         return response and pairs_to_dict(response) or {}
     return response == 'OK'
 
+def parse_script(response, **options):
+    if options['parse'].upper() == "EXISTS":
+        return [element == 1 for element in response]
+    elif options['parse'].upper() == "FLUSH":
+        return response == "OK"
+    else:
+        return response
+
 class StrictRedis(object):
     """
     Implementation of the Redis protocol.
@@ -179,6 +187,7 @@ class StrictRedis(object):
             'OBJECT': parse_object,
             'PING': lambda r: r == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
+            'SCRIPT': parse_script,
         }
         )
 
@@ -1107,6 +1116,12 @@ class StrictRedis(object):
         Eval script with Redis's Lua Scripting 
         """
         return self.execute_command("EVAL", script, numkeys, *keys_n_args)
+        
+    def script(self,cmd,*args):
+        """
+        Scripts LOAD, EXISTS and FLUSH operations for Redis's Lua Scripting
+        """
+        return self.execute_command("SCRIPT", cmd, *args, parse=cmd)
 
 class Redis(StrictRedis):
     """
