@@ -174,6 +174,7 @@ class StrictRedis(object):
             zset_score_pairs
             ),
         string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
+        string_keys_to_dict('EVAL EVALSHA', lambda r: r),
         {
             'BGREWRITEAOF': lambda r: \
                 r == 'Background rewriting of AOF file started',
@@ -1116,7 +1117,13 @@ class StrictRedis(object):
         Eval script with Redis's Lua Scripting 
         """
         return self.execute_command("EVAL", script, numkeys, *keys_n_args)
-        
+    
+    def evalsha(self, sha1hash, numkeys, *keys_n_args):
+        """
+        Eval script corresponding to sha1 hash with Redis's Lua Scripting 
+        """
+        return self.execute_command("EVALSHA", sha1hash, numkeys, *keys_n_args)
+    
     def script(self,cmd,*args):
         """
         Scripts LOAD, EXISTS and FLUSH operations for Redis's Lua Scripting
