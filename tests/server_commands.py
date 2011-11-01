@@ -1308,3 +1308,10 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_eval(self):
         "The lua scripting eval command takes a variable number of keys and arguments"
         self.assertEquals( self.client.eval("return {KEYS[1],KEYS[2],ARGV[1],ARGV[2]}", 2, "key1", "key2", "first", "second"), ["key1", "key2", "first", "second"])
+    
+    def test_script(self):
+        "The lua scripting script command executes different commands depending on arguments"
+        h = self.client.script("LOAD", "return redis.call('set','foo','bar')")
+        self.assertEquals("2fa2b029f72572e803ff55a09b1282699aecae6a", h)
+        self.assertEquals( self.client.script("EXISTS", "2fa2b029f72572e803ff55a09b1282699aecae6a"), [True])
+        self.assertEquals( self.client.script("FLUSH"), True)
