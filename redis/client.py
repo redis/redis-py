@@ -1101,7 +1101,12 @@ class StrictRedis(object):
         Returns the number of subscribers the message was delivered to.
         """
         return self.execute_command('PUBLISH', channel, message)
-
+        
+    def eval(self, script, numkeys, *keys_n_args):
+        """
+        Eval script with Redis's Lua Scripting 
+        """
+        return self.execute_command("EVAL", script, numkeys, *keys_n_args)
 
 class Redis(StrictRedis):
     """
