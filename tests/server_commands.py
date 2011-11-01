@@ -1304,3 +1304,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         data = ''.join(data)
         self.client.set('a', data)
         self.assertEquals(self.client.get('a'), data)
+    
+    def test_eval(self):
+        "The lua scripting eval command takes a variable number of keys and arguments"
+        self.assertEquals( self.client.eval("return {KEYS[1],KEYS[2],ARGV[1],ARGV[2]}", 2, "key1", "key2", "first", "second"), ["key1", "key2", "first", "second"])
