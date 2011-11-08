@@ -1,11 +1,22 @@
 import socket
 from itertools import chain, imap
-from redis.exceptions import ConnectionError, ResponseError, InvalidResponse
+from redis.exceptions import (
+    RedisError,
+    ConnectionError,
+    ResponseError,
+    InvalidResponse
+)
 
 try:
     from cStringIO import StringIO
 except ImportError:
     from StringIO import StringIO
+
+try:
+    import hiredis
+    hiredis_available = True
+except ImportError:
+    hiredis_available = False
 
 class PythonParser(object):
     "Plain Python parsing class"
@@ -100,6 +111,10 @@ class PythonParser(object):
 
 class HiredisParser(object):
     "Parser class for connections using Hiredis"
+    def __init__(self):
+        if not hiredis_available:
+            raise RedisError("Hiredis is not installed")
+
     def __del__(self):
         try:
             self.on_disconnect()
@@ -136,11 +151,11 @@ class HiredisParser(object):
             response = self._reader.gets()
         return response
 
-try:
-    import hiredis
+if hiredis_available:
     DefaultParser = HiredisParser
-except ImportError:
+else:
     DefaultParser = PythonParser
+
 
 class Connection(object):
     "Manages TCP communication to and from a Redis server"

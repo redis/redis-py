@@ -1,3 +1,6 @@
+* 2.4.11 (in development)
+    * If Hiredis is unavailable, the HiredisParser will raise a RedisError
+      if selected manually.
 * 2.4.10
     * Buffer reads from socket in the PythonParser. Fix for a Windows-specific
       bug (#205).
