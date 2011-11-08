@@ -4,7 +4,8 @@ from redis.exceptions import (
     RedisError,
     ConnectionError,
     ResponseError,
-    InvalidResponse
+    InvalidResponse,
+    AuthenticationError
 )
 
 try:
@@ -215,7 +216,7 @@ class Connection(object):
         if self.password:
             self.send_command('AUTH', self.password)
             if self.read_response() != 'OK':
-                raise ConnectionError('Invalid Password')
+                raise AuthenticationError('Invalid Password')
 
         # if a database is specified, switch to it
         if self.db:

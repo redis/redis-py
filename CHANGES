@@ -1,4 +1,6 @@
 * 2.4.11 (in development)
+    * AuthenticationError will now be correctly raised if an invalid password
+      is supplied.
     * If Hiredis is unavailable, the HiredisParser will raise a RedisError
       if selected manually.
 * 2.4.10
