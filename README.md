@@ -205,7 +205,7 @@ value from GET.
 
 Enter the WATCH command. WATCH provides the ability to monitor one or more keys
 prior to starting a transaction. If any of those keys change prior the
-execution of that transaction, the entre transaction will be canceled and a
+execution of that transaction, the entire transaction will be canceled and a
 WatchError will be raised. To implement our own client-side INCR command, we
 could do something like this:
 
@@ -234,10 +234,10 @@ could do something like this:
     ...             continue
 
 Note that, because the Pipeline must bind to a single connection for the
-duration of a WATCH, care must be taken to ensure that he connection is
+duration of a WATCH, care must be taken to ensure that the connection is
 returned to the connection pool by calling the reset() method. If the
 Pipeline is used as a context manager (as in the example above) reset()
-will be called automatically. Of course you can do this the manual way as by
+will be called automatically. Of course you can do this the manual way by
 explicity calling reset():
 
     >>> pipe = r.pipeline()
