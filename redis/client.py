@@ -71,8 +71,9 @@ def parse_info(response):
     info = {}
 
     def get_value(value):
-        if ',' not in value:
+        if ',' not in value or '=' not in value:
             return value
+
         sub_dict = {}
         for item in value.split(','):
             k, v = item.rsplit('=', 1)
@@ -81,6 +82,7 @@ def parse_info(response):
             except ValueError:
                 sub_dict[k] = v
         return sub_dict
+
     for line in response.splitlines():
         if line and not line.startswith('#'):
             key, value = line.split(':')
