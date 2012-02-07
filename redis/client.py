@@ -127,6 +127,14 @@ def parse_config(response, **options):
         return response and pairs_to_dict(response) or {}
     return response == 'OK'
 
+def parse_script(response, **options):
+    if options['parse'].upper() == "EXISTS":
+        return [element == 1 for element in response]
+    elif options['parse'].upper() == "FLUSH":
+        return response == "OK"
+    else:
+        return response
+
 class StrictRedis(object):
     """
     Implementation of the Redis protocol.
@@ -168,6 +176,7 @@ class StrictRedis(object):
             zset_score_pairs
             ),
         string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
+        string_keys_to_dict('EVAL EVALSHA', lambda r: r),
         {
             'BGREWRITEAOF': lambda r: \
                 r == 'Background rewriting of AOF file started',
@@ -181,6 +190,7 @@ class StrictRedis(object):
             'OBJECT': parse_object,
             'PING': lambda r: r == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
+            'SCRIPT': parse_script,
         }
         )
 
@@ -1110,6 +1120,24 @@ class StrictRedis(object):
         """
         return self.execute_command('PUBLISH', channel, message, keys=[channel])
 
+    def eval(self, script, numkeys, *keys_n_args):
+        """
+        Eval script with Redis's Lua Scripting
+        """
+        return self.execute_command("EVAL", script, numkeys, *keys_n_args)
+
+    def evalsha(self, sha1hash, numkeys, *keys_n_args):
+        """
+        Eval script corresponding to sha1 hash with Redis's Lua Scripting
+        """
+        return self.execute_command("EVALSHA", sha1hash, numkeys, *keys_n_args)
+
+    def script(self,cmd,*args):
+        """
+        Scripts LOAD, EXISTS and FLUSH operations for Redis's Lua Scripting
+        """
+        return self.execute_command("SCRIPT", cmd, *args, parse=cmd)
+>>>>>>> de2f18d4ba940269ccca90a57230140e0eb84e6c
 
 class Redis(StrictRedis):
     """
