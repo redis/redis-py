@@ -272,8 +272,9 @@ class StrictRedis(object):
     def execute_command(self, *args, **options):
         "Execute a command and return a parsed response"
         pool = self.connection_pool
+        keys = options.pop('keys', [])
         command_name = args[0]
-        connection = pool.get_connection(command_name, **options)
+        connection = pool.get_connection(command_name, keys, **options)
         try:
             connection.send_command(*args)
             return self.parse_response(connection, command_name, **options)
@@ -305,11 +306,11 @@ class StrictRedis(object):
 
     def config_get(self, pattern="*"):
         "Return a dictionary of configuration based on the ``pattern``"
-        return self.execute_command('CONFIG', 'GET', pattern, parse='GET')
+        return self.execute_command('CONFIG', 'GET', pattern, parse='GET', keys=[pattern])
 
     def config_set(self, name, value):
         "Set config item ``name`` with ``value``"
-        return self.execute_command('CONFIG', 'SET', name, value, parse='SET')
+        return self.execute_command('CONFIG', 'SET', name, value, parse='SET', keys=[name])
 
     def dbsize(self):
         "Returns the number of keys in the current database"
@@ -317,11 +318,11 @@ class StrictRedis(object):
 
     def debug_object(self, key):
         "Returns version specific metainformation about a give key"
-        return self.execute_command('DEBUG', 'OBJECT', key)
+        return self.execute_command('DEBUG', 'OBJECT', key, keys=[key])
 
     def delete(self, *names):
         "Delete one or more keys specified by ``names``"
-        return self.execute_command('DEL', *names)
+        return self.execute_command('DEL', *names, keys=[k for k in names])
     __delitem__ = delete
 
     def echo(self, value):
@@ -349,7 +350,7 @@ class StrictRedis(object):
 
     def object(self, infotype, key):
         "Return the encoding, idletime, or refcount about the key"
-        return self.execute_command('OBJECT', infotype, key, infotype=infotype)
+        return self.execute_command('OBJECT', infotype, key, infotype=infotype, keys=[key])
 
     def ping(self):
         "Ping the Redis server"
@@ -388,23 +389,23 @@ class StrictRedis(object):
         doesn't already exist, create it with a value of ``value``.
         Returns the new length of the value at ``key``.
         """
-        return self.execute_command('APPEND', key, value)
+        return self.execute_command('APPEND', key, value, keys=[key])
 
     def decr(self, name, amount=1):
         """
-        Decrements the value of ``key`` by ``amount``.  If no key exists,
+        Decrements the value of ``name`` by ``amount``.  If no key exists,
         the value will be initialized as 0 - ``amount``
         """
-        return self.execute_command('DECRBY', name, amount)
+        return self.execute_command('DECRBY', name, amount, keys=[name])
 
     def exists(self, name):
         "Returns a boolean indicating whether key ``name`` exists"
-        return self.execute_command('EXISTS', name)
+        return self.execute_command('EXISTS', name, keys=[name])
     __contains__ = exists
 
     def expire(self, name, time):
         "Set an expire flag on key ``name`` for ``time`` seconds"
-        return self.execute_command('EXPIRE', name, time)
+        return self.execute_command('EXPIRE', name, time, keys=[name])
 
     def expireat(self, name, when):
         """
@@ -413,13 +414,13 @@ class StrictRedis(object):
         """
         if isinstance(when, datetime.datetime):
             when = int(time.mktime(when.timetuple()))
-        return self.execute_command('EXPIREAT', name, when)
+        return self.execute_command('EXPIREAT', name, when, keys=[name])
 
     def get(self, name):
         """
         Return the value at key ``name``, or None if the key doesn't exist
         """
-        return self.execute_command('GET', name)
+        return self.execute_command('GET', name, keys=[name])
 
     def __getitem__(self, name):
         """
@@ -433,39 +434,41 @@ class StrictRedis(object):
 
     def getbit(self, name, offset):
         "Returns a boolean indicating the value of ``offset`` in ``name``"
-        return self.execute_command('GETBIT', name, offset)
+        return self.execute_command('GETBIT', name, offset, keys=[name])
 
     def getset(self, name, value):
         """
         Set the value at key ``name`` to ``value`` if key doesn't exist
         Return the value at key ``name`` atomically
         """
-        return self.execute_command('GETSET', name, value)
+        return self.execute_command('GETSET', name, value, keys=[name])
 
     def incr(self, name, amount=1):
         """
         Increments the value of ``key`` by ``amount``.  If no key exists,
         the value will be initialized as ``amount``
         """
-        return self.execute_command('INCRBY', name, amount)
+        return self.execute_command('INCRBY', name, amount, keys=[name])
 
     def keys(self, pattern='*'):
         "Returns a list of keys matching ``pattern``"
-        return self.execute_command('KEYS', pattern)
+        return self.execute_command('KEYS', pattern, keys=[pattern])
 
     def mget(self, keys, *args):
         """
         Returns a list of values ordered identically to ``keys``
         """
         keys = list_or_args(keys, args)
-        return self.execute_command('MGET', *keys)
+        return self.execute_command('MGET', *keys, keys=[k for k in keys])
 
     def mset(self, mapping):
         "Sets each key in the ``mapping`` dict to its corresponding value"
+        keys = []
         items = []
         for pair in mapping.iteritems():
+            keys = pair[0]
             items.extend(pair)
-        return self.execute_command('MSET', *items)
+        return self.execute_command('MSET', *items, keys=keys)
 
     def msetnx(self, mapping):
         """
@@ -473,17 +476,19 @@ class StrictRedis(object):
         none of the keys are already set
         """
         items = []
+        keys = []
         for pair in mapping.iteritems():
+            keys = pair[0]
             items.extend(pair)
-        return self.execute_command('MSETNX', *items)
+        return self.execute_command('MSETNX', *items, keys=keys)
 
     def move(self, name, db):
         "Moves the key ``name`` to a different Redis database ``db``"
-        return self.execute_command('MOVE', name, db)
+        return self.execute_command('MOVE', name, db, keys=name)
 
     def persist(self, name):
         "Removes an expiration on ``name``"
-        return self.execute_command('PERSIST', name)
+        return self.execute_command('PERSIST', name, keys=[name])
 
     def randomkey(self):
         "Returns the name of a random key"
@@ -493,15 +498,15 @@ class StrictRedis(object):
         """
         Rename key ``src`` to ``dst``
         """
-        return self.execute_command('RENAME', src, dst)
+        return self.execute_command('RENAME', src, dst, keys=[src])
 
     def renamenx(self, src, dst):
         "Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist"
-        return self.execute_command('RENAMENX', src, dst)
+        return self.execute_command('RENAMENX', src, dst, keys=[src])
 
     def set(self, name, value):
         "Set the value at key ``name`` to ``value``"
-        return self.execute_command('SET', name, value)
+        return self.execute_command('SET', name, value, keys=[name])
     __setitem__ = set
 
     def setbit(self, name, offset, value):
@@ -510,18 +515,18 @@ class StrictRedis(object):
         indicating the previous value of ``offset``.
         """
         value = value and 1 or 0
-        return self.execute_command('SETBIT', name, offset, value)
+        return self.execute_command('SETBIT', name, offset, value, keys=[name])
 
     def setex(self, name, time, value):
         """
         Set the value of key ``name`` to ``value``
         that expires in ``time`` seconds
         """
-        return self.execute_command('SETEX', name, time, value)
+        return self.execute_command('SETEX', name, time, value, keys=[name])
 
     def setnx(self, name, value):
         "Set the value of key ``name`` to ``value`` if key doesn't exist"
-        return self.execute_command('SETNX', name, value)
+        return self.execute_command('SETNX', name, value, keys=[name])
 
     def setrange(self, name, offset, value):
         """
@@ -534,26 +539,26 @@ class StrictRedis(object):
 
         Returns the length of the new string.
         """
-        return self.execute_command('SETRANGE', name, offset, value)
+        return self.execute_command('SETRANGE', name, offset, value, keys=[name])
 
     def strlen(self, name):
         "Return the number of bytes stored in the value of ``name``"
-        return self.execute_command('STRLEN', name)
+        return self.execute_command('STRLEN', name, keys=[name])
 
     def substr(self, name, start, end=-1):
         """
         Return a substring of the string at key ``name``. ``start`` and ``end``
         are 0-based integers specifying the portion of the string to return.
         """
-        return self.execute_command('SUBSTR', name, start, end)
+        return self.execute_command('SUBSTR', name, start, end, keys=[name])
 
     def ttl(self, name):
         "Returns the number of seconds until the key ``name`` will expire"
-        return self.execute_command('TTL', name)
+        return self.execute_command('TTL', name, keys=[name])
 
     def type(self, name):
         "Returns the type of key ``name``"
-        return self.execute_command('TYPE', name)
+        return self.execute_command('TYPE', name, keys=[name])
 
     def watch(self, *names):
         """
@@ -586,7 +591,7 @@ class StrictRedis(object):
         else:
             keys = list(keys)
         keys.append(timeout)
-        return self.execute_command('BLPOP', *keys)
+        return self.execute_command('BLPOP', *keys, keys=[k for k in keys])
 
     def brpop(self, keys, timeout=0):
         """
@@ -606,7 +611,7 @@ class StrictRedis(object):
         else:
             keys = list(keys)
         keys.append(timeout)
-        return self.execute_command('BRPOP', *keys)
+        return self.execute_command('BRPOP', *keys, keys=[k for k in keys])
 
     def brpoplpush(self, src, dst, timeout=0):
         """
@@ -619,7 +624,7 @@ class StrictRedis(object):
         """
         if timeout is None:
             timeout = 0
-        return self.execute_command('BRPOPLPUSH', src, dst, timeout)
+        return self.execute_command('BRPOPLPUSH', src, dst, timeout, keys=[src, dst])
 
     def lindex(self, name, index):
         """
@@ -628,7 +633,7 @@ class StrictRedis(object):
         Negative indexes are supported and will return an item at the
         end of the list
         """
-        return self.execute_command('LINDEX', name, index)
+        return self.execute_command('LINDEX', name, index, keys=[name])
 
     def linsert(self, name, where, refvalue, value):
         """
@@ -638,23 +643,23 @@ class StrictRedis(object):
         Returns the new length of the list on success or -1 if ``refvalue``
         is not in the list.
         """
-        return self.execute_command('LINSERT', name, where, refvalue, value)
+        return self.execute_command('LINSERT', name, where, refvalue, value, keys=[name])
 
     def llen(self, name):
         "Return the length of the list ``name``"
-        return self.execute_command('LLEN', name)
+        return self.execute_command('LLEN', name, keys=[name])
 
     def lpop(self, name):
         "Remove and return the first item of the list ``name``"
-        return self.execute_command('LPOP', name)
+        return self.execute_command('LPOP', name, keys=[name])
 
     def lpush(self, name, *values):
         "Push ``values`` onto the head of the list ``name``"
-        return self.execute_command('LPUSH', name, *values)
+        return self.execute_command('LPUSH', name, *values, keys=[name])
 
     def lpushx(self, name, value):
         "Push ``value`` onto the head of the list ``name`` if ``name`` exists"
-        return self.execute_command('LPUSHX', name, value)
+        return self.execute_command('LPUSHX', name, value, keys=[name])
 
     def lrange(self, name, start, end):
         """
@@ -664,7 +669,7 @@ class StrictRedis(object):
         ``start`` and ``end`` can be negative numbers just like
         Python slicing notation
         """
-        return self.execute_command('LRANGE', name, start, end)
+        return self.execute_command('LRANGE', name, start, end, keys=[name])
 
     def lrem(self, name, count, value):
         """
@@ -676,11 +681,11 @@ class StrictRedis(object):
             count < 0: Remove elements equal to value moving from tail to head.
             count = 0: Remove all elements equal to value.
         """
-        return self.execute_command('LREM', name, count, value)
+        return self.execute_command('LREM', name, count, value, keys=[name])
 
     def lset(self, name, index, value):
         "Set ``position`` of list ``name`` to ``value``"
-        return self.execute_command('LSET', name, index, value)
+        return self.execute_command('LSET', name, index, value, keys=[name])
 
     def ltrim(self, name, start, end):
         """
@@ -690,26 +695,26 @@ class StrictRedis(object):
         ``start`` and ``end`` can be negative numbers just like
         Python slicing notation
         """
-        return self.execute_command('LTRIM', name, start, end)
+        return self.execute_command('LTRIM', name, start, end, keys=[name])
 
     def rpop(self, name):
         "Remove and return the last item of the list ``name``"
-        return self.execute_command('RPOP', name)
+        return self.execute_command('RPOP', name, keys=[name])
 
     def rpoplpush(self, src, dst):
         """
         RPOP a value off of the ``src`` list and atomically LPUSH it
         on to the ``dst`` list.  Returns the value.
         """
-        return self.execute_command('RPOPLPUSH', src, dst)
+        return self.execute_command('RPOPLPUSH', src, dst, keys=[src, dst])
 
     def rpush(self, name, *values):
         "Push ``values`` onto the tail of the list ``name``"
-        return self.execute_command('RPUSH', name, *values)
+        return self.execute_command('RPUSH', name, *values, keys=[name])
 
     def rpushx(self, name, value):
         "Push ``value`` onto the tail of the list ``name`` if ``name`` exists"
-        return self.execute_command('RPUSHX', name, value)
+        return self.execute_command('RPUSHX', name, value, keys=[name])
 
     def sort(self, name, start=None, num=None, by=None, get=None,
              desc=False, alpha=False, store=None):
@@ -763,22 +768,22 @@ class StrictRedis(object):
         if store is not None:
             pieces.append('STORE')
             pieces.append(store)
-        return self.execute_command('SORT', *pieces)
+        return self.execute_command('SORT', *pieces, keys=[name])
 
 
     #### SET COMMANDS ####
     def sadd(self, name, *values):
         "Add ``value(s)`` to set ``name``"
-        return self.execute_command('SADD', name, *values)
+        return self.execute_command('SADD', name, *values, keys=[name])
 
     def scard(self, name):
         "Return the number of elements in set ``name``"
-        return self.execute_command('SCARD', name)
+        return self.execute_command('SCARD', name, keys=[name])
 
     def sdiff(self, keys, *args):
         "Return the difference of sets specified by ``keys``"
         keys = list_or_args(keys, args)
-        return self.execute_command('SDIFF', *keys)
+        return self.execute_command('SDIFF', *keys, keys=[k for k in keys])
 
     def sdiffstore(self, dest, keys, *args):
         """
@@ -786,12 +791,12 @@ class StrictRedis(object):
         set named ``dest``.  Returns the number of keys in the new set.
         """
         keys = list_or_args(keys, args)
-        return self.execute_command('SDIFFSTORE', dest, *keys)
+        return self.execute_command('SDIFFSTORE', dest, *keys, keys=[k for k in keys])
 
     def sinter(self, keys, *args):
         "Return the intersection of sets specified by ``keys``"
         keys = list_or_args(keys, args)
-        return self.execute_command('SINTER', *keys)
+        return self.execute_command('SINTER', *keys, keys=[k for k in keys])
 
     def sinterstore(self, dest, keys, *args):
         """
@@ -799,36 +804,37 @@ class StrictRedis(object):
         set named ``dest``.  Returns the number of keys in the new set.
         """
         keys = list_or_args(keys, args)
-        return self.execute_command('SINTERSTORE', dest, *keys)
+        all_keys = [dest] + keys
+        return self.execute_command('SINTERSTORE', dest, *keys, keys=all_keys)
 
     def sismember(self, name, value):
         "Return a boolean indicating if ``value`` is a member of set ``name``"
-        return self.execute_command('SISMEMBER', name, value)
+        return self.execute_command('SISMEMBER', name, value, keys=[name])
 
     def smembers(self, name):
         "Return all members of the set ``name``"
-        return self.execute_command('SMEMBERS', name)
+        return self.execute_command('SMEMBERS', name, keys=[name])
 
     def smove(self, src, dst, value):
         "Move ``value`` from set ``src`` to set ``dst`` atomically"
-        return self.execute_command('SMOVE', src, dst, value)
+        return self.execute_command('SMOVE', src, dst, value, keys=[src, dst])
 
     def spop(self, name):
         "Remove and return a random member of set ``name``"
-        return self.execute_command('SPOP', name)
+        return self.execute_command('SPOP', name, keys=[name])
 
     def srandmember(self, name):
         "Return a random member of set ``name``"
-        return self.execute_command('SRANDMEMBER', name)
+        return self.execute_command('SRANDMEMBER', name, keys=[name])
 
     def srem(self, name, *values):
         "Remove ``values`` from set ``name``"
-        return self.execute_command('SREM', name, *values)
+        return self.execute_command('SREM', name, *values, keys=[name])
 
     def sunion(self, keys, *args):
         "Return the union of sets specifiued by ``keys``"
         keys = list_or_args(keys, args)
-        return self.execute_command('SUNION', *keys)
+        return self.execute_command('SUNION', *keys, keys=[k for k in keys])
 
     def sunionstore(self, dest, keys, *args):
         """
@@ -836,7 +842,7 @@ class StrictRedis(object):
         set named ``dest``.  Returns the number of keys in the new set.
         """
         keys = list_or_args(keys, args)
-        return self.execute_command('SUNIONSTORE', dest, *keys)
+        return self.execute_command('SUNIONSTORE', dest, *keys, keys=[k for k in keys])
 
 
     #### SORTED SET COMMANDS ####
@@ -860,18 +866,18 @@ class StrictRedis(object):
         for pair in kwargs.iteritems():
             pieces.append(pair[1])
             pieces.append(pair[0])
-        return self.execute_command('ZADD', name, *pieces)
+        return self.execute_command('ZADD', name, *pieces, keys=[name])
 
     def zcard(self, name):
         "Return the number of elements in the sorted set ``name``"
-        return self.execute_command('ZCARD', name)
+        return self.execute_command('ZCARD', name, keys=[name])
 
     def zcount(self, name, min, max):
-        return self.execute_command('ZCOUNT', name, min, max)
+        return self.execute_command('ZCOUNT', name, min, max, keys=[name])
 
     def zincrby(self, name, value, amount=1):
         "Increment the score of ``value`` in sorted set ``name`` by ``amount``"
-        return self.execute_command('ZINCRBY', name, amount, value)
+        return self.execute_command('ZINCRBY', name, amount, value, keys=[name])
 
     def zinterstore(self, dest, keys, aggregate=None):
         """
@@ -879,7 +885,7 @@ class StrictRedis(object):
         a new sorted set, ``dest``. Scores in the destination will be
         aggregated based on the ``aggregate``, or SUM if none is provided.
         """
-        return self._zaggregate('ZINTERSTORE', dest, keys, aggregate)
+        return self._zaggregate('ZINTERSTORE', dest, keys, aggregate, keys=[dest])
 
     def zrange(self, name, start, end, desc=False, withscores=False,
                score_cast_func=float):
@@ -902,7 +908,7 @@ class StrictRedis(object):
         if withscores:
             pieces.append('withscores')
         options = {'withscores': withscores, 'score_cast_func': score_cast_func}
-        return self.execute_command(*pieces, **options)
+        return self.execute_command(*pieces, keys=[name], **options)
 
     def zrangebyscore(self, name, min, max,
             start=None, num=None, withscores=False, score_cast_func=float):
@@ -927,7 +933,7 @@ class StrictRedis(object):
         if withscores:
             pieces.append('withscores')
         options = {'withscores': withscores, 'score_cast_func': score_cast_func}
-        return self.execute_command(*pieces, **options)
+        return self.execute_command(*pieces, keys=[name], **options)
 
     def zrank(self, name, value):
         """
@@ -938,7 +944,7 @@ class StrictRedis(object):
 
     def zrem(self, name, *values):
         "Remove member ``values`` from sorted set ``name``"
-        return self.execute_command('ZREM', name, *values)
+        return self.execute_command('ZREM', name, *values, keys=[name])
 
     def zremrangebyrank(self, name, min, max):
         """
@@ -947,14 +953,14 @@ class StrictRedis(object):
         to largest. Values can be negative indicating the highest scores.
         Returns the number of elements removed
         """
-        return self.execute_command('ZREMRANGEBYRANK', name, min, max)
+        return self.execute_command('ZREMRANGEBYRANK', name, min, max, keys=[name])
 
     def zremrangebyscore(self, name, min, max):
         """
         Remove all elements in the sorted set ``name`` with scores
         between ``min`` and ``max``. Returns the number of elements removed.
         """
-        return self.execute_command('ZREMRANGEBYSCORE', name, min, max)
+        return self.execute_command('ZREMRANGEBYSCORE', name, min, max, keys=[name])
 
     def zrevrange(self, name, start, num, withscores=False,
                   score_cast_func=float):
@@ -973,7 +979,7 @@ class StrictRedis(object):
         if withscores:
             pieces.append('withscores')
         options = {'withscores': withscores, 'score_cast_func': score_cast_func}
-        return self.execute_command(*pieces, **options)
+        return self.execute_command(*pieces, keys=[name], **options)
 
     def zrevrangebyscore(self, name, max, min,
             start=None, num=None, withscores=False, score_cast_func=float):
@@ -998,18 +1004,18 @@ class StrictRedis(object):
         if withscores:
             pieces.append('withscores')
         options = {'withscores': withscores, 'score_cast_func': score_cast_func}
-        return self.execute_command(*pieces, **options)
+        return self.execute_command(*pieces, keys=[name], **options)
 
     def zrevrank(self, name, value):
         """
         Returns a 0-based value indicating the descending rank of
         ``value`` in sorted set ``name``
         """
-        return self.execute_command('ZREVRANK', name, value)
+        return self.execute_command('ZREVRANK', name, value, keys=[name])
 
     def zscore(self, name, value):
         "Return the score of element ``value`` in sorted set ``name``"
-        return self.execute_command('ZSCORE', name, value)
+        return self.execute_command('ZSCORE', name, value, keys=[name])
 
     def zunionstore(self, dest, keys, aggregate=None):
         """
@@ -1017,65 +1023,65 @@ class StrictRedis(object):
         a new sorted set, ``dest``. Scores in the destination will be
         aggregated based on the ``aggregate``, or SUM if none is provided.
         """
-        return self._zaggregate('ZUNIONSTORE', dest, keys, aggregate)
+        return self._zaggregate('ZUNIONSTORE', dest, keys, aggregate, keys=[dest])
 
-    def _zaggregate(self, command, dest, keys, aggregate=None):
-        pieces = [command, dest, len(keys)]
-        if isinstance(keys, dict):
-            keys, weights = keys.keys(), keys.values()
+    def _zaggregate(self, command, dest, hkeys, aggregate=None, keys=[]):
+        pieces = [command, dest, len(hkeys)]
+        if isinstance(hkeys, dict):
+            hkeys, weights = hkeys.keys(), hkeys.values()
         else:
             weights = None
-        pieces.extend(keys)
+        pieces.extend(hkeys)
         if weights:
             pieces.append('WEIGHTS')
             pieces.extend(weights)
         if aggregate:
             pieces.append('AGGREGATE')
             pieces.append(aggregate)
-        return self.execute_command(*pieces)
+        return self.execute_command(*pieces, keys=keys)
 
     #### HASH COMMANDS ####
     def hdel(self, name, *keys):
         "Delete ``keys`` from hash ``name``"
-        return self.execute_command('HDEL', name, *keys)
+        return self.execute_command('HDEL', name, *keys, keys=[name])
 
     def hexists(self, name, key):
         "Returns a boolean indicating if ``key`` exists within hash ``name``"
-        return self.execute_command('HEXISTS', name, key)
+        return self.execute_command('HEXISTS', name, key, keys=[name])
 
     def hget(self, name, key):
         "Return the value of ``key`` within the hash ``name``"
-        return self.execute_command('HGET', name, key)
+        return self.execute_command('HGET', name, key, keys=[name])
 
     def hgetall(self, name):
         "Return a Python dict of the hash's name/value pairs"
-        return self.execute_command('HGETALL', name)
+        return self.execute_command('HGETALL', name, keys=[name])
 
     def hincrby(self, name, key, amount=1):
         "Increment the value of ``key`` in hash ``name`` by ``amount``"
-        return self.execute_command('HINCRBY', name, key, amount)
+        return self.execute_command('HINCRBY', name, key, amount, keys=[name])
 
     def hkeys(self, name):
         "Return the list of keys within hash ``name``"
-        return self.execute_command('HKEYS', name)
+        return self.execute_command('HKEYS', name, keys=[name])
 
     def hlen(self, name):
         "Return the number of elements in hash ``name``"
-        return self.execute_command('HLEN', name)
+        return self.execute_command('HLEN', name, keys=[name])
 
     def hset(self, name, key, value):
         """
         Set ``key`` to ``value`` within hash ``name``
         Returns 1 if HSET created a new field, otherwise 0
         """
-        return self.execute_command('HSET', name, key, value)
+        return self.execute_command('HSET', name, key, value, keys=[name])
 
     def hsetnx(self, name, key, value):
         """
         Set ``key`` to ``value`` within hash ``name`` if ``key`` does not
         exist.  Returns 1 if HSETNX created a field, otherwise 0.
         """
-        return self.execute_command("HSETNX", name, key, value)
+        return self.execute_command("HSETNX", name, key, value, keys=[name])
 
     def hmset(self, name, mapping):
         """
@@ -1087,22 +1093,22 @@ class StrictRedis(object):
         items = []
         for pair in mapping.iteritems():
             items.extend(pair)
-        return self.execute_command('HMSET', name, *items)
+        return self.execute_command('HMSET', name, *items, keys=[name])
 
     def hmget(self, name, keys):
         "Returns a list of values ordered identically to ``keys``"
-        return self.execute_command('HMGET', name, *keys)
+        return self.execute_command('HMGET', name, *keys, keys=[name])
 
     def hvals(self, name):
         "Return the list of values within hash ``name``"
-        return self.execute_command('HVALS', name)
+        return self.execute_command('HVALS', name, keys=[name])
 
     def publish(self, channel, message):
         """
         Publish ``message`` on ``channel``.
         Returns the number of subscribers the message was delivered to.
         """
-        return self.execute_command('PUBLISH', channel, message)
+        return self.execute_command('PUBLISH', channel, message, keys=[channel])
 
 
 class Redis(StrictRedis):
@@ -1139,7 +1145,7 @@ class Redis(StrictRedis):
         Set the value of key ``name`` to ``value``
         that expires in ``time`` seconds
         """
-        return self.execute_command('SETEX', name, time, value)
+        return self.execute_command('SETEX', name, time, value, keys=[name])
 
     def lrem(self, name, value, num=0):
         """
@@ -1151,7 +1157,7 @@ class Redis(StrictRedis):
             num < 0: Remove elements equal to value moving from tail to head.
             num = 0: Remove all elements equal to value.
         """
-        return self.execute_command('LREM', name, num, value)
+        return self.execute_command('LREM', name, num, value, keys=[name])
 
     def zadd(self, name, *args, **kwargs):
         """
@@ -1182,7 +1188,7 @@ class Redis(StrictRedis):
         for pair in kwargs.iteritems():
             pieces.append(pair[1])
             pieces.append(pair[0])
-        return self.execute_command('ZADD', name, *pieces)
+        return self.execute_command('ZADD', name, *pieces, keys=[name])
 
 
 class PubSub(object):
@@ -1262,7 +1268,7 @@ class PubSub(object):
             patterns = [patterns]
         for pattern in patterns:
             self.patterns.add(pattern)
-        return self.execute_command('PSUBSCRIBE', *patterns)
+        return self.execute_command('PSUBSCRIBE', *patterns, keys=[patterns])
 
     def punsubscribe(self, patterns=[]):
         """
@@ -1276,7 +1282,7 @@ class PubSub(object):
                 self.patterns.remove(pattern)
             except KeyError:
                 pass
-        return self.execute_command('PUNSUBSCRIBE', *patterns)
+        return self.execute_command('PUNSUBSCRIBE', *patterns, keys=[patterns])
 
     def subscribe(self, channels):
         "Subscribe to ``channels``, waiting for messages to be published"
@@ -1284,7 +1290,7 @@ class PubSub(object):
             channels = [channels]
         for channel in channels:
             self.channels.add(channel)
-        return self.execute_command('SUBSCRIBE', *channels)
+        return self.execute_command('SUBSCRIBE', *channels, keys=[k for k in channels])
 
     def unsubscribe(self, channels=[]):
         """
@@ -1298,7 +1304,7 @@ class PubSub(object):
                 self.channels.remove(channel)
             except KeyError:
                 pass
-        return self.execute_command('UNSUBSCRIBE', *channels)
+        return self.execute_command('UNSUBSCRIBE', *channels, keys=[k for k in channels])
 
     def listen(self):
         "Listen for messages on channels this client has been subscribed to"
@@ -1444,6 +1450,10 @@ class BasePipeline(object):
         At some other point, you can then run: pipe.execute(),
         which will execute all commands queued in the pipe.
         """
+
+        #I think that our only option is to throw it away.
+        options.pop('keys')
+
         self.command_stack.append((args, options))
         return self
 
