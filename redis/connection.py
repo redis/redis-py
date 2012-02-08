@@ -22,6 +22,7 @@ except ImportError:
 class PythonParser(object):
     "Plain Python parsing class"
     MAX_READ_LENGTH = 1000000
+    encoding = None
 
     def __init__(self):
         self._fp = None
@@ -35,6 +36,7 @@ class PythonParser(object):
     def on_connect(self, connection):
         "Called when the socket connects"
         self._fp = connection._sock.makefile('r')
+        self.encoding = connection.encoding
 
     def on_disconnect(self):
         "Called when the socket disconnects"
@@ -80,6 +82,9 @@ class PythonParser(object):
 
         byte, response = response[0], response[1:]
 
+        if byte not in ('-', '+', ':', '$', '*'):
+            raise InvalidResponse("Protocol Error")
+
         # server returned an error
         if byte == '-':
             if response.startswith('ERR '):
@@ -91,24 +96,25 @@ class PythonParser(object):
                 raise ConnectionError("Redis is loading data into memory")
         # single value
         elif byte == '+':
-            return response
+            pass
         # int value
         elif byte == ':':
-            return long(response)
+            response = long(response)
         # bulk response
         elif byte == '$':
             length = int(response)
             if length == -1:
                 return None
             response = self.read(length)
-            return response
         # multi-bulk response
         elif byte == '*':
             length = int(response)
             if length == -1:
                 return None
-            return [self.read_response() for i in xrange(length)]
-        raise InvalidResponse("Protocol Error")
+            response = [self.read_response() for i in xrange(length)]
+        if isinstance(response, str) and self.encoding:
+            response = response.decode(self.encoding)
+        return response
 
 class HiredisParser(object):
     "Parser class for connections using Hiredis"
