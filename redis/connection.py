@@ -126,7 +126,8 @@ class HiredisParser(object):
         self._sock = connection._sock
         self._reader = hiredis.Reader(
             protocolError=InvalidResponse,
-            replyError=ResponseError)
+            replyError=ResponseError,
+            encoding=connection.encoding)
 
     def on_disconnect(self):
         self._sock = None
