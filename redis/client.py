@@ -15,7 +15,7 @@ from redis.exceptions import (
 def list_or_args(keys, args):
     # returns a single list combining keys and args
     try:
-        i = iter(keys)
+        iter(keys)
         # a string can be iterated, but indicates
         # keys wasn't passed as a list
         if isinstance(keys, basestring):
@@ -457,8 +457,8 @@ class StrictRedis(object):
         """
         Returns a list of values ordered identically to ``keys``
         """
-        keys = list_or_args(keys, args)
-        return self.execute_command('MGET', *keys)
+        args = list_or_args(keys, args)
+        return self.execute_command('MGET', *args)
 
     def mset(self, mapping):
         "Sets each key in the ``mapping`` dict to its corresponding value"
@@ -777,29 +777,29 @@ class StrictRedis(object):
 
     def sdiff(self, keys, *args):
         "Return the difference of sets specified by ``keys``"
-        keys = list_or_args(keys, args)
-        return self.execute_command('SDIFF', *keys)
+        args = list_or_args(keys, args)
+        return self.execute_command('SDIFF', *args)
 
     def sdiffstore(self, dest, keys, *args):
         """
         Store the difference of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
         """
-        keys = list_or_args(keys, args)
-        return self.execute_command('SDIFFSTORE', dest, *keys)
+        args = list_or_args(keys, args)
+        return self.execute_command('SDIFFSTORE', dest, *args)
 
     def sinter(self, keys, *args):
         "Return the intersection of sets specified by ``keys``"
-        keys = list_or_args(keys, args)
-        return self.execute_command('SINTER', *keys)
+        args = list_or_args(keys, args)
+        return self.execute_command('SINTER', *args)
 
     def sinterstore(self, dest, keys, *args):
         """
         Store the intersection of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
         """
-        keys = list_or_args(keys, args)
-        return self.execute_command('SINTERSTORE', dest, *keys)
+        args = list_or_args(keys, args)
+        return self.execute_command('SINTERSTORE', dest, *args)
 
     def sismember(self, name, value):
         "Return a boolean indicating if ``value`` is a member of set ``name``"
@@ -827,16 +827,16 @@ class StrictRedis(object):
 
     def sunion(self, keys, *args):
         "Return the union of sets specifiued by ``keys``"
-        keys = list_or_args(keys, args)
-        return self.execute_command('SUNION', *keys)
+        args = list_or_args(keys, args)
+        return self.execute_command('SUNION', *args)
 
     def sunionstore(self, dest, keys, *args):
         """
         Store the union of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
         """
-        keys = list_or_args(keys, args)
-        return self.execute_command('SUNIONSTORE', dest, *keys)
+        args = list_or_args(keys, args)
+        return self.execute_command('SUNIONSTORE', dest, *args)
 
 
     #### SORTED SET COMMANDS ####
@@ -1089,9 +1089,10 @@ class StrictRedis(object):
             items.extend(pair)
         return self.execute_command('HMSET', name, *items)
 
-    def hmget(self, name, keys):
+    def hmget(self, name, keys, *args):
         "Returns a list of values ordered identically to ``keys``"
-        return self.execute_command('HMGET', name, *keys)
+        args = list_or_args(keys, args)
+        return self.execute_command('HMGET', name, *args)
 
     def hvals(self, name):
         "Return the list of values within hash ``name``"

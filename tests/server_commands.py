@@ -1003,6 +1003,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(self.client.hmset('foo', d))
         self.assertEqual(self.client.hmget('foo', ['a', 'b', 'c']), ['1', '2', '3'])
         self.assertEqual(self.client.hmget('foo', ['a', 'c']), ['1', '3'])
+        # using *args type args
+        self.assertEquals(self.client.hmget('foo', 'a', 'c'), ['1', '3'])
 
     def test_hmget_empty(self):
         self.assertEqual(self.client.hmget('foo', ['a', 'b']), [None, None])
