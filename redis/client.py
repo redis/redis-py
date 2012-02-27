@@ -1124,20 +1124,20 @@ class StrictRedis(object):
         """
         Eval script with Redis's Lua Scripting
         """
-        return self.execute_command("EVAL", script, numkeys, *keys_n_args)
+        return self.execute_command("EVAL", script, numkeys, *keys_n_args, keys=[k for k in keys_n_args[:numkeys]])
 
     def evalsha(self, sha1hash, numkeys, *keys_n_args):
         """
         Eval script corresponding to sha1 hash with Redis's Lua Scripting
         """
-        return self.execute_command("EVALSHA", sha1hash, numkeys, *keys_n_args)
+        return self.execute_command("EVALSHA", sha1hash, numkeys, *keys_n_args, keys=[k for k in keys_n_args[:numkeys]])
 
-    def script(self,cmd,*args):
+    def script(self, cmd, *args):
         """
         Scripts LOAD, EXISTS and FLUSH operations for Redis's Lua Scripting
         """
         return self.execute_command("SCRIPT", cmd, *args, parse=cmd)
->>>>>>> de2f18d4ba940269ccca90a57230140e0eb84e6c
+
 
 class Redis(StrictRedis):
     """
