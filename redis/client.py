@@ -240,7 +240,8 @@ class StrictRedis(object):
         with self.pipeline(True, shard_hint) as pipe:
             while 1:
                 try:
-                    pipe.watch(*watches)
+                    if watches:
+                        pipe.watch(*watches)
                     func(pipe)
                     return pipe.execute()
                 except WatchError:
