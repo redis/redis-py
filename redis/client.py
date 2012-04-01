@@ -3,7 +3,12 @@ import datetime
 import time
 import warnings
 from itertools import imap, izip, starmap
-from redis.connection import ConnectionPool, UnixDomainSocketConnection
+from redis.connection import (
+    ConnectionPool,
+    UnixDomainSocketConnection,
+    HiredisParser,
+    PythonParser,
+)
 from redis.exceptions import (
     ConnectionError,
     DataError,
@@ -1105,6 +1110,56 @@ class StrictRedis(object):
         Returns the number of subscribers the message was delivered to.
         """
         return self.execute_command('PUBLISH', channel, message)
+
+    def slowlog_len(self):
+        "Get the current `slowlog` length"
+        return self.execute_command('SLOWLOG', 'LEN')
+
+    def slowlog_reset(self):
+        "Reset the `slowlog`"
+        return self.execute_command('SLOWLOG', 'RESET')
+
+    def slowlog_get(self, count=None):
+        "Return the last ``count`` items from the `slowlog`"
+        # Duplication of the `execute_command` method, it seems to be the
+        # only way to patch this in without affecting other code
+        command_name = 'SLOWLOG'
+
+        args = ('GET',)
+        # If a count is passed, we have to add it to the args
+        if count:
+            args += count,
+
+        # Manually get the connection because we can't overwrite the parser
+        # with ``execute_command``
+        pool = self.connection_pool
+        connection = pool.get_connection(command_name)
+        old_parser = connection._parser
+        if isinstance(old_parser, HiredisParser):
+            # Ugly monkey-patch here
+            connection._parser = parser = PythonParser() 
+
+            # Reuse connection if available
+            if old_parser._connection:
+                parser.on_connect(old_parser._connection)
+        else:
+            parser = None
+
+        try:
+            connection.send_command(command_name, *args)
+            return self.parse_response(connection, command_name)
+        except ConnectionError:
+            connection.disconnect()
+            connection.send_command(*args)
+            return self.parse_response(connection, command_name)
+        finally:
+            # revert parser overwrite and pass save the connection if needed
+            connection._parser = old_parser
+            if parser and not old_parser._connection:
+                old_parser.on_connect(parser._connection)
+
+            pool.release(connection)
+
 
 
 class Redis(StrictRedis):
