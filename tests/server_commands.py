@@ -1306,3 +1306,18 @@ class ServerCommandsTestCase(unittest.TestCase):
         data = ''.join(data)
         self.client.set('a', data)
         self.assertEquals(self.client.get('a'), data)
+
+    def test_slowlog(self):
+        '''
+        With the HiredisParser this would normally break, the patched
+        version should ensure that slowlog_get works without a problem
+        '''
+        client = self.get_client(redis.StrictRedis)
+        client.slowlog_get()
+        client.slowlog_get(10)
+        client.slowlog_len()
+
+if __name__ == '__main__':
+    import unittest
+    unittest.main()
+
