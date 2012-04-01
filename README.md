@@ -56,6 +56,7 @@ versions of redis-py:
   accidentally when being implemented and not discovered until after people
   were already using it. The Redis class expects *args in the form of:
       name1, score1, name2, score2, ...
+* SETEX: Order of 'time' and 'value' arguments reversed.
 
 
 ## More Detail
@@ -73,7 +74,7 @@ are managed.
     >>> pool = redis.ConnectionPool(host='localhost', port=6379, db=0)
     >>> r = redis.Redis(connection_pool=pool)
 
-### Connetions
+### Connections
 
 ConnectionPools manage a set of Connection instances. redis-py ships with two
 types of Connections. The default, Connection, is a normal TCP socket based
@@ -156,7 +157,7 @@ If you use multiple Redis databases within the same application, you should
 create a separate client instance (and possibly a separate connection pool) for
 each database.
 
-It is not save to pass PubSub objects between threads.
+It is not safe to pass PubSub or Pipeline objects between threads.
 
 ## Pipelines
 
@@ -170,7 +171,7 @@ Pipelines are quite simple to use:
     >>> r = redis.Redis(...)
     >>> r.set('bing', 'baz')
     >>> # Use the pipeline() method to create a pipeline instance
-    >>> pipe = redis.pipeline()
+    >>> pipe = r.pipeline()
     >>> # The following SET commands are buffered
     >>> pipe.set('foo', 'bar')
     >>> pipe.get('bing')
@@ -204,7 +205,7 @@ value from GET.
 
 Enter the WATCH command. WATCH provides the ability to monitor one or more keys
 prior to starting a transaction. If any of those keys change prior the
-execution of that transaction, the entre transaction will be canceled and a
+execution of that transaction, the entire transaction will be canceled and a
 WatchError will be raised. To implement our own client-side INCR command, we
 could do something like this:
 
@@ -233,10 +234,10 @@ could do something like this:
     ...             continue
 
 Note that, because the Pipeline must bind to a single connection for the
-duration of a WATCH, care must be taken to ensure that he connection is
+duration of a WATCH, care must be taken to ensure that the connection is
 returned to the connection pool by calling the reset() method. If the
 Pipeline is used as a context manager (as in the example above) reset()
-will be called automatically. Of course you can do this the manual way as by
+will be called automatically. Of course you can do this the manual way by
 explicity calling reset():
 
     >>> pipe = r.pipeline()

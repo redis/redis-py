@@ -1,11 +1,36 @@
-import errno
 import socket
 from itertools import chain, imap
-from redis.exceptions import ConnectionError, ResponseError, InvalidResponse
+from redis.exceptions import (
+    RedisError,
+    ConnectionError,
+    ResponseError,
+    InvalidResponse,
+    AuthenticationError
+)
+
+try:
+    from cStringIO import StringIO
+except ImportError:
+    from StringIO import StringIO
+
+try:
+    import hiredis
+    hiredis_available = True
+except ImportError:
+    hiredis_available = False
 
 class PythonParser(object):
+    "Plain Python parsing class"
+    MAX_READ_LENGTH = 1000000
+
     def __init__(self):
         self._fp = None
+
+    def __del__(self):
+        try:
+            self.on_disconnect()
+        except:
+            pass
 
     def on_connect(self, connection):
         "Called when the socket connects"
@@ -24,7 +49,25 @@ class PythonParser(object):
         """
         try:
             if length is not None:
-                return self._fp.read(length+2)[:-2]
+                bytes_left = length + 2 # read the line ending
+                if length > self.MAX_READ_LENGTH:
+                    # apparently reading more than 1MB or so from a windows
+                    # socket can cause MemoryErrors. See:
+                    # https://github.com/andymccurdy/redis-py/issues/205
+                    # read smaller chunks at a time to work around this
+                    try:
+                        buf = StringIO()
+                        while bytes_left > 0:
+                            read_len = min(bytes_left, self.MAX_READ_LENGTH)
+                            buf.write(self._fp.read(read_len))
+                            bytes_left -= read_len
+                        buf.seek(0)
+                        return buf.read(length)
+                    finally:
+                        buf.close()
+                return self._fp.read(bytes_left)[:-2]
+
+            # no length, read a full line
             return self._fp.readline()[:-2]
         except (socket.error, socket.timeout), e:
             raise ConnectionError("Error while reading from socket: %s" % \
@@ -68,6 +111,17 @@ class PythonParser(object):
         raise InvalidResponse("Protocol Error")
 
 class HiredisParser(object):
+    "Parser class for connections using Hiredis"
+    def __init__(self):
+        if not hiredis_available:
+            raise RedisError("Hiredis is not installed")
+
+    def __del__(self):
+        try:
+            self.on_disconnect()
+        except:
+            pass
+
     def on_connect(self, connection):
         self._sock = connection._sock
         self._reader = hiredis.Reader(
@@ -79,6 +133,8 @@ class HiredisParser(object):
         self._reader = None
 
     def read_response(self):
+        if not self._reader:
+            raise ConnectionError("Socket closed on remote end")
         response = self._reader.gets()
         while response is False:
             try:
@@ -96,11 +152,11 @@ class HiredisParser(object):
             response = self._reader.gets()
         return response
 
-try:
-    import hiredis
+if hiredis_available:
     DefaultParser = HiredisParser
-except ImportError:
+else:
     DefaultParser = PythonParser
+
 
 class Connection(object):
     "Manages TCP communication to and from a Redis server"
@@ -116,6 +172,12 @@ class Connection(object):
         self.encoding_errors = encoding_errors
         self._sock = None
         self._parser = parser_class()
+
+    def __del__(self):
+        try:
+            self.disconnect()
+        except:
+            pass
 
     def connect(self):
         "Connects to the Redis server if not already connected"
@@ -146,7 +208,6 @@ class Connection(object):
             return "Error %s connecting %s:%s. %s." % \
                 (exception.args[0], self.host, self.port, exception.args[1])
 
-
     def on_connect(self):
         "Initialize the connection, authenticate and select a database"
         self._parser.on_connect(self)
@@ -155,7 +216,7 @@ class Connection(object):
         if self.password:
             self.send_command('AUTH', self.password)
             if self.read_response() != 'OK':
-                raise ConnectionError('Invalid Password')
+                raise AuthenticationError('Invalid Password')
 
         # if a database is specified, switch to it
         if self.db:

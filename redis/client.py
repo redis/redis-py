@@ -15,7 +15,7 @@ from redis.exceptions import (
 def list_or_args(keys, args):
     # returns a single list combining keys and args
     try:
-        i = iter(keys)
+        iter(keys)
         # a string can be iterated, but indicates
         # keys wasn't passed as a list
         if isinstance(keys, basestring):
@@ -44,12 +44,36 @@ def dict_merge(*dicts):
     [merged.update(d) for d in dicts]
     return merged
 
+def parse_debug_object(response):
+    "Parse the results of Redis's DEBUG OBJECT command into a Python dict"
+    # The 'type' of the object is the first item in the response, but isn't
+    # prefixed with a name
+    response = 'type:' + response
+    response = dict([kv.split(':') for kv in response.split()])
+
+    # parse some expected int values from the string response
+    # note: this cmd isn't spec'd so these may not appear in all redis versions
+    int_fields = ('refcount', 'serializedlength', 'lru', 'lru_seconds_idle')
+    for field in int_fields:
+        if field in response:
+            response[field] = int(response[field])
+
+    return response
+
+def parse_object(response, infotype):
+    "Parse the results of an OBJECT command"
+    if infotype in ('idletime', 'refcount'):
+        return int(response)
+    return response
+
 def parse_info(response):
     "Parse the result of Redis's INFO command into a Python dict"
     info = {}
+
     def get_value(value):
-        if ',' not in value:
+        if ',' not in value or '=' not in value:
             return value
+
         sub_dict = {}
         for item in value.split(','):
             k, v = item.rsplit('=', 1)
@@ -58,6 +82,7 @@ def parse_info(response):
             except ValueError:
                 sub_dict[k] = v
         return sub_dict
+
     for line in response.splitlines():
         if line and not line.startswith('#'):
             key, value = line.split(':')
@@ -115,13 +140,13 @@ class StrictRedis(object):
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict(
             'AUTH DEL EXISTS EXPIRE EXPIREAT HDEL HEXISTS HMSET MOVE MSETNX '
-            'PERSIST RENAMENX SADD SISMEMBER SMOVE SETEX SETNX SREM ZADD ZREM',
+            'PERSIST RENAMENX SISMEMBER SMOVE SETEX SETNX SREM ZREM',
             bool
             ),
         string_keys_to_dict(
-            'DECRBY GETBIT HLEN INCRBY LINSERT LLEN LPUSHX RPUSHX SCARD '
-            'SDIFFSTORE SETBIT SETRANGE SINTERSTORE STRLEN SUNIONSTORE ZCARD '
-            'ZREMRANGEBYRANK ZREMRANGEBYSCORE',
+            'DECRBY GETBIT HLEN INCRBY LINSERT LLEN LPUSHX RPUSHX SADD SCARD '
+            'SDIFFSTORE SETBIT SETRANGE SINTERSTORE STRLEN SUNIONSTORE ZADD '
+            'ZCARD ZREMRANGEBYRANK ZREMRANGEBYSCORE',
             int
             ),
         string_keys_to_dict(
@@ -149,12 +174,13 @@ class StrictRedis(object):
             'BGSAVE': lambda r: r == 'Background saving started',
             'BRPOPLPUSH': lambda r: r and r or None,
             'CONFIG': parse_config,
+            'DEBUG': parse_debug_object,
             'HGETALL': lambda r: r and pairs_to_dict(r) or {},
             'INFO': parse_info,
             'LASTSAVE': timestamp_to_datetime,
+            'OBJECT': parse_object,
             'PING': lambda r: r == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
-            'TTL': lambda r: r != -1 and r or None,
         }
         )
 
@@ -198,7 +224,7 @@ class StrictRedis(object):
         atomic, pipelines are useful for reducing the back-and-forth overhead
         between the client and server.
         """
-        return Pipeline(
+        return StrictPipeline(
             self.connection_pool,
             self.response_callbacks,
             transaction,
@@ -214,7 +240,8 @@ class StrictRedis(object):
         with self.pipeline(True, shard_hint) as pipe:
             while 1:
                 try:
-                    pipe.watch(*watches)
+                    if watches:
+                        pipe.watch(*watches)
                     func(pipe)
                     return pipe.execute()
                 except WatchError:
@@ -289,10 +316,18 @@ class StrictRedis(object):
         "Returns the number of keys in the current database"
         return self.execute_command('DBSIZE')
 
+    def debug_object(self, key):
+        "Returns version specific metainformation about a give key"
+        return self.execute_command('DEBUG', 'OBJECT', key)
+
     def delete(self, *names):
         "Delete one or more keys specified by ``names``"
         return self.execute_command('DEL', *names)
     __delitem__ = delete
+
+    def echo(self, value):
+        "Echo the string back from the server"
+        return self.execute_command('ECHO', value)
 
     def flushall(self):
         "Delete all keys in all databases on the current host"
@@ -312,6 +347,10 @@ class StrictRedis(object):
         Redis database was saved to disk
         """
         return self.execute_command('LASTSAVE')
+
+    def object(self, infotype, key):
+        "Return the encoding, idletime, or refcount about the key"
+        return self.execute_command('OBJECT', infotype, key, infotype=infotype)
 
     def ping(self):
         "Ping the Redis server"
@@ -419,8 +458,8 @@ class StrictRedis(object):
         """
         Returns a list of values ordered identically to ``keys``
         """
-        keys = list_or_args(keys, args)
-        return self.execute_command('MGET', *keys)
+        args = list_or_args(keys, args)
+        return self.execute_command('MGET', *args)
 
     def mset(self, mapping):
         "Sets each key in the ``mapping`` dict to its corresponding value"
@@ -474,7 +513,7 @@ class StrictRedis(object):
         value = value and 1 or 0
         return self.execute_command('SETBIT', name, offset, value)
 
-    def setex(self, name, value, time):
+    def setex(self, name, time, value):
         """
         Set the value of key ``name`` to ``value``
         that expires in ``time`` seconds
@@ -739,29 +778,29 @@ class StrictRedis(object):
 
     def sdiff(self, keys, *args):
         "Return the difference of sets specified by ``keys``"
-        keys = list_or_args(keys, args)
-        return self.execute_command('SDIFF', *keys)
+        args = list_or_args(keys, args)
+        return self.execute_command('SDIFF', *args)
 
     def sdiffstore(self, dest, keys, *args):
         """
         Store the difference of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
         """
-        keys = list_or_args(keys, args)
-        return self.execute_command('SDIFFSTORE', dest, *keys)
+        args = list_or_args(keys, args)
+        return self.execute_command('SDIFFSTORE', dest, *args)
 
     def sinter(self, keys, *args):
         "Return the intersection of sets specified by ``keys``"
-        keys = list_or_args(keys, args)
-        return self.execute_command('SINTER', *keys)
+        args = list_or_args(keys, args)
+        return self.execute_command('SINTER', *args)
 
     def sinterstore(self, dest, keys, *args):
         """
         Store the intersection of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
         """
-        keys = list_or_args(keys, args)
-        return self.execute_command('SINTERSTORE', dest, *keys)
+        args = list_or_args(keys, args)
+        return self.execute_command('SINTERSTORE', dest, *args)
 
     def sismember(self, name, value):
         "Return a boolean indicating if ``value`` is a member of set ``name``"
@@ -789,16 +828,16 @@ class StrictRedis(object):
 
     def sunion(self, keys, *args):
         "Return the union of sets specifiued by ``keys``"
-        keys = list_or_args(keys, args)
-        return self.execute_command('SUNION', *keys)
+        args = list_or_args(keys, args)
+        return self.execute_command('SUNION', *args)
 
     def sunionstore(self, dest, keys, *args):
         """
         Store the union of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
         """
-        keys = list_or_args(keys, args)
-        return self.execute_command('SUNIONSTORE', dest, *keys)
+        args = list_or_args(keys, args)
+        return self.execute_command('SUNIONSTORE', dest, *args)
 
 
     #### SORTED SET COMMANDS ####
@@ -1051,9 +1090,10 @@ class StrictRedis(object):
             items.extend(pair)
         return self.execute_command('HMSET', name, *items)
 
-    def hmget(self, name, keys):
+    def hmget(self, name, keys, *args):
         "Returns a list of values ordered identically to ``keys``"
-        return self.execute_command('HMGET', name, *keys)
+        args = list_or_args(keys, args)
+        return self.execute_command('HMGET', name, *args)
 
     def hvals(self, name):
         "Return the list of values within hash ``name``"
@@ -1070,9 +1110,38 @@ class StrictRedis(object):
 class Redis(StrictRedis):
     """
     Provides backwards compatibility with older versions of redis-py that
-    changed arguemnts to some commands to be more Pythonic, sane, or
+    changed arguments to some commands to be more Pythonic, sane, or by
     accident.
     """
+
+    # Overridden callbacks
+    RESPONSE_CALLBACKS = dict_merge(
+        StrictRedis.RESPONSE_CALLBACKS,
+        {
+            'TTL': lambda r: r != -1 and r or None,
+        }
+    )
+
+    def pipeline(self, transaction=True, shard_hint=None):
+        """
+        Return a new pipeline object that can queue multiple commands for
+        later execution. ``transaction`` indicates whether all commands
+        should be executed atomically. Apart from making a group of operations
+        atomic, pipelines are useful for reducing the back-and-forth overhead
+        between the client and server.
+        """
+        return Pipeline(
+            self.connection_pool,
+            self.response_callbacks,
+            transaction,
+            shard_hint)
+
+    def setex(self, name, value, time):
+        """
+        Set the value of key ``name`` to ``value``
+        that expires in ``time`` seconds
+        """
+        return self.execute_command('SETEX', name, time, value)
 
     def lrem(self, name, value, num=0):
         """
@@ -1111,9 +1180,7 @@ class Redis(StrictRedis):
             if len(args) % 2 != 0:
                 raise RedisError("ZADD requires an equal number of "
                                  "values and scores")
-            temp_args = args
-            temp_args.reverse()
-            pieces.extend(temp_args)
+            pieces.extend(reversed(args))
         for pair in kwargs.iteritems():
             pieces.append(pair[1])
             pieces.append(pair[0])
@@ -1139,6 +1206,22 @@ class PubSub(object):
             ('subscribe', 'psubscribe', 'unsubscribe', 'punsubscribe')
             )
 
+    def __del__(self):
+        try:
+            # if this object went out of scope prior to shutting down
+            # subscriptions, close the connection manually before
+            # returning it to the connection pool
+            if self.connection and (self.channels or self.patterns):
+                self.connection.disconnect()
+            self.reset()
+        except:
+            pass
+
+    def reset(self):
+        if self.connection:
+            self.connection_pool.release(self.connection)
+            self.connection = None
+
     def execute_command(self, *args, **kwargs):
         "Execute a publish/subscribe command"
         if self.connection is None:
@@ -1152,6 +1235,9 @@ class PubSub(object):
             return self.parse_response()
         except ConnectionError:
             connection.disconnect()
+            # Connect manually here. If the Redis server is down, this will
+            # fail and raise a ConnectionError as desired.
+            connection.connect()
             # resubscribe to all channels and patterns before
             # resending the current command
             for channel in self.channels:
@@ -1169,8 +1255,7 @@ class PubSub(object):
             # if we've just unsubscribed from the remaining channels,
             # release the connection back to the pool
             if not self.subscription_count:
-                self.connection_pool.release(self.connection)
-                self.connection = None
+                self.reset()
         return response
 
     def psubscribe(self, patterns):
@@ -1238,7 +1323,7 @@ class PubSub(object):
             yield msg
 
 
-class Pipeline(Redis):
+class BasePipeline(object):
     """
     Pipelines provide a way to transmit multiple commands to the Redis server
     in one transmission.  This is convenient for batch processing, such as
@@ -1275,6 +1360,12 @@ class Pipeline(Redis):
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.reset()
+
+    def __del__(self):
+        try:
+            self.reset()
+        except:
+            pass
 
     def reset(self):
         self.command_stack = []
@@ -1398,8 +1489,8 @@ class Pipeline(Redis):
                 for args, options in commands]
 
     def parse_response(self, connection, command_name, **options):
-        result = super(Pipeline, self).parse_response(
-            connection, command_name, **options)
+        result = StrictRedis.parse_response(
+            self, connection, command_name, **options)
         if command_name in self.UNWATCH_COMMANDS:
             self.watching = False
         elif command_name == 'WATCH':
@@ -1410,7 +1501,7 @@ class Pipeline(Redis):
         "Execute all the commands in the current pipeline"
         stack = self.command_stack
         if self.transaction or self.explicit_transaction:
-            stack = [(('MULTI' ,), {})] + stack + [(('EXEC', ), {})]
+            stack = [(('MULTI', ), {})] + stack + [(('EXEC', ), {})]
             execute = self._execute_transaction
         else:
             execute = self._execute_pipeline
@@ -1455,6 +1546,14 @@ class Pipeline(Redis):
         return self.watching and self.execute_command('UNWATCH') or True
 
 
+class StrictPipeline(BasePipeline, StrictRedis):
+    "Pipeline for the StrictRedis class"
+    pass
+
+class Pipeline(BasePipeline, Redis):
+    "Pipeline for the Redis class"
+    pass
+
 class LockError(RedisError):
     "Errors thrown from the Lock"
     pass
@@ -1483,8 +1582,8 @@ class Lock(object):
         holding the lock.
 
         Note: If using ``timeout``, you should make sure all the hosts
-        that are running clients are within the same timezone and are using
-        a network time service like ntp.
+        that are running clients have their time synchronized with a network time
+        service like ntp.
         """
         self.redis = redis
         self.name = name

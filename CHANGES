@@ -1,8 +1,33 @@
-* 2.4.10 (in development)
+* 2.4.11
+    * AuthenticationError will now be correctly raised if an invalid password
+      is supplied.
+    * If Hiredis is unavailable, the HiredisParser will raise a RedisError
+      if selected manually.
+    * Made the INFO command more tolerant of Redis changes formatting. Fix
+      for #217.
+* 2.4.10
+    * Buffer reads from socket in the PythonParser. Fix for a Windows-specific
+      bug (#205).
+    * Added the OBJECT and DEBUG OBJECT commands.
+    * Added __del__ methods for classes that hold on to resources that need to
+      be cleaned up. This should prevent resource leakage when these objects
+      leave scope due to misuse or unhandled exceptions. Thanks David Wolever
+      for the suggestion.
+    * Added the ECHO command for completeness.
+    * Fixed a bug where attempting to subscribe to a PubSub channel of a Redis
+      server that's down would blow out the stack. Fixes #179 and #195. Thanks
+      Ovidiu Predescu for the test case.
+    * StrictRedis's TTL command now returns a -1 when querying a key with no
+      expiration. The Redis class continues to return None.
+    * ZADD and SADD now return integer values indicating the number of items
+      added. Thanks Homer Strong.
     * Renamed the base client class to StrictRedis, replacing ZADD and LREM in
       favor of their official argument order. The Redis class is now a subclass
       of StrictRedis, implementing the legacy redis-py implementations of ZADD
       and LREM. Docs have been updated to suggesting the use of StrictRedis.
+    * SETEX in StrictRedis is now compliant with official Redis SETEX command.
+      the name, value, time implementation moved to "Redis" for backwards
+      compatability.
 * 2.4.9
     * Removed socket retry logic in Connection. This is the responsbility of
       the caller to determine if the command is safe and can be retried. Thanks

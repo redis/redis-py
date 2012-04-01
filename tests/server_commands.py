@@ -2,6 +2,7 @@ import redis
 import unittest
 import datetime
 import time
+from string import letters
 from distutils.version import StrictVersion
 from redis.client import parse_info
 
@@ -81,6 +82,18 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(self.client.config_set('dbfilename', rdbname))
         self.assertEquals(self.client.config_get()['dbfilename'], rdbname)
 
+    def test_debug_object(self):
+        self.client['a'] = 'foo'
+        debug_info = self.client.debug_object('a')
+        self.assert_(len(debug_info) > 0)
+        self.assertEquals(debug_info['refcount'], 1)
+        self.assert_(debug_info['serializedlength'] > 0)
+        self.client.rpush('b', 'a1')
+        debug_info = self.client.debug_object('a')
+
+    def test_echo(self):
+        self.assertEquals(self.client.echo('foo bar'), 'foo bar')
+
     def test_info(self):
         self.client['a'] = 'foo'
         self.client['b'] = 'bar'
@@ -91,9 +104,14 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_lastsave(self):
         self.assert_(isinstance(self.client.lastsave(), datetime.datetime))
 
+    def test_object(self):
+        self.client['a'] = 'foo'
+        self.assert_(isinstance(self.client.object('refcount', 'a'), int))
+        self.assert_(isinstance(self.client.object('idletime', 'a'), int))
+        self.assertEquals(self.client.object('encoding', 'a'), 'raw')
+
     def test_ping(self):
         self.assertEquals(self.client.ping(), True)
-
 
     # KEYS
     def test_append(self):
@@ -184,7 +202,7 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_mset(self):
         d = {'a': '1', 'b': '2', 'c': '3'}
         self.assert_(self.client.mset(d))
-        for k,v in d.iteritems():
+        for k, v in d.iteritems():
             self.assertEquals(self.client[k], v)
 
     def test_msetnx(self):
@@ -192,7 +210,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(self.client.msetnx(d))
         d2 = {'a': 'x', 'd': '4'}
         self.assert_(not self.client.msetnx(d2))
-        for k,v in d.iteritems():
+        for k, v in d.iteritems():
             self.assertEquals(self.client[k], v)
         self.assertEquals(self.client.get('d'), None)
 
@@ -219,7 +237,7 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_setex(self):
         self.assertEquals(self.client.setex('a', '1', 60), True)
         self.assertEquals(self.client['a'], '1')
-        self.assertEquals(self.client.ttl('a'), 60  )
+        self.assertEquals(self.client.ttl('a'), 60)
 
     def test_setnx(self):
         self.assert_(self.client.setnx('a', '1'))
@@ -689,7 +707,7 @@ class ServerCommandsTestCase(unittest.TestCase):
 
     # SORTED SETS
     def make_zset(self, name, d):
-        for k,v in d.items():
+        for k, v in d.items():
             self.client.zadd(name, **{k: v})
 
     def test_zadd(self):
@@ -937,10 +955,9 @@ class ServerCommandsTestCase(unittest.TestCase):
             [('a2', 1), ('a3', 5), ('a5', 12), ('a4', 19), ('a1', 23)]
             )
 
-
     # HASHES
     def make_hash(self, key, d):
-        for k,v in d.iteritems():
+        for k, v in d.iteritems():
             self.client.hset(key, k, v)
 
     def test_hget_and_hset(self):
@@ -986,6 +1003,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(self.client.hmset('foo', d))
         self.assertEqual(self.client.hmget('foo', ['a', 'b', 'c']), ['1', '2', '3'])
         self.assertEqual(self.client.hmget('foo', ['a', 'c']), ['1', '3'])
+        # using *args type args
+        self.assertEquals(self.client.hmget('foo', 'a', 'c'), ['1', '3'])
 
     def test_hmget_empty(self):
         self.assertEqual(self.client.hmget('foo', ['a', 'b']), [None, None])
@@ -1050,7 +1069,6 @@ class ServerCommandsTestCase(unittest.TestCase):
         # finally a key that's not an int
         self.client.hset('a', 'a3', 'foo')
         self.assertRaises(redis.ResponseError, self.client.hincrby, 'a', 'a3')
-
 
     def test_hkeys(self):
         # key is not a hash
@@ -1194,6 +1212,23 @@ class ServerCommandsTestCase(unittest.TestCase):
         client.lrem('a', 0, 'a1')
         self.assertEquals(client.lrange('a', 0, -1), ['a2', 'a3'])
 
+    def test_strict_setex(self):
+        "SETEX swaps the order of the value and timeout"
+        client = self.get_client(redis.StrictRedis)
+        self.assertEquals(client.setex('a', 60, '1'), True)
+        self.assertEquals(client['a'], '1')
+        self.assertEquals(client.ttl('a'), 60)
+
+    def test_strict_expire(self):
+        "TTL is -1 by default in StrictRedis"
+        client = self.get_client(redis.StrictRedis)
+        self.assertEquals(client.expire('a', 10), False)
+        self.client['a'] = 'foo'
+        self.assertEquals(client.expire('a', 10), True)
+        self.assertEquals(client.ttl('a'), 10)
+        self.assertEquals(client.persist('a'), True)
+        self.assertEquals(client.ttl('a'), -1)
+
     ## BINARY SAFE
     # TODO add more tests
     def test_binary_get_set(self):
@@ -1261,3 +1296,13 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_('allocation_stats' in parsed)
         self.assert_('6' in parsed['allocation_stats'])
         self.assert_('>=256' in parsed['allocation_stats'])
+
+    def test_large_responses(self):
+        "The PythonParser has some special cases for return values > 1MB"
+        # load up 5MB of data into a key
+        data = []
+        for i in range(5000000/len(letters)):
+            data.append(letters)
+        data = ''.join(data)
+        self.client.set('a', data)
+        self.assertEquals(self.client.get('a'), data)
