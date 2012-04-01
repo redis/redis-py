@@ -25,6 +25,7 @@ class PythonParser(object):
 
     def __init__(self):
         self._fp = None
+        self._connection = None
 
     def __del__(self):
         try:
@@ -34,6 +35,7 @@ class PythonParser(object):
 
     def on_connect(self, connection):
         "Called when the socket connects"
+        self._connection = connection
         self._fp = connection._sock.makefile('r')
 
     def on_disconnect(self):
@@ -41,6 +43,7 @@ class PythonParser(object):
         if self._fp is not None:
             self._fp.close()
             self._fp = None
+            self._connection = None
 
     def read(self, length=None):
         """
@@ -115,6 +118,7 @@ class HiredisParser(object):
     def __init__(self):
         if not hiredis_available:
             raise RedisError("Hiredis is not installed")
+        self._connection = None
 
     def __del__(self):
         try:
@@ -123,6 +127,7 @@ class HiredisParser(object):
             pass
 
     def on_connect(self, connection):
+        self._connection = connection
         self._sock = connection._sock
         self._reader = hiredis.Reader(
             protocolError=InvalidResponse,
@@ -131,6 +136,7 @@ class HiredisParser(object):
     def on_disconnect(self):
         self._sock = None
         self._reader = None
+        self._connection = None
 
     def read_response(self):
         if not self._reader:
