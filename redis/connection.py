@@ -1,3 +1,4 @@
+import os
 import socket
 from itertools import chain, imap
 from redis.exceptions import (
@@ -163,6 +164,7 @@ class Connection(object):
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', parser_class=DefaultParser):
+        self.pid = os.getpid()
         self.host = host
         self.port = port
         self.db = db
@@ -284,6 +286,7 @@ class UnixDomainSocketConnection(Connection):
     def __init__(self, path='', db=0, password=None,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', parser_class=DefaultParser):
+        self.pid = os.getpid()
         self.path = path
         self.db = db
         self.password = password
@@ -316,6 +319,7 @@ class ConnectionPool(object):
     "Generic connection pool"
     def __init__(self, connection_class=Connection, max_connections=None,
                  **connection_kwargs):
+        self.pid = os.getpid()
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections or 2**31
@@ -323,8 +327,14 @@ class ConnectionPool(object):
         self._available_connections = []
         self._in_use_connections = set()
 
+    def _checkpid(self):
+        if self.pid != os.getpid():
+            self.disconnect()
+            self.__init__(self.connection_class, self.max_connections, **self.connection_kwargs)
+
     def get_connection(self, command_name, *keys, **options):
         "Get a connection from the pool"
+        self._checkpid()
         try:
             connection = self._available_connections.pop()
         except IndexError:
@@ -341,8 +351,10 @@ class ConnectionPool(object):
 
     def release(self, connection):
         "Releases the connection back to the pool"
-        self._in_use_connections.remove(connection)
-        self._available_connections.append(connection)
+        self._checkpid()
+        if connection.pid == self.pid:
+            self._in_use_connections.remove(connection)
+            self._available_connections.append(connection)
 
     def disconnect(self):
         "Disconnects all connections in the pool"
