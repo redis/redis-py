@@ -7,6 +7,11 @@ from distutils.version import StrictVersion
 from redis.client import parse_info
 from redis.exceptions import ResponseError
 
+
+client = redis.Redis(host='localhost', port=6379, db=9)
+version = map(int, client.info()['redis_version'].split('.'))
+hasScripting = version >= [2, 5]
+
 class ServerCommandsTestCase(unittest.TestCase):
 
     def get_client(self, cls=redis.Redis):
@@ -1305,18 +1310,21 @@ class ServerCommandsTestCase(unittest.TestCase):
         data = ''.join(data)
         self.client.set('a', data)
         self.assertEquals(self.client.get('a'), data)
-    
+
+    @unittest.skipUnless(hasScripting, "Skip unless version of redis has scripting")
     def test_eval(self):
         "The lua scripting eval command takes a variable number of keys and arguments"
         self.assertEquals( self.client.eval("return {KEYS[1],KEYS[2],ARGV[1],ARGV[2]}", 2, "key1", "key2", "first", "second"), ["key1", "key2", "first", "second"])
-    
+
+    @unittest.skipUnless(hasScripting, "Skip unless version of redis has scripting")
     def test_script(self):
         "The lua scripting script command executes different commands depending on arguments"
         h = self.client.script("LOAD", "return redis.call('set','foo','bar')")
         self.assertEquals("2fa2b029f72572e803ff55a09b1282699aecae6a", h)
         self.assertEquals( self.client.script("EXISTS", "2fa2b029f72572e803ff55a09b1282699aecae6a"), [True])
         self.assertEquals( self.client.script("FLUSH"), True)
-    
+
+    @unittest.skipUnless(hasScripting, "Skip unless version of redis has scripting")
     def test_evalsha(self):
         "The lua scripting evalsha command executes a previously loaded script if it exists"
         try:
@@ -1326,4 +1334,3 @@ class ServerCommandsTestCase(unittest.TestCase):
             self.assertTrue(True)
         h = self.client.script("LOAD", "return redis.call('set','foo','bar')")
         self.assertEquals( self.client.evalsha("2fa2b029f72572e803ff55a09b1282699aecae6a", 0), "OK")
-        
