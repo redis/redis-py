@@ -362,7 +362,11 @@ class StrictRedis(object):
         blocking until the save is complete
         """
         return self.execute_command('SAVE')
-
+    def select(self, index):
+        """
+        Select the DB with having the specified zero-based numeric index
+        """
+        return self.execute_command('SELECT', index)
     def shutdown(self):
         "Shutdown the server"
         try:
