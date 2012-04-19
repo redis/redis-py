@@ -1350,7 +1350,7 @@ class LuaScriptingTestCase(unittest.TestCase):
         self.client.config_set('lua-time-limit', 500)
         with self.assertRaises(ResponseError):
             script = """
-                redis.call('set', 'test', 'foo')
+                redis.call('set', 'foo', 'bar')
                 while true do
 
                 end

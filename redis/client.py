@@ -14,6 +14,7 @@ from redis.exceptions import (
     ScriptsNotRunningError,
     ScriptNotFoundError,
     ScriptBusyError,
+    ScriptOutOfControlError,
 )
 from threading import Timer
 
@@ -380,10 +381,14 @@ class StrictRedis(object):
         """
         return self.execute_command('SAVE')
 
-    def shutdown(self):
+    def shutdown(self, save=True):
         "Shutdown the server"
+        if save:
+            option = 'SAVE'
+        else:
+            option = 'NOSAVE'
         try:
-            self.execute_command('SHUTDOWN')
+            self.execute_command('SHUTDOWN', option)
         except ConnectionError:
             # a ConnectionError here is expected
             return
@@ -1169,18 +1174,12 @@ class StrictRedis(object):
                 break
             except ScriptBusyError, e:
                 pass
-
-    def shutdown_nosave(self):
-        """
-        When a lua script performs a write operation and exceeds the
-        allotted time limit, this command is required to hard kill the
-        redis process to prevent it from saving data in a half-written
-        state.
-
-        XXX: https://github.com/antirez/redis/issues/466
-        """
-        cmd = "SHUTDOWN NOSAVE"
-        return self.execute_command(cmd, parse=cmd)
+            except ScriptOutOfControlError:
+                # When a lua script performs a write operation and exceeds the
+                # allotted time limit, this command is required to hard kill the
+                # redis process to prevent it from saving data in a half-written
+                # state.
+                return self.shutdown(save=False)
 
 
 class Redis(StrictRedis):

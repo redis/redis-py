@@ -9,6 +9,7 @@ from redis.exceptions import (
     ScriptsNotRunningError,
     ScriptNotFoundError,
     ScriptBusyError,
+    ScriptOutOfControlError,
 )
 
 try:
@@ -26,7 +27,11 @@ except ImportError:
 exception_mappings = {
     'ERR No scripts in execution right now.': ScriptsNotRunningError,
     'NOSCRIPT No matching script. Please use EVAL.': ScriptNotFoundError,
-    'BUSY Redis is busy running a script. You can only call SCRIPT KILL or SHUTDOWN NOSAVE.': ScriptBusyError
+    'BUSY Redis is busy running a script. You can only call SCRIPT KILL or '
+        'SHUTDOWN NOSAVE.': ScriptBusyError,
+    'ERR Sorry the script already executed write commands against the dataset. '
+        'You can either wait the script termination or kill the server in an '
+        'hard way using the SHUTDOWN NOSAVE command.': ScriptOutOfControlError
 }
 
 def parse_response_error(response_exception):

@@ -32,3 +32,6 @@ class ScriptNotFoundError(ResponseError):
 
 class ScriptBusyError(ResponseError):
     pass
+
+class ScriptOutOfControlError(ResponseError):
+    pass
