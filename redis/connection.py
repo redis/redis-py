@@ -5,7 +5,10 @@ from redis.exceptions import (
     ConnectionError,
     ResponseError,
     InvalidResponse,
-    AuthenticationError
+    AuthenticationError,
+    ScriptsNotRunningError,
+    ScriptNotFoundError,
+    ScriptBusyError,
 )
 
 try:
@@ -18,6 +21,19 @@ try:
     hiredis_available = True
 except ImportError:
     hiredis_available = False
+
+
+exception_mappings = {
+    'ERR No scripts in execution right now.': ScriptsNotRunningError,
+    'NOSCRIPT No matching script. Please use EVAL.': ScriptNotFoundError,
+    'BUSY Redis is busy running a script. You can only call SCRIPT KILL or SHUTDOWN NOSAVE.': ScriptBusyError
+}
+
+def parse_response_error(response_exception):
+    message = response_exception.message
+    exception = exception_mappings.get(message, response_exception.__class__)
+    return exception(message)
+
 
 class PythonParser(object):
     "Plain Python parsing class"
@@ -268,7 +284,7 @@ class Connection(object):
             self.disconnect()
             raise
         if response.__class__ == ResponseError:
-            raise response
+            raise parse_response_error(response)
         return response
 
     def encode(self, value):

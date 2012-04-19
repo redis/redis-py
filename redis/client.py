@@ -3,6 +3,7 @@ import datetime
 import time
 import warnings
 from itertools import imap, izip, starmap
+from hashlib import sha1
 from redis.connection import ConnectionPool, UnixDomainSocketConnection
 from redis.exceptions import (
     ConnectionError,
@@ -10,7 +11,12 @@ from redis.exceptions import (
     RedisError,
     ResponseError,
     WatchError,
+    ScriptsNotRunningError,
+    ScriptNotFoundError,
+    ScriptBusyError,
 )
+from threading import Timer
+
 
 def list_or_args(keys, args):
     # returns a single list combining keys and args
@@ -134,6 +140,7 @@ def parse_script(response, **options):
         return response == "OK"
     else:
         return response
+
 
 class StrictRedis(object):
     """
@@ -1120,23 +1127,60 @@ class StrictRedis(object):
         """
         return self.execute_command('PUBLISH', channel, message, keys=[channel])
 
-    def eval(self, script, numkeys, *keys_n_args):
+    def eval(self, script, numkeys, *keys_n_args, **options):
         """
         Eval script with Redis's Lua Scripting
+
+        Uses a ``threading.Timer`` to get around the blocking call, in
+        case the script exceeds ``lua-time-limit``.
+
+        Note: If the script performs a write operation, it will not be
+        possible to stop the script using SCRIPT KILL.  In a
+        half-written state, the client needs to send SHUTDOWN NOSAVE
+        to the server.
         """
-        return self.execute_command("EVAL", script, numkeys, *keys_n_args, keys=[k for k in keys_n_args[:numkeys]])
+
+        sha1hash = sha1(script).hexdigest()
+        ms = self.config_get('lua-time-limit')['lua-time-limit']
+        s = int(ms) / 1000.0
+        t = Timer(s, self.script, args=('KILL',))
+        t.start()
+        try:
+            response = self.evalsha(sha1hash, numkeys, *keys_n_args)
+        except ScriptNotFoundError:
+            response = self.execute_command("EVAL", script, numkeys, *keys_n_args, keys=keys_n_args[:numkeys])
+        t.cancel()
+        return response
 
     def evalsha(self, sha1hash, numkeys, *keys_n_args):
         """
         Eval script corresponding to sha1 hash with Redis's Lua Scripting
         """
-        return self.execute_command("EVALSHA", sha1hash, numkeys, *keys_n_args, keys=[k for k in keys_n_args[:numkeys]])
+        return self.execute_command("EVALSHA", sha1hash, numkeys, *keys_n_args, keys=keys_n_args[:numkeys])
 
     def script(self, cmd, *args):
         """
         Scripts LOAD, EXISTS and FLUSH operations for Redis's Lua Scripting
         """
-        return self.execute_command("SCRIPT", cmd, *args, parse=cmd)
+        while True:
+            try:
+                return self.execute_command("SCRIPT", cmd, *args, parse=cmd)
+            except ScriptsNotRunningError, e:
+                break
+            except ScriptBusyError, e:
+                pass
+
+    def shutdown_nosave(self):
+        """
+        When a lua script performs a write operation and exceeds the
+        allotted time limit, this command is required to hard kill the
+        redis process to prevent it from saving data in a half-written
+        state.
+
+        XXX: https://github.com/antirez/redis/issues/466
+        """
+        cmd = "SHUTDOWN NOSAVE"
+        return self.execute_command(cmd, parse=cmd)
 
 
 class Redis(StrictRedis):
