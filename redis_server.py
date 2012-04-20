@@ -46,7 +46,9 @@ class RedisServer(object):
         if self.conf is not None and not os.path.exists(self.conf):
             raise ImproperlyConfigured("Path to redis configuration file does not exist")
 
-        args = [self.path, self.conf or '']
+        args = [self.path]
+        if self.conf:
+            args.append(self.conf)
 
         devnull = open(os.devnull, 'wb')
         self.process = subprocess.Popen(args, stdout=devnull, stderr=devnull)

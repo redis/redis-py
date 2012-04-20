@@ -1133,11 +1133,9 @@ class StrictRedis(object):
         """
         return self.execute_command('PUBLISH', channel, message, keys=[channel])
 
-    def eval(self, script, numkeys, *keys_n_args, **options):
+    def _script_watchdog(self, method, *args, **kwargs):
         """
-        Eval script with Redis's Lua Scripting
-
-        Uses a ``threading.Timer`` to get around the blocking call, in
+        Uses a ``threading.Timer`` to get around a blocking call, in
         case the script exceeds ``lua-time-limit``.
 
         Note: If the script performs a write operation, it will not be
@@ -1145,30 +1143,64 @@ class StrictRedis(object):
         half-written state, the client needs to send SHUTDOWN NOSAVE
         to the server.
         """
-
-        sha1hash = sha1(script).hexdigest()
         ms = self.config_get('lua-time-limit')['lua-time-limit']
         s = int(ms) / 1000.0
         t = Timer(s, self.script, args=('KILL',))
         t.start()
         try:
-            try:
-                response = self.evalsha(sha1hash, numkeys, *keys_n_args)
-            except ScriptNotFoundError:
-                response = self.execute_command("EVAL", script, numkeys, *keys_n_args, keys=keys_n_args[:numkeys])
+            response = method(*args, **kwargs)
         except ConnectionError:
             if self._forced_shutdown:
                 # reset the self._forced_shutdown state
                 self._forced_shutdown = None
                 raise ScriptOutOfControlError('Lua script has become unresponsive and forced the client to shut down the server.')
-        t.cancel()
+            raise
+        finally:
+            t.cancel()
         return response
 
-    def evalsha(self, sha1hash, numkeys, *keys_n_args):
+    def __eval(self, script, numkeys, *keys_n_args, **options):
         """
-        Eval script corresponding to sha1 hash with Redis's Lua Scripting
+        Unprotected method for calling ``eval``
+        """
+        return self.execute_command("EVAL", script, numkeys, *keys_n_args, keys=keys_n_args[:numkeys])
+
+    def _eval(self, script, numkeys, *keys_n_args, **options):
+        """
+        Provides logic to determine whether to use ``evalsha`` or ``eval``
+        """
+        sha1hash = sha1(script).hexdigest()
+        try:
+            response = self.__evalsha(sha1hash, numkeys, *keys_n_args, **options)
+        except ScriptNotFoundError:
+            response = self.__eval(script, numkeys, *keys_n_args, **options)
+        return response
+
+    def eval(self, *args, **kwargs):
+        """
+        Eval script with Redis's Lua Scripting
+        """
+        return self._script_watchdog(self._eval, *args, **kwargs)
+
+    def __evalsha(self, sha1hash, numkeys, *keys_n_args, **options):
+        """
+        Unprotected method for calling ``evalsha``
         """
         return self.execute_command("EVALSHA", sha1hash, numkeys, *keys_n_args, keys=keys_n_args[:numkeys])
+
+    def evalsha(self, *args, **kwargs):
+        """
+        Eval script corresponding to sha1 hash with Redis's Lua Scripting
+
+        If this method is executed in the context of a pipeline,
+        raise an Exception.  Running this in the pipeline breaks the
+        contract that commands execute in sequential order.  If no script
+        is found with the sha1hash, then you have to resend redis the
+        script to execute.
+        """
+        if isinstance(self, BasePipeline):
+            raise RedisError("evalsha cannot be run in the context of a Pipeline. Always use eval.")
+        return self._script_watchdog(self.__evalsha, *args, **kwargs)
 
     def script(self, cmd, *args):
         """

@@ -1,6 +1,7 @@
 from __future__ import with_statement
 import redis
 import unittest
+from hashlib import sha1
 
 class PipelineTestCase(unittest.TestCase):
     def setUp(self):
@@ -144,3 +145,11 @@ class PipelineTestCase(unittest.TestCase):
         result = self.client.transaction(my_transaction, 'a', 'b')
         self.assertEquals(result, [True])
         self.assertEquals(self.client.get('c'), '4')
+
+    def test_pipeline_with_evalsha(self):
+        script = "return true"
+        sha1hash = sha1(script).hexdigest()
+        with self.client.pipeline() as pipe:
+            with self.assertRaises(redis.RedisError):
+                pipe.set('foo', 'bar').evalsha(sha1hash, 0)
+
