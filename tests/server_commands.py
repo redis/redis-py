@@ -1372,6 +1372,7 @@ class LuaScriptingTestCase(unittest.TestCase):
         self.assertEquals("2fa2b029f72572e803ff55a09b1282699aecae6a", h)
         self.assertEquals(self.client.script("EXISTS", "2fa2b029f72572e803ff55a09b1282699aecae6a"), [True])
         self.assertEquals(self.client.script("FLUSH"), True)
+        self.assertEquals(self.client.script("EXISTS", "2fa2b029f72572e803ff55a09b1282699aecae6a"), [False])
 
     @unittest.skipUnless(hasScripting(), "Skip unless version of redis has scripting")
     def test_evalsha(self):
