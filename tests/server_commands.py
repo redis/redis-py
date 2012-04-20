@@ -5,12 +5,17 @@ import time
 from string import letters
 from distutils.version import StrictVersion
 from redis.client import parse_info
-from redis.exceptions import ResponseError, ScriptNotFoundError
+from redis.exceptions import ResponseError, ScriptNotFoundError, ScriptOutOfControlError
+from redis_server import server
 
+def hasScripting():
+    if hasattr(hasScripting, '_hasScripting'):
+        return hasScripting._hasScripting
+    client = redis.Redis(host='localhost', port=6379, db=9)
+    version = map(int, client.info()['redis_version'].split('.'))
+    hasScripting._hasScripting = version >= [2, 5]
+    return hasScripting._hasScripting
 
-client = redis.Redis(host='localhost', port=6379, db=9)
-version = map(int, client.info()['redis_version'].split('.'))
-hasScripting = version >= [2, 5]
 
 class ServerCommandsTestCase(unittest.TestCase):
 
@@ -1325,13 +1330,12 @@ class LuaScriptingTestCase(unittest.TestCase):
         self.client.flushdb()
         self.client.connection_pool.disconnect()
 
-
-    @unittest.skipUnless(hasScripting, "Skip unless version of redis has scripting")
+    @unittest.skipUnless(hasScripting(), "Skip unless version of redis has scripting")
     def test_eval(self):
         "The lua scripting eval command takes a variable number of keys and arguments"
         self.assertEquals(self.client.eval("return {KEYS[1],KEYS[2],ARGV[1],ARGV[2]}", 2, "key1", "key2", "first", "second"), ["key1", "key2", "first", "second"])
 
-    @unittest.skipUnless(hasScripting, "Skip unless version of redis has scripting")
+    @unittest.skipUnless(hasScripting(), "Skip unless version of redis has scripting")
     def test_script_timeout(self):
         self.client.config_set('lua-time-limit', 500)
         with self.assertRaises(ResponseError):
@@ -1344,11 +1348,11 @@ class LuaScriptingTestCase(unittest.TestCase):
             h = self.client.eval(script, 0)
         self.client.config_set('lua-time-limit', 5000)
 
-    @unittest.skipUnless(hasScripting, "Skip unless version of redis has scripting")
-    @unittest.skip("Can't test this right now.")
+    @unittest.skipUnless(hasScripting(), "Skip unless version of redis has scripting")
+    @unittest.skipUnless(server.process is not None, "Skip unless redis server was started by the tests")
     def test_script_timeout_with_written_state(self):
         self.client.config_set('lua-time-limit', 500)
-        with self.assertRaises(ResponseError):
+        with self.assertRaises(ScriptOutOfControlError):
             script = """
                 redis.call('set', 'foo', 'bar')
                 while true do
@@ -1357,45 +1361,47 @@ class LuaScriptingTestCase(unittest.TestCase):
                 return
             """
             h = self.client.eval(script, 0)
-        self.client.config_set('lua-time-limit', 5000)
 
-    @unittest.skipUnless(hasScripting, "Skip unless version of redis has scripting")
+        # Server will be shutdown, start it back up
+        server.start()
+
+    @unittest.skipUnless(hasScripting(), "Skip unless version of redis has scripting")
     def test_script(self):
         "The lua scripting script command executes different commands depending on arguments"
         h = self.client.script("LOAD", "return redis.call('set','foo','bar')")
         self.assertEquals("2fa2b029f72572e803ff55a09b1282699aecae6a", h)
-        self.assertEquals( self.client.script("EXISTS", "2fa2b029f72572e803ff55a09b1282699aecae6a"), [True])
-        self.assertEquals( self.client.script("FLUSH"), True)
+        self.assertEquals(self.client.script("EXISTS", "2fa2b029f72572e803ff55a09b1282699aecae6a"), [True])
+        self.assertEquals(self.client.script("FLUSH"), True)
 
-    @unittest.skipUnless(hasScripting, "Skip unless version of redis has scripting")
+    @unittest.skipUnless(hasScripting(), "Skip unless version of redis has scripting")
     def test_evalsha(self):
         "The lua scripting evalsha command executes a previously loaded script if it exists"
         with self.assertRaises(ScriptNotFoundError):
             self.client.evalsha("2fa2b029f72572e803ff55a09b1282699aecae6a", 0)
         h = self.client.script("LOAD", "return redis.call('set','foo','bar')")
-        self.assertEquals( self.client.evalsha("2fa2b029f72572e803ff55a09b1282699aecae6a", 0), "OK")
+        self.assertEquals(self.client.evalsha("2fa2b029f72572e803ff55a09b1282699aecae6a", 0), "OK")
 
-    @unittest.skipUnless(hasScripting, "Skip unless version of redis has scripting")
+    @unittest.skipUnless(hasScripting(), "Skip unless version of redis has scripting")
     def test_lua_integer_conversion(self):
         val = self.client.eval('return 100.5', 0)
         self.assertEquals(val, 100)
 
-    @unittest.skipUnless(hasScripting, "Skip unless version of redis has scripting")
+    @unittest.skipUnless(hasScripting(), "Skip unless version of redis has scripting")
     def test_lua_string_conversion(self):
         val = self.client.eval("return 'hello world'", 0)
         self.assertEquals(val, "hello world")
 
-    @unittest.skipUnless(hasScripting, "Skip unless version of redis has scripting")
+    @unittest.skipUnless(hasScripting(), "Skip unless version of redis has scripting")
     def test_lua_boolean_true_conversion(self):
         val = self.client.eval("return true", 0)
         self.assertEquals(val, 1)
 
-    @unittest.skipUnless(hasScripting, "Skip unless version of redis has scripting")
+    @unittest.skipUnless(hasScripting(), "Skip unless version of redis has scripting")
     def test_lua_boolean_false_conversion(self):
         val = self.client.eval("return false", 0)
         self.assertEquals(val, None)
 
-    @unittest.skipUnless(hasScripting, "Skip unless version of redis has scripting")
+    @unittest.skipUnless(hasScripting(), "Skip unless version of redis has scripting")
     def test_lua_table_conversion(self):
         val = self.client.eval("return {1,2,3,'foo',{'a','b'}}", 0)
         self.assertEquals(val, [1, 2, 3, 'foo', ['a', 'b']])

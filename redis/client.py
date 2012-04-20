@@ -227,6 +227,7 @@ class StrictRedis(object):
                 })
             connection_pool = ConnectionPool(**kwargs)
         self.connection_pool = connection_pool
+        self._forced_shutdown = None
 
         self.response_callbacks = self.__class__.RESPONSE_CALLBACKS.copy()
 
@@ -1151,9 +1152,15 @@ class StrictRedis(object):
         t = Timer(s, self.script, args=('KILL',))
         t.start()
         try:
-            response = self.evalsha(sha1hash, numkeys, *keys_n_args)
-        except ScriptNotFoundError:
-            response = self.execute_command("EVAL", script, numkeys, *keys_n_args, keys=keys_n_args[:numkeys])
+            try:
+                response = self.evalsha(sha1hash, numkeys, *keys_n_args)
+            except ScriptNotFoundError:
+                response = self.execute_command("EVAL", script, numkeys, *keys_n_args, keys=keys_n_args[:numkeys])
+        except ConnectionError:
+            if self._forced_shutdown:
+                # reset the self._forced_shutdown state
+                self._forced_shutdown = None
+                raise ScriptOutOfControlError('Lua script has become unresponsive and forced the client to shut down the server.')
         t.cancel()
         return response
 
@@ -1179,6 +1186,7 @@ class StrictRedis(object):
                 # allotted time limit, this command is required to hard kill the
                 # redis process to prevent it from saving data in a half-written
                 # state.
+                self._forced_shutdown = True
                 return self.shutdown(save=False)
 
 
