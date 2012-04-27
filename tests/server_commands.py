@@ -5,6 +5,7 @@ import time
 from string import letters
 from distutils.version import StrictVersion
 from redis.client import parse_info
+from redis.exceptions import ResponseError
 
 class ServerCommandsTestCase(unittest.TestCase):
 
@@ -1306,3 +1307,25 @@ class ServerCommandsTestCase(unittest.TestCase):
         data = ''.join(data)
         self.client.set('a', data)
         self.assertEquals(self.client.get('a'), data)
+    
+    def test_eval(self):
+        "The lua scripting eval command takes a variable number of keys and arguments"
+        self.assertEquals( self.client.eval("return {KEYS[1],KEYS[2],ARGV[1],ARGV[2]}", 2, "key1", "key2", "first", "second"), ["key1", "key2", "first", "second"])
+    
+    def test_script(self):
+        "The lua scripting script command executes different commands depending on arguments"
+        h = self.client.script("LOAD", "return redis.call('set','foo','bar')")
+        self.assertEquals("2fa2b029f72572e803ff55a09b1282699aecae6a", h)
+        self.assertEquals( self.client.script("EXISTS", "2fa2b029f72572e803ff55a09b1282699aecae6a"), [True])
+        self.assertEquals( self.client.script("FLUSH"), True)
+    
+    def test_evalsha(self):
+        "The lua scripting evalsha command executes a previously loaded script if it exists"
+        try:
+            self.client.evalsha("2fa2b029f72572e803ff55a09b1282699aecae6a", 0)
+            self.fail("it should raise an error before getting here")
+        except ResponseError:
+            self.assertTrue(True)
+        h = self.client.script("LOAD", "return redis.call('set','foo','bar')")
+        self.assertEquals( self.client.evalsha("2fa2b029f72572e803ff55a09b1282699aecae6a", 0), "OK")
+        
