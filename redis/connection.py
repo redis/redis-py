@@ -274,6 +274,8 @@ class Connection(object):
         "Return a bytestring representation of the value"
         if isinstance(value, unicode):
             return value.encode(self.encoding, self.encoding_errors)
+        if isinstance(value, float):
+            return format(value, 'f')
         return str(value)
 
     def pack_command(self, *args):
