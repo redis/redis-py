@@ -66,6 +66,20 @@ def parse_object(response, infotype):
         return int(response)
     return response
 
+def parse_eval_response(response):
+    x = response
+    #print "EVAL RESPONSE := ", x
+    if isinstance(x, long):
+        return x
+    elif isinstance(x, int):
+        return x
+    elif isinstance(x, float):
+        return x
+    elif isinstance(x, str):
+        return x
+    else:
+        return x
+
 def parse_info(response):
     "Parse the result of Redis's INFO command into a Python dict"
     info = {}
@@ -138,6 +152,9 @@ class StrictRedis(object):
     the commands are sent and received to the Redis server
     """
     RESPONSE_CALLBACKS = dict_merge(
+
+        string_keys_to_dict('EVAL', parse_eval_response), 
+
         string_keys_to_dict(
             'AUTH DEL EXISTS EXPIRE EXPIREAT HDEL HEXISTS HMSET MOVE MSETNX '
             'PERSIST RENAMENX SISMEMBER SMOVE SETEX SETNX SREM ZREM',
@@ -288,9 +305,32 @@ class StrictRedis(object):
     def parse_response(self, connection, command_name, **options):
         "Parses a response from the Redis server"
         response = connection.read_response()
+
         if command_name in self.response_callbacks:
             return self.response_callbacks[command_name](response, **options)
         return response
+
+    #### LUA SCRIPTING ###
+    def script_load(self, script):
+        """Load a script onto the server and get the SHA1 for it"""
+        pass
+
+    def evalsha(self, sha1, keys, args):
+        """Load a script onto the server and get the SHA1 for it"""
+        pass
+
+    def eval(self, script, keys=None, args=None):
+        """execute a script w/ or w/out keys and args"""
+        num_keys = 0        
+        if keys is not None:
+            if isinstance(keys, str):
+                num_keys = len(keys.split())
+            elif isinstance(keys, list):
+                num_keys = len(keys)
+                keys = reduce(lambda x,y: x + ' %s' % str(y), keys, '') 
+
+        return self.execute_command("EVAL", script, num_keys, keys, args)
+
 
     #### SERVER INFORMATION ####
     def bgrewriteaof(self):

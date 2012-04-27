@@ -78,7 +78,8 @@ class PythonParser(object):
         if not response:
             raise ConnectionError("Socket closed on remote end")
 
-        byte, response = response[0], response[1:]
+        byte, response = response[0], response[1:]        
+        #print "READ <= ", byte, " ", response
 
         # server returned an error
         if byte == '-':
@@ -108,6 +109,7 @@ class PythonParser(object):
             if length == -1:
                 return None
             return [self.read_response() for i in xrange(length)]
+
         raise InvalidResponse("Protocol Error")
 
 class HiredisParser(object):
@@ -237,9 +239,10 @@ class Connection(object):
 
     def send_packed_command(self, command):
         "Send an already packed command to the Redis server"
+        #print "SEND => ", command
         if not self._sock:
             self.connect()
-        try:
+        try:            
             self._sock.sendall(command)
         except socket.error, e:
             self.disconnect()

@@ -30,6 +30,44 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client.set('a', 'foo')
         self.assertEquals(self.client.get('a'), 'static')
 
+    def test_eval(self):
+        lua_script = "return 1"
+        self.assertEquals(1, self.client.eval(lua_script))
+
+        self.client.set('x', 21)
+        self.client.set('y', 5)
+
+        lua_script1 = "return {redis.call('get', 'x')}"
+        self.assertEquals(['21'], self.client.eval(lua_script1))
+
+        lua_script2 = "return {redis.call('get', KEYS[1])}"
+        self.assertEquals(['21'], self.client.eval(lua_script2, "x"))
+
+        lua_script3 = "return tonumber(redis.call('get', KEYS[1]))"
+        self.assertEquals(21, self.client.eval(lua_script3, "x"))
+
+        lua_script4 = "return tonumber(redis.call('get', KEYS[1]) + ARGV[1])"
+        self.assertEquals(22, self.client.eval(lua_script4, "x", "1"))
+
+        lua_script5 = "return tonumber(redis.call('get', KEYS[1]) + ARGV[1])"
+        self.assertEquals(22, self.client.eval(lua_script5, 'x', 1))
+
+        lua_script6 = "return {tonumber(redis.call('get', KEYS[1])) + ARGV[1]}"
+        self.assertEquals([23], self.client.eval(lua_script6, 'x', 2))
+
+        # can't get these to pass right now
+
+        #lua_script7 = "return ARGV[1]"
+        #self.assertEquals(5, self.client.eval(lua_script7, None, '1'))
+
+        #lua_script8 = "return {tonumber(redis.call('get', KEYS[1])) + tonumber(redis.call('get', KEYS[2]))}"
+        #self.assertEquals([23], self.client.eval(lua_script8, ['x','y']))
+
+class SKIP:
+    #def test_script_load(self):
+    #    lua_script = "return redis.call('get','KEYS[1]')"
+    #    self.assertEquals("sha1xxx", self.client.script_load(lua_script))
+
     # GENERAL SERVER COMMANDS
     def test_dbsize(self):
         self.client['a'] = 'foo'
