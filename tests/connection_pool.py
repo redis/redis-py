@@ -1,9 +1,11 @@
+import os
 import redis
 import unittest
 
 class DummyConnection(object):
     def __init__(self, **kwargs):
         self.kwargs = kwargs
+        self.pid = os.getpid()
 
 class ConnectionPoolTestCase(unittest.TestCase):
     def get_pool(self, connection_info=None, max_connections=None):

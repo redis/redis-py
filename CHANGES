@@ -1,3 +1,5 @@
+* 2.4.12
+    * ConnectionPool is now fork-safe. Thanks Josiah Carson for the patch.
 * 2.4.11
     * AuthenticationError will now be correctly raised if an invalid password
       is supplied.
