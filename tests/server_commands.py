@@ -47,9 +47,10 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(self.client.set('unicode_string', unicode_string))
         self.assertEquals(self.client.get('byte_string'), byte_string)
         self.assertEquals(self.client.get('integer'), str(integer))
-        self.assertEquals(
-                self.client.get('unicode_string').decode('utf-8'),
-                unicode_string)
+        cache_value = self.client.get('unicode_string')
+        if isinstance(cache_value, str):
+            cache_value = cache_value.decode('utf-8')
+        self.assertEquals(cache_value, unicode_string)
 
     def test_getitem_and_setitem(self):
         self.client['a'] = 'bar'
