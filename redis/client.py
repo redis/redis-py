@@ -173,7 +173,7 @@ class StrictRedis(object):
             ),
         string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
         string_keys_to_dict(
-            'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME '
+            'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME PSETEX'
             'SAVE SELECT SET SHUTDOWN SLAVEOF WATCH UNWATCH',
             lambda r: r == 'OK'
             ),
@@ -969,6 +969,12 @@ class StrictRedis(object):
             pieces.append('withscores')
         options = {'withscores': withscores, 'score_cast_func': score_cast_func}
         return self.execute_command(*pieces, **options)
+
+    def psetex(self, name, expires_ms, value):
+        """
+        Returns OK sets 'key' w/ 'value' and an expiration in ms
+        """
+        return self.execute_command('PSETEX', name, expires_ms, value)
 
     def zrank(self, name, value):
         """

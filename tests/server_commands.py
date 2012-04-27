@@ -63,10 +63,10 @@ class ServerCommandsTestCase(unittest.TestCase):
         #lua_script8 = "return {tonumber(redis.call('get', KEYS[1])) + tonumber(redis.call('get', KEYS[2]))}"
         #self.assertEquals([23], self.client.eval(lua_script8, ['x','y']))
 
-class SKIP:
-    #def test_script_load(self):
-    #    lua_script = "return redis.call('get','KEYS[1]')"
-    #    self.assertEquals("sha1xxx", self.client.script_load(lua_script))
+    def test_psetex(self):
+        self.assertTrue(self.client.psetex('x', 1000, 21))
+        self.assertEquals(1, self.client.ttl('x'))
+        self.assertEquals('21', self.client.get('x'))
 
     # GENERAL SERVER COMMANDS
     def test_dbsize(self):
