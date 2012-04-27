@@ -63,6 +63,15 @@ class ServerCommandsTestCase(unittest.TestCase):
         #lua_script8 = "return {tonumber(redis.call('get', KEYS[1])) + tonumber(redis.call('get', KEYS[2]))}"
         #self.assertEquals([23], self.client.eval(lua_script8, ['x','y']))
 
+
+    def test_evalsha(self):
+        self.client.set('x', 21)
+        lua_script1 = "return {redis.call('get', 'x')}"
+        self.assertEquals(['21'], self.client.eval(lua_script1))
+        import hashlib
+        sha = hashlib.sha1(lua_script1).hexdigest()
+        self.assertEquals(['21'], self.client.evalsha(sha))
+
     def test_psetex(self):
         self.assertTrue(self.client.psetex('x', 1000, 21))
         self.assertEquals(1, self.client.ttl('x'))

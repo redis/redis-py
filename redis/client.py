@@ -152,7 +152,7 @@ class StrictRedis(object):
     """
     RESPONSE_CALLBACKS = dict_merge(
 
-        string_keys_to_dict('EVAL', parse_eval_response), 
+        string_keys_to_dict('EVAL EVALSHA', parse_eval_response), 
 
         string_keys_to_dict(
             'AUTH DEL EXISTS EXPIRE EXPIREAT HDEL HEXISTS HMSET MOVE MSETNX '
@@ -314,9 +314,18 @@ class StrictRedis(object):
         """Load a script onto the server and get the SHA1 for it"""
         pass
 
-    def evalsha(self, sha1, keys, args):
+    def evalsha(self, sha1, keys=None, args=None):
         """execute a script that has been loaded by its SHA1"""
-        pass
+        num_keys = 0        
+        if keys is not None:
+            if isinstance(keys, str):
+                num_keys = len(keys.split())
+            elif isinstance(keys, list):
+                num_keys = len(keys)
+                keys = reduce(lambda x,y: x + ' %s' % str(y), keys, '') 
+
+        return self.execute_command("EVALSHA", sha1, num_keys, keys, args)
+        
 
     def eval(self, script, keys=None, args=None):
         """execute a script w/ or w/out keys and args"""
