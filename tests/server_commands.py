@@ -415,6 +415,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.make_list('a', 'abcde')
         self.assertEquals(self.client.lrange('a', 0, 2), ['a', 'b', 'c'])
         self.assertEquals(self.client.lrange('a', 2, 10), ['c', 'd', 'e'])
+        self.assertEquals(self.client.lrange('a'), ['a', 'b', 'c', 'd', 'e'])
 
     def test_lrem(self):
         # no key

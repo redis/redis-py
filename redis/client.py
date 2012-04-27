@@ -657,7 +657,7 @@ class StrictRedis(object):
         "Push ``value`` onto the head of the list ``name`` if ``name`` exists"
         return self.execute_command('LPUSHX', name, value)
 
-    def lrange(self, name, start, end):
+    def lrange(self, name, start=0, end=-1):
         """
         Return a slice of the list ``name`` between
         position ``start`` and ``end``
