@@ -79,7 +79,6 @@ class PythonParser(object):
             raise ConnectionError("Socket closed on remote end")
 
         byte, response = response[0], response[1:]        
-        #print "READ <= ", byte, " ", response
 
         # server returned an error
         if byte == '-':
@@ -239,7 +238,6 @@ class Connection(object):
 
     def send_packed_command(self, command):
         "Send an already packed command to the Redis server"
-        #print "SEND => ", command
         if not self._sock:
             self.connect()
         try:            

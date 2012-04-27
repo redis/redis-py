@@ -68,7 +68,6 @@ def parse_object(response, infotype):
 
 def parse_eval_response(response):
     x = response
-    #print "EVAL RESPONSE := ", x
     if isinstance(x, long):
         return x
     elif isinstance(x, int):
@@ -316,7 +315,7 @@ class StrictRedis(object):
         pass
 
     def evalsha(self, sha1, keys, args):
-        """Load a script onto the server and get the SHA1 for it"""
+        """execute a script that has been loaded by its SHA1"""
         pass
 
     def eval(self, script, keys=None, args=None):
