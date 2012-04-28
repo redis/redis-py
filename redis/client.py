@@ -167,12 +167,12 @@ class StrictRedis(object):
             ),
         string_keys_to_dict(
             # these return OK, or int if redis-server is >=1.3.4
-            'LPUSH RPUSH',
+            'LPUSH RPUSH PSETEX',
             lambda r: isinstance(r, long) and r or r == 'OK'
             ),
         string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
         string_keys_to_dict(
-            'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME PSETEX'
+            'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME '
             'SAVE SELECT SET SHUTDOWN SLAVEOF WATCH UNWATCH',
             lambda r: r == 'OK'
             ),
@@ -304,7 +304,10 @@ class StrictRedis(object):
     def parse_response(self, connection, command_name, **options):
         "Parses a response from the Redis server"
         response = connection.read_response()
-
+        #print "COMMAND => ", command_name, " options = ", str(options)
+        #print "RESPONSE => " + str(response)
+        if response is None:
+            return None
         if command_name in self.response_callbacks:
             return self.response_callbacks[command_name](response, **options)
         return response
@@ -467,7 +470,7 @@ class StrictRedis(object):
     def get(self, name):
         """
         Return the value at key ``name``, or None if the key doesn't exist
-        """
+        """        
         return self.execute_command('GET', name)
 
     def __getitem__(self, name):
