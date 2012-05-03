@@ -1,4 +1,5 @@
 *.pyc
+.tox
 redis.egg-info
 build/
 dist/
