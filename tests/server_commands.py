@@ -6,7 +6,8 @@ from string import letters
 from distutils.version import StrictVersion
 from redis.client import parse_info
 from redis.exceptions import ResponseError, ScriptNotFoundError, ScriptOutOfControlError
-from redis_server import server
+from redis.server import server
+
 
 def hasScripting():
     if hasattr(hasScripting, '_hasScripting'):

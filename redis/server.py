@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 
 from redis import Redis, ConnectionError
 
@@ -19,39 +20,45 @@ class RedisServer(object):
     skipped, since they need to be able to shutdown/restart the server
     in order to pass.
     """
-    def __init__(self, path=None, conf=None):
-        self.configure(path, conf)
+    def __init__(self, server_path=None, conf=None, verbosity=0):
+        self.configure(server_path, conf, verbosity)
         self.process = None
 
-    def configure(self, path, conf):
-        if path is not None:
-            path = os.path.abspath(path)
-        self.path = path
+    def configure(self, server_path=None, conf=None, verbosity=0):
+        if server_path is not None:
+            server_path = os.path.abspath(server_path)
+        self.server_path = server_path
 
         if conf is not None:
             conf = os.path.abspath(conf)
         self.conf = conf
+
+        self.verbosity = verbosity
 
     def __enter__(self):
         self.start()
 
     def start(self):
         # short-circuit this and assume a redis server is running
-        if self.path is None:
+        if self.server_path is None:
             return
 
-        if not os.path.exists(self.path):
-            raise ImproperlyConfigured("Path to redis file does not exist")
+        if not os.path.exists(self.server_path):
+            raise ImproperlyConfigured("Path to redis-server executable does not exist")
 
         if self.conf is not None and not os.path.exists(self.conf):
             raise ImproperlyConfigured("Path to redis configuration file does not exist")
 
-        args = [self.path]
+        args = [self.server_path]
         if self.conf:
             args.append(self.conf)
 
-        devnull = open(os.devnull, 'wb')
-        self.process = subprocess.Popen(args, stdout=devnull, stderr=devnull)
+        if self.verbosity == 0:
+            stream = open(os.devnull, 'wb')
+        else:
+            stream = sys.stdout
+
+        self.process = subprocess.Popen(args, stdout=stream, stderr=stream)
 
         # Poll the redis server until it is accepting connections
         redis = Redis()

@@ -4,19 +4,21 @@ from optparse import OptionParser
 import os
 import subprocess
 import unittest
-from redis_server import server
+from redis.server import server
 
 
 if __name__ == "__main__":
     parser = OptionParser()
-    parser.add_option("-x", "--executable", dest="redis_path", action="store",
-        type="string", default=None, help="Path to the redis executable")
+    parser.add_option("-s", "--server", dest="server_path", action="store",
+        type="string", default=None, help="Path to the redis server executable")
     parser.add_option("-c", "--conf", dest="conf", default=None,
                       help="Path to the redis configuration file.")
+    parser.add_option("-v", "--verbosity", dest="verbosity", default=0, type="int",
+                      help="Change the verbostiy of the redis-server.")
 
     (options, args) = parser.parse_args()
 
-    server.configure(options.redis_path, options.conf)
+    server.configure(options.server_path, options.conf, options.verbosity)
 
     with server:
         from tests import all_tests
