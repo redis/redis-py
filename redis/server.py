@@ -16,9 +16,7 @@ class RedisServer(object):
     can be specified.
 
     No-ops if the executable path is not provided and assumes a redis
-    server is already running.  In such case, certain tests will be
-    skipped, since they need to be able to shutdown/restart the server
-    in order to pass.
+    server is already running.
     """
     def __init__(self, server_path=None, conf=None, verbosity=0):
         self.configure(server_path, conf, verbosity)
