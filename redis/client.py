@@ -482,7 +482,7 @@ class StrictRedis(object):
         Returns a list of values ordered identically to ``keys``
         """
         keys = list_or_args(keys, args)
-        return self.execute_command('MGET', *keys, keys=[k for k in keys])
+        return self.execute_command('MGET', *keys, keys=keys)
 
     def mset(self, mapping):
         "Sets each key in the ``mapping`` dict to its corresponding value"
@@ -614,7 +614,7 @@ class StrictRedis(object):
         else:
             keys = list(keys)
         keys.append(timeout)
-        return self.execute_command('BLPOP', *keys, keys=[k for k in keys])
+        return self.execute_command('BLPOP', *keys, keys=keys)
 
     def brpop(self, keys, timeout=0):
         """
@@ -634,7 +634,7 @@ class StrictRedis(object):
         else:
             keys = list(keys)
         keys.append(timeout)
-        return self.execute_command('BRPOP', *keys, keys=[k for k in keys])
+        return self.execute_command('BRPOP', *keys, keys=keys)
 
     def brpoplpush(self, src, dst, timeout=0):
         """
@@ -806,7 +806,7 @@ class StrictRedis(object):
     def sdiff(self, keys, *args):
         "Return the difference of sets specified by ``keys``"
         keys = list_or_args(keys, args)
-        return self.execute_command('SDIFF', *keys, keys=[k for k in keys])
+        return self.execute_command('SDIFF', *keys, keys=keys)
 
     def sdiffstore(self, dest, keys, *args):
         """
@@ -814,12 +814,12 @@ class StrictRedis(object):
         set named ``dest``.  Returns the number of keys in the new set.
         """
         keys = list_or_args(keys, args)
-        return self.execute_command('SDIFFSTORE', dest, *keys, keys=[k for k in keys])
+        return self.execute_command('SDIFFSTORE', dest, *keys, keys=keys)
 
     def sinter(self, keys, *args):
         "Return the intersection of sets specified by ``keys``"
         keys = list_or_args(keys, args)
-        return self.execute_command('SINTER', *keys, keys=[k for k in keys])
+        return self.execute_command('SINTER', *keys, keys=keys)
 
     def sinterstore(self, dest, keys, *args):
         """
@@ -857,7 +857,7 @@ class StrictRedis(object):
     def sunion(self, keys, *args):
         "Return the union of sets specifiued by ``keys``"
         keys = list_or_args(keys, args)
-        return self.execute_command('SUNION', *keys, keys=[k for k in keys])
+        return self.execute_command('SUNION', *keys, keys=keys)
 
     def sunionstore(self, dest, keys, *args):
         """
@@ -865,7 +865,7 @@ class StrictRedis(object):
         set named ``dest``.  Returns the number of keys in the new set.
         """
         keys = list_or_args(keys, args)
-        return self.execute_command('SUNIONSTORE', dest, *keys, keys=[k for k in keys])
+        return self.execute_command('SUNIONSTORE', dest, *keys, keys=keys)
 
 
     #### SORTED SET COMMANDS ####
