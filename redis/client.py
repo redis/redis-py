@@ -1106,6 +1106,46 @@ class StrictRedis(object):
         """
         return self.execute_command('PUBLISH', channel, message)
 
+    ### SCRIPTING COMMANDS
+    def eval(self, script, keys, args):
+        """
+        Execute a Lua ``script`` server side
+        """
+        num_keys = len(keys)
+        keys.extend(args)
+        self.execute_command('EVAL', script, num_keys, *keys)
+
+    def evalsha(self, shahash, keys, args):
+        """
+        Execute a Lua ``script`` server side corresponding to ``shahash``
+        """
+        num_keys = len(keys)
+        keys.extend(args)
+        self.execute_command('EVALSHA', shahash, num_keys, *keys)
+
+    def script_exists(self, shahashes):
+        """
+        Check existence of ``scripts`` in the script cache, corresponding to a collection of sha1 hashes
+        """
+        self.execute_command('SCRIPT EXISTS', *shahashes)
+
+    def script_flush(self):
+        """
+        Remove all the ``scripts`` from the script cache.
+        """
+        self.execute_command('SCRIPT FLUSH')
+
+    def script_kill(self):
+        """
+        Kill the script currently in execution.
+        """
+        self.execute_command('SCRIPT KILL')
+
+    def script_load(self, script):
+        """
+        Load the specified Lua ``script`` into the script cache.
+        """
+        self.execute_command('SCRIPT LOAD', script)
 
 class Redis(StrictRedis):
     """
