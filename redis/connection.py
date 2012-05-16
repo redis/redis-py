@@ -35,7 +35,7 @@ class PythonParser(object):
 
     def on_connect(self, connection):
         "Called when the socket connects"
-        self._fp = connection._sock.makefile('r')
+        self._fp = connection._sock.makefile('rb')
 
     def on_disconnect(self):
         "Called when the socket disconnects"
