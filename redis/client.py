@@ -1106,6 +1106,13 @@ class StrictRedis(object):
         """
         return self.execute_command('PUBLISH', channel, message)
 
+    def script_load(self, script):
+        """
+        Load ``script`` into the scripts cache.
+        Returns the SHA1 sum of the script added to the scripts cache.
+        """
+        return self.execute_command('SCRIPT', 'LOAD', script)
+
 
 class Redis(StrictRedis):
     """

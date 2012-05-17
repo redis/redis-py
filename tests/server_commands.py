@@ -2,6 +2,7 @@ import redis
 import unittest
 import datetime
 import time
+import hashlib
 from string import letters
 from distutils.version import StrictVersion
 from redis.client import parse_info
@@ -1306,3 +1307,17 @@ class ServerCommandsTestCase(unittest.TestCase):
         data = ''.join(data)
         self.client.set('a', data)
         self.assertEquals(self.client.get('a'), data)
+
+    def test_script_load(self):
+        """
+        Test loading a script in the scripts cache
+        """
+        script = ('if redis("exists",KEYS[1]) == 1\n'
+                  'then\n'
+                  '    return redis("incr",KEYS[1])\n'
+                  'else\n'
+                  '    return nil\n'
+                  'end')
+        sha1 = hashlib.sha1(script).hexdigest()
+        response = self.client.script_load(script)
+        self.assertEquals(response, sha1)
