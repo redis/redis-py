@@ -1359,3 +1359,18 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client.script_load(TEST_SCRIPT)
         self.assertEquals(self.client.script_exists(sha1a, sha1b),
                           [True, False])
+
+    def test_script_flush(self):
+        """
+        Test flushing the script cache
+        """
+        script = "return {KEYS[1],ARGV[1],ARGV[2]}"
+        sha1a = hashlib.sha1(script).hexdigest()
+        sha1b = hashlib.sha1(TEST_SCRIPT).hexdigest()
+        self.client.script_load(script)
+        self.client.script_load(TEST_SCRIPT)
+        self.assertEquals(self.client.script_exists(sha1a, sha1b),
+                          [True, True])
+        self.client.script_flush()
+        self.assertEquals(self.client.script_exists(sha1a, sha1b),
+                          [False, False])

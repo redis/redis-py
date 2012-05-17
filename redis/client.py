@@ -1141,6 +1141,12 @@ class StrictRedis(object):
         response = self.execute_command('SCRIPT', 'EXISTS', *sha1s)
         return [bool(exists) for exists in response]
 
+    def script_flush(self):
+        """
+        Flush the scripts cache.
+        """
+        self.execute_command('SCRIPT', 'FLUSH')
+
 
 class Redis(StrictRedis):
     """
