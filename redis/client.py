@@ -1113,6 +1113,15 @@ class StrictRedis(object):
         """
         return self.execute_command('SCRIPT', 'LOAD', script)
 
+    def eval(self, script, keys=(), args=()):
+        """
+        Evaluate a ``script`` with given ``keys`` and ``args``.
+        Returns the value returned from the LUA ``script`` converted to Redis
+        type.
+        """
+        arguments = tuple(keys) + tuple(args)
+        return self.execute_command('EVAL', script, len(keys), *arguments)
+
 
 class Redis(StrictRedis):
     """

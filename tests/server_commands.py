@@ -7,6 +7,15 @@ from string import letters
 from distutils.version import StrictVersion
 from redis.client import parse_info
 
+
+TEST_SCRIPT = """if redis("exists",KEYS[1]) == 1
+then
+    return redis("incr",KEYS[1])
+else
+    return nil
+end"""
+
+
 class ServerCommandsTestCase(unittest.TestCase):
 
     def get_client(self, cls=redis.Redis):
@@ -1312,12 +1321,17 @@ class ServerCommandsTestCase(unittest.TestCase):
         """
         Test loading a script in the scripts cache
         """
-        script = ('if redis("exists",KEYS[1]) == 1\n'
-                  'then\n'
-                  '    return redis("incr",KEYS[1])\n'
-                  'else\n'
-                  '    return nil\n'
-                  'end')
-        sha1 = hashlib.sha1(script).hexdigest()
-        response = self.client.script_load(script)
+        sha1 = hashlib.sha1(TEST_SCRIPT).hexdigest()
+        response = self.client.script_load(TEST_SCRIPT)
         self.assertEquals(response, sha1)
+
+    def test_eval(self):
+        """
+        Test evaling a script
+        """
+        self.client.set("foo", "bar")
+        script = "return redis.call('get', 'foo')"
+        self.assertEquals(self.client.eval(script), "bar")
+        script = "return {KEYS[1],ARGV[1],ARGV[2]}"
+        self.assertEquals(self.client.eval(script, ['key1'], ['arg1', 'arg2']),
+                          ['key1', 'arg1', 'arg2'])
