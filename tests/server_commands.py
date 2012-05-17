@@ -8,9 +8,9 @@ from distutils.version import StrictVersion
 from redis.client import parse_info
 
 
-TEST_SCRIPT = """if redis("exists",KEYS[1]) == 1
+TEST_SCRIPT = """if redis.call("exists",KEYS[1]) == 1
 then
-    return redis("incr",KEYS[1])
+    return redis.call("incr",KEYS[1])
 else
     return nil
 end"""
@@ -1334,4 +1334,18 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.eval(script), "bar")
         script = "return {KEYS[1],ARGV[1],ARGV[2]}"
         self.assertEquals(self.client.eval(script, ['key1'], ['arg1', 'arg2']),
+                          ['key1', 'arg1', 'arg2'])
+
+    def test_evalsha(self):
+        """
+        Test evaling a loaded script by its SHA1
+        """
+        sha1 = self.client.script_load(TEST_SCRIPT)
+        self.assertEquals(self.client.evalsha(sha1, ["foo"]), None)
+        self.client.set("foo", 2)
+        self.assertEquals(self.client.evalsha(sha1, ["foo"]), 3)
+        script = "return {KEYS[1],ARGV[1],ARGV[2]}"
+        sha1 = self.client.script_load(script)
+        self.assertEquals(self.client.evalsha(sha1,
+                                              ['key1'], ['arg1', 'arg2']),
                           ['key1', 'arg1', 'arg2'])

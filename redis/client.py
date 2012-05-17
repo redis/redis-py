@@ -1122,6 +1122,15 @@ class StrictRedis(object):
         arguments = tuple(keys) + tuple(args)
         return self.execute_command('EVAL', script, len(keys), *arguments)
 
+    def evalsha(self, sha1, keys=(), args=()):
+        """
+        Evaluate a loaded script by it's `sha1` with given ``keys`` and
+        ``args``.  Returns the value returned from the LUA ``script`` converted
+        to Redis type.
+        """
+        arguments = tuple(keys) + tuple(args)
+        return self.execute_command('EVALSHA', sha1, len(keys), *arguments)
+
 
 class Redis(StrictRedis):
     """
