@@ -1349,3 +1349,13 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.evalsha(sha1,
                                               ['key1'], ['arg1', 'arg2']),
                           ['key1', 'arg1', 'arg2'])
+
+    def test_script_exists(self):
+        """
+        Test checking for existence of scripts.
+        """
+        sha1a = hashlib.sha1(TEST_SCRIPT).hexdigest()
+        sha1b = '250e77f12a5ab6972a0895d290c4792f0a326ea8'
+        self.client.script_load(TEST_SCRIPT)
+        self.assertEquals(self.client.script_exists(sha1a, sha1b),
+                          [True, False])

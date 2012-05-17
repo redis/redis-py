@@ -1131,6 +1131,16 @@ class StrictRedis(object):
         arguments = tuple(keys) + tuple(args)
         return self.execute_command('EVALSHA', sha1, len(keys), *arguments)
 
+    def script_exists(self, *sha1s):
+        """
+        Get information about the existense of scripts in the scripts cache
+        with a list of ``sha1s``.
+        Return list of booleans where ``True`` indicates the corresponding
+        script exists and ``False`` indicates it does not exist.
+        """
+        response = self.execute_command('SCRIPT', 'EXISTS', *sha1s)
+        return [bool(exists) for exists in response]
+
 
 class Redis(StrictRedis):
     """
