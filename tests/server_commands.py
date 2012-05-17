@@ -6,6 +6,7 @@ import hashlib
 from string import letters
 from distutils.version import StrictVersion
 from redis.client import parse_info
+from redis.exceptions import ResponseError
 
 
 TEST_SCRIPT = """if redis.call("exists",KEYS[1]) == 1
@@ -1374,3 +1375,6 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client.script_flush()
         self.assertEquals(self.client.script_exists(sha1a, sha1b),
                           [False, False])
+
+    def test_script_kill(self):
+        self.assertRaises(ResponseError, self.client.script_kill)

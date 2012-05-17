@@ -1148,6 +1148,13 @@ class StrictRedis(object):
         self.execute_command('SCRIPT', 'FLUSH')
 
 
+    def script_kill(self):
+        """
+        Kill the currently running script.
+        """
+        self.execute_command('SCRIPT', 'KILL')
+
+
 class Redis(StrictRedis):
     """
     Provides backwards compatibility with older versions of redis-py that
