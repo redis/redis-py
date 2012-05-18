@@ -4,6 +4,7 @@ from redis.connection import (
     Connection,
     UnixDomainSocketConnection
     )
+from redis.utils import from_url
 from redis.exceptions import (
     AuthenticationError,
     ConnectionError,
@@ -23,5 +24,5 @@ __all__ = [
     'Redis', 'StrictRedis', 'ConnectionPool',
     'Connection', 'UnixDomainSocketConnection',
     'RedisError', 'ConnectionError', 'ResponseError', 'AuthenticationError',
-    'InvalidResponse', 'DataError', 'PubSubError', 'WatchError',
+    'InvalidResponse', 'DataError', 'PubSubError', 'WatchError', 'from_url',
     ]
