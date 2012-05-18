@@ -13,10 +13,14 @@ def from_url(url, db=None):
 
     url = urlparse(url)
 
+    # Make sure it's a redis database.
+    if url.scheme:
+        assert url.scheme == 'redis'
+
     # Attempt to resolve database id.
     if db is None:
         try:
-            db = int(url.path.replace('/'))
+            db = int(url.path.replace('/', ''))
         except (AttributeError, ValueError):
             db = DEFAULT_DATABASE_ID
 
