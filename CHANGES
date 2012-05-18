@@ -1,3 +1,6 @@
+* 2.4.13 (in development)
+    * redis.from_url() can take an URL representing a Redis connection string
+      and return a client object. Thanks Kenneth Reitz for the patch.
 * 2.4.12
     * ConnectionPool is now fork-safe. Thanks Josiah Carson for the patch.
 * 2.4.11
