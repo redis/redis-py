@@ -15,9 +15,9 @@ except ImportError:
 def all_tests():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(ServerCommandsTestCase))
-    #suite.addTest(unittest.makeSuite(ConnectionPoolTestCase))
-    #suite.addTest(unittest.makeSuite(PipelineTestCase))
-    #suite.addTest(unittest.makeSuite(LockTestCase))
-    #suite.addTest(unittest.makeSuite(PubSubTestCase))
-    #suite.addTest(unittest.makeSuite(PubSubRedisDownTestCase))
+    suite.addTest(unittest.makeSuite(ConnectionPoolTestCase))
+    suite.addTest(unittest.makeSuite(PipelineTestCase))
+    suite.addTest(unittest.makeSuite(LockTestCase))
+    suite.addTest(unittest.makeSuite(PubSubTestCase))
+    suite.addTest(unittest.makeSuite(PubSubRedisDownTestCase))
     return suite
