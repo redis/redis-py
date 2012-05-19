@@ -89,6 +89,8 @@ class PythonParser(object):
                 # If we're loading the dataset into memory, kill the socket
                 # so we re-initialize (and re-SELECT) next time.
                 raise ConnectionError("Redis is loading data into memory")
+            if response.startswith('NOSCRIPT '):
+                raise ResponseError(response)
         # single value
         elif byte == '+':
             return response
@@ -238,6 +240,8 @@ class Connection(object):
 
     def send_packed_command(self, command):
         "Send an already packed command to the Redis server"
+        #import sys
+        #print >> sys.stderr , "Packed Cmd = ", str(command)
         if not self._sock:
             self.connect()
         try:            

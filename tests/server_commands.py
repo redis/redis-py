@@ -71,6 +71,16 @@ class ServerCommandsTestCase(unittest.TestCase):
         import hashlib
         sha = hashlib.sha1(lua_script1).hexdigest()
         self.assertEquals(['21'], self.client.evalsha(sha))
+        import os
+        script_lines_template = open(os.path.join(os.path.split(os.path.abspath(__file__))[0],'incrdecay.template.lua'),'r').read()        
+        params = {'default_expiration_ms' : 30000,
+                  'incrby'                : 1,
+                  'decay_ms'              : 1000}  # decrement 1/1 second   
+        script_lines = script_lines_template % params
+        self.client.eval(script_lines, 'test', 1)
+        sha = hashlib.sha1(script_lines).hexdigest()
+        import sys
+        print >> sys.stderr, self.client.evalsha(sha, 'test', 1)
 
     def test_psetex(self):
         self.assertTrue(self.client.psetex('x', 1000, 21))

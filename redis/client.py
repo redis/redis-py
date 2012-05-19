@@ -292,8 +292,12 @@ class StrictRedis(object):
         command_name = args[0]
         connection = pool.get_connection(command_name, **options)
         try:
+            #import sys
+            #print >> sys.stderr , ">> %s %s" % (command_name, str(args[1:]))
             connection.send_command(*args)
-            return self.parse_response(connection, command_name, **options)
+            response = self.parse_response(connection, command_name, **options)
+            #print >> sys.stderr , "<< ", str(response)
+            return response
         except ConnectionError:
             connection.disconnect()
             connection.send_command(*args)
@@ -304,8 +308,9 @@ class StrictRedis(object):
     def parse_response(self, connection, command_name, **options):
         "Parses a response from the Redis server"
         response = connection.read_response()
-        #print "COMMAND => ", command_name, " options = ", str(options)
-        #print "RESPONSE => " + str(response)
+        import sys
+        #print >> sys.stderr , "COMMAND  => ", command_name, " options = ", str(options)
+        #print >> sys.stderr , "RESPONSE <= " + str(response)
         if response is None:
             return None
         if command_name in self.response_callbacks:
@@ -326,7 +331,8 @@ class StrictRedis(object):
             elif isinstance(keys, list):
                 num_keys = len(keys)
                 keys = reduce(lambda x,y: x + ' %s' % str(y), keys, '') 
-
+        #import sys
+        #print >> sys.stderr , "EVALSHA %s %d %s %s" % (sha1, num_keys, keys, args)
         return self.execute_command("EVALSHA", sha1, num_keys, keys, args)
         
 
