@@ -80,7 +80,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client.eval(script_lines, 'test', 1)
         sha = hashlib.sha1(script_lines).hexdigest()
         import sys
-        print >> sys.stderr, self.client.evalsha(sha, 'test', 1)
+        print >> sys.stderr, self.client.evalsha(sha, ['test'], 1)
 
     def test_psetex(self):
         self.assertTrue(self.client.psetex('x', 1000, 21))
