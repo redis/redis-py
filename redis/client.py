@@ -326,12 +326,17 @@ class StrictRedis(object):
         """execute a script that has been loaded by its SHA1"""
         num_keys = 0
         if keys is not None:
-            if not isinstance(keys, list):
-                raise Exception("InvalidKeyList")
+            if isinstance(keys, list):
+                #raise Exception("InvalidKeyList")
+                pass
+            else:
+                keys = keys.split()
             num_keys = len(keys)
-            if num_keys > 1:
-                # make it a string
-                keys = reduce(lambda x,y: x + ' %s' % str(y), keys, '') 
+            # make it a string
+            if num_keys == 1:
+                keys = keys[0]
+            else:
+                keys = reduce(lambda x,y: x + ' %s' % str(y.strip()), keys, '') 
         #import sys
         #print >> sys.stderr , "EVALSHA %s %d %s %s" % (sha1, num_keys, keys, args)
         return self.execute_command("EVALSHA", sha1, num_keys, keys, args)

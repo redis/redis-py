@@ -82,6 +82,9 @@ class ServerCommandsTestCase(unittest.TestCase):
         import sys
         print >> sys.stderr, self.client.evalsha(sha, ['test'], 1)
 
+        import sys
+        print >> sys.stderr, self.client.evalsha(sha, 'test', 1)
+
     def test_psetex(self):
         self.assertTrue(self.client.psetex('x', 1000, 21))
         self.assertEquals(1, self.client.ttl('x'))
