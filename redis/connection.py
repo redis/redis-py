@@ -5,7 +5,11 @@ from redis.exceptions import (
     ConnectionError,
     ResponseError,
     InvalidResponse,
-    AuthenticationError
+    AuthenticationError,
+    ScriptsNotRunningError,
+    ScriptNotFoundError,
+    ScriptBusyError,
+    ScriptOutOfControlError,
 )
 
 try:
@@ -18,6 +22,23 @@ try:
     hiredis_available = True
 except ImportError:
     hiredis_available = False
+
+
+exception_mappings = {
+    'ERR No scripts in execution right now.': ScriptsNotRunningError,
+    'NOSCRIPT No matching script. Please use EVAL.': ScriptNotFoundError,
+    'BUSY Redis is busy running a script. You can only call SCRIPT KILL or '
+        'SHUTDOWN NOSAVE.': ScriptBusyError,
+    'ERR Sorry the script already executed write commands against the dataset. '
+        'You can either wait the script termination or kill the server in an '
+        'hard way using the SHUTDOWN NOSAVE command.': ScriptOutOfControlError
+}
+
+def parse_response_error(response_exception):
+    message = response_exception.message
+    exception = exception_mappings.get(message, response_exception.__class__)
+    return exception(message)
+
 
 class PythonParser(object):
     "Plain Python parsing class"
@@ -84,6 +105,9 @@ class PythonParser(object):
         if byte == '-':
             if response.startswith('ERR '):
                 response = response[4:]
+                return ResponseError(response)
+            if response.startswith('NOSCRIPT '):
+                response = response[9:]
                 return ResponseError(response)
             if response.startswith('LOADING '):
                 # If we're loading the dataset into memory, kill the socket
@@ -265,7 +289,7 @@ class Connection(object):
             self.disconnect()
             raise
         if response.__class__ == ResponseError:
-            raise response
+            raise parse_response_error(response)
         return response
 
     def encode(self, value):
@@ -323,7 +347,7 @@ class ConnectionPool(object):
         self._available_connections = []
         self._in_use_connections = set()
 
-    def get_connection(self, command_name, *keys, **options):
+    def get_connection(self, command_name, keys=[], **options):
         "Get a connection from the pool"
         try:
             connection = self._available_connections.pop()

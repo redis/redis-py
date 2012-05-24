@@ -1,5 +1,5 @@
 import unittest
-from server_commands import ServerCommandsTestCase
+from server_commands import ServerCommandsTestCase, LuaScriptingTestCase
 from connection_pool import ConnectionPoolTestCase
 from pipeline import PipelineTestCase
 from lock import LockTestCase
@@ -15,6 +15,7 @@ except ImportError:
 def all_tests():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(ServerCommandsTestCase))
+    suite.addTest(unittest.makeSuite(LuaScriptingTestCase))
     suite.addTest(unittest.makeSuite(ConnectionPoolTestCase))
     suite.addTest(unittest.makeSuite(PipelineTestCase))
     suite.addTest(unittest.makeSuite(LockTestCase))

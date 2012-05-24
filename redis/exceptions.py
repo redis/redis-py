@@ -24,3 +24,14 @@ class PubSubError(RedisError):
 class WatchError(RedisError):
     pass
 
+class ScriptsNotRunningError(ResponseError):
+    pass
+
+class ScriptNotFoundError(ResponseError):
+    pass
+
+class ScriptBusyError(ResponseError):
+    pass
+
+class ScriptOutOfControlError(ResponseError):
+    pass
