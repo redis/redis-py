@@ -1044,7 +1044,7 @@ class StrictRedis(object):
             'score_cast_func': score_cast_func,
             'keys': [name],
         }
-        return self.execute_command(*pieces, keys=[name], **options)
+        return self.execute_command(*pieces, **options)
 
     def zrevrank(self, name, value):
         """
