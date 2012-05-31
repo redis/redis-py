@@ -336,7 +336,7 @@ class StrictRedis(object):
             if num_keys == 1:
                 keys = keys[0]
             else:
-                keys = reduce(lambda x,y: x + ' %s' % str(y.strip()), keys, '') 
+                keys = reduce(lambda x,y: x + ' %s' % str(y.strip()), keys[1:], keys[0]) 
         #import sys
         #print >> sys.stderr , "EVALSHA %s %d %s %s" % (sha1, num_keys, keys, args)
         return self.execute_command("EVALSHA", sha1, num_keys, keys, args)
