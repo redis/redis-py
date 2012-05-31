@@ -30,6 +30,66 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client.set('a', 'foo')
         self.assertEquals(self.client.get('a'), 'static')
 
+    def test_eval(self):
+        lua_script = "return 1"
+        self.assertEquals(1, self.client.eval(lua_script))
+
+        self.client.set('x', 21)
+        self.client.set('y', 5)
+
+        lua_script1 = "return {redis.call('get', 'x')}"
+        self.assertEquals(['21'], self.client.eval(lua_script1))
+
+        lua_script2 = "return {redis.call('get', KEYS[1])}"
+        self.assertEquals(['21'], self.client.eval(lua_script2, "x"))
+
+        lua_script3 = "return tonumber(redis.call('get', KEYS[1]))"
+        self.assertEquals(21, self.client.eval(lua_script3, "x"))
+
+        lua_script4 = "return tonumber(redis.call('get', KEYS[1]) + ARGV[1])"
+        self.assertEquals(22, self.client.eval(lua_script4, "x", "1"))
+
+        lua_script5 = "return tonumber(redis.call('get', KEYS[1]) + ARGV[1])"
+        self.assertEquals(22, self.client.eval(lua_script5, 'x', 1))
+
+        lua_script6 = "return {tonumber(redis.call('get', KEYS[1])) + ARGV[1]}"
+        self.assertEquals([23], self.client.eval(lua_script6, 'x', 2))
+
+        # can't get these to pass right now
+
+        #lua_script7 = "return ARGV[1]"
+        #self.assertEquals(5, self.client.eval(lua_script7, None, '1'))
+
+        #lua_script8 = "return {tonumber(redis.call('get', KEYS[1])) + tonumber(redis.call('get', KEYS[2]))}"
+        #self.assertEquals([23], self.client.eval(lua_script8, ['x','y']))
+
+
+    def test_evalsha(self):
+        self.client.set('x', 21)
+        lua_script1 = "return {redis.call('get', 'x')}"
+        self.assertEquals(['21'], self.client.eval(lua_script1))
+        import hashlib
+        sha = hashlib.sha1(lua_script1).hexdigest()
+        self.assertEquals(['21'], self.client.evalsha(sha))
+        import os
+        script_lines_template = open(os.path.join(os.path.split(os.path.abspath(__file__))[0],'incrdecay.template.lua'),'r').read()        
+        params = {'default_expiration_ms' : 30000,
+                  'incrby'                : 1,
+                  'decay_ms'              : 1000}  # decrement 1/1 second   
+        script_lines = script_lines_template % params
+        self.client.eval(script_lines, 'test', 1)
+        sha = hashlib.sha1(script_lines).hexdigest()
+        import sys
+        print >> sys.stderr, self.client.evalsha(sha, ['test'], 1)
+
+        import sys
+        print >> sys.stderr, self.client.evalsha(sha, 'test', 1)
+
+    def test_psetex(self):
+        self.assertTrue(self.client.psetex('x', 1000, 21))
+        self.assertEquals(1, self.client.ttl('x'))
+        self.assertEquals('21', self.client.get('x'))
+
     # GENERAL SERVER COMMANDS
     def test_dbsize(self):
         self.client['a'] = 'foo'

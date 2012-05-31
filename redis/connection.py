@@ -79,7 +79,7 @@ class PythonParser(object):
         if not response:
             raise ConnectionError("Socket closed on remote end")
 
-        byte, response = response[0], response[1:]
+        byte, response = response[0], response[1:]        
 
         # server returned an error
         if byte == '-':
@@ -90,6 +90,8 @@ class PythonParser(object):
                 # If we're loading the dataset into memory, kill the socket
                 # so we re-initialize (and re-SELECT) next time.
                 raise ConnectionError("Redis is loading data into memory")
+            if response.startswith('NOSCRIPT '):
+                raise ResponseError(response)
         # single value
         elif byte == '+':
             return response
@@ -109,6 +111,7 @@ class PythonParser(object):
             if length == -1:
                 return None
             return [self.read_response() for i in xrange(length)]
+
         raise InvalidResponse("Protocol Error")
 
 class HiredisParser(object):
@@ -239,9 +242,11 @@ class Connection(object):
 
     def send_packed_command(self, command):
         "Send an already packed command to the Redis server"
+        #import sys
+        #print >> sys.stderr , "Packed Cmd = ", str(command)
         if not self._sock:
             self.connect()
-        try:
+        try:            
             self._sock.sendall(command)
         except socket.error, e:
             self.disconnect()

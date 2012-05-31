@@ -66,6 +66,19 @@ def parse_object(response, infotype):
         return int(response)
     return response
 
+def parse_eval_response(response):
+    x = response
+    if isinstance(x, long):
+        return x
+    elif isinstance(x, int):
+        return x
+    elif isinstance(x, float):
+        return x
+    elif isinstance(x, str):
+        return x
+    else:
+        return x
+
 def parse_info(response):
     "Parse the result of Redis's INFO command into a Python dict"
     info = {}
@@ -138,6 +151,9 @@ class StrictRedis(object):
     the commands are sent and received to the Redis server
     """
     RESPONSE_CALLBACKS = dict_merge(
+
+        string_keys_to_dict('EVAL EVALSHA', parse_eval_response), 
+
         string_keys_to_dict(
             'AUTH DEL EXISTS EXPIRE EXPIREAT HDEL HEXISTS HMSET MOVE MSETNX '
             'PERSIST RENAMENX SISMEMBER SMOVE SETEX SETNX SREM ZREM',
@@ -151,7 +167,7 @@ class StrictRedis(object):
             ),
         string_keys_to_dict(
             # these return OK, or int if redis-server is >=1.3.4
-            'LPUSH RPUSH',
+            'LPUSH RPUSH PSETEX',
             lambda r: isinstance(r, long) and r or r == 'OK'
             ),
         string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
@@ -276,8 +292,12 @@ class StrictRedis(object):
         command_name = args[0]
         connection = pool.get_connection(command_name, **options)
         try:
+            #import sys
+            #print >> sys.stderr , ">> %s %s" % (command_name, str(args[1:]))
             connection.send_command(*args)
-            return self.parse_response(connection, command_name, **options)
+            response = self.parse_response(connection, command_name, **options)
+            #print >> sys.stderr , "<< ", str(response)
+            return response
         except ConnectionError:
             connection.disconnect()
             connection.send_command(*args)
@@ -288,9 +308,52 @@ class StrictRedis(object):
     def parse_response(self, connection, command_name, **options):
         "Parses a response from the Redis server"
         response = connection.read_response()
+        import sys
+        #print >> sys.stderr , "COMMAND  => ", command_name, " options = ", str(options)
+        #print >> sys.stderr , "RESPONSE <= " + str(response)
+        if response is None:
+            return None
         if command_name in self.response_callbacks:
             return self.response_callbacks[command_name](response, **options)
         return response
+
+    #### LUA SCRIPTING ###
+    def script_load(self, script):
+        """Load a script onto the server and get the SHA1 for it"""
+        pass
+
+    def evalsha(self, sha1, keys=None, args=None):
+        """execute a script that has been loaded by its SHA1"""
+        num_keys = 0
+        if keys is not None:
+            if isinstance(keys, list):
+                #raise Exception("InvalidKeyList")
+                pass
+            else:
+                keys = keys.split()
+            num_keys = len(keys)
+            # make it a string
+            if num_keys == 1:
+                keys = keys[0]
+            else:
+                keys = reduce(lambda x,y: x + ' %s' % str(y.strip()), keys[1:], keys[0]) 
+        #import sys
+        #print >> sys.stderr , "EVALSHA %s %d %s %s" % (sha1, num_keys, keys, args)
+        return self.execute_command("EVALSHA", sha1, num_keys, keys, args)
+        
+
+    def eval(self, script, keys=None, args=None):
+        """execute a script w/ or w/out keys and args"""
+        num_keys = 0        
+        if keys is not None:
+            if isinstance(keys, str):
+                num_keys = len(keys.split())
+            elif isinstance(keys, list):
+                num_keys = len(keys)
+                keys = reduce(lambda x,y: x + ' %s' % str(y), keys, '') 
+
+        return self.execute_command("EVAL", script, num_keys, keys, args)
+
 
     #### SERVER INFORMATION ####
     def bgrewriteaof(self):
@@ -419,7 +482,7 @@ class StrictRedis(object):
     def get(self, name):
         """
         Return the value at key ``name``, or None if the key doesn't exist
-        """
+        """        
         return self.execute_command('GET', name)
 
     def __getitem__(self, name):
@@ -929,6 +992,12 @@ class StrictRedis(object):
             pieces.append('withscores')
         options = {'withscores': withscores, 'score_cast_func': score_cast_func}
         return self.execute_command(*pieces, **options)
+
+    def psetex(self, name, expires_ms, value):
+        """
+        Returns OK sets 'key' w/ 'value' and an expiration in ms
+        """
+        return self.execute_command('PSETEX', name, expires_ms, value)
 
     def zrank(self, name, value):
         """
