@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import sys
 
@@ -59,7 +60,7 @@ class RedisServer(object):
         self.process = subprocess.Popen(args, stdout=stream, stderr=stream)
 
         # Poll the redis server until it is accepting connections
-        redis = Redis()
+        redis = Redis(host=self.host, port=self.port, password=self.password)
         while True:
             try:
                 if redis.ping():
@@ -76,5 +77,47 @@ class RedisServer(object):
             self.process.kill()
             self.process = None
 
+    def get_configuration(self):
+        # set defaults
+        self._host = '127.0.0.1'
+        self._port = 6379
+        self._password = None
+
+        # short-circuit if there is no conf, just use the defaults
+        if self.conf is None:
+            return
+
+        # Open the redis conf and search for the port and bind options
+        with open(self.conf) as f:
+            contents = f.read()
+            for line in contents.splitlines():
+                line = line.strip()
+                if line.startswith('port'):
+                    self._port = int(re.split(r"[ ]+", line)[1])
+                if line.startswith('bind'):
+                    self._host = re.split(r"[ ]+", line)[1]
+                if line.startswith('requirepass'):
+                    self._password = re.split(r'[ ]+', line)[1]
+
+    @property
+    def password(self):
+        if hasattr(self, '_password'):
+            return self._password
+        self.get_configuration()
+        return self._password
+
+    @property
+    def host(self):
+        if hasattr(self, '_host'):
+            return self._host
+        self.get_configuration()
+        return self._host
+
+    @property
+    def port(self):
+        if hasattr(self, '_port'):
+            return self._port
+        self.get_configuration()
+        return self._port
 
 server = RedisServer()
