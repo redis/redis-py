@@ -84,7 +84,7 @@ class RedisServer(object):
         self._password = None
 
         # short-circuit if there is no conf, just use the defaults
-        if self.conf is None:
+        if self.conf is None or not os.path.exists(self.conf):
             return
 
         # Open the redis conf and search for the port and bind options
