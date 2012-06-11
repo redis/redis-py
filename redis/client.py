@@ -186,15 +186,17 @@ class StrictRedis(object):
 
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
-                 connection_pool=None,
-                 charset='utf-8', errors='strict', unix_socket_path=None):
+                 connection_pool=None, charset='utf-8',
+                 errors='strict', decode_responses=False,
+                 unix_socket_path=None):
         if not connection_pool:
             kwargs = {
                 'db': db,
                 'password': password,
                 'socket_timeout': socket_timeout,
                 'encoding': charset,
-                'encoding_errors': errors
+                'encoding_errors': errors,
+                'decode_responses': decode_responses,
                 }
             # based on input, setup appropriate connection args
             if unix_socket_path:

@@ -48,8 +48,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.get('byte_string'), byte_string)
         self.assertEquals(self.client.get('integer'), str(integer))
         self.assertEquals(
-                self.client.get('unicode_string').decode('utf-8'),
-                unicode_string)
+            self.client.get('unicode_string').decode('utf-8'),
+            unicode_string)
 
     def test_getitem_and_setitem(self):
         self.client['a'] = 'bar'
