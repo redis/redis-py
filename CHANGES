@@ -1,3 +1,7 @@
+* 2.4.14 (in development)
+    * A new setting "decode_responses" specifies whether return values from
+      Redis commands get decoded automatically using the client's charset
+      value. Thanks to Frankie Dintino for the patch.
 * 2.4.13
     * redis.from_url() can take an URL representing a Redis connection string
       and return a client object. Thanks Kenneth Reitz for the patch.
