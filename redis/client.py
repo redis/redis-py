@@ -111,6 +111,16 @@ def zset_score_pairs(response, **options):
     it = iter(response)
     return zip(it, imap(score_cast_func, it))
 
+def sort_return_tuples(response, **options):
+    """
+    If ``tuples`` is specified, return the response as a list of
+    n-element tuples with n being the value found in options['tuples']
+    """
+    if not response or not options['tuples']:
+        return response
+    n = options['tuples']
+    return zip(*[response[i::n] for i in range(n)])
+
 def int_or_none(response):
     if response is None:
         return None
@@ -154,6 +164,7 @@ class StrictRedis(object):
             'LPUSH RPUSH',
             lambda r: isinstance(r, long) and r or r == 'OK'
             ),
+        string_keys_to_dict('SORT', sort_return_tuples),
         string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
         string_keys_to_dict(
             'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME '
@@ -715,7 +726,7 @@ class StrictRedis(object):
         return self.execute_command('RPUSHX', name, value)
 
     def sort(self, name, start=None, num=None, by=None, get=None,
-             desc=False, alpha=False, store=None):
+             desc=False, alpha=False, store=None, tuples=False):
         """
         Sort and return the list, set or sorted set at ``name``.
 
@@ -734,6 +745,11 @@ class StrictRedis(object):
 
         ``store`` allows for storing the result of the sort into
             the key ``store``
+
+        ``tuples`` if set to True and if ``get`` contains at least two
+        elements, will return a list of tuples matching the keys given
+        as arguments to ``get``.
+            
         """
         if (start is not None and num is None) or \
                 (num is not None and start is None):
@@ -766,8 +782,16 @@ class StrictRedis(object):
         if store is not None:
             pieces.append('STORE')
             pieces.append(store)
-        return self.execute_command('SORT', *pieces)
 
+        options = {'tuples': None}
+        if tuples:
+            if not get or isinstance(get, basestring) or len(get) < 2:
+                raise DataError("when using ``tuples`` the ``get`` argument "
+                                "must be specified and contain at least "
+                                "two keys")
+            options['tuples'] = len(get)
+                
+        return self.execute_command('SORT', *pieces, **options)
 
     #### SET COMMANDS ####
     def sadd(self, name, *values):
