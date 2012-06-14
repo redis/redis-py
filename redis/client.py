@@ -393,6 +393,13 @@ class StrictRedis(object):
         """
         return self.execute_command('APPEND', key, value)
 
+    def getrange(self, key, start, end):
+        """
+        Returns the substring of the string value stored at ``key``,
+        determined by the offsets ``start`` and ``end`` (both are inclusive)
+        """
+        return self.execute_command('GETRANGE', key, start, end)
+
     def decr(self, name, amount=1):
         """
         Decrements the value of ``key`` by ``amount``.  If no key exists,
