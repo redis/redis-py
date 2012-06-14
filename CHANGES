@@ -1,4 +1,5 @@
 * 2.4.14 (in development)
+    * Added support for GETRANGE, thanks Jean-Philippe Caruana
     * A new setting "decode_responses" specifies whether return values from
       Redis commands get decoded automatically using the client's charset
       value. Thanks to Frankie Dintino for the patch.
