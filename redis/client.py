@@ -144,9 +144,9 @@ class StrictRedis(object):
             bool
             ),
         string_keys_to_dict(
-            'DECRBY GETBIT HLEN INCRBY LINSERT LLEN LPUSHX RPUSHX SADD SCARD '
-            'SDIFFSTORE SETBIT SETRANGE SINTERSTORE STRLEN SUNIONSTORE ZADD '
-            'ZCARD ZREMRANGEBYRANK ZREMRANGEBYSCORE',
+            'BITCOUNT DECRBY GETBIT HLEN INCRBY LINSERT LLEN LPUSHX RPUSHX '
+            'SADD SCARD SDIFFSTORE SETBIT SETRANGE SINTERSTORE STRLEN '
+            'SUNIONSTORE ZADD ZCARD ZREMRANGEBYRANK ZREMRANGEBYSCORE',
             int
             ),
         string_keys_to_dict(
@@ -399,6 +399,20 @@ class StrictRedis(object):
         determined by the offsets ``start`` and ``end`` (both are inclusive)
         """
         return self.execute_command('GETRANGE', key, start, end)
+
+    def bitcount(self, key, start=None, end=None):
+        """
+        returns the count of set bits in the given (string) key.  Optional
+        start and end params indicate which _bytes_ to consider
+        """
+        params = [key]
+        if start and end:
+          params.append(start)
+          params.append(end)
+        elif (start and not end) or (end and not start):
+          raise RedisError("Both start and end must be specified")
+        return self.execute_command('BITCOUNT', *params)
+
 
     def decr(self, name, amount=1):
         """

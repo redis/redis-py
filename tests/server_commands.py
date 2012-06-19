@@ -176,6 +176,24 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.getbit('a', 4), True)
         self.assertEquals(self.client.getbit('a', 5), True)
 
+    def test_bitcount(self):
+        self.client.setbit('a', 5, True)
+        self.assertEquals(self.client.bitcount('a'), 1)
+        self.client.setbit('a', 6, True)
+        self.assertEquals(self.client.bitcount('a'), 2)
+        self.client.setbit('a', 5, False)
+        self.assertEquals(self.client.bitcount('a'), 1)
+        self.client.setbit('a', 9, True)
+        self.client.setbit('a', 17, True)
+        self.client.setbit('a', 25, True)
+        self.client.setbit('a', 33, True)
+        self.assertEquals(self.client.bitcount('a'), 5)
+        self.assertEquals(self.client.bitcount('a', 2, 3), 2)
+        self.assertEquals(self.client.bitcount('a', 2, -1), 3)
+        self.assertEquals(self.client.bitcount('a', -2, -1), 2)
+        self.assertEquals(self.client.bitcount('a', 1, 1), 1)
+
+
     def test_getset(self):
         self.assertEquals(self.client.getset('a', 'foo'), None)
         self.assertEquals(self.client.getset('a', 'bar'), 'foo')
