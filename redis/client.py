@@ -413,6 +413,9 @@ class StrictRedis(object):
           raise RedisError("Both start and end must be specified")
         return self.execute_command('BITCOUNT', *params)
 
+    def bitop(self, op, dest, *keys):
+        return self.execute_command('BITOP', op, dest, *keys)
+
 
     def decr(self, name, amount=1):
         """

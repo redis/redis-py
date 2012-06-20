@@ -193,6 +193,44 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.bitcount('a', -2, -1), 2)
         self.assertEquals(self.client.bitcount('a', 1, 1), 1)
 
+    def test_bitop_not_empty_string(self):
+        self.client.set('a', '')
+        self.client.bitop('not', 'r', 'a')
+        self.assertEquals(self.client.get('r'), None)
+
+    def test_bitop_not(self):
+        test_str = chr(0xaa) + chr(0x00) + chr(0xff) + chr(0x55)
+        correct = ~0xaa00ff55 & 0xffffffff
+        self.client.set('a', test_str)
+        self.client.bitop('not', 'r', 'a')
+        self.assertEquals(int(self.client.get('r').encode('hex'), 16), correct)
+
+    def test_bitop_not_in_place(self):
+        test_str = chr(0xaa) + chr(0x00) + chr(0xff) + chr(0x55)
+        correct = ~0xaa00ff55 & 0xffffffff
+        self.client.set('a', test_str)
+        self.client.bitop('not', 'a', 'a')
+        self.assertEquals(int(self.client.get('a').encode('hex'), 16), correct)
+
+    def test_bitop_single_string(self):
+        test_str = chr(0x01) + chr(0x02) + chr(0xff)
+        self.client.set('a', test_str)
+        self.client.bitop('and', 'res1', 'a')
+        self.client.bitop('or', 'res2', 'a')
+        self.client.bitop('xor', 'res3', 'a')
+        self.assertEquals(self.client.get('res1'), test_str)
+        self.assertEquals(self.client.get('res2'), test_str)
+        self.assertEquals(self.client.get('res3'), test_str)
+
+    def test_bitop_string_operands(self):
+      self.client.set('a', chr(0x01) + chr(0x02) + chr(0xff) + chr(0xff))
+      self.client.set('b', chr(0x01) + chr(0x02) + chr(0xff))
+      self.client.bitop('and', 'res1', 'a', 'b')
+      self.client.bitop('or', 'res2', 'a', 'b')
+      self.client.bitop('xor', 'res3', 'a', 'b')
+      self.assertEquals(int(self.client.get('res1').encode('hex'), 16), 0x0102ff00)
+      self.assertEquals(int(self.client.get('res2').encode('hex'), 16), 0x0102ffff)
+      self.assertEquals(int(self.client.get('res3').encode('hex'), 16), 0x000000ff)
 
     def test_getset(self):
         self.assertEquals(self.client.getset('a', 'foo'), None)
