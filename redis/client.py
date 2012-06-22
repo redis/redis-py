@@ -1241,7 +1241,7 @@ class PubSub(object):
         connection = self.connection
         try:
             connection.send_command(*args)
-            return self.parse_response()
+            return self.parse_response(dump_msgs=True)
         except ConnectionError:
             connection.disconnect()
             # Connect manually here. If the Redis server is down, this will
@@ -1254,11 +1254,18 @@ class PubSub(object):
             for pattern in self.patterns:
                 self.psubscribe(pattern)
             connection.send_command(*args)
-            return self.parse_response()
+            return self.parse_response(dump_msgs=True)
 
-    def parse_response(self):
+    def parse_response(self, dump_msgs=False):
         "Parse the response from a publish/subscribe command"
+        
+        # get te response from Redis
         response = self.connection.read_response()
+        
+        # optionally cleanup input buffer from published messages
+        while dump_msgs and response[0] == "message":
+            response = self.connection.read_response()    
+            
         if response[0] in self.subscribe_commands:
             self.subscription_count = response[2]
             # if we've just unsubscribed from the remaining channels,
