@@ -413,7 +413,12 @@ class StrictRedis(object):
     __contains__ = exists
 
     def expire(self, name, time):
-        "Set an expire flag on key ``name`` for ``time`` seconds"
+        """
+        Set an expire flag on key ``name`` for ``time`` seconds. ``time``
+        can be represented by an integer or a Python timedelta object.
+        """
+        if isinstance(time, datetime.timedelta):
+            time = int(time.total_seconds())
         return self.execute_command('EXPIRE', name, time)
 
     def expireat(self, name, when):
@@ -524,9 +529,12 @@ class StrictRedis(object):
 
     def setex(self, name, time, value):
         """
-        Set the value of key ``name`` to ``value``
-        that expires in ``time`` seconds
+        Set the value of key ``name`` to ``value`` that expires in ``time``
+        seconds. ``time`` can be represented by an integer or a Python
+        timedelta object.
         """
+        if isinstance(time, datetime.timedelta):
+            time = int(time.total_seconds())
         return self.execute_command('SETEX', name, time, value)
 
     def setnx(self, name, value):
@@ -1147,9 +1155,12 @@ class Redis(StrictRedis):
 
     def setex(self, name, value, time):
         """
-        Set the value of key ``name`` to ``value``
-        that expires in ``time`` seconds
+        Set the value of key ``name`` to ``value`` that expires in ``time``
+        seconds. ``time`` can be represented by an integer or a Python
+        timedelta object.
         """
+        if isinstance(time, datetime.timedelta):
+            time = int(time.total_seconds())
         return self.execute_command('SETEX', name, time, value)
 
     def lrem(self, name, value, num=0):
