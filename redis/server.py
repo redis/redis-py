@@ -2,6 +2,7 @@ import os
 import re
 import subprocess
 import sys
+from threading import Timer
 
 from redis import Redis, ConnectionError
 
@@ -19,11 +20,11 @@ class RedisServer(object):
     No-ops if the executable path is not provided and assumes a redis
     server is already running.
     """
-    def __init__(self, server_path=None, conf=None, verbosity=0):
-        self.configure(server_path, conf, verbosity)
+    def __init__(self, server_path=None, conf=None, options=None, verbosity=0):
+        self.configure(server_path, conf, options, verbosity)
         self.process = None
 
-    def configure(self, server_path=None, conf=None, verbosity=0):
+    def configure(self, server_path=None, conf=None, options=None, verbosity=0):
         if server_path is not None:
             server_path = os.path.abspath(server_path)
         self.server_path = server_path
@@ -31,6 +32,10 @@ class RedisServer(object):
         if conf is not None:
             conf = os.path.abspath(conf)
         self.conf = conf
+
+        if options is None:
+            options = {}
+        self.options = options or {}
 
         self.verbosity = verbosity
 
@@ -49,8 +54,12 @@ class RedisServer(object):
             raise ImproperlyConfigured("Path to redis configuration file does not exist")
 
         args = [self.server_path]
+
         if self.conf:
             args.append(self.conf)
+
+        for option, value in self.options.items():
+            args.extend(["--%s" % option, value])
 
         if self.verbosity == 0:
             stream = open(os.devnull, 'wb')
@@ -61,12 +70,22 @@ class RedisServer(object):
 
         # Poll the redis server until it is accepting connections
         redis = Redis(host=self.host, port=self.port, password=self.password)
-        while True:
+
+        # Create a threading.Timer to timeout the while loop so it
+        # doesn't infinitely loop.
+        self.timed_out = False
+        t = Timer(2.0, self.timeout)
+        t.start()
+
+        while not self.timed_out:
             try:
                 if redis.ping():
                     break
-            except ConnectionError:
-                pass
+            except ConnectionError, e:
+                self.last_exception = e
+
+        if self.timed_out:
+            raise self.last_exception
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -76,6 +95,9 @@ class RedisServer(object):
         if self.process is not None:
             self.process.kill()
             self.process = None
+
+    def timeout(self):
+        self.timed_out = True
 
     def get_configuration(self):
         # set defaults
@@ -120,4 +142,4 @@ class RedisServer(object):
         self.get_configuration()
         return self._port
 
-server = RedisServer()
+server = RedisServer
