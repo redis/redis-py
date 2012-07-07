@@ -3,6 +3,7 @@ import datetime
 import time
 import warnings
 from itertools import imap, izip, starmap
+from urlparse import urlparse
 from redis.connection import ConnectionPool, UnixDomainSocketConnection
 from redis.exceptions import (
     ConnectionError,
@@ -183,6 +184,36 @@ class StrictRedis(object):
             'RANDOMKEY': lambda r: r and r or None,
         }
         )
+
+    @classmethod
+    def from_url(cls, url, db=None, **kwargs):
+        """
+        Return a Redis client object configured from the given URL.
+
+        For example::
+
+            redis://username:password@localhost:6379/0
+
+        If ``db`` is None, this method will attempt to extract the database ID
+        from the URL path component.
+
+        Any additional keyword arguments will be passed along to the Redis
+        class's initializer.
+        """
+        url = urlparse(url)
+
+        # We only support redis:// schemes.
+        assert url.scheme == 'redis' or not url.scheme
+
+        # Extract the database ID from the path component if hasn't been given.
+        if db is None:
+            try:
+                db = int(url.path.replace('/', ''))
+            except (AttributeError, ValueError):
+                db = 0
+
+        return cls(host=url.hostname, port=url.port, db=db,
+                   password=url.password, **kwargs)
 
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
