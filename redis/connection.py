@@ -90,6 +90,8 @@ class PythonParser(object):
                 # If we're loading the dataset into memory, kill the socket
                 # so we re-initialize (and re-SELECT) next time.
                 raise ConnectionError("Redis is loading data into memory")
+            if response.startswith('NOSCRIPT '):
+                raise ResponseError(response[9:])
         # single value
         elif byte == '+':
             return response

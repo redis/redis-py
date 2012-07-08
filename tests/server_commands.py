@@ -1357,6 +1357,10 @@ class ServerCommandsTestCase(unittest.TestCase):
                                                   ['key1'], ['arg1', 'arg2']),
                               ['key1', 'arg1', 'arg2'])
 
+        def test_no_script(self):
+            sha1 = hashlib.sha1('return "hello"').hexdigest()
+            self.assertRaises(ResponseError, self.client.evalsha, sha1)
+
         def test_script_exists(self):
             """
             Test checking for existence of scripts.
