@@ -6,7 +6,7 @@ import hashlib
 from string import letters
 from distutils.version import StrictVersion
 from redis.client import parse_info
-from redis.exceptions import ResponseError
+from redis.exceptions import ResponseError, NoScriptError
 
 
 TEST_SCRIPT = """if redis.call("exists",KEYS[1]) == 1
@@ -1359,7 +1359,7 @@ class ServerCommandsTestCase(unittest.TestCase):
 
         def test_no_script(self):
             sha1 = hashlib.sha1('return "hello"').hexdigest()
-            self.assertRaises(ResponseError, self.client.evalsha, sha1)
+            self.assertRaises(NoScriptError, self.client.evalsha, sha1)
 
         def test_script_exists(self):
             """
