@@ -15,7 +15,7 @@ There are a few exceptions:
 
 - SELECT: Not implemented. See the explanation in the Thread Safety section
   below.
--  DEL: 'del' is a reserved keyword in the Python syntax. Therefore redis-py
+- DEL: 'del' is a reserved keyword in the Python syntax. Therefore redis-py
   uses 'delete' instead.
 - CONFIG GET|SET: These are implemented separately as config_get or config_set.
 - MULTI/EXEC: These are implemented as part of the Pipeline class. Calling
@@ -37,7 +37,7 @@ versions of redis-py:
 - ZADD: Redis specifies the 'score' argument before 'value'. These were swapped
   accidentally when being implemented and not discovered until after people
   were already using it. The Redis class expects `*args` in the form of:
-      name1, score1, name2, score2, ...
+  name1, score1, name2, score2, ...
 - SETEX: Order of 'time' and 'value' arguments reversed.
 
 
