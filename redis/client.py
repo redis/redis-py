@@ -1239,11 +1239,20 @@ class PubSub(object):
 
     def reset(self):
         if self.connection:
+            self.connection.disconnect()
             self.connection_pool.release(self.connection)
             self.connection = None
 
+    def close(self):
+        self.reset()
+
     def execute_command(self, *args, **kwargs):
         "Execute a publish/subscribe command"
+
+        # NOTE: don't parse the response in this function. it could pull a
+        # legitmate message off the stack if the connection is already
+        # subscribed to one or more channels
+
         if self.connection is None:
             self.connection = self.connection_pool.get_connection(
                 'pubsub',
@@ -1252,7 +1261,6 @@ class PubSub(object):
         connection = self.connection
         try:
             connection.send_command(*args)
-            return self.parse_response()
         except ConnectionError:
             connection.disconnect()
             # Connect manually here. If the Redis server is down, this will
@@ -1265,7 +1273,6 @@ class PubSub(object):
             for pattern in self.patterns:
                 self.psubscribe(pattern)
             connection.send_command(*args)
-            return self.parse_response()
 
     def parse_response(self):
         "Parse the response from a publish/subscribe command"
@@ -1324,7 +1331,7 @@ class PubSub(object):
 
     def listen(self):
         "Listen for messages on channels this client has been subscribed to"
-        while self.subscription_count:
+        while self.subscription_count or self.channels or self.patterns:
             r = self.parse_response()
             if r[0] == 'pmessage':
                 msg = {
