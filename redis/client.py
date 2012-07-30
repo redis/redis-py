@@ -1123,6 +1123,54 @@ class StrictRedis(object):
         """
         return self.execute_command('PUBLISH', channel, message)
 
+    def script_load(self, script):
+        """
+        Load ``script`` into the scripts cache.
+        Returns the SHA1 sum of the script added to the scripts cache.
+        """
+        return self.execute_command('SCRIPT', 'LOAD', script)
+
+    def eval(self, script, keys=(), args=()):
+        """
+        Evaluate a ``script`` with given ``keys`` and ``args``.
+        Returns the value returned from the LUA ``script`` converted to Redis
+        type.
+        """
+        arguments = tuple(keys) + tuple(args)
+        return self.execute_command('EVAL', script, len(keys), *arguments)
+
+    def evalsha(self, sha1, keys=(), args=()):
+        """
+        Evaluate a loaded script by it's `sha1` with given ``keys`` and
+        ``args``.  Returns the value returned from the LUA ``script`` converted
+        to Redis type.
+        """
+        arguments = tuple(keys) + tuple(args)
+        return self.execute_command('EVALSHA', sha1, len(keys), *arguments)
+
+    def script_exists(self, *sha1s):
+        """
+        Get information about the existense of scripts in the scripts cache
+        with a list of ``sha1s``.
+        Return list of booleans where ``True`` indicates the corresponding
+        script exists and ``False`` indicates it does not exist.
+        """
+        response = self.execute_command('SCRIPT', 'EXISTS', *sha1s)
+        return [bool(exists) for exists in response]
+
+    def script_flush(self):
+        """
+        Flush the scripts cache.
+        """
+        self.execute_command('SCRIPT', 'FLUSH')
+
+
+    def script_kill(self):
+        """
+        Kill the currently running script.
+        """
+        self.execute_command('SCRIPT', 'KILL')
+
 
 class Redis(StrictRedis):
     """

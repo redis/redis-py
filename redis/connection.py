@@ -6,7 +6,8 @@ from redis.exceptions import (
     ConnectionError,
     ResponseError,
     InvalidResponse,
-    AuthenticationError
+    AuthenticationError,
+    NoScriptError
 )
 
 try:
@@ -96,6 +97,8 @@ class PythonParser(object):
                 # If we're loading the dataset into memory, kill the socket
                 # so we re-initialize (and re-SELECT) next time.
                 raise ConnectionError("Redis is loading data into memory")
+            if response.startswith('NOSCRIPT '):
+                raise NoScriptError(response[9:])
         # single value
         elif byte == '+':
             pass

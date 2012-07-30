@@ -2,9 +2,24 @@ import redis
 import unittest
 import datetime
 import time
+import hashlib
 from string import letters
 from distutils.version import StrictVersion
 from redis.client import parse_info
+from redis.exceptions import ResponseError, NoScriptError
+
+r = redis.Redis(host='localhost', port=6379)
+redis_version = [int(n) for n in r.info()['redis_version'].split('.')]
+del r
+
+
+TEST_SCRIPT = """if redis.call("exists",KEYS[1]) == 1
+then
+    return redis.call("incr",KEYS[1])
+else
+    return nil
+end"""
+
 
 class ServerCommandsTestCase(unittest.TestCase):
 
@@ -1312,3 +1327,71 @@ class ServerCommandsTestCase(unittest.TestCase):
         data = ''.join(data)
         self.client.set('a', data)
         self.assertEquals(self.client.get('a'), data)
+
+    if redis_version >= [2, 5, 9]:
+
+        def test_script_load(self):
+            """
+            Test loading a script in the scripts cache
+            """
+            sha1 = hashlib.sha1(TEST_SCRIPT).hexdigest()
+            response = self.client.script_load(TEST_SCRIPT)
+            self.assertEquals(response, sha1)
+
+        def test_eval(self):
+            """
+            Test evaling a script
+            """
+            self.client.set("foo", "bar")
+            script = "return redis.call('get', 'foo')"
+            self.assertEquals(self.client.eval(script), "bar")
+            script = "return {KEYS[1],ARGV[1],ARGV[2]}"
+            self.assertEquals(self.client.eval(script, ['key1'],
+                                               ['arg1', 'arg2']),
+                              ['key1', 'arg1', 'arg2'])
+
+        def test_evalsha(self):
+            """
+            Test evaling a loaded script by its SHA1
+            """
+            sha1 = self.client.script_load(TEST_SCRIPT)
+            self.assertEquals(self.client.evalsha(sha1, ["foo"]), None)
+            self.client.set("foo", 2)
+            self.assertEquals(self.client.evalsha(sha1, ["foo"]), 3)
+            script = "return {KEYS[1],ARGV[1],ARGV[2]}"
+            sha1 = self.client.script_load(script)
+            self.assertEquals(self.client.evalsha(sha1,
+                                                  ['key1'], ['arg1', 'arg2']),
+                              ['key1', 'arg1', 'arg2'])
+
+        def test_no_script(self):
+            sha1 = hashlib.sha1('return "hello"').hexdigest()
+            self.assertRaises(NoScriptError, self.client.evalsha, sha1)
+
+        def test_script_exists(self):
+            """
+            Test checking for existence of scripts.
+            """
+            sha1a = hashlib.sha1(TEST_SCRIPT).hexdigest()
+            sha1b = '250e77f12a5ab6972a0895d290c4792f0a326ea8'
+            self.client.script_load(TEST_SCRIPT)
+            self.assertEquals(self.client.script_exists(sha1a, sha1b),
+                              [True, False])
+
+        def test_script_flush(self):
+            """
+            Test flushing the script cache
+            """
+            script = "return {KEYS[1],ARGV[1],ARGV[2]}"
+            sha1a = hashlib.sha1(script).hexdigest()
+            sha1b = hashlib.sha1(TEST_SCRIPT).hexdigest()
+            self.client.script_load(script)
+            self.client.script_load(TEST_SCRIPT)
+            self.assertEquals(self.client.script_exists(sha1a, sha1b),
+                              [True, True])
+            self.client.script_flush()
+            self.assertEquals(self.client.script_exists(sha1a, sha1b),
+                              [False, False])
+
+        def test_script_kill(self):
+            self.assertRaises(ResponseError, self.client.script_kill)
