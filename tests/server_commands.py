@@ -8,6 +8,10 @@ from distutils.version import StrictVersion
 from redis.client import parse_info
 from redis.exceptions import ResponseError, NoScriptError
 
+r = redis.Redis(host='localhost', port=6379)
+redis_version = [int(n) for n in r.info()['redis_version'].split('.')]
+del r
+
 
 TEST_SCRIPT = """if redis.call("exists",KEYS[1]) == 1
 then
@@ -1324,10 +1328,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client.set('a', data)
         self.assertEquals(self.client.get('a'), data)
 
-
-    r = redis.Redis(host='localhost', port=6379)
-    version = [int(n) for n in r.info()['redis_version'].split('.')]
-    if version >= [2, 5, 9]:
+    if redis_version >= [2, 5, 9]:
 
         def test_script_load(self):
             """
