@@ -186,15 +186,17 @@ class StrictRedis(object):
 
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
-                 connection_pool=None,
-                 charset='utf-8', errors='strict', unix_socket_path=None):
+                 connection_pool=None, charset='utf-8',
+                 errors='strict', decode_responses=False,
+                 unix_socket_path=None):
         if not connection_pool:
             kwargs = {
                 'db': db,
                 'password': password,
                 'socket_timeout': socket_timeout,
                 'encoding': charset,
-                'encoding_errors': errors
+                'encoding_errors': errors,
+                'decode_responses': decode_responses,
                 }
             # based on input, setup appropriate connection args
             if unix_socket_path:
@@ -391,6 +393,13 @@ class StrictRedis(object):
         """
         return self.execute_command('APPEND', key, value)
 
+    def getrange(self, key, start, end):
+        """
+        Returns the substring of the string value stored at ``key``,
+        determined by the offsets ``start`` and ``end`` (both are inclusive)
+        """
+        return self.execute_command('GETRANGE', key, start, end)
+
     def decr(self, name, amount=1):
         """
         Decrements the value of ``key`` by ``amount``.  If no key exists,
@@ -404,7 +413,12 @@ class StrictRedis(object):
     __contains__ = exists
 
     def expire(self, name, time):
-        "Set an expire flag on key ``name`` for ``time`` seconds"
+        """
+        Set an expire flag on key ``name`` for ``time`` seconds. ``time``
+        can be represented by an integer or a Python timedelta object.
+        """
+        if isinstance(time, datetime.timedelta):
+            time = int(time.total_seconds())
         return self.execute_command('EXPIRE', name, time)
 
     def expireat(self, name, when):
@@ -515,9 +529,12 @@ class StrictRedis(object):
 
     def setex(self, name, time, value):
         """
-        Set the value of key ``name`` to ``value``
-        that expires in ``time`` seconds
+        Set the value of key ``name`` to ``value`` that expires in ``time``
+        seconds. ``time`` can be represented by an integer or a Python
+        timedelta object.
         """
+        if isinstance(time, datetime.timedelta):
+            time = int(time.total_seconds())
         return self.execute_command('SETEX', name, time, value)
 
     def setnx(self, name, value):
@@ -898,7 +915,7 @@ class StrictRedis(object):
         ``score_cast_func`` a callable used to cast the score return value
         """
         if desc:
-            return self.zrevrange(name, start, end, withscores)
+            return self.zrevrange(name, start, end, withscores, score_cast_func)
         pieces = ['ZRANGE', name, start, end]
         if withscores:
             pieces.append('withscores')
@@ -1186,9 +1203,12 @@ class Redis(StrictRedis):
 
     def setex(self, name, value, time):
         """
-        Set the value of key ``name`` to ``value``
-        that expires in ``time`` seconds
+        Set the value of key ``name`` to ``value`` that expires in ``time``
+        seconds. ``time`` can be represented by an integer or a Python
+        timedelta object.
         """
+        if isinstance(time, datetime.timedelta):
+            time = int(time.total_seconds())
         return self.execute_command('SETEX', name, time, value)
 
     def lrem(self, name, value, num=0):
@@ -1267,11 +1287,20 @@ class PubSub(object):
 
     def reset(self):
         if self.connection:
+            self.connection.disconnect()
             self.connection_pool.release(self.connection)
             self.connection = None
 
+    def close(self):
+        self.reset()
+
     def execute_command(self, *args, **kwargs):
         "Execute a publish/subscribe command"
+
+        # NOTE: don't parse the response in this function. it could pull a
+        # legitmate message off the stack if the connection is already
+        # subscribed to one or more channels
+
         if self.connection is None:
             self.connection = self.connection_pool.get_connection(
                 'pubsub',
@@ -1280,7 +1309,6 @@ class PubSub(object):
         connection = self.connection
         try:
             connection.send_command(*args)
-            return self.parse_response()
         except ConnectionError:
             connection.disconnect()
             # Connect manually here. If the Redis server is down, this will
@@ -1293,7 +1321,6 @@ class PubSub(object):
             for pattern in self.patterns:
                 self.psubscribe(pattern)
             connection.send_command(*args)
-            return self.parse_response()
 
     def parse_response(self):
         "Parse the response from a publish/subscribe command"
@@ -1352,7 +1379,7 @@ class PubSub(object):
 
     def listen(self):
         "Listen for messages on channels this client has been subscribed to"
-        while self.subscription_count:
+        while self.subscription_count or self.channels or self.patterns:
             r = self.parse_response()
             if r[0] == 'pmessage':
                 msg = {

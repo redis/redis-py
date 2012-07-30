@@ -1,3 +1,20 @@
+* 2.6.0
+    * Changed (p)subscribe and (p)unsubscribe to no longer return messages
+      indicating the channel was subscribed/unsubscribed to. These messages
+      are available in the listen() loop instead. This is to prevent the
+      following scenario:
+        * Client A is subscribed to "foo"
+        * Client B publishes message to "foo"
+        * Client A subscribes to channel "bar" at the same time.
+      Prior to this change, the subscribe() call would return the published
+      messages on "foo" rather than the subscription confirmation to "bar".
+    * Added support for GETRANGE, thanks Jean-Philippe Caruana
+    * A new setting "decode_responses" specifies whether return values from
+      Redis commands get decoded automatically using the client's charset
+      value. Thanks to Frankie Dintino for the patch.
+* 2.4.13
+    * redis.from_url() can take an URL representing a Redis connection string
+      and return a client object. Thanks Kenneth Reitz for the patch.
 * 2.4.12
     * ConnectionPool is now fork-safe. Thanks Josiah Carson for the patch.
 * 2.4.11

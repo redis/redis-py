@@ -59,8 +59,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.get('byte_string'), byte_string)
         self.assertEquals(self.client.get('integer'), str(integer))
         self.assertEquals(
-                self.client.get('unicode_string').decode('utf-8'),
-                unicode_string)
+            self.client.get('unicode_string').decode('utf-8'),
+            unicode_string)
 
     def test_getitem_and_setitem(self):
         self.client['a'] = 'bar'
@@ -135,6 +135,12 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client['a'], 'a1')
         self.assert_(self.client.append('a', 'a2'), 4)
         self.assertEquals(self.client['a'], 'a1a2')
+
+    def test_getrange(self):
+        self.client['a'] = 'foo'
+        self.assertEquals(self.client.getrange('a', 0, 0), 'f')
+        self.assertEquals(self.client.getrange('a', 0, 2), 'foo')
+        self.assertEquals(self.client.getrange('a', 3, 4), '')
 
     def test_decr(self):
         self.assertEquals(self.client.decr('a'), -1)

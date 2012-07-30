@@ -24,6 +24,7 @@ except ImportError:
 class PythonParser(object):
     "Plain Python parsing class"
     MAX_READ_LENGTH = 1000000
+    encoding = None
 
     def __init__(self):
         self._fp = None
@@ -37,6 +38,8 @@ class PythonParser(object):
     def on_connect(self, connection):
         "Called when the socket connects"
         self._fp = connection._sock.makefile('rb')
+        if connection.decode_responses:
+            self.encoding = connection.encoding
 
     def on_disconnect(self):
         "Called when the socket disconnects"
@@ -82,6 +85,9 @@ class PythonParser(object):
 
         byte, response = response[0], response[1:]
 
+        if byte not in ('-', '+', ':', '$', '*'):
+            raise InvalidResponse("Protocol Error")
+
         # server returned an error
         if byte == '-':
             if response.startswith('ERR '):
@@ -95,24 +101,25 @@ class PythonParser(object):
                 raise NoScriptError(response[9:])
         # single value
         elif byte == '+':
-            return response
+            pass
         # int value
         elif byte == ':':
-            return long(response)
+            response = long(response)
         # bulk response
         elif byte == '$':
             length = int(response)
             if length == -1:
                 return None
             response = self.read(length)
-            return response
         # multi-bulk response
         elif byte == '*':
             length = int(response)
             if length == -1:
                 return None
-            return [self.read_response() for i in xrange(length)]
-        raise InvalidResponse("Protocol Error")
+            response = [self.read_response() for i in xrange(length)]
+        if isinstance(response, str) and self.encoding:
+            response = response.decode(self.encoding)
+        return response
 
 class HiredisParser(object):
     "Parser class for connections using Hiredis"
@@ -128,9 +135,13 @@ class HiredisParser(object):
 
     def on_connect(self, connection):
         self._sock = connection._sock
-        self._reader = hiredis.Reader(
-            protocolError=InvalidResponse,
-            replyError=ResponseError)
+        kwargs = {
+            'protocolError': InvalidResponse,
+            'replyError': ResponseError,
+        }
+        if connection.decode_responses:
+            kwargs['encoding'] = connection.encoding
+        self._reader = hiredis.Reader(**kwargs)
 
     def on_disconnect(self):
         self._sock = None
@@ -166,7 +177,8 @@ class Connection(object):
     "Manages TCP communication to and from a Redis server"
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None, encoding='utf-8',
-                 encoding_errors='strict', parser_class=DefaultParser):
+                 encoding_errors='strict', decode_responses=False,
+                 parser_class=DefaultParser):
         self.pid = os.getpid()
         self.host = host
         self.port = port
@@ -175,6 +187,7 @@ class Connection(object):
         self.socket_timeout = socket_timeout
         self.encoding = encoding
         self.encoding_errors = encoding_errors
+        self.decode_responses = decode_responses
         self._sock = None
         self._parser = parser_class()
 
@@ -288,7 +301,8 @@ class Connection(object):
 class UnixDomainSocketConnection(Connection):
     def __init__(self, path='', db=0, password=None,
                  socket_timeout=None, encoding='utf-8',
-                 encoding_errors='strict', parser_class=DefaultParser):
+                 encoding_errors='strict', decode_responses=False,
+                 parser_class=DefaultParser):
         self.pid = os.getpid()
         self.path = path
         self.db = db
@@ -296,6 +310,7 @@ class UnixDomainSocketConnection(Connection):
         self.socket_timeout = socket_timeout
         self.encoding = encoding
         self.encoding_errors = encoding_errors
+        self.decode_responses = decode_responses
         self._sock = None
         self._parser = parser_class()
 
