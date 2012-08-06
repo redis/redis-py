@@ -20,6 +20,12 @@ except ImportError:
     hiredis_available = False
 
 
+SYM_STAR = b('*')
+SYM_DOLLAR = b('$')
+SYM_CRLF = b('\r\n')
+SYM_LF = b('\n')
+
+
 class PythonParser(object):
     "Plain Python parsing class"
     MAX_READ_LENGTH = 1000000
@@ -162,7 +168,7 @@ class HiredisParser(object):
             self._reader.feed(buffer)
             # proactively, but not conclusively, check if more data is in the
             # buffer. if the data received doesn't end with \n, there's more.
-            if not buffer.endswith(b('\n')):
+            if not buffer.endswith(SYM_LF):
                 continue
             response = self._reader.gets()
         return response
@@ -300,17 +306,14 @@ class Connection(object):
 
     def pack_command(self, *args):
         "Pack a series of arguments into a value Redis command"
-        output = BytesIO()
-        output.write(b('*'))
-        output.write(b(str(len(args))))
-        output.write(b('\r\n'))
+        output = SYM_STAR + b(str(len(args))) + SYM_CRLF
         for enc_value in imap(self.encode, args):
-            output.write(b('$'))
-            output.write(b(str(len(enc_value))))
-            output.write(b('\r\n'))
-            output.write(enc_value)
-            output.write(b('\r\n'))
-        return output.getvalue()
+            output += SYM_DOLLAR
+            output += b(str(len(enc_value)))
+            output += SYM_CRLF
+            output += enc_value
+            output += SYM_CRLF
+        return output
 
 
 class UnixDomainSocketConnection(Connection):

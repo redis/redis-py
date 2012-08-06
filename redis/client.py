@@ -15,6 +15,8 @@ from redis.exceptions import (
     WatchError,
 )
 
+SYM_EMPTY = b('')
+
 
 def list_or_args(keys, args):
     # returns a single list combining keys and args
@@ -1500,8 +1502,9 @@ class BasePipeline(object):
         return self
 
     def _execute_transaction(self, connection, commands):
-        all_cmds = b('').join(starmap(connection.pack_command,
-                                      [args for args, options in commands]))
+        all_cmds = SYM_EMPTY.join(
+            starmap(connection.pack_command,
+                    [args for args, options in commands]))
         connection.send_packed_command(all_cmds)
         # we don't care about the multi/exec any longer
         commands = commands[1:-1]
@@ -1532,8 +1535,9 @@ class BasePipeline(object):
 
     def _execute_pipeline(self, connection, commands):
         # build up all commands into a single request to increase network perf
-        all_cmds = b('').join(starmap(connection.pack_command,
-                                      [args for args, options in commands]))
+        all_cmds = SYM_EMPTY.join(
+            starmap(connection.pack_command,
+                    [args for args, options in commands]))
         connection.send_packed_command(all_cmds)
         return [self.parse_response(connection, args[0], **options)
                 for args, options in commands]
