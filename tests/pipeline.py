@@ -1,6 +1,8 @@
 from __future__ import with_statement
-import redis
 import unittest
+
+import redis
+
 
 class PipelineTestCase(unittest.TestCase):
     def setUp(self):
@@ -14,7 +16,8 @@ class PipelineTestCase(unittest.TestCase):
         with self.client.pipeline() as pipe:
             pipe.set('a', 'a1').get('a').zadd('z', z1=1).zadd('z', z2=4)
             pipe.zincrby('z', 'z1').zrange('z', 0, 5, withscores=True)
-            self.assertEquals(pipe.execute(),
+            self.assertEquals(
+                pipe.execute(),
                 [
                     True,
                     'a1',
@@ -23,7 +26,7 @@ class PipelineTestCase(unittest.TestCase):
                     2.0,
                     [('z1', 2.0), ('z2', 4)],
                 ]
-                )
+            )
 
     def test_pipeline_no_transaction(self):
         with self.client.pipeline(transaction=False) as pipe:
@@ -139,7 +142,7 @@ class PipelineTestCase(unittest.TestCase):
                 has_run.append('it has')
 
             pipe.multi()
-            pipe.set('c', int(a)+int(b))
+            pipe.set('c', int(a) + int(b))
 
         result = self.client.transaction(my_transaction, 'a', 'b')
         self.assertEquals(result, [True])
