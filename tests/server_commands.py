@@ -1,13 +1,14 @@
-import redis
+from string import letters
+from distutils.version import StrictVersion
 import unittest
 import datetime
 import time
-from string import letters
-from distutils.version import StrictVersion
+
 from redis.client import parse_info
+import redis
+
 
 class ServerCommandsTestCase(unittest.TestCase):
-
     def get_client(self, cls=redis.Redis):
         return cls(host='localhost', port=6379, db=9)
 
@@ -78,7 +79,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(
             self.client.config_get()['dbfilename'],
             'redis_py_test.rdb'
-            )
+        )
         self.assert_(self.client.config_set('dbfilename', rdbname))
         self.assertEquals(self.client.config_get()['dbfilename'], rdbname)
 
@@ -193,7 +194,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         keys = set(['test_a', 'test_b', 'testc'])
         for key in keys:
             self.client[key] = 1
-        self.assertEquals(set(self.client.keys(pattern='test_*')),
+        self.assertEquals(
+            set(self.client.keys(pattern='test_*')),
             keys - set(['testc']))
         self.assertEquals(set(self.client.keys(pattern='test*')), keys)
 
@@ -202,7 +204,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client['a'] = '1'
         self.client['b'] = '2'
         self.client['c'] = '3'
-        self.assertEquals(self.client.mget(['a', 'other', 'b', 'c']),
+        self.assertEquals(
+            self.client.mget(['a', 'other', 'b', 'c']),
             ['1', None, '2', '3'])
 
     def test_mset(self):
@@ -273,7 +276,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.substr('a', 2), 'cdefghi')
         self.assertEquals(self.client.substr('a', 3, 5), 'def')
         self.assertEquals(self.client.substr('a', 3, -2), 'defgh')
-        self.client['a'] = 123456 # does substr work with ints?
+        self.client['a'] = 123456  # does substr work with ints?
         self.assertEquals(self.client.substr('a', 2, -2), '345')
 
     def test_type(self):
@@ -346,15 +349,17 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client['a'] = 'b'
         self.assertRaises(
             redis.ResponseError, self.client.linsert, 'a', 'after', 'x', 'y'
-            )
+        )
         del self.client['a']
         # real logic
         self.make_list('a', 'abc')
         self.assertEquals(self.client.linsert('a', 'after', 'b', 'b1'), 4)
-        self.assertEquals(self.client.lrange('a', 0, -1),
+        self.assertEquals(
+            self.client.lrange('a', 0, -1),
             ['a', 'b', 'b1', 'c'])
         self.assertEquals(self.client.linsert('a', 'before', 'b', 'a1'), 5)
-        self.assertEquals(self.client.lrange('a', 0, -1),
+        self.assertEquals(
+            self.client.lrange('a', 0, -1),
             ['a', 'a1', 'b', 'b1', 'c'])
 
     def test_llen(self):
@@ -500,7 +505,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.make_list('b', ['b1', 'b2', 'b3'])
         self.assertEquals(self.client.rpoplpush('a', 'b'), 'a3')
         self.assertEquals(self.client.lrange('a', 0, 2), ['a1', 'a2'])
-        self.assertEquals(self.client.lrange('b', 0, 4),
+        self.assertEquals(
+            self.client.lrange('b', 0, 4),
             ['a3', 'b1', 'b2', 'b3'])
 
     def test_rpush(self):
@@ -569,7 +575,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         # some key is not a set
         self.make_set('a', ['a1', 'a2', 'a3'])
         self.client['b'] = 'b'
-        self.assertRaises(redis.ResponseError, self.client.sdiffstore,
+        self.assertRaises(
+            redis.ResponseError, self.client.sdiffstore,
             'c', ['a', 'b'])
         del self.client['b']
         self.make_set('b', ['b1', 'a2', 'b3'])
@@ -593,7 +600,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         # some key is not a set
         self.make_set('a', ['a1', 'a2', 'a3'])
         self.client['b'] = 'b'
-        self.assertRaises(redis.ResponseError, self.client.sinterstore,
+        self.assertRaises(
+            redis.ResponseError, self.client.sinterstore,
             'c', ['a', 'b'])
         del self.client['b']
         self.make_set('b', ['a1', 'b2', 'a3'])
@@ -632,14 +640,16 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.smove('a', 'b', 'a1'), 0)
         # src key is not a set
         self.client['a'] = 'a'
-        self.assertRaises(redis.ResponseError, self.client.smove,
+        self.assertRaises(
+            redis.ResponseError, self.client.smove,
             'a', 'b', 'a1')
         del self.client['a']
         self.make_set('a', ['a1', 'a2'])
         # dest key is not a set
         del self.client['b']
         self.client['b'] = 'b'
-        self.assertRaises(redis.ResponseError, self.client.smove,
+        self.assertRaises(
+            redis.ResponseError, self.client.smove,
             'a', 'b', 'a1')
         del self.client['b']
         self.make_set('b', ['b1', 'b2'])
@@ -693,14 +703,16 @@ class ServerCommandsTestCase(unittest.TestCase):
         del self.client['b']
         # real logic
         self.make_set('b', ['a1', 'b2', 'a3'])
-        self.assertEquals(self.client.sunion(['a', 'b']),
+        self.assertEquals(
+            self.client.sunion(['a', 'b']),
             set(['a1', 'a2', 'a3', 'b2']))
 
     def test_sunionstore(self):
         # some key is not a set
         self.make_set('a', ['a1', 'a2', 'a3'])
         self.client['b'] = 'b'
-        self.assertRaises(redis.ResponseError, self.client.sunionstore,
+        self.assertRaises(
+            redis.ResponseError, self.client.sunionstore,
             'c', ['a', 'b'])
         del self.client['b']
         self.make_set('b', ['a1', 'b2', 'a3'])
@@ -708,7 +720,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         # test for that
         # real logic
         self.assertEquals(self.client.sunionstore('c', ['a', 'b']), 4)
-        self.assertEquals(self.client.smembers('c'),
+        self.assertEquals(
+            self.client.smembers('c'),
             set(['a1', 'a2', 'a3', 'b2']))
 
     # SORTED SETS
@@ -762,23 +775,23 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(
             self.client.zrange('z', 0, -1, withscores=True),
             [('a3', 8), ('a1', 9)]
-            )
+        )
 
         # max, no weight
         self.assert_(
             self.client.zinterstore('z', ['a', 'b', 'c'], aggregate='MAX')
-            )
+        )
         self.assertEquals(
             self.client.zrange('z', 0, -1, withscores=True),
             [('a3', 5), ('a1', 6)]
-            )
+        )
 
         # with weight
         self.assert_(self.client.zinterstore('z', {'a': 1, 'b': 2, 'c': 3}))
         self.assertEquals(
             self.client.zrange('z', 0, -1, withscores=True),
             [('a3', 20), ('a1', 23)]
-            )
+        )
 
     def test_zrange(self):
         # key is not a zset
@@ -789,13 +802,16 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3})
         self.assertEquals(self.client.zrange('a', 0, 1), ['a1', 'a2'])
         self.assertEquals(self.client.zrange('a', 1, 2), ['a2', 'a3'])
-        self.assertEquals(self.client.zrange('a', 0, 1, withscores=True),
+        self.assertEquals(
+            self.client.zrange('a', 0, 1, withscores=True),
             [('a1', 1.0), ('a2', 2.0)])
-        self.assertEquals(self.client.zrange('a', 1, 2, withscores=True),
+        self.assertEquals(
+            self.client.zrange('a', 1, 2, withscores=True),
             [('a2', 2.0), ('a3', 3.0)])
         # test a custom score casting function returns the correct value
         self.assertEquals(
-            self.client.zrange('a', 0, 1, withscores=True, score_cast_func=int),
+            self.client.zrange('a', 0, 1, withscores=True,
+                               score_cast_func=int),
             [('a1', 1), ('a2', 2)])
         # a non existant key should return empty list
         self.assertEquals(self.client.zrange('b', 0, 1, withscores=True), [])
@@ -803,19 +819,24 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_zrangebyscore(self):
         # key is not a zset
         self.client['a'] = 'a'
-        self.assertRaises(redis.ResponseError, self.client.zrangebyscore,
+        self.assertRaises(
+            redis.ResponseError, self.client.zrangebyscore,
             'a', 0, 1)
         del self.client['a']
         # real logic
         self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3, 'a4': 4, 'a5': 5})
-        self.assertEquals(self.client.zrangebyscore('a', 2, 4),
+        self.assertEquals(
+            self.client.zrangebyscore('a', 2, 4),
             ['a2', 'a3', 'a4'])
-        self.assertEquals(self.client.zrangebyscore('a', 2, 4, start=1, num=2),
+        self.assertEquals(
+            self.client.zrangebyscore('a', 2, 4, start=1, num=2),
             ['a3', 'a4'])
-        self.assertEquals(self.client.zrangebyscore('a', 2, 4, withscores=True),
+        self.assertEquals(
+            self.client.zrangebyscore('a', 2, 4, withscores=True),
             [('a2', 2.0), ('a3', 3.0), ('a4', 4.0)])
         # a non existant key should return empty list
-        self.assertEquals(self.client.zrangebyscore('b', 0, 1, withscores=True), [])
+        self.assertEquals(
+            self.client.zrangebyscore('b', 0, 1, withscores=True), [])
 
     def test_zrank(self):
         # key is not a zset
@@ -847,7 +868,8 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_zremrangebyrank(self):
         # key is not a zset
         self.client['a'] = 'a'
-        self.assertRaises(redis.ResponseError, self.client.zremrangebyscore,
+        self.assertRaises(
+            redis.ResponseError, self.client.zremrangebyscore,
             'a', 0, 1)
         del self.client['a']
         # real logic
@@ -858,7 +880,8 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_zremrangebyscore(self):
         # key is not a zset
         self.client['a'] = 'a'
-        self.assertRaises(redis.ResponseError, self.client.zremrangebyscore,
+        self.assertRaises(
+            redis.ResponseError, self.client.zremrangebyscore,
             'a', 0, 1)
         del self.client['a']
         # real logic
@@ -871,16 +894,19 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_zrevrange(self):
         # key is not a zset
         self.client['a'] = 'a'
-        self.assertRaises(redis.ResponseError, self.client.zrevrange,
+        self.assertRaises(
+            redis.ResponseError, self.client.zrevrange,
             'a', 0, 1)
         del self.client['a']
         # real logic
         self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3})
         self.assertEquals(self.client.zrevrange('a', 0, 1), ['a3', 'a2'])
         self.assertEquals(self.client.zrevrange('a', 1, 2), ['a2', 'a1'])
-        self.assertEquals(self.client.zrevrange('a', 0, 1, withscores=True),
+        self.assertEquals(
+            self.client.zrevrange('a', 0, 1, withscores=True),
             [('a3', 3.0), ('a2', 2.0)])
-        self.assertEquals(self.client.zrevrange('a', 1, 2, withscores=True),
+        self.assertEquals(
+            self.client.zrevrange('a', 1, 2, withscores=True),
             [('a2', 2.0), ('a1', 1.0)])
         # a non existant key should return empty list
         self.assertEquals(self.client.zrange('b', 0, 1, withscores=True), [])
@@ -888,7 +914,8 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_zrevrangebyscore(self):
         # key is not a zset
         self.client['a'] = 'a'
-        self.assertRaises(redis.ResponseError, self.client.zrevrangebyscore,
+        self.assertRaises(
+            redis.ResponseError, self.client.zrevrangebyscore,
             'a', 0, 1)
         del self.client['a']
         # real logic
@@ -943,23 +970,23 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(
             self.client.zrange('z', 0, -1, withscores=True),
             [('a2', 1), ('a3', 3), ('a5', 4), ('a4', 7), ('a1', 9)]
-            )
+        )
 
         # max, no weight
         self.assert_(
             self.client.zunionstore('z', ['a', 'b', 'c'], aggregate='MAX')
-            )
+        )
         self.assertEquals(
             self.client.zrange('z', 0, -1, withscores=True),
             [('a2', 1), ('a3', 2), ('a5', 4), ('a4', 5), ('a1', 6)]
-            )
+        )
 
         # with weight
         self.assert_(self.client.zunionstore('z', {'a': 1, 'b': 2, 'c': 3}))
         self.assertEquals(
             self.client.zrange('z', 0, -1, withscores=True),
             [('a2', 1), ('a3', 5), ('a5', 12), ('a4', 19), ('a1', 23)]
-            )
+        )
 
     # HASHES
     def make_hash(self, key, d):
@@ -1007,7 +1034,8 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_hmget(self):
         d = {'a': 1, 'b': 2, 'c': 3}
         self.assert_(self.client.hmset('foo', d))
-        self.assertEqual(self.client.hmget('foo', ['a', 'b', 'c']), ['1', '2', '3'])
+        self.assertEqual(
+            self.client.hmget('foo', ['a', 'b', 'c']), ['1', '2', '3'])
         self.assertEqual(self.client.hmget('foo', ['a', 'c']), ['1', '3'])
         # using *args type args
         self.assertEquals(self.client.hmget('foo', 'a', 'c'), ['1', '3'])
@@ -1143,7 +1171,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client['score:2'] = 3
         self.client['score:3'] = 5
         self.make_list('a_values', '123')
-        self.assertEquals(self.client.sort('a_values', by='score:*'),
+        self.assertEquals(
+            self.client.sort('a_values', by='score:*'),
             ['2', '3', '1'])
 
     def test_sort_get(self):
@@ -1151,7 +1180,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client['user:2'] = 'u2'
         self.client['user:3'] = 'u3'
         self.make_list('a', '231')
-        self.assertEquals(self.client.sort('a', get='user:*'),
+        self.assertEquals(
+            self.client.sort('a', get='user:*'),
             ['u1', 'u2', 'u3'])
 
     def test_sort_get_multi(self):
@@ -1159,7 +1189,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client['user:2'] = 'u2'
         self.client['user:3'] = 'u3'
         self.make_list('a', '231')
-        self.assertEquals(self.client.sort('a', get=('user:*', '#')),
+        self.assertEquals(
+            self.client.sort('a', get=('user:*', '#')),
             ['u1', '1', 'u2', '2', 'u3', '3'])
 
     def test_sort_desc(self):
@@ -1168,13 +1199,15 @@ class ServerCommandsTestCase(unittest.TestCase):
 
     def test_sort_alpha(self):
         self.make_list('a', 'ecbda')
-        self.assertEquals(self.client.sort('a', alpha=True),
+        self.assertEquals(
+            self.client.sort('a', alpha=True),
             ['a', 'b', 'c', 'd', 'e'])
 
     def test_sort_store(self):
         self.make_list('a', '231')
         self.assertEquals(self.client.sort('a', store='sorted_values'), 3)
-        self.assertEquals(self.client.lrange('sorted_values', 0, 5),
+        self.assertEquals(
+            self.client.lrange('sorted_values', 0, 5),
             ['1', '2', '3'])
 
     def test_sort_all_options(self):
@@ -1197,10 +1230,12 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client['user:8:favorite_drink'] = 'apple juice'
 
         self.make_list('gods', '12345678')
-        num = self.client.sort('gods', start=2, num=4, by='user:*:username',
+        num = self.client.sort(
+            'gods', start=2, num=4, by='user:*:username',
             get='user:*:favorite_drink', desc=True, alpha=True, store='sorted')
         self.assertEquals(num, 4)
-        self.assertEquals(self.client.lrange('sorted', 0, 10),
+        self.assertEquals(
+            self.client.lrange('sorted', 0, 10),
             ['vodka', 'milk', 'gin', 'apple juice'])
 
     def test_strict_zadd(self):
@@ -1247,7 +1282,9 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertTrue(self.client.set(' \r\n\t\x07\x13 ', '789'))
         self.assertEqual(self.client.get(' \r\n\t\x07\x13 '), '789')
 
-        self.assertEqual(sorted(self.client.keys('*')), [' \r\n\t\x07\x13 ', ' foo\r\nbar\r\n ', ' foo bar '])
+        self.assertEqual(
+            sorted(self.client.keys('*')),
+            [' \r\n\t\x07\x13 ', ' foo\r\nbar\r\n ', ' foo bar '])
 
         self.assertTrue(self.client.delete(' foo bar '))
         self.assertTrue(self.client.delete(' foo\r\nbar\r\n '))
@@ -1268,7 +1305,8 @@ class ServerCommandsTestCase(unittest.TestCase):
 
         # check that it is possible to get list content by key name
         for key in mapping.keys():
-            self.assertEqual(self.client.lrange(key, 0, -1), list(mapping[key]))
+            self.assertEqual(self.client.lrange(key, 0, -1),
+                             list(mapping[key]))
 
     def test_22_info(self):
         """
@@ -1282,22 +1320,23 @@ class ServerCommandsTestCase(unittest.TestCase):
                "34=169,35=201,36=10155,37=1045,38=15078,39=22985,40=12523," \
                "41=15588,42=265,43=1287,44=142,45=382,46=945,47=426,48=171," \
                "49=56,50=516,51=43,52=41,53=46,54=54,55=75,56=647,57=332," \
-               "58=32,59=39,60=48,61=35,62=62,63=32,64=221,65=26,66=30,67=36," \
-               "68=41,69=44,70=26,71=144,72=169,73=24,74=37,75=25,76=42," \
-               "77=21,78=126,79=374,80=27,81=40,82=43,83=47,84=46,85=114," \
-               "86=34,87=37,88=7240,89=34,90=38,91=18,92=99,93=20,94=18," \
-               "95=17,96=15,97=22,98=18,99=69,100=17,101=22,102=15,103=29," \
-               "104=39,105=30,106=70,107=22,108=21,109=26,110=52,111=45," \
-               "112=33,113=67,114=41,115=44,116=48,117=53,118=54,119=51," \
-               "120=75,121=44,122=57,123=44,124=66,125=56,126=52,127=81," \
-               "128=108,129=70,130=50,131=51,132=53,133=45,134=62,135=12," \
-               "136=13,137=7,138=15,139=21,140=11,141=20,142=6,143=7,144=11," \
-               "145=6,146=16,147=19,148=1112,149=1,151=83,154=1,155=1,156=1," \
-               "157=1,160=1,161=1,162=2,166=1,169=1,170=1,171=2,172=1,174=1," \
-               "176=2,177=9,178=34,179=73,180=30,181=1,185=3,187=1,188=1," \
-               "189=1,192=1,196=1,198=1,200=1,201=1,204=1,205=1,207=1,208=1," \
-               "209=1,214=2,215=31,216=78,217=28,218=5,219=2,220=1,222=1," \
-               "225=1,227=1,234=1,242=1,250=1,252=1,253=1,>=256=203"
+               "58=32,59=39,60=48,61=35,62=62,63=32,64=221,65=26,66=30," \
+               "67=36,68=41,69=44,70=26,71=144,72=169,73=24,74=37,75=25," \
+               "76=42,77=21,78=126,79=374,80=27,81=40,82=43,83=47,84=46," \
+               "85=114,86=34,87=37,88=7240,89=34,90=38,91=18,92=99,93=20," \
+               "94=18,95=17,96=15,97=22,98=18,99=69,100=17,101=22,102=15," \
+               "103=29,104=39,105=30,106=70,107=22,108=21,109=26,110=52," \
+               "111=45,112=33,113=67,114=41,115=44,116=48,117=53,118=54," \
+               "119=51,120=75,121=44,122=57,123=44,124=66,125=56,126=52," \
+               "127=81,128=108,129=70,130=50,131=51,132=53,133=45,134=62," \
+               "135=12,136=13,137=7,138=15,139=21,140=11,141=20,142=6,143=7," \
+               "144=11,145=6,146=16,147=19,148=1112,149=1,151=83,154=1," \
+               "155=1,156=1,157=1,160=1,161=1,162=2,166=1,169=1,170=1,171=2," \
+               "172=1,174=1,176=2,177=9,178=34,179=73,180=30,181=1,185=3," \
+               "187=1,188=1,189=1,192=1,196=1,198=1,200=1,201=1,204=1,205=1," \
+               "207=1,208=1,209=1,214=2,215=31,216=78,217=28,218=5,219=2," \
+               "220=1,222=1,225=1,227=1,234=1,242=1,250=1,252=1,253=1," \
+               ">=256=203"
         parsed = parse_info(info)
         self.assert_('allocation_stats' in parsed)
         self.assert_('6' in parsed['allocation_stats'])
@@ -1307,7 +1346,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         "The PythonParser has some special cases for return values > 1MB"
         # load up 5MB of data into a key
         data = []
-        for i in range(5000000/len(letters)):
+        for i in range(5000000 / len(letters)):
             data.append(letters)
         data = ''.join(data)
         self.client.set('a', data)
