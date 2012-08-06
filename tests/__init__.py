@@ -1,4 +1,5 @@
 import unittest
+
 from server_commands import ServerCommandsTestCase
 from connection_pool import ConnectionPoolTestCase
 from pipeline import PipelineTestCase
@@ -6,12 +7,12 @@ from lock import LockTestCase
 from pubsub import PubSubTestCase, PubSubRedisDownTestCase
 from encoding import PythonParserEncodingTestCase, HiredisEncodingTestCase
 
-use_hiredis = False
 try:
     import hiredis
     use_hiredis = True
 except ImportError:
-    pass
+    use_hiredis = False
+
 
 def all_tests():
     suite = unittest.TestSuite()

@@ -1,6 +1,7 @@
 import os
 import socket
 from itertools import chain, imap
+
 from redis.exceptions import (
     RedisError,
     ConnectionError,
@@ -19,6 +20,7 @@ try:
     hiredis_available = True
 except ImportError:
     hiredis_available = False
+
 
 class PythonParser(object):
     "Plain Python parsing class"
@@ -53,7 +55,7 @@ class PythonParser(object):
         """
         try:
             if length is not None:
-                bytes_left = length + 2 # read the line ending
+                bytes_left = length + 2  # read the line ending
                 if length > self.MAX_READ_LENGTH:
                     # apparently reading more than 1MB or so from a windows
                     # socket can cause MemoryErrors. See:
@@ -74,8 +76,8 @@ class PythonParser(object):
             # no length, read a full line
             return self._fp.readline()[:-2]
         except (socket.error, socket.timeout), e:
-            raise ConnectionError("Error while reading from socket: %s" % \
-                (e.args,))
+            raise ConnectionError("Error while reading from socket: %s" %
+                                  (e.args,))
 
     def read_response(self):
         response = self.read()
@@ -118,6 +120,7 @@ class PythonParser(object):
             response = response.decode(self.encoding)
         return response
 
+
 class HiredisParser(object):
     "Parser class for connections using Hiredis"
     def __init__(self):
@@ -152,8 +155,8 @@ class HiredisParser(object):
             try:
                 buffer = self._sock.recv(4096)
             except (socket.error, socket.timeout), e:
-                raise ConnectionError("Error while reading from socket: %s" % \
-                    (e.args,))
+                raise ConnectionError("Error while reading from socket: %s" %
+                                      (e.args,))
             if not buffer:
                 raise ConnectionError("Socket closed on remote end")
             self._reader.feed(buffer)
@@ -262,8 +265,8 @@ class Connection(object):
                 _errno, errmsg = 'UNKNOWN', e.args[0]
             else:
                 _errno, errmsg = e.args
-            raise ConnectionError("Error %s while writing to socket. %s." % \
-                (_errno, errmsg))
+            raise ConnectionError("Error %s while writing to socket. %s." %
+                                  (_errno, errmsg))
         except:
             self.disconnect()
             raise
@@ -294,6 +297,7 @@ class Connection(object):
         command = ['$%s\r\n%s\r\n' % (len(enc_value), enc_value)
                    for enc_value in imap(self.encode, args)]
         return '*%s\r\n%s' % (len(command), ''.join(command))
+
 
 class UnixDomainSocketConnection(Connection):
     def __init__(self, path='', db=0, password=None,
@@ -337,7 +341,7 @@ class ConnectionPool(object):
         self.pid = os.getpid()
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
-        self.max_connections = max_connections or 2**31
+        self.max_connections = max_connections or 2 ** 31
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()
@@ -345,7 +349,8 @@ class ConnectionPool(object):
     def _checkpid(self):
         if self.pid != os.getpid():
             self.disconnect()
-            self.__init__(self.connection_class, self.max_connections, **self.connection_kwargs)
+            self.__init__(self.connection_class, self.max_connections,
+                          **self.connection_kwargs)
 
     def get_connection(self, command_name, *keys, **options):
         "Get a connection from the pool"
@@ -373,6 +378,7 @@ class ConnectionPool(object):
 
     def disconnect(self):
         "Disconnects all connections in the pool"
-        all_conns = chain(self._available_connections, self._in_use_connections)
+        all_conns = chain(self._available_connections,
+                          self._in_use_connections)
         for connection in all_conns:
             connection.disconnect()

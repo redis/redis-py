@@ -3,6 +3,7 @@ import datetime
 import time
 import warnings
 from itertools import imap, izip, starmap
+
 from redis.connection import ConnectionPool, UnixDomainSocketConnection
 from redis.exceptions import (
     ConnectionError,
@@ -11,6 +12,7 @@ from redis.exceptions import (
     ResponseError,
     WatchError,
 )
+
 
 def list_or_args(keys, args):
     # returns a single list combining keys and args
@@ -26,6 +28,7 @@ def list_or_args(keys, args):
         keys.extend(args)
     return keys
 
+
 def timestamp_to_datetime(response):
     "Converts a unix timestamp to a Python datetime object"
     if not response:
@@ -36,13 +39,16 @@ def timestamp_to_datetime(response):
         return None
     return datetime.datetime.fromtimestamp(response)
 
+
 def string_keys_to_dict(key_string, callback):
     return dict.fromkeys(key_string.split(), callback)
+
 
 def dict_merge(*dicts):
     merged = {}
     [merged.update(d) for d in dicts]
     return merged
+
 
 def parse_debug_object(response):
     "Parse the results of Redis's DEBUG OBJECT command into a Python dict"
@@ -60,11 +66,13 @@ def parse_debug_object(response):
 
     return response
 
+
 def parse_object(response, infotype):
     "Parse the results of an OBJECT command"
     if infotype in ('idletime', 'refcount'):
         return int(response)
     return response
+
 
 def parse_info(response):
     "Parse the result of Redis's INFO command into a Python dict"
@@ -95,10 +103,12 @@ def parse_info(response):
                 info[key] = get_value(value)
     return info
 
+
 def pairs_to_dict(response):
     "Create a dict given a list of key/value pairs"
     it = iter(response)
     return dict(izip(it, it))
+
 
 def zset_score_pairs(response, **options):
     """
@@ -111,21 +121,25 @@ def zset_score_pairs(response, **options):
     it = iter(response)
     return zip(it, imap(score_cast_func, it))
 
+
 def int_or_none(response):
     if response is None:
         return None
     return int(response)
+
 
 def float_or_none(response):
     if response is None:
         return None
     return float(response)
 
+
 def parse_config(response, **options):
     # this is stupid, but don't have a better option right now
     if options['parse'] == 'GET':
         return response and pairs_to_dict(response) or {}
     return response == 'OK'
+
 
 class StrictRedis(object):
     """
@@ -142,35 +156,38 @@ class StrictRedis(object):
             'AUTH DEL EXISTS EXPIRE EXPIREAT HDEL HEXISTS HMSET MOVE MSETNX '
             'PERSIST RENAMENX SISMEMBER SMOVE SETEX SETNX SREM ZREM',
             bool
-            ),
+        ),
         string_keys_to_dict(
             'DECRBY GETBIT HLEN INCRBY LINSERT LLEN LPUSHX RPUSHX SADD SCARD '
             'SDIFFSTORE SETBIT SETRANGE SINTERSTORE STRLEN SUNIONSTORE ZADD '
             'ZCARD ZREMRANGEBYRANK ZREMRANGEBYSCORE',
             int
-            ),
+        ),
         string_keys_to_dict(
             # these return OK, or int if redis-server is >=1.3.4
             'LPUSH RPUSH',
             lambda r: isinstance(r, long) and r or r == 'OK'
-            ),
+        ),
         string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
         string_keys_to_dict(
             'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME '
             'SAVE SELECT SET SHUTDOWN SLAVEOF WATCH UNWATCH',
             lambda r: r == 'OK'
-            ),
+        ),
         string_keys_to_dict('BLPOP BRPOP', lambda r: r and tuple(r) or None),
-        string_keys_to_dict('SDIFF SINTER SMEMBERS SUNION',
+        string_keys_to_dict(
+            'SDIFF SINTER SMEMBERS SUNION',
             lambda r: r and set(r) or set()
-            ),
-        string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
+        ),
+        string_keys_to_dict(
+            'ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
             zset_score_pairs
-            ),
+        ),
         string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
         {
-            'BGREWRITEAOF': lambda r: \
-                r == 'Background rewriting of AOF file started',
+            'BGREWRITEAOF': (
+                lambda r: r == 'Background rewriting of AOF file started'
+            ),
             'BGSAVE': lambda r: r == 'Background saving started',
             'BRPOPLPUSH': lambda r: r and r or None,
             'CONFIG': parse_config,
@@ -182,7 +199,7 @@ class StrictRedis(object):
             'PING': lambda r: r == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
         }
-        )
+    )
 
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
@@ -197,7 +214,7 @@ class StrictRedis(object):
                 'encoding': charset,
                 'encoding_errors': errors,
                 'decode_responses': decode_responses,
-                }
+            }
             # based on input, setup appropriate connection args
             if unix_socket_path:
                 kwargs.update({
@@ -583,7 +600,8 @@ class StrictRedis(object):
         """
         Unwatches the value at key ``name``, or None of the key doesn't exist
         """
-        warnings.warn(DeprecationWarning('Call UNWATCH from a Pipeline object'))
+        warnings.warn(
+            DeprecationWarning('Call UNWATCH from a Pipeline object'))
 
     #### LIST COMMANDS ####
     def blpop(self, keys, timeout=0):
@@ -783,7 +801,6 @@ class StrictRedis(object):
             pieces.append(store)
         return self.execute_command('SORT', *pieces)
 
-
     #### SET COMMANDS ####
     def sadd(self, name, *values):
         "Add ``value(s)`` to set ``name``"
@@ -856,7 +873,6 @@ class StrictRedis(object):
         args = list_or_args(keys, args)
         return self.execute_command('SUNIONSTORE', dest, *args)
 
-
     #### SORTED SET COMMANDS ####
     def zadd(self, name, *args, **kwargs):
         """
@@ -915,15 +931,17 @@ class StrictRedis(object):
         ``score_cast_func`` a callable used to cast the score return value
         """
         if desc:
-            return self.zrevrange(name, start, end, withscores, score_cast_func)
+            return self.zrevrange(name, start, end, withscores,
+                                  score_cast_func)
         pieces = ['ZRANGE', name, start, end]
         if withscores:
             pieces.append('withscores')
-        options = {'withscores': withscores, 'score_cast_func': score_cast_func}
+        options = {
+            'withscores': withscores, 'score_cast_func': score_cast_func}
         return self.execute_command(*pieces, **options)
 
-    def zrangebyscore(self, name, min, max,
-            start=None, num=None, withscores=False, score_cast_func=float):
+    def zrangebyscore(self, name, min, max, start=None, num=None,
+                      withscores=False, score_cast_func=float):
         """
         Return a range of values from the sorted set ``name`` with scores
         between ``min`` and ``max``.
@@ -944,7 +962,8 @@ class StrictRedis(object):
             pieces.extend(['LIMIT', start, num])
         if withscores:
             pieces.append('withscores')
-        options = {'withscores': withscores, 'score_cast_func': score_cast_func}
+        options = {
+            'withscores': withscores, 'score_cast_func': score_cast_func}
         return self.execute_command(*pieces, **options)
 
     def zrank(self, name, value):
@@ -990,11 +1009,12 @@ class StrictRedis(object):
         pieces = ['ZREVRANGE', name, start, num]
         if withscores:
             pieces.append('withscores')
-        options = {'withscores': withscores, 'score_cast_func': score_cast_func}
+        options = {
+            'withscores': withscores, 'score_cast_func': score_cast_func}
         return self.execute_command(*pieces, **options)
 
-    def zrevrangebyscore(self, name, max, min,
-            start=None, num=None, withscores=False, score_cast_func=float):
+    def zrevrangebyscore(self, name, max, min, start=None, num=None,
+                         withscores=False, score_cast_func=float):
         """
         Return a range of values from the sorted set ``name`` with scores
         between ``min`` and ``max`` in descending order.
@@ -1015,7 +1035,8 @@ class StrictRedis(object):
             pieces.extend(['LIMIT', start, num])
         if withscores:
             pieces.append('withscores')
-        options = {'withscores': withscores, 'score_cast_func': score_cast_func}
+        options = {
+            'withscores': withscores, 'score_cast_func': score_cast_func}
         return self.execute_command(*pieces, **options)
 
     def zrevrank(self, name, value):
@@ -1224,7 +1245,7 @@ class PubSub(object):
         self.subscription_count = 0
         self.subscribe_commands = set(
             ('subscribe', 'psubscribe', 'unsubscribe', 'punsubscribe')
-            )
+        )
 
     def __del__(self):
         try:
@@ -1257,7 +1278,7 @@ class PubSub(object):
             self.connection = self.connection_pool.get_connection(
                 'pubsub',
                 self.shard_hint
-                )
+            )
         connection = self.connection
         try:
             connection.send_command(*args)
@@ -1485,7 +1506,7 @@ class BasePipeline(object):
         # parse off the response for MULTI and all commands prior to EXEC.
         # the only data we care about is the response the EXEC
         # which is the last command
-        for i in range(len(commands)+1):
+        for i in range(len(commands) + 1):
             self.parse_response(connection, '_')
         # parse the EXEC.
         response = self.parse_response(connection, '_')
@@ -1535,7 +1556,8 @@ class BasePipeline(object):
 
         conn = self.connection
         if not conn:
-            conn = self.connection_pool.get_connection('MULTI', self.shard_hint)
+            conn = self.connection_pool.get_connection('MULTI',
+                                                       self.shard_hint)
             # assign to self.connection so reset() releases the connection
             # back to the pool after we're done
             self.connection = conn
@@ -1544,11 +1566,11 @@ class BasePipeline(object):
             return execute(conn, stack)
         except ConnectionError:
             conn.disconnect()
-            # if we were watching a variable, the watch is no longer valid since
-            # this connection has died. raise a WatchError, which indicates
-            # the user should retry his transaction. If this is more than a
-            # temporary failure, the WATCH that the user next issue will fail,
-            # propegating the real ConnectionError
+            # if we were watching a variable, the watch is no longer valid
+            # since this connection has died. raise a WatchError, which
+            # indicates the user should retry his transaction. If this is more
+            # than a temporary failure, the WATCH that the user next issue
+            # will fail, propegating the real ConnectionError
             if self.watching:
                 raise WatchError("A ConnectionError occured on while watching "
                                  "one or more keys")
@@ -1577,13 +1599,16 @@ class StrictPipeline(BasePipeline, StrictRedis):
     "Pipeline for the StrictRedis class"
     pass
 
+
 class Pipeline(BasePipeline, Redis):
     "Pipeline for the Redis class"
     pass
 
+
 class LockError(RedisError):
     "Errors thrown from the Lock"
     pass
+
 
 class Lock(object):
     """
@@ -1594,7 +1619,7 @@ class Lock(object):
     multiple clients play nicely together.
     """
 
-    LOCK_FOREVER = float(2**31+1) # 1 past max unix time
+    LOCK_FOREVER = float(2 ** 31 + 1)  # 1 past max unix time
 
     def __init__(self, redis, name, timeout=None, sleep=0.1):
         """
@@ -1609,8 +1634,8 @@ class Lock(object):
         holding the lock.
 
         Note: If using ``timeout``, you should make sure all the hosts
-        that are running clients have their time synchronized with a network time
-        service like ntp.
+        that are running clients have their time synchronized with a network
+        time service like ntp.
         """
         self.redis = redis
         self.name = name

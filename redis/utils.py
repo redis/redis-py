@@ -4,6 +4,7 @@ from .client import Redis
 
 DEFAULT_DATABASE_ID = 0
 
+
 def from_url(url, db=None):
     """Returns an active Redis client generated from the given database URL.
 
