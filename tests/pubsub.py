@@ -1,12 +1,13 @@
 import unittest
 
+from redis._compat import next
 from redis.exceptions import ConnectionError
 import redis
 
 
 class PubSubTestCase(unittest.TestCase):
     def setUp(self):
-        self.connection_pool = redis.ConnectionPool()
+        self.connection_pool = redis.ConnectionPool(decode_responses=True)
         self.client = redis.Redis(connection_pool=self.connection_pool)
         self.pubsub = self.client.pubsub()
 
@@ -24,7 +25,7 @@ class PubSubTestCase(unittest.TestCase):
         # there should be now 2 messages in the buffer, a subscribe and the
         # one we just published
         self.assertEquals(
-            self.pubsub.listen().next(),
+            next(self.pubsub.listen()),
             {
                 'type': 'subscribe',
                 'pattern': None,
@@ -33,7 +34,7 @@ class PubSubTestCase(unittest.TestCase):
             }
         )
         self.assertEquals(
-            self.pubsub.listen().next(),
+            next(self.pubsub.listen()),
             {
                 'type': 'message',
                 'pattern': None,
@@ -49,7 +50,7 @@ class PubSubTestCase(unittest.TestCase):
         )
         # unsubscribe message should be in the buffer
         self.assertEquals(
-            self.pubsub.listen().next(),
+            next(self.pubsub.listen()),
             {
                 'type': 'unsubscribe',
                 'pattern': None,
@@ -69,7 +70,7 @@ class PubSubTestCase(unittest.TestCase):
         # there should be now 2 messages in the buffer, a subscribe and the
         # one we just published
         self.assertEquals(
-            self.pubsub.listen().next(),
+            next(self.pubsub.listen()),
             {
                 'type': 'psubscribe',
                 'pattern': None,
@@ -78,7 +79,7 @@ class PubSubTestCase(unittest.TestCase):
             }
         )
         self.assertEquals(
-            self.pubsub.listen().next(),
+            next(self.pubsub.listen()),
             {
                 'type': 'pmessage',
                 'pattern': 'f*',
@@ -94,7 +95,7 @@ class PubSubTestCase(unittest.TestCase):
         )
         # unsubscribe message should be in the buffer
         self.assertEquals(
-            self.pubsub.listen().next(),
+            next(self.pubsub.listen()),
             {
                 'type': 'punsubscribe',
                 'pattern': None,
@@ -107,7 +108,7 @@ class PubSubTestCase(unittest.TestCase):
 class PubSubRedisDownTestCase(unittest.TestCase):
     def setUp(self):
         self.connection_pool = redis.ConnectionPool(port=6390)
-        self.client = redis.Redis(connection_pool=self.connection_pool)
+        self.client = redis.Redis(connection_pool=self.connection_pool, decode_responses=True)
         self.pubsub = self.client.pubsub()
 
     def tearDown(self):

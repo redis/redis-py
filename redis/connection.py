@@ -1,7 +1,9 @@
+from itertools import chain
 import os
 import socket
-from itertools import chain, imap
+import sys
 
+from redis._compat import b, xrange, imap, byte_to_chr, unicode, bytes, long, BytesIO, nativestr
 from redis.exceptions import (
     RedisError,
     ConnectionError,
@@ -9,11 +11,6 @@ from redis.exceptions import (
     InvalidResponse,
     AuthenticationError
 )
-
-try:
-    from cStringIO import StringIO
-except ImportError:
-    from StringIO import StringIO
 
 try:
     import hiredis
@@ -62,7 +59,7 @@ class PythonParser(object):
                     # https://github.com/andymccurdy/redis-py/issues/205
                     # read smaller chunks at a time to work around this
                     try:
-                        buf = StringIO()
+                        buf = BytesIO()
                         while bytes_left > 0:
                             read_len = min(bytes_left, self.MAX_READ_LENGTH)
                             buf.write(self._fp.read(read_len))
@@ -75,7 +72,8 @@ class PythonParser(object):
 
             # no length, read a full line
             return self._fp.readline()[:-2]
-        except (socket.error, socket.timeout), e:
+        except (socket.error, socket.timeout):
+            e = sys.exc_info()[1]
             raise ConnectionError("Error while reading from socket: %s" %
                                   (e.args,))
 
@@ -84,17 +82,17 @@ class PythonParser(object):
         if not response:
             raise ConnectionError("Socket closed on remote end")
 
-        byte, response = response[0], response[1:]
+        byte, response = byte_to_chr(response[0]), response[1:]
 
         if byte not in ('-', '+', ':', '$', '*'):
             raise InvalidResponse("Protocol Error")
 
         # server returned an error
         if byte == '-':
-            if response.startswith('ERR '):
+            if nativestr(response).startswith('ERR '):
                 response = response[4:]
                 return ResponseError(response)
-            if response.startswith('LOADING '):
+            if nativestr(response).startswith('LOADING '):
                 # If we're loading the dataset into memory, kill the socket
                 # so we re-initialize (and re-SELECT) next time.
                 raise ConnectionError("Redis is loading data into memory")
@@ -116,7 +114,7 @@ class PythonParser(object):
             if length == -1:
                 return None
             response = [self.read_response() for i in xrange(length)]
-        if isinstance(response, str) and self.encoding:
+        if isinstance(response, bytes) and self.encoding:
             response = response.decode(self.encoding)
         return response
 
@@ -154,7 +152,8 @@ class HiredisParser(object):
         while response is False:
             try:
                 buffer = self._sock.recv(4096)
-            except (socket.error, socket.timeout), e:
+            except (socket.error, socket.timeout):
+                e = sys.exc_info()[1]
                 raise ConnectionError("Error while reading from socket: %s" %
                                       (e.args,))
             if not buffer:
@@ -162,7 +161,7 @@ class HiredisParser(object):
             self._reader.feed(buffer)
             # proactively, but not conclusively, check if more data is in the
             # buffer. if the data received doesn't end with \n, there's more.
-            if not buffer.endswith('\n'):
+            if not buffer.endswith(b('\n')):
                 continue
             response = self._reader.gets()
         return response
@@ -203,7 +202,8 @@ class Connection(object):
             return
         try:
             sock = self._connect()
-        except socket.error, e:
+        except socket.error:
+            e = sys.exc_info()[1]
             raise ConnectionError(self._error_message(e))
 
         self._sock = sock
@@ -233,13 +233,13 @@ class Connection(object):
         # if a password is specified, authenticate
         if self.password:
             self.send_command('AUTH', self.password)
-            if self.read_response() != 'OK':
+            if nativestr(self.read_response()) != 'OK':
                 raise AuthenticationError('Invalid Password')
 
         # if a database is specified, switch to it
         if self.db:
             self.send_command('SELECT', self.db)
-            if self.read_response() != 'OK':
+            if nativestr(self.read_response()) != 'OK':
                 raise ConnectionError('Invalid Database')
 
     def disconnect(self):
@@ -259,7 +259,8 @@ class Connection(object):
             self.connect()
         try:
             self._sock.sendall(command)
-        except socket.error, e:
+        except socket.error:
+            e = sys.exc_info()[1]
             self.disconnect()
             if len(e.args) == 1:
                 _errno, errmsg = 'UNKNOWN', e.args[0]
@@ -288,15 +289,27 @@ class Connection(object):
 
     def encode(self, value):
         "Return a bytestring representation of the value"
+        if isinstance(value, bytes):
+            return value
+        if not isinstance(value, unicode):
+            value = str(value)
         if isinstance(value, unicode):
-            return value.encode(self.encoding, self.encoding_errors)
-        return str(value)
+            value = value.encode(self.encoding, self.encoding_errors)
+        return value
 
     def pack_command(self, *args):
         "Pack a series of arguments into a value Redis command"
-        command = ['$%s\r\n%s\r\n' % (len(enc_value), enc_value)
-                   for enc_value in imap(self.encode, args)]
-        return '*%s\r\n%s' % (len(command), ''.join(command))
+        output = BytesIO()
+        output.write(b('*'))
+        output.write(b(str(len(args))))
+        output.write(b('\r\n'))
+        for enc_value in imap(self.encode, args):
+            output.write(b('$'))
+            output.write(b(str(len(enc_value))))
+            output.write(b('\r\n'))
+            output.write(enc_value)
+            output.write(b('\r\n'))
+        return output.getvalue()
 
 
 class UnixDomainSocketConnection(Connection):
