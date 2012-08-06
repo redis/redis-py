@@ -14,7 +14,7 @@ if sys.version_info[0] < 3:
     iteritems = lambda x: x.iteritems()
     dictkeys = lambda x: x.keys()
     dictvalues = lambda x: x.values()
-    nativestr = lambda x: x if isinstance(x, str) else x.encode(errors='replace')
+    nativestr = lambda x: x if isinstance(x, str) else x.encode('utf-8', 'replace')
     u = lambda x: x.decode()
     b = lambda x: x
     next = lambda x: x.next()
@@ -34,7 +34,7 @@ else:
     dictkeys = lambda x: list(x.keys())
     dictvalues = lambda x: list(x.values())
     byte_to_chr = lambda x: chr(x)
-    nativestr = lambda x: x if isinstance(x, str) else x.decode(errors='replace')
+    nativestr = lambda x: x if isinstance(x, str) else x.decode('utf-8', 'replace')
     u = lambda x: x
     b = lambda x: x.encode('iso-8859-1')
     next = next
