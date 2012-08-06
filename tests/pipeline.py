@@ -6,7 +6,8 @@ import redis
 
 class PipelineTestCase(unittest.TestCase):
     def setUp(self):
-        self.client = redis.Redis(host='localhost', port=6379, db=9, decode_responses=True)
+        self.client = redis.Redis(host='localhost', port=6379, db=9,
+                                  decode_responses=True)
         self.client.flushdb()
 
     def tearDown(self):

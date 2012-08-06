@@ -108,7 +108,8 @@ class PubSubTestCase(unittest.TestCase):
 class PubSubRedisDownTestCase(unittest.TestCase):
     def setUp(self):
         self.connection_pool = redis.ConnectionPool(port=6390)
-        self.client = redis.Redis(connection_pool=self.connection_pool, decode_responses=True)
+        self.client = redis.Redis(connection_pool=self.connection_pool,
+                                  decode_responses=True)
         self.pubsub = self.client.pubsub()
 
     def tearDown(self):

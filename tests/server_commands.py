@@ -3,7 +3,8 @@ import unittest
 import datetime
 import time
 
-from redis._compat import unichr, u, b, ascii_letters, iteritems, dictkeys, dictvalues
+from redis._compat import (unichr, u, b, ascii_letters, iteritems, dictkeys,
+                           dictvalues)
 from redis.client import parse_info
 import redis
 
@@ -1098,7 +1099,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.hincrby('a', 'a1'), 2)
         self.assertEquals(self.client.hincrby('a', 'a1', amount=2), 4)
         # negative values decrement
-        self.assertEquals(self.client.hincrby('a', 'a1', amount= -3), 1)
+        self.assertEquals(self.client.hincrby('a', 'a1', amount=-3), 1)
         # hash that exists, but key that doesn't
         self.assertEquals(self.client.hincrby('a', 'a2', amount=3), 3)
         # finally a key that's not an int
@@ -1302,7 +1303,8 @@ class ServerCommandsTestCase(unittest.TestCase):
                 self.assertTrue(self.client.rpush(key, c))
 
         # check that KEYS returns all the keys as they are
-        self.assertEqual(sorted(self.client.keys('*')), sorted(dictkeys(mapping)))
+        self.assertEqual(sorted(self.client.keys('*')),
+                         sorted(dictkeys(mapping)))
 
         # check that it is possible to get list content by key name
         for key in dictkeys(mapping):

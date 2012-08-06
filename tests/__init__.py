@@ -5,7 +5,8 @@ from tests.connection_pool import ConnectionPoolTestCase
 from tests.pipeline import PipelineTestCase
 from tests.lock import LockTestCase
 from tests.pubsub import PubSubTestCase, PubSubRedisDownTestCase
-from tests.encoding import PythonParserEncodingTestCase, HiredisEncodingTestCase
+from tests.encoding import (PythonParserEncodingTestCase,
+                            HiredisEncodingTestCase)
 
 try:
     import hiredis

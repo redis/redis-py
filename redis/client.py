@@ -4,7 +4,8 @@ import datetime
 import time
 import warnings
 
-from redis._compat import b, izip, imap, iteritems, dictkeys, dictvalues, basestring, long, nativestr
+from redis._compat import (b, izip, imap, iteritems, dictkeys, dictvalues,
+                           basestring, long, nativestr)
 from redis.connection import ConnectionPool, UnixDomainSocketConnection
 from redis.exceptions import (
     ConnectionError,
@@ -1500,7 +1501,7 @@ class BasePipeline(object):
 
     def _execute_transaction(self, connection, commands):
         all_cmds = b('').join(starmap(connection.pack_command,
-                                   [args for args, options in commands]))
+                                      [args for args, options in commands]))
         connection.send_packed_command(all_cmds)
         # we don't care about the multi/exec any longer
         commands = commands[1:-1]
