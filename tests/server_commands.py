@@ -1,16 +1,17 @@
-from string import letters
 from distutils.version import StrictVersion
 import unittest
 import datetime
 import time
 
+from redis._compat import (unichr, u, b, ascii_letters, iteritems, dictkeys,
+                           dictvalues)
 from redis.client import parse_info
 import redis
 
 
 class ServerCommandsTestCase(unittest.TestCase):
     def get_client(self, cls=redis.Redis):
-        return cls(host='localhost', port=6379, db=9)
+        return cls(host='localhost', port=6379, db=9, decode_responses=True)
 
     def setUp(self):
         self.client = self.get_client()
@@ -39,17 +40,18 @@ class ServerCommandsTestCase(unittest.TestCase):
 
     def test_get_and_set(self):
         # get and set can't be tested independently of each other
-        self.assertEquals(self.client.get('a'), None)
-        byte_string = 'value'
+        client = redis.Redis(host='localhost', port=6379, db=9)
+        self.assertEquals(client.get('a'), None)
+        byte_string = b('value')
         integer = 5
-        unicode_string = unichr(3456) + u'abcd' + unichr(3421)
-        self.assert_(self.client.set('byte_string', byte_string))
-        self.assert_(self.client.set('integer', 5))
-        self.assert_(self.client.set('unicode_string', unicode_string))
-        self.assertEquals(self.client.get('byte_string'), byte_string)
-        self.assertEquals(self.client.get('integer'), str(integer))
+        unicode_string = unichr(3456) + u('abcd') + unichr(3421)
+        self.assert_(client.set('byte_string', byte_string))
+        self.assert_(client.set('integer', 5))
+        self.assert_(client.set('unicode_string', unicode_string))
+        self.assertEquals(client.get('byte_string'), byte_string)
+        self.assertEquals(client.get('integer'), b(str(integer)))
         self.assertEquals(
-            self.client.get('unicode_string').decode('utf-8'),
+            client.get('unicode_string').decode('utf-8'),
             unicode_string)
 
     def test_getitem_and_setitem(self):
@@ -211,7 +213,7 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_mset(self):
         d = {'a': '1', 'b': '2', 'c': '3'}
         self.assert_(self.client.mset(d))
-        for k, v in d.iteritems():
+        for k, v in iteritems(d):
             self.assertEquals(self.client[k], v)
 
     def test_msetnx(self):
@@ -219,7 +221,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(self.client.msetnx(d))
         d2 = {'a': 'x', 'd': '4'}
         self.assert_(not self.client.msetnx(d2))
-        for k, v in d.iteritems():
+        for k, v in iteritems(d):
             self.assertEquals(self.client[k], v)
         self.assertEquals(self.client.get('d'), None)
 
@@ -990,7 +992,7 @@ class ServerCommandsTestCase(unittest.TestCase):
 
     # HASHES
     def make_hash(self, key, d):
-        for k, v in d.iteritems():
+        for k, v in iteritems(d):
             self.client.hset(key, k, v)
 
     def test_hget_and_hset(self):
@@ -1114,7 +1116,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         # real logic
         h = {'a1': '1', 'a2': '2', 'a3': '3'}
         self.make_hash('a', h)
-        keys = h.keys()
+        keys = dictkeys(h)
         keys.sort()
         remote_keys = self.client.hkeys('a')
         remote_keys.sort()
@@ -1143,7 +1145,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         # real logic
         h = {'a1': '1', 'a2': '2', 'a3': '3'}
         self.make_hash('a', h)
-        vals = h.values()
+        vals = dictvalues(h)
         vals.sort()
         remote_vals = self.client.hvals('a')
         remote_vals.sort()
@@ -1296,15 +1298,16 @@ class ServerCommandsTestCase(unittest.TestCase):
                    'foo\tbar\x07': '789',
                    }
         # fill in lists
-        for key, value in mapping.iteritems():
+        for key, value in iteritems(mapping):
             for c in value:
                 self.assertTrue(self.client.rpush(key, c))
 
         # check that KEYS returns all the keys as they are
-        self.assertEqual(sorted(self.client.keys('*')), sorted(mapping.keys()))
+        self.assertEqual(sorted(self.client.keys('*')),
+                         sorted(dictkeys(mapping)))
 
         # check that it is possible to get list content by key name
-        for key in mapping.keys():
+        for key in dictkeys(mapping):
             self.assertEqual(self.client.lrange(key, 0, -1),
                              list(mapping[key]))
 
@@ -1346,8 +1349,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         "The PythonParser has some special cases for return values > 1MB"
         # load up 5MB of data into a key
         data = []
-        for i in range(5000000 / len(letters)):
-            data.append(letters)
+        for i in range(5000000 // len(ascii_letters)):
+            data.append(ascii_letters)
         data = ''.join(data)
         self.client.set('a', data)
         self.assertEquals(self.client.get('a'), data)

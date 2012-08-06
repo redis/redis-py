@@ -1,6 +1,5 @@
-from urlparse import urlparse
-
-from .client import Redis
+from redis.client import Redis
+from redis._compat import urlparse
 
 DEFAULT_DATABASE_ID = 0
 
