@@ -2,6 +2,8 @@
 
 The Python interface to the Redis key-value store.
 
+[![Build Status](https://secure.travis-ci.org/andymccurdy/redis-py.png?branch=master)](http://travis-ci.org/andymccurdy/redis-py)
+
 ## Installation
 
     $ sudo pip install redis
