@@ -1,4 +1,4 @@
-* 2.6.1 (in development)
+* 2.6.1
     * Python 3.x support! Big thanks to Alex Grönholm.
     * Fixed a bug in the PythonParser's read_response that could hide an error
       from the client (#251).
