@@ -96,13 +96,16 @@ class PythonParser(object):
 
         # server returned an error
         if byte == '-':
-            if nativestr(response).startswith('ERR '):
-                response = response[4:]
-                return ResponseError(response)
             if nativestr(response).startswith('LOADING '):
-                # If we're loading the dataset into memory, kill the socket
+                # if we're loading the dataset into memory, kill the socket
                 # so we re-initialize (and re-SELECT) next time.
                 raise ConnectionError("Redis is loading data into memory")
+            # if the error starts with ERR, trim that off
+            if nativestr(response).startswith('ERR '):
+                response = response[4:]
+            # *return*, not raise the exception class. if it is meant to be
+            # raised, it will be at a higher level.
+            return ResponseError(response)
         # single value
         elif byte == '+':
             pass
