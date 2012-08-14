@@ -1,3 +1,6 @@
+* 2.6.2 (in development)
+    * `from_url` is now available as a classmethod on client classes. Thanks
+      Jon Parise for the patch.
 * 2.6.1
     * Python 3.x support! Big thanks to Alex Grönholm.
     * Fixed a bug in the PythonParser's read_response that could hide an error
