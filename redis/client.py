@@ -3,7 +3,7 @@ from itertools import starmap
 import datetime
 import time
 import warnings
-from redis._compat import (b, u, izip, imap, iteritems, dictkeys, dictvalues,
+from redis._compat import (b, izip, imap, iteritems, dictkeys, dictvalues,
                            basestring, long, nativestr, urlparse)
 from redis.connection import ConnectionPool, UnixDomainSocketConnection
 from redis.exceptions import (
@@ -142,7 +142,8 @@ def float_or_none(response):
 def parse_config(response, **options):
     # this is stupid, but don't have a better option right now
     if options['parse'] == 'GET':
-        return response and pairs_to_dict(imap(nativestr, response)) or {}
+        response = [nativestr(i) if i is not None else None for i in response]
+        return response and pairs_to_dict(response) or {}
     return nativestr(response) == 'OK'
 
 
