@@ -2,6 +2,7 @@ from distutils.version import StrictVersion
 import unittest
 import datetime
 import time
+import binascii
 
 from redis._compat import (unichr, u, b, ascii_letters, iteritems, dictkeys,
                            dictvalues)
@@ -180,6 +181,10 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.getbit('a', 5), True)
 
     def test_bitcount(self):
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.0'):
+            raise unittest.SkipTest
+
         self.client.setbit('a', 5, True)
         self.assertEquals(self.client.bitcount('a'), 1)
         self.client.setbit('a', 6, True)
@@ -197,26 +202,46 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.bitcount('a', 1, 1), 1)
 
     def test_bitop_not_empty_string(self):
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.0'):
+            raise unittest.SkipTest
+
         self.client.set('a', '')
         self.client.bitop('not', 'r', 'a')
         self.assertEquals(self.client.get('r'), None)
 
     def test_bitop_not(self):
-        test_str = chr(0xaa) + chr(0x00) + chr(0xff) + chr(0x55)
-        correct = ~0xaa00ff55 & 0xffffffff
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.0'):
+            raise unittest.SkipTest
+
+        test_str = b('\xAA\x00\xFF\x55')
+        correct = ~0xAA00FF55 & 0xFFFFFFFF
         self.client.set('a', test_str)
         self.client.bitop('not', 'r', 'a')
-        self.assertEquals(int(self.client.get('r').encode('hex'), 16), correct)
+        self.assertEquals(
+            int(binascii.hexlify(self.client.get('r')), 16),
+            correct)
 
     def test_bitop_not_in_place(self):
-        test_str = chr(0xaa) + chr(0x00) + chr(0xff) + chr(0x55)
-        correct = ~0xaa00ff55 & 0xffffffff
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.0'):
+            raise unittest.SkipTest
+
+        test_str = b('\xAA\x00\xFF\x55')
+        correct = ~0xAA00FF55 & 0xFFFFFFFF
         self.client.set('a', test_str)
         self.client.bitop('not', 'a', 'a')
-        self.assertEquals(int(self.client.get('a').encode('hex'), 16), correct)
+        self.assertEquals(
+            int(binascii.hexlify(self.client.get('a')), 16),
+            correct)
 
     def test_bitop_single_string(self):
-        test_str = chr(0x01) + chr(0x02) + chr(0xff)
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.0'):
+            raise unittest.SkipTest
+
+        test_str = b('\x01\x02\xFF')
         self.client.set('a', test_str)
         self.client.bitop('and', 'res1', 'a')
         self.client.bitop('or', 'res2', 'a')
@@ -226,14 +251,24 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.get('res3'), test_str)
 
     def test_bitop_string_operands(self):
-      self.client.set('a', chr(0x01) + chr(0x02) + chr(0xff) + chr(0xff))
-      self.client.set('b', chr(0x01) + chr(0x02) + chr(0xff))
-      self.client.bitop('and', 'res1', 'a', 'b')
-      self.client.bitop('or', 'res2', 'a', 'b')
-      self.client.bitop('xor', 'res3', 'a', 'b')
-      self.assertEquals(int(self.client.get('res1').encode('hex'), 16), 0x0102ff00)
-      self.assertEquals(int(self.client.get('res2').encode('hex'), 16), 0x0102ffff)
-      self.assertEquals(int(self.client.get('res3').encode('hex'), 16), 0x000000ff)
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.0'):
+            raise unittest.SkipTest
+
+        self.client.set('a', b('\x01\x02\xFF\xFF'))
+        self.client.set('b', b('\x01\x02\xFF'))
+        self.client.bitop('and', 'res1', 'a', 'b')
+        self.client.bitop('or', 'res2', 'a', 'b')
+        self.client.bitop('xor', 'res3', 'a', 'b')
+        self.assertEquals(
+            int(binascii.hexlify(self.client.get('res1')), 16),
+            0x0102FF00)
+        self.assertEquals(
+            int(binascii.hexlify(self.client.get('res2')), 16),
+            0x0102FFFF)
+        self.assertEquals(
+            int(binascii.hexlify(self.client.get('res3')), 16),
+            0x000000FF)
 
     def test_getset(self):
         self.assertEquals(self.client.getset('a', 'foo'), None)

@@ -1,6 +1,9 @@
-* 2.6.2 (in development)
+* 2.6.3 (in development)
+    * Added BITOP and BITCOUNT commands. Thanks Mark Tozzi.
+* 2.6.2
     * `from_url` is now available as a classmethod on client classes. Thanks
       Jon Parise for the patch.
+    * Fixed several encoding errors resulting from the Python 3.x support.
 * 2.6.1
     * Python 3.x support! Big thanks to Alex Grönholm.
     * Fixed a bug in the PythonParser's read_response that could hide an error

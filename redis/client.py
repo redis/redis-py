@@ -455,20 +455,23 @@ class StrictRedis(object):
 
     def bitcount(self, key, start=None, end=None):
         """
-        returns the count of set bits in the given (string) key.  Optional
-        start and end params indicate which _bytes_ to consider
+        Returns the count of set bits in the value of ``key``.  Optional
+        ``start`` and ``end`` paramaters indicate which bytes to consider
         """
         params = [key]
         if start and end:
-          params.append(start)
-          params.append(end)
+            params.append(start)
+            params.append(end)
         elif (start and not end) or (end and not start):
-          raise RedisError("Both start and end must be specified")
+            raise RedisError("Both start and end must be specified")
         return self.execute_command('BITCOUNT', *params)
 
-    def bitop(self, op, dest, *keys):
-        return self.execute_command('BITOP', op, dest, *keys)
-
+    def bitop(self, operation, dest, *keys):
+        """
+        Perform a bitwise operation using ``operation`` between ``keys`` and
+        store the result in ``dest``.
+        """
+        return self.execute_command('BITOP', operation, dest, *keys)
 
     def decr(self, name, amount=1):
         """
