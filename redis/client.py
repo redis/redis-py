@@ -371,6 +371,11 @@ class StrictRedis(object):
         "Returns the number of keys in the current database"
         return self.execute_command('DBSIZE')
 
+    def time(self):
+        """Returns the server time in (seconds since epoch, microseconds 
+        into this second)."""
+        return self.execute_command('TIME')
+
     def debug_object(self, key):
         "Returns version specific metainformation about a give key"
         return self.execute_command('DEBUG', 'OBJECT', key)
