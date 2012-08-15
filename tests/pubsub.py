@@ -1,13 +1,13 @@
 import unittest
 
-from redis._compat import next
+from redis._compat import b, next
 from redis.exceptions import ConnectionError
 import redis
 
 
 class PubSubTestCase(unittest.TestCase):
     def setUp(self):
-        self.connection_pool = redis.ConnectionPool(decode_responses=True)
+        self.connection_pool = redis.ConnectionPool()
         self.client = redis.Redis(connection_pool=self.connection_pool)
         self.pubsub = self.client.pubsub()
 
@@ -39,7 +39,7 @@ class PubSubTestCase(unittest.TestCase):
                 'type': 'message',
                 'pattern': None,
                 'channel': 'foo',
-                'data': 'hello foo'
+                'data': b('hello foo')
             }
         )
 
@@ -84,7 +84,7 @@ class PubSubTestCase(unittest.TestCase):
                 'type': 'pmessage',
                 'pattern': 'f*',
                 'channel': 'foo',
-                'data': 'hello foo'
+                'data': b('hello foo')
             }
         )
 
@@ -108,8 +108,7 @@ class PubSubTestCase(unittest.TestCase):
 class PubSubRedisDownTestCase(unittest.TestCase):
     def setUp(self):
         self.connection_pool = redis.ConnectionPool(port=6390)
-        self.client = redis.Redis(connection_pool=self.connection_pool,
-                                  decode_responses=True)
+        self.client = redis.Redis(connection_pool=self.connection_pool)
         self.pubsub = self.client.pubsub()
 
     def tearDown(self):

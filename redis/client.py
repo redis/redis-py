@@ -3,7 +3,7 @@ from itertools import starmap
 import datetime
 import time
 import warnings
-from redis._compat import (b, izip, imap, iteritems, dictkeys, dictvalues,
+from redis._compat import (b, u, izip, imap, iteritems, dictkeys, dictvalues,
                            basestring, long, nativestr, urlparse)
 from redis.connection import ConnectionPool, UnixDomainSocketConnection
 from redis.exceptions import (
@@ -57,6 +57,7 @@ def parse_debug_object(response):
     "Parse the results of Redis's DEBUG OBJECT command into a Python dict"
     # The 'type' of the object is the first item in the response, but isn't
     # prefixed with a name
+    response = nativestr(response)
     response = 'type:' + response
     response = dict([kv.split(':') for kv in response.split()])
 
@@ -80,6 +81,7 @@ def parse_object(response, infotype):
 def parse_info(response):
     "Parse the result of Redis's INFO command into a Python dict"
     info = {}
+    response = nativestr(response)
 
     def get_value(value):
         if ',' not in value or '=' not in value:
@@ -140,8 +142,8 @@ def float_or_none(response):
 def parse_config(response, **options):
     # this is stupid, but don't have a better option right now
     if options['parse'] == 'GET':
-        return response and pairs_to_dict(response) or {}
-    return response == 'OK'
+        return response and pairs_to_dict(imap(nativestr, response)) or {}
+    return nativestr(response) == 'OK'
 
 
 class StrictRedis(object):
@@ -1331,7 +1333,7 @@ class PubSub(object):
     def parse_response(self):
         "Parse the response from a publish/subscribe command"
         response = self.connection.read_response()
-        if response[0] in self.subscribe_commands:
+        if nativestr(response[0]) in self.subscribe_commands:
             self.subscription_count = response[2]
             # if we've just unsubscribed from the remaining channels,
             # release the connection back to the pool
@@ -1387,18 +1389,19 @@ class PubSub(object):
         "Listen for messages on channels this client has been subscribed to"
         while self.subscription_count or self.channels or self.patterns:
             r = self.parse_response()
-            if r[0] == 'pmessage':
+            msg_type = nativestr(r[0])
+            if msg_type == 'pmessage':
                 msg = {
-                    'type': r[0],
-                    'pattern': r[1],
-                    'channel': r[2],
+                    'type': msg_type,
+                    'pattern': nativestr(r[1]),
+                    'channel': nativestr(r[2]),
                     'data': r[3]
                 }
             else:
                 msg = {
-                    'type': r[0],
+                    'type': msg_type,
                     'pattern': None,
-                    'channel': r[1],
+                    'channel': nativestr(r[1]),
                     'data': r[2]
                 }
             yield msg
