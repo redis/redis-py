@@ -9,7 +9,6 @@ from redis._compat import (unichr, u, b, ascii_letters, iteritems, dictkeys,
 from redis.client import parse_info
 import redis
 
-
 class ServerCommandsTestCase(unittest.TestCase):
     def get_client(self, cls=redis.Redis):
         return cls(host='localhost', port=6379, db=9)
@@ -183,7 +182,10 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_bitcount(self):
         version = self.client.info()['redis_version']
         if StrictVersion(version) < StrictVersion('2.6.0'):
-            raise unittest.SkipTest
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
 
         self.client.setbit('a', 5, True)
         self.assertEquals(self.client.bitcount('a'), 1)
@@ -204,7 +206,10 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_bitop_not_empty_string(self):
         version = self.client.info()['redis_version']
         if StrictVersion(version) < StrictVersion('2.6.0'):
-            raise unittest.SkipTest
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
 
         self.client.set('a', '')
         self.client.bitop('not', 'r', 'a')
@@ -213,7 +218,10 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_bitop_not(self):
         version = self.client.info()['redis_version']
         if StrictVersion(version) < StrictVersion('2.6.0'):
-            raise unittest.SkipTest
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
 
         test_str = b('\xAA\x00\xFF\x55')
         correct = ~0xAA00FF55 & 0xFFFFFFFF
@@ -226,7 +234,10 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_bitop_not_in_place(self):
         version = self.client.info()['redis_version']
         if StrictVersion(version) < StrictVersion('2.6.0'):
-            raise unittest.SkipTest
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
 
         test_str = b('\xAA\x00\xFF\x55')
         correct = ~0xAA00FF55 & 0xFFFFFFFF
@@ -239,7 +250,10 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_bitop_single_string(self):
         version = self.client.info()['redis_version']
         if StrictVersion(version) < StrictVersion('2.6.0'):
-            raise unittest.SkipTest
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
 
         test_str = b('\x01\x02\xFF')
         self.client.set('a', test_str)
@@ -253,7 +267,10 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_bitop_string_operands(self):
         version = self.client.info()['redis_version']
         if StrictVersion(version) < StrictVersion('2.6.0'):
-            raise unittest.SkipTest
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
 
         self.client.set('a', b('\x01\x02\xFF\xFF'))
         self.client.set('b', b('\x01\x02\xFF'))
