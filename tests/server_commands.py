@@ -38,12 +38,6 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client['b'] = 'bar'
         self.assertEquals(self.client.dbsize(), 2)
 
-    def test_time(self): 
-        first = self.client.time()
-        time.sleep(0.05)
-        second = self.client.time()
-        self.assertLess(first, second)
-
     def test_get_and_set(self):
         # get and set can't be tested independently of each other
         client = redis.Redis(host='localhost', port=6379, db=9)
@@ -121,6 +115,19 @@ class ServerCommandsTestCase(unittest.TestCase):
 
     def test_ping(self):
         self.assertEquals(self.client.ping(), True)
+
+    def test_time(self):
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.0'):
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
+
+        t = self.client.time()
+        self.assertEquals(len(t), 2)
+        self.assert_(isinstance(t[0], int))
+        self.assert_(isinstance(t[1], int))
 
     # KEYS
     def test_append(self):

@@ -373,8 +373,10 @@ class StrictRedis(object):
         return self.execute_command('DBSIZE')
 
     def time(self):
-        """Returns the server time in (seconds since epoch, microseconds 
-        into this second)."""
+        """
+        Returns the server time as a 2-item tuple of ints:
+        (seconds since epoch, microseconds into this second).
+        """
         return self.execute_command('TIME')
 
     def debug_object(self, key):
