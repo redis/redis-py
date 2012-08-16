@@ -204,6 +204,7 @@ class StrictRedis(object):
             'OBJECT': parse_object,
             'PING': lambda r: nativestr(r) == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
+            'TIME': lambda x: (int(x[0]), int(x[1]))
         }
     )
 
