@@ -38,6 +38,12 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client['b'] = 'bar'
         self.assertEquals(self.client.dbsize(), 2)
 
+    def test_time(self): 
+        first = self.client.time()
+        time.sleep(0.05)
+        second = self.client.time()
+        self.assertLess(first, second)
+
     def test_get_and_set(self):
         # get and set can't be tested independently of each other
         client = redis.Redis(host='localhost', port=6379, db=9)

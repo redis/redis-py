@@ -204,6 +204,7 @@ class StrictRedis(object):
             'OBJECT': parse_object,
             'PING': lambda r: nativestr(r) == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
+            'TIME': lambda x: (int(x[0]), int(x[1]))
         }
     )
 
@@ -370,6 +371,11 @@ class StrictRedis(object):
     def dbsize(self):
         "Returns the number of keys in the current database"
         return self.execute_command('DBSIZE')
+
+    def time(self):
+        """Returns the server time in (seconds since epoch, microseconds 
+        into this second)."""
+        return self.execute_command('TIME')
 
     def debug_object(self, key):
         "Returns version specific metainformation about a give key"
