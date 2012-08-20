@@ -1,8 +1,8 @@
 from __future__ import with_statement
 from itertools import starmap
 import datetime
-import time
 import warnings
+import time as mod_time
 from redis._compat import (b, izip, imap, iteritems, dictkeys, dictvalues,
                            basestring, long, nativestr, urlparse)
 from redis.connection import ConnectionPool, UnixDomainSocketConnection
@@ -508,7 +508,7 @@ class StrictRedis(object):
         as an integer indicating unix time or a Python datetime object.
         """
         if isinstance(when, datetime.datetime):
-            when = int(time.mktime(when.timetuple()))
+            when = int(mod_time.mktime(when.timetuple()))
         return self.execute_command('EXPIREAT', name, when)
 
     def get(self, name):
@@ -1729,7 +1729,7 @@ class Lock(object):
         sleep = self.sleep
         timeout = self.timeout
         while 1:
-            unixtime = int(time.time())
+            unixtime = int(mod_time.time())
             if timeout:
                 timeout_at = unixtime + timeout
             else:
@@ -1750,7 +1750,7 @@ class Lock(object):
                     return True
             if not blocking:
                 return False
-            time.sleep(sleep)
+            mod_time.sleep(sleep)
 
     def release(self):
         "Releases the already acquired lock"
