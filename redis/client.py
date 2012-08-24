@@ -1766,7 +1766,7 @@ class Script(object):
         # make sure the Redis server knows about the script
         if isinstance(client, BasePipeline):
             # make sure this script is good to go on pipeline
-            client.script_load_for_pipeline(self.script)
+            client.script_load_for_pipeline(self)
         try:
             return client.evalsha(self.sha, len(keys), *args)
         except NoScriptError:
