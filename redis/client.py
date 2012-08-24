@@ -12,6 +12,7 @@ from redis.exceptions import (
     RedisError,
     ResponseError,
     WatchError,
+    NoScriptError
 )
 
 SYM_EMPTY = b('')
@@ -140,11 +141,19 @@ def float_or_none(response):
 
 
 def parse_config(response, **options):
-    # this is stupid, but don't have a better option right now
     if options['parse'] == 'GET':
         response = [nativestr(i) if i is not None else None for i in response]
         return response and pairs_to_dict(response) or {}
     return nativestr(response) == 'OK'
+
+
+def parse_script(response, **options):
+    parse = options['parse']
+    if parse in ('FLUSH', 'KILL'):
+        return response == 'OK'
+    if parse == 'EXISTS':
+        return list(imap(bool, response))
+    return response
 
 
 class StrictRedis(object):
@@ -204,6 +213,7 @@ class StrictRedis(object):
             'OBJECT': parse_object,
             'PING': lambda r: nativestr(r) == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
+            'SCRIPT': parse_script,
             'TIME': lambda x: (int(x[0]), int(x[1]))
         }
     )
@@ -1208,6 +1218,61 @@ class StrictRedis(object):
         """
         return self.execute_command('PUBLISH', channel, message)
 
+    def eval(self, script, numkeys, *keys_and_args):
+        """
+        Execute the LUA ``script``, specifying the ``numkeys`` the script
+        will touch and the key names and argument values in ``keys_and_args``.
+        Returns the result of the script.
+
+        In practice, use the object returned by ``register_script``. This
+        function exists purely for Redis API completion.
+        """
+        return self.execute_command('EVAL', script, numkeys, *keys_and_args)
+
+    def evalsha(self, sha, numkeys, *keys_and_args):
+        """
+        Use the ``sha`` to execute a LUA script already registered via EVAL
+        or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
+        key names and argument values in ``keys_and_args``. Returns the result
+        of the script.
+
+        In practice, use the object returned by ``register_script``. This
+        function exists purely for Redis API completion.
+        """
+        return self.execute_command('EVALSHA', sha, numkeys, *keys_and_args)
+
+    def script_exists(self, *args):
+        """
+        Check if a script exists in the script cache by specifying the SHAs of
+        each script as ``args``. Returns a list of boolean values indicating if
+        if each already script exists in the cache.
+        """
+        options = {'parse': 'EXISTS'}
+        return self.execute_command('SCRIPT', 'EXISTS', *args, **options)
+
+    def script_flush(self):
+        "Flush all scripts from the script cache"
+        options = {'parse': 'FLUSH'}
+        return self.execute_command('SCRIPT', 'FLUSH', **options)
+
+    def script_kill(self):
+        "Kill the currently executing LUA script"
+        options = {'parse': 'KILL'}
+        return self.execute_command('SCRIPT', 'KILL', **options)
+
+    def script_load(self, script):
+        "Load a LUA ``script`` into the script cache. Returns the SHA."
+        options = {'parse': 'LOAD'}
+        return self.execute_command('SCRIPT', 'LOAD', script, **options)
+
+    def register_script(self, script, *keys):
+        """
+        Register a LUA ``script`` specifying the ``keys`` it will touch.
+        Returns a Script object that is callable and hides the complexity of
+        deal with scripts, keys, and shas. This is the preferred way to work
+        with LUA scripts.
+        """
+        return Script(self, script, *keys)
 
 class Redis(StrictRedis):
     """
@@ -1482,6 +1547,7 @@ class BasePipeline(object):
 
     def reset(self):
         self.command_stack = []
+        self.scripts = set()
         # make sure to reset the connection state in the event that we were
         # watching something
         if self.watching and self.connection:
@@ -1612,8 +1678,21 @@ class BasePipeline(object):
             self.watching = True
         return result
 
+    def load_scripts(self):
+        # make sure all scripts that are about to be run on this pipeline exist
+        scripts = list(self.scripts)
+        immediate = self.immediate_execute_command
+        shas = [s.sha for s in scripts]
+        exists = immediate('SCRIPT', 'EXISTS', *shas, **{'parse': 'EXISTS'})
+        if not all(exists):
+            for s, exist in izip(scripts, exists):
+                if not exist:
+                    immediate('SCRIPT', 'LOAD', s.script, **{'parse': 'LOAD'})
+
     def execute(self):
         "Execute all the commands in the current pipeline"
+        if self.scripts:
+            self.load_scripts()
         stack = self.command_stack
         if self.transaction or self.explicit_transaction:
             stack = [(('MULTI', ), {})] + stack + [(('EXEC', ), {})]
@@ -1648,18 +1727,18 @@ class BasePipeline(object):
             self.reset()
 
     def watch(self, *names):
-        """
-        Watches the values at keys ``names``
-        """
+        "Watches the values at keys ``names``"
         if self.explicit_transaction:
             raise RedisError('Cannot issue a WATCH after a MULTI')
         return self.execute_command('WATCH', *names)
 
     def unwatch(self):
-        """
-        Unwatches all previously specified keys
-        """
+        "Unwatches all previously specified keys"
         return self.watching and self.execute_command('UNWATCH') or True
+
+    def script_load_for_pipeline(self, script):
+        "Make sure scripts are loaded prior to pipeline execution"
+        self.scripts.add(script)
 
 
 class StrictPipeline(BasePipeline, StrictRedis):
@@ -1670,6 +1749,31 @@ class StrictPipeline(BasePipeline, StrictRedis):
 class Pipeline(BasePipeline, Redis):
     "Pipeline for the Redis class"
     pass
+
+
+class Script(object):
+    "An executable LUA script object returned by ``register_script``"
+
+    def __init__(self, registered_client, script):
+        self.registered_client = registered_client
+        self.script = script
+        self.sha = registered_client.script_load(script)
+
+    def __call__(self, keys=[], args=[], client=None):
+        "Execute the script, passing any required ``args``"
+        client = client or self.registered_client
+        args = tuple(keys) + tuple(args)
+        # make sure the Redis server knows about the script
+        if isinstance(client, BasePipeline):
+            # make sure this script is good to go on pipeline
+            client.script_load_for_pipeline(self.script)
+        try:
+            return client.evalsha(self.sha, len(keys), *args)
+        except NoScriptError:
+            # Maybe the client is pointed to a differnet server than the client
+            # that created this instance?
+            self.sha = client.script_load(self.script)
+            return client.evalsha(self.sha, len(keys), *args)
 
 
 class LockError(RedisError):

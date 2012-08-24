@@ -10,7 +10,8 @@ from redis.exceptions import (
     ConnectionError,
     ResponseError,
     InvalidResponse,
-    AuthenticationError
+    AuthenticationError,
+    NoScriptError,
 )
 
 try:
@@ -30,6 +31,11 @@ class PythonParser(object):
     "Plain Python parsing class"
     MAX_READ_LENGTH = 1000000
     encoding = None
+
+    EXCEPTION_CLASSES = {
+        'ERR': ResponseError,
+        'NOSCRIPT': NoScriptError,
+    }
 
     def __init__(self):
         self._fp = None
@@ -84,6 +90,14 @@ class PythonParser(object):
             raise ConnectionError("Error while reading from socket: %s" %
                                   (e.args,))
 
+    def parse_error(self, response):
+        "Parse an error response"
+        error_code = response.split(' ')[0]
+        if error_code in self.EXCEPTION_CLASSES:
+            response = response[len(error_code) + 1:]
+            return self.EXCEPTION_CLASSES[error_code](response)
+        return ResponseError(response)
+
     def read_response(self):
         response = self.read()
         if not response:
@@ -100,12 +114,9 @@ class PythonParser(object):
                 # if we're loading the dataset into memory, kill the socket
                 # so we re-initialize (and re-SELECT) next time.
                 raise ConnectionError("Redis is loading data into memory")
-            # if the error starts with ERR, trim that off
-            if nativestr(response).startswith('ERR '):
-                response = response[4:]
             # *return*, not raise the exception class. if it is meant to be
             # raised, it will be at a higher level.
-            return ResponseError(response)
+            return self.parse_error(response)
         # single value
         elif byte == '+':
             pass
@@ -293,7 +304,7 @@ class Connection(object):
         except:
             self.disconnect()
             raise
-        if response.__class__ == ResponseError:
+        if isinstance(response, ResponseError):
             raise response
         return response
 
