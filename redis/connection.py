@@ -110,7 +110,8 @@ class PythonParser(object):
 
         # server returned an error
         if byte == '-':
-            if nativestr(response).startswith('LOADING '):
+            response = nativestr(response)
+            if response.startswith('LOADING '):
                 # if we're loading the dataset into memory, kill the socket
                 # so we re-initialize (and re-SELECT) next time.
                 raise ConnectionError("Redis is loading data into memory")
