@@ -1265,14 +1265,14 @@ class StrictRedis(object):
         options = {'parse': 'LOAD'}
         return self.execute_command('SCRIPT', 'LOAD', script, **options)
 
-    def register_script(self, script, *keys):
+    def register_script(self, script):
         """
         Register a LUA ``script`` specifying the ``keys`` it will touch.
         Returns a Script object that is callable and hides the complexity of
         deal with scripts, keys, and shas. This is the preferred way to work
         with LUA scripts.
         """
-        return Script(self, script, *keys)
+        return Script(self, script)
 
 class Redis(StrictRedis):
     """
