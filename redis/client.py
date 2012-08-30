@@ -327,13 +327,16 @@ class StrictRedis(object):
         """
         return Lock(self, name, timeout=timeout, sleep=sleep)
 
-    def pubsub(self, shard_hint=None):
+    def pubsub(self, shard_hint=None, release_connection=True):
         """
         Return a Publish/Subscribe object. With this object, you can
         subscribe to channels and listen for messages that get published to
         them.
+
+        ``shard_hint`` and ``release_connection`` are passed to the
+        :class:`PubSub` constructor.
         """
-        return PubSub(self.connection_pool, shard_hint)
+        return PubSub(self.connection_pool, shard_hint, release_connection)
 
     #### COMMAND EXECUTION AND PROTOCOL PARSING ####
     def execute_command(self, *args, **options):
@@ -1364,10 +1367,18 @@ class PubSub(object):
     After subscribing to one or more channels, the listen() method will block
     until a message arrives on one of the subscribed channels. That message
     will be returned and it's safe to start listening again.
+
+    The default is to recycle the connection when parsing a response (usually
+    by calling ``listen()``) indicating that this connection is not subscribed
+    to any channel anymore. This can be changed by passing ``False`` to
+    ``release_connection``, which will hold on the same connection regardless
+    of its subscriptions.
     """
-    def __init__(self, connection_pool, shard_hint=None):
+    def __init__(self, connection_pool, shard_hint=None,
+            release_connection=True):
         self.connection_pool = connection_pool
         self.shard_hint = shard_hint
+        self.release_connection = release_connection
         self.connection = None
         self.channels = set()
         self.patterns = set()
@@ -1431,7 +1442,7 @@ class PubSub(object):
             self.subscription_count = response[2]
             # if we've just unsubscribed from the remaining channels,
             # release the connection back to the pool
-            if not self.subscription_count:
+            if self.release_connection and not self.subscription_count:
                 self.reset()
         return response
 
