@@ -1429,10 +1429,6 @@ class PubSub(object):
         response = self.connection.read_response()
         if nativestr(response[0]) in self.subscribe_commands:
             self.subscription_count = response[2]
-            # if we've just unsubscribed from the remaining channels,
-            # release the connection back to the pool
-            if not self.subscription_count:
-                self.reset()
         return response
 
     def psubscribe(self, patterns):
