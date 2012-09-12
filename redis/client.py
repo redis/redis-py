@@ -512,6 +512,16 @@ class StrictRedis(object):
             time = int(time.total_seconds())
         return self.execute_command('EXPIRE', name, time)
 
+    def pexpire(self, name, time):
+        """
+        Set an expire flag on key ``name`` for ``time`` milliseconds. 
+        ``time`` can be represented by an integer or a Python timedelta 
+        object.
+        """
+        if isinstance(time, datetime.timedelta):
+            time = int(time.total_seconds()) * 1000
+        return self.execute_command('PEXPIRE', name, time)
+
     def expireat(self, name, when):
         """
         Set an expire flag on key ``name``. ``when`` can be represented
@@ -659,6 +669,10 @@ class StrictRedis(object):
     def ttl(self, name):
         "Returns the number of seconds until the key ``name`` will expire"
         return self.execute_command('TTL', name)
+
+    def pttl(self, name):
+        "Returns the number of milliseconds until the key ``name`` will expire"
+        return self.execute_command('PTTL', name)
 
     def type(self, name):
         "Returns the type of key ``name``"
