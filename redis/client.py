@@ -1,4 +1,3 @@
-from __future__ import with_statement
 from itertools import starmap
 import datetime
 import warnings
@@ -142,7 +141,13 @@ def float_or_none(response):
 
 def parse_config(response, **options):
     if options['parse'] == 'GET':
-        response = [nativestr(i) if i is not None else None for i in response]
+        response_ = []
+        for i in response:
+            if i is not None:
+                response_.append(nativestr(i))
+            else:
+                response_.append(None)
+            response = response_
         return response and pairs_to_dict(response) or {}
     return nativestr(response) == 'OK'
 
@@ -183,7 +188,7 @@ class StrictRedis(object):
             'LPUSH RPUSH',
             lambda r: isinstance(r, long) and r or nativestr(r) == 'OK'
         ),
-        string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
+        string_keys_to_dict('ZSCORE ZINCRBY INCRBYFLOAT HINCRBYFLOAT', float_or_none),
         string_keys_to_dict(
             'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME '
             'SAVE SELECT SET SHUTDOWN SLAVEOF WATCH UNWATCH',
@@ -303,7 +308,13 @@ class StrictRedis(object):
         should expect a single arguement which is a Pipeline object.
         """
         shard_hint = kwargs.pop('shard_hint', None)
-        with self.pipeline(True, shard_hint) as pipe:
+        s___mgr = self.pipeline(True, shard_hint)
+        s___exit = type(s___mgr).__exit__
+        s___value = type(s___mgr).__enter__(s___mgr)
+        s___exc = True
+        try:
+          try:
+            pipe = s___value
             while 1:
                 try:
                     if watches:
@@ -312,6 +323,13 @@ class StrictRedis(object):
                     return pipe.execute()
                 except WatchError:
                     continue
+          except:
+            s___exc = False
+            if not s___exit(s___mgr, *sys.exc_info()):
+              raise
+        finally:
+          if s___exc:
+            s___exit(s___mgr, None, None, None)
 
     def lock(self, name, timeout=None, sleep=0.1):
         """
@@ -342,12 +360,13 @@ class StrictRedis(object):
         command_name = args[0]
         connection = pool.get_connection(command_name, **options)
         try:
-            connection.send_command(*args)
-            return self.parse_response(connection, command_name, **options)
-        except ConnectionError:
-            connection.disconnect()
-            connection.send_command(*args)
-            return self.parse_response(connection, command_name, **options)
+            try:
+                connection.send_command(*args)
+                return self.parse_response(connection, command_name, **options)
+            except ConnectionError:
+                connection.disconnect()
+                connection.send_command(*args)
+                return self.parse_response(connection, command_name, **options)
         finally:
             pool.release(connection)
 
@@ -554,6 +573,13 @@ class StrictRedis(object):
         the value will be initialized as ``amount``
         """
         return self.execute_command('INCRBY', name, amount)
+
+    def incrbyfloat(self, name, amount=1.):
+        """
+        Increments the value of ``key`` by ``amount``.  If no key exists,
+        the value will be initialized as ``amount``
+        """
+        return self.execute_command('INCRBYFLOAT', name, amount)
 
     def keys(self, pattern='*'):
         "Returns a list of keys matching ``pattern``"
@@ -1168,6 +1194,10 @@ class StrictRedis(object):
         "Increment the value of ``key`` in hash ``name`` by ``amount``"
         return self.execute_command('HINCRBY', name, key, amount)
 
+    def hincrbyfloat(self, name, key, amount=1.):
+        "Increment the value of ``key`` in hash ``name`` by ``amount``"
+        return self.execute_command('HINCRBYFLOAT', name, key, amount)
+
     def hkeys(self, name):
         "Return the list of keys within hash ``name``"
         return self.execute_command('HKEYS', name)
@@ -1709,20 +1739,21 @@ class BasePipeline(object):
             self.connection = conn
 
         try:
-            return execute(conn, stack)
-        except ConnectionError:
-            conn.disconnect()
-            # if we were watching a variable, the watch is no longer valid
-            # since this connection has died. raise a WatchError, which
-            # indicates the user should retry his transaction. If this is more
-            # than a temporary failure, the WATCH that the user next issue
-            # will fail, propegating the real ConnectionError
-            if self.watching:
-                raise WatchError("A ConnectionError occured on while watching "
-                                 "one or more keys")
-            # otherwise, it's safe to retry since the transaction isn't
-            # predicated on any state
-            return execute(conn, stack)
+            try:
+                return execute(conn, stack)
+            except ConnectionError:
+                conn.disconnect()
+                # if we were watching a variable, the watch is no longer valid
+                # since this connection has died. raise a WatchError, which
+                # indicates the user should retry his transaction. If this is more
+                # than a temporary failure, the WATCH that the user next issue
+                # will fail, propegating the real ConnectionError
+                if self.watching:
+                    raise WatchError("A ConnectionError occured on while watching "
+                                     "one or more keys")
+                # otherwise, it's safe to retry since the transaction isn't
+                # predicated on any state
+                return execute(conn, stack)
         finally:
             self.reset()
 
