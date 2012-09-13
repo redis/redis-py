@@ -188,7 +188,7 @@ class StrictRedis(object):
             'LPUSH RPUSH',
             lambda r: isinstance(r, long) and r or nativestr(r) == 'OK'
         ),
-        string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
+        string_keys_to_dict('ZSCORE ZINCRBY INCRBYFLOAT HINCRBYFLOAT', float_or_none),
         string_keys_to_dict(
             'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME '
             'SAVE SELECT SET SHUTDOWN SLAVEOF WATCH UNWATCH',
@@ -573,6 +573,13 @@ class StrictRedis(object):
         the value will be initialized as ``amount``
         """
         return self.execute_command('INCRBY', name, amount)
+
+    def incrbyfloat(self, name, amount=1.):
+        """
+        Increments the value of ``key`` by ``amount``.  If no key exists,
+        the value will be initialized as ``amount``
+        """
+        return self.execute_command('INCRBYFLOAT', name, amount)
 
     def keys(self, pattern='*'):
         "Returns a list of keys matching ``pattern``"
@@ -1186,6 +1193,10 @@ class StrictRedis(object):
     def hincrby(self, name, key, amount=1):
         "Increment the value of ``key`` in hash ``name`` by ``amount``"
         return self.execute_command('HINCRBY', name, key, amount)
+
+    def hincrbyfloat(self, name, key, amount=1.):
+        "Increment the value of ``key`` in hash ``name`` by ``amount``"
+        return self.execute_command('HINCRBYFLOAT', name, key, amount)
 
     def hkeys(self, name):
         "Return the list of keys within hash ``name``"
