@@ -1280,7 +1280,6 @@ class Redis(StrictRedis):
     changed arguments to some commands to be more Pythonic, sane, or by
     accident.
     """
-
     # Overridden callbacks
     RESPONSE_CALLBACKS = dict_merge(
         StrictRedis.RESPONSE_CALLBACKS,
@@ -1482,6 +1481,9 @@ class PubSub(object):
     def listen(self):
         "Listen for messages on channels this client has been subscribed to"
         while self.subscription_count or self.channels or self.patterns:
+            if self.connection == None:
+              break
+          
             r = self.parse_response()
             msg_type = nativestr(r[0])
             if msg_type == 'pmessage':
