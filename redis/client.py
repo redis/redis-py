@@ -179,6 +179,7 @@ class StrictRedis(object):
             'SUNIONSTORE ZADD ZCARD ZREMRANGEBYRANK ZREMRANGEBYSCORE',
             int
         ),
+        string_keys_to_dict('INCRBYFLOAT HINCRBYFLOAT', float),
         string_keys_to_dict(
             # these return OK, or int if redis-server is >=1.3.4
             'LPUSH RPUSH',
@@ -555,6 +556,13 @@ class StrictRedis(object):
         the value will be initialized as ``amount``
         """
         return self.execute_command('INCRBY', name, amount)
+
+    def incrbyfloat(self, name, amount=1.0):
+        """
+        Increments the value at key ``name`` by floating ``amount``.
+        If no key exists, the value will be initialized as ``amount``
+        """
+        return self.execute_command('INCRBYFLOAT', name, amount)
 
     def keys(self, pattern='*'):
         "Returns a list of keys matching ``pattern``"
@@ -1200,6 +1208,12 @@ class StrictRedis(object):
     def hincrby(self, name, key, amount=1):
         "Increment the value of ``key`` in hash ``name`` by ``amount``"
         return self.execute_command('HINCRBY', name, key, amount)
+
+    def hincrbyfloat(self, name, key, amount=1.0):
+        """
+        Increment the value of ``key`` in hash ``name`` by floating ``amount``
+        """
+        return self.execute_command('HINCRBYFLOAT', name, key, amount)
 
     def hkeys(self, name):
         "Return the list of keys within hash ``name``"
