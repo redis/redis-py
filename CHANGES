@@ -1,4 +1,4 @@
-* 2.7.0 (in development)
+* 2.7.0
     * Added BITOP and BITCOUNT commands. Thanks Mark Tozzi.
     * Added the TIME command. Thanks Jason Knight.
     * Added support for LUA scripting. Thanks to Angus Peart, Drew Smathers,
@@ -16,6 +16,7 @@
     * Added INCRBYFLOAT/HINCRBYFLOAT commands. Thanks Nikita Uvarov.
     * High precision floating point values won't lose their precision when
       being sent to the Redis server. Thanks Jason Oster and Oleg Pudeyev.
+    * Added CLIENT LIST/CLIENT KILL commands
 * 2.6.2
     * `from_url` is now available as a classmethod on client classes. Thanks
       Jon Parise for the patch.
