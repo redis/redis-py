@@ -535,7 +535,11 @@ class ServerCommandsTestCase(unittest.TestCase):
         del self.client['a']
         # real logic
         version = self.client.info()['redis_version']
-        if StrictVersion(version) >= StrictVersion('1.3.4'):
+        if StrictVersion(version) >= StrictVersion('2.4.0'):
+            self.assertEqual(1, self.client.lpush('a', 'b'))
+            self.assertEqual(2, self.client.lpush('a', 'a'))
+            self.assertEqual(4, self.client.lpush('a', 'b', 'a'))
+        elif StrictVersion(version) >= StrictVersion('1.3.4'):
             self.assertEqual(1, self.client.lpush('a', 'b'))
             self.assertEqual(2, self.client.lpush('a', 'a'))
         else:
@@ -669,7 +673,11 @@ class ServerCommandsTestCase(unittest.TestCase):
         del self.client['a']
         # real logic
         version = self.client.info()['redis_version']
-        if StrictVersion(version) >= StrictVersion('1.3.4'):
+        if StrictVersion(version) >= StrictVersion('2.4.0'):
+            self.assertEqual(1, self.client.rpush('a', 'a'))
+            self.assertEqual(2, self.client.rpush('a', 'b'))
+            self.assertEqual(4, self.client.rpush('a', 'a', 'b'))
+        elif StrictVersion(version) >= StrictVersion('1.3.4'):
             self.assertEqual(1, self.client.rpush('a', 'a'))
             self.assertEqual(2, self.client.rpush('a', 'b'))
         else:
