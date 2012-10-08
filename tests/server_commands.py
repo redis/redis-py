@@ -168,21 +168,6 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.persist('a'), True)
         self.assertEquals(self.client.ttl('a'), None)
 
-    def test_pexpire(self):
-        version = self.client.info()['redis_version']
-        if StrictVersion(version) < StrictVersion('2.6.0'):
-            try:
-                raise unittest.SkipTest()
-            except AttributeError:
-                return
-
-        self.assertEquals(self.client.pexpire('a', 10000), False)
-        self.client['a'] = 'foo'
-        self.assertEquals(self.client.expire('a', 10000), True)
-        self.assertEquals(self.client.pttl('a'), 10000)
-        self.assertEquals(self.client.persist('a'), True)
-        self.assertEquals(self.client.pttl('a'), None)
-
     def test_expireat(self):
         expire_at = datetime.datetime.now() + datetime.timedelta(minutes=1)
         self.assertEquals(self.client.expireat('a', expire_at), False)
@@ -194,6 +179,41 @@ class ServerCommandsTestCase(unittest.TestCase):
         # expire at given a datetime object
         self.client['b'] = 'bar'
         self.assertEquals(self.client.expireat('b', expire_at), True)
+        self.assertEquals(self.client.ttl('b'), 60)
+
+    def test_pexpire(self):
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.0'):
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
+
+        self.assertEquals(self.client.pexpire('a', 10000), False)
+        self.client['a'] = 'foo'
+        self.assertEquals(self.client.pexpire('a', 10000), True)
+        self.assert_(self.client.pttl('a') <= 10000)
+        self.assertEquals(self.client.persist('a'), True)
+        self.assertEquals(self.client.pttl('a'), None)
+
+    def test_pexpireat(self):
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.0'):
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
+
+        expire_at = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        self.assertEquals(self.client.pexpireat('a', expire_at), False)
+        self.client['a'] = 'foo'
+        # expire at in unix time (milliseconds)
+        expire_at_seconds = int(time.mktime(expire_at.timetuple())) * 1000
+        self.assertEquals(self.client.pexpireat('a', expire_at_seconds), True)
+        self.assertEquals(self.client.ttl('a'), 60)
+        # expire at given a datetime object
+        self.client['b'] = 'bar'
+        self.assertEquals(self.client.pexpireat('b', expire_at), True)
         self.assertEquals(self.client.ttl('b'), 60)
 
     def test_get_set_bit(self):
@@ -1491,6 +1511,22 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(client.ttl('a'), 10)
         self.assertEquals(client.persist('a'), True)
         self.assertEquals(client.ttl('a'), -1)
+
+    def test_strict_pexpire(self):
+        client = self.get_client(redis.StrictRedis)
+        version = client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.0'):
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
+
+        self.assertEquals(client.pexpire('a', 10000), False)
+        self.client['a'] = 'foo'
+        self.assertEquals(client.pexpire('a', 10000), True)
+        self.assert_(client.pttl('a') <= 10000)
+        self.assertEquals(client.persist('a'), True)
+        self.assertEquals(client.pttl('a'), -1)
 
     ## BINARY SAFE
     # TODO add more tests

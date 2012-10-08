@@ -513,16 +513,6 @@ class StrictRedis(object):
             time = int(time.total_seconds())
         return self.execute_command('EXPIRE', name, time)
 
-    def pexpire(self, name, time):
-        """
-        Set an expire flag on key ``name`` for ``time`` milliseconds. 
-        ``time`` can be represented by an integer or a Python timedelta 
-        object.
-        """
-        if isinstance(time, datetime.timedelta):
-            time = int(time.total_seconds()) * 1000
-        return self.execute_command('PEXPIRE', name, time)
-
     def expireat(self, name, when):
         """
         Set an expire flag on key ``name``. ``when`` can be represented
@@ -602,6 +592,31 @@ class StrictRedis(object):
         "Removes an expiration on ``name``"
         return self.execute_command('PERSIST', name)
 
+    def pexpire(self, name, time):
+        """
+        Set an expire flag on key ``name`` for ``time`` milliseconds.
+        ``time`` can be represented by an integer or a Python timedelta
+        object.
+        """
+        if isinstance(time, datetime.timedelta):
+            time = int(time.total_seconds()) * 1000
+        return self.execute_command('PEXPIRE', name, time)
+
+    def pexpireat(self, name, when):
+        """
+        Set an expire flag on key ``name``. ``when`` can be represented
+        as an integer representing unix time in milliseconds (unix time * 1000)
+        or a Python datetime object.
+        """
+        if isinstance(when, datetime.datetime):
+            ms = when.microsecond / 1000
+            when = int(mod_time.mktime(when.timetuple())) * 1000 + ms
+        return self.execute_command('PEXPIREAT', name, when)
+
+    def pttl(self, name):
+        "Returns the number of milliseconds until the key ``name`` will expire"
+        return self.execute_command('PTTL', name)
+
     def randomkey(self):
         "Returns the name of a random key"
         return self.execute_command('RANDOMKEY')
@@ -670,10 +685,6 @@ class StrictRedis(object):
     def ttl(self, name):
         "Returns the number of seconds until the key ``name`` will expire"
         return self.execute_command('TTL', name)
-
-    def pttl(self, name):
-        "Returns the number of milliseconds until the key ``name`` will expire"
-        return self.execute_command('PTTL', name)
 
     def type(self, name):
         "Returns the type of key ``name``"
@@ -1308,6 +1319,7 @@ class Redis(StrictRedis):
         StrictRedis.RESPONSE_CALLBACKS,
         {
             'TTL': lambda r: r != -1 and r or None,
+            'PTTL': lambda r: r != -1 and r or None,
         }
     )
 
