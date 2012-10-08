@@ -854,6 +854,13 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.make_set('a', 'abc')
         self.assert_(self.client.srandmember('a') in b('abc'))
 
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) >= StrictVersion('2.6.0'):
+            randoms = self.client.srandmember('a', number=2)
+            self.assertEquals(len(randoms), 2)
+            for r in randoms:
+                self.assert_(r in b('abc'))
+
     def test_srem(self):
         # key is not set
         self.assertEquals(self.client.srem('a', 'a'), False)

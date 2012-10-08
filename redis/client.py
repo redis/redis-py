@@ -927,9 +927,16 @@ class StrictRedis(object):
         "Remove and return a random member of set ``name``"
         return self.execute_command('SPOP', name)
 
-    def srandmember(self, name):
-        "Return a random member of set ``name``"
-        return self.execute_command('SRANDMEMBER', name)
+    def srandmember(self, name, number=None):
+        """
+        If ``number`` is None, returns a random member of set ``name``.
+
+        If ``number`` is supplied, returns a list of ``number`` random
+        memebers of set ``name``. Note this is only available when running
+        Redis 2.6+.
+        """
+        args = number and [number] or []
+        return self.execute_command('SRANDMEMBER', name, *args)
 
     def srem(self, name, *values):
         "Remove ``values`` from set ``name``"
