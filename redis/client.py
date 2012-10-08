@@ -531,7 +531,7 @@ class StrictRedis(object):
         can be represented by an integer or a Python timedelta object.
         """
         if isinstance(time, datetime.timedelta):
-            time = int(time.total_seconds())
+            time = time.seconds + time.days * 24 * 3600
         return self.execute_command('EXPIRE', name, time)
 
     def expireat(self, name, when):
@@ -627,7 +627,8 @@ class StrictRedis(object):
         object.
         """
         if isinstance(time, datetime.timedelta):
-            time = int(time.total_seconds()) * 1000
+            ms = int(time.microseconds / 1000)
+            time = time.seconds + time.days * 24 * 3600 * 1000 + ms
         return self.execute_command('PEXPIRE', name, time)
 
     def pexpireat(self, name, when):
@@ -679,7 +680,7 @@ class StrictRedis(object):
         timedelta object.
         """
         if isinstance(time, datetime.timedelta):
-            time = int(time.total_seconds())
+            time = time.seconds + time.days * 24 * 3600
         return self.execute_command('SETEX', name, time, value)
 
     def setnx(self, name, value):
@@ -1378,7 +1379,7 @@ class Redis(StrictRedis):
         timedelta object.
         """
         if isinstance(time, datetime.timedelta):
-            time = int(time.total_seconds())
+            time = time.seconds + time.days * 24 * 3600
         return self.execute_command('SETEX', name, time, value)
 
     def lrem(self, name, value, num=0):

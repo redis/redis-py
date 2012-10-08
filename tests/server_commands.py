@@ -363,7 +363,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.incrbyfloat('a'), 1.0)
         self.assertEquals(self.client['a'], b('1'))
         self.assertEquals(self.client.incrbyfloat('a', 1.1), 2.1)
-        self.assertEquals(self.client['a'], b('2.1'))
+        self.assertEquals(float(self.client['a']), float(2.1))
 
     def test_keys(self):
         self.assertEquals(self.client.keys(), [])
