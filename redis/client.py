@@ -145,7 +145,7 @@ def parse_client(response, **options):
     parse = options['parse']
     if parse == 'LIST':
         clients = []
-        for c in response.splitlines():
+        for c in nativestr(response).splitlines():
             clients.append(dict([pair.split('=') for pair in c.split(' ')]))
         return clients
     elif parse == 'KILL':
@@ -637,7 +637,7 @@ class StrictRedis(object):
         or a Python datetime object.
         """
         if isinstance(when, datetime.datetime):
-            ms = when.microsecond / 1000
+            ms = int(when.microsecond / 1000)
             when = int(mod_time.mktime(when.timetuple())) * 1000 + ms
         return self.execute_command('PEXPIREAT', name, when)
 
