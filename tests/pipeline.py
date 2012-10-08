@@ -61,12 +61,13 @@ class PipelineTestCase(unittest.TestCase):
             pipe.set('a', int(a) + 1)
             self.assertRaises(redis.WatchError, pipe.execute)
 
-    def test_invalid_command_in_pipeline(self):
-        # all commands but the invalid one should be excuted correctly
+    def test_exec_error_in_response(self):
+        # an invalid pipeline command at exec time adds the exception instance
+        # to the list of returned values
         self.client['c'] = 'a'
         with self.client.pipeline() as pipe:
             pipe.set('a', 1).set('b', 2).lpush('c', 3).set('d', 4)
-            result = pipe.execute()
+            result = pipe.execute(raise_on_error=False)
 
             self.assertEquals(result[0], True)
             self.assertEquals(self.client['a'], b('1'))
@@ -78,6 +79,42 @@ class PipelineTestCase(unittest.TestCase):
             self.assertEquals(self.client['c'], b('a'))
             self.assertEquals(result[3], True)
             self.assertEquals(self.client['d'], b('4'))
+
+            # make sure the pipe was restored to a working state
+            self.assertEquals(pipe.set('z', 'zzz').execute(), [True])
+            self.assertEquals(self.client['z'], b('zzz'))
+
+    def test_exec_error_raised(self):
+        self.client['c'] = 'a'
+        with self.client.pipeline() as pipe:
+            pipe.set('a', 1).set('b', 2).lpush('c', 3).set('d', 4)
+            self.assertRaises(redis.ResponseError, pipe.execute)
+
+            # make sure the pipe was restored to a working state
+            self.assertEquals(pipe.set('z', 'zzz').execute(), [True])
+            self.assertEquals(self.client['z'], b('zzz'))
+
+    def test_parse_error_in_response(self):
+        with self.client.pipeline() as pipe:
+            # the zrem is invalid because we don't pass any keys to it
+            pipe.set('a', 1).zrem('b').set('b', 2)
+            result = pipe.execute(raise_on_error=False)
+
+            self.assertEquals(result[0], True)
+            self.assertEquals(self.client['a'], b('1'))
+            self.assert_(isinstance(result[1], redis.ResponseError))
+            self.assertEquals(result[2], True)
+            self.assertEquals(self.client['b'], b('2'))
+
+            # make sure the pipe was restored to a working state
+            self.assertEquals(pipe.set('z', 'zzz').execute(), [True])
+            self.assertEquals(self.client['z'], b('zzz'))
+
+    def test_parse_error_raised(self):
+        with self.client.pipeline() as pipe:
+            # the zrem is invalid because we don't pass any keys to it
+            pipe.set('a', 1).zrem('b').set('b', 2)
+            self.assertRaises(redis.ResponseError, pipe.execute)
 
             # make sure the pipe was restored to a working state
             self.assertEquals(pipe.set('z', 'zzz').execute(), [True])

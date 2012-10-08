@@ -1,6 +1,15 @@
-* 2.6.3 (in development)
+* 2.7.0 (in development)
     * Added BITOP and BITCOUNT commands. Thanks Mark Tozzi.
     * Added the TIME command. Thanks Jason Knight.
+    * Added support for LUA scripting. Thanks to Angus Peart, Drew Smathers,
+      Issac Kelly, Louis-Philippe Perron, Sean Bleier, Jeffrey Kaditz, and
+      Dvir Volk for various patches and contributions to this feature.
+    * Changed the default error handling in pipelines. By default, the first
+      error in a pipeline will now be raised. A new parameter to the
+      pipeline's execute, `raise_on_error`, can be set to False to keep the
+      old behavior of embeedding the exception instances in the result.
+    * Fixed a bug with pipelines where parse errors won't corrupt the
+      socket.
 * 2.6.2
     * `from_url` is now available as a classmethod on client classes. Thanks
       Jon Parise for the patch.

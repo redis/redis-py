@@ -1,5 +1,5 @@
 from __future__ import with_statement
-from itertools import starmap
+from itertools import chain, starmap
 import datetime
 import warnings
 import time as mod_time
@@ -1628,27 +1628,40 @@ class BasePipeline(object):
         self.command_stack.append((args, options))
         return self
 
-    def _execute_transaction(self, connection, commands):
+    def _execute_transaction(self, connection, commands, raise_on_error):
+        cmds = chain([(('MULTI', ), {})], commands, [(('EXEC', ), {})])
         all_cmds = SYM_EMPTY.join(
             starmap(connection.pack_command,
-                    [args for args, options in commands]))
+                    [args for args, options in cmds]))
         connection.send_packed_command(all_cmds)
-        # we don't care about the multi/exec any longer
-        commands = commands[1:-1]
-        # parse off the response for MULTI and all commands prior to EXEC.
-        # the only data we care about is the response the EXEC
-        # which is the last command
-        for i in range(len(commands) + 1):
-            self.parse_response(connection, '_')
+        # parse off the response for MULTI
+        self.parse_response(connection, '_')
+        # and all the other commands
+        errors = []
+        for i, _ in enumerate(commands):
+            try:
+                self.parse_response(connection, '_')
+            except ResponseError, e:
+                errors.append((i, e))
+
         # parse the EXEC.
         response = self.parse_response(connection, '_')
 
         if response is None:
             raise WatchError("Watched variable changed.")
 
+        # put any parse errors into the response
+        for i, e in errors:
+            response.insert(i, e)
+
         if len(response) != len(commands):
             raise ResponseError("Wrong number of response items from "
                                 "pipeline execution")
+
+        # find any errors in the response and raise if necessary
+        if raise_on_error:
+            self.raise_first_error(response)
+
         # We have to run response callbacks manually
         data = []
         for r, cmd in izip(response, commands):
@@ -1660,14 +1673,22 @@ class BasePipeline(object):
             data.append(r)
         return data
 
-    def _execute_pipeline(self, connection, commands):
+    def _execute_pipeline(self, connection, commands, raise_on_error):
         # build up all commands into a single request to increase network perf
         all_cmds = SYM_EMPTY.join(
             starmap(connection.pack_command,
                     [args for args, options in commands]))
         connection.send_packed_command(all_cmds)
-        return [self.parse_response(connection, args[0], **options)
-                for args, options in commands]
+        response = [self.parse_response(connection, args[0], **options)
+                    for args, options in commands]
+        if raise_on_error:
+            self.raise_first_error(response)
+        return response
+
+    def raise_first_error(self, response):
+        for r in response:
+            if isinstance(r, ResponseError):
+                raise r
 
     def parse_response(self, connection, command_name, **options):
         result = StrictRedis.parse_response(
@@ -1689,13 +1710,12 @@ class BasePipeline(object):
                 if not exist:
                     immediate('SCRIPT', 'LOAD', s.script, **{'parse': 'LOAD'})
 
-    def execute(self):
+    def execute(self, raise_on_error=True):
         "Execute all the commands in the current pipeline"
         if self.scripts:
             self.load_scripts()
         stack = self.command_stack
         if self.transaction or self.explicit_transaction:
-            stack = [(('MULTI', ), {})] + stack + [(('EXEC', ), {})]
             execute = self._execute_transaction
         else:
             execute = self._execute_pipeline
@@ -1709,7 +1729,7 @@ class BasePipeline(object):
             self.connection = conn
 
         try:
-            return execute(conn, stack)
+            return execute(conn, stack, raise_on_error)
         except ConnectionError:
             conn.disconnect()
             # if we were watching a variable, the watch is no longer valid
@@ -1722,7 +1742,7 @@ class BasePipeline(object):
                                  "one or more keys")
             # otherwise, it's safe to retry since the transaction isn't
             # predicated on any state
-            return execute(conn, stack)
+            return execute(conn, stack, raise_on_error)
         finally:
             self.reset()
 
