@@ -1354,6 +1354,13 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertRaises(redis.ResponseError, self.client.hincrby, 'a', 'a3')
 
     def test_hincrbyfloat(self):
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.0'):
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
+
         # key is not a hash
         self.client['a'] = 'a'
         self.assertRaises(redis.ResponseError,
