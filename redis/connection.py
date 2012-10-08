@@ -4,7 +4,7 @@ import socket
 import sys
 
 from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
-                           BytesIO, nativestr)
+                           BytesIO, nativestr, basestring)
 from redis.exceptions import (
     RedisError,
     ConnectionError,
@@ -313,7 +313,9 @@ class Connection(object):
         "Return a bytestring representation of the value"
         if isinstance(value, bytes):
             return value
-        if not isinstance(value, unicode):
+        if isinstance(value, float):
+            value = repr(value)
+        if not isinstance(value, basestring):
             value = str(value)
         if isinstance(value, unicode):
             value = value.encode(self.encoding, self.encoding_errors)

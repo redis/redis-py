@@ -1635,3 +1635,12 @@ class ServerCommandsTestCase(unittest.TestCase):
         data = ''.join(data)
         self.client.set('a', data)
         self.assertEquals(self.client.get('a'), b(data))
+
+    def test_floating_point_encoding(self):
+        """
+        High precision floating point values sent to the server should keep
+        precision.
+        """
+        timestamp = 1349673917.939762
+        self.client.zadd('a', 'aaa', timestamp)
+        self.assertEquals(self.client.zscore('a', 'aaa'), timestamp)

@@ -14,6 +14,8 @@
       Redis 2.6+ servers.
     * Added PEXPIRE/PEXPIREAT/PTTL commands. Thanks Luper Rouch.
     * Added INCRBYFLOAT/HINCRBYFLOAT commands. Thanks Nikita Uvarov.
+    * High precision floating point values won't lose their precision when
+      being sent to the Redis server. Thanks Jason Oster and Oleg Pudeyev.
 * 2.6.2
     * `from_url` is now available as a classmethod on client classes. Thanks
       Jon Parise for the patch.
