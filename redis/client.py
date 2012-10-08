@@ -1,6 +1,7 @@
 from __future__ import with_statement
 from itertools import chain, starmap
 import datetime
+import sys
 import warnings
 import time as mod_time
 from redis._compat import (b, izip, imap, iteritems, dictkeys, dictvalues,
@@ -1641,8 +1642,8 @@ class BasePipeline(object):
         for i, _ in enumerate(commands):
             try:
                 self.parse_response(connection, '_')
-            except ResponseError, e:
-                errors.append((i, e))
+            except ResponseError:
+                errors.append((i, sys.exc_info()[1]))
 
         # parse the EXEC.
         response = self.parse_response(connection, '_')
