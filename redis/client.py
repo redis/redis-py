@@ -141,6 +141,17 @@ def float_or_none(response):
     return float(response)
 
 
+def parse_client(response, **options):
+    parse = options['parse']
+    if parse == 'LIST':
+        clients = []
+        for c in response.splitlines():
+            clients.append(dict([pair.split('=') for pair in c.split(' ')]))
+        return clients
+    elif parse == 'KILL':
+        return bool(response)
+
+
 def parse_config(response, **options):
     if options['parse'] == 'GET':
         response = [nativestr(i) if i is not None else None for i in response]
@@ -207,6 +218,7 @@ class StrictRedis(object):
             ),
             'BGSAVE': lambda r: r == 'Background saving started',
             'BRPOPLPUSH': lambda r: r and r or None,
+            'CLIENT': parse_client,
             'CONFIG': parse_config,
             'DEBUG': parse_debug_object,
             'HGETALL': lambda r: r and pairs_to_dict(r) or {},
@@ -371,6 +383,14 @@ class StrictRedis(object):
         this method is asynchronous and returns immediately.
         """
         return self.execute_command('BGSAVE')
+
+    def client_kill(self, address):
+        "Disconnects the client at ``address`` (ip:port)"
+        return self.execute_command('CLIENT', 'KILL', address, parse='KILL')
+
+    def client_list(self):
+        "Returns a list of currently connected clients"
+        return self.execute_command('CLIENT', 'LIST', parse='LIST')
 
     def config_get(self, pattern="*"):
         "Return a dictionary of configuration based on the ``pattern``"

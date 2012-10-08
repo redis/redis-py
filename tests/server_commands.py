@@ -69,6 +69,11 @@ class ServerCommandsTestCase(unittest.TestCase):
         del self.client['a']
         self.assertEquals(self.client.get('a'), None)
 
+    def test_client_list(self):
+        clients = self.client.client_list()
+        self.assert_(isinstance(clients[0], dict))
+        self.assert_('addr' in clients[0])
+
     def test_config_get(self):
         data = self.client.config_get()
         self.assert_('maxmemory' in data)
@@ -210,11 +215,11 @@ class ServerCommandsTestCase(unittest.TestCase):
         # expire at in unix time (milliseconds)
         expire_at_seconds = int(time.mktime(expire_at.timetuple())) * 1000
         self.assertEquals(self.client.pexpireat('a', expire_at_seconds), True)
-        self.assertEquals(self.client.ttl('a'), 60)
+        self.assert_(self.client.ttl('a') <= 60)
         # expire at given a datetime object
         self.client['b'] = 'bar'
         self.assertEquals(self.client.pexpireat('b', expire_at), True)
-        self.assertEquals(self.client.ttl('b'), 60)
+        self.assert_(self.client.ttl('b') <= 60)
 
     def test_get_set_bit(self):
         self.assertEquals(self.client.getbit('a', 5), False)
