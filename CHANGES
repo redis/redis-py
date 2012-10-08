@@ -13,6 +13,7 @@
     * Added the optional `number` argument to SRANDMEMBER for use with
       Redis 2.6+ servers.
     * Added PEXPIRE/PEXPIREAT/PTTL commands. Thanks Luper Rouch.
+    * Added INCRBYFLOAT/HINCRBYFLOAT commands. Thanks Nikita Uvarov.
 * 2.6.2
     * `from_url` is now available as a classmethod on client classes. Thanks
       Jon Parise for the patch.

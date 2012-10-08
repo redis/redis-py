@@ -347,6 +347,19 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.incr('a', amount=5), 7)
         self.assertEquals(self.client['a'], b('7'))
 
+    def test_incrbyfloat(self):
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.0'):
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
+
+        self.assertEquals(self.client.incrbyfloat('a'), 1.0)
+        self.assertEquals(self.client['a'], b('1'))
+        self.assertEquals(self.client.incrbyfloat('a', 1.1), 2.1)
+        self.assertEquals(self.client['a'], b('2.1'))
+
     def test_keys(self):
         self.assertEquals(self.client.keys(), [])
         keys = set([b('test_a'), b('test_b'), b('testc')])
@@ -1339,6 +1352,17 @@ class ServerCommandsTestCase(unittest.TestCase):
         # finally a key that's not an int
         self.client.hset('a', 'a3', 'foo')
         self.assertRaises(redis.ResponseError, self.client.hincrby, 'a', 'a3')
+
+    def test_hincrbyfloat(self):
+        # key is not a hash
+        self.client['a'] = 'a'
+        self.assertRaises(redis.ResponseError,
+                          self.client.hincrbyfloat, 'a', 'a1')
+        del self.client['a']
+        # no key should create the hash and incr the key's value to 1
+        self.assertEquals(self.client.hincrbyfloat('a', 'a1'), 1.0)
+        self.assertEquals(self.client.hincrbyfloat('a', 'a1'), 2.0)
+        self.assertEquals(self.client.hincrbyfloat('a', 'a1', 1.2), 3.2)
 
     def test_hkeys(self):
         # key is not a hash
