@@ -240,6 +240,7 @@ class StrictRedis(object):
         For example::
 
             redis://username:password@localhost:6379/0
+            redis://:password@/var/run/redis/redis.sock
 
         If ``db`` is None, this method will attempt to extract the database ID
         from the URL path component.
@@ -251,16 +252,18 @@ class StrictRedis(object):
 
         # We only support redis:// schemes.
         assert url.scheme == 'redis' or not url.scheme
+        if url.hostname:
+            # Extract the database ID from the path component if hasn't been given.
+            if db is None:
+                try:
+                    db = int(url.path.replace('/', ''))
+                except (AttributeError, ValueError):
+                    db = 0
 
-        # Extract the database ID from the path component if hasn't been given.
-        if db is None:
-            try:
-                db = int(url.path.replace('/', ''))
-            except (AttributeError, ValueError):
-                db = 0
-
-        return cls(host=url.hostname, port=url.port, db=db,
-                   password=url.password, **kwargs)
+            return cls(host=url.hostname, port=url.port, db=db,
+                       password=url.password, **kwargs)
+        else:
+            return cls(unix_socket_path=url.path,password=url.password, **kwargs)
 
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
