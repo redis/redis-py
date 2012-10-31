@@ -415,9 +415,11 @@ class StrictRedis(object):
         "Returns version specific metainformation about a give key"
         return self.execute_command('DEBUG', 'OBJECT', key)
 
-    def delete(self, *names):
-        "Delete one or more keys specified by ``names``"
-        return self.execute_command('DEL', *names)
+    def delete(self, keys, *args):
+        "Delete one or more keys specified by ``keys``"
+        args = list_or_args(keys, args)
+        return self.execute_command('DEL', *args)
+
     __delitem__ = delete
 
     def echo(self, value):

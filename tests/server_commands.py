@@ -63,6 +63,10 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.delete('a'), False)
         self.client['a'] = 'foo'
         self.assertEquals(self.client.delete('a'), True)
+        self.assertEquals(self.client.mget(['a', 'b']), [None, None])
+        self.client['a'] = 'foo'
+        self.client['b'] = 'bar'
+        self.assertEquals(self.client.delete(['a', 'b']), True)
 
     def test_delitem(self):
         self.client['a'] = 'foo'
