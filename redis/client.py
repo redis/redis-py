@@ -683,6 +683,13 @@ class StrictRedis(object):
             time = time.seconds + time.days * 24 * 3600
         return self.execute_command('SETEX', name, time, value)
 
+    def psetex(self, name, time_ms, value):
+        """
+        Set the value of key ``name`` to ``value`` that expires in ``time_ms``
+        milliseconds.
+        """
+        return self.execute_command('PSETEX', name, time_ms, value)
+
     def setnx(self, name, value):
         "Set the value of key ``name`` to ``value`` if key doesn't exist"
         return self.execute_command('SETNX', name, value)
