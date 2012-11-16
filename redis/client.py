@@ -13,7 +13,8 @@ from redis.exceptions import (
     RedisError,
     ResponseError,
     WatchError,
-    NoScriptError
+    NoScriptError,
+    ExecAbortError,
 )
 
 SYM_EMPTY = b('')
@@ -1714,7 +1715,13 @@ class BasePipeline(object):
                 errors.append((i, sys.exc_info()[1]))
 
         # parse the EXEC.
-        response = self.parse_response(connection, '_')
+        try:
+            response = self.parse_response(connection, '_')
+        except ExecAbortError:
+            self.immediate_execute_command('DISCARD')
+            if errors:
+                raise errors[0][1]
+            raise sys.exc_info()[1]
 
         if response is None:
             raise WatchError("Watched variable changed.")

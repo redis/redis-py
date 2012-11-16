@@ -12,6 +12,7 @@ from redis.exceptions import (
     InvalidResponse,
     AuthenticationError,
     NoScriptError,
+    ExecAbortError,
 )
 
 try:
@@ -35,6 +36,7 @@ class PythonParser(object):
     EXCEPTION_CLASSES = {
         'ERR': ResponseError,
         'NOSCRIPT': NoScriptError,
+        'EXECABORT': ExecAbortError,
     }
 
     def __init__(self):

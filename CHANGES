@@ -1,3 +1,10 @@
+* 2.7.2
+    * Parse errors are now *always* raised on multi/exec pipelines, regardless
+      of the `raise_on_error` flag. See
+      https://groups.google.com/forum/?hl=en&fromgroups=#!topic/redis-db/VUiEFT8U8U0
+      for more info.
+* 2.7.1
+    * Packaged tests with source code
 * 2.7.0
     * Added BITOP and BITCOUNT commands. Thanks Mark Tozzi.
     * Added the TIME command. Thanks Jason Knight.
