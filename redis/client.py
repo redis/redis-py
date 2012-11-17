@@ -432,9 +432,24 @@ class StrictRedis(object):
         "Delete all keys in the current database"
         return self.execute_command('FLUSHDB')
 
-    def info(self):
-        "Returns a dictionary containing information about the Redis server"
-        return self.execute_command('INFO')
+    def info(self, name=None):
+        """
+        Returns a dictionary containing information about the Redis server
+        
+        The name argument is not supported by older versions of Redis Server,
+        and will return an empty dictionary.
+        """
+        if name is None:
+            return self.execute_command('INFO')
+        else:
+            try:
+                return self.execute_command('INFO', name)
+            except ResponseError:
+                e = sys.exc_info()[1]
+                if len(e.args) > 0 and e.args[0] == 'syntax error':
+                    return {}
+                else:
+                    raise
 
     def lastsave(self):
         """
