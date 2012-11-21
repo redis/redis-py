@@ -5,7 +5,7 @@ import sys
 import warnings
 import time as mod_time
 from redis._compat import (b, izip, imap, iteritems, dictkeys, dictvalues,
-                           basestring, long, nativestr, urlparse)
+                           basestring, long, nativestr, urlparse, bytes)
 from redis.connection import ConnectionPool, UnixDomainSocketConnection
 from redis.exceptions import (
     ConnectionError,
@@ -24,9 +24,9 @@ def list_or_args(keys, args):
     # returns a single list combining keys and args
     try:
         iter(keys)
-        # a string can be iterated, but indicates
+        # a string or bytes instance can be iterated, but indicates
         # keys wasn't passed as a list
-        if isinstance(keys, basestring):
+        if isinstance(keys, (basestring, bytes)):
             keys = [keys]
     except TypeError:
         keys = [keys]
