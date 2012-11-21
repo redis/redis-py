@@ -1,7 +1,8 @@
 from __future__ import with_statement
 import unittest
 
-from redis._compat import unichr, u, unicode
+from redis._compat import unichr, u, unicode, b
+from redis.client import list_or_args
 from redis.connection import ConnectionPool, PythonParser, HiredisParser
 import redis
 
@@ -32,6 +33,17 @@ class EncodingTestCase(unittest.TestCase):
             self.client.rpush('a', unicode_string)
         self.assertEquals(self.client.lrange('a', 0, -1), result)
 
+    def test_list_or_args(self):
+        bfoo = b('foo')
+        ufoo = u('foo')
+        # first record is a text instance
+        self.assertEquals(list_or_args(ufoo, []), [ufoo])
+        self.assertEquals(list_or_args(ufoo, [ufoo]), [ufoo, ufoo])
+        # first record is a list
+        self.assertEquals(list_or_args([ufoo], [ufoo]), [ufoo, ufoo])
+        # first record is a binary instance
+        self.assertEquals(list_or_args(bfoo, []), [bfoo])
+        self.assertEquals(list_or_args(bfoo, [bfoo]), [bfoo, bfoo])
 
 class PythonParserEncodingTestCase(EncodingTestCase):
     def setUp(self):
