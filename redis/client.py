@@ -500,10 +500,11 @@ class StrictRedis(object):
         ``start`` and ``end`` paramaters indicate which bytes to consider
         """
         params = [key]
-        if start and end:
+        if start is not None and end is not None:
             params.append(start)
             params.append(end)
-        elif (start and not end) or (end and not start):
+        elif (start is not None and end is None) or \
+                (end is not None and start is None):
             raise RedisError("Both start and end must be specified")
         return self.execute_command('BITCOUNT', *params)
 
