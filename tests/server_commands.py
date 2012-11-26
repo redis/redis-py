@@ -251,6 +251,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client.setbit('a', 25, True)
         self.client.setbit('a', 33, True)
         self.assertEquals(self.client.bitcount('a'), 5)
+        self.assertEquals(self.client.bitcount('a', 0, -1), 5)
         self.assertEquals(self.client.bitcount('a', 2, 3), 2)
         self.assertEquals(self.client.bitcount('a', 2, -1), 3)
         self.assertEquals(self.client.bitcount('a', -2, -1), 2)
