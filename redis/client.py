@@ -87,27 +87,24 @@ def parse_info(response):
 
     def get_value(value):
         if ',' not in value or '=' not in value:
-            return value
-
-        sub_dict = {}
-        for item in value.split(','):
-            k, v = item.rsplit('=', 1)
             try:
-                sub_dict[k] = int(v)
+                if '.' in value:
+                    return float(value)
+                else:
+                    return int(value)
             except ValueError:
-                sub_dict[k] = v
-        return sub_dict
+                return value
+        else:
+            sub_dict = {}
+            for item in value.split(','):
+                k, v = item.rsplit('=', 1)
+                sub_dict[k] = get_value(v)  
+            return sub_dict
 
     for line in response.splitlines():
         if line and not line.startswith('#'):
             key, value = line.split(':')
-            try:
-                if '.' in value:
-                    info[key] = float(value)
-                else:
-                    info[key] = int(value)
-            except ValueError:
-                info[key] = get_value(value)
+            info[key] = get_value(value)
     return info
 
 
