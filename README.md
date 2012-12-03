@@ -46,7 +46,7 @@ official official command syntax. There are a few exceptions:
   class as it places the underlying connection in a state where it can't
   execute non-pubsub commands. Calling the pubsub method from the Redis client
   will return a PubSub instance where you can subscribe to channels and listen
-  for messages. You can call PUBLISH from both classes.
+  for messages. You can only call PUBLISH from the Redis client (see [this comment on issue #151](https://github.com/andymccurdy/redis-py/issues/151#issuecomment-1545015) for details).
 
 In addition to the changes above, the Redis class, a subclass of StrictRedis,
 overrides several other commands to provide backwards compatibility with older
