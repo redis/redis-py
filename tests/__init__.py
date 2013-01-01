@@ -7,6 +7,7 @@ from tests.lock import LockTestCase
 from tests.pubsub import PubSubTestCase, PubSubRedisDownTestCase
 from tests.encoding import (PythonParserEncodingTestCase,
                             HiredisEncodingTestCase)
+from tests.mirror_server import MirrorServerTestCase
 
 try:
     import hiredis
@@ -24,6 +25,7 @@ def all_tests():
     suite.addTest(unittest.makeSuite(PubSubTestCase))
     suite.addTest(unittest.makeSuite(PubSubRedisDownTestCase))
     suite.addTest(unittest.makeSuite(PythonParserEncodingTestCase))
+    suite.addTest(unittest.makeSuite(MirrorServerTestCase))
     if use_hiredis:
         suite.addTest(unittest.makeSuite(HiredisEncodingTestCase))
     return suite

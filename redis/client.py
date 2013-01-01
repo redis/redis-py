@@ -2,7 +2,6 @@ from __future__ import with_statement
 from itertools import chain, starmap
 import datetime
 import sys
-import inspect
 import warnings
 import time as mod_time
 from redis._compat import (b, izip, imap, iteritems, dictkeys, dictvalues,
@@ -1458,7 +1457,9 @@ class Redis(object):
                                    unix_socket_path=unix_socket_path)
         self.mirror_inst = None
         if mirror:
-            self.mirror_inst = _Redis(host=mirror, port=port, db=db,
+            if ':' in mirror:
+                mirror, port = mirror.split(':', 1)
+            self.mirror_inst = _Redis(host=mirror, port=int(port), db=db,
                                       password=password,
                                       socket_timeout=socket_timeout,
                                       connection_pool=connection_pool,
@@ -1468,7 +1469,7 @@ class Redis(object):
 
     def __getattr__(self, name):
         attr = getattr(self.primary_inst, name)
-        if self.mirror_inst and inspect.isfunction(attr):
+        if self.mirror_inst and hasattr(attr, '__call__'):
             def _func(*args, **kwargs):
                 getattr(self.primary_inst, name)(*args, **kwargs)
                 getattr(self.mirror_inst, name)(*args, **kwargs)
@@ -1477,12 +1478,12 @@ class Redis(object):
             return attr
 
     def __getitem__(self, name):
-        return self.primary_inst[name]
+        return self.primary_inst.get(name)
 
     def __setitem__(self, name, value):
-        self.primary_inst[name] = value
+        self.primary_inst.set(name, value)
         if self.mirror_inst:
-            self.mirror_inst[name] = value
+            self.mirror_inst.set(name, value)
 
     def __delitem__(self, name):
         self.primary_inst.delete(name)
