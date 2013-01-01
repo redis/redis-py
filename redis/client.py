@@ -2,6 +2,7 @@ from __future__ import with_statement
 from itertools import chain, starmap
 import datetime
 import sys
+import inspect
 import warnings
 import time as mod_time
 from redis._compat import (b, izip, imap, iteritems, dictkeys, dictvalues,
@@ -1352,7 +1353,7 @@ class StrictRedis(object):
         """
         return Script(self, script)
 
-class Redis(StrictRedis):
+class _Redis(StrictRedis):
     """
     Provides backwards compatibility with older versions of redis-py that
     changed arguments to some commands to be more Pythonic, sane, or by
@@ -1434,6 +1435,59 @@ class Redis(StrictRedis):
             pieces.append(pair[1])
             pieces.append(pair[0])
         return self.execute_command('ZADD', name, *pieces)
+
+
+class Redis(object):
+    """
+    wrapper to support mirror instance
+    """
+
+    RESPONSE_CALLBACKS = _Redis.RESPONSE_CALLBACKS
+
+    def __init__(self, host='localhost', port=6379,
+                 db=0, password=None, socket_timeout=None,
+                 connection_pool=None, charset='utf-8',
+                 errors='strict', decode_responses=False,
+                 unix_socket_path=None, mirror=None):
+        self.primary_inst = _Redis(host=host, port=port, db=db,
+                                   password=password,
+                                   socket_timeout=socket_timeout,
+                                   connection_pool=connection_pool,
+                                   charset=charset, errors=errors,
+                                   decode_responses=decode_responses,
+                                   unix_socket_path=unix_socket_path)
+        self.mirror_inst = None
+        if mirror:
+            self.mirror_inst = _Redis(host=mirror, port=port, db=db,
+                                      password=password,
+                                      socket_timeout=socket_timeout,
+                                      connection_pool=connection_pool,
+                                      charset=charset, errors=errors,
+                                      decode_responses=decode_responses,
+                                      unix_socket_path=unix_socket_path)
+
+    def __getattr__(self, name):
+        attr = getattr(self.primary_inst, name)
+        if self.mirror_inst and inspect.isfunction(attr):
+            def _func(*args, **kwargs):
+                getattr(self.primary_inst, name)(*args, **kwargs)
+                getattr(self.mirror_inst, name)(*args, **kwargs)
+            return _func
+        else:
+            return attr
+
+    def __getitem__(self, name):
+        return self.primary_inst[name]
+
+    def __setitem__(self, name, value):
+        self.primary_inst[name] = value
+        if self.mirror_inst:
+            self.mirror_inst[name] = value
+
+    def __delitem__(self, name):
+        self.primary_inst.delete(name)
+        if self.mirror_inst:
+            self.mirror_inst.delete(name)
 
 
 class PubSub(object):
@@ -1851,7 +1905,7 @@ class StrictPipeline(BasePipeline, StrictRedis):
     pass
 
 
-class Pipeline(BasePipeline, Redis):
+class Pipeline(BasePipeline, _Redis):
     "Pipeline for the Redis class"
     pass
 
