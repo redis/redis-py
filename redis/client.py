@@ -1624,6 +1624,9 @@ class BasePipeline(object):
         except:
             pass
 
+    def __len__(self):
+        return len(self.command_stack)
+
     def reset(self):
         self.command_stack = []
         self.scripts = set()
