@@ -74,6 +74,31 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(isinstance(clients[0], dict))
         self.assert_('addr' in clients[0])
 
+    def test_client_getname(self):
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.9'):
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
+
+        name = self.client.client_getname()
+        self.assertEquals(name, None)
+
+    def test_client_setname(self):
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.9'):
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
+
+        self.assert_(self.client.client_setname('redis_py_test'))
+        self.assertEquals(
+            self.client.client_getname(),
+            'redis_py_test'
+        )
+
     def test_config_get(self):
         data = self.client.config_get()
         self.assert_('maxmemory' in data)
