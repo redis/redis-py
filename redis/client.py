@@ -216,9 +216,9 @@ class StrictRedis(object):
         string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
         {
             'BGREWRITEAOF': (
-                lambda r: r == 'Background rewriting of AOF file started'
+                lambda r: nativestr(r) == 'Background rewriting of AOF file started'
             ),
-            'BGSAVE': lambda r: r == 'Background saving started',
+            'BGSAVE': lambda r: nativestr(r) == 'Background saving started',
             'BRPOPLPUSH': lambda r: r and r or None,
             'CLIENT': parse_client,
             'CONFIG': parse_config,
