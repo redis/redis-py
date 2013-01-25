@@ -942,15 +942,15 @@ class ServerCommandsTestCase(unittest.TestCase):
 
     def test_srem(self):
         # key is not set
-        self.assertEquals(self.client.srem('a', 'a'), False)
+        self.assertEquals(self.client.srem('a', 'a'), 0)
         # key is not a set
         self.client['a'] = 'a'
         self.assertRaises(redis.ResponseError, self.client.srem, 'a', 'a')
         del self.client['a']
         # real logic
-        self.make_set('a', 'abc')
-        self.assertEquals(self.client.srem('a', 'd'), False)
-        self.assertEquals(self.client.srem('a', 'b'), True)
+        self.make_set('a', 'abcd')
+        self.assertEquals(self.client.srem('a', 'e'), 0)
+        self.assertEquals(self.client.srem('a', 'b', 'd'), 2)
         self.assertEquals(self.client.smembers('a'), set([b('a'), b('c')]))
 
     def test_sunion(self):
