@@ -190,7 +190,7 @@ class StrictRedis(object):
         "Set a custom Response Callback"
         self.response_callbacks[command] = callback
 
-    def pipeline(self, transaction=True, shard_hint=None):
+    def pipeline(self, transaction=False, shard_hint=None):
         """
         Return a new pipeline object that can queue multiple commands for
         later execution. ``transaction`` indicates whether all commands
@@ -1074,7 +1074,7 @@ class Redis(StrictRedis):
     accident.
     """
 
-    def pipeline(self, transaction=True, shard_hint=None):
+    def pipeline(self, transaction=False, shard_hint=None):
         """
         Return a new pipeline object that can queue multiple commands for
         later execution. ``transaction`` indicates whether all commands
@@ -1283,6 +1283,8 @@ class BasePipeline(object):
         self.connection_pool = connection_pool
         self.connection = None
         self.response_callbacks = response_callbacks
+        if transaction:
+            raise Exception("Transactions are no longer supported")
         self.transaction = transaction
         self.shard_hint = shard_hint
 
