@@ -10,6 +10,7 @@ from redis.exceptions import (
     RedisError,
     ResponseError,
     WatchError,
+    NoScriptError,
 )
 
 def list_or_args(keys, args):
@@ -102,6 +103,14 @@ def parse_config(response, **options):
         return response and pairs_to_dict(response) or {}
     return response == 'OK'
 
+def parse_script(response, **options):
+    parse = options['parse']
+    if parse in ('FLUSH', 'KILL'):
+        return response == 'OK'
+    if parse == 'EXISTS':
+        return list(imap(bool, response))
+    return response
+
 class StrictRedis(object):
     """
     Implementation of the Redis protocol.
@@ -154,6 +163,7 @@ class StrictRedis(object):
             'LASTSAVE': timestamp_to_datetime,
             'PING': lambda r: r == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
+            'SCRIPT': parse_script,
             'TTL': lambda r: r != -1 and r or None,
         }
         )
@@ -1065,7 +1075,53 @@ class StrictRedis(object):
         Returns the number of subscribers the message was delivered to.
         """
         return self.execute_command('PUBLISH', channel, message)
+    
+    def eval(self, script, numkeys, *keys_and_args):
+        """
+        Execute the LUA ``script``, specifying the ``numkeys`` the script
+        will touch and the key names and argument values in ``keys_and_args``.
+        Returns the result of the script.
 
+        In practice, use the object returned by ``register_script``. This
+        function exists purely for Redis API completion.
+        """
+        return self.execute_command('EVAL', script, numkeys, *keys_and_args)
+
+    def evalsha(self, sha, numkeys, *keys_and_args):
+        """
+        Use the ``sha`` to execute a LUA script already registered via EVAL
+        or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
+        key names and argument values in ``keys_and_args``. Returns the result
+        of the script.
+
+        In practice, use the object returned by ``register_script``. This
+        function exists purely for Redis API completion.
+        """
+        return self.execute_command('EVALSHA', sha, numkeys, *keys_and_args)
+
+    def script_exists(self, *args):
+        """
+        Check if a script exists in the script cache by specifying the SHAs of
+        each script as ``args``. Returns a list of boolean values indicating if
+        if each already script exists in the cache.
+        """
+        options = {'parse': 'EXISTS'}
+        return self.execute_command('SCRIPT', 'EXISTS', *args, **options)
+
+    def script_flush(self):
+        "Flush all scripts from the script cache"
+        options = {'parse': 'FLUSH'}
+        return self.execute_command('SCRIPT', 'FLUSH', **options)
+
+    def script_kill(self):
+        "Kill the currently executing LUA script"
+        options = {'parse': 'KILL'}
+        return self.execute_command('SCRIPT', 'KILL', **options)
+
+    def script_load(self, script):
+        "Load a LUA ``script`` into the script cache. Returns the SHA."
+        options = {'parse': 'LOAD'}
+        return self.execute_command('SCRIPT', 'LOAD', script, **options)
 
 class Redis(StrictRedis):
     """

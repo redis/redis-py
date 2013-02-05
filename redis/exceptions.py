@@ -24,3 +24,5 @@ class PubSubError(RedisError):
 class WatchError(RedisError):
     pass
 
+class NoScriptError(ResponseError):
+    pass

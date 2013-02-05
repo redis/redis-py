@@ -1,9 +1,15 @@
 import errno
 import socket
 from itertools import chain, imap
-from redis.exceptions import ConnectionError, ResponseError, InvalidResponse
+from redis.exceptions import ConnectionError, ResponseError, InvalidResponse, NoScriptError
 
 class PythonParser(object):
+
+    EXCEPTION_CLASSES = {
+        'ERR': ResponseError,
+        'NOSCRIPT': NoScriptError,
+    }
+
     def __init__(self):
         self._fp = None
 
@@ -30,6 +36,14 @@ class PythonParser(object):
             raise ConnectionError("Error while reading from socket: %s" % \
                 (e.args,))
 
+    def parse_error(self, response):
+        "Parse an error response"
+        error_code = response.split(' ')[0]
+        if error_code in self.EXCEPTION_CLASSES:
+            response = response[len(error_code) + 1:]
+            return self.EXCEPTION_CLASSES[error_code](response)
+        return ResponseError(response)
+
     def read_response(self):
         response = self.read()
         if not response:
@@ -39,13 +53,13 @@ class PythonParser(object):
 
         # server returned an error
         if byte == '-':
-            if response.startswith('ERR '):
-                response = response[4:]
-                return ResponseError(response)
             if response.startswith('LOADING '):
                 # If we're loading the dataset into memory, kill the socket
                 # so we re-initialize (and re-SELECT) next time.
                 raise ConnectionError("Redis is loading data into memory")
+            # *return*, not raise the exception class. if it is meant to be
+            # raised, it will be at a higher level.
+            return self.parse_error(response)
         # single value
         elif byte == '+':
             return response
@@ -205,7 +219,7 @@ class Connection(object):
         except:
             self.disconnect()
             raise
-        if response.__class__ == ResponseError:
+        if isinstance(response, ResponseError):
             raise response
         return response
 
