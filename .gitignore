@@ -4,3 +4,4 @@ build/
 dist/
 dump.rdb
 /.tox
+_build
