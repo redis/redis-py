@@ -549,6 +549,10 @@ class ServerCommandsTestCase(unittest.TestCase):
             self.client.lrange('b', 0, -1),
             [b('1'), b('2'), b('3'), b('4')])
 
+    def test_brpoplpush_empty_string(self):
+        self.client.lpush('a', '')
+        self.assertEquals(self.client.brpoplpush('a', 'b'), b(''))
+
     def test_lindex(self):
         # no key
         self.assertEquals(self.client.lindex('a', '0'), None)
