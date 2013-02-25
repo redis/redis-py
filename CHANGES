@@ -1,3 +1,5 @@
+* 2.7.3 (in development)
+    * Fixed a bug with BRPOPLPUSH and lists with empty strings.
 * 2.7.2
     * Parse errors are now *always* raised on multi/exec pipelines, regardless
       of the `raise_on_error` flag. See
