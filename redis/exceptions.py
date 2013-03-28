@@ -6,13 +6,16 @@ class RedisError(Exception):
 class AuthenticationError(RedisError):
     pass
 
-class ConnectionError(RedisError):
+class ServerError(RedisError):
+    pass
+
+class ConnectionError(ServerError):
+    pass
+
+class InvalidResponse(ServerError):
     pass
 
 class ResponseError(RedisError):
-    pass
-
-class InvalidResponse(RedisError):
     pass
 
 class DataError(RedisError):
