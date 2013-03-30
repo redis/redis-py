@@ -8,14 +8,18 @@ class RedisError(Exception):
 class AuthenticationError(RedisError):
     pass
 
+
 class ServerError(RedisError):
     pass
+
 
 class ConnectionError(ServerError):
     pass
 
+
 class InvalidResponse(ServerError):
     pass
+
 
 class ResponseError(RedisError):
     pass
@@ -32,8 +36,10 @@ class PubSubError(RedisError):
 class WatchError(RedisError):
     pass
 
+
 class NoScriptError(ResponseError):
     pass
+
 
 class ExecAbortError(ResponseError):
     pass

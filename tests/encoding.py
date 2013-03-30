@@ -45,6 +45,7 @@ class EncodingTestCase(unittest.TestCase):
         self.assertEquals(list_or_args(bfoo, []), [bfoo])
         self.assertEquals(list_or_args(bfoo, [bfoo]), [bfoo, bfoo])
 
+
 class PythonParserEncodingTestCase(EncodingTestCase):
     def setUp(self):
         pool = ConnectionPool(

@@ -4,6 +4,7 @@ import unittest
 import redis
 from redis._compat import b
 
+
 class PipelineTestCase(unittest.TestCase):
     def setUp(self):
         self.client = redis.Redis(host='localhost', port=6379, db=9)

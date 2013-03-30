@@ -9,6 +9,7 @@ from redis._compat import (unichr, u, b, ascii_letters, iteritems, dictkeys,
 from redis.client import parse_info
 import redis
 
+
 class ServerCommandsTestCase(unittest.TestCase):
     def get_client(self, cls=redis.Redis):
         return cls(host='localhost', port=6379, db=9)
@@ -1319,8 +1320,11 @@ class ServerCommandsTestCase(unittest.TestCase):
         d = {'a': 1, 'b': 2, 'c': 3}
         self.assert_(self.client.hmset('foo', d))
         self.assertEqual(
-            self.client.hmget('foo', ['a', 'b', 'c']), [b('1'), b('2'), b('3')])
-        self.assertEqual(self.client.hmget('foo', ['a', 'c']), [b('1'), b('3')])
+            self.client.hmget('foo', ['a', 'b', 'c']), [b('1'), b('2'), b('3')]
+        )
+        self.assertEqual(
+            self.client.hmget('foo', ['a', 'c']), [b('1'), b('3')]
+        )
         # using *args type args
         self.assertEquals(self.client.hmget('foo', 'a', 'c'), [b('1'), b('3')])
 
