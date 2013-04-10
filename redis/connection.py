@@ -45,7 +45,7 @@ class PythonParser(object):
     def __del__(self):
         try:
             self.on_disconnect()
-        except:
+        except Exception:
             pass
 
     def on_connect(self, connection):
@@ -152,7 +152,7 @@ class HiredisParser(object):
     def __del__(self):
         try:
             self.on_disconnect()
-        except:
+        except Exception:
             pass
 
     def on_connect(self, connection):
@@ -217,7 +217,7 @@ class Connection(object):
     def __del__(self):
         try:
             self.disconnect()
-        except:
+        except Exception:
             pass
 
     def connect(self):
@@ -292,7 +292,7 @@ class Connection(object):
                 _errno, errmsg = e.args
             raise ConnectionError("Error %s while writing to socket. %s." %
                                   (_errno, errmsg))
-        except:
+        except Exception:
             self.disconnect()
             raise
 
@@ -304,7 +304,7 @@ class Connection(object):
         "Read the response from a previously sent command"
         try:
             response = self._parser.read_response()
-        except:
+        except Exception:
             self.disconnect()
             raise
         if isinstance(response, ResponseError):
