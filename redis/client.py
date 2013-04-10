@@ -1474,7 +1474,7 @@ class PubSub(object):
             if self.connection and (self.channels or self.patterns):
                 self.connection.disconnect()
             self.reset()
-        except:
+        except Exception:
             pass
 
     def reset(self):
@@ -1632,7 +1632,7 @@ class BasePipeline(object):
     def __del__(self):
         try:
             self.reset()
-        except:
+        except Exception:
             pass
 
     def __len__(self):
