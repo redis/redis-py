@@ -2,6 +2,7 @@ from itertools import chain
 import os
 import socket
 import sys
+import cPickle
 
 from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
                            BytesIO, nativestr, basestring)
@@ -138,6 +139,13 @@ class PythonParser(object):
             if length == -1:
                 return None
             response = [self.read_response() for i in xrange(length)]
+
+        try:
+            r = cPickle.loads(response)
+            return r
+        except:
+            pass
+
         if isinstance(response, bytes) and self.encoding:
             response = response.decode(self.encoding)
         return response
@@ -317,10 +325,14 @@ class Connection(object):
             return value
         if isinstance(value, float):
             value = repr(value)
-        if not isinstance(value, basestring):
+        elif isinstance(value, int):
             value = str(value)
-        if isinstance(value, unicode):
+        elif isinstance(value, basestring):
+            value = str(value)
+        elif isinstance(value, unicode):
             value = value.encode(self.encoding, self.encoding_errors)
+        elif isinstance(value, object):
+            value = cPickle.dumps(value)
         return value
 
     def pack_command(self, *args):
