@@ -19,6 +19,10 @@
       Ali Onur Uyar.
     * Fixed a bug with BITCOUNT to allow `start` and `end` to both be zero.
       Thanks Tim Bart.
+    * The transaction() method now accepts a boolean keyword argument,
+      value_from_callable. By default, or if False is passes, the transaction()
+      method will return the value of the pipelines execution. Otherwise, it
+      will return whatever func() returns.
 * 2.7.2
     * Parse errors are now *always* raised on multi/exec pipelines, regardless
       of the `raise_on_error` flag. See

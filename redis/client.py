@@ -318,13 +318,15 @@ class StrictRedis(object):
         should expect a single arguement which is a Pipeline object.
         """
         shard_hint = kwargs.pop('shard_hint', None)
+        value_from_callable = kwargs.pop('value_from_callable', False)
         with self.pipeline(True, shard_hint) as pipe:
             while 1:
                 try:
                     if watches:
                         pipe.watch(*watches)
-                    func(pipe)
-                    return pipe.execute()
+                    func_value = func(pipe)
+                    exec_value = pipe.execute()
+                    return func_value if value_from_callable else exec_value
                 except WatchError:
                     continue
 
