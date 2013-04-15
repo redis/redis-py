@@ -6,6 +6,9 @@ The Python interface to the Redis key-value store.
 
 ## Installation
 
+*NOTE:* redis-py requires a running Redis server.
+See [Redis's quickstart](http://redis.io/topics/quickstart) for installation instructions.
+
     $ sudo pip install redis
 
 or alternatively (you really should be using pip though):
