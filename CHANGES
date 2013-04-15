@@ -23,6 +23,8 @@
       value_from_callable. By default, or if False is passes, the transaction()
       method will return the value of the pipelines execution. Otherwise, it
       will return whatever func() returns.
+    * Python3 compatibility fix ensuring we're not already bytes(). Thanks
+      Salimane Adjao Moustapha.
 * 2.7.2
     * Parse errors are now *always* raised on multi/exec pipelines, regardless
       of the `raise_on_error` flag. See
