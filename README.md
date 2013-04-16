@@ -41,9 +41,9 @@ official command syntax. There are a few exceptions:
 * DEL: 'del' is a reserved keyword in the Python syntax. Therefore redis-py
   uses 'delete' instead.
 * CONFIG GET|SET: These are implemented separately as config_get or config_set.
-* MULTI/EXEC: These are implemented as part of the Pipeline class. Calling
-  the pipeline method and specifying use_transaction=True will cause the
-  pipeline to be wrapped with the MULTI and EXEC statements when it is executed.
+* MULTI/EXEC: These are implemented as part of the Pipeline class. The
+  pipeline is wrapped with the MULTI and EXEC statements by default when it
+  is executed, which can be disabled by specifying transaction=False.
   See more about Pipelines below.
 * SUBSCRIBE/LISTEN: Similar to pipelines, PubSub is implemented as a separate
   class as it places the underlying connection in a state where it can't
