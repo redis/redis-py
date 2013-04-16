@@ -1,5 +1,30 @@
 * 2.7.3 (in development)
     * Fixed a bug with BRPOPLPUSH and lists with empty strings.
+    * All empty except: clauses have been replaced to only catch Exception
+      subclasses. This prevents a KeyboardInterrupt from triggering exception
+      handlers. Thanks Lucian Branescu Mihaila.
+    * All exceptions that are the result of redis server errors now share a
+      command Exception subclass, ServerError. Thanks Matt Robenolt.
+    * Prevent DISCARD from being called if MULTI wasn't also called. Thanks
+      Pete Aykroyd.
+    * SREM now returns an integer indicating the number of items removed from
+      the set. Thanks http://github.com/ronniekk.
+    * Fixed a bug with BGSAVE and BGREWRITEAOF response callbacks with Python3.
+      Thanks Nathan Wan.
+    * Added CLIENT GETNAME and CLIENT SETNAME commands.
+      Thanks http://github.com/bitterb.
+    * It's now possible to use len() on a pipeline instance to determine the
+      number of commands that will be executed. Thanks Jon Parise.
+    * Fixed a bug in INFO's parse routine with floating point numbers. Thanks
+      Ali Onur Uyar.
+    * Fixed a bug with BITCOUNT to allow `start` and `end` to both be zero.
+      Thanks Tim Bart.
+    * The transaction() method now accepts a boolean keyword argument,
+      value_from_callable. By default, or if False is passes, the transaction()
+      method will return the value of the pipelines execution. Otherwise, it
+      will return whatever func() returns.
+    * Python3 compatibility fix ensuring we're not already bytes(). Thanks
+      Salimane Adjao Moustapha.
 * 2.7.2
     * Parse errors are now *always* raised on multi/exec pipelines, regardless
       of the `raise_on_error` flag. See
