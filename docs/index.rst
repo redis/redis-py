@@ -1,22 +1,21 @@
 .. redis-py documentation master file, created by
-   sphinx-quickstart on Fri Feb  8 00:47:08 2013.
+   sphinx-quickstart on Thu Jul  5 12:56:35 2012.
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to redis-py's documentation!
-====================================
+redis-py: python interface to Redis
+===================================
 
-Contents:
+redis-py is the python interface to `Redis <http://redis.io>`_.
+
+
+User Guide
+----------
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 3
 
-
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+   user/intro
+   user/install
+   api
 
