@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # redis-py documentation build configuration file, created by
-# sphinx-quickstart on Fri Feb  8 00:47:08 2013.
+# sphinx-quickstart on Thu Jul  5 12:56:35 2012.
 #
 # This file is execfile()d with the current directory set to its containing dir.
 #
@@ -12,6 +12,7 @@
 # serve to show the default.
 
 import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
@@ -25,7 +26,7 @@ import sys, os
 
 # Add any Sphinx extension module names here, as strings. They can be extensions
 # coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
-extensions = []
+extensions = ['sphinx.ext.autodoc', 'sphinx.ext.doctest', 'sphinx.ext.todo', 'sphinx.ext.coverage']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -41,7 +42,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'redis-py'
-copyright = u'2013, Andy McCurdy, Mahdi Yusuf'
+copyright = u'2012, Andy McCurdy, Mahdi Yusuf, Rick van Hattem, Kushal Das'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -184,7 +185,7 @@ latex_elements = {
 # (source start file, target name, title, author, documentclass [howto/manual]).
 latex_documents = [
   ('index', 'redis-py.tex', u'redis-py Documentation',
-   u'Andy McCurdy, Mahdi Yusuf', 'manual'),
+   u'Andy McCurdy, Mahdi Yusuf, Rick van Hattem, Kushal Das', 'manual'),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of
@@ -214,7 +215,7 @@ latex_documents = [
 # (source start file, name, description, authors, manual section).
 man_pages = [
     ('index', 'redis-py', u'redis-py Documentation',
-     [u'Andy McCurdy, Mahdi Yusuf'], 1)
+     [u'Andy McCurdy, Rick van Hattem, Kushal Das'], 1)
 ]
 
 # If true, show URL addresses after external links.
@@ -228,7 +229,7 @@ man_pages = [
 #  dir menu entry, description, category)
 texinfo_documents = [
   ('index', 'redis-py', u'redis-py Documentation',
-   u'Andy McCurdy, Mahdi Yusuf', 'redis-py', 'One line description of project.',
+   u'Andy McCurdy, Rick van Hattem, Kushal Das', 'redis-py', 'One line description of project.',
    'Miscellaneous'),
 ]
 
