@@ -3,8 +3,6 @@ import unittest
 
 # this is a work around to keep tests compatible across all the python versions
 if not hasattr(unittest, "skipIf"):
-    import os, sys
-    sys.insert(0, os.path.join(os.path.dirname(__file__), "tests", "test.support.zip")) 
     import unittest2 as unittest
 
 from tests import all_tests
