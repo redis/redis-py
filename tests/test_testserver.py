@@ -5,7 +5,7 @@ import redis
 import redis.test_server
 
 
-FREEPORT = os.getenv("FREEPORT", 6379)
+FREEPORT = os.getenv("FREEPORT", 9999)
 
 
 class SimpleTestServerCase(unittest.TestCase):
