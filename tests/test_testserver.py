@@ -20,7 +20,14 @@ FREEPORT = os.getenv("FREEPORT", 9999)
 
 
 class SimpleTestServerCase(unittest.TestCase):
+    
+    def test_check_failed_redis_server(self):
+        "chek for a non-existent redis server executable"
+        server = redis.test_server.TestServer()
+        server.config['redis'] = 'bahse0edjwicwi'
+        self.assertRaises(IOError, server.start)
 
+    @unittest.skipIf(sys.version_info[:2] < (2, 6), "python < 2.6 doesn't support context managers")
     def test_startup_server_context(self):
         "launches the redis server with a context manager"
         with redis.test_server.TestServer({ 'port' : FREEPORT, }) as server:
@@ -33,7 +40,6 @@ class SimpleTestServerCase(unittest.TestCase):
             self.assertEquals(cfg['bind'], '127.0.0.1')
             self.assertEquals(cfg['port'], str(FREEPORT))
 
-    @unittest.skipIf(sys.version_info[:2] < 2.6)
     def test_startup_server(self):
         "launches the redis server in a ordinary way"
         server = redis.test_server.TestServer({ 'port' : FREEPORT, })
