@@ -20,8 +20,10 @@ def which(exe, raise_=True):
             if os.path.exists(pname):
                 result = pname
                 break
+
     if os.path.exists(result):
-        return os.path.normpath(result)
+        return os.path.normpath(os.path.abspath(result))
+
     if raise_ == True:
         raise IOError("unable to find %s" % exe)
     elif raise_ in [ False, None, ]:
