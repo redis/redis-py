@@ -2,9 +2,8 @@
 # this is to prevent the with statement to generate a syntax error
 from __future__ import with_statement
 # we need skipIf from unittest (standard from 2.7)
-if hasattr(unittest, "skipIf"):
-    import unittest
-else:
+import unittest
+if not hasattr(unittest, "skipIf"):
     import unittest2 as unittest
 # end of compat layer
 
