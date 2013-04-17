@@ -1,6 +1,8 @@
 import re
 import tempfile
 import os
+import sys
+import signal
 import time
 import logging
 import subprocess
@@ -144,7 +146,13 @@ class TestServerBase(object):
     def stop(self):
         if not self.__server:
             return
-        self.__server.terminate()
+        
+        
+        if hasattr(self.__server, "terminate"):
+            self.__server.terminate()
+        else:
+            os.kill(self.__server.pid, signal.SIGTERM)
+
         self.__server.wait()
         self._cleanup()
         self.__server = None
