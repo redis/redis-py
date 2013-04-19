@@ -515,7 +515,6 @@ class BlockingConnectionPool(object):
 
         connection = self.connection_class(**self.connection_kwargs)
         self._connections.append(connection)
-        print len(self._connections)
         return connection
 
     def get_connection(self, command_name, *keys, **options):
