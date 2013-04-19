@@ -84,22 +84,24 @@ class BlockingConnectionPoolTestCase(unittest.TestCase):
             from Queue import Queue
 
         q = Queue()
+        q.put_nowait('Not yet got')
         pool = self.get_pool(max_connections=2, timeout=5)
         c1 = pool.get_connection('_')
         c2 = pool.get_connection('_')
-        c3 = 'Not yet got'
-
+        
         target = lambda: q.put_nowait(pool.get_connection('_'))
         Thread(target=target).start()
 
         # Blocks while non available.
         time.sleep(0.05)
-        self.assertEquals(deepcopy(c3), 'Not yet got')
-
+        c3 = q.get_nowait()
+        self.assertEquals(c3, 'Not yet got')
+        
         # Then got when available.
         pool.release(c1)
         time.sleep(0.05)
-        self.assertEquals(c1, q.get_nowait())
+        c3 = q.get_nowait()
+        self.assertEquals(c1, c3)
 
     def test_max_connections_timeout(self):
         """Getting a connection raises ``ConnectionError`` after timeout."""
