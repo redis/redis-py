@@ -3,13 +3,9 @@ import os
 import socket
 import sys
 
-try: # Python 3
-    from queue import LifoQueue, Empty, Full
-except ImportError:
-    from Queue import LifoQueue, Empty, Full
-
 from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
-                           BytesIO, nativestr, basestring)
+                           BytesIO, nativestr, basestring,
+                           LifoQueue, Empty, Full)
 from redis.exceptions import (
     RedisError,
     ConnectionError,
