@@ -1787,8 +1787,8 @@ class BasePipeline(object):
             try:
                 response.append(
                     self.parse_response(connection, args[0], **options))
-            except ResponseError as error:
-                response.append(error)
+            except ResponseError:
+                response.append(sys.exc_info()[1])
 
         if raise_on_error:
             self.raise_first_error(response)

@@ -198,4 +198,4 @@ class PipelineTestCase(unittest.TestCase):
                 raise
 
         ret = self.client.hgetall('x')
-        self.assertEquals(ret, {'a': 'b'})
+        self.assertEqual(ret, {b('a'): b('b')})
