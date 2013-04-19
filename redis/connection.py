@@ -475,8 +475,8 @@ class BlockingConnectionPool(object):
         # algorithm we use, it must be a positive integer.
         is_valid = isinstance(max_connections, int) and max_connections > 0
         if not is_valid:
-            raise ValueError, '``max_connections`` must be a positive integer'
-
+            raise ValueError('``max_connections`` must be a positive integer')
+        
         # Get the current process id, so we can disconnect and reinstantiate if
         # it changes.
         self.pid = os.getpid()
