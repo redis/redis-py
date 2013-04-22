@@ -651,7 +651,7 @@ class StrictRedis(object):
         """
         if isinstance(time, datetime.timedelta):
             ms = int(time.microseconds / 1000)
-            time = time.seconds + time.days * 24 * 3600 * 1000 + ms
+            time = (time.seconds + time.days * 24 * 3600) * 1000 + ms
         return self.execute_command('PEXPIRE', name, time)
 
     def pexpireat(self, name, when):
@@ -673,7 +673,7 @@ class StrictRedis(object):
         """
         if isinstance(time_ms, datetime.timedelta):
             ms = int(time_ms.microseconds / 1000)
-            time_ms = time_ms.seconds + time_ms.days * 24 * 3600 * 1000 + ms
+            time_ms = (time_ms.seconds + time_ms.days * 24 * 3600) * 1000 + ms
         return self.execute_command('PSETEX', name, time_ms, value)
 
     def pttl(self, name):
