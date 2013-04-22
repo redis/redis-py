@@ -1,5 +1,6 @@
 from redis.client import Redis, StrictRedis
 from redis.connection import (
+    BlockingConnectionPool,
     ConnectionPool,
     Connection,
     UnixDomainSocketConnection
