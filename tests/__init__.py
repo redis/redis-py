@@ -2,6 +2,7 @@ import unittest
 
 from tests.server_commands import ServerCommandsTestCase
 from tests.connection_pool import ConnectionPoolTestCase
+from tests.connection_pool import BlockingConnectionPoolTestCase
 from tests.pipeline import PipelineTestCase
 from tests.lock import LockTestCase
 from tests.pubsub import PubSubTestCase, PubSubRedisDownTestCase
@@ -19,6 +20,7 @@ def all_tests():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(ServerCommandsTestCase))
     suite.addTest(unittest.makeSuite(ConnectionPoolTestCase))
+    suite.addTest(unittest.makeSuite(BlockingConnectionPoolTestCase))
     suite.addTest(unittest.makeSuite(PipelineTestCase))
     suite.addTest(unittest.makeSuite(LockTestCase))
     suite.addTest(unittest.makeSuite(PubSubTestCase))
