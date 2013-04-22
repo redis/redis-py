@@ -26,6 +26,8 @@
     * Python3 compatibility fix ensuring we're not already bytes(). Thanks
       Salimane Adjao Moustapha.
     * Added PSETEX. Thanks YAMAMOTO Takashi.
+    * Added a BlockingConnectionPool to limit the number of connections that
+      can be created. Thanks James Arthur.
 * 2.7.2
     * Parse errors are now *always* raised on multi/exec pipelines, regardless
       of the `raise_on_error` flag. See
