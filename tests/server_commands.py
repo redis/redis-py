@@ -246,6 +246,16 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.pexpireat('b', expire_at), True)
         self.assert_(self.client.ttl('b') <= 60)
 
+    def test_psetex(self):
+        self.assertEquals(self.client.psetex('a', 1000, 'value'), True)
+        self.assertEquals(self.client['a'], b('value'))
+        self.assert_(0 < self.client.pttl('a') <= 1000)
+        # expire given a timeelta
+        expire_at = datetime.timedelta(milliseconds=1000)
+        self.assertEquals(self.client.psetex('a', expire_at, 'value'), True)
+        self.assertEquals(self.client['a'], b('value'))
+        self.assert_(0 < self.client.pttl('a') <= 1000)
+
     def test_get_set_bit(self):
         self.assertEquals(self.client.getbit('a', 5), False)
         self.assertEquals(self.client.setbit('a', 5, True), False)

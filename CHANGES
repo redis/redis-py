@@ -25,6 +25,7 @@
       will return whatever func() returns.
     * Python3 compatibility fix ensuring we're not already bytes(). Thanks
       Salimane Adjao Moustapha.
+    * Added PSETEX. Thanks YAMAMOTO Takashi.
 * 2.7.2
     * Parse errors are now *always* raised on multi/exec pipelines, regardless
       of the `raise_on_error` flag. See

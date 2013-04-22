@@ -183,7 +183,7 @@ class StrictRedis(object):
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict(
             'AUTH DEL EXISTS EXPIRE EXPIREAT HDEL HEXISTS HMSET MOVE MSETNX '
-            'PERSIST RENAMENX SISMEMBER SMOVE SETEX SETNX ZREM',
+            'PERSIST PSETEX RENAMENX SISMEMBER SMOVE SETEX SETNX ZREM',
             bool
         ),
         string_keys_to_dict(
@@ -665,6 +665,17 @@ class StrictRedis(object):
             when = int(mod_time.mktime(when.timetuple())) * 1000 + ms
         return self.execute_command('PEXPIREAT', name, when)
 
+    def psetex(self, name, time_ms, value):
+        """
+        Set the value of key ``name`` to ``value`` that expires in ``time_ms``
+        milliseconds. ``time_ms`` can be represented by an integer or a Python
+        timedelta object
+        """
+        if isinstance(time_ms, datetime.timedelta):
+            ms = int(time_ms.microseconds / 1000)
+            time_ms = time_ms.seconds + time_ms.days * 24 * 3600 * 1000 + ms
+        return self.execute_command('PSETEX', name, time_ms, value)
+
     def pttl(self, name):
         "Returns the number of milliseconds until the key ``name`` will expire"
         return self.execute_command('PTTL', name)
@@ -705,13 +716,6 @@ class StrictRedis(object):
         if isinstance(time, datetime.timedelta):
             time = time.seconds + time.days * 24 * 3600
         return self.execute_command('SETEX', name, time, value)
-
-    def psetex(self, name, time_ms, value):
-        """
-        Set the value of key ``name`` to ``value`` that expires in ``time_ms``
-        milliseconds.
-        """
-        return self.execute_command('PSETEX', name, time_ms, value)
 
     def setnx(self, name, value):
         "Set the value of key ``name`` to ``value`` if key doesn't exist"
