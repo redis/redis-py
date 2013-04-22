@@ -1794,8 +1794,15 @@ class BasePipeline(object):
             starmap(connection.pack_command,
                     [args for args, options in commands]))
         connection.send_packed_command(all_cmds)
-        response = [self.parse_response(connection, args[0], **options)
-                    for args, options in commands]
+
+        response = []
+        for args, options in commands:
+            try:
+                response.append(
+                    self.parse_response(connection, args[0], **options))
+            except ResponseError:
+                response.append(sys.exc_info()[1])
+
         if raise_on_error:
             self.raise_first_error(response)
         return response
