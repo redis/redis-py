@@ -10,6 +10,7 @@ if not hasattr(unittest, "skipIf"):
 
 import sys
 import os
+import logging
 
 
 import redis
@@ -59,6 +60,7 @@ class SimpleTestServerCase(unittest.TestCase):
     
 
 if __name__ == "__main__":
+    logging.basicConfig()
     unittest.main()
 
 
