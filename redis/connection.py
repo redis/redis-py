@@ -476,7 +476,7 @@ class BlockingConnectionPool(object):
         is_valid = isinstance(max_connections, int) and max_connections > 0
         if not is_valid:
             raise ValueError('``max_connections`` must be a positive integer')
-        
+
         # Get the current process id, so we can disconnect and reinstantiate if
         # it changes.
         self.pid = os.getpid()
@@ -539,7 +539,7 @@ class BlockingConnectionPool(object):
             connection = self.pool.get(block=True, timeout=self.timeout)
         except Empty:
             # Note that this is not caught by the redis client and will be raised
-            # unless handled by application code. If you want never to raise 
+            # unless handled by application code. If you want never to raise
             raise ConnectionError("No connection available.")
 
         # If the ``connection`` is actually ``None`` then that's a cue to make a
@@ -579,4 +579,3 @@ class BlockingConnectionPool(object):
         self.__init__(max_connections=self.max_connections, timeout=self.timeout,
                       connection_class=self.connection_class,
                       queue_class=self.queue_class, **self.connection_kwargs)
-

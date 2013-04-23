@@ -49,16 +49,17 @@ else:
     bytes = bytes
     long = int
 
-try: # Python 3
+try:  # Python 3
     from queue import LifoQueue, Empty, Full
 except ImportError:
     from Queue import Empty, Full
-    try: # Python 2.6 - 2.7
+    try:  # Python 2.6 - 2.7
         from Queue import LifoQueue
-    except ImportError: # Python 2.5
+    except ImportError:  # Python 2.5
         from Queue import Queue
         # From the Python 2.7 lib. Python 2.5 already extracted the core
         # methods to aid implementating different queue organisations.
+
         class LifoQueue(Queue):
             """Override queue methods to implement a last-in first-out queue."""
 
@@ -74,4 +75,3 @@ except ImportError:
 
             def _get(self):
                 return self.queue.pop()
-

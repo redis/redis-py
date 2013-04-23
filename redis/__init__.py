@@ -22,7 +22,7 @@ __version__ = '2.7.2'
 VERSION = tuple(map(int, __version__.split('.')))
 
 __all__ = [
-    'Redis', 'StrictRedis', 'ConnectionPool',
+    'Redis', 'StrictRedis', 'ConnectionPool', 'BlockingConnectionPool',
     'Connection', 'UnixDomainSocketConnection',
     'RedisError', 'ConnectionError', 'ResponseError', 'AuthenticationError',
     'InvalidResponse', 'DataError', 'PubSubError', 'WatchError', 'from_url',

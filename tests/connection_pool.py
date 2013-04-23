@@ -32,14 +32,14 @@ class ConnectionPoolTestCase(unittest.TestCase):
 
     def test_max_connections(self):
         pool = self.get_pool(max_connections=2)
-        c1 = pool.get_connection('_')
-        c2 = pool.get_connection('_')
+        pool.get_connection('_')
+        pool.get_connection('_')
         self.assertRaises(redis.ConnectionError, pool.get_connection, '_')
 
     def test_blocking_max_connections(self):
         pool = self.get_pool(max_connections=2)
-        c1 = pool.get_connection('_')
-        c2 = pool.get_connection('_')
+        pool.get_connection('_')
+        pool.get_connection('_')
         self.assertRaises(redis.ConnectionError, pool.get_connection, '_')
 
     def test_release(self):
@@ -74,11 +74,10 @@ class BlockingConnectionPoolTestCase(unittest.TestCase):
         """Getting a connection should block for until available."""
 
         import time
-        from copy import deepcopy
         from threading import Thread
 
         # We use a queue for cross thread communication within the unit test.
-        try: # Python 3
+        try:  # Python 3
             from queue import Queue
         except ImportError:
             from Queue import Queue
@@ -87,8 +86,8 @@ class BlockingConnectionPoolTestCase(unittest.TestCase):
         q.put_nowait('Not yet got')
         pool = self.get_pool(max_connections=2, timeout=5)
         c1 = pool.get_connection('_')
-        c2 = pool.get_connection('_')
-        
+        pool.get_connection('_')
+
         target = lambda: q.put_nowait(pool.get_connection('_'))
         Thread(target=target).start()
 
@@ -96,7 +95,7 @@ class BlockingConnectionPoolTestCase(unittest.TestCase):
         time.sleep(0.05)
         c3 = q.get_nowait()
         self.assertEquals(c3, 'Not yet got')
-        
+
         # Then got when available.
         pool.release(c1)
         time.sleep(0.05)
@@ -107,8 +106,8 @@ class BlockingConnectionPoolTestCase(unittest.TestCase):
         """Getting a connection raises ``ConnectionError`` after timeout."""
 
         pool = self.get_pool(max_connections=2, timeout=0.1)
-        c1 = pool.get_connection('_')
-        c2 = pool.get_connection('_')
+        pool.get_connection('_')
+        pool.get_connection('_')
         self.assertRaises(redis.ConnectionError, pool.get_connection, '_')
 
     def test_release(self):
@@ -117,4 +116,3 @@ class BlockingConnectionPoolTestCase(unittest.TestCase):
         pool.release(c1)
         c2 = pool.get_connection('_')
         self.assertEquals(c1, c2)
-

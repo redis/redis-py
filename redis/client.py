@@ -137,6 +137,7 @@ def sort_return_tuples(response, **options):
     n = options['groups']
     return list(izip(*[response[i::n] for i in range(n)]))
 
+
 def int_or_none(response):
     if response is None:
         return None
