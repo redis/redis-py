@@ -7,10 +7,18 @@ import time
 import logging
 import subprocess
 
+import redis
 from redis import utils
 
 
+REDIS_TESTSERVER_PORT = int(os.getenv("REDIS_TESTSERVER_PORT", 9999))
+REDIS_TESTSERVER_ADDRESS = os.getenv("REDIS_TESTSERVER_ADDRESS", "127.0.0.1")
+REDIS_TESTSERVER_REDIS_EXE = os.getenv("REDIS_TESTSERVER_REDIS_EXE", "redis-server")
+REDIS_TESTSERVER_STARTUP_DELAY_S = int(os.getenv("REDIS_TESTSERVER_STARTUP_DELAY_S", 2))
+
+
 logger = logging.getLogger(__name__)
+
 
 class KeyPairMapping(dict):
     "support class to map text <-> dict"
@@ -46,14 +54,13 @@ class ServerConfig(KeyPairMapping):
     template = """
 # Skeleton template for config a redis server
 daemonize       no
-port            6379
-bind            127.0.0.1
+port            %s
+bind            %s
 timeout         0
 tcp-keepalive   0
 loglevel        notice
 databases       16
-"""
-
+""" % (REDIS_TESTSERVER_PORT, REDIS_TESTSERVER_ADDRESS)
 
 
 class TestServerBase(object):
@@ -69,8 +76,8 @@ class TestServerBase(object):
         self.server_config.update(keypairs if keypairs else {})
 
         self.config = {}
-        self.config['redis'] = "redis-server"
-        self.config['startup_delay_s'] = 2
+        self.config['redis'] = REDIS_TESTSERVER_REDIS_EXE
+        self.config['startup_delay_s'] = REDIS_TESTSERVER_STARTUP_DELAY_S
         self.__tmpfiles = []
         self.__server = None
 
@@ -122,6 +129,16 @@ class TestServerBase(object):
         for n in [ 'dir', 'dbfilename', 'pidfile', 'logfile', ]:
             logger.debug("using %s: %s" % (n, self.server_config[n]))
 
+        # before we start we check if an istance is already running
+        pool = redis.ConnectionPool(**self.get_pool_args())
+        connection = redis.Redis(connection_pool=pool)
+        try:    
+            connection.ping()
+        except redis.ConnectionError:
+            pass
+        else:
+            logger.warn("a redis server instance is listening at: " + str(self.get_pool_args()))
+
         # the main redis config file (generated on the fly from the server_config dict)
         config_file = self._tmpfile()
         fp = open(config_file, "w")
@@ -146,7 +163,6 @@ class TestServerBase(object):
     def stop(self):
         if not self.__server:
             return
-        
         
         if hasattr(self.__server, "terminate"):
             self.__server.terminate()
