@@ -1513,6 +1513,55 @@ class ServerCommandsTestCase(unittest.TestCase):
             self.client.sort('a', get=('user:*', '#')),
             [b('u1'), b('1'), b('u2'), b('2'), b('u3'), b('3')])
 
+    def test_sort_get_groups_two(self):
+        self.client['user:1'] = 'u1'
+        self.client['user:2'] = 'u2'
+        self.client['user:3'] = 'u3'
+        self.make_list('a', '231')
+        self.assertEquals(
+            self.client.sort('a', get=('user:*', '#'), groups=True),
+            [(b('u1'), b('1')), (b('u2'), b('2')), (b('u3'), b('3'))])
+
+    def test_sort_groups_string_get(self):
+        self.client['user:1'] = 'u1'
+        self.client['user:2'] = 'u2'
+        self.client['user:3'] = 'u3'
+        self.make_list('a', '231')
+        self.assertRaises(redis.DataError, self.client.sort, 'a',
+                          get='user:*', groups=True)
+
+    def test_sort_groups_just_one_get(self):
+        self.client['user:1'] = 'u1'
+        self.client['user:2'] = 'u2'
+        self.client['user:3'] = 'u3'
+        self.make_list('a', '231')
+        self.assertRaises(redis.DataError, self.client.sort, 'a',
+                          get=['user:*'], groups=True)
+
+    def test_sort_groups_no_get(self):
+        self.client['user:1'] = 'u1'
+        self.client['user:2'] = 'u2'
+        self.client['user:3'] = 'u3'
+        self.make_list('a', '231')
+        self.assertRaises(redis.DataError, self.client.sort, 'a', groups=True)
+
+    def test_sort_groups_three_gets(self):
+        self.client['user:1'] = 'u1'
+        self.client['user:2'] = 'u2'
+        self.client['user:3'] = 'u3'
+        self.client['door:1'] = 'd1'
+        self.client['door:2'] = 'd2'
+        self.client['door:3'] = 'd3'
+        self.make_list('a', '231')
+        self.assertEquals(
+            self.client.sort('a', get=('user:*', 'door:*', '#'), groups=True),
+            [
+                (b('u1'), b('d1'), b('1')),
+                (b('u2'), b('d2'), b('2')),
+                (b('u3'), b('d3'), b('3'))
+            ]
+        )
+
     def test_sort_desc(self):
         self.make_list('a', '231')
         self.assertEquals(

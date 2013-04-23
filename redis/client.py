@@ -127,6 +127,16 @@ def zset_score_pairs(response, **options):
     return list(izip(it, imap(score_cast_func, it)))
 
 
+def sort_return_tuples(response, **options):
+    """
+    If ``groups`` is specified, return the response as a list of
+    n-element tuples with n being the value found in options['groups']
+    """
+    if not response or not options['groups']:
+        return response
+    n = options['groups']
+    return list(izip(*[response[i::n] for i in range(n)]))
+
 def int_or_none(response):
     if response is None:
         return None
@@ -198,6 +208,7 @@ class StrictRedis(object):
             'LPUSH RPUSH',
             lambda r: isinstance(r, long) and r or nativestr(r) == 'OK'
         ),
+        string_keys_to_dict('SORT', sort_return_tuples),
         string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
         string_keys_to_dict(
             'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME '
@@ -912,7 +923,7 @@ class StrictRedis(object):
         return self.execute_command('RPUSHX', name, value)
 
     def sort(self, name, start=None, num=None, by=None, get=None,
-             desc=False, alpha=False, store=None):
+             desc=False, alpha=False, store=None, groups=False):
         """
         Sort and return the list, set or sorted set at ``name``.
 
@@ -931,6 +942,11 @@ class StrictRedis(object):
 
         ``store`` allows for storing the result of the sort into
             the key ``store``
+
+        ``groups`` if set to True and if ``get`` contains at least two
+            elements, sort will return a list of tuples, each containing the
+            values fetched from the arguments to ``get``.
+
         """
         if (start is not None and num is None) or \
                 (num is not None and start is None):
@@ -963,7 +979,15 @@ class StrictRedis(object):
         if store is not None:
             pieces.append('STORE')
             pieces.append(store)
-        return self.execute_command('SORT', *pieces)
+
+        if groups:
+            if not get or isinstance(get, basestring) or len(get) < 2:
+                raise DataError('when using "groups" the "get" argument '
+                                'must be specified and contain at least '
+                                'two keys')
+
+        options = {'groups': len(get) if groups else None}
+        return self.execute_command('SORT', *pieces, **options)
 
     #### SET COMMANDS ####
     def sadd(self, name, *values):
