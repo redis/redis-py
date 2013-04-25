@@ -13,8 +13,10 @@ from redis import utils
 
 REDIS_TESTSERVER_PORT = int(os.getenv("REDIS_TESTSERVER_PORT", 9999))
 REDIS_TESTSERVER_ADDRESS = os.getenv("REDIS_TESTSERVER_ADDRESS", "127.0.0.1")
-REDIS_TESTSERVER_REDIS_EXE = os.getenv("REDIS_TESTSERVER_REDIS_EXE", "redis-server")
-REDIS_TESTSERVER_STARTUP_DELAY_S = int(os.getenv("REDIS_TESTSERVER_STARTUP_DELAY_S", 2))
+REDIS_TESTSERVER_REDIS_EXE = \
+    os.getenv("REDIS_TESTSERVER_REDIS_EXE", "redis-server")
+REDIS_TESTSERVER_STARTUP_DELAY_S = \
+    int(os.getenv("REDIS_TESTSERVER_STARTUP_DELAY_S", 2))
 
 
 logger = logging.getLogger(__name__)
@@ -29,7 +31,8 @@ class KeyPairMapping(dict):
         super(KeyPairMapping, self).__init__()
         for line in text.split("\n"):
             line = line.strip()
-            if line.startswith("#") or line == "": continue
+            if line.startswith("#") or line == "":
+                continue
             i = line.find(" ")
             if i == -1:
                 key = line.strip()
@@ -38,12 +41,13 @@ class KeyPairMapping(dict):
                 key = line[:i]
                 value = line[i+1:].strip()
             self[key] = value
-        
+
     @staticmethod
     def to_str(data, eol='\n'):
         result = []
         for k in sorted(data.keys()):
-            if k.startswith("__"): continue
+            if k.startswith("__"):
+                continue
             result.append(str(k) + " " + str(data[k]))
         if eol:
             result = eol.join(result)
@@ -66,7 +70,7 @@ databases       16
 class TestServerBase(object):
     """test server launcher class
 
-    This class wraps a redis-server instance providing support for 
+    This class wraps a redis-server instance providing support for
     testing.
 
 """
@@ -77,10 +81,10 @@ class TestServerBase(object):
 
         self.config = {}
         self.config['redis'] = REDIS_TESTSERVER_REDIS_EXE
-        self.config['startup_delay_s'] = REDIS_TESTSERVER_STARTUP_DELAY_S
+        self.config['startup_delay_s'] = \
+            REDIS_TESTSERVER_STARTUP_DELAY_S
         self.__tmpfiles = []
         self.__server = None
-
 
     def _tmpfile(self, ghost=False):
         # We handle the allocated tmp files
@@ -88,11 +92,11 @@ class TestServerBase(object):
         os.close(fd)
         if ghost:
             os.unlink(fname)
-        self.__tmpfiles.append(fname) 
+        self.__tmpfiles.append(fname)
         return fname
 
     def _cleanup(self):
-        for fname in [ n for n in self.__tmpfiles if os.path.exists(n) ]:
+        for fname in [n for n in self.__tmpfiles if os.path.exists(n)]:
             logger.debug("removing temp file %s" % fname)
             os.unlink(fname)
 
@@ -103,43 +107,51 @@ class TestServerBase(object):
         self.stop()
 
     def get_pool_args(self):
-        return { 'host' : self.server_config['bind'], 'port' : int(self.server_config['port']), 'db' : 0 }
+        return {'host': self.server_config['bind'],
+                'port': int(self.server_config['port']),
+                'db': 0}
 
     def start(self, keypairs=None):
 
         self.server_config.update(keypairs if keypairs else {})
 
         # we need those defined
-        missing = set(['dir', 'dbfilename', 'pidfile', 'logfile',]).difference(self.server_config.keys())
-        if missing:
-            raise ValueError("missing the following keys from config: '%s'" % (", ".join(missing)))
+        mandatory = ['dir', 'dbfilename', 'pidfile', 'logfile']
+        missing_keys = set(mandatory).difference(self.server_config.keys())
+        if missing_keys:
+            msg = "missing the following keys from config: "
+            msg += "'%s'" % (", ".join(missing_keys))
+            raise ValueError(msg)
 
         # the full qualified pathname to the redis server
         server_exe = utils.which(self.config['redis'])
         logger.debug("redis-server exe from: %s" % server_exe)
 
         # creating missing dirs
-        dir_names = [ self.server_config['dir'], ]
-        for key in [ 'pidfile', 'logfile', ]:
+        dir_names = [self.server_config['dir']]
+        for key in ['pidfile', 'logfile']:
             dir_names.append(os.path.dirname(self.server_config[key]))
         for dir_name in dir_names:
             if not os.path.exists(dir_name):
                 logger.debug("creating dir: %s" % dir_name)
                 os.makedirs(dir_name)
-        for n in [ 'dir', 'dbfilename', 'pidfile', 'logfile', ]:
+        for n in ['dir', 'dbfilename', 'pidfile', 'logfile']:
             logger.debug("using %s: %s" % (n, self.server_config[n]))
 
         # before we start we check if an istance is already running
         pool = redis.ConnectionPool(**self.get_pool_args())
         connection = redis.Redis(connection_pool=pool)
-        try:    
+        try:
             connection.ping()
         except redis.ConnectionError:
             pass
         else:
-            logger.warn("a redis server instance is listening at: " + str(self.get_pool_args()))
+            msg = "a redis server instance is listening at: "
+            msg += str(self.get_pool_args())
+            logger.warn(msg)
 
-        # the main redis config file (generated on the fly from the server_config dict)
+        # the main redis config file (generated on the fly
+        # from the server_config dict)
         config_file = self._tmpfile()
         fp = open(config_file, "w")
         fp.write(KeyPairMapping.to_str(self.server_config))
@@ -147,23 +159,26 @@ class TestServerBase(object):
         fp.close()
         logger.debug("temp config file: %s" % config_file)
 
-
         # Launching the server
-        args = [ server_exe, config_file, ]
+        args = [server_exe, config_file]
         logger.debug("redis server launch command: %s" % ' '.join(args))
 
         self.__server = subprocess.Popen(args)
         logger.debug("redis server started with pid %i" % self.__server.pid)
 
         if 'startup_delay_s' in self.config:
-            logger.debug("waiting %is before listening" % self.config['startup_delay_s'])
+            msg = "waiting %is before listening" % \
+                (self.config['startup_delay_s'])
+            logger.debug(msg)
             time.sleep(self.config['startup_delay_s'])
-        logger.debug(str(self.__class__.__name__) + " listening at %(bind)s:%(port)s" % self.server_config)
+        msg = str(self.__class__.__name__)
+        msg += " listening at %(bind)s:%(port)s" % self.server_config
+        logger.debug(msg)
 
     def stop(self):
         if not self.__server:
             return
-        
+
         if hasattr(self.__server, "terminate"):
             self.__server.terminate()
         else:
