@@ -40,7 +40,14 @@ class KeyPairMapping(dict):
             else:
                 key = line[:i]
                 value = line[i+1:].strip()
-            self[key] = value
+
+            if key in self:
+                if isinstance(self[key], (list, tuple)):
+                    self[key].append(value)
+                else:
+                    self[key] = [self[key], value]
+            else:
+                self[key] = value
 
     @staticmethod
     def to_str(data, eol='\n'):
@@ -48,7 +55,11 @@ class KeyPairMapping(dict):
         for k in sorted(data.keys()):
             if k.startswith("__"):
                 continue
-            result.append(str(k) + " " + str(data[k]))
+            values = data[k]
+            if not isinstance(data[k], (list, tuple)):
+                values = [data[k]]
+            for value in values:
+                result.append(str(k) + " " + str(value))
         if eol:
             result = eol.join(result)
         return result
