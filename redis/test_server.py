@@ -193,13 +193,36 @@ class TestServer(TestServerBase):
     def start(self, keypairs=None):
         newdata = keypairs.copy() if keypairs else {}
 
-        if not 'pidfile' in newdata and not 'pidfile' in self.server_config:
-            newdata['pidfile'] = self._tmpfile()
-        if not 'logfile' in newdata and not 'logfile' in self.server_config:
-            newdata['logfile'] = self._tmpfile()
+        # we're trying to follow the redis way to configure files here.
+        # pid/log files can be absolute files -> no problem
+        # pid/log files can be relative to a working_dir if provided
+        # dbfilename is always relative to working_dir
+        #       if working_dir is not setit must set it
 
-        full_db_path = self._tmpfile(ghost=True)
-        newdata['dir'] = os.path.dirname(full_db_path)
-        newdata['dbfilename'] = os.path.basename(full_db_path)
+        working_dir = newdata.get("dir",
+                                  self.server_config.get("dir", os.getcwd()))
+        working_dir = os.path.abspath(working_dir)
+
+        for name in ['pidfile', 'logfile']:
+            filename = newdata.get(name, self.server_config.get(name, None))
+            if not filename:
+                filename = self._tmpfile()
+            if not os.path.isabs(filename):
+                filename = os.path.join(working_dir, filename)
+            newdata[name] = filename
+
+        dbfilepath = newdata.get("dbfilename",
+                                 self.server_config.get("dbfilename", None))
+        if not dbfilepath:
+            dbfilepath = self._tmpfile(ghost=True)
+
+        dbfilename = dbfilepath
+        if os.path.isabs(dbfilepath):
+            # We reassign working dir here
+            working_dir = os.path.dirname(dbfilepath)
+            dbfilename = os.path.basename(dbfilepath)
+
+        newdata['dir'] = working_dir
+        newdata['dbfilename'] = dbfilename
 
         return super(TestServer, self).start(newdata)
