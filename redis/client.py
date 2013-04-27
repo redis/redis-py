@@ -213,7 +213,6 @@ class StrictRedis(object):
         string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
         string_keys_to_dict(
             'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME '
-#            'SAVE SELECT SET SHUTDOWN SLAVEOF WATCH UNWATCH',
             'SAVE SELECT SHUTDOWN SLAVEOF WATCH UNWATCH',
             lambda r: nativestr(r) == 'OK'
         ),

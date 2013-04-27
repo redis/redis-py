@@ -473,7 +473,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client['foo'], b('1'))
         self.assert_(self.client.pttl('foo'), 10000)
         self.assert_(self.client.ttl('foo'), 10)
-        # expire given a timeelta
+        # expire given a timedelta
         expire_at = datetime.timedelta(milliseconds=1000)
         self.assertEquals(self.client.set('foo', '1', px=expire_at), True)
         self.assert_(self.client.pttl('foo'), 1000)
@@ -482,7 +482,7 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_set_ex(self):
         self.assertEquals(self.client.set('foo', '1', ex=10), True)
         self.assertEquals(self.client.ttl('foo'), 10)
-        # expire given a timeelta
+        # expire given a timedelta
         expire_at = datetime.timedelta(seconds=60)
         self.assertEquals(self.client.set('foo', '1', ex=expire_at), True)
         self.assertEquals(self.client.ttl('foo'), 60)
