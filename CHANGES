@@ -1,3 +1,7 @@
+* 2.7.4 (in development)
+    * SET now accepts the EX, PX, NX and XX options from Redis 2.6.12. These
+      options will generate errors if these options are used when connected
+      to a Redis server < 2.6.12. Thanks George Yoshida.
 * 2.7.3
     * Fixed a bug with BRPOPLPUSH and lists with empty strings.
     * All empty except: clauses have been replaced to only catch Exception
