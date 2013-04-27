@@ -6,8 +6,9 @@ python:
   - "2.6"
   - "2.5"
 env:
-  - PEP8=0
-  - PEP8=1
+  - TEST_PEP8=0
+  - TEST_PEP8=1
 install:
   - pip install -e . --use-mirrors
-script: "if [[ $PEP8 == '1' ]]; then pip install pep8 --use-mirrors; pep8 --repeat --show-source --exclude=.venv,.tox,dist,doc,build,*.egg .; else python setup.py test; fi"
+  - "if [[ $TEST_PEP8 == '1' ]]; then pip install pep8 --use-mirrors; fi"
+script: "if [[ $TEST_PEP8 == '1' ]]; then pep8 --repeat --show-source --exclude=.venv,.tox,dist,doc,build,*.egg .; else python setup.py test; fi"
