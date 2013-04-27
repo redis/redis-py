@@ -5,5 +5,9 @@ python:
   - "2.7"
   - "2.6"
   - "2.5"
+install:
+  - pip install pep8 --use-mirrors
+  - pip install -e . --use-mirrors
+before_script:
+  - "pep8 --repeat --show-source --exclude=.venv,.tox,dist,doc,build,*.egg ."
 script: python setup.py test
-
