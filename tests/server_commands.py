@@ -135,6 +135,16 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(isinstance(info, dict))
         self.assertEquals(info['db9']['keys'], 2)
 
+        import sys
+        if sys.version_info[0] < 3:
+            print
+            print info['redis_version']
+            print
+        else:
+            print('')
+            print(info['redis_version'])
+            print('')
+
     def test_lastsave(self):
         self.assert_(isinstance(self.client.lastsave(), datetime.datetime))
 
