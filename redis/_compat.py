@@ -61,7 +61,7 @@ except ImportError:
         # methods to aid implementating different queue organisations.
 
         class LifoQueue(Queue):
-            """Override queue methods to implement a last-in first-out queue."""
+            "Override queue methods to implement a last-in first-out queue."
 
             def _init(self, maxsize):
                 self.maxsize = maxsize

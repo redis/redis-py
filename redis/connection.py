@@ -422,42 +422,41 @@ class ConnectionPool(object):
 
 
 class BlockingConnectionPool(object):
-    """Thread-safe blocking connection pool::
-
-          >>> from redis.client import Redis
-          >>> client = Redis(connection_pool=BlockingConnectionPool())
-
-      It performs the same function as the default
-      ``:py:class: ~redis.connection.ConnectionPool`` implementation, in that,
-      it maintains a pool of reusable connections that can be shared by
-      multiple redis clients (safely across threads if required).
-
-      The difference is that, in the event that a client tries to get a
-      connection from the pool when all of connections are in use, rather than
-      raising a ``:py:class: ~redis.exceptions.ConnectionError`` (as the default
-      ``:py:class: ~redis.connection.ConnectionPool`` implementation does), it
-      makes the client wait ("blocks") for a specified number of seconds until
-      a connection becomes available.
-
-      Use ``max_connections`` to increase / decrease the pool size::
-
-          >>> pool = BlockingConnectionPool(max_connections=10)
-
-      Use ``timeout`` to tell it either how many seconds to wait for a connection
-      to become available, or to block forever:
-
-          # Block forever.
-          >>> pool = BlockingConnectionPool(timeout=None)
-
-          # Raise a ``ConnectionError`` after five seconds if a connection is
-          # not available.
-          >>> pool = BlockingConnectionPool(timeout=5)
-
     """
+    Thread-safe blocking connection pool::
 
-    def __init__(self, max_connections=50, timeout=20, connection_class=None, queue_class=None, **connection_kwargs):
-        """Compose and assign values."""
+        >>> from redis.client import Redis
+        >>> client = Redis(connection_pool=BlockingConnectionPool())
 
+    It performs the same function as the default
+    ``:py:class: ~redis.connection.ConnectionPool`` implementation, in that,
+    it maintains a pool of reusable connections that can be shared by
+    multiple redis clients (safely across threads if required).
+
+    The difference is that, in the event that a client tries to get a
+    connection from the pool when all of connections are in use, rather than
+    raising a ``:py:class: ~redis.exceptions.ConnectionError`` (as the default
+    ``:py:class: ~redis.connection.ConnectionPool`` implementation does), it
+    makes the client wait ("blocks") for a specified number of seconds until
+    a connection becomes available.
+
+    Use ``max_connections`` to increase / decrease the pool size::
+
+        >>> pool = BlockingConnectionPool(max_connections=10)
+
+    Use ``timeout`` to tell it either how many seconds to wait for a connection
+    to become available, or to block forever:
+
+        # Block forever.
+        >>> pool = BlockingConnectionPool(timeout=None)
+
+        # Raise a ``ConnectionError`` after five seconds if a connection is
+        # not available.
+        >>> pool = BlockingConnectionPool(timeout=5)
+    """
+    def __init__(self, max_connections=50, timeout=20, connection_class=None,
+                 queue_class=None, **connection_kwargs):
+        "Compose and assign values."
         # Compose.
         if connection_class is None:
             connection_class = Connection
@@ -494,10 +493,10 @@ class BlockingConnectionPool(object):
         self._connections = []
 
     def _checkpid(self):
-        """Check the current process id.  If it has changed, disconnect and
-          re-instantiate this connection pool instance.
         """
-
+        Check the current process id.  If it has changed, disconnect and
+        re-instantiate this connection pool instance.
+        """
         # Get the current process id.
         pid = os.getpid()
 
@@ -511,24 +510,23 @@ class BlockingConnectionPool(object):
         self.reinstantiate()
 
     def make_connection(self):
-        """Make a fresh connection."""
-
+        "Make a fresh connection."
         connection = self.connection_class(**self.connection_kwargs)
         self._connections.append(connection)
         return connection
 
     def get_connection(self, command_name, *keys, **options):
-        """Get a connection, blocking for ``self.timeout`` until a connection is
-          available from the pool.
-
-          If the connection returned is ``None`` then creates a new connection.
-          Because we use a last-in first-out queue, the existing connections (having
-          been returned to the pool after the initial ``None`` values were added)
-          will be returned before ``None`` values. This means we only create new
-          connections when we need to, i.e.: the actual number of connections will
-          only increase in response to demand.
         """
+        Get a connection, blocking for ``self.timeout`` until a connection
+        is available from the pool.
 
+        If the connection returned is ``None`` then creates a new connection.
+        Because we use a last-in first-out queue, the existing connections
+        (having been returned to the pool after the initial ``None`` values
+        were added) will be returned before ``None`` values. This means we only
+        create new connections when we need to, i.e.: the actual number of
+        connections will only increase in response to demand.
+        """
         # Make sure we haven't changed process.
         self._checkpid()
 
@@ -538,20 +536,19 @@ class BlockingConnectionPool(object):
         try:
             connection = self.pool.get(block=True, timeout=self.timeout)
         except Empty:
-            # Note that this is not caught by the redis client and will be raised
-            # unless handled by application code. If you want never to raise
+            # Note that this is not caught by the redis client and will be
+            # raised unless handled by application code. If you want never to
             raise ConnectionError("No connection available.")
 
-        # If the ``connection`` is actually ``None`` then that's a cue to make a
-        # new connection to add to the pool.
+        # If the ``connection`` is actually ``None`` then that's a cue to make
+        # a new connection to add to the pool.
         if connection is None:
             connection = self.make_connection()
 
         return connection
 
     def release(self, connection):
-        """Releases the connection back to the pool."""
-
+        "Releases the connection back to the pool."
         # Make sure we haven't changed process.
         self._checkpid()
 
@@ -566,16 +563,16 @@ class BlockingConnectionPool(object):
             pass
 
     def disconnect(self):
-        """Disconnects all connections in the pool."""
-
+        "Disconnects all connections in the pool."
         for connection in self._connections:
             connection.disconnect()
 
     def reinstantiate(self):
-        """Reinstatiate this instance within a new process with a new connection
-          pool set.
         """
-
-        self.__init__(max_connections=self.max_connections, timeout=self.timeout,
+        Reinstatiate this instance within a new process with a new connection
+        pool set.
+        """
+        self.__init__(max_connections=self.max_connections,
+                      timeout=self.timeout,
                       connection_class=self.connection_class,
                       queue_class=self.queue_class, **self.connection_kwargs)

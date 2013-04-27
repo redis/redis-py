@@ -242,7 +242,7 @@ class StrictRedis(object):
             'PING': lambda r: nativestr(r) == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
             'SCRIPT': parse_script,
-            'SET': lambda r: r and nativestr(r) == 'OK'  or None,
+            'SET': lambda r: r and nativestr(r) == 'OK' or None,
             'TIME': lambda x: (int(x[0]), int(x[1]))
         }
     )
