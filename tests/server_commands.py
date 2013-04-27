@@ -457,11 +457,25 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client['b'], b('2'))
 
     def test_set_nx(self):
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.12'):
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
+
         self.assertEquals(self.client.set('foo', '1', nx=True), True)
         self.assertEquals(self.client.set('foo', '2', nx=True), None)
         self.assertEquals(self.client.get('foo'), b('1'))
 
     def test_set_xx(self):
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.12'):
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
+
         self.assertEquals(self.client.set('foo', '1', xx=True), None)
         self.assertEquals(self.client.get('foo'), None)
         self.client.set('foo', 'bar')
@@ -469,6 +483,13 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.get('foo'), b('2'))
 
     def test_set_px(self):
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.12'):
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
+
         self.assertEquals(self.client.set('foo', '1', px=10000), True)
         self.assertEquals(self.client['foo'], b('1'))
         self.assert_(0 < self.client.pttl('foo') <= 10000)
@@ -480,6 +501,13 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(0 < self.client.ttl('foo') <= 1)
 
     def test_set_ex(self):
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.12'):
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
+
         self.assertEquals(self.client.set('foo', '1', ex=10), True)
         self.assertEquals(self.client.ttl('foo'), 10)
         # expire given a timedelta
@@ -488,6 +516,13 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.ttl('foo'), 60)
 
     def test_set_multipleoptions(self):
+        version = self.client.info()['redis_version']
+        if StrictVersion(version) < StrictVersion('2.6.12'):
+            try:
+                raise unittest.SkipTest()
+            except AttributeError:
+                return
+
         self.client['foo'] = 'val'
         self.assertEquals(
             self.client.set('foo', 'bar', xx=True, px=10000),
