@@ -19,6 +19,8 @@ from redis.exceptions import (
 
 SYM_EMPTY = b('')
 
+"THIS IS A FAILURE ON PURPOSE TO TEST PEP8 INTEGRATION WITH TRAVIS-CI BLAH BALH BALH BALH"
+
 
 def list_or_args(keys, args):
     # returns a single list combining keys and args
