@@ -9,6 +9,5 @@ env:
   - PEP8=0
   - PEP8=1
 install:
-  - pip install pep8 --use-mirrors
   - pip install -e . --use-mirrors
-script: "if [[ $PEP8 == '1' ]]; then pip install pep8 --use-mirrors; pep8 --repeat --show-source --exclude=.venv,.tox,dist,doc,build,*.egg . else python setup.py test fi"
+script: "if [[ $PEP8 == '1' ]]; then pip install pep8 --use-mirrors; pep8 --repeat --show-source --exclude=.venv,.tox,dist,doc,build,*.egg .; else python setup.py test; fi"
