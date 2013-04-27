@@ -5,10 +5,13 @@ python:
   - "2.7"
   - "2.6"
   - "2.5"
-env:
-  - TEST_PEP8=0
-  - TEST_PEP8=1
 install:
   - pip install -e . --use-mirrors
   - "if [[ $TEST_PEP8 == '1' ]]; then pip install pep8 --use-mirrors; fi"
 script: "if [[ $TEST_PEP8 == '1' ]]; then pep8 --repeat --show-source --exclude=.venv,.tox,dist,doc,build,*.egg .; else python setup.py test; fi"
+matrix:
+  include:
+    - python: 2.7
+      env: TEST_PEP8=1
+    - python: 3.3
+      env: TEST_PEP8=1
