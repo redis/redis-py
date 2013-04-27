@@ -213,7 +213,8 @@ class StrictRedis(object):
         string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
         string_keys_to_dict(
             'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME '
-            'SAVE SELECT SET SHUTDOWN SLAVEOF WATCH UNWATCH',
+#            'SAVE SELECT SET SHUTDOWN SLAVEOF WATCH UNWATCH',
+            'SAVE SELECT SHUTDOWN SLAVEOF WATCH UNWATCH',
             lambda r: nativestr(r) == 'OK'
         ),
         string_keys_to_dict('BLPOP BRPOP', lambda r: r and tuple(r) or None),
@@ -242,6 +243,7 @@ class StrictRedis(object):
             'PING': lambda r: nativestr(r) == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
             'SCRIPT': parse_script,
+            'SET': lambda r: r and r == 'OK'  or None,
             'TIME': lambda x: (int(x[0]), int(x[1]))
         }
     )
@@ -707,9 +709,38 @@ class StrictRedis(object):
         "Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist"
         return self.execute_command('RENAMENX', src, dst)
 
-    def set(self, name, value):
-        "Set the value at key ``name`` to ``value``"
-        return self.execute_command('SET', name, value)
+    def set(self, name, value, ex=None, px=None, nx=False, xx=False):
+        """
+        Set the value at key ``name`` to ``value``
+
+        ``ex`` sets an expire flag on key ``name`` for ``ex`` seconds.
+
+        ``px`` sets an expire flag on key ``name`` for ``px`` milliseconds.
+
+        ``nx`` if set to True, set the value at key ``name`` to ``value`` if it
+            does not already exist.
+
+        ``xx`` if set to True, set the value at key ``name`` to ``value`` if it
+            already exists.
+        """
+        pieces = [name, value]
+        if ex:
+            pieces.append('EX')
+            if isinstance(ex, datetime.timedelta):
+                ex = ex.seconds + ex.days * 24 * 3600
+            pieces.append(ex)
+        if px:
+            pieces.append('PX')
+            if isinstance(px, datetime.timedelta):
+                ms = int(px.microseconds / 1000)
+                px = (px.seconds + px.days * 24 * 3600) * 1000 + ms
+            pieces.append(px)
+
+        if nx:
+            pieces.append('NX')
+        if xx:
+            pieces.append('XX')
+        return self.execute_command('SET', *pieces)
     __setitem__ = set
 
     def setbit(self, name, offset, value):
