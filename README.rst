@@ -10,7 +10,7 @@ Installation
 ------------
 
 redis-py requires a running Redis server. See `Redis's quickstart
-<http://redis.io/topics/quickstart>_` for installation instructions.
+<http://redis.io/topics/quickstart>`_ for installation instructions.
 
 To install redis-py, simply:
 
@@ -46,7 +46,7 @@ Getting Started
 API Reference
 -------------
 
-The `official Redis command documentation <http://redis.io/commands>_` does a
+The `official Redis command documentation <http://redis.io/commands>`_ does a
 great job of explaining each command in detail. redis-py exposes two client
 classes that implement these commands. The StrictRedis class attempts to adhere
 to the official command syntax. There are a few exceptions:
@@ -66,7 +66,7 @@ to the official command syntax. There are a few exceptions:
   will return a PubSub instance where you can subscribe to channels and listen
   for messages. You can only call PUBLISH from the Redis client (see
   `this comment on issue #151
-  <https://github.com/andymccurdy/redis-py/issues/151#issuecomment-1545015>_`
+  <https://github.com/andymccurdy/redis-py/issues/151#issuecomment-1545015>`_
   for details).
 
 In addition to the changes above, the Redis class, a subclass of StrictRedis,
@@ -348,12 +348,12 @@ it with the multiplier value and returns the result.
 function. Script instances accept the following optional arguments:
 
 * keys: A list of key names that the script will access. This becomes the
-        KEYS list in LUA.
+  KEYS list in LUA.
 * args: A list of argument values. This becomes the ARGV list in LUA.
 * client: A redis-py Client or Pipeline instance that will invoke the
-          script. If client isn't specified, the client that intiially
-          created the Script instance (the one that `register_script` was
-          invoked from) will be used.
+  script. If client isn't specified, the client that intiially
+  created the Script instance (the one that `register_script` was
+  invoked from) will be used.
 
 Continuing the example from above:
 
