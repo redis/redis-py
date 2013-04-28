@@ -86,7 +86,7 @@ More Detail
 -----------
 
 Connection Pools
-----------------
+^^^^^^^^^^^^^^^^
 
 Behind the scenes, redis-py uses a connection pool to manage connections to
 a Redis server. By default, each Redis instance you create will in turn create
@@ -102,7 +102,7 @@ are managed.
     >>> r = redis.Redis(connection_pool=pool)
 
 Connections
------------
+^^^^^^^^^^^
 
 ConnectionPools manage a set of Connection instances. redis-py ships with two
 types of Connections. The default, Connection, is a normal TCP socket based
@@ -130,7 +130,7 @@ specified during initialization.
                                     your_arg='...', ...)
 
 Parsers
--------
+^^^^^^^
 
 Parser classes provide a way to control how responses from the Redis server
 are parsed. redis-py ships with two parser classes, the PythonParser and the
@@ -158,7 +158,7 @@ or
     $ easy_install hiredis
 
 Response Callbacks
-------------------
+^^^^^^^^^^^^^^^^^^
 
 The client class uses a set of callbacks to cast Redis responses to the
 appropriate Python type. There are a number of these callbacks defined on
@@ -178,7 +178,7 @@ command's call to execute_command. The ZRANGE implementation demonstrates the
 use of response callback keyword arguments with its "withscores" argument.
 
 Thread Safety
--------------
+^^^^^^^^^^^^^
 
 Redis client instances can safely be shared between threads. Internally,
 connection instances are only retrieved from the connection pool during
@@ -199,7 +199,7 @@ each database.
 It is not safe to pass PubSub or Pipeline objects between threads.
 
 Pipelines
----------
+^^^^^^^^^
 
 Pipelines are a subclass of the base Redis class that provide support for
 buffering multiple commands to the server in a single request. They can be used
@@ -320,7 +320,7 @@ which is much easier to read:
     [True]
 
 LUA Scripting
--------------
+^^^^^^^^^^^^^
 
 redis-py supports the EVAL, EVALSHA, and SCRIPT commands. However, there are
 a number of edge cases that make these commands tedious to use in real world
@@ -347,10 +347,10 @@ it with the multiplier value and returns the result.
 `multiply` is now a Script instance that is invoked by calling it like a
 function. Script instances accept the following optional arguments:
 
-* keys: A list of key names that the script will access. This becomes the
+* **keys**: A list of key names that the script will access. This becomes the
   KEYS list in LUA.
-* args: A list of argument values. This becomes the ARGV list in LUA.
-* client: A redis-py Client or Pipeline instance that will invoke the
+* **args**: A list of argument values. This becomes the ARGV list in LUA.
+* **client**: A redis-py Client or Pipeline instance that will invoke the
   script. If client isn't specified, the client that intiially
   created the Script instance (the one that `register_script` was
   invoked from) will be used.
@@ -395,7 +395,7 @@ execution.
     [True, 25]
 
 Author
-------
+^^^^^^
 
 redis-py is developed and maintained by Andy McCurdy (sedrik@gmail.com).
 It can be found here: http://github.com/andymccurdy/redis-py
