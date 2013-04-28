@@ -1,4 +1,5 @@
-* 2.7.4 (in development)
+* 2.7.4
+    * Added missing INCRBY method. Thanks Krzysztof Dorosz.
     * SET now accepts the EX, PX, NX and XX options from Redis 2.6.12. These
       options will generate errors if these options are used when connected
       to a Redis server < 2.6.12. Thanks George Yoshida.

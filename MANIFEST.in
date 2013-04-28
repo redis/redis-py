@@ -1,5 +1,5 @@
 include CHANGES
 include INSTALL
 include LICENSE
-include README.md
+include README.rst
 recursive-include tests *
