@@ -51,16 +51,16 @@ great job of explaining each command in detail. redis-py exposes two client
 classes that implement these commands. The StrictRedis class attempts to adhere
 to the official command syntax. There are a few exceptions:
 
-* SELECT: Not implemented. See the explanation in the Thread Safety section
+* **SELECT**: Not implemented. See the explanation in the Thread Safety section
   below.
-* DEL: 'del' is a reserved keyword in the Python syntax. Therefore redis-py
+* **DEL**: 'del' is a reserved keyword in the Python syntax. Therefore redis-py
   uses 'delete' instead.
-* CONFIG GET|SET: These are implemented separately as config_get or config_set.
-* MULTI/EXEC: These are implemented as part of the Pipeline class. The
+* **CONFIG GET|SET**: These are implemented separately as config_get or config_set.
+* **MULTI/EXEC**: These are implemented as part of the Pipeline class. The
   pipeline is wrapped with the MULTI and EXEC statements by default when it
   is executed, which can be disabled by specifying transaction=False.
   See more about Pipelines below.
-* SUBSCRIBE/LISTEN: Similar to pipelines, PubSub is implemented as a separate
+* **SUBSCRIBE/LISTEN**: Similar to pipelines, PubSub is implemented as a separate
   class as it places the underlying connection in a state where it can't
   execute non-pubsub commands. Calling the pubsub method from the Redis client
   will return a PubSub instance where you can subscribe to channels and listen
@@ -73,13 +73,13 @@ In addition to the changes above, the Redis class, a subclass of StrictRedis,
 overrides several other commands to provide backwards compatibility with older
 versions of redis-py:
 
-* LREM: Order of 'num' and 'value' arguments reversed such that 'num' can
+* **LREM**: Order of 'num' and 'value' arguments reversed such that 'num' can
   provide a default value of zero.
-* ZADD: Redis specifies the 'score' argument before 'value'. These were swapped
+* **ZADD**: Redis specifies the 'score' argument before 'value'. These were swapped
   accidentally when being implemented and not discovered until after people
-  were already using it. The Redis class expects *args in the form of:
+  were already using it. The Redis class expects \*args in the form of:
   `name1, score1, name2, score2, ...`
-* SETEX: Order of 'time' and 'value' arguments reversed.
+* **SETEX**: Order of 'time' and 'value' arguments reversed.
 
 
 More Detail
