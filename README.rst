@@ -1,40 +1,26 @@
-redis-py
-========
+# redis-py
 
 The Python interface to the Redis key-value store.
 
-.. image:: https://secure.travis-ci.org/andymccurdy/redis-py.png?branch=master
-        :target: http://travis-ci.org/andymccurdy/redis-py
+[![Build Status](https://secure.travis-ci.org/andymccurdy/redis-py.png?branch=master)](http://travis-ci.org/andymccurdy/redis-py)
 
-Installation
-------------
+## Installation
 
-redis-py requires a running Redis server. See `Redis's quickstart
-<http://redis.io/topics/quickstart>`_ for installation instructions.
-
-To install redis-py, simply:
-
-.. code-block:: bash
+*NOTE:* redis-py requires a running Redis server.
+See [Redis's quickstart](http://redis.io/topics/quickstart) for installation instructions.
 
     $ sudo pip install redis
 
 or alternatively (you really should be using pip though):
 
-.. code-block:: bash
-
     $ sudo easy_install redis
 
-or from source:
-
-.. code-block:: bash
+From source:
 
     $ sudo python setup.py install
 
 
-Getting Started
----------------
-
-.. code-block:: pycon
+## Getting Started
 
     >>> import redis
     >>> r = redis.StrictRedis(host='localhost', port=6379, db=0)
@@ -43,13 +29,12 @@ Getting Started
     >>> r.get('foo')
     'bar'
 
-API Reference
--------------
+## API Reference
 
-The `official Redis command documentation <http://redis.io/commands>`_ does a
-great job of explaining each command in detail. redis-py exposes two client
-classes that implement these commands. The StrictRedis class attempts to adhere
-to the official command syntax. There are a few exceptions:
+The official Redis documentation does a great job of explaining each command in
+detail (http://redis.io/commands). redis-py exposes two client classes that
+implement these commands. The StrictRedis class attempts to adhere to the
+official command syntax. There are a few exceptions:
 
 * SELECT: Not implemented. See the explanation in the Thread Safety section
   below.
@@ -64,10 +49,7 @@ to the official command syntax. There are a few exceptions:
   class as it places the underlying connection in a state where it can't
   execute non-pubsub commands. Calling the pubsub method from the Redis client
   will return a PubSub instance where you can subscribe to channels and listen
-  for messages. You can only call PUBLISH from the Redis client (see
-  `this comment on issue #151
-  <https://github.com/andymccurdy/redis-py/issues/151#issuecomment-1545015>`_
-  for details).
+  for messages. You can only call PUBLISH from the Redis client (see [this comment on issue #151](https://github.com/andymccurdy/redis-py/issues/151#issuecomment-1545015) for details).
 
 In addition to the changes above, the Redis class, a subclass of StrictRedis,
 overrides several other commands to provide backwards compatibility with older
@@ -78,15 +60,13 @@ versions of redis-py:
 * ZADD: Redis specifies the 'score' argument before 'value'. These were swapped
   accidentally when being implemented and not discovered until after people
   were already using it. The Redis class expects *args in the form of:
-  `name1, score1, name2, score2, ...`
+      name1, score1, name2, score2, ...
 * SETEX: Order of 'time' and 'value' arguments reversed.
 
 
-More Detail
------------
+## More Detail
 
-Connection Pools
-^^^^^^^^^^^^^^^^
+### Connection Pools
 
 Behind the scenes, redis-py uses a connection pool to manage connections to
 a Redis server. By default, each Redis instance you create will in turn create
@@ -96,13 +76,10 @@ connection_pool argument of the Redis class. You may choose to do this in order
 to implement client side sharding or have finer grain control of how connections
 are managed.
 
-.. code-block:: pycon
-
     >>> pool = redis.ConnectionPool(host='localhost', port=6379, db=0)
     >>> r = redis.Redis(connection_pool=pool)
 
-Connections
-^^^^^^^^^^^
+### Connections
 
 ConnectionPools manage a set of Connection instances. redis-py ships with two
 types of Connections. The default, Connection, is a normal TCP socket based
@@ -113,8 +90,6 @@ argument, which is a string to the unix domain socket file. Additionally, make
 sure the unixsocket parameter is defined in your redis.conf file. It's
 commented out by default.
 
-.. code-block:: pycon
-
     >>> r = redis.Redis(unix_socket_path='/tmp/redis.sock')
 
 You can create your own Connection subclasses as well. This may be useful if
@@ -124,13 +99,10 @@ a connection pool, passing your class to the connection_class argument.
 Other keyword parameters your pass to the pool will be passed to the class
 specified during initialization.
 
-.. code-block:: pycon
-
     >>> pool = redis.ConnectionPool(connection_class=YourConnectionClass,
                                     your_arg='...', ...)
 
-Parsers
-^^^^^^^
+### Parsers
 
 Parser classes provide a way to control how responses from the Redis server
 are parsed. redis-py ships with two parser classes, the PythonParser and the
@@ -144,21 +116,16 @@ kind enough to create Python bindings. Using Hiredis can provide up to a
 performance increase is most noticeable when retrieving many pieces of data,
 such as from LRANGE or SMEMBERS operations.
 
-Hiredis is available on PyPI, and can be installed via pip or easy_install
+Hiredis is available on Pypi, and can be installed via pip or easy_install
 just like redis-py.
-
-.. code-block:: bash
 
     $ pip install hiredis
 
 or
 
-.. code-block:: bash
-
     $ easy_install hiredis
 
-Response Callbacks
-^^^^^^^^^^^^^^^^^^
+### Response Callbacks
 
 The client class uses a set of callbacks to cast Redis responses to the
 appropriate Python type. There are a number of these callbacks defined on
@@ -177,8 +144,7 @@ how to interpret the response. These keyword arguments are specified during the
 command's call to execute_command. The ZRANGE implementation demonstrates the
 use of response callback keyword arguments with its "withscores" argument.
 
-Thread Safety
-^^^^^^^^^^^^^
+## Thread Safety
 
 Redis client instances can safely be shared between threads. Internally,
 connection instances are only retrieved from the connection pool during
@@ -198,8 +164,7 @@ each database.
 
 It is not safe to pass PubSub or Pipeline objects between threads.
 
-Pipelines
-^^^^^^^^^
+## Pipelines
 
 Pipelines are a subclass of the base Redis class that provide support for
 buffering multiple commands to the server in a single request. They can be used
@@ -207,8 +172,6 @@ to dramatically increase the performance of groups of commands by reducing the
 number of back-and-forth TCP packets between the client and server.
 
 Pipelines are quite simple to use:
-
-.. code-block:: pycon
 
     >>> r = redis.Redis(...)
     >>> r.set('bing', 'baz')
@@ -225,8 +188,6 @@ Pipelines are quite simple to use:
 For ease of use, all commands being buffered into the pipeline return the
 pipeline object itself. Therefore calls can be chained like:
 
-.. code-block:: pycon
-
     >>> pipe.set('foo', 'bar').sadd('faz', 'baz').incr('auto_number').execute()
     [True, True, 6]
 
@@ -234,8 +195,6 @@ In addition, pipelines can also ensure the buffered commands are executed
 atomically as a group. This happens by default. If you want to disable the
 atomic nature of a pipeline but still want to buffer commands, you can turn
 off transactions.
-
-.. code-block:: pycon
 
     >>> pipe = r.pipeline(transaction=False)
 
@@ -254,8 +213,6 @@ prior to starting a transaction. If any of those keys change prior the
 execution of that transaction, the entire transaction will be canceled and a
 WatchError will be raised. To implement our own client-side INCR command, we
 could do something like this:
-
-.. code-block:: pycon
 
     >>> with r.pipeline() as pipe:
     ...     while 1:
@@ -288,8 +245,6 @@ Pipeline is used as a context manager (as in the example above) reset()
 will be called automatically. Of course you can do this the manual way by
 explicity calling reset():
 
-.. code-block:: pycon
-
     >>> pipe = r.pipeline()
     >>> while 1:
     ...     try:
@@ -308,8 +263,6 @@ should expect a single parameter, a pipeline object, and any number of keys to
 be WATCHed. Our client-side INCR command above can be written like this,
 which is much easier to read:
 
-.. code-block:: pycon
-
     >>> def client_side_incr(pipe):
     ...     current_value = pipe.get('OUR-SEQUENCE-KEY')
     ...     next_value = int(current_value) + 1
@@ -319,8 +272,7 @@ which is much easier to read:
     >>> r.transaction(client_side_incr, 'OUR-SEQUENCE-KEY')
     [True]
 
-LUA Scripting
-^^^^^^^^^^^^^
+## LUA Scripting
 
 redis-py supports the EVAL, EVALSHA, and SCRIPT commands. However, there are
 a number of edge cases that make these commands tedious to use in real world
@@ -335,8 +287,6 @@ The following trivial LUA script accepts two parameters: the name of a key and a
 multiplier value. The script fetches the value stored in the key, multiplies
 it with the multiplier value and returns the result.
 
-.. code-block:: pycon
-
     >>> r = redis.StrictRedis()
     >>> lua = """
     ... local value = redis.call('GET', KEYS[1])
@@ -347,17 +297,15 @@ it with the multiplier value and returns the result.
 `multiply` is now a Script instance that is invoked by calling it like a
 function. Script instances accept the following optional arguments:
 
-* **keys**: A list of key names that the script will access. This becomes the
-  KEYS list in LUA.
-* **args**: A list of argument values. This becomes the ARGV list in LUA.
-* **client**: A redis-py Client or Pipeline instance that will invoke the
-  script. If client isn't specified, the client that intiially
-  created the Script instance (the one that `register_script` was
-  invoked from) will be used.
+* keys: A list of key names that the script will access. This becomes the
+        KEYS list in LUA.
+* args: A list of argument values. This becomes the ARGV list in LUA.
+* client: A redis-py Client or Pipeline instance that will invoke the
+          script. If client isn't specified, the client that intiially
+          created the Script instance (the one that `register_script` was
+          invoked from) will be used.
 
 Continuing the example from above:
-
-.. code-block:: pycon
 
     >>> r.set('foo', 2)
     >>> multiply(keys=['foo'], args=[5])
@@ -369,8 +317,6 @@ script and returns the result, 10.
 
 Script instances can be executed using a different client instance, even one
 that points to a completely different Redis server.
-
-.. code-block:: pycon
 
     >>> r2 = redis.StrictRedis('redis2.example.com')
     >>> r2.set('foo', 3)
@@ -386,8 +332,6 @@ passed as the client argument when calling the script. Care is taken to ensure
 that the script is registered in Redis's script cache just prior to pipeline
 execution.
 
-.. code-block:: pycon
-
     >>> pipe = r.pipeline()
     >>> pipe.set('foo', 5)
     >>> multiply(keys=['foo'], args=[5], client=pipe)
@@ -395,7 +339,7 @@ execution.
     [True, 25]
 
 Author
-^^^^^^
+------
 
 redis-py is developed and maintained by Andy McCurdy (sedrik@gmail.com).
 It can be found here: http://github.com/andymccurdy/redis-py
