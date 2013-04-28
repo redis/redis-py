@@ -614,6 +614,16 @@ class StrictRedis(object):
         """
         return self.execute_command('INCRBY', name, amount)
 
+    def incrby(self, name, amount=1):
+        """
+        Increments the value of ``key`` by ``amount``.  If no key exists,
+        the value will be initialized as ``amount``
+        """
+
+        # An alias for ``incr()``, because it is already implemented
+        # as INCRBY redis command.
+        return self.incr(name, amount)
+
     def incrbyfloat(self, name, amount=1.0):
         """
         Increments the value at key ``name`` by floating ``amount``.
