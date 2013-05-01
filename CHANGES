@@ -1,3 +1,6 @@
+* 2.7.5 (in development)
+    * DEL, HDEL and ZREM commands now return the numbers of keys deleted
+      instead of just True/False.
 * 2.7.4
     * Added missing INCRBY method. Thanks Krzysztof Dorosz.
     * SET now accepts the EX, PX, NX and XX options from Redis 2.6.12. These

@@ -61,9 +61,16 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertRaises(KeyError, self.client.__getitem__, 'b')
 
     def test_delete(self):
-        self.assertEquals(self.client.delete('a'), False)
+        self.assertEquals(self.client.delete('a'), 0)
         self.client['a'] = 'foo'
-        self.assertEquals(self.client.delete('a'), True)
+        self.assertEquals(self.client.delete('a'), 1)
+
+    def test_delete_multiple_keys(self):
+        self.client['a'] = 'foo'
+        self.client['b'] = 'bar'
+        self.assertEquals(self.client.delete('a', 'b'), 2)
+        self.assertEquals(self.client.get('a'), None)
+        self.assertEquals(self.client.get('b'), None)
 
     def test_delitem(self):
         self.client['a'] = 'foo'
@@ -1208,10 +1215,15 @@ class ServerCommandsTestCase(unittest.TestCase):
         del self.client['a']
         # real logic
         self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3})
-        self.assertEquals(self.client.zrem('a', 'a2'), True)
+        self.assertEquals(self.client.zrem('a', 'a2'), 1)
         self.assertEquals(self.client.zrange('a', 0, 5), [b('a1'), b('a3')])
-        self.assertEquals(self.client.zrem('a', 'b'), False)
+        self.assertEquals(self.client.zrem('a', 'b'), 0)
         self.assertEquals(self.client.zrange('a', 0, 5), [b('a1'), b('a3')])
+
+    def test_zrem_multiple_keys(self):
+        self.make_zset('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        self.assertEquals(self.client.zrem('a', 'a1', 'a2'), 2)
+        self.assertEquals(self.client.zrange('a', 0, 5), [b('a3')])
 
     def test_zremrangebyrank(self):
         # key is not a zset
@@ -1423,12 +1435,19 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertRaises(redis.ResponseError, self.client.hdel, 'a', 'a1')
         del self.client['a']
         # no key
-        self.assertEquals(self.client.hdel('a', 'a1'), False)
+        self.assertEquals(self.client.hdel('a', 'a1'), 0)
         # real logic
         self.make_hash('a', {'a1': 1, 'a2': 2, 'a3': 3})
         self.assertEquals(self.client.hget('a', 'a2'), b('2'))
-        self.assert_(self.client.hdel('a', 'a2'))
+        self.assertEquals(self.client.hdel('a', 'a2'), 1)
         self.assertEquals(self.client.hget('a', 'a2'), None)
+
+    def test_hdel_multiple_keys(self):
+        self.make_hash('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        self.assertEquals(self.client.hdel('a', 'a1', 'a2'), 2)
+        self.assertEquals(self.client.hget('a', 'a1'), None)
+        self.assertEquals(self.client.hget('a', 'a2'), None)
+        self.assertEquals(self.client.hget('a', 'a3'), b('3'))
 
     def test_hexists(self):
         # key is not a hash
