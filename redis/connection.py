@@ -36,8 +36,9 @@ class PythonParser(object):
 
     EXCEPTION_CLASSES = {
         'ERR': ResponseError,
-        'NOSCRIPT': NoScriptError,
         'EXECABORT': ExecAbortError,
+        'LOADING': ConnectionError,
+        'NOSCRIPT': NoScriptError,
     }
 
     def __init__(self):
@@ -63,7 +64,7 @@ class PythonParser(object):
 
     def read(self, length=None):
         """
-        Read a line from the socket is no length is specified,
+        Read a line from the socket if no length is specified,
         otherwise read ``length`` bytes. Always strip away the newlines.
         """
         try:
@@ -114,10 +115,6 @@ class PythonParser(object):
         # server returned an error
         if byte == '-':
             response = nativestr(response)
-            if response.startswith('LOADING '):
-                # if we're loading the dataset into memory, kill the socket
-                # so we re-initialize (and re-SELECT) next time.
-                raise ConnectionError("Redis is loading data into memory")
             # *return*, not raise the exception class. if it is meant to be
             # raised, it will be at a higher level.
             return self.parse_error(response)
