@@ -275,7 +275,7 @@ class StrictRedis(object):
             except (AttributeError, ValueError):
                 db = 0
 
-        return cls(host=url.hostname, port=url.port, db=db,
+        return cls(host=url.hostname, port=int(url.port or 6379), db=db,
                    password=url.password, **kwargs)
 
     def __init__(self, host='localhost', port=6379,
