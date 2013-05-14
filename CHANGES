@@ -1,6 +1,7 @@
-* 2.7.5 (in development)
+* 2.7.5
     * DEL, HDEL and ZREM commands now return the numbers of keys deleted
       instead of just True/False.
+    * from_url now supports URIs with a port number. Thanks Aaron Westendorf.
 * 2.7.4
     * Added missing INCRBY method. Thanks Krzysztof Dorosz.
     * SET now accepts the EX, PX, NX and XX options from Redis 2.6.12. These
