@@ -1969,7 +1969,7 @@ class Script(object):
 
     def __call__(self, keys=[], args=[], client=None):
         "Execute the script, passing any required ``args``"
-        if client == None:
+        if client is None:
             client = self.registered_client
         args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
