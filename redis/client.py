@@ -1969,7 +1969,8 @@ class Script(object):
 
     def __call__(self, keys=[], args=[], client=None):
         "Execute the script, passing any required ``args``"
-        client = client or self.registered_client
+        if client == None:
+            client = self.registered_client
         args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
         if isinstance(client, BasePipeline):
