@@ -30,6 +30,11 @@ or from source:
 
     $ sudo python setup.py install
 
+Documentation
+-------------
+
+The documentation is available here: `https://redis-py.readthedocs.org/en/latest/ <https://redis-py.readthedocs.org/en/latest/>`_.
+
 
 Getting Started
 ---------------
@@ -406,4 +411,3 @@ Special thanks to:
   which some of the socket code is still used.
 * Alexander Solovyov for ideas on the generic response callback system.
 * Paul Hubbard for initial packaging support.
-
