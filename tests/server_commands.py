@@ -4,8 +4,8 @@ import datetime
 import time
 import binascii
 
-from redis._compat import (unichr, u, b, ascii_letters, iteritems, dictkeys,
-                           dictvalues)
+from redis._compat import (unichr, u, b, ascii_letters, iteritems, iterkeys,
+                           itervalues)
 from redis.client import parse_info
 import redis
 
@@ -1522,7 +1522,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         # real logic
         h = {b('a1'): b('1'), b('a2'): b('2'), b('a3'): b('3')}
         self.make_hash('a', h)
-        keys = dictkeys(h)
+        keys = list(iterkeys(h))
         keys.sort()
         remote_keys = self.client.hkeys('a')
         remote_keys.sort()
@@ -1551,7 +1551,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         # real logic
         h = {b('a1'): b('1'), b('a2'): b('2'), b('a3'): b('3')}
         self.make_hash('a', h)
-        vals = dictvalues(h)
+        vals = list(itervalues(h))
         vals.sort()
         remote_vals = self.client.hvals('a')
         remote_vals.sort()
@@ -1782,10 +1782,10 @@ class ServerCommandsTestCase(unittest.TestCase):
 
         # check that KEYS returns all the keys as they are
         self.assertEqual(sorted(self.client.keys('*')),
-                         sorted(dictkeys(mapping)))
+                         sorted(list(iterkeys(mapping))))
 
         # check that it is possible to get list content by key name
-        for key in dictkeys(mapping):
+        for key in iterkeys(mapping):
             self.assertEqual(self.client.lrange(key, 0, -1),
                              mapping[key])
 

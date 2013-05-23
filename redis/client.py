@@ -4,7 +4,7 @@ import datetime
 import sys
 import warnings
 import time as mod_time
-from redis._compat import (b, izip, imap, iteritems, dictkeys, dictvalues,
+from redis._compat import (b, izip, imap, iteritems, iterkeys, itervalues,
                            basestring, long, nativestr, urlparse, bytes)
 from redis.connection import ConnectionPool, UnixDomainSocketConnection
 from redis.exceptions import (
@@ -1298,7 +1298,7 @@ class StrictRedis(object):
     def _zaggregate(self, command, dest, keys, aggregate=None):
         pieces = [command, dest, len(keys)]
         if isinstance(keys, dict):
-            keys, weights = dictkeys(keys), dictvalues(keys)
+            keys, weights = iterkeys(keys), itervalues(keys)
         else:
             weights = None
         pieces.extend(keys)
