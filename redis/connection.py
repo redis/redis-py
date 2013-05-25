@@ -1,8 +1,8 @@
-from itertools import chain
 import os
 import socket
 import sys
-
+from itertools import chain
+from select import select
 from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
                            BytesIO, nativestr, basestring,
                            LifoQueue, Empty, Full)
@@ -61,6 +61,9 @@ class PythonParser(object):
         if self._fp is not None:
             self._fp.close()
             self._fp = None
+
+    def can_read(self):
+        return self._fp and self._fp._rbuf.tell()
 
     def read(self, length=None):
         """
@@ -146,6 +149,7 @@ class HiredisParser(object):
     def __init__(self):
         if not hiredis_available:
             raise RedisError("Hiredis is not installed")
+        self._next_response = False
 
     def __del__(self):
         try:
@@ -167,9 +171,24 @@ class HiredisParser(object):
         self._sock = None
         self._reader = None
 
+    def can_read(self):
+        if not self._reader:
+            raise ConnectionError("Socket closed on remote end")
+
+        if self._next_response is False:
+            self._next_response = self._reader.gets()
+        return self._next_response is not False
+
     def read_response(self):
         if not self._reader:
             raise ConnectionError("Socket closed on remote end")
+
+        # _next_response might be cached from a can_read() call
+        if self._next_response is not False:
+            response = self._next_response
+            self._next_response = False
+            return response
+
         response = self._reader.gets()
         while response is False:
             try:
@@ -297,6 +316,13 @@ class Connection(object):
     def send_command(self, *args):
         "Pack and send a command to the Redis server"
         self.send_packed_command(self.pack_command(*args))
+
+    def can_read(self):
+        "Poll the socket to see if there's data that can be read."
+        sock = self._sock
+        if not sock:
+            return False
+        return bool(select([sock], [], [], 0)[0]) or self._parser.can_read()
 
     def read_response(self):
         "Read the response from a previously sent command"
