@@ -1642,6 +1642,8 @@ class PubSub(object):
                 del self.patterns[pattern]
             except KeyError:
                 pass
+        if not args:
+            self.patterns = {}
         return self.execute_command('PUNSUBSCRIBE', *args)
 
     def subscribe(self, *args, **kwargs):
@@ -1669,6 +1671,8 @@ class PubSub(object):
                 del self.channels[channel]
             except KeyError:
                 pass
+        if not args:
+            self.channels = {}
         return self.execute_command('UNSUBSCRIBE', *args)
 
     def listen(self):
