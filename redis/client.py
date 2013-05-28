@@ -1573,6 +1573,11 @@ class PubSub(object):
     def close(self):
         self.reset()
 
+    @property
+    def subscribed(self):
+        "Indicates if there are subscriptions to any channels or patterns"
+        return bool(self.subsciption_count or self.channels or self.patterns)
+
     def execute_command(self, *args, **kwargs):
         "Execute a publish/subscribe command"
 
@@ -1677,7 +1682,7 @@ class PubSub(object):
 
     def listen(self):
         "Listen for messages on channels this client has been subscribed to"
-        while self.subscription_count or self.channels or self.patterns:
+        while self.subscribed:
             response = self.handle_message(self.parse_response(block=True))
             if response is not None:
                 yield response
@@ -1744,7 +1749,7 @@ class PubSub(object):
                 if self._running:
                     return
                 self._running = True
-                while self._running:
+                while self._running and pubsub.subscribed:
                     pubsub.get_message(ignore_subscribe_messages=True)
                     mod_time.sleep(sleep_time)
 
