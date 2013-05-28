@@ -1558,8 +1558,6 @@ class PubSub(object):
             # if this object went out of scope prior to shutting down
             # subscriptions, close the connection manually before
             # returning it to the connection pool
-            if self.connection and (self.channels or self.patterns):
-                self.connection.disconnect()
             self.reset()
         except Exception:
             pass
