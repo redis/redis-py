@@ -1541,10 +1541,10 @@ class PubSub(object):
     MESSAGE_TYPES = ('message', 'pmessage')
 
     def __init__(self, connection_pool, shard_hint=None,
-                 suppress_subscribe_messages=False):
+                 ignore_subscribe_messages=False):
         self.connection_pool = connection_pool
         self.shard_hint = shard_hint
-        self.suppress_subscribe_messages = suppress_subscribe_messages
+        self.ignore_subscribe_messages = ignore_subscribe_messages
         self.connection = None
         self.channels = {}
         self.patterns = {}
@@ -1682,12 +1682,14 @@ class PubSub(object):
             if response is not None:
                 yield response
 
-    def get_message(self):
+    def get_message(self, ignore_subscribe_messages=False):
         "Get the next message if one is available, otherwise None"
         response = self.parse_response(block=False)
-        return response and self.handle_message(response) or None
+        if response:
+            return self.handle_message(response, ignore_subscribe_messages)
+        return None
 
-    def handle_message(self, response, suppress_subscribe_messages=False):
+    def handle_message(self, response, ignore_subscribe_messages=False):
         """
         Parses a pub/sub message. If the channel or pattern was subscribed to
         with a message handler, the handler is invoked instead of a parsed
@@ -1696,8 +1698,8 @@ class PubSub(object):
         msg_type = nativestr(response[0])
         handler = None
 
-        # optionally suppress subscribe/unsubscribe messages
-        s = suppress_subscribe_messages or self.suppress_subscribe_messages
+        # optionally ignore subscribe/unsubscribe messages
+        s = ignore_subscribe_messages or self.ignore_subscribe_messages
         if s and msg_type not in self.MESSAGE_TYPES:
             return None
 
@@ -1743,7 +1745,7 @@ class PubSub(object):
                     return
                 self._running = True
                 while self._running:
-                    pubsub.get_message()
+                    pubsub.get_message(ignore_subscribe_messages=True)
                     mod_time.sleep(sleep_time)
 
             def stop(self):
