@@ -9,6 +9,7 @@ from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
 from redis.exceptions import (
     RedisError,
     ConnectionError,
+    BusyLoadingError,
     ResponseError,
     InvalidResponse,
     AuthenticationError,
@@ -37,7 +38,7 @@ class PythonParser(object):
     EXCEPTION_CLASSES = {
         'ERR': ResponseError,
         'EXECABORT': ExecAbortError,
-        'LOADING': ConnectionError,
+        'LOADING': BusyLoadingError,
         'NOSCRIPT': NoScriptError,
     }
 
