@@ -53,6 +53,12 @@ class TestRedisCommands(object):
         assert 'maxmemory' in data
         assert data['maxmemory'].isdigit()
 
+    def test_config_resetstat(self, r):
+        r.ping()
+        assert int(r.info()['total_commands_processed']) > 1
+        r.config_resetstat()
+        assert int(r.info()['total_commands_processed']) == 1
+
     def test_config_set(self, r):
         data = r.config_get()
         rdbname = data['dbfilename']
