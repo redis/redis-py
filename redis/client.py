@@ -426,6 +426,10 @@ class StrictRedis(object):
         "Set config item ``name`` with ``value``"
         return self.execute_command('CONFIG', 'SET', name, value, parse='SET')
 
+    def config_resetstat(self):
+        "Reset runtime statistics"
+        return self.execute_command('CONFIG', 'RESETSTAT', parse='SET')
+
     def dbsize(self):
         "Returns the number of keys in the current database"
         return self.execute_command('DBSIZE')
