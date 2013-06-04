@@ -17,7 +17,7 @@ class ConnectionError(ServerError):
     pass
 
 
-class BusyLoadingError(ServerError):
+class BusyLoadingError(ConnectionError):
     pass
 
 
