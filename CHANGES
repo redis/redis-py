@@ -1,3 +1,5 @@
+* 2.8.0 (in development)
+    * Added CONFIG RESETSTAT command. Thanks Yossi Gottlieb.
 * 2.7.5
     * DEL, HDEL and ZREM commands now return the numbers of keys deleted
       instead of just True/False.
