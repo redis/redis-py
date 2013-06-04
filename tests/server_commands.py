@@ -127,7 +127,8 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.client.ping()
         self.assert_(int(self.client.info()['total_commands_processed']) > 1)
         self.client.config_resetstat()
-        self.assertEquals(int(self.client.info()['total_commands_processed']), 1)
+        command_count = int(self.client.info()['total_commands_processed'])
+        self.assertEquals(command_count, 1)
 
     def test_debug_object(self):
         self.client['a'] = 'foo'
