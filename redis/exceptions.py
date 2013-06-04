@@ -17,6 +17,10 @@ class ConnectionError(ServerError):
     pass
 
 
+class BusyLoadingError(ConnectionError):
+    pass
+
+
 class InvalidResponse(ServerError):
     pass
 

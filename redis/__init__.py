@@ -9,6 +9,7 @@ from redis.utils import from_url
 from redis.exceptions import (
     AuthenticationError,
     ConnectionError,
+    BusyLoadingError,
     DataError,
     InvalidResponse,
     PubSubError,
@@ -26,4 +27,5 @@ __all__ = [
     'Connection', 'UnixDomainSocketConnection',
     'RedisError', 'ConnectionError', 'ResponseError', 'AuthenticationError',
     'InvalidResponse', 'DataError', 'PubSubError', 'WatchError', 'from_url',
+    'BusyLoadingError'
 ]
