@@ -123,6 +123,12 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(self.client.config_set('dbfilename', rdbname))
         self.assertEquals(self.client.config_get()['dbfilename'], rdbname)
 
+    def test_config_resetstat(self):
+        self.client.ping()
+        self.assert_(int(self.client.info()['total_commands_processed']) > 1)
+        self.client.config_resetstat()
+        self.assertEquals(int(self.client.info()['total_commands_processed']), 1)
+
     def test_debug_object(self):
         self.client['a'] = 'foo'
         debug_info = self.client.debug_object('a')
