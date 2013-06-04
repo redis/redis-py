@@ -243,7 +243,7 @@ class StrictRedis(object):
             'PING': lambda r: nativestr(r) == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
             'SCRIPT': parse_script,
-            'SET': lambda r: r and nativestr(r) == 'OK' or None,
+            'SET': lambda r: r and nativestr(r) == 'OK',
             'TIME': lambda x: (int(x[0]), int(x[1]))
         }
     )
@@ -430,21 +430,9 @@ class StrictRedis(object):
         "Returns the number of keys in the current database"
         return self.execute_command('DBSIZE')
 
-    def time(self):
-        """
-        Returns the server time as a 2-item tuple of ints:
-        (seconds since epoch, microseconds into this second).
-        """
-        return self.execute_command('TIME')
-
     def debug_object(self, key):
         "Returns version specific metainformation about a give key"
         return self.execute_command('DEBUG', 'OBJECT', key)
-
-    def delete(self, *names):
-        "Delete one or more keys specified by ``names``"
-        return self.execute_command('DEL', *names)
-    __delitem__ = delete
 
     def echo(self, value):
         "Echo the string back from the server"
@@ -514,6 +502,13 @@ class StrictRedis(object):
             return self.execute_command("SLAVEOF", "NO", "ONE")
         return self.execute_command("SLAVEOF", host, port)
 
+    def time(self):
+        """
+        Returns the server time as a 2-item tuple of ints:
+        (seconds since epoch, microseconds into this second).
+        """
+        return self.execute_command('TIME')
+
     #### BASIC KEY COMMANDS ####
     def append(self, key, value):
         """
@@ -522,13 +517,6 @@ class StrictRedis(object):
         Returns the new length of the value at ``key``.
         """
         return self.execute_command('APPEND', key, value)
-
-    def getrange(self, key, start, end):
-        """
-        Returns the substring of the string value stored at ``key``,
-        determined by the offsets ``start`` and ``end`` (both are inclusive)
-        """
-        return self.execute_command('GETRANGE', key, start, end)
 
     def bitcount(self, key, start=None, end=None):
         """
@@ -557,6 +545,11 @@ class StrictRedis(object):
         the value will be initialized as 0 - ``amount``
         """
         return self.execute_command('DECRBY', name, amount)
+
+    def delete(self, *names):
+        "Delete one or more keys specified by ``names``"
+        return self.execute_command('DEL', *names)
+    __delitem__ = delete
 
     def exists(self, name):
         "Returns a boolean indicating whether key ``name`` exists"
@@ -601,6 +594,13 @@ class StrictRedis(object):
         "Returns a boolean indicating the value of ``offset`` in ``name``"
         return self.execute_command('GETBIT', name, offset)
 
+    def getrange(self, key, start, end):
+        """
+        Returns the substring of the string value stored at ``key``,
+        determined by the offsets ``start`` and ``end`` (both are inclusive)
+        """
+        return self.execute_command('GETRANGE', key, start, end)
+
     def getset(self, name, value):
         """
         Set the value at key ``name`` to ``value`` if key doesn't exist
@@ -643,20 +643,33 @@ class StrictRedis(object):
         args = list_or_args(keys, args)
         return self.execute_command('MGET', *args)
 
-    def mset(self, mapping):
-        "Sets each key in the ``mapping`` dict to its corresponding value"
+    def mset(self, *args, **kwargs):
+        """
+        Sets key/values based on a mapping. Mapping can be supplied as a single
+        dictionary argument or as kwargs.
+        """
+        if args:
+            if len(args) != 1 or not isinstance(args[0], dict):
+                raise RedisError('MSET requires **kwargs or a single dict arg')
+            kwargs.update(args[0])
         items = []
-        for pair in iteritems(mapping):
+        for pair in iteritems(kwargs):
             items.extend(pair)
         return self.execute_command('MSET', *items)
 
-    def msetnx(self, mapping):
+    def msetnx(self, *args, **kwargs):
         """
-        Sets each key in the ``mapping`` dict to its corresponding value if
-        none of the keys are already set
+        Sets key/values based on a mapping if none of the keys are already set.
+        Mapping can be supplied as a single dictionary argument or as kwargs.
+        Returns a boolean indicating if the operation was successful.
         """
+        if args:
+            if len(args) != 1 or not isinstance(args[0], dict):
+                raise RedisError('MSETNX requires **kwargs or a single '
+                                 'dict arg')
+            kwargs.update(args[0])
         items = []
-        for pair in iteritems(mapping):
+        for pair in iteritems(kwargs):
             items.extend(pair)
         return self.execute_command('MSETNX', *items)
 
