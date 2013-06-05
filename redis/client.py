@@ -280,6 +280,9 @@ class StrictRedis(object):
 
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
+                 socket_connect_timeout=None,
+                 socket_keepalive=False,
+                 socket_keepalive_params=(None, None, None),
                  connection_pool=None, charset='utf-8',
                  errors='strict', decode_responses=False,
                  unix_socket_path=None):
@@ -288,6 +291,9 @@ class StrictRedis(object):
                 'db': db,
                 'password': password,
                 'socket_timeout': socket_timeout,
+                'socket_connect_timeout': socket_connect_timeout,
+                'socket_keepalive': socket_keepalive,
+                'socket_keepalive_params': socket_keepalive_params,
                 'encoding': charset,
                 'encoding_errors': errors,
                 'decode_responses': decode_responses,

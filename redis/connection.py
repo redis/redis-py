@@ -198,8 +198,11 @@ else:
 class Connection(object):
     "Manages TCP communication to and from a Redis server"
     def __init__(self, host='localhost', port=6379, db=0, password=None,
-                 socket_timeout=None, encoding='utf-8',
-                 encoding_errors='strict', decode_responses=False,
+                 socket_timeout=None, socket_connect_timeout=None,
+                 socket_keepalive=False, 
+                 socket_keepalive_params=(None, None, None),
+                 encoding='utf-8', encoding_errors='strict', 
+                 decode_responses=False,
                  parser_class=DefaultParser):
         self.pid = os.getpid()
         self.host = host
@@ -207,6 +210,11 @@ class Connection(object):
         self.db = db
         self.password = password
         self.socket_timeout = socket_timeout
+        self.socket_connect_timeout = socket_connect_timeout
+        if self.socket_connect_timeout == None:
+            self.socket_connect_timeout = self.socket_timeout
+        self.socket_keepalive = socket_keepalive
+        self.socket_keepalive_params = socket_keepalive_params
         self.encoding = encoding
         self.encoding_errors = encoding_errors
         self.decode_responses = decode_responses
@@ -235,8 +243,20 @@ class Connection(object):
     def _connect(self):
         "Create a TCP socket connection"
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(self.socket_timeout)
+        if self.socket_keepalive:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        if self.socket_keepalive_params[0]:
+            sock.setsockopt(socket.SOL_TCP, socket.TCP_KEEPIDLE,
+                self.socket_keepalive_params[0])
+        if self.socket_keepalive_params[1]:
+            sock.setsockopt(socket.SOL_TCP, socket.TCP_KEEPCNT,
+                self.socket_keepalive_params[1])
+        if self.socket_keepalive_params[2]:
+            sock.setsockopt(socket.SOL_TCP, socket.TCP_KEEPINTVL,
+                self.socket_keepalive_params[2])
+        sock.settimeout(self.socket_connect_timeout)
         sock.connect((self.host, self.port))
+        sock.settimeout(self.socket_timeout)
         return sock
 
     def _error_message(self, exception):
