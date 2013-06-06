@@ -16,12 +16,9 @@ from redis.exceptions import (
     NoScriptError,
     ExecAbortError,
 )
-
-try:
+from redis.utils import HIREDIS_AVAILABLE
+if HIREDIS_AVAILABLE:
     import hiredis
-    hiredis_available = True
-except ImportError:
-    hiredis_available = False
 
 
 SYM_STAR = b('*')
@@ -145,7 +142,7 @@ class PythonParser(object):
 class HiredisParser(object):
     "Parser class for connections using Hiredis"
     def __init__(self):
-        if not hiredis_available:
+        if not HIREDIS_AVAILABLE:
             raise RedisError("Hiredis is not installed")
 
     def __del__(self):
@@ -189,7 +186,7 @@ class HiredisParser(object):
             response = self._reader.gets()
         return response
 
-if hiredis_available:
+if HIREDIS_AVAILABLE:
     DefaultParser = HiredisParser
 else:
     DefaultParser = PythonParser
