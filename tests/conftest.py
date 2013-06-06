@@ -3,7 +3,9 @@ import redis
 
 
 def _get_client(cls, request=None, **kwargs):
-    client = cls(host='localhost', port=6379, db=9, **kwargs)
+    params = {'host': 'localhost', 'port': 6379, 'db': 9}
+    params.update(kwargs)
+    client = cls(**params)
     client.flushdb()
     if request:
         request.addfinalizer(client.flushdb)
