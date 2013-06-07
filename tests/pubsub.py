@@ -104,6 +104,30 @@ class PubSubTestCase(unittest.TestCase):
             }
         )
 
+    def test_hold_connection(self):
+        # SUBSCRIBE => UNSUBSCRIBE => SUBSCRIBE
+        pubsub = self.client.pubsub(release_connection=False)
+        pubsub.subscribe('foo')
+        connection = pubsub.connection
+        pubsub.unsubscribe('foo')
+        pubsub.subscribe('bar')
+
+        # Get a message
+        self.client.publish('bar', 'baz')
+        for i in range(4):
+            message = next(pubsub.listen())
+        self.assertEquals(message, 
+            {
+                'type': 'message',
+                'pattern': None,
+                'channel': 'bar',
+                'data': b('baz'),
+            }
+        )
+
+        # Verify the connection hasn't been recycled
+        self.assertEqual(id(connection), id(pubsub.connection))
+
 
 class PubSubRedisDownTestCase(unittest.TestCase):
     def setUp(self):
