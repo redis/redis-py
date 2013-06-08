@@ -6,7 +6,7 @@ from redis.utils import HIREDIS_AVAILABLE
 from .conftest import r as _redis_client
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture()
 def r(request):
     return _redis_client(request=request, decode_responses=True)
 
