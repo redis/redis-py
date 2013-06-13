@@ -1,5 +1,8 @@
 * 2.8.0 (in development)
     * Added CONFIG RESETSTAT command. Thanks Yossi Gottlieb.
+    * Fixed a bug introduced in 2.7.3 that caused issues with script objects
+      and pipelines. Thanks Carpentier Pierre-Francois.
+    * Converted redis-py's test suite to use the awesome py.test library.
 * 2.7.5
     * DEL, HDEL and ZREM commands now return the numbers of keys deleted
       instead of just True/False.
