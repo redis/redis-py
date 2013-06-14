@@ -113,9 +113,16 @@ class PythonParser(object):
         # server returned an error
         if byte == '-':
             response = nativestr(response)
-            # *return*, not raise the exception class. if it is meant to be
-            # raised, it will be at a higher level.
-            return self.parse_error(response)
+            error = self.parse_error(response)
+            # if the error is a ConnectionError, raise immediately so the user
+            # is notified
+            if isinstance(error, ConnectionError):
+                raise error
+            # otherwise, we're dealing with a ResponseError that might belong
+            # inside a pipeline response. the connection's read_response()
+            # and/or the pipeline's execute() will raise this error if
+            # necessary, so just return the exception instance here.
+            return error
         # single value
         elif byte == '+':
             pass

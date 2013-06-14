@@ -1,8 +1,14 @@
-* 2.8.0 (in development)
+* 2.7.6
     * Added CONFIG RESETSTAT command. Thanks Yossi Gottlieb.
     * Fixed a bug introduced in 2.7.3 that caused issues with script objects
       and pipelines. Thanks Carpentier Pierre-Francois.
     * Converted redis-py's test suite to use the awesome py.test library.
+    * Fixed a bug introduced in 2.7.5 that prevented a ConnectionError from
+      being raised when the Redis server is LOADING data.
+    * Added a BusyLoadingError exception that's raised when the Redis server
+      is starting up and not accepting commands yet. BusyLoadingError
+      subclasses ConnectionError, which this state previously returned.
+      Thanks Yossi Gottlieb.
 * 2.7.5
     * DEL, HDEL and ZREM commands now return the numbers of keys deleted
       instead of just True/False.
