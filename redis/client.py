@@ -478,7 +478,10 @@ class StrictRedis(object):
 
     def ping(self):
         "Ping the Redis server"
-        return self.execute_command('PING')
+        try:
+            return self.execute_command('PING')
+        except ConnectionError:
+            return False
 
     def save(self):
         """
