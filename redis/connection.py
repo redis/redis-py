@@ -295,7 +295,7 @@ class Connection(object):
                 _errno, errmsg = e.args
             raise ConnectionError("Error %s while writing to socket. %s." %
                                   (_errno, errmsg))
-        except Exception:
+        except:
             self.disconnect()
             raise
 
@@ -307,7 +307,7 @@ class Connection(object):
         "Read the response from a previously sent command"
         try:
             response = self._parser.read_response()
-        except Exception:
+        except:
             self.disconnect()
             raise
         if isinstance(response, ResponseError):
