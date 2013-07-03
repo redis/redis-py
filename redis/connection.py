@@ -2,7 +2,7 @@ from itertools import chain
 import os
 import socket
 import sys
-import io
+
 
 from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
                            BytesIO, nativestr, basestring,
@@ -329,7 +329,7 @@ class Connection(object):
 
     def pack_command(self, *args):
         "Pack a series of arguments into a value Redis command"
-        output = io.BytesIO()
+        output = BytesIO()
         output.write(SYM_STAR)
         output.write(b(str(len(args))))
         output.write(SYM_CRLF)
