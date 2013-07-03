@@ -3,6 +3,7 @@ import os
 import socket
 import sys
 
+
 from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
                            BytesIO, nativestr, basestring,
                            LifoQueue, Empty, Full)
@@ -328,14 +329,17 @@ class Connection(object):
 
     def pack_command(self, *args):
         "Pack a series of arguments into a value Redis command"
-        output = SYM_STAR + b(str(len(args))) + SYM_CRLF
+        output = BytesIO()
+        output.write(SYM_STAR)
+        output.write(b(str(len(args))))
+        output.write(SYM_CRLF)
         for enc_value in imap(self.encode, args):
-            output += SYM_DOLLAR
-            output += b(str(len(enc_value)))
-            output += SYM_CRLF
-            output += enc_value
-            output += SYM_CRLF
-        return output
+            output.write(SYM_DOLLAR)
+            output.write(b(str(len(enc_value))))
+            output.write(SYM_CRLF)
+            output.write(enc_value)
+            output.write(SYM_CRLF)
+        return output.getvalue()
 
 
 class UnixDomainSocketConnection(Connection):
