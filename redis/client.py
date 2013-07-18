@@ -1155,6 +1155,10 @@ class StrictRedis(object):
         return self.execute_command('ZCARD', name)
 
     def zcount(self, name, min, max):
+        """
+        Returns the number of elements in the sorted set at key ``name`` with
+        a score between ``min`` and ``max``.
+        """
         return self.execute_command('ZCOUNT', name, min, max)
 
     def zincrby(self, name, value, amount=1):
