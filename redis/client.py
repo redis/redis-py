@@ -555,6 +555,13 @@ class StrictRedis(object):
         return self.execute_command('DEL', *names)
     __delitem__ = delete
 
+    def dump(self, name):
+        """
+        Return a serialized version of the value stored at the specified key.
+        If key does not exist a nil bulk reply is returned.
+        """
+        return self.execute_command('DUMP', name)
+
     def exists(self, name):
         "Returns a boolean indicating whether key ``name`` exists"
         return self.execute_command('EXISTS', name)
@@ -735,6 +742,13 @@ class StrictRedis(object):
     def renamenx(self, src, dst):
         "Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist"
         return self.execute_command('RENAMENX', src, dst)
+
+    def restore(self, name, ttl, value):
+        """
+        Create a key using the provided serialized value, previously obtained
+        using DUMP.
+        """
+        return self.execute_command('RESTORE', name, ttl, value)
 
     def set(self, name, value, ex=None, px=None, nx=False, xx=False):
         """
