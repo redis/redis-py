@@ -209,10 +209,9 @@ class TestRedisCommands(object):
     def test_dump_and_restore(self, r):
         r['a'] = 'foo'
         dumped = r.dump('a')
-        assert dumped.startswith('\x00\x03foo')
-        assert r.delete('a')
-        assert r.restore('a', 0, dumped)
-        assert r.dump('a') == dumped
+        del r['a']
+        r.restore('a', 0, dumped)
+        assert r['a'] == b('foo')
 
     def test_exists(self, r):
         assert not r.exists('a')
