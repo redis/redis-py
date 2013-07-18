@@ -205,6 +205,14 @@ class TestRedisCommands(object):
         del r['a']
         assert r.get('a') is None
 
+    @skip_if_server_version_lt('2.6.0')
+    def test_dump_and_restore(self, r):
+        r['a'] = 'foo'
+        dumped = r.dump('a')
+        del r['a']
+        r.restore('a', 0, dumped)
+        assert r['a'] == b('foo')
+
     def test_exists(self, r):
         assert not r.exists('a')
         r['a'] = 'foo'
