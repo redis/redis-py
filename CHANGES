@@ -1,6 +1,7 @@
 * 2.8.0 (in development)
     * redis-py should play better with gevent when a gevent Timeout is raised.
       Thanks leifkb.
+    * Added SENTINAL command. Thanks Anna Janackova.
 * 2.7.6
     * Added CONFIG RESETSTAT command. Thanks Yossi Gottlieb.
     * Fixed a bug introduced in 2.7.3 that caused issues with script objects
