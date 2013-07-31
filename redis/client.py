@@ -108,6 +108,20 @@ def parse_info(response):
             info[key] = get_value(value)
     return info
 
+def parse_sentinel(response, **options):
+     "Parse the result of Redis's SENTINEL command"
+     output = []
+     parse = options['parse']
+ 
+     if parse == 'SENTINEL_INFO':
+         for sub_list in response:
+             it = iter(sub_list)
+             output.append( dict(izip(it, it)) )
+     else:
+         output = response
+ 
+     return output
+
 
 def pairs_to_dict(response):
     "Create a dict given a list of key/value pairs"
@@ -244,7 +258,8 @@ class StrictRedis(object):
             'RANDOMKEY': lambda r: r and r or None,
             'SCRIPT': parse_script,
             'SET': lambda r: r and nativestr(r) == 'OK',
-            'TIME': lambda x: (int(x[0]), int(x[1]))
+            'TIME': lambda x: (int(x[0]), int(x[1])),
+            'SENTINEL': parse_sentinel
         }
     )
 
@@ -486,6 +501,15 @@ class StrictRedis(object):
         blocking until the save is complete
         """
         return self.execute_command('SAVE')
+
+    def sentinel(self, *args):
+        "Redis Sentinel's SENTINEL command"
+        if args[0] in [ 'masters', 'slaves', 'sentinels' ]:
+            parse = 'SENTINEL_INFO'
+        else:
+            parse = 'SENTINEL'
+
+        return self.execute_command('SENTINEL', *args, parse=parse)
 
     def shutdown(self):
         "Shutdown the server"
