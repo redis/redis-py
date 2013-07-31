@@ -108,19 +108,20 @@ def parse_info(response):
             info[key] = get_value(value)
     return info
 
+
 def parse_sentinel(response, **options):
-     "Parse the result of Redis's SENTINEL command"
-     output = []
-     parse = options['parse']
- 
-     if parse == 'SENTINEL_INFO':
-         for sub_list in response:
-             it = iter(sub_list)
-             output.append( dict(izip(it, it)) )
-     else:
-         output = response
- 
-     return output
+    "Parse the result of Redis's SENTINEL command"
+    output = []
+    parse = options['parse']
+
+    if parse == 'SENTINEL_INFO':
+        for sub_list in response:
+            it = iter(sub_list)
+            output.append(dict(izip(it, it)))
+    else:
+        output = response
+
+    return output
 
 
 def pairs_to_dict(response):
@@ -504,11 +505,10 @@ class StrictRedis(object):
 
     def sentinel(self, *args):
         "Redis Sentinel's SENTINEL command"
-        if args[0] in [ 'masters', 'slaves', 'sentinels' ]:
+        if args[0] in ['masters', 'slaves', 'sentinels']:
             parse = 'SENTINEL_INFO'
         else:
             parse = 'SENTINEL'
-
         return self.execute_command('SENTINEL', *args, parse=parse)
 
     def shutdown(self):
