@@ -509,7 +509,7 @@ class StrictRedis(object):
             parse = 'SENTINEL_INFO'
         else:
             parse = 'SENTINEL'
-        return self.execute_command('SENTINEL', *args, parse=parse)
+        return self.execute_command('SENTINEL', *args, **{'parse': parse})
 
     def shutdown(self):
         "Shutdown the server"
