@@ -329,17 +329,11 @@ class Connection(object):
 
     def pack_command(self, *args):
         "Pack a series of arguments into a value Redis command"
-        output = BytesIO()
-        output.write(SYM_STAR)
-        output.write(b(str(len(args))))
-        output.write(SYM_CRLF)
-        for enc_value in imap(self.encode, args):
-            output.write(SYM_DOLLAR)
-            output.write(b(str(len(enc_value))))
-            output.write(SYM_CRLF)
-            output.write(enc_value)
-            output.write(SYM_CRLF)
-        return output.getvalue()
+        args_output = "".join(
+            ["%s%s%s%s%s" % (SYM_DOLLAR, len(k), SYM_CRLF, k, SYM_CRLF) for k in imap(self.encode, args)]
+        )
+        output = "%s%s%s%s" % (SYM_STAR, len(args), SYM_CRLF, args_output)
+        return output
 
 
 class UnixDomainSocketConnection(Connection):
