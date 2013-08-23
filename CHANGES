@@ -1,4 +1,4 @@
-* 2.8.0 (in development)
+* 2.8.0
     * redis-py should play better with gevent when a gevent Timeout is raised.
       Thanks leifkb.
     * Added SENTINEL command. Thanks Anna Janackova.
