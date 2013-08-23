@@ -2,6 +2,8 @@
     * redis-py should play better with gevent when a gevent Timeout is raised.
       Thanks leifkb.
     * Added SENTINEL command. Thanks Anna Janackova.
+    * Fixed a bug where pipelines could potentially correct a connection
+      if the MULTI command generated a ResponseError
 * 2.7.6
     * Added CONFIG RESETSTAT command. Thanks Yossi Gottlieb.
     * Fixed a bug introduced in 2.7.3 that caused issues with script objects
