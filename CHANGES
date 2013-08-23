@@ -9,6 +9,8 @@
       ensure communication ends immediately per the note at
       http://docs.python.org/2/library/socket.html#socket.socket.close
       Thanks to David Martin for pointing this out.
+    * Lock checks are now based on floats rather than ints. Thanks
+      Vitja Makarov.
 * 2.7.6
     * Added CONFIG RESETSTAT command. Thanks Yossi Gottlieb.
     * Fixed a bug introduced in 2.7.3 that caused issues with script objects
