@@ -1867,10 +1867,18 @@ class BasePipeline(object):
             starmap(connection.pack_command,
                     [args for args, options in cmds]))
         connection.send_packed_command(all_cmds)
-        # parse off the response for MULTI
-        self.parse_response(connection, '_')
-        # and all the other commands
         errors = []
+
+        # parse off the response for MULTI
+        # NOTE: we need to handle ResponseErrors here and continue
+        # so that we read all the additional command messages from
+        # the socket
+        try:
+            self.parse_response(connection, '_')
+        except ResponseError:
+            errors.append((0, sys.exc_info()[1]))
+
+        # and all the other commands
         for i, _ in enumerate(commands):
             try:
                 self.parse_response(connection, '_')
