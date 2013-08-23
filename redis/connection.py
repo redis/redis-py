@@ -276,6 +276,7 @@ class Connection(object):
         if self._sock is None:
             return
         try:
+            self._sock.shutdown(socket.SHUT_RDWR)
             self._sock.close()
         except socket.error:
             pass

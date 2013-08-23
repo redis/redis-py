@@ -3,7 +3,12 @@
       Thanks leifkb.
     * Added SENTINEL command. Thanks Anna Janackova.
     * Fixed a bug where pipelines could potentially correct a connection
-      if the MULTI command generated a ResponseError
+      if the MULTI command generated a ResponseError. Thanks EliFinkelshteyn
+      for the report.
+    * Connections now call socket.shutdown() prior to socket.close() to
+      ensure communication ends immediately per the note at
+      http://docs.python.org/2/library/socket.html#socket.socket.close
+      Thanks to David Martin for pointing this out.
 * 2.7.6
     * Added CONFIG RESETSTAT command. Thanks Yossi Gottlieb.
     * Fixed a bug introduced in 2.7.3 that caused issues with script objects
