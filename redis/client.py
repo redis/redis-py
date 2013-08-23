@@ -2109,7 +2109,7 @@ class Lock(object):
         sleep = self.sleep
         timeout = self.timeout
         while 1:
-            unixtime = int(mod_time.time())
+            unixtime = mod_time.time()
             if timeout:
                 timeout_at = unixtime + timeout
             else:
