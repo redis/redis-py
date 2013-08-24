@@ -55,6 +55,26 @@ class SentinelConnectionPool(ConnectionPool):
 
 
 class Sentinel(object):
+    """
+    Redis Sentinel cluster client::
+
+    >>> from redis.sentinel import Sentinel
+    >>> sentinel = Sentinel([('localhost', 26379)], socket_timeout=0.1)
+    >>> master = sentinel.master_for('mymaster', socket_timeout=0.1)
+    >>> master.set('foo', 'bar')
+    >>> slave = sentinel.slave_for('mymaster', socket_timeout=0.1)
+    >>> slave.get('foo')
+    'bar'
+
+    First required argument ``sentinels`` is a list of sentinel nodes each node
+    is represented by a pair (hostname, port).
+
+    Use ``socket_timeout`` to specify timeout for underlying sentinel clients,
+    it's recommended to use short timeouts.
+
+    Use ``min_other_sentinels`` to filter out sentinels with not enough peers.
+    """
+
     def __init__(self, sentinels, password=None, socket_timeout=None,
                  min_other_sentinels=0):
         self.sentinels = [StrictRedis(hostname, port, password=password,
@@ -65,12 +85,19 @@ class Sentinel(object):
     def check_master_state(self, state, service_name):
         if not state['is_master'] or state['is_sdown'] or state['is_odown']:
             return False
-        # Check whether our sentinel doesn't see others
+        # Check if our sentinel doesn't see other nodes
         if state['num-other-sentinels'] < self.min_other_sentinels:
             return False
         return True
 
     def discover_master(self, service_name):
+        """
+        Asks sentinels for master's address corresponding to the service
+        labeled ``service_name``.
+
+        Returns a pair (address, port) or raises MasterNotFoundError if no alive
+        master is found.
+        """
         for sentinel_no, sentinel in enumerate(self.sentinels):
             try:
                 masters = sentinel.sentinel_masters()
@@ -85,6 +112,7 @@ class Sentinel(object):
         raise MasterNotFoundError("No master found for %r" % (service_name,))
 
     def choose_slave(self, slaves):
+        "Choose random slave from ``slaves``."
         slaves_alive = []
         for slave in slaves:
             if slave['is_odown'] or slave['is_sdown']:
@@ -94,6 +122,17 @@ class Sentinel(object):
             return random.choice(slaves_alive)
 
     def discover_slave(self, service_name, use_master=True):
+        """
+        Asks sentinels for the list of slaves corresponding to the service
+        labeled ``service_name``. Slave is selected with choose_slave() method
+        feel free to override it with your own slave selection algorithm.
+
+        If no slave is found and ``use_master`` is set to True master's address
+        is returned instead.
+
+        Returns a pair (address, port) or raises SlaveNotFoundError if neither
+        slave nor master is found.
+        """
         for sentinel in self.sentinels:
             try:
                 slaves = sentinel.sentinel_slaves(service_name)
@@ -110,11 +149,34 @@ class Sentinel(object):
         raise SlaveNotFoundError("No slave found for %r" % (service_name,))
 
     def master_for(self, service_name, redis_class=StrictRedis, **kwargs):
+        """
+        Returns redis client instance for master of ``service_name``.
+
+        Undercover it calls discover_master() to retrive master's address each
+        time before establishing new connection.
+
+        NOTE: If master address change is detected all other connections from
+        the pool are closed.
+
+        By default redis.StrictRedis class is used you can override this with
+        ``redis_class`` argument. All other arguments are passed directly to
+        the SentinelConnectionPool.
+        """
         kwargs['is_master'] = True
         connection_pool = SentinelConnectionPool(service_name, self, **kwargs)
         return redis_class(connection_pool=connection_pool)
 
     def slave_for(self, service_name, redis_class=StrictRedis, **kwargs):
+        """
+        Returns redis client instance for slave of ``service_name``.
+
+        Undercover it calls discover_slave() to retrive slave's address each
+        time before establishing new connection.
+
+        By default redis.StrictRedis class is used you can override this with
+        ``redis_class`` argument. All other arguments are passed directly to
+        the SentinelConnectionPool.
+        """
         kwargs['is_master'] = False
         connection_pool = SentinelConnectionPool(service_name, self, **kwargs)
         return redis_class(connection_pool=connection_pool)
