@@ -3,7 +3,7 @@ import random
 from redis.client import StrictRedis
 from redis.connection import ConnectionPool, Connection
 from redis.exceptions import ConnectionError, ResponseError
-from redis._compat import xrange
+from redis._compat import xrange, nativestr
 
 
 class MasterNotFoundError(ConnectionError):
@@ -19,27 +19,41 @@ class SentinelManagedConnection(Connection):
         self.connection_pool = kwargs.pop('connection_pool')
         super(SentinelManagedConnection, self).__init__(**kwargs)
 
+    def connect_to(self, address):
+        self.host, self.port = address
+        super(SentinelManagedConnection, self).connect()
+        if self.connection_pool.check_connection:
+            self.send_command('PING')
+            if nativestr(self.read_response()) != 'PONG':
+                raise ConnectionError('PING failed')
+
     def connect(self):
         if self._sock:
             return # already connected
         if self.connection_pool.is_master:
-            self.host, self.port = self.connection_pool.get_master_address()
-            super(SentinelManagedConnection, self).connect()
+            self.connect_to(self.connection_pool.get_master_address())
         else:
             for slave in self.connection_pool.rotate_slaves():
-                self.host, self.port = slave
                 try:
-                    return super(SentinelManagedConnection, self).connect()
+                    return self.connect_to(slave)
                 except ConnectionError:
                     continue
             raise SlaveNotFoundError # Never be here
 
 
 class SentinelConnectionPool(ConnectionPool):
+    """
+    Sentinel backed connection pool.
+
+    If ``check_connection`` flag is set to True SentinelManagedConnection sends
+    PING command right after establishing TCP connection.
+    """
+
     def __init__(self, service_name, sentinel_manager, **kwargs):
         kwargs['connection_class'] = kwargs.get(
             'connection_class', SentinelManagedConnection)
         self.is_master = kwargs.pop('is_master', True)
+        self.check_connection = kwargs.pop('check_connection', False)
         super(SentinelConnectionPool, self).__init__(**kwargs)
         self.connection_kwargs['connection_pool'] = self
         self.service_name = service_name
