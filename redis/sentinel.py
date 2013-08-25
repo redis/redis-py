@@ -155,7 +155,8 @@ class Sentinel(object):
                 return slaves
         return []
 
-    def master_for(self, service_name, redis_class=StrictRedis, **kwargs):
+    def master_for(self, service_name, redis_class=StrictRedis,
+                   connection_pool_class=SentinelConnectionPool, **kwargs):
         """
         Returns redis client instance for master of ``service_name``.
 
@@ -166,14 +167,16 @@ class Sentinel(object):
         the pool are closed.
 
         By default redis.StrictRedis class is used you can override this with
-        ``redis_class`` argument. All other arguments are passed directly to
-        the SentinelConnectionPool.
+        ``redis_class`` argument. Use ``connection_pool_class`` to specify
+        your own connection pool class instead of SentinelConnectionPool. All
+        other arguments are passed directly to the SentinelConnectionPool.
         """
         kwargs['is_master'] = True
-        connection_pool = SentinelConnectionPool(service_name, self, **kwargs)
-        return redis_class(connection_pool=connection_pool)
+        return redis_class(connection_pool=connection_pool_class(
+            service_name, self, **kwargs))
 
-    def slave_for(self, service_name, redis_class=StrictRedis, **kwargs):
+    def slave_for(self, service_name, redis_class=StrictRedis,
+                  connection_pool_class=SentinelConnectionPool, **kwargs):
         """
         Returns redis client instance for slave of ``service_name``.
 
@@ -181,9 +184,10 @@ class Sentinel(object):
         address each time before establishing new connection.
 
         By default redis.StrictRedis class is used you can override this with
-        ``redis_class`` argument. All other arguments are passed directly to
-        the SentinelConnectionPool.
+        ``redis_class`` argument. Use ``connection_pool_class`` to specify
+        your own connection pool class instead of SentinelConnectionPool. All
+        other arguments are passed directly to the SentinelConnectionPool.
         """
         kwargs['is_master'] = False
-        connection_pool = SentinelConnectionPool(service_name, self, **kwargs)
-        return redis_class(connection_pool=connection_pool)
+        return redis_class(connection_pool=connection_pool_class(
+            service_name, self, **kwargs))
