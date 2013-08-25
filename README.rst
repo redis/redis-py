@@ -407,8 +407,8 @@ First of all you need to define sentinel cluster:
     >>> sentinel = Sentinel([('localhost', 26379)], socket_timeout=0.1)
     >>> sentinel.discover_master('mymaster')
     ('127.0.0.1', 6379)
-    >>> sentinel.discover_slave('mymaster')
-    ('127.0.0.1', 6380)
+    >>> sentinel.discover_slaves('mymaster')
+    [('127.0.0.1', 6380)]
 
 Then you can use sentinel instance to acquire master or slave client for the
 corresponding service name:
@@ -426,6 +426,9 @@ pool bound to the sentinel instance. To establish connection with a redis server
 sentinel servers will be asked for the address of 'mymaster' service. If no
 server is found MasterNotFoundError or SlaveNotFoundError is raised both
 exceptions are subclasses of ConnectionError.
+
+For slave client it will iterate over slaves unitl usable one is found. On failure
+it will use master's address.
 
 See `Guidelines for Redis clients with support for Redis Sentinel
 <http://redis.io/topics/sentinel-clients>`_ to learn more abour Redis Sentinel.
