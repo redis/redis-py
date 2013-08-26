@@ -1967,9 +1967,11 @@ class BasePipeline(object):
 
     def execute(self, raise_on_error=True):
         "Execute all the commands in the current pipeline"
+        stack = self.command_stack
+        if not stack:
+            return []
         if self.scripts:
             self.load_scripts()
-        stack = self.command_stack
         if self.transaction or self.explicit_transaction:
             execute = self._execute_transaction
         else:
