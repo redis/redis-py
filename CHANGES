@@ -1,6 +1,8 @@
 * 2.8.1 (in development)
     * Performance improvement for packing commands when using the PythonParser.
       Thanks Guillaume Viot.
+    * Executing an empty pipeline transaction no longer sends MULTI/EXEC to
+      the server. Thanks EliFinkelshteyn.
 * 2.8.0
     * redis-py should play better with gevent when a gevent Timeout is raised.
       Thanks leifkb.
