@@ -1289,20 +1289,20 @@ class StrictRedis(object):
         """
         return self.execute_command('ZREMRANGEBYSCORE', name, min, max)
 
-    def zrevrange(self, name, start, num, withscores=False,
+    def zrevrange(self, name, start, end, withscores=False,
                   score_cast_func=float):
         """
         Return a range of values from sorted set ``name`` between
-        ``start`` and ``num`` sorted in descending order.
+        ``start`` and ``end`` sorted in descending order.
 
-        ``start`` and ``num`` can be negative, indicating the end of the range.
+        ``start`` and ``end`` can be negative, indicating the end of the range.
 
         ``withscores`` indicates to return the scores along with the values
         The return type is a list of (value, score) pairs
 
         ``score_cast_func`` a callable used to cast the score return value
         """
-        pieces = ['ZREVRANGE', name, start, num]
+        pieces = ['ZREVRANGE', name, start, end]
         if withscores:
             pieces.append('withscores')
         options = {
