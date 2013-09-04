@@ -29,7 +29,7 @@ class SentinelManagedConnection(Connection):
 
     def connect(self):
         if self._sock:
-            return # already connected
+            return  # already connected
         if self.connection_pool.is_master:
             self.connect_to(self.connection_pool.get_master_address())
         else:
@@ -38,7 +38,7 @@ class SentinelManagedConnection(Connection):
                     return self.connect_to(slave)
                 except ConnectionError:
                     continue
-            raise SlaveNotFoundError # Never be here
+            raise SlaveNotFoundError  # Never be here
 
 
 class SentinelConnectionPool(ConnectionPool):
@@ -69,7 +69,7 @@ class SentinelConnectionPool(ConnectionPool):
         elif self.master_address is None:
             self.master_address = master_address
         elif master_address != self.master_address:
-            self.disconnect() # Master address changed
+            self.disconnect()  # Master address changed
         return master_address
 
     def rotate_slaves(self):
@@ -80,7 +80,7 @@ class SentinelConnectionPool(ConnectionPool):
                 self.slave_rr_counter = random.randint(0, len(slaves) - 1)
             for _ in xrange(len(slaves)):
                 self.slave_rr_counter = (
-                        self.slave_rr_counter + 1) % len(slaves)
+                    self.slave_rr_counter + 1) % len(slaves)
                 slave = slaves[self.slave_rr_counter]
                 yield slave
         # Fallback to the master connection
@@ -132,8 +132,8 @@ class Sentinel(object):
         Asks sentinels for master's address corresponding to the service
         labeled ``service_name``.
 
-        Returns a pair (address, port) or raises MasterNotFoundError if no alive
-        master is found.
+        Returns a pair (address, port) or raises MasterNotFoundError if no
+        alive master is found.
         """
         for sentinel_no, sentinel in enumerate(self.sentinels):
             try:
