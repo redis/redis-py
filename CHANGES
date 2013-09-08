@@ -3,6 +3,8 @@
       Thanks Guillaume Viot.
     * Executing an empty pipeline transaction no longer sends MULTI/EXEC to
       the server. Thanks EliFinkelshteyn.
+    * Errors when authenticating (incorrect password) and selecting a database
+      now close the socket.
 * 2.8.0
     * redis-py should play better with gevent when a gevent Timeout is raised.
       Thanks leifkb.

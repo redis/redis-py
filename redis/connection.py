@@ -236,7 +236,12 @@ class Connection(object):
             raise ConnectionError(self._error_message(e))
 
         self._sock = sock
-        self.on_connect()
+        try:
+            self.on_connect()
+        except RedisError:
+            # clean up after any error in on_connect
+            self.disconnect()
+            raise
 
     def _connect(self):
         "Create a TCP socket connection"

@@ -106,3 +106,20 @@ class TestBlockingConnectionPool(object):
         pool.release(c1)
         c2 = pool.get_connection('_')
         assert c1 == c2
+
+
+class TestConnection(object):
+    def test_on_connect_error(self, r):
+        """
+        An error in Connection.on_connect should disconnect from the server
+        see for details: https://github.com/andymccurdy/redis-py/issues/368
+        """
+        # this assumed the Redis server being tested against doesn't have
+        # 9999 databases ;)
+        bad_connection = redis.Redis(db=9999)
+        # an error should be raised on connect
+        with pytest.raises(redis.RedisError):
+            bad_connection.info()
+        pool = bad_connection.connection_pool
+        assert len(pool._available_connections) == 1
+        assert not pool._available_connections[0]._sock
