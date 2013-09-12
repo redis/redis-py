@@ -394,6 +394,45 @@ execution.
     >>> pipe.execute()
     [True, 25]
 
+Sentinel support
+^^^^^^^^^^^^^^^^
+
+redis-py can be used together with `Redis Sentinel <http://redis.io/topics/sentinel>`_
+to discover redis nodes on the fly using service name instead of address.
+First of all you need to define sentinel cluster:
+
+.. code-block:: pycon
+
+    >>> from redis.sentinel import Sentinel
+    >>> sentinel = Sentinel([('localhost', 26379)], socket_timeout=0.1)
+    >>> sentinel.discover_master('mymaster')
+    ('127.0.0.1', 6379)
+    >>> sentinel.discover_slaves('mymaster')
+    [('127.0.0.1', 6380)]
+
+Then you can use sentinel instance to acquire master or slave client for the
+corresponding service name:
+
+.. code-block:: pycon
+
+    >>> master = sentinel.master_for('mymaster', socket_timeout=0.1)
+    >>> slave = sentinel.slave_for('mymaster', socket_timeout=0.1)
+    >>> master.set('foo', 'bar')
+    >>> slave.get('foo')
+    'bar'
+
+master and slave objects are normal StrictRedis instances with their connection
+pool bound to the sentinel instance. To establish connection with a redis server
+sentinel servers will be asked for the address of 'mymaster' service. If no
+server is found MasterNotFoundError or SlaveNotFoundError is raised both
+exceptions are subclasses of ConnectionError.
+
+For slave client it will iterate over slaves unitl usable one is found. On failure
+it will use master's address.
+
+See `Guidelines for Redis clients with support for Redis Sentinel
+<http://redis.io/topics/sentinel-clients>`_ to learn more abour Redis Sentinel.
+
 Author
 ^^^^^^
 
