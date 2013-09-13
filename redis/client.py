@@ -556,7 +556,7 @@ class StrictRedis(object):
         return self.execute_command('SENTINEL', *args, **{'parse': parse})
 
     def sentinel_masters(self):
-        "Returns a dictionary containing known masters state."
+        "Returns a dictionary containing the master's state."
         return self.execute_command('SENTINEL', 'masters',
                                     parse='SENTINEL_INFO_MASTERS')
 
@@ -571,7 +571,7 @@ class StrictRedis(object):
                                     parse='SENTINEL_INFO')
 
     def sentinel_get_master_addr_by_name(self, service_name):
-        "Returns pair (host, port) for the given ``service_name``"
+        "Returns a (host, port) pair for the given ``service_name``"
         return self.execute_command('SENTINEL', 'get-master-addr-by-name',
                                     service_name, parse='SENTINEL_ADDR_PORT')
 

@@ -34,7 +34,7 @@ class SentinelTestCluster(object):
             'is_sdown': False,
             'is_odown': False,
             'num-other-sentinels': 0,
-            }
+        }
         self.service_name = service_name
         self.slaves = []
         self.nodes_down = set()

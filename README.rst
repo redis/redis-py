@@ -398,8 +398,11 @@ Sentinel support
 ^^^^^^^^^^^^^^^^
 
 redis-py can be used together with `Redis Sentinel <http://redis.io/topics/sentinel>`_
-to discover redis nodes on the fly using service name instead of address.
-First of all you need to define sentinel cluster:
+to discover Redis nodes. You need to have at least one Sentinel daemon running
+in order to use redis-py's Sentinel support.
+
+Connecting redis-py to the Sentinel instance(s) is easy. You can use a
+Sentinel connection to discover the master and slaves network addresses:
 
 .. code-block:: pycon
 
@@ -410,8 +413,9 @@ First of all you need to define sentinel cluster:
     >>> sentinel.discover_slaves('mymaster')
     [('127.0.0.1', 6380)]
 
-Then you can use sentinel instance to acquire master or slave client for the
-corresponding service name:
+You can also create Redis client connections from a Sentinel instnace. You can
+connect to either the master (for write operations) or a slave (for read-only
+operations).
 
 .. code-block:: pycon
 
@@ -421,17 +425,20 @@ corresponding service name:
     >>> slave.get('foo')
     'bar'
 
-master and slave objects are normal StrictRedis instances with their connection
-pool bound to the sentinel instance. To establish connection with a redis server
-sentinel servers will be asked for the address of 'mymaster' service. If no
-server is found MasterNotFoundError or SlaveNotFoundError is raised both
-exceptions are subclasses of ConnectionError.
+The master and slave objects are normal StrictRedis instances with their
+connection pool bound to the Sentinel instance. When a Sentinel backed client
+attempts to establish a connection, it first queries the Sentinel servers to
+determine an appropriate host to connect to. If no server is found,
+a MasterNotFoundError or SlaveNotFoundError is raised. Both exceptions are
+subclasses of ConnectionError.
 
-For slave client it will iterate over slaves unitl usable one is found. On failure
-it will use master's address.
+When trying to connect to a slave client, the Sentinel connection pool will
+iterate over the list of slaves until it finds one that can be connected to.
+If no slaves can be connected to, a connection will be established with the
+master.
 
 See `Guidelines for Redis clients with support for Redis Sentinel
-<http://redis.io/topics/sentinel-clients>`_ to learn more abour Redis Sentinel.
+<http://redis.io/topics/sentinel-clients>`_ to learn more about Redis Sentinel.
 
 Author
 ^^^^^^

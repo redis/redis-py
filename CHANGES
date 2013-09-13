@@ -3,6 +3,7 @@
       Thanks Guillaume Viot.
     * Executing an empty pipeline transaction no longer sends MULTI/EXEC to
       the server. Thanks EliFinkelshteyn.
+    * Full Sentinel support thanks to Vitja Makarov. Thanks!
 * 2.8.0
     * redis-py should play better with gevent when a gevent Timeout is raised.
       Thanks leifkb.
