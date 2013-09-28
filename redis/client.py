@@ -2204,6 +2204,7 @@ class Lock(object):
             raise ValueError("Cannot release an unlocked lock")
         existing = float(self.redis.get(self.name) or 1)
         # if the lock time is in the future, delete the lock
-        if existing >= self.acquired_until:
-            self.redis.delete(self.name)
+        delete_lock = existing >= self.acquired_until
         self.acquired_until = None
+        if delete_lock:
+            self.redis.delete(self.name)
