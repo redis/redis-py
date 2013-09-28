@@ -1484,8 +1484,8 @@ class StrictRedis(object):
 
     def hmset(self, name, mapping):
         """
-        Sets each key in the ``mapping`` dict to its corresponding value
-        in the hash ``name``
+        Set key to value within hash ``name`` for each corresponding
+        key and value from the ``mapping`` dict.
         """
         if not mapping:
             raise DataError("'hmset' with 'mapping' of length 0")
