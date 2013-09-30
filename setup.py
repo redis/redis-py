@@ -30,7 +30,7 @@ long_description = f.read()
 f.close()
 
 setup(
-    name='redis',
+    name='python-redis',
     version=__version__,
     description='Python client for Redis key-value store',
     long_description=long_description,
