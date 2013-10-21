@@ -353,7 +353,7 @@ class StrictRedis(object):
                 'decode_responses': decode_responses,
             }
             # based on input, setup appropriate connection args
-            if unix_socket_path:
+            if unix_socket_path is not None:
                 kwargs.update({
                     'path': unix_socket_path,
                     'connection_class': UnixDomainSocketConnection
