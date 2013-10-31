@@ -1,3 +1,4 @@
+import os
 import random
 
 from redis.client import StrictRedis
@@ -89,6 +90,14 @@ class SentinelConnectionPool(ConnectionPool):
         except MasterNotFoundError:
             pass
         raise SlaveNotFoundError('No slave found for %r' % (self.service_name))
+
+    def _checkpid(self):
+        if self.pid != os.getpid():
+            self.disconnect()
+            self.__init__(self.service_name, self.sentinel_manager,
+                          connection_class=self.connection_class,
+                          max_connections=self.max_connections,
+                          **self.connection_kwargs)
 
 
 class Sentinel(object):
