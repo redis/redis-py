@@ -123,3 +123,9 @@ class TestConnection(object):
         pool = bad_connection.connection_pool
         assert len(pool._available_connections) == 1
         assert not pool._available_connections[0]._sock
+
+    def test_repr_contains_db_info(self, r):
+        """
+        Repr should contain database connection info
+        """
+        assert repr(redis.Redis()) == 'Redis<host=localhost,port=6379,db=0>'

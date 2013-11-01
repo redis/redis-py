@@ -368,6 +368,12 @@ class StrictRedis(object):
 
         self.response_callbacks = self.__class__.RESPONSE_CALLBACKS.copy()
 
+    def __repr__(self):
+        return "{class_name}<host={host},port={port},db={db}>".format(
+            class_name=type(self).__name__,
+            **self.connection_pool.connection_kwargs
+        )
+
     def set_response_callback(self, command, callback):
         "Set a custom Response Callback"
         self.response_callbacks[command] = callback
