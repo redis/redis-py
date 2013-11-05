@@ -203,6 +203,8 @@ else:
 
 class Connection(object):
     "Manages TCP communication to and from a Redis server"
+    description_format = "Connection<host=%(host)s,port=%(port)s,db=%(db)s>"
+
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
@@ -218,6 +220,14 @@ class Connection(object):
         self.decode_responses = decode_responses
         self._sock = None
         self._parser = parser_class()
+        self._description_args = {
+            'host': self.host,
+            'port': self.port,
+            'db': self.db,
+        }
+
+    def __repr__(self):
+        return self.description_format % self._description_args
 
     def __del__(self):
         try:
@@ -345,6 +355,8 @@ class Connection(object):
 
 
 class UnixDomainSocketConnection(Connection):
+    description_format = "UnixDomainSocketConnection<path=%(path)s,db=%(db)s>"
+
     def __init__(self, path='', db=0, password=None,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
@@ -359,6 +371,10 @@ class UnixDomainSocketConnection(Connection):
         self.decode_responses = decode_responses
         self._sock = None
         self._parser = parser_class()
+        self._description_args = {
+            'path': self.path,
+            'db': self.db,
+        }
 
     def _connect(self):
         "Create a Unix domain socket connection"
@@ -390,6 +406,12 @@ class ConnectionPool(object):
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()
+
+    def __repr__(self):
+        return "%s<%s>" % (
+            type(self).__name__,
+            self.connection_class.description_format % self.connection_kwargs,
+        )
 
     def _checkpid(self):
         if self.pid != os.getpid():
@@ -499,6 +521,12 @@ class BlockingConnectionPool(object):
         # Keep a list of actual connection instances so that we can
         # disconnect them later.
         self._connections = []
+
+    def __repr__(self):
+        return "%s<%s>" % (
+            type(self).__name__,
+            self.connection_class.description_format % self.connection_kwargs,
+        )
 
     def _checkpid(self):
         """
