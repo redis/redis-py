@@ -1217,7 +1217,7 @@ class StrictRedis(object):
         return self.execute_command('SREM', name, *values)
 
     def sunion(self, keys, *args):
-        "Return the union of sets specifiued by ``keys``"
+        "Return the union of sets specified by ``keys``"
         args = list_or_args(keys, args)
         return self.execute_command('SUNION', *args)
 
