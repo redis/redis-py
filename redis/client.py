@@ -641,7 +641,9 @@ class StrictRedis(object):
     def delete(self, *names):
         "Delete one or more keys specified by ``names``"
         return self.execute_command('DEL', *names)
-    __delitem__ = delete
+
+    def __delitem__(self, name):
+        self.delete(name)
 
     def dump(self, name):
         """
@@ -870,7 +872,9 @@ class StrictRedis(object):
         if xx:
             pieces.append('XX')
         return self.execute_command('SET', *pieces)
-    __setitem__ = set
+
+    def __setitem__(self, name, value):
+        self.set(name, value)
 
     def setbit(self, name, offset, value):
         """
