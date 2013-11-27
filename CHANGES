@@ -6,6 +6,10 @@
     * Errors when authenticating (incorrect password) and selecting a database
       now close the socket.
     * Full Sentinel support thanks to Vitja Makarov. Thanks!
+    * Better repr support for client and connection pool instances. Thanks
+      Mark Roberts.
+    * Error messages that the server sends to the client are now included
+      in the client error message. Thanks Sangjin Lim.
 * 2.8.0
     * redis-py should play better with gevent when a gevent Timeout is raised.
       Thanks leifkb.
