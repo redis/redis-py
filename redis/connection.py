@@ -110,8 +110,8 @@ class PythonParser(object):
         byte, response = byte_to_chr(response[0]), response[1:]
 
         if byte not in ('-', '+', ':', '$', '*'):
-            message = "Protocol Error: %s, %s" % (str(byte), str(response))
-            raise InvalidResponse("%s" % message)
+            raise InvalidResponse("Protocol Error: %s, %s" %
+                                  (str(byte), str(response)))
 
         # server returned an error
         if byte == '-':
