@@ -382,15 +382,16 @@ class ConnectionPool(object):
     "Generic connection pool"
     def __init__(self, connection_class=Connection, max_connections=None,
                  **connection_kwargs):
-        '''Create a connection pool. If max_connections is set, then this 
+        """
+        Create a connection pool. If max_connections is set, then this
         object raises redis.ConnectionError when the pool's limit is reached.
-        
+
         By default, TCP connections are created connection_class is specified.
         Use redis.UnixDomainSocketConnection for unix sockets.
-        
-        Any additional keyword arguments are passed to the constructor of 
+
+        Any additional keyword arguments are passed to the constructor of
         connection_class.
-        '''
+        """
         self.pid = os.getpid()
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
