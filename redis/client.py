@@ -1224,7 +1224,8 @@ class StrictRedis(object):
             pieces.append(count)
         return self.execute_command('HSCAN', *pieces)
 
-    def zscan(self, name, cursor, match=None, count=None, score_cast_func=float):
+    def zscan(self, name, cursor, match=None, count=None,
+              score_cast_func=float):
         """
         Scan and return (nextcursor, pairs)
 
