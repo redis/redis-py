@@ -3,12 +3,15 @@ import os
 import pytest
 import redis
 import time
+import re
 
 from threading import Thread
 from redis._compat import Queue
 
 
 class DummyConnection(object):
+    description_format = "DummyConnection<>"
+
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.pid = os.getpid()
@@ -47,6 +50,28 @@ class TestConnectionPoolCase(object):
         pool.release(c1)
         c2 = pool.get_connection('_')
         assert c1 == c2
+
+    def test_repr_contains_db_info_tcp(self):
+        pool = redis.ConnectionPool(host='localhost', port=6379, db=0)
+
+        assert re.match('(.*)<(.*)<(.*)>>', repr(pool)).groups() == (
+            'ConnectionPool',
+            'Connection',
+            'host=localhost,port=6379,db=0',
+        )
+
+    def test_repr_contains_db_info_unix(self):
+        pool = redis.ConnectionPool(
+            connection_class=redis.UnixDomainSocketConnection,
+            path='abc',
+            db=0,
+        )
+
+        assert re.match('(.*)<(.*)<(.*)>>', repr(pool)).groups() == (
+            'ConnectionPool',
+            'UnixDomainSocketConnection',
+            'path=abc,db=0',
+        )
 
 
 class TestBlockingConnectionPool(object):
@@ -107,9 +132,35 @@ class TestBlockingConnectionPool(object):
         c2 = pool.get_connection('_')
         assert c1 == c2
 
+    def test_repr_contains_db_info_tcp(self):
+        pool = redis.BlockingConnectionPool(
+            host='localhost',
+            port=6379,
+            db=0,
+        )
+
+        assert re.match('(.*)<(.*)<(.*)>>', repr(pool)).groups() == (
+            'BlockingConnectionPool',
+            'Connection',
+            'host=localhost,port=6379,db=0',
+        )
+
+    def test_repr_contains_db_info_unix(self):
+        pool = redis.BlockingConnectionPool(
+            connection_class=redis.UnixDomainSocketConnection,
+            path='abc',
+            db=0
+        )
+
+        assert re.match('(.*)<(.*)<(.*)>>', repr(pool)).groups() == (
+            'BlockingConnectionPool',
+            'UnixDomainSocketConnection',
+            'path=abc,db=0',
+        )
+
 
 class TestConnection(object):
-    def test_on_connect_error(self, r):
+    def test_on_connect_error(self):
         """
         An error in Connection.on_connect should disconnect from the server
         see for details: https://github.com/andymccurdy/redis-py/issues/368
