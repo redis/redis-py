@@ -240,6 +240,21 @@ def parse_script(response, **options):
     return response
 
 
+def parse_scan(response, **options):
+    return response
+
+
+def parse_hscan(response, **options):
+    cursor, r = response
+    return [cursor, r and pairs_to_dict(r) or {}]
+
+
+def parse_zscan(response, **options):
+    score_cast_func = options.get('score_cast_func', float)
+    it = iter(response[1])
+    return [response[0], list(izip(it, imap(score_cast_func, it)))]
+
+
 class StrictRedis(object):
     """
     Implementation of the Redis protocol.
@@ -304,7 +319,11 @@ class StrictRedis(object):
             'SCRIPT': parse_script,
             'SET': lambda r: r and nativestr(r) == 'OK',
             'TIME': lambda x: (int(x[0]), int(x[1])),
-            'SENTINEL': parse_sentinel
+            'SENTINEL': parse_sentinel,
+            'SCAN': parse_scan,
+            'SSCAN': parse_scan,
+            'HSCAN': parse_hscan,
+            'ZSCAN': parse_zscan
         }
     )
 
@@ -1152,6 +1171,78 @@ class StrictRedis(object):
 
         options = {'groups': len(get) if groups else None}
         return self.execute_command('SORT', *pieces, **options)
+
+    #### SCAN COMMANDS ####
+    def scan(self, cursor, match=None, count=None):
+        """
+        Scan and return (nextcursor, keys)
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+        """
+        pieces = [cursor]
+        if match is not None:
+            pieces.append('MATCH')
+            pieces.append(match)
+        if count is not None:
+            pieces.append('COUNT')
+            pieces.append(count)
+        return self.execute_command('SCAN', *pieces)
+
+    def sscan(self, name, cursor, match=None, count=None):
+        """
+        Scan and return (nextcursor, membersofset)
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+        """
+        pieces = [name, cursor]
+        if match is not None:
+            pieces.append('MATCH')
+            pieces.append(match)
+        if count is not None:
+            pieces.append('COUNT')
+            pieces.append(count)
+        return self.execute_command('SSCAN', *pieces)
+
+    def hscan(self, name, cursor, match=None, count=None):
+        """
+        Scan and return (nextcursor, dict)
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+        """
+        pieces = [name, cursor]
+        if match is not None:
+            pieces.append('MATCH')
+            pieces.append(match)
+        if count is not None:
+            pieces.append('COUNT')
+            pieces.append(count)
+        return self.execute_command('HSCAN', *pieces)
+
+    def zscan(self, name, cursor, match=None, count=None, score_cast_func=float):
+        """
+        Scan and return (nextcursor, pairs)
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+
+        ``score_cast_func`` a callable used to cast the score return value
+        """
+        pieces = [name, cursor]
+        if match is not None:
+            pieces.append('MATCH')
+            pieces.append(match)
+        if count is not None:
+            pieces.append('COUNT')
+            pieces.append(count)
+        options = {'score_cast_func': score_cast_func}
+        return self.execute_command('ZSCAN', *pieces, **options)
 
     #### SET COMMANDS ####
     def sadd(self, name, *values):
