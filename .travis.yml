@@ -5,6 +5,8 @@ python:
   - "2.7"
   - "2.6"
   - "2.5"
+services:
+  - redis-server
 env:
   - TEST_HIREDIS=0
   - TEST_HIREDIS=1
