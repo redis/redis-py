@@ -663,7 +663,9 @@ class StrictRedis(object):
     def delete(self, *names):
         "Delete one or more keys specified by ``names``"
         return self.execute_command('DEL', *names)
-    __delitem__ = delete
+
+    def __delitem__(self, name):
+        self.delete(name)
 
     def dump(self, name):
         """
@@ -892,7 +894,9 @@ class StrictRedis(object):
         if xx:
             pieces.append('XX')
         return self.execute_command('SET', *pieces)
-    __setitem__ = set
+
+    def __setitem__(self, name, value):
+        self.set(name, value)
 
     def setbit(self, name, offset, value):
         """
@@ -1607,7 +1611,7 @@ class StrictRedis(object):
 
     def eval(self, script, numkeys, *keys_and_args):
         """
-        Execute the LUA ``script``, specifying the ``numkeys`` the script
+        Execute the Lua ``script``, specifying the ``numkeys`` the script
         will touch and the key names and argument values in ``keys_and_args``.
         Returns the result of the script.
 
@@ -1618,7 +1622,7 @@ class StrictRedis(object):
 
     def evalsha(self, sha, numkeys, *keys_and_args):
         """
-        Use the ``sha`` to execute a LUA script already registered via EVAL
+        Use the ``sha`` to execute a Lua script already registered via EVAL
         or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
         key names and argument values in ``keys_and_args``. Returns the result
         of the script.
@@ -1643,21 +1647,21 @@ class StrictRedis(object):
         return self.execute_command('SCRIPT', 'FLUSH', **options)
 
     def script_kill(self):
-        "Kill the currently executing LUA script"
+        "Kill the currently executing Lua script"
         options = {'parse': 'KILL'}
         return self.execute_command('SCRIPT', 'KILL', **options)
 
     def script_load(self, script):
-        "Load a LUA ``script`` into the script cache. Returns the SHA."
+        "Load a Lua ``script`` into the script cache. Returns the SHA."
         options = {'parse': 'LOAD'}
         return self.execute_command('SCRIPT', 'LOAD', script, **options)
 
     def register_script(self, script):
         """
-        Register a LUA ``script`` specifying the ``keys`` it will touch.
+        Register a Lua ``script`` specifying the ``keys`` it will touch.
         Returns a Script object that is callable and hides the complexity of
         deal with scripts, keys, and shas. This is the preferred way to work
-        with LUA scripts.
+        with Lua scripts.
         """
         return Script(self, script)
 
@@ -2188,7 +2192,7 @@ class Pipeline(BasePipeline, Redis):
 
 
 class Script(object):
-    "An executable LUA script object returned by ``register_script``"
+    "An executable Lua script object returned by ``register_script``"
 
     def __init__(self, registered_client, script):
         self.registered_client = registered_client

@@ -1,3 +1,6 @@
+from contextlib import contextmanager
+
+
 try:
     import hiredis
     HIREDIS_AVAILABLE = True
@@ -14,3 +17,10 @@ def from_url(url, db=None, **kwargs):
     """
     from redis.client import Redis
     return Redis.from_url(url, db, **kwargs)
+
+
+@contextmanager
+def pipeline(redis_obj):
+    p = redis_obj.pipeline()
+    yield p
+    p.execute()
