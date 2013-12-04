@@ -10,6 +10,7 @@
       Mark Roberts.
     * Error messages that the server sends to the client are now included
       in the client error message. Thanks Sangjin Lim.
+    * Added the SCAN, SSCAN, HSCAN, and ZSCAN commands. Thanks Jingchao Hu.
 * 2.8.0
     * redis-py should play better with gevent when a gevent Timeout is raised.
       Thanks leifkb.

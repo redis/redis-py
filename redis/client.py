@@ -246,7 +246,7 @@ def parse_scan(response, **options):
 
 def parse_hscan(response, **options):
     cursor, r = response
-    return [cursor, r and pairs_to_dict(r) or {}]
+    return cursor, r and pairs_to_dict(r) or {}
 
 
 def parse_zscan(response, **options):
@@ -1177,7 +1177,7 @@ class StrictRedis(object):
         return self.execute_command('SORT', *pieces, **options)
 
     #### SCAN COMMANDS ####
-    def scan(self, cursor, match=None, count=None):
+    def scan(self, cursor=0, match=None, count=None):
         """
         Scan and return (nextcursor, keys)
 
@@ -1187,16 +1187,14 @@ class StrictRedis(object):
         """
         pieces = [cursor]
         if match is not None:
-            pieces.append('MATCH')
-            pieces.append(match)
+            pieces.extend(['MATCH', match])
         if count is not None:
-            pieces.append('COUNT')
-            pieces.append(count)
+            pieces.extend(['COUNT', count])
         return self.execute_command('SCAN', *pieces)
 
-    def sscan(self, name, cursor, match=None, count=None):
+    def sscan(self, name, cursor=0, match=None, count=None):
         """
-        Scan and return (nextcursor, membersofset)
+        Scan and return (nextcursor, members_of_set)
 
         ``match`` allows for filtering the keys by pattern
 
@@ -1204,14 +1202,12 @@ class StrictRedis(object):
         """
         pieces = [name, cursor]
         if match is not None:
-            pieces.append('MATCH')
-            pieces.append(match)
+            pieces.extend(['MATCH', match])
         if count is not None:
-            pieces.append('COUNT')
-            pieces.append(count)
+            pieces.extend(['COUNT', count])
         return self.execute_command('SSCAN', *pieces)
 
-    def hscan(self, name, cursor, match=None, count=None):
+    def hscan(self, name, cursor=0, match=None, count=None):
         """
         Scan and return (nextcursor, dict)
 
@@ -1221,14 +1217,12 @@ class StrictRedis(object):
         """
         pieces = [name, cursor]
         if match is not None:
-            pieces.append('MATCH')
-            pieces.append(match)
+            pieces.extend(['MATCH', match])
         if count is not None:
-            pieces.append('COUNT')
-            pieces.append(count)
+            pieces.extend(['COUNT', count])
         return self.execute_command('HSCAN', *pieces)
 
-    def zscan(self, name, cursor, match=None, count=None,
+    def zscan(self, name, cursor=0, match=None, count=None,
               score_cast_func=float):
         """
         Scan and return (nextcursor, pairs)
@@ -1241,11 +1235,9 @@ class StrictRedis(object):
         """
         pieces = [name, cursor]
         if match is not None:
-            pieces.append('MATCH')
-            pieces.append(match)
+            pieces.extend(['MATCH', match])
         if count is not None:
-            pieces.append('COUNT')
-            pieces.append(count)
+            pieces.extend(['COUNT', count])
         options = {'score_cast_func': score_cast_func}
         return self.execute_command('ZSCAN', *pieces, **options)
 
