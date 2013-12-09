@@ -4,8 +4,9 @@ import datetime
 import sys
 import warnings
 import time as mod_time
-from redis._compat import (b, izip, imap, iteritems, iterkeys, itervalues,
-                           basestring, long, nativestr, urlparse, bytes)
+from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
+                           itervalues, izip, long, nativestr, urlparse,
+                           unicode)
 from redis.connection import ConnectionPool, UnixDomainSocketConnection
 from redis.exceptions import (
     ConnectionError,
@@ -2034,11 +2035,13 @@ class BasePipeline(object):
             errors.append((0, sys.exc_info()[1]))
 
         # and all the other commands
-        for i, _ in enumerate(commands):
+        for i, command in enumerate(commands):
             try:
                 self.parse_response(connection, '_')
             except ResponseError:
-                errors.append((i, sys.exc_info()[1]))
+                ex = sys.exc_info()[1]
+                self.annotate_exception(ex, i + 1, command[0])
+                errors.append((i, ex))
 
         # parse the EXEC.
         try:
@@ -2063,7 +2066,7 @@ class BasePipeline(object):
 
         # find any errors in the response and raise if necessary
         if raise_on_error:
-            self.raise_first_error(response)
+            self.raise_first_error(commands, response)
 
         # We have to run response callbacks manually
         data = []
@@ -2092,13 +2095,20 @@ class BasePipeline(object):
                 response.append(sys.exc_info()[1])
 
         if raise_on_error:
-            self.raise_first_error(response)
+            self.raise_first_error(commands, response)
         return response
 
-    def raise_first_error(self, response):
-        for r in response:
+    def raise_first_error(self, commands, response):
+        for i, r in enumerate(response):
             if isinstance(r, ResponseError):
+                self.annotate_exception(r, i + 1, commands[i][0])
                 raise r
+
+    def annotate_exception(self, exception, number, command):
+        cmd = unicode(' ').join(imap(unicode, command))
+        msg = unicode('Command # %d (%s) of pipeline caused error: %s') % (
+            number, cmd, unicode(exception.args[0]))
+        exception.args = (msg,) + exception.args[1:]
 
     def parse_response(self, connection, command_name, **options):
         result = StrictRedis.parse_response(
