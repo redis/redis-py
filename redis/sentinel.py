@@ -1,5 +1,6 @@
 import os
 import random
+import weakref
 
 from redis.client import StrictRedis
 from redis.connection import ConnectionPool, Connection
@@ -56,7 +57,7 @@ class SentinelConnectionPool(ConnectionPool):
         self.is_master = kwargs.pop('is_master', True)
         self.check_connection = kwargs.pop('check_connection', False)
         super(SentinelConnectionPool, self).__init__(**kwargs)
-        self.connection_kwargs['connection_pool'] = self
+        self.connection_kwargs['connection_pool'] = weakref.proxy(self)
         self.service_name = service_name
         self.sentinel_manager = sentinel_manager
         self.master_address = None
