@@ -428,7 +428,7 @@ class StrictRedis(object):
                 except WatchError:
                     continue
 
-    def lock(self, name, timeout=None, sleep=0.1):
+    def lock(self, name, timeout=None, sleep=0.1, blocking=True):
         """
         Return a new Lock object using key ``name`` that mimics
         the behavior of threading.Lock.
@@ -440,7 +440,7 @@ class StrictRedis(object):
         when the lock is in blocking mode and another client is currently
         holding the lock.
         """
-        return Lock(self, name, timeout=timeout, sleep=sleep)
+        return Lock(self, name, timeout=timeout, sleep=sleep, blocking=blocking)
 
     def pubsub(self, shard_hint=None):
         """
@@ -2235,7 +2235,7 @@ class Lock(object):
 
     LOCK_FOREVER = float(2 ** 31 + 1)  # 1 past max unix time
 
-    def __init__(self, redis, name, timeout=None, sleep=0.1):
+    def __init__(self, redis, name, timeout=None, sleep=0.1, blocking=True):
         """
         Create a new Lock instnace named ``name`` using the Redis client
         supplied by ``redis``.
@@ -2256,16 +2256,19 @@ class Lock(object):
         self.acquired_until = None
         self.timeout = timeout
         self.sleep = sleep
+        self.blocking = blocking
         if self.timeout and self.sleep > self.timeout:
             raise LockError("'sleep' must be less than 'timeout'")
 
     def __enter__(self):
-        return self.acquire()
-
+        if self.acquire():
+            return self
+        return False
+        
     def __exit__(self, exc_type, exc_value, traceback):
         self.release()
 
-    def acquire(self, blocking=True):
+    def acquire(self, blocking=None):
         """
         Use Redis to hold a shared, distributed lock named ``name``.
         Returns True once the lock is acquired.
@@ -2273,6 +2276,7 @@ class Lock(object):
         If ``blocking`` is False, always return immediately. If the lock
         was acquired, return True, otherwise return False.
         """
+        if blocking is None: blocking = self.blocking or True
         sleep = self.sleep
         timeout = self.timeout
         while 1:
@@ -2309,3 +2313,12 @@ class Lock(object):
         self.acquired_until = None
         if delete_lock:
             self.redis.delete(self.name)
+
+    #works just like acquire(), but used when client wants to keep lock longer
+    #resets lock timeout to be time.now() + timeout
+    def extendLock(self, timeout):
+        unix_time = mod_time.time()
+        if self.acquired_until < unix_time: return False
+        self.redis.set(self.name, unix_time + timeout)
+        self.acquired_until = unix_time + timeout
+        return self
