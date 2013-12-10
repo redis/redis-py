@@ -440,7 +440,8 @@ class StrictRedis(object):
         when the lock is in blocking mode and another client is currently
         holding the lock.
         """
-        return Lock(self, name, timeout=timeout, sleep=sleep, blocking=blocking)
+        return Lock(self, name, timeout=timeout, sleep=sleep,
+                    blocking=blocking)
 
     def pubsub(self, shard_hint=None):
         """
@@ -2264,7 +2265,7 @@ class Lock(object):
         if self.acquire():
             return self
         return False
-        
+
     def __exit__(self, exc_type, exc_value, traceback):
         self.release()
 
@@ -2276,7 +2277,8 @@ class Lock(object):
         If ``blocking`` is False, always return immediately. If the lock
         was acquired, return True, otherwise return False.
         """
-        if blocking is None: blocking = self.blocking or True
+        if blocking is None:
+            blocking = self.blocking or True
         sleep = self.sleep
         timeout = self.timeout
         while 1:
@@ -2316,9 +2318,10 @@ class Lock(object):
 
     #works just like acquire(), but used when client wants to keep lock longer
     #resets lock timeout to be time.now() + timeout
-    def extendLock(self, timeout):
+    def extend_lock(self, timeout):
         unix_time = mod_time.time()
-        if self.acquired_until < unix_time: return False
+        if self.acquired_until < unix_time:
+            return False
         self.redis.set(self.name, unix_time + timeout)
         self.acquired_until = unix_time + timeout
         return self
