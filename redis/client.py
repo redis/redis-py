@@ -2316,12 +2316,25 @@ class Lock(object):
         if delete_lock:
             self.redis.delete(self.name)
 
-    #works just like acquire(), but used when client wants to keep lock longer
-    #resets lock timeout to be time.now() + timeout
+    # works just like acquire(), but used when client wants to keep lock longer
+    # resets lock timeout to be time.now() + timeout
     def extend_lock(self, timeout):
-        unix_time = mod_time.time()
-        if self.acquired_until < unix_time:
-            return False
-        self.redis.set(self.name, unix_time + timeout)
-        self.acquired_until = unix_time + timeout
-        return self
+        # to avoid race conditions, start watching the value, make sure it
+        # hasn't expired, and only extend if no one's changed it since then
+        extended = False
+        with self.redis.pipeline() as pipe:
+            try:
+                pipe.watch(self.name)
+                redis_acquired_until = float(pipe.get(self.name))
+                unix_time = mod_time.time()
+                if self.acquired_until == redis_acquired_until > unix_time:
+                    pipe.multi()
+                    pipe.set(self.name, unix_time + timeout)
+                    pipe.execute()
+                    self.acquired_until = unix_time + timeout
+                    extended = True
+            except WatchError:
+                pass
+        if extended:
+            return self
+        return False
