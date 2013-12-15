@@ -449,7 +449,7 @@ class StrictRedis(object):
         holding the lock.
 
         ``token_generator`` is a function that takes no parameters and
-		returns a string to store in Redis as the key's value.
+        returns a string to store in Redis as the key's value.
         """
         if self.use_lua_lock is None:
             try:
@@ -2385,7 +2385,7 @@ class LuaLock(object):
         holding the lock.
 
         ``token_generator`` is a function that takes no parameters and
-		returns a string to store in Redis as the key's value.
+        returns a string to store in Redis as the key's value.
         """
         self.redis = redis
         self.name = name
