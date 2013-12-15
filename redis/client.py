@@ -1,6 +1,7 @@
 from __future__ import with_statement
 from itertools import chain, starmap
 import datetime
+import os
 import sys
 import warnings
 import time as mod_time
@@ -19,6 +20,10 @@ from redis.exceptions import (
 )
 
 SYM_EMPTY = b('')
+
+
+def generate_random_token():
+    return ''.join('%02x' % (ord(b),) for b in os.urandom(10))
 
 
 def list_or_args(keys, args):
@@ -387,6 +392,7 @@ class StrictRedis(object):
         self.connection_pool = connection_pool
 
         self.response_callbacks = self.__class__.RESPONSE_CALLBACKS.copy()
+        self.use_lua_lock = None
 
     def __repr__(self):
         return "%s<%s>" % (type(self).__name__, repr(self.connection_pool))
@@ -428,7 +434,8 @@ class StrictRedis(object):
                 except WatchError:
                     continue
 
-    def lock(self, name, timeout=None, sleep=0.1):
+    def lock(self, name, timeout=None, sleep=0.1,
+             token_generator=generate_random_token):
         """
         Return a new Lock object using key ``name`` that mimics
         the behavior of threading.Lock.
@@ -439,13 +446,21 @@ class StrictRedis(object):
         ``sleep`` indicates the amount of time to sleep per loop iteration
         when the lock is in blocking mode and another client is currently
         holding the lock.
+
+        ``token_generator`` is a function that takes no parameters and
+		returns a string to store in Redis as the key's value.
         """
-        from distutils.version import StrictVersion
-        version = self.info()['redis_version']
-        if StrictVersion(version) < StrictVersion('2.6.0'):
-            return Lock(self, name, timeout=timeout, sleep=sleep)
+        if self.use_lua_lock is None:
+            try:
+                LuaLock.register_scripts(self)
+                self.use_lua_lock = True
+            except ResponseError:
+                self.use_lua_lock = False
+        if self.use_lua_lock:
+            return LuaLock(self, name, timeout=timeout, sleep=sleep,
+                           token_generator=token_generator)
         else:
-            return LuaLock(self, name, timeout=timeout, sleep=sleep)
+            return Lock(self, name, timeout=timeout, sleep=sleep)
 
     def pubsub(self, shard_hint=None):
         """
@@ -2318,33 +2333,45 @@ class Lock(object):
 
 class LuaLock(object):
     """
-    Like Lock, but using key expiration and LUA for transactions.
+    Like Lock, but using key expiration and Lua for transactions.
 
-    Backward compatible with Lock,
-    except for not keeping released locks in redis.
+    Backward compatible with Lock.
+
+    ``LuaLock.register_scripts()`` should be called once before
+    instantiating a LuaLock; this is done automatically by
+    ``StrictRedis.lock()``.
 
     NOTE: Requires Redis 2.6+
     """
-    # KEYS[1] - lock name, ARGV[1] - timeout, ARGV[2] - timeout at
+    # KEYS[1] - lock name, ARGV[1] - timeout, ARGV[2] - token
+    # return 1 if lock was acquired, 0 otherwise
     LUA_LOCK_ACQUIRE_SCRIPT = """
-        local ret = redis.call('setnx', KEYS[1], ARGV[2])
-        if (ret == 1) then
+        if redis.call('setnx', KEYS[1], ARGV[2]) == 1 then
             redis.call('expire', KEYS[1], ARGV[1])
-            return true
+            return 1
         end
-        return false
+        return 0
         """
+    # KEYS[1] - lock name, ARGV[1] - token
+    # return values:
+    #     if -1, key did not exist, lock is already unlocked
+    #     if 0, lock exists but did not match provided token
+    #     if 1, token matched, lock was released
     LUA_LOCK_RELEASE_SCRIPT = """
-        if (redis.call('get', KEYS[1])) then
+        local token = redis.call('get', KEYS[1])
+        if not token then
+            return -1
+        elseif token == ARGV[1] then
             redis.call('del', KEYS[1])
-            return true
+            return 1
         end
-        return false
-    """
+        return 0
+        """
     LUA_LOCK_ACQUIRE = None
     LUA_LOCK_RELEASE = None
 
-    def __init__(self, redis, name, timeout=None, sleep=0.1):
+    def __init__(self, redis, name, timeout=None, sleep=0.1,
+                 token_generator=generate_random_token):
         """
         Create a new Lock instance named ``name`` using the Redis client
         supplied by ``redis``.
@@ -2355,21 +2382,27 @@ class LuaLock(object):
         ``sleep`` indicates the amount of time to sleep per loop iteration
         when the lock is in blocking mode and another client is currently
         holding the lock.
+
+        ``token_generator`` is a function that takes no parameters and
+		returns a string to store in Redis as the key's value.
         """
         self.redis = redis
         self.name = name
-        self.acquired_until = None
+        self.token = None
+        self.token_generator = token_generator
         self.timeout = timeout
         self.sleep = sleep
         if self.timeout and self.sleep > self.timeout:
             raise LockError("'sleep' must be less than 'timeout'")
-        # If the Acquire/Release scripts are not in redis- load them
-        if not callable(LuaLock.LUA_LOCK_ACQUIRE):
-            LuaLock.LUA_LOCK_ACQUIRE = redis.register_script(
-                LuaLock.LUA_LOCK_ACQUIRE_SCRIPT)
-        if not callable(LuaLock.LUA_LOCK_RELEASE):
-            LuaLock.LUA_LOCK_RELEASE = redis.register_script(
-                LuaLock.LUA_LOCK_RELEASE_SCRIPT)
+
+    @classmethod
+    def register_scripts(cls, redis):
+        if cls.LUA_LOCK_ACQUIRE is None:
+            cls.LUA_LOCK_ACQUIRE = redis.register_script(
+                cls.LUA_LOCK_ACQUIRE_SCRIPT)
+        if cls.LUA_LOCK_RELEASE is None:
+            cls.LUA_LOCK_RELEASE = redis.register_script(
+                cls.LUA_LOCK_RELEASE_SCRIPT)
 
     def __enter__(self):
         return self.acquire()
@@ -2387,12 +2420,13 @@ class LuaLock(object):
         """
         sleep = self.sleep
         timeout = self.timeout if self.timeout else Lock.LOCK_FOREVER
+        token = self.token_generator()
         while 1:
             timeout_at = mod_time.time() + self.timeout if self.timeout \
                 else Lock.LOCK_FOREVER
-            if LuaLock.LUA_LOCK_ACQUIRE(keys=[self.name],
-                                        args=[int(timeout), timeout_at]):
-                self.acquired_until = timeout_at
+            if LuaLock.LUA_LOCK_ACQUIRE(keys=(self.name,),
+                                        args=(int(timeout), token)):
+                self.token = token
                 return True
             if not blocking:
                 return False
@@ -2402,6 +2436,5 @@ class LuaLock(object):
         """
         Releases the already acquired lock
         """
-        if not LuaLock.LUA_LOCK_RELEASE(keys=[self.name]):
+        if LuaLock.LUA_LOCK_RELEASE(keys=(self.name,), args=(self.token,)) == -1:
             raise ValueError("Cannot release an unlocked lock")
-        self.acquired_until = None
