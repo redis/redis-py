@@ -1,10 +1,11 @@
 from __future__ import with_statement
 from itertools import chain, starmap
 import datetime
-import os
 import sys
 import warnings
 import time as mod_time
+from binascii import b2a_hex
+from os import urandom
 from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
                            itervalues, izip, long, nativestr, urlparse,
                            unicode)
@@ -23,7 +24,7 @@ SYM_EMPTY = b('')
 
 
 def generate_random_token():
-    return ''.join('%02x' % (ord(b),) for b in os.urandom(10))
+    return b2a_hex(urandom(10))
 
 
 def list_or_args(keys, args):
