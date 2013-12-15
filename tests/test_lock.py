@@ -74,7 +74,7 @@ class TestLuaLock(object):
     def test_lock(self, rll):
         lock = LuaLock(rll, 'foo')
         assert lock.acquire()
-        assert rll['foo'] == lock.token.encode()
+        assert rll['foo'] == lock.token
         lock.release()
         assert rll.get('foo') is None
 
@@ -93,7 +93,7 @@ class TestLuaLock(object):
         lock2 = LuaLock(rll, 'foo')
         assert lock1.acquire()
         now = time.time()
-        assert rll['foo'] == lock1.token.encode()
+        assert rll['foo'] == lock1.token
         assert not lock2.acquire(blocking=False)
         time.sleep(2)  # need to wait up to 2 seconds for lock to timeout
         assert lock2.acquire(blocking=False)
@@ -102,13 +102,13 @@ class TestLuaLock(object):
     def test_non_blocking(self, rll):
         lock1 = LuaLock(rll, 'foo')
         assert lock1.acquire(blocking=False)
-        assert rll['foo'] == lock1.token.encode()
+        assert rll['foo'] == lock1.token
         lock1.release()
 
     def test_context_manager(self, rll):
         lock = LuaLock(rll, 'foo')
         with lock:
-            assert rll['foo'] == lock.token.encode()
+            assert rll['foo'] == lock.token
         assert rll.get('foo') is None
 
     def test_float_timeout(self, rll):
