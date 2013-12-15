@@ -29,17 +29,27 @@ SYM_LF = b('\n')
 SYM_EMPTY = b('')
 
 
-class PythonParser(object):
-    "Plain Python parsing class"
-    MAX_READ_LENGTH = 1000000
-    encoding = None
-
+class BaseParser(object):
     EXCEPTION_CLASSES = {
         'ERR': ResponseError,
         'EXECABORT': ExecAbortError,
         'LOADING': BusyLoadingError,
         'NOSCRIPT': NoScriptError,
     }
+
+    def parse_error(self, response):
+        "Parse an error response"
+        error_code = response.split(' ')[0]
+        if error_code in self.EXCEPTION_CLASSES:
+            response = response[len(error_code) + 1:]
+            return self.EXCEPTION_CLASSES[error_code](response)
+        return ResponseError(response)
+
+
+class PythonParser(BaseParser):
+    "Plain Python parsing class"
+    MAX_READ_LENGTH = 1000000
+    encoding = None
 
     def __init__(self):
         self._fp = None
@@ -94,14 +104,6 @@ class PythonParser(object):
             raise ConnectionError("Error while reading from socket: %s" %
                                   (e.args,))
 
-    def parse_error(self, response):
-        "Parse an error response"
-        error_code = response.split(' ')[0]
-        if error_code in self.EXCEPTION_CLASSES:
-            response = response[len(error_code) + 1:]
-            return self.EXCEPTION_CLASSES[error_code](response)
-        return ResponseError(response)
-
     def read_response(self):
         response = self.read()
         if not response:
@@ -149,7 +151,7 @@ class PythonParser(object):
         return response
 
 
-class HiredisParser(object):
+class HiredisParser(BaseParser):
     "Parser class for connections using Hiredis"
     def __init__(self):
         if not HIREDIS_AVAILABLE:
@@ -194,6 +196,8 @@ class HiredisParser(object):
             if not buffer.endswith(SYM_LF):
                 continue
             response = self._reader.gets()
+        if isinstance(response, ResponseError):
+            response = self.parse_error(response.args[0])
         return response
 
 if HIREDIS_AVAILABLE:

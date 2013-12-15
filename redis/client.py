@@ -4,8 +4,9 @@ import datetime
 import sys
 import warnings
 import time as mod_time
-from redis._compat import (b, izip, imap, iteritems, iterkeys, itervalues,
-                           basestring, long, nativestr, urlparse, bytes)
+from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
+                           itervalues, izip, long, nativestr, urlparse,
+                           unicode)
 from redis.connection import ConnectionPool, UnixDomainSocketConnection
 from redis.exceptions import (
     ConnectionError,
@@ -240,6 +241,21 @@ def parse_script(response, **options):
     return response
 
 
+def parse_scan(response, **options):
+    return response
+
+
+def parse_hscan(response, **options):
+    cursor, r = response
+    return cursor, r and pairs_to_dict(r) or {}
+
+
+def parse_zscan(response, **options):
+    score_cast_func = options.get('score_cast_func', float)
+    it = iter(response[1])
+    return [response[0], list(izip(it, imap(score_cast_func, it)))]
+
+
 class StrictRedis(object):
     """
     Implementation of the Redis protocol.
@@ -304,7 +320,11 @@ class StrictRedis(object):
             'SCRIPT': parse_script,
             'SET': lambda r: r and nativestr(r) == 'OK',
             'TIME': lambda x: (int(x[0]), int(x[1])),
-            'SENTINEL': parse_sentinel
+            'SENTINEL': parse_sentinel,
+            'SCAN': parse_scan,
+            'SSCAN': parse_scan,
+            'HSCAN': parse_hscan,
+            'ZSCAN': parse_zscan
         }
     )
 
@@ -649,7 +669,9 @@ class StrictRedis(object):
     def delete(self, *names):
         "Delete one or more keys specified by ``names``"
         return self.execute_command('DEL', *names)
-    __delitem__ = delete
+
+    def __delitem__(self, name):
+        self.delete(name)
 
     def dump(self, name):
         """
@@ -878,7 +900,9 @@ class StrictRedis(object):
         if xx:
             pieces.append('XX')
         return self.execute_command('SET', *pieces)
-    __setitem__ = set
+
+    def __setitem__(self, name, value):
+        self.set(name, value)
 
     def setbit(self, name, offset, value):
         """
@@ -1157,6 +1181,71 @@ class StrictRedis(object):
 
         options = {'groups': len(get) if groups else None}
         return self.execute_command('SORT', *pieces, **options)
+
+    #### SCAN COMMANDS ####
+    def scan(self, cursor=0, match=None, count=None):
+        """
+        Scan and return (nextcursor, keys)
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+        """
+        pieces = [cursor]
+        if match is not None:
+            pieces.extend(['MATCH', match])
+        if count is not None:
+            pieces.extend(['COUNT', count])
+        return self.execute_command('SCAN', *pieces)
+
+    def sscan(self, name, cursor=0, match=None, count=None):
+        """
+        Scan and return (nextcursor, members_of_set)
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+        """
+        pieces = [name, cursor]
+        if match is not None:
+            pieces.extend(['MATCH', match])
+        if count is not None:
+            pieces.extend(['COUNT', count])
+        return self.execute_command('SSCAN', *pieces)
+
+    def hscan(self, name, cursor=0, match=None, count=None):
+        """
+        Scan and return (nextcursor, dict)
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+        """
+        pieces = [name, cursor]
+        if match is not None:
+            pieces.extend(['MATCH', match])
+        if count is not None:
+            pieces.extend(['COUNT', count])
+        return self.execute_command('HSCAN', *pieces)
+
+    def zscan(self, name, cursor=0, match=None, count=None,
+              score_cast_func=float):
+        """
+        Scan and return (nextcursor, pairs)
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+
+        ``score_cast_func`` a callable used to cast the score return value
+        """
+        pieces = [name, cursor]
+        if match is not None:
+            pieces.extend(['MATCH', match])
+        if count is not None:
+            pieces.extend(['COUNT', count])
+        options = {'score_cast_func': score_cast_func}
+        return self.execute_command('ZSCAN', *pieces, **options)
 
     #### SET COMMANDS ####
     def sadd(self, name, *values):
@@ -1951,11 +2040,13 @@ class BasePipeline(object):
             errors.append((0, sys.exc_info()[1]))
 
         # and all the other commands
-        for i, _ in enumerate(commands):
+        for i, command in enumerate(commands):
             try:
                 self.parse_response(connection, '_')
             except ResponseError:
-                errors.append((i, sys.exc_info()[1]))
+                ex = sys.exc_info()[1]
+                self.annotate_exception(ex, i + 1, command[0])
+                errors.append((i, ex))
 
         # parse the EXEC.
         try:
@@ -1980,7 +2071,7 @@ class BasePipeline(object):
 
         # find any errors in the response and raise if necessary
         if raise_on_error:
-            self.raise_first_error(response)
+            self.raise_first_error(commands, response)
 
         # We have to run response callbacks manually
         data = []
@@ -2009,13 +2100,20 @@ class BasePipeline(object):
                 response.append(sys.exc_info()[1])
 
         if raise_on_error:
-            self.raise_first_error(response)
+            self.raise_first_error(commands, response)
         return response
 
-    def raise_first_error(self, response):
-        for r in response:
+    def raise_first_error(self, commands, response):
+        for i, r in enumerate(response):
             if isinstance(r, ResponseError):
+                self.annotate_exception(r, i + 1, commands[i][0])
                 raise r
+
+    def annotate_exception(self, exception, number, command):
+        cmd = unicode(' ').join(imap(unicode, command))
+        msg = unicode('Command # %d (%s) of pipeline caused error: %s') % (
+            number, cmd, unicode(exception.args[0]))
+        exception.args = (msg,) + exception.args[1:]
 
     def parse_response(self, connection, command_name, **options):
         result = StrictRedis.parse_response(

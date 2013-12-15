@@ -635,6 +635,45 @@ class TestRedisCommands(object):
         assert r.rpushx('a', '4') == 4
         assert r.lrange('a', 0, -1) == [b('1'), b('2'), b('3'), b('4')]
 
+    ### SCAN COMMANDS ###
+    @skip_if_server_version_lt('2.8.0')
+    def test_scan(self, r):
+        r.set('a', 1)
+        r.set('b', 2)
+        r.set('c', 3)
+        cursor, keys = r.scan()
+        assert cursor == b('0')
+        assert set(keys) == set([b('a'), b('b'), b('c')])
+        _, keys = r.scan(match='a')
+        assert set(keys) == set([b('a')])
+
+    @skip_if_server_version_lt('2.8.0')
+    def test_sscan(self, r):
+        r.sadd('a', 1, 2, 3)
+        cursor, members = r.sscan('a')
+        assert cursor == b('0')
+        assert set(members) == set([b('1'), b('2'), b('3')])
+        _, members = r.sscan('a', match=b('1'))
+        assert set(members) == set([b('1')])
+
+    @skip_if_server_version_lt('2.8.0')
+    def test_hscan(self, r):
+        r.hmset('a', {'a': 1, 'b': 2, 'c': 3})
+        cursor, dic = r.hscan('a')
+        assert cursor == b('0')
+        assert dic == {b('a'): b('1'), b('b'): b('2'), b('c'): b('3')}
+        _, dic = r.hscan('a', match='a')
+        assert dic == {b('a'): b('1')}
+
+    @skip_if_server_version_lt('2.8.0')
+    def test_zscan(self, r):
+        r.zadd('a', 'a', 1, 'b', 2, 'c', 3)
+        cursor, pairs = r.zscan('a')
+        assert cursor == b('0')
+        assert set(pairs) == set([(b('a'), 1), (b('b'), 2), (b('c'), 3)])
+        _, pairs = r.zscan('a', match='a')
+        assert set(pairs) == set([(b('a'), 1)])
+
     ### SET COMMANDS ###
     def test_sadd(self, r):
         members = set([b('1'), b('2'), b('3')])
