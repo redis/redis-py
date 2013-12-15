@@ -6,6 +6,7 @@ import time
 from redis.client import Lock, LuaLock, LockError
 from .conftest import r as _redis_client
 
+
 class TestLock(object):
 
     def test_lock(self, r):
