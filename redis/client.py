@@ -2437,5 +2437,6 @@ class LuaLock(object):
         """
         Releases the already acquired lock
         """
-        if LuaLock.LUA_LOCK_RELEASE(keys=(self.name,), args=(self.token,)) == -1:
+        if LuaLock.LUA_LOCK_RELEASE(keys=(self.name,),
+                                    args=(self.token,)) == -1:
             raise ValueError("Cannot release an unlocked lock")
