@@ -2061,6 +2061,7 @@ class BasePipeline(object):
             response.insert(i, e)
 
         if len(response) != len(commands):
+            self.connection.disconnect()
             raise ResponseError("Wrong number of response items from "
                                 "pipeline execution")
 
