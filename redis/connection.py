@@ -1,7 +1,9 @@
+from __future__ import with_statement
 from itertools import chain
 import os
 import socket
 import sys
+import threading
 
 
 from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
@@ -420,6 +422,7 @@ class ConnectionPool(object):
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()
+        self._check_lock = threading.Lock()
 
     def __repr__(self):
         return "%s<%s>" % (
@@ -429,9 +432,14 @@ class ConnectionPool(object):
 
     def _checkpid(self):
         if self.pid != os.getpid():
-            self.disconnect()
-            self.__init__(self.connection_class, self.max_connections,
-                          **self.connection_kwargs)
+            with self._check_lock:
+                if self.pid == os.getpid():
+                    # another thread already did the work while we waited
+                    # on the lock.
+                    return
+                self.disconnect()
+                self.__init__(self.connection_class, self.max_connections,
+                              **self.connection_kwargs)
 
     def get_connection(self, command_name, *keys, **options):
         "Get a connection from the pool"
@@ -523,6 +531,7 @@ class BlockingConnectionPool(object):
         # Get the current process id, so we can disconnect and reinstantiate if
         # it changes.
         self.pid = os.getpid()
+        self._check_lock = threading.Lock()
 
         # Create and fill up a thread safe queue with ``None`` values.
         self.pool = self.queue_class(max_connections)
@@ -547,17 +556,15 @@ class BlockingConnectionPool(object):
         Check the current process id.  If it has changed, disconnect and
         re-instantiate this connection pool instance.
         """
-        # Get the current process id.
         pid = os.getpid()
-
-        # If it hasn't changed since we were instantiated, then we're fine, so
-        # just exit, remaining connected.
-        if self.pid == pid:
-            return
-
-        # If it has changed, then disconnect and re-instantiate.
-        self.disconnect()
-        self.reinstantiate()
+        if self.pid != pid:
+            with self._check_lock:
+                if self.pid == os.getpid():
+                    # another thread already did the work while we waited
+                    # on the lock.
+                    return
+                self.disconnect()
+                self.reinstantiate()
 
     def make_connection(self):
         "Make a fresh connection."
