@@ -10,7 +10,7 @@ class TestLock(object):
     def test_lock(self, r):
         lock = r.lock('foo')
         assert lock.acquire()
-        assert r['foo'] == str(Lock.LOCK_FOREVER).encode()
+        assert r['foo'] == str(lock.token).encode()
         lock.release()
         assert r.get('foo') is None
 
@@ -29,8 +29,8 @@ class TestLock(object):
         lock2 = r.lock('foo')
         assert lock1.acquire()
         now = time.time()
-        assert now < lock1.acquired_until < now + 1
-        assert lock1.acquired_until == float(r['foo'])
+        assert now < lock1.acquired_until < time.time() + 1
+        assert int(lock1.acquired_until) == int(time.time() + r.ttl('foo'))
         assert not lock2.acquire(blocking=False)
         time.sleep(2)  # need to wait up to 2 seconds for lock to timeout
         assert lock2.acquire(blocking=False)
@@ -39,18 +39,20 @@ class TestLock(object):
     def test_non_blocking(self, r):
         lock1 = r.lock('foo')
         assert lock1.acquire(blocking=False)
-        assert lock1.acquired_until
+        with pytest.raises(LockError):
+            lock1.acquired_until
         lock1.release()
         assert lock1.acquired_until is None
 
     def test_context_manager(self, r):
-        with r.lock('foo'):
-            assert r['foo'] == str(Lock.LOCK_FOREVER).encode()
+        lock = r.lock('foo')
+        with lock:
+            assert r['foo'] == str(lock.token).encode()
         assert r.get('foo') is None
 
     def test_float_timeout(self, r):
-        lock1 = r.lock('foo', timeout=1.5)
-        lock2 = r.lock('foo', timeout=1.5)
+        lock1 = r.lock('foo', timeout=2)
+        lock2 = r.lock('foo', timeout=2)
         assert lock1.acquire()
         assert not lock2.acquire(blocking=False)
         lock1.release()

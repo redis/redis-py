@@ -2,6 +2,7 @@ from __future__ import with_statement
 from itertools import chain, starmap
 import datetime
 import sys
+import uuid
 import warnings
 import time as mod_time
 from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
@@ -2234,9 +2235,7 @@ class Lock(object):
     multiple clients play nicely together.
     """
 
-    LOCK_FOREVER = float(2 ** 31 + 1)  # 1 past max unix time
-
-    def __init__(self, redis, name, timeout=None, sleep=0.1):
+    def __init__(self, redis, name, timeout=None, sleep=0.1, robust=False):
         """
         Create a new Lock instnace named ``name`` using the Redis client
         supplied by ``redis``.
@@ -2254,17 +2253,30 @@ class Lock(object):
         """
         self.redis = redis
         self.name = name
-        self.acquired_until = None
+        self.acquired = False
         self.timeout = timeout
         self.sleep = sleep
         if self.timeout and self.sleep > self.timeout:
             raise LockError("'sleep' must be less than 'timeout'")
-
+        if robust:
+            self.token = uuid.uuid1()
+        else:
+            self.token = 1
+            
     def __enter__(self):
         return self.acquire()
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.release()
+
+    @property
+    def acquired_until(self):
+        ttl = self.redis.ttl(self.name)
+        if ttl == -1 or ttl == None:
+            raise LockError("'{}' has no timeout".format(self.name))
+        if ttl == -2:
+            return None
+        return mod_time.time() + ttl
 
     def acquire(self, blocking=True):
         """
@@ -2277,36 +2289,18 @@ class Lock(object):
         sleep = self.sleep
         timeout = self.timeout
         while 1:
-            unixtime = mod_time.time()
-            if timeout:
-                timeout_at = unixtime + timeout
-            else:
-                timeout_at = Lock.LOCK_FOREVER
-            timeout_at = float(timeout_at)
-            if self.redis.setnx(self.name, timeout_at):
-                self.acquired_until = timeout_at
+            if self.redis.set(self.name, self.token, ex=self.timeout, nx=True):
+                self.acquired = True
                 return True
-            # We want blocking, but didn't acquire the lock
-            # check to see if the current lock is expired
-            existing = float(self.redis.get(self.name) or 1)
-            if existing < unixtime:
-                # the previous lock is expired, attempt to overwrite it
-                existing = float(self.redis.getset(self.name, timeout_at) or 1)
-                if existing < unixtime:
-                    # we successfully acquired the lock
-                    self.acquired_until = timeout_at
-                    return True
             if not blocking:
                 return False
             mod_time.sleep(sleep)
 
     def release(self):
         "Releases the already acquired lock"
-        if self.acquired_until is None:
+        if not self.acquired:
             raise ValueError("Cannot release an unlocked lock")
-        existing = float(self.redis.get(self.name) or 1)
-        # if the lock time is in the future, delete the lock
-        delete_lock = existing >= self.acquired_until
-        self.acquired_until = None
-        if delete_lock:
+        existing = self.redis.get(self.name)
+        self.acquired = False
+        if (existing is not None) and (existing == str(self.token)):
             self.redis.delete(self.name)
