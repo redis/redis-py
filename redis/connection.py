@@ -3,10 +3,18 @@ import os
 import socket
 import sys
 
+from hash_ring import HashRing
+import itertools
+
+if 'gevent.monkey' in sys.modules:
+    from gevent import queue as Queue
+    from gevent.queue import Empty, Full
+else:
+    from redis._compat import Queue, Empty, Full
 
 from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
                            BytesIO, nativestr, basestring,
-                           LifoQueue, Empty, Full)
+                           LifoQueue)
 from redis.exceptions import (
     RedisError,
     ConnectionError,
@@ -626,3 +634,209 @@ class BlockingConnectionPool(object):
                       timeout=self.timeout,
                       connection_class=self.connection_class,
                       queue_class=self.queue_class, **self.connection_kwargs)
+
+
+class ConnectionWrapper(Connection):
+    """
+    A connection wrapper that keeps track of the queue this comes from.
+    This is inspired by pycassa
+
+    It would be simple to implement things like RetryPolicies at this level.
+    """
+
+    def __init__(self, queue, **kwargs):
+        super(ConnectionWrapper, self).__init__(**kwargs)
+        self._queue = queue
+
+    def return_to_queue(self):
+        """
+        Return the connection to its original queue
+        """
+        try:
+            self._queue.put(self)
+        except Queue.Full:
+            self.disconnect()
+
+
+class Shard(object):
+    """
+    The definition of a shard, including the slaves
+    """
+
+    def __init__(self, master, slaves):
+        super(Shard, self).__init__()
+        self.master = master
+        if slaves:
+            self.slaves = itertools.cycle(slaves)
+        else:
+            self.slaves = None
+
+    def __str__(self):
+        """
+        Used by :class:HashRing to compute the ring
+        """
+        return self.master['host']
+
+
+class InvalidCommandException(RedisError):
+    """
+    Raised if you try to run a command that can't be sharded
+    """
+    pass
+
+
+class ShardedMasterSlaveConnectionPool(object):
+    """
+    A connection pool to handle master/slave.
+    """
+
+    # Right now the shard_hint is retrictive as it expects the key to be
+    # the first argument, prevent running the commands
+    # that does not fit this criteria.
+    #
+    # Also prevents commands on multiple keys
+    # this seems really restrictive as you can't run AUTH or SELECT
+    INVALID_COMMANDS = [
+        'KEYS', 'MIGRATE', 'OBJECT', 'RANDOMKEY',
+        'RENAME', 'RENAMENX', 'SCAN',
+        'BITOP', 'MGET', 'MSET', 'MSETNX',
+        'BLPOP', 'BRPOP', 'BRPOPLPUSH', 'RPOPLPUSH',
+        'SDIFF', 'SDIFFSTORE', 'SINTER', 'SINTERSTORE',
+        'SMOVE', 'SUNION', 'SUNIONSTORE',
+        'ZINTERSTORE', 'ZUNIONSTORE',
+        'PSUBSCRIBE', 'PUBSUB', 'PUNSUBSCRIBE', 'SUBSCRIBE', 'UNSUBSCRIBE',
+        'DISCARD', 'EXEC', 'MULTI', 'UNWATCH', 'WATCH',
+        'EVAL', 'EVALSHA', 'SCRIPT EXISTS', 'SCRIPT FLUSH',
+        'SCRIPT KILL', 'SCRIPT LOAD',
+        'AUTH', 'ECHO', 'PING', 'QUIT', 'SELECT'
+    ]
+
+    # A list of commands for which slaves are ok to use
+    SLAVE_OK = [
+        'DUMP', 'EXISTS', 'SORT', 'TTL', 'TYPE',
+        'BITCOUNT', 'GET', 'GETBIT', 'GETRANGE', 'STRLEN',
+        'HEXISTS', 'HGET', 'HGETALL', 'HKEYS', 'HLEN',
+        'HMGET', 'HVAL', 'HSCAN',
+        'LINDEX', 'LLEN', 'LRANGE',
+        'SCARD', 'SISMEMBER', 'SMEMBERS', 'SRANDMEMBER', 'SSCAN',
+        'ZCARD', 'ZCOUNT', 'ZRANGE', 'ZRANGEBYSCORE', 'ZRANK',
+        'ZREVRANGE', 'ZREVRANK', 'ZSCORE', 'ZSCAN'
+    ]
+
+    def __init__(self, servers, connection_class=ConnectionWrapper,
+                 max_connections=None, slave_ok=True, **connection_kwargs):
+        """
+        :param servers: The servers defined like this
+            >>>[
+            >>>    ('master1:port', 'slave1.1:port', 'slave1.2:port'),
+            >>>    ('master2:port', 'slave2.1:port', 'slave2.2:port')
+            >>>]
+        :param connection_class: The connection class to use.
+            It must implement a return_to_queue(self) method to put
+            the connection back in the queue
+        :param max_connections: The maximum number of connections per pool
+        :param slave_ok: True if connecting to slaves is allowed
+        :param connection_kwargs: Other connection parameters.
+            They will be passed as is when instantiating a connection
+        """
+        self.servers = servers
+        self.connection_class = connection_class
+        self.connection_kwargs = connection_kwargs
+        self.slave_ok = slave_ok
+        self.max_connections = max_connections or 1024
+
+        self.pid = os.getpid()
+        self._all_connections = []
+
+        shards = []
+        for shard in servers:
+            shards.append(self._create_shard(shard))
+        self._hash_ring = HashRing(shards)
+
+    def _create_shard(self, shard):
+        master = {
+            'host': shard[0],
+            'queue': self._create_queue()
+        }
+        slaves = []
+        for slave_def in shard[1:]:
+            slaves.append({
+                'host': slave_def,
+                'queue': self._create_queue()
+            })
+        return Shard(master, slaves)
+
+    def _merge_connection_options(self, host):
+        hostname, port = host.split(':')
+        return dict(
+            {'host': hostname, 'port': int(port)}.items() +
+            self.connection_kwargs.items()
+        )
+
+    def _create_queue(self):
+        queue = Queue(self.max_connections)
+        # prefill the queue with None
+        # this is the signal that we need to create one
+        while True:
+            try:
+                queue.put_nowait(None)
+            except Full:
+                break
+        return queue
+
+    def _checkpid(self):
+        ret = True
+        if self.pid != os.getpid():
+            self.disconnect()
+            ret = False
+            self.__init__(self.servers, self.connection_class,
+                          self.max_connections, **self.connection_kwargs)
+        return ret
+
+    def _get_server(self, key, is_slave):
+        shard = self._hash_ring.get_node(key)
+        if is_slave and shard.slaves:
+            return shard.slaves.next()
+        return shard.master
+
+    def get_connection(self, command_name, *keys, **options):
+        """Get a connection from the pool"""
+        if not keys:
+            raise InvalidCommandException(command_name)
+
+        self._checkpid()
+
+        is_slave = options.get('slave_ok', None)
+        if is_slave is None:
+            is_slave = self.slave_ok
+        if is_slave:
+            is_slave = command_name in \
+                ShardedMasterSlaveConnectionPool.SLAVE_OK
+
+        server = self._get_server(keys[0], is_slave)
+
+        connection = server['queue'].get()  # to do timeouts
+        if not connection:
+            # hint that we need to create a connection
+            connection = self.make_connection(server)
+            self._all_connections.append(connection)
+        return connection
+
+    def make_connection(self, server):
+        """Create a new connection"""
+        connection = self.connection_class(
+            server['queue'],
+            **self._merge_connection_options(server['host'])
+        )
+        return connection
+
+    def release(self, connection):
+        """Releases the connection back to the pool"""
+        same_pid = self._checkpid()
+        if same_pid:
+            connection.return_to_queue()
+
+    def disconnect(self):
+        """Disconnect all"""
+        for connection in self._all_connections:
+            connection.disconnect()

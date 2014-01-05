@@ -42,7 +42,8 @@ setup(
     keywords=['Redis', 'key-value store'],
     license='MIT',
     packages=['redis'],
-    tests_require=['pytest'],
+    tests_require=['pytest', 'minimock'],
+    installs_require=['hash_ring'],
     cmdclass={'test': PyTest},
     classifiers=[
         'Development Status :: 5 - Production/Stable',

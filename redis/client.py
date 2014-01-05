@@ -452,10 +452,17 @@ class StrictRedis(object):
 
     #### COMMAND EXECUTION AND PROTOCOL PARSING ####
     def execute_command(self, *args, **options):
-        "Execute a command and return a parsed response"
+        """
+        Execute a command and return a parsed response
+        """
         pool = self.connection_pool
         command_name = args[0]
-        connection = pool.get_connection(command_name, **options)
+        # Assume the first argument is the shard key. this is really crude
+        # better addressed by https://github.com/andymccurdy/redis-py/pull/220
+        keys = []
+        if len(args) > 1:
+            keys = args[1:]
+        connection = pool.get_connection(command_name, *keys, **options)
         try:
             connection.send_command(*args)
             return self.parse_response(connection, command_name, **options)
