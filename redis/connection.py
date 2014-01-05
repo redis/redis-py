@@ -640,8 +640,6 @@ class ConnectionWrapper(Connection):
     """
     A connection wrapper that keeps track of the queue this comes from.
     This is inspired by pycassa
-
-    It would be simple to implement things like RetryPolicies at this level.
     """
 
     def __init__(self, queue, **kwargs):
