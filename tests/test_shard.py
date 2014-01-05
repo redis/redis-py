@@ -10,8 +10,34 @@ from redis import StrictRedis
 from redis.connection import (
     ShardedMasterSlaveConnectionPool,
     Shard,
-    Queue,
-    InvalidCommandException)
+    Queue, Full,
+    InvalidCommandException,
+    ConnectionWrapper)
+
+
+# noinspection PyDocstring,PyMethodMayBeStatic
+class TestConnectionWrapper(object):
+    def test_return_to_queue(self):
+        tracker = minimock.TraceTracker()
+        mocked_queue = minimock.Mock('queue', tracker=tracker)
+        wrapper = ConnectionWrapper(mocked_queue)
+        wrapper.return_to_queue()
+
+        minimock.assert_same_trace(tracker,
+                                   'Called queue.put('
+                                   'Connection<host=localhost,port=6379,db=0>'
+                                   ')')
+
+    def test_return_to_queue_full(self):
+        tracker = minimock.TraceTracker()
+        mocked_queue = minimock.Mock('queue')
+        mocked_queue.put.mock_raises = Full
+
+        wrapper = ConnectionWrapper(mocked_queue)
+        wrapper.disconnect = minimock.Mock('disconnect', tracker=tracker)
+        wrapper.return_to_queue()
+
+        minimock.assert_same_trace(tracker, 'Called disconnect()')
 
 
 # noinspection PyProtectedMember,PyDocstring

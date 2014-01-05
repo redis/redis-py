@@ -654,7 +654,7 @@ class ConnectionWrapper(Connection):
         """
         try:
             self._queue.put(self)
-        except Queue.Full:
+        except Full:
             self.disconnect()
 
 
@@ -800,7 +800,13 @@ class ShardedMasterSlaveConnectionPool(object):
         return shard.master
 
     def get_connection(self, command_name, *keys, **options):
-        """Get a connection from the pool"""
+        """Get a connection from the pool
+        :param command_name: The command to execute
+        :param keys: The arguemts for the command
+        :param options: Other options, only
+            'slave_ok' is used and will override the value from the constructor
+        :return: :class:ConnectionWrapper
+        """
         if not keys:
             raise InvalidCommandException(command_name)
 
@@ -823,7 +829,11 @@ class ShardedMasterSlaveConnectionPool(object):
         return connection
 
     def make_connection(self, server):
-        """Create a new connection"""
+        """Create a new connection
+        :param server: A server definition defined as
+            >>> {'host':'hostname:port', 'queue':Queue}
+        :return: :class:ConnectionWrapper
+        """
         connection = self.connection_class(
             server['queue'],
             **self._merge_connection_options(server['host'])
@@ -831,7 +841,10 @@ class ShardedMasterSlaveConnectionPool(object):
         return connection
 
     def release(self, connection):
-        """Releases the connection back to the pool"""
+        """Releases the connection back to the pool
+        :param connection: The connection to release.
+            Must have a return_to_queue() method
+        """
         same_pid = self._checkpid()
         if same_pid:
             connection.return_to_queue()
