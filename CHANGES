@@ -1,3 +1,5 @@
+* 2.9.1
+    * IPv6 support. Thanks https://github.com/amashinchi
 * 2.9.0
     * Performance improvement for packing commands when using the PythonParser.
       Thanks Guillaume Viot.

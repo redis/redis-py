@@ -263,11 +263,13 @@ class Connection(object):
     def _connect(self):
         "Create a TCP socket connection"
         # in 2.6+ try to use IPv6/4 compatibility, else just original code
-        if hasattr(socket,'create_connection'):
-            return socket.create_connection((self.host, self.port), self.socket_timeout)
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(self.socket_timeout)
-        sock.connect((self.host, self.port))
+        if hasattr(socket, 'create_connection'):
+            sock = socket.create_connection((self.host, self.port),
+                                            self.socket_timeout)
+        else:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(self.socket_timeout)
+            sock.connect((self.host, self.port))
         return sock
 
     def _error_message(self, exception):
