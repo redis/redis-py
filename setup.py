@@ -2,7 +2,9 @@
 import os
 import sys
 
-from redis import __version__
+#this is bad but since this triggers __init__
+# all he deppendencies will be imported before being installed
+#from redis import __version__
 
 try:
     from setuptools import setup
@@ -31,7 +33,7 @@ f.close()
 
 setup(
     name='redis',
-    version=__version__,
+    version='2.8.0',
     description='Python client for Redis key-value store',
     long_description=long_description,
     url='http://github.com/andymccurdy/redis-py',
@@ -43,7 +45,7 @@ setup(
     license='MIT',
     packages=['redis'],
     tests_require=['pytest', 'minimock'],
-    installs_require=['hash_ring'],
+    install_requires=['hash_ring'],
     cmdclass={'test': PyTest},
     classifiers=[
         'Development Status :: 5 - Production/Stable',
