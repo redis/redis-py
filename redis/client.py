@@ -413,7 +413,7 @@ class StrictRedis(object):
         """
         Convenience method for executing the callable `func` as a transaction
         while watching all keys specified in `watches`. The 'func' callable
-        should expect a single arguement which is a Pipeline object.
+        should expect a single argument which is a Pipeline object.
         """
         shard_hint = kwargs.pop('shard_hint', None)
         value_from_callable = kwargs.pop('value_from_callable', False)
@@ -610,7 +610,7 @@ class StrictRedis(object):
     def slaveof(self, host=None, port=None):
         """
         Set the server to be a replicated slave of the instance identified
-        by the ``host`` and ``port``. If called without arguements, the
+        by the ``host`` and ``port``. If called without arguments, the
         instance is promoted to a master instead.
         """
         if host is None and port is None:
