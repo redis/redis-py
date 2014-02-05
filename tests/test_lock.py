@@ -59,3 +59,19 @@ class TestLock(object):
         "If sleep is higher than timeout, it should raise an error"
         with pytest.raises(LockError):
             r.lock('foo', timeout=1, sleep=2)
+
+    def test_extend_lock_time(self, r):
+        with r.lock('foo', timeout=1) as lock:
+            now = time.time()
+            assert now <= lock.acquired_until <= now + 1
+            lock.extend_lock(10)
+            #leave a bit of padding in case extending takes a couple seconds
+            assert now + 5 <= lock.acquired_until <= now + 15
+
+    def test_extend_lock_race(self, r):
+        lock1 = r.lock('foo', timeout=1.5, blocking=False)
+        lock2 = r.lock('foo', timeout=1.5, blocking=False)
+        assert lock1.acquire()
+        time.sleep(2)
+        assert lock2.acquire()
+        assert not lock1.extend_lock(timeout=1.5)
