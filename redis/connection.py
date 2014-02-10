@@ -52,7 +52,7 @@ def parse_url(url, db=None, **kwargs):
     url = urlparse(url)
 
     # We only support redis:// and unix:// schemes.
-    if url.scheme == 'redis':
+    if url.scheme == 'redis' or not url.scheme:
         # Extract the database ID from the path component
         # if it hasn't been given.
         if db is None:
