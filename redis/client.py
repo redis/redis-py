@@ -6,7 +6,8 @@ import warnings
 import time as mod_time
 from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
                            itervalues, izip, long, nativestr, unicode)
-from redis.connection import ConnectionPool, parse_url, UnixDomainSocketConnection
+from redis.connection import (ConnectionPool, parse_url,
+                              UnixDomainSocketConnection)
 from redis.exceptions import (
     ConnectionError,
     DataError,

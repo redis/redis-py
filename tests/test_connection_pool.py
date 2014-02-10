@@ -89,10 +89,10 @@ class TestConnectionPoolFromUrl(TestConnectionPoolCase):
     def test_connection_creation(self):
         connection_info = {'foo': 'bar', 'biz': 'baz'}
         expected_connection_info = {
-            'host':'localhost',
-            'port':8888,
-            'db':1,
-            'password':'12345',
+            'host': 'localhost',
+            'port': 8888,
+            'db': 1,
+            'password': '12345',
         }
         expected_connection_info.update(connection_info)
         pool = self.get_pool(
@@ -105,8 +105,8 @@ class TestConnectionPoolFromUrl(TestConnectionPoolCase):
     def test_connection_creation_unix(self):
         connection_info = {'foo': 'bar', 'biz': 'baz'}
         expected_connection_info = {
-            'path':'/path/to/socket.sock',
-            'db':1,
+            'path': '/path/to/socket.sock',
+            'db': 1,
         }
         expected_connection_info.update(connection_info)
         pool = self.get_pool(
@@ -237,10 +237,10 @@ class TestBlockingConnectionPoolFromUrl(TestBlockingConnectionPool):
     def test_connection_creation(self):
         connection_info = {'foo': 'bar', 'biz': 'baz'}
         expected_connection_info = {
-            'host':'localhost',
-            'port':8888,
-            'db':1,
-            'password':'12345',
+            'host': 'localhost',
+            'port': 8888,
+            'db': 1,
+            'password': '12345',
         }
         expected_connection_info.update(connection_info)
         pool = self.get_pool(
@@ -253,8 +253,8 @@ class TestBlockingConnectionPoolFromUrl(TestBlockingConnectionPool):
     def test_connection_creation_unix(self):
         connection_info = {'foo': 'bar', 'biz': 'baz'}
         expected_connection_info = {
-            'path':'/path/to/socket.sock',
-            'db':1,
+            'path': '/path/to/socket.sock',
+            'db': 1,
         }
         expected_connection_info.update(connection_info)
         pool = self.get_pool(

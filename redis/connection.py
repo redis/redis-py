@@ -61,17 +61,17 @@ def parse_url(url, db=None, **kwargs):
             except (AttributeError, ValueError):
                 db = 0
         url_settings = {
-            'host':url.hostname,
-            'port':int(url.port or 6379),
-            'db':db,
-            'password':url.password,
+            'host': url.hostname,
+            'port': int(url.port or 6379),
+            'db': db,
+            'password': url.password,
         }
     elif url.scheme == 'unix':
         if db is None:
             db = 0
         url_settings = {
-            'unix_socket_path':url.path,
-            'db':db,
+            'unix_socket_path': url.path,
+            'db': db,
         }
     else:
         raise ValueError('only redis:// and unix:// schemes are supported')
