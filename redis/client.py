@@ -5,9 +5,8 @@ import sys
 import warnings
 import time as mod_time
 from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
-                           itervalues, izip, long, nativestr, urlparse,
-                           unicode)
-from redis.connection import ConnectionPool, UnixDomainSocketConnection
+                           itervalues, izip, long, nativestr, unicode)
+from redis.connection import ConnectionPool, parse_url, UnixDomainSocketConnection
 from redis.exceptions import (
     ConnectionError,
     DataError,
@@ -336,27 +335,16 @@ class StrictRedis(object):
         For example::
 
             redis://username:password@localhost:6379/0
+            unix:///path/to/socket.sock
 
-        If ``db`` is None, this method will attempt to extract the database ID
-        from the URL path component.
+        If using a "redis" URL and ``db`` is None, this method will attempt to
+        extract the database ID from the URL path component.  When using a
+        UNIX domain socket URL, ``db`` defaults to 0 if not specified.
 
         Any additional keyword arguments will be passed along to the Redis
         class's initializer.
         """
-        url = urlparse(url)
-
-        # We only support redis:// schemes.
-        assert url.scheme == 'redis' or not url.scheme
-
-        # Extract the database ID from the path component if hasn't been given.
-        if db is None:
-            try:
-                db = int(url.path.replace('/', ''))
-            except (AttributeError, ValueError):
-                db = 0
-
-        return cls(host=url.hostname, port=int(url.port or 6379), db=db,
-                   password=url.password, **kwargs)
+        return cls(**parse_url(url, db=db, **kwargs))
 
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,

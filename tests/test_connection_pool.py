@@ -74,6 +74,68 @@ class TestConnectionPoolCase(object):
         )
 
 
+class TestConnectionPoolFromUrl(TestConnectionPoolCase):
+    def get_pool(self, url=None, db=None, connection_info=None,
+                 max_connections=None):
+        url = url or 'redis://localhost/0'
+        connection_info = connection_info or {'a': 1, 'b': 2, 'c': 3}
+        pool = redis.ConnectionPool.from_url(
+            url, db,
+            connection_class=DummyConnection,
+            max_connections=max_connections,
+            **connection_info)
+        return pool
+
+    def test_connection_creation(self):
+        connection_info = {'foo': 'bar', 'biz': 'baz'}
+        expected_connection_info = {
+            'host':'localhost',
+            'port':8888,
+            'db':1,
+            'password':'12345',
+        }
+        expected_connection_info.update(connection_info)
+        pool = self.get_pool(
+            url='redis://username:12345@localhost:8888/1',
+            connection_info=connection_info
+        )
+        connection = pool.get_connection('_')
+        assert connection.kwargs == expected_connection_info
+
+    def test_connection_creation_unix(self):
+        connection_info = {'foo': 'bar', 'biz': 'baz'}
+        expected_connection_info = {
+            'path':'/path/to/socket.sock',
+            'db':1,
+        }
+        expected_connection_info.update(connection_info)
+        pool = self.get_pool(
+            url='unix:///path/to/socket.sock',
+            db=1,
+            connection_info=connection_info
+        )
+        connection = pool.get_connection('_')
+        assert connection.kwargs == expected_connection_info
+
+    def test_repr_contains_db_info_tcp(self):
+        pool = redis.ConnectionPool.from_url('redis://localhost')
+
+        assert re.match('(.*)<(.*)<(.*)>>', repr(pool)).groups() == (
+            'ConnectionPool',
+            'Connection',
+            'host=localhost,port=6379,db=0',
+        )
+
+    def test_repr_contains_db_info_unix(self):
+        pool = redis.ConnectionPool.from_url('unix:///abc')
+
+        assert re.match('(.*)<(.*)<(.*)>>', repr(pool)).groups() == (
+            'ConnectionPool',
+            'UnixDomainSocketConnection',
+            'path=/abc,db=0',
+        )
+
+
 class TestBlockingConnectionPool(object):
     def get_pool(self, connection_info=None, max_connections=10, timeout=20):
         connection_info = connection_info or {'a': 1, 'b': 2, 'c': 3}
@@ -159,6 +221,69 @@ class TestBlockingConnectionPool(object):
         )
 
 
+class TestBlockingConnectionPoolFromUrl(TestBlockingConnectionPool):
+    def get_pool(self, url=None, db=None, connection_info=None,
+                 max_connections=10, timeout=20):
+        url = url or 'redis://localhost/0'
+        connection_info = connection_info or {'a': 1, 'b': 2, 'c': 3}
+        pool = redis.BlockingConnectionPool.from_url(
+            url, db,
+            connection_class=DummyConnection,
+            max_connections=max_connections,
+            timeout=timeout,
+            **connection_info)
+        return pool
+
+    def test_connection_creation(self):
+        connection_info = {'foo': 'bar', 'biz': 'baz'}
+        expected_connection_info = {
+            'host':'localhost',
+            'port':8888,
+            'db':1,
+            'password':'12345',
+        }
+        expected_connection_info.update(connection_info)
+        pool = self.get_pool(
+            url='redis://username:12345@localhost:8888/1',
+            connection_info=connection_info
+        )
+        connection = pool.get_connection('_')
+        assert connection.kwargs == expected_connection_info
+
+    def test_connection_creation_unix(self):
+        connection_info = {'foo': 'bar', 'biz': 'baz'}
+        expected_connection_info = {
+            'path':'/path/to/socket.sock',
+            'db':1,
+        }
+        expected_connection_info.update(connection_info)
+        pool = self.get_pool(
+            url='unix:///path/to/socket.sock',
+            db=1,
+            connection_info=connection_info
+        )
+        connection = pool.get_connection('_')
+        assert connection.kwargs == expected_connection_info
+
+    def test_repr_contains_db_info_tcp(self):
+        pool = redis.BlockingConnectionPool.from_url('redis://localhost')
+
+        assert re.match('(.*)<(.*)<(.*)>>', repr(pool)).groups() == (
+            'BlockingConnectionPool',
+            'Connection',
+            'host=localhost,port=6379,db=0',
+        )
+
+    def test_repr_contains_db_info_unix(self):
+        pool = redis.BlockingConnectionPool.from_url('unix:///abc')
+
+        assert re.match('(.*)<(.*)<(.*)>>', repr(pool)).groups() == (
+            'BlockingConnectionPool',
+            'UnixDomainSocketConnection',
+            'path=/abc,db=0',
+        )
+
+
 class TestConnection(object):
     def test_on_connect_error(self):
         """
@@ -174,3 +299,23 @@ class TestConnection(object):
         pool = bad_connection.connection_pool
         assert len(pool._available_connections) == 1
         assert not pool._available_connections[0]._sock
+
+    def test_connect_from_url_tcp(self):
+        connection = redis.Redis.from_url('redis://localhost')
+        pool = connection.connection_pool
+
+        assert re.match('(.*)<(.*)<(.*)>>', repr(pool)).groups() == (
+            'ConnectionPool',
+            'Connection',
+            'host=localhost,port=6379,db=0',
+        )
+
+    def test_connect_from_url_unix(self):
+        connection = redis.Redis.from_url('unix:///path/to/socket')
+        pool = connection.connection_pool
+
+        assert re.match('(.*)<(.*)<(.*)>>', repr(pool)).groups() == (
+            'ConnectionPool',
+            'UnixDomainSocketConnection',
+            'path=/path/to/socket,db=0',
+        )
