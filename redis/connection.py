@@ -200,6 +200,11 @@ class HiredisParser(BaseParser):
             response = self._reader.gets()
         if isinstance(response, ResponseError):
             response = self.parse_error(response.args[0])
+        # hiredis only knows about ResponseErrors.
+        # self.parse_error() might turn the exception into a ConnectionError
+        # which needs raising.
+        if isinstance(response, ConnectionError):
+            raise response
         return response
 
 if HIREDIS_AVAILABLE:

@@ -7,6 +7,10 @@ import re
 
 from threading import Thread
 from redis._compat import Queue
+from .conftest import skip_if_server_version_lt
+
+# won't need this after next version of pytest
+from distutils.version import StrictVersion
 
 
 class DummyConnection(object):
@@ -165,12 +169,25 @@ class TestConnection(object):
         An error in Connection.on_connect should disconnect from the server
         see for details: https://github.com/andymccurdy/redis-py/issues/368
         """
-        # this assumed the Redis server being tested against doesn't have
+        # this assumes the Redis server being tested against doesn't have
         # 9999 databases ;)
         bad_connection = redis.Redis(db=9999)
         # an error should be raised on connect
         with pytest.raises(redis.RedisError):
             bad_connection.info()
         pool = bad_connection.connection_pool
+        assert len(pool._available_connections) == 1
+        assert not pool._available_connections[0]._sock
+
+    # NOTE: Increment this version # when the DEBUG ERROR patch releases
+    @skip_if_server_version_lt('2.8.7')
+    def test_busy_loading_disconnects_socket(self, r):
+        """
+        If Redis raises a LOADING error, the connection should be
+        disconnected and a BusyLoadingError raised
+        """
+        with pytest.raises(redis.BusyLoadingError):
+            r.execute_command('DEBUG', 'ERROR', 'LOADING fake message')
+        pool = r.connection_pool
         assert len(pool._available_connections) == 1
         assert not pool._available_connections[0]._sock
