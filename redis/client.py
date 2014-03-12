@@ -1670,8 +1670,8 @@ class Redis(StrictRedis):
     RESPONSE_CALLBACKS = dict_merge(
         StrictRedis.RESPONSE_CALLBACKS,
         {
-            'TTL': lambda r: r != -1 and r or None,
-            'PTTL': lambda r: r != -1 and r or None,
+            'TTL': lambda r: r >= 0 and r or None,
+            'PTTL': lambda r: r >= 0 and r or None,
         }
     )
 
