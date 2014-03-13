@@ -1,12 +1,29 @@
 #!/usr/bin/env python
 import os
+import sys
 
 from redis import __version__
 
 try:
     from setuptools import setup
+    from setuptools.command.test import test as TestCommand
+
+    class PyTest(TestCommand):
+        def finalize_options(self):
+            TestCommand.finalize_options(self)
+            self.test_args = []
+            self.test_suite = True
+
+        def run_tests(self):
+            #import here, cause outside the eggs aren't loaded
+            import pytest
+            errno = pytest.main(self.test_args)
+            sys.exit(errno)
+
 except ImportError:
+
     from distutils.core import setup
+    PyTest = lambda x: x
 
 f = open(os.path.join(os.path.dirname(__file__), 'README.rst'))
 long_description = f.read()
@@ -25,7 +42,8 @@ setup(
     keywords=['Redis', 'key-value store'],
     license='MIT',
     packages=['redis'],
-    test_suite='tests.all_tests',
+    tests_require=['pytest'],
+    cmdclass={'test': PyTest},
     classifiers=[
         'Development Status :: 5 - Production/Stable',
         'Environment :: Console',

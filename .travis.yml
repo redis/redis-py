@@ -4,7 +4,8 @@ python:
   - "3.2"
   - "2.7"
   - "2.6"
-  - "2.5"
+services:
+  - redis-server
 env:
   - TEST_HIREDIS=0
   - TEST_HIREDIS=1
@@ -19,6 +20,3 @@ matrix:
       env: TEST_PEP8=1
     - python: "3.3"
       env: TEST_PEP8=1
-  exclude:
-    - python: "2.5"
-      env: TEST_HIREDIS=1

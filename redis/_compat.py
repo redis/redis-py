@@ -6,6 +6,7 @@ if sys.version_info[0] < 3:
     from urlparse import urlparse
     from itertools import imap, izip
     from string import letters as ascii_letters
+    from Queue import Queue
     try:
         from cStringIO import StringIO as BytesIO
     except ImportError:
@@ -30,6 +31,7 @@ else:
     from urllib.parse import urlparse
     from io import BytesIO
     from string import ascii_letters
+    from queue import Queue
 
     iteritems = lambda x: iter(x.items())
     iterkeys = lambda x: iter(x.keys())

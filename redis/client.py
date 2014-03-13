@@ -5,8 +5,9 @@ import sys
 import warnings
 import threading
 import time as mod_time
-from redis._compat import (b, izip, imap, iteritems, iterkeys, itervalues,
-                           basestring, long, nativestr, urlparse, bytes)
+from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
+                           itervalues, izip, long, nativestr, urlparse,
+                           unicode)
 from redis.connection import ConnectionPool, UnixDomainSocketConnection
 from redis.exceptions import (
     ConnectionError,
@@ -106,15 +107,74 @@ def parse_info(response):
 
     for line in response.splitlines():
         if line and not line.startswith('#'):
-            key, value = line.split(':')
+            key, value = line.split(':', 1)
             info[key] = get_value(value)
     return info
+
+
+SENTINEL_STATE_TYPES = {
+    'can-failover-its-master': int,
+    'info-refresh': int,
+    'last-hello-message': int,
+    'last-ok-ping-reply': int,
+    'last-ping-reply': int,
+    'master-link-down-time': int,
+    'master-port': int,
+    'num-other-sentinels': int,
+    'num-slaves': int,
+    'o-down-time': int,
+    'pending-commands': int,
+    'port': int,
+    'quorum': int,
+    's-down-time': int,
+    'slave-priority': int,
+}
+
+
+def parse_sentinel_state(item):
+    result = pairs_to_dict_typed(item, SENTINEL_STATE_TYPES)
+    flags = set(result['flags'].split(','))
+    for name, flag in (('is_master', 'master'), ('is_slave', 'slave'),
+                       ('is_sdown', 's_down'), ('is_odown', 'o_down'),
+                       ('is_sentinel', 'sentinel'),
+                       ('is_disconnected', 'disconnected'),
+                       ('is_master_down', 'master_down')):
+        result[name] = flag in flags
+    return result
+
+
+def parse_sentinel(response, **options):
+    "Parse the result of Redis's SENTINEL command"
+    parse = options.get('parse')
+    if parse == 'SENTINEL_INFO':
+        return [parse_sentinel_state(item) for item in response]
+    elif parse == 'SENTINEL_INFO_MASTERS':
+        result = {}
+        for item in response:
+            state = parse_sentinel_state(item)
+            result[state['name']] = state
+        return result
+    elif parse == 'SENTINEL_ADDR_PORT':
+        if response is None:
+            return
+        return response[0], int(response[1])
+    return response
 
 
 def pairs_to_dict(response):
     "Create a dict given a list of key/value pairs"
     it = iter(response)
     return dict(izip(it, it))
+
+
+def pairs_to_dict_typed(response, type_info):
+    it = iter(response)
+    result = {}
+    for key, value in izip(it, it):
+        if key in type_info:
+            value = type_info[key](value)
+        result[key] = value
+    return result
 
 
 def zset_score_pairs(response, **options):
@@ -183,6 +243,21 @@ def parse_script(response, **options):
     return response
 
 
+def parse_scan(response, **options):
+    return response
+
+
+def parse_hscan(response, **options):
+    cursor, r = response
+    return cursor, r and pairs_to_dict(r) or {}
+
+
+def parse_zscan(response, **options):
+    score_cast_func = options.get('score_cast_func', float)
+    it = iter(response[1])
+    return [response[0], list(izip(it, imap(score_cast_func, it)))]
+
+
 class StrictRedis(object):
     """
     Implementation of the Redis protocol.
@@ -245,8 +320,13 @@ class StrictRedis(object):
             'PING': lambda r: nativestr(r) == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
             'SCRIPT': parse_script,
-            'SET': lambda r: r and nativestr(r) == 'OK' or None,
-            'TIME': lambda x: (int(x[0]), int(x[1]))
+            'SET': lambda r: r and nativestr(r) == 'OK',
+            'TIME': lambda x: (int(x[0]), int(x[1])),
+            'SENTINEL': parse_sentinel,
+            'SCAN': parse_scan,
+            'SSCAN': parse_scan,
+            'HSCAN': parse_hscan,
+            'ZSCAN': parse_zscan
         }
     )
 
@@ -295,7 +375,7 @@ class StrictRedis(object):
                 'decode_responses': decode_responses,
             }
             # based on input, setup appropriate connection args
-            if unix_socket_path:
+            if unix_socket_path is not None:
                 kwargs.update({
                     'path': unix_socket_path,
                     'connection_class': UnixDomainSocketConnection
@@ -309,6 +389,9 @@ class StrictRedis(object):
         self.connection_pool = connection_pool
 
         self.response_callbacks = self.__class__.RESPONSE_CALLBACKS.copy()
+
+    def __repr__(self):
+        return "%s<%s>" % (type(self).__name__, repr(self.connection_pool))
 
     def set_response_callback(self, command, callback):
         "Set a custom Response Callback"
@@ -332,7 +415,7 @@ class StrictRedis(object):
         """
         Convenience method for executing the callable `func` as a transaction
         while watching all keys specified in `watches`. The 'func' callable
-        should expect a single arguement which is a Pipeline object.
+        should expect a single argument which is a Pipeline object.
         """
         shard_hint = kwargs.pop('shard_hint', None)
         value_from_callable = kwargs.pop('value_from_callable', False)
@@ -428,25 +511,17 @@ class StrictRedis(object):
         "Set config item ``name`` with ``value``"
         return self.execute_command('CONFIG', 'SET', name, value, parse='SET')
 
+    def config_resetstat(self):
+        "Reset runtime statistics"
+        return self.execute_command('CONFIG', 'RESETSTAT', parse='RESETSTAT')
+
     def dbsize(self):
         "Returns the number of keys in the current database"
         return self.execute_command('DBSIZE')
 
-    def time(self):
-        """
-        Returns the server time as a 2-item tuple of ints:
-        (seconds since epoch, microseconds into this second).
-        """
-        return self.execute_command('TIME')
-
     def debug_object(self, key):
         "Returns version specific metainformation about a give key"
         return self.execute_command('DEBUG', 'OBJECT', key)
-
-    def delete(self, *names):
-        "Delete one or more keys specified by ``names``"
-        return self.execute_command('DEL', *names)
-    __delitem__ = delete
 
     def echo(self, value):
         "Echo the string back from the server"
@@ -497,6 +572,34 @@ class StrictRedis(object):
         """
         return self.execute_command('SAVE')
 
+    def sentinel(self, *args):
+        "Redis Sentinel's SENTINEL command"
+        if args[0] in ['masters', 'slaves', 'sentinels']:
+            parse = 'SENTINEL_INFO'
+        else:
+            parse = 'SENTINEL'
+        return self.execute_command('SENTINEL', *args, **{'parse': parse})
+
+    def sentinel_masters(self):
+        "Returns a dictionary containing the master's state."
+        return self.execute_command('SENTINEL', 'masters',
+                                    parse='SENTINEL_INFO_MASTERS')
+
+    def sentinel_slaves(self, service_name):
+        "Returns a list of slaves for ``service_name``"
+        return self.execute_command('SENTINEL', 'slaves', service_name,
+                                    parse='SENTINEL_INFO')
+
+    def sentinel_sentinels(self, service_name):
+        "Returns a list of sentinels for ``service_name``"
+        return self.execute_command('SENTINEL', 'sentinels', service_name,
+                                    parse='SENTINEL_INFO')
+
+    def sentinel_get_master_addr_by_name(self, service_name):
+        "Returns a (host, port) pair for the given ``service_name``"
+        return self.execute_command('SENTINEL', 'get-master-addr-by-name',
+                                    service_name, parse='SENTINEL_ADDR_PORT')
+
     def shutdown(self):
         "Shutdown the server"
         try:
@@ -509,12 +612,19 @@ class StrictRedis(object):
     def slaveof(self, host=None, port=None):
         """
         Set the server to be a replicated slave of the instance identified
-        by the ``host`` and ``port``. If called without arguements, the
+        by the ``host`` and ``port``. If called without arguments, the
         instance is promoted to a master instead.
         """
         if host is None and port is None:
             return self.execute_command("SLAVEOF", "NO", "ONE")
         return self.execute_command("SLAVEOF", host, port)
+
+    def time(self):
+        """
+        Returns the server time as a 2-item tuple of ints:
+        (seconds since epoch, microseconds into this second).
+        """
+        return self.execute_command('TIME')
 
     #### BASIC KEY COMMANDS ####
     def append(self, key, value):
@@ -524,13 +634,6 @@ class StrictRedis(object):
         Returns the new length of the value at ``key``.
         """
         return self.execute_command('APPEND', key, value)
-
-    def getrange(self, key, start, end):
-        """
-        Returns the substring of the string value stored at ``key``,
-        determined by the offsets ``start`` and ``end`` (both are inclusive)
-        """
-        return self.execute_command('GETRANGE', key, start, end)
 
     def bitcount(self, key, start=None, end=None):
         """
@@ -559,6 +662,20 @@ class StrictRedis(object):
         the value will be initialized as 0 - ``amount``
         """
         return self.execute_command('DECRBY', name, amount)
+
+    def delete(self, *names):
+        "Delete one or more keys specified by ``names``"
+        return self.execute_command('DEL', *names)
+
+    def __delitem__(self, name):
+        self.delete(name)
+
+    def dump(self, name):
+        """
+        Return a serialized version of the value stored at the specified key.
+        If key does not exist a nil bulk reply is returned.
+        """
+        return self.execute_command('DUMP', name)
 
     def exists(self, name):
         "Returns a boolean indicating whether key ``name`` exists"
@@ -603,6 +720,13 @@ class StrictRedis(object):
         "Returns a boolean indicating the value of ``offset`` in ``name``"
         return self.execute_command('GETBIT', name, offset)
 
+    def getrange(self, key, start, end):
+        """
+        Returns the substring of the string value stored at ``key``,
+        determined by the offsets ``start`` and ``end`` (both are inclusive)
+        """
+        return self.execute_command('GETRANGE', key, start, end)
+
     def getset(self, name, value):
         """
         Set the value at key ``name`` to ``value`` if key doesn't exist
@@ -645,20 +769,33 @@ class StrictRedis(object):
         args = list_or_args(keys, args)
         return self.execute_command('MGET', *args)
 
-    def mset(self, mapping):
-        "Sets each key in the ``mapping`` dict to its corresponding value"
+    def mset(self, *args, **kwargs):
+        """
+        Sets key/values based on a mapping. Mapping can be supplied as a single
+        dictionary argument or as kwargs.
+        """
+        if args:
+            if len(args) != 1 or not isinstance(args[0], dict):
+                raise RedisError('MSET requires **kwargs or a single dict arg')
+            kwargs.update(args[0])
         items = []
-        for pair in iteritems(mapping):
+        for pair in iteritems(kwargs):
             items.extend(pair)
         return self.execute_command('MSET', *items)
 
-    def msetnx(self, mapping):
+    def msetnx(self, *args, **kwargs):
         """
-        Sets each key in the ``mapping`` dict to its corresponding value if
-        none of the keys are already set
+        Sets key/values based on a mapping if none of the keys are already set.
+        Mapping can be supplied as a single dictionary argument or as kwargs.
+        Returns a boolean indicating if the operation was successful.
         """
+        if args:
+            if len(args) != 1 or not isinstance(args[0], dict):
+                raise RedisError('MSETNX requires **kwargs or a single '
+                                 'dict arg')
+            kwargs.update(args[0])
         items = []
-        for pair in iteritems(mapping):
+        for pair in iteritems(kwargs):
             items.extend(pair)
         return self.execute_command('MSETNX', *items)
 
@@ -721,6 +858,13 @@ class StrictRedis(object):
         "Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist"
         return self.execute_command('RENAMENX', src, dst)
 
+    def restore(self, name, ttl, value):
+        """
+        Create a key using the provided serialized value, previously obtained
+        using DUMP.
+        """
+        return self.execute_command('RESTORE', name, ttl, value)
+
     def set(self, name, value, ex=None, px=None, nx=False, xx=False):
         """
         Set the value at key ``name`` to ``value``
@@ -753,7 +897,9 @@ class StrictRedis(object):
         if xx:
             pieces.append('XX')
         return self.execute_command('SET', *pieces)
-    __setitem__ = set
+
+    def __setitem__(self, name, value):
+        self.set(name, value)
 
     def setbit(self, name, offset, value):
         """
@@ -1033,6 +1179,71 @@ class StrictRedis(object):
         options = {'groups': len(get) if groups else None}
         return self.execute_command('SORT', *pieces, **options)
 
+    #### SCAN COMMANDS ####
+    def scan(self, cursor=0, match=None, count=None):
+        """
+        Scan and return (nextcursor, keys)
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+        """
+        pieces = [cursor]
+        if match is not None:
+            pieces.extend(['MATCH', match])
+        if count is not None:
+            pieces.extend(['COUNT', count])
+        return self.execute_command('SCAN', *pieces)
+
+    def sscan(self, name, cursor=0, match=None, count=None):
+        """
+        Scan and return (nextcursor, members_of_set)
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+        """
+        pieces = [name, cursor]
+        if match is not None:
+            pieces.extend(['MATCH', match])
+        if count is not None:
+            pieces.extend(['COUNT', count])
+        return self.execute_command('SSCAN', *pieces)
+
+    def hscan(self, name, cursor=0, match=None, count=None):
+        """
+        Scan and return (nextcursor, dict)
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+        """
+        pieces = [name, cursor]
+        if match is not None:
+            pieces.extend(['MATCH', match])
+        if count is not None:
+            pieces.extend(['COUNT', count])
+        return self.execute_command('HSCAN', *pieces)
+
+    def zscan(self, name, cursor=0, match=None, count=None,
+              score_cast_func=float):
+        """
+        Scan and return (nextcursor, pairs)
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+
+        ``score_cast_func`` a callable used to cast the score return value
+        """
+        pieces = [name, cursor]
+        if match is not None:
+            pieces.extend(['MATCH', match])
+        if count is not None:
+            pieces.extend(['COUNT', count])
+        options = {'score_cast_func': score_cast_func}
+        return self.execute_command('ZSCAN', *pieces, **options)
+
     #### SET COMMANDS ####
     def sadd(self, name, *values):
         "Add ``value(s)`` to set ``name``"
@@ -1100,7 +1311,7 @@ class StrictRedis(object):
         return self.execute_command('SREM', name, *values)
 
     def sunion(self, keys, *args):
-        "Return the union of sets specifiued by ``keys``"
+        "Return the union of sets specified by ``keys``"
         args = list_or_args(keys, args)
         return self.execute_command('SUNION', *args)
 
@@ -1140,6 +1351,10 @@ class StrictRedis(object):
         return self.execute_command('ZCARD', name)
 
     def zcount(self, name, min, max):
+        """
+        Returns the number of elements in the sorted set at key ``name`` with
+        a score between ``min`` and ``max``.
+        """
         return self.execute_command('ZCOUNT', name, min, max)
 
     def zincrby(self, name, value, amount=1):
@@ -1232,20 +1447,20 @@ class StrictRedis(object):
         """
         return self.execute_command('ZREMRANGEBYSCORE', name, min, max)
 
-    def zrevrange(self, name, start, num, withscores=False,
+    def zrevrange(self, name, start, end, withscores=False,
                   score_cast_func=float):
         """
         Return a range of values from sorted set ``name`` between
-        ``start`` and ``num`` sorted in descending order.
+        ``start`` and ``end`` sorted in descending order.
 
-        ``start`` and ``num`` can be negative, indicating the end of the range.
+        ``start`` and ``end`` can be negative, indicating the end of the range.
 
         ``withscores`` indicates to return the scores along with the values
         The return type is a list of (value, score) pairs
 
         ``score_cast_func`` a callable used to cast the score return value
         """
-        pieces = ['ZREVRANGE', name, start, num]
+        pieces = ['ZREVRANGE', name, start, end]
         if withscores:
             pieces.append('withscores')
         options = {
@@ -1363,8 +1578,8 @@ class StrictRedis(object):
 
     def hmset(self, name, mapping):
         """
-        Sets each key in the ``mapping`` dict to its corresponding value
-        in the hash ``name``
+        Set key to value within hash ``name`` for each corresponding
+        key and value from the ``mapping`` dict.
         """
         if not mapping:
             raise DataError("'hmset' with 'mapping' of length 0")
@@ -1391,7 +1606,7 @@ class StrictRedis(object):
 
     def eval(self, script, numkeys, *keys_and_args):
         """
-        Execute the LUA ``script``, specifying the ``numkeys`` the script
+        Execute the Lua ``script``, specifying the ``numkeys`` the script
         will touch and the key names and argument values in ``keys_and_args``.
         Returns the result of the script.
 
@@ -1402,7 +1617,7 @@ class StrictRedis(object):
 
     def evalsha(self, sha, numkeys, *keys_and_args):
         """
-        Use the ``sha`` to execute a LUA script already registered via EVAL
+        Use the ``sha`` to execute a Lua script already registered via EVAL
         or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
         key names and argument values in ``keys_and_args``. Returns the result
         of the script.
@@ -1427,21 +1642,21 @@ class StrictRedis(object):
         return self.execute_command('SCRIPT', 'FLUSH', **options)
 
     def script_kill(self):
-        "Kill the currently executing LUA script"
+        "Kill the currently executing Lua script"
         options = {'parse': 'KILL'}
         return self.execute_command('SCRIPT', 'KILL', **options)
 
     def script_load(self, script):
-        "Load a LUA ``script`` into the script cache. Returns the SHA."
+        "Load a Lua ``script`` into the script cache. Returns the SHA."
         options = {'parse': 'LOAD'}
         return self.execute_command('SCRIPT', 'LOAD', script, **options)
 
     def register_script(self, script):
         """
-        Register a LUA ``script`` specifying the ``keys`` it will touch.
+        Register a Lua ``script`` specifying the ``keys`` it will touch.
         Returns a Script object that is callable and hides the complexity of
         deal with scripts, keys, and shas. This is the preferred way to work
-        with LUA scripts.
+        with Lua scripts.
         """
         return Script(self, script)
 
@@ -1574,7 +1789,7 @@ class PubSub(object):
     @property
     def subscribed(self):
         "Indicates if there are subscriptions to any channels or patterns"
-        return bool(self.subsciption_count or self.channels or self.patterns)
+        return bool(self.subscription_count or self.channels or self.patterns)
 
     def execute_command(self, *args, **kwargs):
         "Execute a publish/subscribe command"
@@ -1892,15 +2107,25 @@ class BasePipeline(object):
             starmap(connection.pack_command,
                     [args for args, options in cmds]))
         connection.send_packed_command(all_cmds)
-        # parse off the response for MULTI
-        self.parse_response(connection, '_')
-        # and all the other commands
         errors = []
-        for i, _ in enumerate(commands):
+
+        # parse off the response for MULTI
+        # NOTE: we need to handle ResponseErrors here and continue
+        # so that we read all the additional command messages from
+        # the socket
+        try:
+            self.parse_response(connection, '_')
+        except ResponseError:
+            errors.append((0, sys.exc_info()[1]))
+
+        # and all the other commands
+        for i, command in enumerate(commands):
             try:
                 self.parse_response(connection, '_')
             except ResponseError:
-                errors.append((i, sys.exc_info()[1]))
+                ex = sys.exc_info()[1]
+                self.annotate_exception(ex, i + 1, command[0])
+                errors.append((i, ex))
 
         # parse the EXEC.
         try:
@@ -1920,12 +2145,13 @@ class BasePipeline(object):
             response.insert(i, e)
 
         if len(response) != len(commands):
+            self.connection.disconnect()
             raise ResponseError("Wrong number of response items from "
                                 "pipeline execution")
 
         # find any errors in the response and raise if necessary
         if raise_on_error:
-            self.raise_first_error(response)
+            self.raise_first_error(commands, response)
 
         # We have to run response callbacks manually
         data = []
@@ -1954,13 +2180,20 @@ class BasePipeline(object):
                 response.append(sys.exc_info()[1])
 
         if raise_on_error:
-            self.raise_first_error(response)
+            self.raise_first_error(commands, response)
         return response
 
-    def raise_first_error(self, response):
-        for r in response:
+    def raise_first_error(self, commands, response):
+        for i, r in enumerate(response):
             if isinstance(r, ResponseError):
+                self.annotate_exception(r, i + 1, commands[i][0])
                 raise r
+
+    def annotate_exception(self, exception, number, command):
+        cmd = unicode(' ').join(imap(unicode, command))
+        msg = unicode('Command # %d (%s) of pipeline caused error: %s') % (
+            number, cmd, unicode(exception.args[0]))
+        exception.args = (msg,) + exception.args[1:]
 
     def parse_response(self, connection, command_name, **options):
         result = StrictRedis.parse_response(
@@ -1984,9 +2217,11 @@ class BasePipeline(object):
 
     def execute(self, raise_on_error=True):
         "Execute all the commands in the current pipeline"
+        stack = self.command_stack
+        if not stack:
+            return []
         if self.scripts:
             self.load_scripts()
-        stack = self.command_stack
         if self.transaction or self.explicit_transaction:
             execute = self._execute_transaction
         else:
@@ -2044,7 +2279,7 @@ class Pipeline(BasePipeline, Redis):
 
 
 class Script(object):
-    "An executable LUA script object returned by ``register_script``"
+    "An executable Lua script object returned by ``register_script``"
 
     def __init__(self, registered_client, script):
         self.registered_client = registered_client
@@ -2126,7 +2361,7 @@ class Lock(object):
         sleep = self.sleep
         timeout = self.timeout
         while 1:
-            unixtime = int(mod_time.time())
+            unixtime = mod_time.time()
             if timeout:
                 timeout_at = unixtime + timeout
             else:
@@ -2155,6 +2390,7 @@ class Lock(object):
             raise ValueError("Cannot release an unlocked lock")
         existing = float(self.redis.get(self.name) or 1)
         # if the lock time is in the future, delete the lock
-        if existing >= self.acquired_until:
-            self.redis.delete(self.name)
+        delete_lock = existing >= self.acquired_until
         self.acquired_until = None
+        if delete_lock:
+            self.redis.delete(self.name)
