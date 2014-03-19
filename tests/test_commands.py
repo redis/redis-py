@@ -641,12 +641,30 @@ class TestRedisCommands(object):
         assert set(keys) == set([b('a')])
 
     @skip_if_server_version_lt('2.8.0')
+    def test_scan_iter(self, r):
+        r.set('a', 1)
+        r.set('b', 2)
+        r.set('c', 3)
+        keys = list(r.scan_iter())
+        assert set(keys) == set([b('a'), b('b'), b('c')])
+        keys = list(r.scan_iter(match='a'))
+        assert set(keys) == set([b('a')])
+
+    @skip_if_server_version_lt('2.8.0')
     def test_sscan(self, r):
         r.sadd('a', 1, 2, 3)
         cursor, members = r.sscan('a')
         assert cursor == b('0')
         assert set(members) == set([b('1'), b('2'), b('3')])
         _, members = r.sscan('a', match=b('1'))
+        assert set(members) == set([b('1')])
+
+    @skip_if_server_version_lt('2.8.0')
+    def test_sscan_iter(self, r):
+        r.sadd('a', 1, 2, 3)
+        members = list(r.sscan_iter('a'))
+        assert set(members) == set([b('1'), b('2'), b('3')])
+        members = list(r.sscan_iter('a', match=b('1')))
         assert set(members) == set([b('1')])
 
     @skip_if_server_version_lt('2.8.0')
@@ -659,12 +677,28 @@ class TestRedisCommands(object):
         assert dic == {b('a'): b('1')}
 
     @skip_if_server_version_lt('2.8.0')
+    def test_hscan_iter(self, r):
+        r.hmset('a', {'a': 1, 'b': 2, 'c': 3})
+        dic = dict(r.hscan_iter('a'))
+        assert dic == {b('a'): b('1'), b('b'): b('2'), b('c'): b('3')}
+        dic = dict(r.hscan_iter('a', match='a'))
+        assert dic == {b('a'): b('1')}
+
+    @skip_if_server_version_lt('2.8.0')
     def test_zscan(self, r):
         r.zadd('a', 'a', 1, 'b', 2, 'c', 3)
         cursor, pairs = r.zscan('a')
         assert cursor == b('0')
         assert set(pairs) == set([(b('a'), 1), (b('b'), 2), (b('c'), 3)])
         _, pairs = r.zscan('a', match='a')
+        assert set(pairs) == set([(b('a'), 1)])
+
+    @skip_if_server_version_lt('2.8.0')
+    def test_zscan_iter(self, r):
+        r.zadd('a', 'a', 1, 'b', 2, 'c', 3)
+        pairs = list(r.zscan_iter('a'))
+        assert set(pairs) == set([(b('a'), 1), (b('b'), 2), (b('c'), 3)])
+        pairs = list(r.zscan_iter('a', match='a'))
         assert set(pairs) == set([(b('a'), 1)])
 
     ### SET COMMANDS ###

@@ -1193,6 +1193,20 @@ class StrictRedis(object):
             pieces.extend(['COUNT', count])
         return self.execute_command('SCAN', *pieces)
 
+    def scan_iter(self, match=None, count=None):
+        """
+        Make a iterator using scan.
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+        """
+        cursor = 0
+        while cursor != '0':
+            cursor, data = self.scan(cursor=cursor, match=match, count=count)
+            for _ in data:
+                yield _
+
     def sscan(self, name, cursor=0, match=None, count=None):
         """
         Scan and return (nextcursor, members_of_set)
@@ -1208,6 +1222,21 @@ class StrictRedis(object):
             pieces.extend(['COUNT', count])
         return self.execute_command('SSCAN', *pieces)
 
+    def sscan_iter(self, name, match=None, count=None):
+        """
+        Make a iterator using sscan. Iterates over set members.
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+        """
+        cursor = 0
+        while cursor != '0':
+            cursor, data = self.sscan(name, cursor=cursor,
+                                      match=match, count=count)
+            for _ in data:
+                yield _
+
     def hscan(self, name, cursor=0, match=None, count=None):
         """
         Scan and return (nextcursor, dict)
@@ -1222,6 +1251,21 @@ class StrictRedis(object):
         if count is not None:
             pieces.extend(['COUNT', count])
         return self.execute_command('HSCAN', *pieces)
+
+    def hscan_iter(self, name, match=None, count=None):
+        """
+        Make a iterator using hscan. Iterates over key/value pairs.
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+        """
+        cursor = 0
+        while cursor != '0':
+            cursor, data = self.hscan(name, cursor=cursor,
+                                      match=match, count=count)
+            for _ in data.items():
+                yield _
 
     def zscan(self, name, cursor=0, match=None, count=None,
               score_cast_func=float):
@@ -1241,6 +1285,25 @@ class StrictRedis(object):
             pieces.extend(['COUNT', count])
         options = {'score_cast_func': score_cast_func}
         return self.execute_command('ZSCAN', *pieces, **options)
+
+    def zscan_iter(self, name, match=None, count=None,
+                   score_cast_func=float):
+        """
+        Make a iterator using zscan. Iterates over key/score pairs.
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+
+        ``score_cast_func`` a callable used to cast the score return value
+        """
+        cursor = 0
+        while cursor != '0':
+            cursor, data = self.zscan(name, cursor=cursor, match=match,
+                                      count=count,
+                                      score_cast_func=score_cast_func)
+            for _ in data:
+                yield _
 
     #### SET COMMANDS ####
     def sadd(self, name, *values):
