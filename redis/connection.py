@@ -5,6 +5,13 @@ import socket
 import sys
 import threading
 
+try:
+    import ssl
+    ssl_available = True
+    ssl_cert_reqs = ssl.CERT_NONE
+except ImportError:
+    ssl_available = False
+    ssl_cert_reqs = 0
 
 from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
                            BytesIO, nativestr, basestring,
@@ -220,12 +227,19 @@ class Connection(object):
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
-                 parser_class=DefaultParser):
+                 parser_class=DefaultParser,
+                 use_ssl=False, keyfile=None, certfile=None,
+                 cert_reqs=ssl_cert_reqs, ca_certs=None):
         self.pid = os.getpid()
         self.host = host
         self.port = port
         self.db = db
         self.password = password
+        self.use_ssl = use_ssl
+        self.keyfile = keyfile
+        self.certfile = certfile
+        self.ca_certs = ca_certs
+        self.cert_reqs = cert_reqs
         self.socket_timeout = socket_timeout
         self.encoding = encoding
         self.encoding_errors = encoding_errors
@@ -275,6 +289,13 @@ class Connection(object):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(self.socket_timeout)
             sock.connect((self.host, self.port))
+
+        if ssl_available and self.use_ssl:
+            sock = ssl.wrap_socket(sock,
+                                   cert_reqs=self.cert_reqs,
+                                   keyfile=self.keyfile,
+                                   certfile=self.certfile,
+                                   ca_certs=self.ca_certs, )
         return sock
 
     def _error_message(self, exception):

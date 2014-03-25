@@ -18,6 +18,14 @@ from redis.exceptions import (
     ExecAbortError,
 )
 
+try:
+    import ssl
+    ssl_available = True
+    ssl_cert_reqs = ssl.CERT_NONE
+except ImportError:
+    ssl_available = False
+    ssl_cert_reqs = 0
+
 SYM_EMPTY = b('')
 
 
@@ -345,8 +353,12 @@ class StrictRedis(object):
         """
         url = urlparse(url)
 
-        # We only support redis:// schemes.
-        assert url.scheme == 'redis' or not url.scheme
+        # We only support redis:// and resiss:// schemes.
+        assert url.scheme == 'redis' or \
+            url.scheme == 'rediss' or \
+            not url.scheme
+        if url.scheme == 'rediss':
+            kwargs['use_ssl'] = True
 
         # Extract the database ID from the path component if hasn't been given.
         if db is None:
@@ -362,11 +374,18 @@ class StrictRedis(object):
                  db=0, password=None, socket_timeout=None,
                  connection_pool=None, charset='utf-8',
                  errors='strict', decode_responses=False,
-                 unix_socket_path=None):
+                 unix_socket_path=None,
+                 use_ssl=False, keyfile=None, certfile=None,
+                 cert_reqs=ssl_cert_reqs, ca_certs=None):
         if not connection_pool:
             kwargs = {
                 'db': db,
                 'password': password,
+                'keyfile': keyfile,
+                'use_ssl': use_ssl,
+                'certfile': certfile,
+                'ca_certs': ca_certs,
+                'cert_reqs': cert_reqs,
                 'socket_timeout': socket_timeout,
                 'encoding': charset,
                 'encoding_errors': errors,
