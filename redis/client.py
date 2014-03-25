@@ -355,8 +355,8 @@ class StrictRedis(object):
 
         # We only support redis:// and resiss:// schemes.
         assert url.scheme == 'redis' or \
-               url.scheme == 'rediss' or \
-               not url.scheme
+            url.scheme == 'rediss' or \
+            not url.scheme
         if url.scheme == 'rediss':
             kwargs['use_ssl'] = True
 
