@@ -459,7 +459,7 @@ class StrictRedis(object):
         try:
             connection.send_command(*args)
             return self.parse_response(connection, command_name, **options)
-        except ConnectionError:
+        except (ConnectionError, ResponseError):
             connection.disconnect()
             connection.send_command(*args)
             return self.parse_response(connection, command_name, **options)
