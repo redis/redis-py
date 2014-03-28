@@ -121,6 +121,8 @@ class SocketBuffer(object):
     def close(self):
         self.purge()
         self._buffer.close()
+        self._buffer = None
+        self._sock = None
 
 
 class PythonParser(BaseParser):
