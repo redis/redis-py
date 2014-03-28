@@ -1753,7 +1753,8 @@ class PubSub(object):
     until a message arrives on one of the subscribed channels. That message
     will be returned and it's safe to start listening again.
     """
-    MESSAGE_TYPES = ('message', 'pmessage')
+    PUBLISH_MESSAGE_TYPES = ('message', 'pmessage')
+    UNSUBSCRIBE_MESSAGE_TYPES = ('unsubscribe', 'punsubscribe')
 
     def __init__(self, connection_pool, shard_hint=None,
                  ignore_subscribe_messages=False):
@@ -1761,12 +1762,7 @@ class PubSub(object):
         self.shard_hint = shard_hint
         self.ignore_subscribe_messages = ignore_subscribe_messages
         self.connection = None
-        self.channels = {}
-        self.patterns = {}
-        self.subscription_count = 0
-        self.subscribe_commands = set(
-            ('subscribe', 'psubscribe', 'unsubscribe', 'punsubscribe')
-        )
+        self.reset()
 
     def __del__(self):
         try:
@@ -1783,6 +1779,8 @@ class PubSub(object):
             self.connection.clear_connect_callbacks()
             self.connection_pool.release(self.connection)
             self.connection = None
+        self.channels = {}
+        self.patterns = {}
 
     def close(self):
         self.reset()
@@ -1796,7 +1794,7 @@ class PubSub(object):
     @property
     def subscribed(self):
         "Indicates if there are subscriptions to any channels or patterns"
-        return bool(self.subscription_count or self.channels or self.patterns)
+        return bool(self.channels or self.patterns)
 
     def execute_command(self, *args, **kwargs):
         "Execute a publish/subscribe command"
@@ -1811,7 +1809,8 @@ class PubSub(object):
                 self.shard_hint
             )
             # initially connect here so we don't run our callback the first
-            # time. It's primarily there for reconnection purposes.
+            # time. If we did, it would dupe the subscriptions, once from the
+            # callback and a second time from the actual command invocation
             self.connection.connect()
             self.connection.register_connect_callback(self.on_connect)
         connection = self.connection
@@ -1825,8 +1824,9 @@ class PubSub(object):
             # Connect manually here. If the Redis server is down, this will
             # fail and raise a ConnectionError as desired.
             connection.connect()
-            # resubscribe to all channels and patterns before
-            # resending the current command
+            # the ``on_connect`` callback should haven been called by the
+            # connection to resubscribe us to any channels and patterns we were
+            # previously listening to
             return command(*args)
 
     def parse_response(self, block=True):
@@ -1834,10 +1834,7 @@ class PubSub(object):
         connection = self.connection
         if not block and not connection.can_read():
             return None
-        response = self._execute(connection, connection.read_response)
-        if nativestr(response[0]) in self.subscribe_commands:
-            self.subscription_count = response[2]
-        return response
+        return self._execute(connection, connection.read_response)
 
     def psubscribe(self, *args, **kwargs):
         """
@@ -1862,13 +1859,6 @@ class PubSub(object):
         """
         if args:
             args = list_or_args(args[0], args[1:])
-        for pattern in args:
-            try:
-                del self.patterns[pattern]
-            except KeyError:
-                pass
-        if not args:
-            self.patterns = {}
         return self.execute_command('PUNSUBSCRIBE', *args)
 
     def subscribe(self, *args, **kwargs):
@@ -1876,7 +1866,8 @@ class PubSub(object):
         Subscribe to channels. Channels supplied as keyword arguments expect
         a channel name as the key and a callable as the value. A channel's
         callable will be invoked automatically when a message is received on
-        that channel rather than producing a message via ``listen()``.
+        that channel rather than producing a message via ``listen()`` or
+        ``get_message()``.
         """
         if args:
             args = list_or_args(args[0], args[1:])
@@ -1893,13 +1884,6 @@ class PubSub(object):
         """
         if args:
             args = list_or_args(args[0], args[1:])
-        for channel in args:
-            try:
-                del self.channels[channel]
-            except KeyError:
-                pass
-        if not args:
-            self.channels = {}
         return self.execute_command('UNSUBSCRIBE', *args)
 
     def listen(self):
@@ -1922,36 +1906,51 @@ class PubSub(object):
         with a message handler, the handler is invoked instead of a parsed
         message being returned.
         """
-        msg_type = nativestr(response[0])
-        handler = None
-
-        # optionally ignore subscribe/unsubscribe messages
-        s = ignore_subscribe_messages or self.ignore_subscribe_messages
-        if s and msg_type not in self.MESSAGE_TYPES:
-            return None
-
-        if msg_type == 'pmessage':
-            msg = {
-                'type': msg_type,
+        message_type = nativestr(response[0])
+        if message_type == 'pmessage':
+            message = {
+                'type': message_type,
                 'pattern': nativestr(response[1]),
                 'channel': nativestr(response[2]),
                 'data': response[3]
             }
-            handler = self.patterns.get(msg['pattern'], None)
         else:
-            msg = {
-                'type': msg_type,
+            message = {
+                'type': message_type,
                 'pattern': None,
                 'channel': nativestr(response[1]),
                 'data': response[2]
             }
-            handler = self.channels.get(msg['channel'], None)
 
-        if handler:
-            handler(msg)
-            return None
+        if message_type in self.PUBLISH_MESSAGE_TYPES:
+            # if there's a message handler, invoke it
+            handler = None
+            if message_type == 'pmessage':
+                handler = self.patterns.get(message['pattern'], None)
+            else:
+                handler = self.channels.get(message['channel'], None)
+            if handler:
+                handler(message)
+                return None
         else:
-            return msg
+            # this is a subscribe/unsubscribe message. ignore if we don't
+            # want them
+            if ignore_subscribe_messages or self.ignore_subscribe_messages:
+                return None
+
+        # if this is an unsubscribe message, remove it from memory
+        if message_type in self.UNSUBSCRIBE_MESSAGE_TYPES:
+            subscribed_dict = None
+            if message_type == 'punsubscribe':
+                subscribed_dict = self.patterns
+            else:
+                subscribed_dict = self.channels
+            try:
+                del subscribed_dict[message['channel']]
+            except KeyError:
+                pass
+
+        return message
 
     def run_in_thread(self, sleep_time=0):
         for channel, handler in iteritems(self.channels):
