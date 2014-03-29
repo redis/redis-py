@@ -1,6 +1,8 @@
 import pytest
 import redis
 
+from distutils.version import StrictVersion
+
 
 _REDIS_VERSIONS = {}
 
@@ -30,9 +32,8 @@ def _get_client(cls, request=None, **kwargs):
 
 
 def skip_if_server_version_lt(min_version):
-    version = get_version()
-    c = "StrictVersion('%s') < StrictVersion('%s')" % (version, min_version)
-    return pytest.mark.skipif(c)
+    check = StrictVersion(get_version()) < StrictVersion(min_version)
+    return pytest.mark.skipif(check, reason="")
 
 
 @pytest.fixture()

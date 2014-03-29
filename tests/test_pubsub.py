@@ -54,13 +54,15 @@ class TestPubSubSubscribeUnsubscribe(object):
 
     def _test_subscribe_unsubscribe(self, p, sub_type, unsub_type, sub_func,
                                     unsub_func, keys):
-        assert sub_func(*keys) is None
+        assert sub_func(keys[0]) is None
+        assert sub_func(keys[1]) is None
 
         # should be 2 messages indicating that we've subscribed
         assert wait_for_message(p) == make_message(sub_type, keys[0], 1)
         assert wait_for_message(p) == make_message(sub_type, keys[1], 2)
 
-        assert unsub_func(*keys) is None
+        assert unsub_func(keys[0]) is None
+        assert unsub_func(keys[1]) is None
 
         # should be 2 messages indicating that we've unsubscribed
         assert wait_for_message(p) == make_message(unsub_type, keys[0], 1)
@@ -76,19 +78,28 @@ class TestPubSubSubscribeUnsubscribe(object):
 
     def _test_resubscribe_on_reconnection(self, p, sub_type, unsub_type,
                                           sub_func, unsub_func, keys):
-        assert sub_func(*keys) is None
+        assert sub_func(keys[0]) is None
+        assert sub_func(keys[1]) is None
 
-        for i, key in enumerate(keys):
-            i += 1  # enumerate is 0 index, but we want 1 based indexing
-            assert wait_for_message(p) == make_message(sub_type, key, i)
+        # should be 2 messages indicating that we've subscribed
+        assert wait_for_message(p) == make_message(sub_type, keys[0], 1)
+        assert wait_for_message(p) == make_message(sub_type, keys[1], 2)
 
         # manually disconnect
         p.connection.disconnect()
 
         # calling get_message again reconnects and resubscribes
-        for i, key in enumerate(keys):
-            i += 1  # enumerate is 0 index, but we want 1 based indexing
-            assert wait_for_message(p) == make_message(sub_type, key, i)
+        # note, we may not re-subscribe to channels in exactly the same order
+        message1 = wait_for_message(p)
+        message2 = wait_for_message(p)
+
+        assert message1['type'] == sub_type
+        assert message1['channel'] in keys
+        assert message1['data'] == 1
+        assert message2['type'] == sub_type
+        assert message2['channel'] in keys
+        assert message2['data'] == 2
+        assert message1['channel'] != message2['channel']
 
     def test_resubscribe_to_channels_on_reconnection(self, r):
         kwargs = make_subscribe_test_data(r.pubsub(), 'channel')

@@ -9,9 +9,6 @@ from threading import Thread
 from redis._compat import Queue
 from .conftest import skip_if_server_version_lt
 
-# won't need this after next version of pytest
-from distutils.version import StrictVersion
-
 
 class DummyConnection(object):
     description_format = "DummyConnection<>"

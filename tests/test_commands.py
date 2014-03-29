@@ -11,8 +11,6 @@ from redis.client import parse_info
 from redis import exceptions
 
 from .conftest import skip_if_server_version_lt
-# won't need this after next version of pytest
-from distutils.version import StrictVersion
 
 
 # RESPONSE CALLBACKS
