@@ -323,7 +323,7 @@ Publish / Subscribe
 ^^^^^^^^^^^^^^^^^^^
 
 redis-py includes a `PubSub` object that subscribes to channels and listens
-for new messages. Creating a `PubSub` object is easy:
+for new messages. Creating a `PubSub` object is easy.
 
 .. code-block:: pycon
 
@@ -331,7 +331,7 @@ for new messages. Creating a `PubSub` object is easy:
     >>> p = r.pubsub()
 
 Once a `PubSub` instance is created, channels and patterns can be subscribed
-to:
+to.
 
 .. code-block:: pycon
 
@@ -339,8 +339,8 @@ to:
     >>> p.psubscribe('my-*', ...)
 
 The `PubSub` instance is now subscribed to those channels/patterns. The
-subscription confirmations can be seen by reading messages off the `PubSub`
-instance:
+subscription confirmations can be seen by reading messages from the `PubSub`
+instance.
 
 .. code-block:: pycon
 
@@ -352,14 +352,14 @@ instance:
     {'pattern': None, 'type': 'psubscribe', 'channel': 'my-*', 'data': 3L}
 
 Every message read from a `PubSub` instance will be a dictionary with the
-following keys:
+following keys.
 
 * **type**: One of the following: 'subscribe', 'unsubscribe', 'psubscribe',
   'punsubscribe', 'message', 'pmessage'
 * **channel**: The channel [un]subscribed to or the channel a message was
   published to
-* **pattern**: The pattern that matched a published messages channel. Will be
-  None in all cases except for 'pmessage' types.
+* **pattern**: The pattern that matched a published message's channel. Will be
+  `None` in all cases except for 'pmessage' types.
 * **data**: The message data. With [un]subscribe messages, this value will be
   the number of channels and patterns the connection is currently subscribed
   to. With [p]message messages, this value will be the actual published
@@ -381,7 +381,7 @@ Let's send a message now.
     {'channel': 'my-first-channel', 'data': 'some data', 'pattern': 'my-*', 'type': 'pmessage'}
 
 Unsubscribing works just like subscribing. If no arguments are passed to
-[p]unsubscribe, all channels or patterns will be unsubscribed from:
+[p]unsubscribe, all channels or patterns will be unsubscribed from.
 
 .. code-block:: pycon
 
@@ -398,17 +398,19 @@ redis-py also allows you to register callback functions to handle published
 messages. Message handlers take a single argument, the message, which is a
 dictionary just like the examples above. To subscribe to a channel or pattern
 with a message handler, pass the channel or pattern name as a keyword argument
-with a value of the callback function.
+with its value being the callback function.
 
-When a message is read on a channels or pattern with a message handler, the
-message dictionary is created and passed to the message handler. A None value
-is returned from get_message().
+When a message is read on a channel or pattern with a message handler, the
+message dictionary is created and passed to the message handler. In this case,
+a `None` value is returned from get_message() since the message was already
+handled.
 
 .. code-block:: pycon
 
     >>> def my_handler(message):
     ...     print 'MY HANDLER: ', message['data']
     >>> p.subscribe(**{'my-channel': my_handler})
+    # read the subscribe confirmation message
     >>> p.get_message()
     {'pattern': None, 'type': 'subscribe', 'channel': 'my-channel', 'data': 1L}
     >>> r.publish('my-channel', 'awesome data')
@@ -424,9 +426,10 @@ is returned from get_message().
     None
 
 If your application is not interested in the (sometimes noisy)
-subscribe/unsubscribe messages, you can pass `ignore_subscribe_messages=True`
-to redis.pubsub(). This will cause all subscribe/unsubscribe messages to be
-read, but they won't bubble up to your application:
+subscribe/unsubscribe confirmation messages, you can ignore them by passing
+`ignore_subscribe_messages=True` to `r.pubsub()`. This will cause all
+subscribe/unsubscribe messages to be read, but they won't bubble up to your
+application.
 
 .. code-block:: pycon
 
@@ -445,7 +448,8 @@ The examples above have been using `pubsub.get_message()`. Behind the scenes,
 connection's socket. If there's data available to be read, `get_message()` will
 read it, format the message and return it or pass it to a message handler. If
 there's no data to be read, `get_message()` will immediately return None. This
-makes it trivial to integrate into an event loop inside your application:
+makes it trivial to integrate into an existing event loop inside your
+application.
 
 .. code-block:: pycon
 
@@ -458,7 +462,7 @@ makes it trivial to integrate into an event loop inside your application:
 Older versions of redis-py only read messages with `pubsub.listen()`. listen()
 is a generator that blocks until a message is available. If your application
 doesn't need to do anything else but receive and act on messages received from
-redis, listen() is an easy way to get up an running:
+redis, listen() is an easy way to get up an running.
 
 .. code-block:: pycon
 
@@ -467,7 +471,7 @@ redis, listen() is an easy way to get up an running:
 
 The third option runs an event loop in a separate thread.
 `pubsub.run_in_thread()` creates a new thread and starts the event loop. The
-thread object is returned the caller of `run_in_thread()`. The caller can
+thread object is returned to the caller of `run_in_thread()`. The caller can
 use the `thread.stop()` method to shut down the event loop and thread. Behind
 the scenes, this is simply a wrapper around `get_message()` that runs in a
 separate thread, essentially creating a tiny non-blocking event loop for you.
