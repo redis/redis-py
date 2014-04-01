@@ -176,8 +176,7 @@ class TestConnection(object):
         assert len(pool._available_connections) == 1
         assert not pool._available_connections[0]._sock
 
-    # NOTE: Increment this version # when the DEBUG ERROR patch releases
-    @skip_if_server_version_lt('2.8.7')
+    @skip_if_server_version_lt('2.8.8')
     def test_busy_loading_disconnects_socket(self, r):
         """
         If Redis raises a LOADING error, the connection should be
