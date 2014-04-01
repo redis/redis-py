@@ -1762,6 +1762,12 @@ class PubSub(object):
         self.shard_hint = shard_hint
         self.ignore_subscribe_messages = ignore_subscribe_messages
         self.connection = None
+        # we need to know the encoding options for this connection in order
+        # to lookup channel and pattern names for callback handlers.
+        connection_kwargs = self.connection_pool.connection_kwargs
+        self.encoding = connection_kwargs['encoding']
+        self.encoding_errors = connection_kwargs['encoding_errors']
+        self.decode_responses = connection_kwargs['decode_responses']
         self.reset()
 
     def __del__(self):
@@ -1786,10 +1792,35 @@ class PubSub(object):
         self.reset()
 
     def on_connect(self, connection):
+        "Re-subscribe to any channels and patterns previously subscribed to"
+        # NOTE: for python3, we can't pass bytestrings as keyword arguments
+        # so we need to decode channel/pattern names back to unicode strings
+        # before passing them to [p]subscribe.
         if self.channels:
-            self.subscribe(**self.channels)
+            channels = {}
+            for k, v in iteritems(self.channels):
+                if not self.decode_responses:
+                    k = k.decode(self.encoding, self.encoding_errors)
+                channels[k] = v
+            self.subscribe(**channels)
         if self.patterns:
-            self.psubscribe(**self.patterns)
+            patterns = {}
+            for k, v in iteritems(self.patterns):
+                if not self.decode_responses:
+                    k = k.decode(self.encoding, self.encoding_errors)
+                patterns[k] = v
+            self.psubscribe(**patterns)
+
+    def encode(self, value):
+        """
+        Encode the value so that it's identical to what we'll
+        read off the connection
+        """
+        if self.decode_responses and isinstance(value, bytes):
+            value = value.decode(self.encoding, self.encoding_errors)
+        elif not self.decode_responses and isinstance(value, unicode):
+            value = value.encode(self.encoding, self.encoding_errors)
+        return value
 
     @property
     def subscribed(self):
@@ -1808,10 +1839,8 @@ class PubSub(object):
                 'pubsub',
                 self.shard_hint
             )
-            # initially connect here so we don't run our callback the first
-            # time. If we did, it would dupe the subscriptions, once from the
-            # callback and a second time from the actual command invocation
-            self.connection.connect()
+            # register a callback that re-subscribes to any channels we
+            # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
         connection = self.connection
         self._execute(connection, connection.send_command, *args)
@@ -1847,10 +1876,15 @@ class PubSub(object):
         if args:
             args = list_or_args(args[0], args[1:])
         new_patterns = {}
-        new_patterns.update(dict.fromkeys(args))
-        new_patterns.update(kwargs)
+        new_patterns.update(dict.fromkeys(imap(self.encode, args)))
+        for pattern, handler in iteritems(kwargs):
+            new_patterns[self.encode(pattern)] = handler
+        ret_val = self.execute_command('PSUBSCRIBE', *iterkeys(new_patterns))
+        # update the patterns dict AFTER we send the command. we don't want to
+        # subscribe twice to these patterns, once for the command and again
+        # for the reconnection.
         self.patterns.update(new_patterns)
-        return self.execute_command('PSUBSCRIBE', *iterkeys(new_patterns))
+        return ret_val
 
     def punsubscribe(self, *args):
         """
@@ -1872,10 +1906,15 @@ class PubSub(object):
         if args:
             args = list_or_args(args[0], args[1:])
         new_channels = {}
-        new_channels.update(dict.fromkeys(args))
-        new_channels.update(kwargs)
+        new_channels.update(dict.fromkeys(imap(self.encode, args)))
+        for channel, handler in iteritems(kwargs):
+            new_channels[self.encode(channel)] = handler
+        ret_val = self.execute_command('SUBSCRIBE', *iterkeys(new_channels))
+        # update the channels dict AFTER we send the command. we don't want to
+        # subscribe twice to these channels, once for the command and again
+        # for the reconnection.
         self.channels.update(new_channels)
-        return self.execute_command('SUBSCRIBE', *iterkeys(new_channels))
+        return ret_val
 
     def unsubscribe(self, *args):
         """
@@ -1910,17 +1949,29 @@ class PubSub(object):
         if message_type == 'pmessage':
             message = {
                 'type': message_type,
-                'pattern': nativestr(response[1]),
-                'channel': nativestr(response[2]),
+                'pattern': response[1],
+                'channel': response[2],
                 'data': response[3]
             }
         else:
             message = {
                 'type': message_type,
                 'pattern': None,
-                'channel': nativestr(response[1]),
+                'channel': response[1],
                 'data': response[2]
             }
+
+        # if this is an unsubscribe message, remove it from memory
+        if message_type in self.UNSUBSCRIBE_MESSAGE_TYPES:
+            subscribed_dict = None
+            if message_type == 'punsubscribe':
+                subscribed_dict = self.patterns
+            else:
+                subscribed_dict = self.channels
+            try:
+                del subscribed_dict[message['channel']]
+            except KeyError:
+                pass
 
         if message_type in self.PUBLISH_MESSAGE_TYPES:
             # if there's a message handler, invoke it
@@ -1937,18 +1988,6 @@ class PubSub(object):
             # want them
             if ignore_subscribe_messages or self.ignore_subscribe_messages:
                 return None
-
-        # if this is an unsubscribe message, remove it from memory
-        if message_type in self.UNSUBSCRIBE_MESSAGE_TYPES:
-            subscribed_dict = None
-            if message_type == 'punsubscribe':
-                subscribed_dict = self.patterns
-            else:
-                subscribed_dict = self.channels
-            try:
-                del subscribed_dict[message['channel']]
-            except KeyError:
-                pass
 
         return message
 

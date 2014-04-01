@@ -154,6 +154,7 @@ class PythonParser(BaseParser):
         if self._buffer is not None:
             self._buffer.close()
             self._buffer = None
+        self.encoding = None
 
     def can_read(self):
         return self._buffer and bool(self._buffer.length)
