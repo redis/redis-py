@@ -452,7 +452,7 @@ class StrictRedis(object):
         """
         return PubSub(self.connection_pool, **kwargs)
 
-    #### COMMAND EXECUTION AND PROTOCOL PARSING ####
+    # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
         "Execute a command and return a parsed response"
         pool = self.connection_pool
@@ -475,7 +475,7 @@ class StrictRedis(object):
             return self.response_callbacks[command_name](response, **options)
         return response
 
-    #### SERVER INFORMATION ####
+    # SERVER INFORMATION
     def bgrewriteaof(self):
         "Tell the Redis server to rewrite the AOF file from data in memory."
         return self.execute_command('BGREWRITEAOF')
@@ -626,7 +626,7 @@ class StrictRedis(object):
         """
         return self.execute_command('TIME')
 
-    #### BASIC KEY COMMANDS ####
+    # BASIC KEY COMMANDS
     def append(self, key, value):
         """
         Appends the string ``value`` to the value at ``key``. If ``key``
@@ -968,7 +968,7 @@ class StrictRedis(object):
         warnings.warn(
             DeprecationWarning('Call UNWATCH from a Pipeline object'))
 
-    #### LIST COMMANDS ####
+    # LIST COMMANDS
     def blpop(self, keys, timeout=0):
         """
         LPOP a value off of the first non-empty list
@@ -1179,7 +1179,7 @@ class StrictRedis(object):
         options = {'groups': len(get) if groups else None}
         return self.execute_command('SORT', *pieces, **options)
 
-    #### SCAN COMMANDS ####
+    # SCAN COMMANDS
     def scan(self, cursor=0, match=None, count=None):
         """
         Scan and return (nextcursor, keys)
@@ -1244,7 +1244,7 @@ class StrictRedis(object):
         options = {'score_cast_func': score_cast_func}
         return self.execute_command('ZSCAN', *pieces, **options)
 
-    #### SET COMMANDS ####
+    # SET COMMANDS
     def sadd(self, name, *values):
         "Add ``value(s)`` to set ``name``"
         return self.execute_command('SADD', name, *values)
@@ -1323,7 +1323,7 @@ class StrictRedis(object):
         args = list_or_args(keys, args)
         return self.execute_command('SUNIONSTORE', dest, *args)
 
-    #### SORTED SET COMMANDS ####
+    # SORTED SET COMMANDS
     def zadd(self, name, *args, **kwargs):
         """
         Set any number of score, element-name pairs to the key ``name``. Pairs
@@ -1527,7 +1527,7 @@ class StrictRedis(object):
             pieces.append(aggregate)
         return self.execute_command(*pieces)
 
-    #### HASH COMMANDS ####
+    # HASH COMMANDS
     def hdel(self, name, *keys):
         "Delete ``keys`` from hash ``name``"
         return self.execute_command('HDEL', name, *keys)

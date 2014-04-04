@@ -32,7 +32,7 @@ class TestRedisCommands(object):
         with pytest.raises(redis.ResponseError):
             r['a']
 
-    ### SERVER INFORMATION ###
+    # SERVER INFORMATION
     def test_client_list(self, r):
         clients = r.client_list()
         assert isinstance(clients[0], dict)
@@ -101,7 +101,7 @@ class TestRedisCommands(object):
         assert isinstance(t[0], int)
         assert isinstance(t[1], int)
 
-    ### BASIC KEY COMMANDS ###
+    # BASIC KEY COMMANDS
     def test_append(self, r):
         assert r.append('a', 'a1') == 2
         assert r['a'] == b('a1')
@@ -501,7 +501,7 @@ class TestRedisCommands(object):
         r.zadd('a', **{'1': 1})
         assert r.type('a') == b('zset')
 
-    #### LIST COMMANDS ####
+    # LIST COMMANDS
     def test_blpop(self, r):
         r.rpush('a', '1', '2')
         r.rpush('b', '3', '4')
@@ -626,7 +626,7 @@ class TestRedisCommands(object):
         assert r.rpushx('a', '4') == 4
         assert r.lrange('a', 0, -1) == [b('1'), b('2'), b('3'), b('4')]
 
-    ### SCAN COMMANDS ###
+    # SCAN COMMANDS
     @skip_if_server_version_lt('2.8.0')
     def test_scan(self, r):
         r.set('a', 1)
@@ -665,7 +665,7 @@ class TestRedisCommands(object):
         _, pairs = r.zscan('a', match='a')
         assert set(pairs) == set([(b('a'), 1)])
 
-    ### SET COMMANDS ###
+    # SET COMMANDS
     def test_sadd(self, r):
         members = set([b('1'), b('2'), b('3')])
         r.sadd('a', *members)
@@ -758,7 +758,7 @@ class TestRedisCommands(object):
         assert r.sunionstore('c', 'a', 'b') == 3
         assert r.smembers('c') == set([b('1'), b('2'), b('3')])
 
-    ### SORTED SET COMMANDS ###
+    # SORTED SET COMMANDS
     def test_zadd(self, r):
         r.zadd('a', a1=1, a2=2, a3=3)
         assert r.zrange('a', 0, -1) == [b('a1'), b('a2'), b('a3')]
@@ -951,7 +951,7 @@ class TestRedisCommands(object):
         assert r.zrange('d', 0, -1, withscores=True) == \
             [(b('a2'), 5), (b('a4'), 12), (b('a3'), 20), (b('a1'), 23)]
 
-    ### HASH COMMANDS ###
+    # HASH COMMANDS
     def test_hget_and_hset(self, r):
         r.hmset('a', {'1': 1, '2': 2, '3': 3})
         assert r.hget('a', '1') == b('1')
@@ -1031,7 +1031,7 @@ class TestRedisCommands(object):
         remote_vals = r.hvals('a')
         assert sorted(local_vals) == sorted(remote_vals)
 
-    ### SORT ###
+    # SORT
     def test_sort_basic(self, r):
         r.rpush('a', '3', '2', '1', '4')
         assert r.sort('a') == [b('1'), b('2'), b('3'), b('4')]
