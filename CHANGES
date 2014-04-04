@@ -1,5 +1,8 @@
-* 2.9.2 (in development)
+* 2.10.0 (in development)
     * The HiRedis parser will now properly raise ConnectionErrors.
+    * Completely refactored PubSub support. Fixes all known PubSub bugs and
+      adds a bunch of new features. Docs can be found in the README under the
+      new "Publish / Subscribe" section.
 * 2.9.1
     * IPv6 support. Thanks https://github.com/amashinchi
 * 2.9.0
