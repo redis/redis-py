@@ -482,6 +482,7 @@ class UnixDomainSocketConnection(Connection):
             'path': self.path,
             'db': self.db,
         }
+        self._connect_callbacks = []
 
     def _connect(self):
         "Create a Unix domain socket connection"
