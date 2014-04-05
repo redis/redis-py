@@ -1,0 +1,18 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# Vagrantfile API/syntax version. Don't touch unless you know what you're doing!
+VAGRANTFILE_API_VERSION = "2"
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  # ubuntu 64bit image
+  config.vm.box = "hashicorp/precise64"
+
+  # map the root of redis-py to /home/vagrant/redis-py
+  config.vm.synced_folder "../", "/home/vagrant/redis-py"
+
+  # install the redis server
+  config.vm.provision :shell, :path => "bootstrap.sh"
+  config.vm.provision :shell, :path => "install_redis.sh"
+
+end
