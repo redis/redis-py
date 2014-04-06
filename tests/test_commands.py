@@ -951,6 +951,33 @@ class TestRedisCommands(object):
         assert r.zrange('d', 0, -1, withscores=True) == \
             [(b('a2'), 5), (b('a4'), 12), (b('a3'), 20), (b('a1'), 23)]
 
+    #HYPERLOGLOG TESTS
+    @skip_if_server_version_lt('2.8.9')
+    def test_pfadd(self, r):
+        members = set([b('1'), b('2'), b('3')])
+        assert r.pfadd('a', *members) == 1
+        assert r.pfadd('a', *members) == 0
+        assert r.pfcount('a') == len(members)
+
+    @skip_if_server_version_lt('2.8.9')
+    def test_pfcount(self, r):
+        members = set([b('1'), b('2'), b('3')])
+        r.pfadd('a', *members)
+        assert r.pfcount('a') == len(members)
+
+    @skip_if_server_version_lt('2.8.9')
+    def test_pfmerge(self, r):
+        mema = set([b('1'), b('2'), b('3')])
+        memb = set([b('2'), b('3'), b('4')])
+        memc = set([b('5'), b('6'), b('7')])
+        r.pfadd('a', *mema)
+        r.pfadd('b', *memb)
+        r.pfadd('c', *memc)
+        r.pfmerge('d', 'c', 'a')
+        assert r.pfcount('d') == 6
+        r.pfmerge('d', 'b')
+        assert r.pfcount('d') == 7
+
     # HASH COMMANDS
     def test_hget_and_hset(self, r):
         r.hmset('a', {'1': 1, '2': 2, '3': 3})
