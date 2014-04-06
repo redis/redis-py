@@ -951,7 +951,7 @@ class TestRedisCommands(object):
         assert r.zrange('d', 0, -1, withscores=True) == \
             [(b('a2'), 5), (b('a4'), 12), (b('a3'), 20), (b('a1'), 23)]
 
-    #HYPERLOGLOG TESTS
+    # HYPERLOGLOG TESTS
     @skip_if_server_version_lt('2.8.9')
     def test_pfadd(self, r):
         members = set([b('1'), b('2'), b('3')])
