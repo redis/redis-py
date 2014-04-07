@@ -242,18 +242,20 @@ def parse_script(response, **options):
 
 
 def parse_scan(response, **options):
-    return response
+    cursor, r = response
+    return nativestr(cursor), r
 
 
 def parse_hscan(response, **options):
     cursor, r = response
-    return cursor, r and pairs_to_dict(r) or {}
+    return nativestr(cursor), r and pairs_to_dict(r) or {}
 
 
 def parse_zscan(response, **options):
     score_cast_func = options.get('score_cast_func', float)
-    it = iter(response[1])
-    return [response[0], list(izip(it, imap(score_cast_func, it)))]
+    cursor, r = response
+    it = iter(r)
+    return nativestr(cursor), list(izip(it, imap(score_cast_func, it)))
 
 
 class StrictRedis(object):
@@ -1180,7 +1182,8 @@ class StrictRedis(object):
     #### SCAN COMMANDS ####
     def scan(self, cursor=0, match=None, count=None):
         """
-        Scan and return (nextcursor, keys)
+        Incrementally return lists of key names. Also return a cursor
+        indicating the scan position.
 
         ``match`` allows for filtering the keys by pattern
 
@@ -1195,7 +1198,8 @@ class StrictRedis(object):
 
     def scan_iter(self, match=None, count=None):
         """
-        Make a iterator using scan.
+        Make an iterator using the SCAN command so that the client doesn't
+        need to remember the cursor position.
 
         ``match`` allows for filtering the keys by pattern
 
@@ -1204,12 +1208,13 @@ class StrictRedis(object):
         cursor = 0
         while cursor != '0':
             cursor, data = self.scan(cursor=cursor, match=match, count=count)
-            for _ in data:
-                yield _
+            for item in data:
+                yield item
 
     def sscan(self, name, cursor=0, match=None, count=None):
         """
-        Scan and return (nextcursor, members_of_set)
+        Incrementally return lists of elements in a set. Also return a cursor
+        indicating the scan position.
 
         ``match`` allows for filtering the keys by pattern
 
@@ -1224,7 +1229,8 @@ class StrictRedis(object):
 
     def sscan_iter(self, name, match=None, count=None):
         """
-        Make a iterator using sscan. Iterates over set members.
+        Make an iterator using the SSCAN command so that the client doesn't
+        need to remember the cursor position.
 
         ``match`` allows for filtering the keys by pattern
 
@@ -1234,12 +1240,13 @@ class StrictRedis(object):
         while cursor != '0':
             cursor, data = self.sscan(name, cursor=cursor,
                                       match=match, count=count)
-            for _ in data:
-                yield _
+            for item in data:
+                yield item
 
     def hscan(self, name, cursor=0, match=None, count=None):
         """
-        Scan and return (nextcursor, dict)
+        Incrementally return key/value slices in a hash. Also return a cursor
+        indicating the scan position.
 
         ``match`` allows for filtering the keys by pattern
 
@@ -1254,7 +1261,8 @@ class StrictRedis(object):
 
     def hscan_iter(self, name, match=None, count=None):
         """
-        Make a iterator using hscan. Iterates over key/value pairs.
+        Make an iterator using the HSCAN command so that the client doesn't
+        need to remember the cursor position.
 
         ``match`` allows for filtering the keys by pattern
 
@@ -1264,13 +1272,14 @@ class StrictRedis(object):
         while cursor != '0':
             cursor, data = self.hscan(name, cursor=cursor,
                                       match=match, count=count)
-            for _ in data.items():
-                yield _
+            for item in data.items():
+                yield item
 
     def zscan(self, name, cursor=0, match=None, count=None,
               score_cast_func=float):
         """
-        Scan and return (nextcursor, pairs)
+        Incrementally return lists of elements in a sorted set. Also return a
+        cursor indicating the scan position.
 
         ``match`` allows for filtering the keys by pattern
 
@@ -1289,7 +1298,8 @@ class StrictRedis(object):
     def zscan_iter(self, name, match=None, count=None,
                    score_cast_func=float):
         """
-        Make a iterator using zscan. Iterates over key/score pairs.
+        Make an iterator using the ZSCAN command so that the client doesn't
+        need to remember the cursor position.
 
         ``match`` allows for filtering the keys by pattern
 
@@ -1302,8 +1312,8 @@ class StrictRedis(object):
             cursor, data = self.zscan(name, cursor=cursor, match=match,
                                       count=count,
                                       score_cast_func=score_cast_func)
-            for _ in data:
-                yield _
+            for item in data:
+                yield item
 
     #### SET COMMANDS ####
     def sadd(self, name, *values):
