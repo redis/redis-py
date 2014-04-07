@@ -276,9 +276,9 @@ class StrictRedis(object):
         ),
         string_keys_to_dict(
             'BITCOUNT DECRBY DEL GETBIT HDEL HLEN INCRBY LINSERT LLEN LPUSHX '
-            'RPUSHX SADD SCARD SDIFFSTORE SETBIT SETRANGE SINTERSTORE SREM '
-            'STRLEN SUNIONSTORE ZADD ZCARD ZREM ZREMRANGEBYRANK '
-            'ZREMRANGEBYSCORE',
+            'PFADD PFCOUNT RPUSHX SADD SCARD SDIFFSTORE SETBIT SETRANGE '
+            'SINTERSTORE SREM STRLEN SUNIONSTORE ZADD ZCARD ZREM '
+            'ZREMRANGEBYRANK ZREMRANGEBYSCORE',
             int
         ),
         string_keys_to_dict('INCRBYFLOAT HINCRBYFLOAT', float),
@@ -290,7 +290,7 @@ class StrictRedis(object):
         string_keys_to_dict('SORT', sort_return_tuples),
         string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
         string_keys_to_dict(
-            'FLUSHALL FLUSHDB LSET LTRIM MSET RENAME '
+            'FLUSHALL FLUSHDB LSET LTRIM MSET PFMERGE RENAME '
             'SAVE SELECT SHUTDOWN SLAVEOF WATCH UNWATCH',
             lambda r: nativestr(r) == 'OK'
         ),
@@ -1526,6 +1526,22 @@ class StrictRedis(object):
             pieces.append('AGGREGATE')
             pieces.append(aggregate)
         return self.execute_command(*pieces)
+
+    # HYPERLOGLOG COMMANDS
+    def pfadd(self, name, *values):
+        "Adds the specified elements to the specified HyperLogLog."
+        return self.execute_command('PFADD', name, *values)
+
+    def pfcount(self, name):
+        """
+        Return the approximated cardinality of
+        the set observed by the HyperLogLog at key.
+        """
+        return self.execute_command('PFCOUNT', name)
+
+    def pfmerge(self, dest, *sources):
+        "Merge N different HyperLogLogs into a single one."
+        return self.execute_command('PFMERGE', dest, *sources)
 
     # HASH COMMANDS
     def hdel(self, name, *keys):
