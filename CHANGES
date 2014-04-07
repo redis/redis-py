@@ -5,6 +5,8 @@
       new "Publish / Subscribe" section.
     * Added the new HyperLogLog commanads (PFADD, PFCOUNT, PFMERGE). Thanks
       Pepijn de Vos and Vincent Ohprecio.
+    * Updated TTL and PTTL commands with Redis 2.8+ semantics. Thanks Markus
+      Kaiserswerth.
 * 2.9.1
     * IPv6 support. Thanks https://github.com/amashinchi
 * 2.9.0
