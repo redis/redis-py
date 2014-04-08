@@ -2422,9 +2422,12 @@ class Script(object):
     "An executable Lua script object returned by ``register_script``"
 
     def __init__(self, registered_client, script):
+        import hashlib
         self.registered_client = registered_client
         self.script = script
-        self.sha = registered_client.script_load(script)
+        self.sha = hashlib.sha1(script).hexdigest()
+        if not registered_client.script_exists(self.sha)[0]:
+            self.sha = registered_client.script_load(script)
 
     def __call__(self, keys=[], args=[], client=None):
         "Execute the script, passing any required ``args``"
