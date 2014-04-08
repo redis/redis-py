@@ -7,6 +7,9 @@
       Pepijn de Vos and Vincent Ohprecio.
     * Updated TTL and PTTL commands with Redis 2.8+ semantics. Thanks Markus
       Kaiserswerth.
+    * Added extra *SCAN commands that return iterators instead of the normal
+      [cursor, data] type. Use scan_iter, hscan_iter, sscan_iter, and
+      zscan_iter for iterators. Thanks Mathieu Longtin.
 * 2.9.1
     * IPv6 support. Thanks https://github.com/amashinchi
 * 2.9.0

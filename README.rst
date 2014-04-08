@@ -68,6 +68,11 @@ to the official command syntax. There are a few exceptions:
   `this comment on issue #151
   <https://github.com/andymccurdy/redis-py/issues/151#issuecomment-1545015>`_
   for details).
+* **SCAN/SSCAN/HSCAN/ZSCAN**: The *SCAN commands are implemented as they
+  exist in the Redis documentation. In addition, each command has an equivilant
+  iterator method. These are purely for convenience so the user doesn't have
+  to keep track of the cursor while iterating. Use the
+  scan_iter/sscan_iter/hscan_iter/zscan_iter methods for this behavior.
 
 In addition to the changes above, the Redis class, a subclass of StrictRedis,
 overrides several other commands to provide backwards compatibility with older
@@ -634,6 +639,24 @@ master.
 
 See `Guidelines for Redis clients with support for Redis Sentinel
 <http://redis.io/topics/sentinel-clients>`_ to learn more about Redis Sentinel.
+
+Scan Iterators
+^^^^^^^^^^^^^^
+
+The *SCAN commands introduced in Redis 2.8 can be cumbersome to use. While
+these commands are fully supported, redis-py also exposes the following methods
+that return Python iterators for convenience: `scan_iter`, `hscan_iter`,
+`sscan_iter` and `zscan_iter`.
+
+.. code-block:: pycon
+
+    >>> for key, value in (('A', '1'), ('B', '2'), ('C', '3')):
+    ...     r.set(key, value)
+    >>> for key in r.scan_iter():
+    ...     print key, r.get(key)
+    A 1
+    B 2
+    C 3
 
 Author
 ^^^^^^
