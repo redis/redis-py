@@ -2424,7 +2424,7 @@ class Script(object):
     def __init__(self, registered_client, script):
         self.registered_client = registered_client
         self.script = script
-        self.sha = registered_client.script_load(script)
+        self.sha = ''
 
     def __call__(self, keys=[], args=[], client=None):
         "Execute the script, passing any required ``args``"
