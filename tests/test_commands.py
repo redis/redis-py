@@ -90,6 +90,7 @@ class TestRedisCommands(object):
         assert isinstance(r.object('refcount', 'a'), int)
         assert isinstance(r.object('idletime', 'a'), int)
         assert r.object('encoding', 'a') == b('raw')
+        assert r.object('idletime', 'invalid-key') is None
 
     def test_ping(self, r):
         assert r.ping()

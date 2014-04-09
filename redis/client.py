@@ -80,7 +80,7 @@ def parse_debug_object(response):
 def parse_object(response, infotype):
     "Parse the results of an OBJECT command"
     if infotype in ('idletime', 'refcount'):
-        return int(response)
+        return int_or_none(response)
     return response
 
 
