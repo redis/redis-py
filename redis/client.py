@@ -260,6 +260,21 @@ def parse_zscan(response, **options):
     return nativestr(cursor), list(izip(it, imap(score_cast_func, it)))
 
 
+def parse_slowlog(response, **options):
+    parse = options['parse']
+    if parse == 'LEN':
+        return int(response)
+    elif parse == 'RESET':
+        return nativestr(response) == 'OK'
+    elif parse == 'GET':
+        return [{
+            'id': item[0],
+            'start_time': int(item[1]),
+            'duration': int(item[2]),
+            'command': b(' ').join(item[3])
+        } for item in response]
+
+
 class StrictRedis(object):
     """
     Implementation of the Redis protocol.
@@ -316,6 +331,7 @@ class StrictRedis(object):
             'CONFIG': parse_config,
             'DEBUG': parse_debug_object,
             'HGETALL': lambda r: r and pairs_to_dict(r) or {},
+            'HSCAN': parse_hscan,
             'INFO': parse_info,
             'LASTSAVE': timestamp_to_datetime,
             'OBJECT': parse_object,
@@ -326,8 +342,8 @@ class StrictRedis(object):
             'TIME': lambda x: (int(x[0]), int(x[1])),
             'SENTINEL': parse_sentinel,
             'SCAN': parse_scan,
+            'SLOWLOG': parse_slowlog,
             'SSCAN': parse_scan,
-            'HSCAN': parse_hscan,
             'ZSCAN': parse_zscan
         }
     )
@@ -620,6 +636,24 @@ class StrictRedis(object):
         if host is None and port is None:
             return self.execute_command("SLAVEOF", "NO", "ONE")
         return self.execute_command("SLAVEOF", host, port)
+
+    def slowlog_get(self, num=None):
+        """
+        Get the entries from the slowlog. If ``num`` is specified, get the
+        most recent ``num`` items.
+        """
+        args = ['SLOWLOG', 'GET']
+        if num is not None:
+            args.append(num)
+        return self.execute_command(*args, parse='GET')
+
+    def slowlog_len(self):
+        "Get the number of items in the slowlog"
+        return self.execute_command('SLOWLOG', 'LEN', parse='LEN')
+
+    def slowlog_reset(self):
+        "Remove all items in the slowlog"
+        return self.execute_command('SLOWLOG', 'RESET', parse='RESET')
 
     def time(self):
         """

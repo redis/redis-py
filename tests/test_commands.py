@@ -94,6 +94,38 @@ class TestRedisCommands(object):
     def test_ping(self, r):
         assert r.ping()
 
+    def test_slowlog_get(self, r):
+        assert r.slowlog_reset()
+        unicode_string = unichr(3456) + u('abcd') + unichr(3421)
+        r.get(unicode_string)
+        slowlog = r.slowlog_get()
+        assert isinstance(slowlog, list)
+        assert len(slowlog) == 2
+        get_command = slowlog[0]
+        assert isinstance(get_command['start_time'], int)
+        assert isinstance(get_command['duration'], int)
+        assert get_command['command'] == \
+            b(' ').join((b('GET'), unicode_string.encode('utf-8')))
+
+        slowlog_reset_command = slowlog[1]
+        assert isinstance(slowlog_reset_command['start_time'], int)
+        assert isinstance(slowlog_reset_command['duration'], int)
+        assert slowlog_reset_command['command'] == b('SLOWLOG RESET')
+
+    def test_slowlog_get_limit(self, r):
+        assert r.slowlog_reset()
+        r.get('foo')
+        r.get('bar')
+        slowlog = r.slowlog_get(1)
+        assert isinstance(slowlog, list)
+        assert len(slowlog) == 1
+        assert slowlog[0]['command'] == b('GET bar')
+
+    def test_slowlog_length(self, r):
+        assert r.slowlog_reset()
+        r.get('foo')
+        assert r.slowlog_len() == 2
+
     @skip_if_server_version_lt('2.6.0')
     def test_time(self, r):
         t = r.time()
