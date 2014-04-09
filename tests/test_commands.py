@@ -13,6 +13,21 @@ from redis import exceptions
 from .conftest import skip_if_server_version_lt
 
 
+@pytest.fixture()
+def slowlog(request, r):
+    current_config = r.config_get()
+    old_slower_than_value = current_config['slowlog-log-slower-than']
+    old_max_legnth_value = current_config['slowlog-max-len']
+
+    def cleanup():
+        r.config_set('slowlog-log-slower-than', old_slower_than_value)
+        r.config_set('slowlog-max-len', old_max_legnth_value)
+    request.addfinalizer(cleanup)
+
+    r.config_set('slowlog-log-slower-than', 0)
+    r.config_set('slowlog-max-len', 128)
+
+
 # RESPONSE CALLBACKS
 class TestResponseCallbacks(object):
     "Tests for the response callback system"
@@ -95,11 +110,7 @@ class TestRedisCommands(object):
     def test_ping(self, r):
         assert r.ping()
 
-    def test_slowlog_get(self, r):
-        # fail on purpose on travis
-        assert [
-            r.config_get('slowlog-log-slower-than'),
-            r.config_get('slowlog-max-len')] == [-10, -10]
+    def test_slowlog_get(self, r, slowlog):
         assert r.slowlog_reset()
         unicode_string = unichr(3456) + u('abcd') + unichr(3421)
         r.get(unicode_string)
@@ -117,7 +128,7 @@ class TestRedisCommands(object):
         assert isinstance(slowlog_reset_command['duration'], int)
         assert slowlog_reset_command['command'] == b('SLOWLOG RESET')
 
-    def test_slowlog_get_limit(self, r):
+    def test_slowlog_get_limit(self, r, slowlog):
         assert r.slowlog_reset()
         r.get('foo')
         r.get('bar')
@@ -126,7 +137,7 @@ class TestRedisCommands(object):
         assert len(slowlog) == 1
         assert slowlog[0]['command'] == b('GET bar')
 
-    def test_slowlog_length(self, r):
+    def test_slowlog_length(self, r, slowlog):
         assert r.slowlog_reset()
         r.get('foo')
         assert r.slowlog_len() == 2
