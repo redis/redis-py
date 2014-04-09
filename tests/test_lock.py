@@ -36,6 +36,16 @@ class TestLock(object):
         assert lock2.acquire(blocking=False)
         lock2.release()
 
+    def test_blocking_timeouts(self, r):
+        lock1 = r.lock('foo', timeout=2, blocking_timeout=1)
+        lock2 = r.lock('foo', timeout=2, blocking_timeout=1)
+        assert lock1.acquire()
+        before = time.time()
+        assert not lock2.acquire()
+        after = time.time()
+        assert (after - before) > 1
+        assert (after - before) < 2
+
     def test_non_blocking(self, r):
         lock1 = r.lock('foo')
         assert lock1.acquire(blocking=False)
