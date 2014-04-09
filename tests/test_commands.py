@@ -96,6 +96,10 @@ class TestRedisCommands(object):
         assert r.ping()
 
     def test_slowlog_get(self, r):
+        # fail on purpose on travis
+        assert [
+            r.config_get('slowlog-log-slower-than'),
+            r.config.get('slowlog-max-len')] == [-10, -10]
         assert r.slowlog_reset()
         unicode_string = unichr(3456) + u('abcd') + unichr(3421)
         r.get(unicode_string)
