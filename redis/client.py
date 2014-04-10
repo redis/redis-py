@@ -2257,12 +2257,15 @@ class BasePipeline(object):
         except ConnectionError:
             conn.disconnect()
             # if we're not already watching, we can safely retry the command
-            # assuming it was a connection timeout
-            if not self.watching:
-                conn.send_command(*args)
-                return self.parse_response(conn, command_name, **options)
-            self.reset()
-            raise
+            try:
+                if not self.watching:
+                    conn.send_command(*args)
+                    return self.parse_response(conn, command_name, **options)
+            except ConnectionError:
+                # the retry failed so cleanup.
+                conn.disconnect()
+                self.reset()
+                raise
 
     def pipeline_execute_command(self, *args, **options):
         """

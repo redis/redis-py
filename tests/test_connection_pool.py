@@ -187,3 +187,34 @@ class TestConnection(object):
         pool = r.connection_pool
         assert len(pool._available_connections) == 1
         assert not pool._available_connections[0]._sock
+
+    @skip_if_server_version_lt('2.8.8')
+    def test_busy_loading_from_pipeline_immediate_command(self, r):
+        """
+        BusyLoadingErrors should raise from Pipelines that execute a
+        command immediately, like WATCH does.
+        """
+        pipe = r.pipeline()
+        with pytest.raises(redis.BusyLoadingError):
+            pipe.immediate_execute_command('DEBUG', 'ERROR',
+                                           'LOADING fake message')
+        pool = r.connection_pool
+        assert not pipe.connection
+        assert len(pool._available_connections) == 1
+        assert not pool._available_connections[0]._sock
+
+    # TODO: This fails on hiredis. need to think about this
+    # @skip_if_server_version_lt('2.8.8')
+    # def test_busy_loading_from_pipeline(self, r):
+    #     """
+    #     BusyLoadingErrors should be raised from a pipeline execution
+    #     regardless of the raise_on_error flag.
+    #     """
+    #     pipe = r.pipeline()
+    #     pipe.execute_command('DEBUG', 'ERROR', 'LOADING fake message')
+    #     with pytest.raises(redis.BusyLoadingError):
+    #         pipe.execute()
+    #     pool = r.connection_pool
+    #     assert not pipe.connection
+    #     assert len(pool._available_connections) == 1
+    #     assert not pool._available_connections[0]._sock
