@@ -146,6 +146,7 @@ def parse_sentinel_state(item):
 def parse_sentinel(response, **options):
     "Parse the result of Redis's SENTINEL command"
     parse = options.get('parse')
+    response = nativestr(response)
     if parse == 'SENTINEL_INFO':
         return [parse_sentinel_state(item) for item in response]
     elif parse == 'SENTINEL_INFO_MASTERS':
