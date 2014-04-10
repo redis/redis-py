@@ -2,6 +2,7 @@ from __future__ import with_statement
 import pytest
 
 from redis import exceptions
+from redis._compat import b
 
 
 multiply_script = """
@@ -65,7 +66,7 @@ class TestScripting(object):
         assert multiply.sha
         assert r.script_exists(multiply.sha) == [True]
         # [SET worked, GET 'a', result of multiple script]
-        assert pipe.execute() == [True, '2', 6]
+        assert pipe.execute() == [True, b('2'), 6]
 
         # purge the script from redis's cache and re-run the pipeline
         # the multiply script object knows it's sha, so it shouldn't get
@@ -78,4 +79,4 @@ class TestScripting(object):
         multiply(keys=['a'], args=[3], client=pipe)
         assert r.script_exists(multiply.sha) == [False]
         # [SET worked, GET 'a', result of multiple script]
-        assert pipe.execute() == [True, '2', 6]
+        assert pipe.execute() == [True, b('2'), 6]
