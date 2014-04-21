@@ -30,8 +30,8 @@ if HIREDIS_AVAILABLE:
         hiredis_version >= StrictVersion('0.1.3')
 
     if not HIREDIS_SUPPORTS_CALLABLE_ERRORS:
-        msg = ('redis-py works best with hiredis >= 0.1.3. Your hiredis '
-               'is %s. Please consider upgrading.' % hiredis.__version__)
+        msg = ("redis-py works best with hiredis >= 0.1.3. You're running "
+               "hiredis %s. Please consider upgrading." % hiredis.__version__)
         warnings.warn(msg)
 
 SYM_STAR = b('*')
