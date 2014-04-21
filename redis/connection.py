@@ -1,10 +1,12 @@
 from __future__ import with_statement
+from distutils.version import StrictVersion
 from itertools import chain
 from select import select
 import os
 import socket
 import sys
 import threading
+import warnings
 
 from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
                            BytesIO, nativestr, basestring,
@@ -23,6 +25,14 @@ from redis.utils import HIREDIS_AVAILABLE
 if HIREDIS_AVAILABLE:
     import hiredis
 
+    hiredis_version = StrictVersion(hiredis.__version__)
+    HIREDIS_SUPPORTS_CALLABLE_ERRORS = \
+        hiredis_version >= StrictVersion('0.1.3')
+
+    if not HIREDIS_SUPPORTS_CALLABLE_ERRORS:
+        msg = ('redis-py works best with hiredis >= 0.1.3. Your hiredis '
+               'is %s. Please consider upgrading.' % hiredis.__version__)
+        warnings.warn(msg)
 
 SYM_STAR = b('*')
 SYM_DOLLAR = b('$')
@@ -48,8 +58,6 @@ class BaseParser(object):
 
 
 class SocketBuffer(object):
-    MAX_READ_LENGTH = 1000000
-
     def __init__(self, socket):
         self._sock = socket
         self._buffer = BytesIO()
@@ -222,8 +230,12 @@ class HiredisParser(BaseParser):
         self._sock = connection._sock
         kwargs = {
             'protocolError': InvalidResponse,
-            'replyError': ResponseError,
+            'replyError': self.parse_error,
         }
+
+        if not HIREDIS_SUPPORTS_CALLABLE_ERRORS:
+            kwargs['replyError'] = ResponseError
+
         if connection.decode_responses:
             kwargs['encoding'] = connection.encoding
         self._reader = hiredis.Reader(**kwargs)
@@ -268,13 +280,22 @@ class HiredisParser(BaseParser):
             if not buffer.endswith(SYM_CRLF):
                 continue
             response = self._reader.gets()
-        if isinstance(response, ResponseError):
-            response = self.parse_error(response.args[0])
-        # hiredis only knows about ResponseErrors.
-        # self.parse_error() might turn the exception into a ConnectionError
-        # which needs raising.
+        # if an older version of hiredis is installed, we need to attempt
+        # to convert ResponseErrors to their appropriate types.
+        if not HIREDIS_SUPPORTS_CALLABLE_ERRORS:
+            if isinstance(response, ResponseError):
+                response = self.parse_error(response.args[0])
+            elif isinstance(response, list) and response and \
+                    isinstance(response[0], ResponseError):
+                response[0] = self.parse_error(response[0].args[0])
+        # if the response is a ConnectionError or the response is a list and
+        # the first item is a ConnectionError, raise it as something bad
+        # happened
         if isinstance(response, ConnectionError):
             raise response
+        elif isinstance(response, list) and response and \
+                isinstance(response[0], ConnectionError):
+            raise response[0]
         return response
 
 if HIREDIS_AVAILABLE:
