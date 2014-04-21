@@ -90,7 +90,7 @@ class SentinelConnectionPool(ConnectionPool):
             yield self.get_master_address()
         except MasterNotFoundError:
             pass
-        raise SlaveNotFoundError('No slave found for %r' % (self.service_name))
+        raise SlaveNotFoundError('No slave found for %r' % self.service_name)
 
     def _checkpid(self):
         if self.pid != os.getpid():
@@ -129,7 +129,7 @@ class Sentinel(object):
                           for hostname, port in sentinels]
         self.min_other_sentinels = min_other_sentinels
 
-    def check_master_state(self, state, service_name):
+    def check_master_state(self, state):
         if not state['is_master'] or state['is_sdown'] or state['is_odown']:
             return False
         # Check if our sentinel doesn't see other nodes
@@ -151,7 +151,7 @@ class Sentinel(object):
             except ConnectionError:
                 continue
             state = masters.get(service_name)
-            if state and self.check_master_state(state, service_name):
+            if state and self.check_master_state(state):
                 # Put this sentinel at the top of the list
                 self.sentinels[0], self.sentinels[sentinel_no] = (
                     sentinel, self.sentinels[0])

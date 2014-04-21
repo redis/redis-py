@@ -244,12 +244,12 @@ def parse_script(response, **options):
     return response
 
 
-def parse_scan(response, **options):
+def parse_scan(response):
     cursor, r = response
     return nativestr(cursor), r
 
 
-def parse_hscan(response, **options):
+def parse_hscan(response):
     cursor, r = response
     return nativestr(cursor), r and pairs_to_dict(r) or {}
 
@@ -1882,6 +1882,8 @@ class PubSub(object):
 
     def __init__(self, connection_pool, shard_hint=None,
                  ignore_subscribe_messages=False):
+        self.patterns = {}
+        self.channels = {}
         self.connection_pool = connection_pool
         self.shard_hint = shard_hint
         self.ignore_subscribe_messages = ignore_subscribe_messages
@@ -1912,8 +1914,6 @@ class PubSub(object):
             self.connection.clear_connect_callbacks()
             self.connection_pool.release(self.connection)
             self.connection = None
-        self.channels = {}
-        self.patterns = {}
 
     def close(self):
         self.reset()
@@ -2090,7 +2090,6 @@ class PubSub(object):
 
         # if this is an unsubscribe message, remove it from memory
         if message_type in self.UNSUBSCRIBE_MESSAGE_TYPES:
-            subscribed_dict = None
             if message_type == 'punsubscribe':
                 subscribed_dict = self.patterns
             else:
@@ -2172,6 +2171,7 @@ class BasePipeline(object):
 
     def __init__(self, connection_pool, response_callbacks, transaction,
                  shard_hint):
+        self.scripts = set()
         self.connection_pool = connection_pool
         self.connection = None
         self.response_callbacks = response_callbacks
@@ -2198,7 +2198,6 @@ class BasePipeline(object):
 
     def reset(self):
         self.command_stack = []
-        self.scripts = set()
         # make sure to reset the connection state in the event that we were
         # watching something
         if self.watching and self.connection:

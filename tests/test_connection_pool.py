@@ -120,7 +120,7 @@ class TestBlockingConnectionPool(object):
     def test_max_connections_timeout(self):
         """Getting a connection raises ``ConnectionError`` after timeout."""
 
-        pool = self.get_pool(max_connections=2, timeout=0.1)
+        pool = self.get_pool(max_connections=2, timeout=1)
         pool.get_connection('_')
         pool.get_connection('_')
         with pytest.raises(redis.ConnectionError):

@@ -91,7 +91,7 @@ class SocketBuffer(object):
                                   (e.args,))
 
     def read(self, length):
-        length = length + 2  # make sure to read the \r\n terminator
+        length += 2  # make sure to read the \r\n terminator
         # make sure we've read enough data from the socket
         if length > self.length:
             self._read_from_socket(length - self.length)
@@ -217,6 +217,10 @@ class PythonParser(BaseParser):
 class HiredisParser(BaseParser):
     "Parser class for connections using Hiredis"
     def __init__(self):
+        self._next_response = False
+        self._reader = None
+        self._sock = None
+        self._next_response = False
         if not HIREDIS_AVAILABLE:
             raise RedisError("Hiredis is not installed")
 
@@ -239,11 +243,8 @@ class HiredisParser(BaseParser):
         if connection.decode_responses:
             kwargs['encoding'] = connection.encoding
         self._reader = hiredis.Reader(**kwargs)
-        self._next_response = False
 
     def on_disconnect(self):
-        self._sock = None
-        self._reader = None
         self._next_response = False
 
     def can_read(self):
@@ -261,7 +262,6 @@ class HiredisParser(BaseParser):
         # _next_response might be cached from a can_read() call
         if self._next_response is not False:
             response = self._next_response
-            self._next_response = False
             return response
 
         response = self._reader.gets()
@@ -489,6 +489,7 @@ class UnixDomainSocketConnection(Connection):
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  parser_class=DefaultParser):
+        super(UnixDomainSocketConnection, self).__init__()
         self.pid = os.getpid()
         self.path = path
         self.db = db
