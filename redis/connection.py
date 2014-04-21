@@ -58,8 +58,9 @@ class BaseParser(object):
 
 
 class SocketBuffer(object):
-    def __init__(self, socket):
+    def __init__(self, socket, socket_read_size):
         self._sock = socket
+        self.socket_read_size = socket_read_size
         self._buffer = BytesIO()
         # number of bytes written to the buffer from the socket
         self.bytes_written = 0
@@ -71,9 +72,9 @@ class SocketBuffer(object):
         return self.bytes_written - self.bytes_read
 
     def _read_from_socket(self, length=None):
-        chunksize = 8192
+        socket_read_size = self.socket_read_size
         if length is None:
-            length = chunksize
+            length = socket_read_size
 
         buf = self._buffer
         buf.seek(self.bytes_written)
@@ -81,10 +82,10 @@ class SocketBuffer(object):
 
         try:
             while length > marker:
-                data = self._sock.recv(chunksize)
+                data = self._sock.recv(socket_read_size)
                 buf.write(data)
                 self.bytes_written += len(data)
-                marker += chunksize
+                marker += socket_read_size
         except (socket.error, socket.timeout):
             e = sys.exc_info()[1]
             raise ConnectionError("Error while reading from socket: %s" %
@@ -137,7 +138,8 @@ class PythonParser(BaseParser):
     "Plain Python parsing class"
     encoding = None
 
-    def __init__(self):
+    def __init__(self, socket_read_size):
+        self.socket_read_size = socket_read_size
         self._sock = None
         self._buffer = None
 
@@ -150,7 +152,7 @@ class PythonParser(BaseParser):
     def on_connect(self, connection):
         "Called when the socket connects"
         self._sock = connection._sock
-        self._buffer = SocketBuffer(self._sock)
+        self._buffer = SocketBuffer(self._sock, self.socket_read_size)
         if connection.decode_responses:
             self.encoding = connection.encoding
 
@@ -216,9 +218,10 @@ class PythonParser(BaseParser):
 
 class HiredisParser(BaseParser):
     "Parser class for connections using Hiredis"
-    def __init__(self):
+    def __init__(self, socket_read_size):
         if not HIREDIS_AVAILABLE:
             raise RedisError("Hiredis is not installed")
+        self.socket_read_size = socket_read_size
 
     def __del__(self):
         try:
@@ -233,6 +236,7 @@ class HiredisParser(BaseParser):
             'replyError': self.parse_error,
         }
 
+        # hiredis < 0.1.3 doesn't support functions that create exceptions
         if not HIREDIS_SUPPORTS_CALLABLE_ERRORS:
             kwargs['replyError'] = ResponseError
 
@@ -265,9 +269,10 @@ class HiredisParser(BaseParser):
             return response
 
         response = self._reader.gets()
+        socket_read_size = self.socket_read_size
         while response is False:
             try:
-                buffer = self._sock.recv(4096)
+                buffer = self._sock.recv(socket_read_size)
             except (socket.error, socket.timeout):
                 e = sys.exc_info()[1]
                 raise ConnectionError("Error while reading from socket: %s" %
@@ -311,7 +316,7 @@ class Connection(object):
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
-                 parser_class=DefaultParser):
+                 parser_class=DefaultParser, socket_read_size=8192):
         self.pid = os.getpid()
         self.host = host
         self.port = port
@@ -322,7 +327,7 @@ class Connection(object):
         self.encoding_errors = encoding_errors
         self.decode_responses = decode_responses
         self._sock = None
-        self._parser = parser_class()
+        self._parser = parser_class(socket_read_size=socket_read_size)
         self._description_args = {
             'host': self.host,
             'port': self.port,
@@ -488,7 +493,7 @@ class UnixDomainSocketConnection(Connection):
     def __init__(self, path='', db=0, password=None,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
-                 parser_class=DefaultParser):
+                 parser_class=DefaultParser, socket_read_size=8192):
         self.pid = os.getpid()
         self.path = path
         self.db = db
@@ -498,7 +503,7 @@ class UnixDomainSocketConnection(Connection):
         self.encoding_errors = encoding_errors
         self.decode_responses = decode_responses
         self._sock = None
-        self._parser = parser_class()
+        self._parser = parser_class(socket_read_size=socket_read_size)
         self._description_args = {
             'path': self.path,
             'db': self.db,
