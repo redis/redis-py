@@ -295,8 +295,8 @@ class StrictRedis(object):
         string_keys_to_dict(
             'BITCOUNT DECRBY DEL GETBIT HDEL HLEN INCRBY LINSERT LLEN LPUSHX '
             'PFADD PFCOUNT RPUSHX SADD SCARD SDIFFSTORE SETBIT SETRANGE '
-            'SINTERSTORE SREM STRLEN SUNIONSTORE ZADD ZCARD ZREM '
-            'ZREMRANGEBYRANK ZREMRANGEBYSCORE',
+            'SINTERSTORE SREM STRLEN SUNIONSTORE ZADD ZCARD ZLEXCOUNT ZREM '
+            'ZREMRANGEBYLEX ZREMRANGEBYRANK ZREMRANGEBYSCORE',
             int
         ),
         string_keys_to_dict('INCRBYFLOAT HINCRBYFLOAT', float),
@@ -1477,6 +1477,13 @@ class StrictRedis(object):
         """
         return self._zaggregate('ZINTERSTORE', dest, keys, aggregate)
 
+    def zlexcount(self, name, min, max):
+        """
+        Return the number of items in the sorted set ``name`` between the
+        lexicographical range ``min`` and ``max``.
+        """
+        return self.execute_command('ZLEXCOUNT', name, min, max)
+
     def zrange(self, name, start, end, desc=False, withscores=False,
                score_cast_func=float):
         """
@@ -1501,6 +1508,22 @@ class StrictRedis(object):
         options = {
             'withscores': withscores, 'score_cast_func': score_cast_func}
         return self.execute_command(*pieces, **options)
+
+    def zrangebylex(self, name, min, max, start=None, num=None):
+        """
+        Return the lexicographical range of values from sorted set ``name``
+        between ``min`` and ``max``.
+
+        If ``start`` and ``num`` are specified, then return a slice of the
+        range.
+        """
+        if (start is not None and num is None) or \
+                (num is not None and start is None):
+            raise RedisError("``start`` and ``num`` must both be specified")
+        pieces = ['ZRANGEBYLEX', name, min, max]
+        if start is not None and num is not None:
+            pieces.extend(['LIMIT', start, num])
+        return self.execute_command(*pieces)
 
     def zrangebyscore(self, name, min, max, start=None, num=None,
                       withscores=False, score_cast_func=float):
@@ -1538,6 +1561,15 @@ class StrictRedis(object):
     def zrem(self, name, *values):
         "Remove member ``values`` from sorted set ``name``"
         return self.execute_command('ZREM', name, *values)
+
+    def zremrangebylex(self, name, min, max):
+        """
+        Remove all elements in the sorted set ``name`` between the
+        lexicographical range specified by ``min`` and ``max``.
+
+        Returns the number of elements removed.
+        """
+        return self.execute_command('ZREMRANGEBYLEX', name, min, max)
 
     def zremrangebyrank(self, name, min, max):
         """

@@ -11,6 +11,8 @@
       [cursor, data] type. Use scan_iter, hscan_iter, sscan_iter, and
       zscan_iter for iterators. Thanks Mathieu Longtin.
     * Added support for SLOWLOG commands. Thanks Rick van Hattem.
+    * Added lexicographical commands ZRANGEBYLEX, ZREMRANGEBYLEX, and ZLEXCOUNT
+      for sorted sets.
 * 2.9.1
     * IPv6 support. Thanks https://github.com/amashinchi
 * 2.9.0

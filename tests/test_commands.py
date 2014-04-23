@@ -862,6 +862,12 @@ class TestRedisCommands(object):
         assert r.zscore('a', 'a2') == 3.0
         assert r.zscore('a', 'a3') == 8.0
 
+    @skip_if_server_version_lt('2.8.9')
+    def test_zlexcount(self, r):
+        r.zadd('a', a=0, b=0, c=0, d=0, e=0, f=0, g=0)
+        assert r.zlexcount('a', '-', '+') == 7
+        assert r.zlexcount('a', '[b', '[f') == 5
+
     def test_zinterstore_sum(self, r):
         r.zadd('a', a1=1, a2=1, a3=1)
         r.zadd('b', a1=2, a2=2, a3=2)
@@ -909,6 +915,16 @@ class TestRedisCommands(object):
         assert r.zrange('a', 0, 1, withscores=True, score_cast_func=int) == \
             [(b('a1'), 1), (b('a2'), 2)]
 
+    @skip_if_server_version_lt('2.8.9')
+    def test_zrangebylex(self, r):
+        r.zadd('a', a=0, b=0, c=0, d=0, e=0, f=0, g=0)
+        assert r.zrangebylex('a', '-', '[c') == [b('a'), b('b'), b('c')]
+        assert r.zrangebylex('a', '-', '(c') == [b('a'), b('b')]
+        assert r.zrangebylex('a', '[aaa', '(g') == \
+            [b('b'), b('c'), b('d'), b('e'), b('f')]
+        assert r.zrangebylex('a', '[f', '+') == [b('f'), b('g')]
+        assert r.zrangebylex('a', '-', '+', start=3, num=2) == [b('d'), b('e')]
+
     def test_zrangebyscore(self, r):
         r.zadd('a', a1=1, a2=2, a3=3, a4=4, a5=5)
         assert r.zrangebyscore('a', 2, 4) == [b('a2'), b('a3'), b('a4')]
@@ -943,6 +959,16 @@ class TestRedisCommands(object):
         r.zadd('a', a1=1, a2=2, a3=3)
         assert r.zrem('a', 'a1', 'a2') == 2
         assert r.zrange('a', 0, 5) == [b('a3')]
+
+    @skip_if_server_version_lt('2.8.9')
+    def test_zremrangebylex(self, r):
+        r.zadd('a', a=0, b=0, c=0, d=0, e=0, f=0, g=0)
+        assert r.zremrangebylex('a', '-', '[c') == 3
+        assert r.zrange('a', 0, -1) == [b('d'), b('e'), b('f'), b('g')]
+        assert r.zremrangebylex('a', '[f', '+') == 2
+        assert r.zrange('a', 0, -1) == [b('d'), b('e')]
+        assert r.zremrangebylex('a', '[h', '+') == 0
+        assert r.zrange('a', 0, -1) == [b('d'), b('e')]
 
     def test_zremrangebyrank(self, r):
         r.zadd('a', a1=1, a2=2, a3=3, a4=4, a5=5)
