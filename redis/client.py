@@ -766,8 +766,8 @@ class StrictRedis(object):
 
     def getset(self, name, value):
         """
-        Set the value at key ``name`` to ``value`` if key doesn't exist
-        Return the value at key ``name`` atomically
+        Sets the value at key ``name`` to ``value``
+        and returns the old value at key ``name`` atomically.
         """
         return self.execute_command('GETSET', name, value)
 
