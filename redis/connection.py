@@ -80,6 +80,8 @@ class SocketBuffer(object):
         try:
             while True:
                 data = self._sock.recv(socket_read_size)
+                if isinstance(data, str) and len(data) == 0:
+                    raise socket.error("Connection closed by remote server.")
                 buf.write(data)
                 data_length = len(data)
                 self.bytes_written += data_length
