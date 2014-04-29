@@ -324,7 +324,7 @@ class Connection(object):
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
-                 parser_class=DefaultParser, socket_read_size=8192):
+                 parser_class=DefaultParser, socket_read_size=65536):
         self.pid = os.getpid()
         self.host = host
         self.port = port
@@ -501,7 +501,7 @@ class UnixDomainSocketConnection(Connection):
     def __init__(self, path='', db=0, password=None,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
-                 parser_class=DefaultParser, socket_read_size=8192):
+                 parser_class=DefaultParser, socket_read_size=65536):
         self.pid = os.getpid()
         self.path = path
         self.db = db
