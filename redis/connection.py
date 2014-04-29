@@ -73,19 +73,21 @@ class SocketBuffer(object):
 
     def _read_from_socket(self, length=None):
         socket_read_size = self.socket_read_size
-        if length is None:
-            length = socket_read_size
-
         buf = self._buffer
         buf.seek(self.bytes_written)
         marker = 0
 
         try:
-            while length > marker:
+            while True:
                 data = self._sock.recv(socket_read_size)
                 buf.write(data)
-                self.bytes_written += len(data)
-                marker += socket_read_size
+                data_length = len(data)
+                self.bytes_written += data_length
+                marker += data_length
+
+                if length is not None and length > marker:
+                    continue
+                break
         except (socket.error, socket.timeout):
             e = sys.exc_info()[1]
             raise ConnectionError("Error while reading from socket: %s" %
@@ -119,6 +121,12 @@ class SocketBuffer(object):
             data = buf.readline()
 
         self.bytes_read += len(data)
+
+        # purge the buffer when we've consumed it all so it doesn't
+        # grow forever
+        if self.bytes_read == self.bytes_written:
+            self.purge()
+
         return data[:-2]
 
     def purge(self):
