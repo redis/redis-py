@@ -1760,28 +1760,26 @@ class StrictRedis(object):
         """
         return self.execute_command('PUBLISH', channel, message)
 
-    def eval(self, script, numkeys, *keys_and_args):
+    def eval(self, script, keys=[], args=[]):
         """
-        Execute the Lua ``script``, specifying the ``numkeys`` the script
-        will touch and the key names and argument values in ``keys_and_args``.
-        Returns the result of the script.
+        Execute the Lua ``script``, specifying the ``keys`` the script
+        will touch and argument values in ``args``. Returns the result of the script.
 
         In practice, use the object returned by ``register_script``. This
         function exists purely for Redis API completion.
         """
-        return self.execute_command('EVAL', script, numkeys, *keys_and_args)
+        return self.execute_command('EVAL', script, len(keys), *(tuple(keys) + tuple(args)))
 
-    def evalsha(self, sha, numkeys, *keys_and_args):
+    def evalsha(self, sha, keys=[], args=[]):
         """
         Use the ``sha`` to execute a Lua script already registered via EVAL
-        or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
-        key names and argument values in ``keys_and_args``. Returns the result
-        of the script.
+        or SCRIPT LOAD. Specify the ``keys`` the script will touch
+        and argument values in ``args``. Returns the result of the script.
 
         In practice, use the object returned by ``register_script``. This
         function exists purely for Redis API completion.
         """
-        return self.execute_command('EVALSHA', sha, numkeys, *keys_and_args)
+        return self.execute_command('EVALSHA', sha, len(keys), *(tuple(keys) + tuple(args)))
 
     def script_exists(self, *args):
         """
@@ -2512,18 +2510,17 @@ class Script(object):
         "Execute the script, passing any required ``args``"
         if client is None:
             client = self.registered_client
-        args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
         if isinstance(client, BasePipeline):
             # make sure this script is good to go on pipeline
             client.script_load_for_pipeline(self)
         try:
-            return client.evalsha(self.sha, len(keys), *args)
+            return client.evalsha(self.sha, keys, args)
         except NoScriptError:
             # Maybe the client is pointed to a differnet server than the client
             # that created this instance?
             self.sha = client.script_load(self.script)
-            return client.evalsha(self.sha, len(keys), *args)
+            return client.evalsha(self.sha, keys, args)
 
 
 class LockError(RedisError):
