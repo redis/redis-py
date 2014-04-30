@@ -13,6 +13,13 @@
     * Added support for SLOWLOG commands. Thanks Rick van Hattem.
     * Added lexicographical commands ZRANGEBYLEX, ZREMRANGEBYLEX, and ZLEXCOUNT
       for sorted sets.
+    * Connection objects now support an optional argument, socket_read_size,
+      indicating how much data to read during each socket.recv() call. After
+      benchmarking, increased the default size to 64k, which dramatically
+      improves performance when fetching large values, such as many results
+      in a pipeline or a large (>1MB) string value.
+    * Improved the pack_command and send_packed_command functions to increase
+      performance when sending large (>1MB) values.
 * 2.9.1
     * IPv6 support. Thanks https://github.com/amashinchi
 * 2.9.0

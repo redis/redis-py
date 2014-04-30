@@ -2316,7 +2316,7 @@ class BasePipeline(object):
 
     def _execute_transaction(self, connection, commands, raise_on_error):
         cmds = chain([(('MULTI', ), {})], commands, [(('EXEC', ), {})])
-        all_cmds = SYM_EMPTY.join(
+        all_cmds = chain.from_iterable(
             starmap(connection.pack_command,
                     [args for args, options in cmds]))
         connection.send_packed_command(all_cmds)
@@ -2379,7 +2379,7 @@ class BasePipeline(object):
 
     def _execute_pipeline(self, connection, commands, raise_on_error):
         # build up all commands into a single request to increase network perf
-        all_cmds = SYM_EMPTY.join(
+        all_cmds = chain.from_iterable(
             starmap(connection.pack_command,
                     [args for args, options in commands]))
         connection.send_packed_command(all_cmds)
