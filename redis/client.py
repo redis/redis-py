@@ -1763,12 +1763,14 @@ class StrictRedis(object):
     def eval(self, script, keys=[], args=[]):
         """
         Execute the Lua ``script``, specifying the ``keys`` the script
-        will touch and argument values in ``args``. Returns the result of the script.
+        will touch and argument values in ``args``.
+        Returns the result of the script.
 
         In practice, use the object returned by ``register_script``. This
         function exists purely for Redis API completion.
         """
-        return self.execute_command('EVAL', script, len(keys), *(tuple(keys) + tuple(args)))
+        args = tuple(keys) + tuple(args)
+        return self.execute_command('EVAL', script, len(keys), *(args))
 
     def evalsha(self, sha, keys=[], args=[]):
         """
@@ -1779,7 +1781,8 @@ class StrictRedis(object):
         In practice, use the object returned by ``register_script``. This
         function exists purely for Redis API completion.
         """
-        return self.execute_command('EVALSHA', sha, len(keys), *(tuple(keys) + tuple(args)))
+        args = tuple(keys) + tuple(args)
+        return self.execute_command('EVALSHA', sha, len(keys), *(args))
 
     def script_exists(self, *args):
         """
