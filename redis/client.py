@@ -324,8 +324,8 @@ class StrictRedis(object):
         string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
         {
             'BGREWRITEAOF': (
-                lambda r: nativestr(r) == ('Background rewriting of AOF '
-                                           'file started')
+                lambda r: nativestr(r) == ('Background append only file '
+                                           'rewriting started')
             ),
             'BGSAVE': lambda r: nativestr(r) == 'Background saving started',
             'CLIENT': parse_client,
