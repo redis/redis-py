@@ -1,0 +1,7 @@
+pidfile /var/run/redis-master.pid
+port 6379
+daemonize yes
+unixsocket /tmp/redis_master.sock
+unixsocketperm 777
+dbfilename master.rdb
+dir /home/vagrant/redis/backups

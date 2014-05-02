@@ -1,14 +1,21 @@
 #!/bin/sh
-#
-# Simple Redis init.d script conceived to work on Linux systems
-# as it does use of the /proc filesystem.
 
-REDISPORT=6379
-EXEC=/home/vagrant/redis/src/redis-server
-CLIEXEC=/home/vagrant/redis/src/redis-cli
+### BEGIN INIT INFO
+# Provides:          redis-server
+# Required-Start:    $syslog
+# Required-Stop:     $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Start redis-server at boot time
+# Description:       Control redis-server.
+### END INIT INFO
 
-PIDFILE=/var/run/redis.pid
-CONF=/home/vagrant/redis/redis.conf
+REDISPORT={{ PORT }}
+PIDFILE=/var/run/{{ PROCESS_NAME }}.pid
+CONF=/home/vagrant/redis/conf/{{ PROCESS_NAME }}.conf
+
+EXEC=/home/vagrant/redis/bin/redis-server
+CLIEXEC=/home/vagrant/redis/bin/redis-cli
 
 case "$1" in
     start)

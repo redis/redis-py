@@ -1,34 +1,37 @@
 #!/usr/bin/env bash
 
-pushd /home/vagrant
+source /home/vagrant/redis-py/vagrant/redis_vars.sh
 
-# if there's an existing redis running (started at boot?) kill it
-if [ -a /etc/init.d/redis_master ]
-    then
-        sudo /etc/init.d/redis_master stop
-        sudo update-rc.d -f redis_master remove
-        sudo rm -f /etc/init.d/redis_master
-fi
+for filename in `ls $VAGRANT_REDIS_CONF_DIR`; do
+    # cuts the order prefix off of the filename, e.g. 001-master -> master
+    PROCESS_NAME=redis-`echo $filename | cut -f 2- -d -`
+    echo "======================================"
+    echo "INSTALLING REDIS SERVER: $PROCESS_NAME"
+    echo "======================================"
 
-# delete any previous provisioned redis
-rm -rf /home/vagrant/redis
-rm -rf /home/vagrant/redis-2.8.8.tar.gz
+    # make sure the instance is uninstalled (it should be already)
+    uninstall_instance $PROCESS_NAME
 
-# download, unpack and build redis in /home/vagrant/redis
-wget http://download.redis.io/releases/redis-2.8.8.tar.gz
-tar zxvf redis-2.8.8.tar.gz
-mv redis-2.8.8 /home/vagrant/redis
-cd /home/vagrant/redis
-make
+    # base config
+    mkdir -p $REDIS_CONF_DIR
+    cp $REDIS_BUILD_DIR/redis.conf $REDIS_CONF_DIR/$PROCESS_NAME.conf
+    # override config values from file
+    cat $VAGRANT_REDIS_CONF_DIR/$filename >> $REDIS_CONF_DIR/$PROCESS_NAME.conf
 
-# include our overridden config options
-cat /home/vagrant/redis-py/vagrant/redis-override.conf >> /home/vagrant/redis/redis.conf
+    # replace placeholder variables in init.d script
+    cp $VAGRANT_DIR/redis_init_script /etc/init.d/$PROCESS_NAME
+    sed -i "s/{{ PROCESS_NAME }}/$PROCESS_NAME/g" /etc/init.d/$PROCESS_NAME
+    # need to read the config file to find out what port this instance will run on
+    port=`grep port $VAGRANT_REDIS_CONF_DIR/$filename | cut -f 2 -d " "`
+    sed -i "s/{{ PORT }}/$port/g" /etc/init.d/$PROCESS_NAME
+    chmod 755 /etc/init.d/$PROCESS_NAME
 
-# link to our init.d script
-sudo cp /home/vagrant/redis-py/vagrant/redis_init_script /etc/init.d/redis_master
-# and tell update-rc about it
-sudo update-rc.d redis_master defaults 99
-# and finally start it
-sudo /etc/init.d/redis_master start
+    # and tell update-rc.d about it
+    update-rc.d $PROCESS_NAME defaults 99
 
-popd
+    # save the $PROCESS_NAME into installed instances file
+    echo $PROCESS_NAME >> $REDIS_INSTALLED_INSTANCES_FILE
+
+    # start redis
+    /etc/init.d/$PROCESS_NAME start
+done
