@@ -22,6 +22,8 @@ wget http://download.redis.io/releases/$REDIS_PACKAGE
 tar zxvf $REDIS_PACKAGE
 cd $REDIS_BUILD_DIR
 make
-PREFIX=$REDIS_DIR make install
+cp src/redis-server $REDIS_DIR/bin
+cp src/redis-cli $REDIS_DIR/bin
+cp src/redis-sentinel $REDIS_DIR/bin
 
 popd

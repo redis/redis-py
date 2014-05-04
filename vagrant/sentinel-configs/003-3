@@ -1,0 +1,6 @@
+pidfile /var/run/sentinel-3.pid
+port 26381
+daemonize yes
+
+# short timeout for sentinel tests
+sentinel down-after-milliseconds mymaster 500
