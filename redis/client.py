@@ -322,12 +322,8 @@ class StrictRedis(object):
             zset_score_pairs
         ),
         string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
+        string_keys_to_dict('BGREWRITEAOF BGSAVE', lambda r: True),
         {
-            'BGREWRITEAOF': (
-                lambda r: nativestr(r) == ('Background rewriting of AOF '
-                                           'file started')
-            ),
-            'BGSAVE': lambda r: nativestr(r) == 'Background saving started',
             'CLIENT': parse_client,
             'CONFIG': parse_config,
             'DEBUG': parse_debug_object,
