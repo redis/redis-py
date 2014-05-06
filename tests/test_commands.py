@@ -28,6 +28,12 @@ def slowlog(request, r):
     r.config_set('slowlog-max-len', 128)
 
 
+def redis_server_time(client):
+    seconds, milliseconds = client.time()
+    timestamp = float('%s.%s' % (seconds, milliseconds))
+    return datetime.datetime.fromtimestamp(timestamp)
+
+
 # RESPONSE CALLBACKS
 class TestResponseCallbacks(object):
     "Tests for the response callback system"
@@ -271,17 +277,17 @@ class TestRedisCommands(object):
         assert not r.ttl('a')
 
     def test_expireat_datetime(self, r):
-        expire_at = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         r['a'] = 'foo'
         assert r.expireat('a', expire_at)
         assert 0 < r.ttl('a') <= 60
 
     def test_expireat_no_key(self, r):
-        expire_at = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         assert not r.expireat('a', expire_at)
 
     def test_expireat_unixtime(self, r):
-        expire_at = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         r['a'] = 'foo'
         expire_at_seconds = int(time.mktime(expire_at.timetuple()))
         assert r.expireat('a', expire_at_seconds)
@@ -411,19 +417,19 @@ class TestRedisCommands(object):
 
     @skip_if_server_version_lt('2.6.0')
     def test_pexpireat_datetime(self, r):
-        expire_at = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         r['a'] = 'foo'
         assert r.pexpireat('a', expire_at)
         assert 0 < r.pttl('a') <= 60000
 
     @skip_if_server_version_lt('2.6.0')
     def test_pexpireat_no_key(self, r):
-        expire_at = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         assert not r.pexpireat('a', expire_at)
 
     @skip_if_server_version_lt('2.6.0')
     def test_pexpireat_unixtime(self, r):
-        expire_at = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         r['a'] = 'foo'
         expire_at_seconds = int(time.mktime(expire_at.timetuple())) * 1000
         assert r.pexpireat('a', expire_at_seconds)
