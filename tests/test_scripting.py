@@ -19,13 +19,13 @@ class TestScripting(object):
     def test_eval(self, r):
         r.set('a', 2)
         # 2 * 3 == 6
-        assert r.eval(multiply_script, 1, 'a', 3) == 6
+        assert r.eval(multiply_script, ['a'], [3]) == 6
 
     def test_evalsha(self, r):
         r.set('a', 2)
         sha = r.script_load(multiply_script)
         # 2 * 3 == 6
-        assert r.evalsha(sha, 1, 'a', 3) == 6
+        assert r.evalsha(sha, ['a'], [3]) == 6
 
     def test_evalsha_script_not_loaded(self, r):
         r.set('a', 2)
@@ -33,7 +33,7 @@ class TestScripting(object):
         # remove the script from Redis's cache
         r.script_flush()
         with pytest.raises(exceptions.NoScriptError):
-            r.evalsha(sha, 1, 'a', 3)
+            r.evalsha(sha, ['a'], [3])
 
     def test_script_loading(self, r):
         # get the sha, then clear the cache
