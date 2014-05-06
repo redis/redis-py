@@ -163,6 +163,8 @@ def parse_sentinel(response, **options):
             state = parse_sentinel_state(imap(nativestr, item))
             result[state['name']] = state
         return result
+    elif parse == 'SENTINEL_INFO_MASTER':
+        return parse_sentinel_state(imap(nativestr, response))
     elif parse == 'SENTINEL_ADDR_PORT':
         if response is None:
             return
@@ -608,8 +610,13 @@ class StrictRedis(object):
             parse = 'SENTINEL'
         return self.execute_command('SENTINEL', *args, **{'parse': parse})
 
+    def sentinel_master(self, service_name):
+        "Returns a dictionary containing the specified masters state."
+        return self.execute_command('SENTINEL', 'master', service_name,
+                                    parse='SENTINEL_INFO_MASTER')
+
     def sentinel_masters(self):
-        "Returns a dictionary containing the master's state."
+        "Returns a list of dictionaries containing each master's state."
         return self.execute_command('SENTINEL', 'masters',
                                     parse='SENTINEL_INFO_MASTERS')
 
