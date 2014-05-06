@@ -114,20 +114,28 @@ def parse_info(response):
 
 SENTINEL_STATE_TYPES = {
     'can-failover-its-master': int,
+    'config-epoch': int,
+    'down-after-milliseconds': int,
+    'failover-timeout': int,
     'info-refresh': int,
     'last-hello-message': int,
     'last-ok-ping-reply': int,
     'last-ping-reply': int,
+    'last-ping-sent': int,
     'master-link-down-time': int,
     'master-port': int,
     'num-other-sentinels': int,
     'num-slaves': int,
     'o-down-time': int,
     'pending-commands': int,
+    'parallel-syncs': int,
     'port': int,
     'quorum': int,
+    'role-reported-time': int,
     's-down-time': int,
     'slave-priority': int,
+    'slave-repl-offset': int,
+    'voted-leader-epoch': int
 }
 
 
@@ -146,13 +154,13 @@ def parse_sentinel_state(item):
 def parse_sentinel(response, **options):
     "Parse the result of Redis's SENTINEL command"
     parse = options.get('parse')
-    response = nativestr(response)
     if parse == 'SENTINEL_INFO':
-        return [parse_sentinel_state(item) for item in response]
+        return [parse_sentinel_state(imap(nativestr, item))
+                for item in response]
     elif parse == 'SENTINEL_INFO_MASTERS':
         result = {}
         for item in response:
-            state = parse_sentinel_state(item)
+            state = parse_sentinel_state(imap(nativestr, item))
             result[state['name']] = state
         return result
     elif parse == 'SENTINEL_ADDR_PORT':
@@ -173,7 +181,12 @@ def pairs_to_dict_typed(response, type_info):
     result = {}
     for key, value in izip(it, it):
         if key in type_info:
-            value = type_info[key](value)
+            try:
+                value = type_info[key](value)
+            except:
+                # if for some reason the value can't be coerced, just use
+                # the string value
+                pass
         result[key] = value
     return result
 
