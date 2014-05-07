@@ -335,7 +335,7 @@ class Connection(object):
                  parser_class=DefaultParser, socket_read_size=65536):
         self.pid = os.getpid()
         self.host = host
-        self.port = port
+        self.port = int(port)
         self.db = db
         self.password = password
         self.socket_timeout = socket_timeout
