@@ -21,6 +21,14 @@ class SentinelManagedConnection(Connection):
         self.connection_pool = kwargs.pop('connection_pool')
         super(SentinelManagedConnection, self).__init__(**kwargs)
 
+    def __repr__(self):
+        pool = self.connection_pool
+        s = '%s<service=%s%%s>' % (type(self).__name__, pool.service_name)
+        if self.host:
+            host_info = ',host=%s,port=%s' % (self.host, self.port)
+            s = s % host_info
+        return s
+
     def connect_to(self, address):
         self.host, self.port = address
         super(SentinelManagedConnection, self).connect()
@@ -76,6 +84,13 @@ class SentinelConnectionPool(ConnectionPool):
         self.sentinel_manager = sentinel_manager
         self.master_address = None
         self.slave_rr_counter = None
+
+    def __repr__(self):
+        return "%s<service=%s(%s)" % (
+            type(self).__name__,
+            self.service_name,
+            self.is_master and 'master' or 'slave',
+        )
 
     def get_master_address(self):
         master_address = self.sentinel_manager.discover_master(
@@ -142,6 +157,17 @@ class Sentinel(object):
                                       socket_timeout=socket_timeout)
                           for hostname, port in sentinels]
         self.min_other_sentinels = min_other_sentinels
+
+    def __repr__(self):
+        sentinel_addresses = []
+        for sentinel in self.sentinels:
+            sentinel_addresses.append('%s:%s' % (
+                sentinel.connection_pool.connection_kwargs['host'],
+                sentinel.connection_pool.connection_kwargs['port'],
+            ))
+        return '%s<sentinels=[%s]>' % (
+            type(self).__name__,
+            ','.join(sentinel_addresses))
 
     def check_master_state(self, state, service_name):
         if not state['is_master'] or state['is_sdown'] or state['is_odown']:
