@@ -4,7 +4,7 @@ import weakref
 
 from redis.client import StrictRedis
 from redis.connection import ConnectionPool, Connection
-from redis.exceptions import ConnectionError, ResponseError
+from redis.exceptions import ConnectionError, ResponseError, ReadOnlyError
 from redis._compat import xrange, nativestr
 
 
@@ -42,6 +42,20 @@ class SentinelManagedConnection(Connection):
                     continue
             raise SlaveNotFoundError  # Never be here
 
+    def send_command(self, *args):
+        try:
+            super(SentinelManagedConnection, self).send_command(*args)
+        except ReadOnlyError:
+            if self.connection_pool.is_master:
+                # When talking to a master, a ReadOnlyError when likely
+                # indicates that the previous master that we're still connected
+                # to has been demoted to a slave and there's a new master.
+                # calling disconnect will force the connection to re-query
+                # sentinel during the next connect() attempt.
+                self.disconnect()
+                raise ConnectionError('The previous master is now a slave')
+            raise
+
 
 class SentinelConnectionPool(ConnectionPool):
     """
@@ -66,12 +80,12 @@ class SentinelConnectionPool(ConnectionPool):
     def get_master_address(self):
         master_address = self.sentinel_manager.discover_master(
             self.service_name)
-        if not self.is_master:
-            pass
-        elif self.master_address is None:
-            self.master_address = master_address
-        elif master_address != self.master_address:
-            self.disconnect()  # Master address changed
+        if self.is_master:
+            if self.master_address is None:
+                self.master_address = master_address
+            elif master_address != self.master_address:
+                # Master address changed, disconnect all clients in this pool
+                self.disconnect()
         return master_address
 
     def rotate_slaves(self):

@@ -20,6 +20,7 @@ from redis.exceptions import (
     AuthenticationError,
     NoScriptError,
     ExecAbortError,
+    ReadOnlyError
 )
 from redis.utils import HIREDIS_AVAILABLE
 if HIREDIS_AVAILABLE:
@@ -46,6 +47,7 @@ class BaseParser(object):
         'EXECABORT': ExecAbortError,
         'LOADING': BusyLoadingError,
         'NOSCRIPT': NoScriptError,
+        'READONLY': ReadOnlyError,
     }
 
     def parse_error(self, response):

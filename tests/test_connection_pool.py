@@ -217,3 +217,9 @@ class TestConnection(object):
         assert not pipe.connection
         assert len(pool._available_connections) == 1
         assert not pool._available_connections[0]._sock
+
+    @skip_if_server_version_lt('2.8.8')
+    def test_read_only_error(self, r):
+        "READONLY errors get turned in ReadOnlyError exceptions"
+        with pytest.raises(redis.ReadOnlyError):
+            r.execute_command('DEBUG', 'ERROR', 'READONLY blah blah')

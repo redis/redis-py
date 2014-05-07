@@ -16,6 +16,7 @@ from redis.exceptions import (
     RedisError,
     ResponseError,
     WatchError,
+    ReadOnlyError
 )
 
 
@@ -27,5 +28,5 @@ __all__ = [
     'Connection', 'UnixDomainSocketConnection',
     'RedisError', 'ConnectionError', 'ResponseError', 'AuthenticationError',
     'InvalidResponse', 'DataError', 'PubSubError', 'WatchError', 'from_url',
-    'BusyLoadingError'
+    'BusyLoadingError', 'ReadOnlyError'
 ]

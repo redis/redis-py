@@ -58,3 +58,7 @@ class NoScriptError(ResponseError):
 
 class ExecAbortError(ResponseError):
     pass
+
+
+class ReadOnlyError(ResponseError):
+    pass
