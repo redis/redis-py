@@ -111,6 +111,7 @@ def parse_info(response):
                 key, value = line.split(':', 1)
                 info[key] = get_value(value)
             else:
+                # if the line isn't splittable, append it to the "__raw__" key
                 info.setdefault('__raw__', []).append(line)
 
     return info

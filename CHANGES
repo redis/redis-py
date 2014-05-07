@@ -24,6 +24,9 @@
       is encountered and disconnect themselves and all other active connections
       to the same master so that the new master can be discovered.
     * Fixed Sentinel state parsing on Python 3.
+    * INFO ouput that doesn't follow the "key:value" format will now be
+      appended to a key named "__raw__" in the INFO dictionary. Thanks Pedro
+      Larroy.
 * 2.9.1
     * IPv6 support. Thanks https://github.com/amashinchi
 * 2.9.0
