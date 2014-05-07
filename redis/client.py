@@ -2565,7 +2565,7 @@ class Lock(object):
 
     def __init__(self, redis, name, timeout=None, sleep=0.1):
         """
-        Create a new Lock instnace named ``name`` using the Redis client
+        Create a new Lock instance named ``name`` using the Redis client
         supplied by ``redis``.
 
         ``timeout`` indicates a maximum life for the lock.
