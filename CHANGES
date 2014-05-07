@@ -27,6 +27,11 @@
     * INFO ouput that doesn't follow the "key:value" format will now be
       appended to a key named "__raw__" in the INFO dictionary. Thanks Pedro
       Larroy.
+    * The "vagrant" directory contains a complete vagrant environment for
+      redis-py developers. The environment runs a Redis master, a Redis slave,
+      and 3 Sentinels. Future iterations of the test sutie will incorporate
+      more integration style tests, ensuring things like failover happen
+      correctly.
 * 2.9.1
     * IPv6 support. Thanks https://github.com/amashinchi
 * 2.9.0
