@@ -20,6 +20,10 @@
       in a pipeline or a large (>1MB) string value.
     * Improved the pack_command and send_packed_command functions to increase
       performance when sending large (>1MB) values.
+    * Sentinel Connections to master servers now detect when a READONLY error
+      is encountered and disconnect themselves and all other active connections
+      to the same master so that the new master can be discovered.
+    * Fixed Sentinel state parsing on Python 3.
 * 2.9.1
     * IPv6 support. Thanks https://github.com/amashinchi
 * 2.9.0
