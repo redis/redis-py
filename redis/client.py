@@ -107,8 +107,12 @@ def parse_info(response):
 
     for line in response.splitlines():
         if line and not line.startswith('#'):
-            key, value = line.split(':', 1)
-            info[key] = get_value(value)
+            if line.find(':') != -1:
+                key, value = line.split(':', 1)
+                info[key] = get_value(value)
+            else:
+                info.setdefault('__raw__', []).append(line)
+
     return info
 
 
