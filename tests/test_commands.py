@@ -299,6 +299,8 @@ class TestRedisCommands(object):
         assert r.get('byte_string') == byte_string
         assert r.get('integer') == b(str(integer))
         assert r.get('unicode_string').decode('utf-8') == unicode_string
+        with pytest.raises(ValueError):
+            r.set('dict', {'not': 'a string'})
 
     def test_getitem_and_setitem(self, r):
         r['a'] = 'bar'
@@ -716,6 +718,8 @@ class TestRedisCommands(object):
     @skip_if_server_version_lt('2.8.0')
     def test_hscan(self, r):
         r.hmset('a', {'a': 1, 'b': 2, 'c': 3})
+        with pytest.raises(ValueError):
+            r.hmset('a', {'dict': {'not': 'a string value'}})
         cursor, dic = r.hscan('a')
         assert cursor == '0'
         assert dic == {b('a'): b('1'), b('b'): b('2'), b('c'): b('3')}

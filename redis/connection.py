@@ -486,10 +486,10 @@ class Connection(object):
         "Return a bytestring representation of the value"
         if isinstance(value, bytes):
             return value
-        if isinstance(value, float):
+        if isinstance(value, (float, int)):
             value = repr(value)
         if not isinstance(value, basestring):
-            value = str(value)
+            raise ValueError('Redis can only handle strings as values')
         if isinstance(value, unicode):
             value = value.encode(self.encoding, self.encoding_errors)
         return value
