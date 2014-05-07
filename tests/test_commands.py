@@ -339,10 +339,6 @@ class TestRedisCommands(object):
     def test_getset(self, r):
         assert r.getset('a', 'foo') is None
         assert r.getset('a', 'bar') == b('foo')
-
-    def test_getset_exists(self, r):
-        r.set('a', 'foo')
-        assert r.getset('a', 'bar') == b('foo')
         assert r.get('a') == b('bar')
 
     def test_incr(self, r):
