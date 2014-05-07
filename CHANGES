@@ -24,6 +24,8 @@
       is encountered and disconnect themselves and all other active connections
       to the same master so that the new master can be discovered.
     * Fixed Sentinel state parsing on Python 3.
+    * Added support for SENTINEL MONITOR, SENTINEL REMOVE, and SENTINEL SET
+      commands. Thanks Greg Murphy.
     * INFO ouput that doesn't follow the "key:value" format will now be
       appended to a key named "__raw__" in the INFO dictionary. Thanks Pedro
       Larroy.

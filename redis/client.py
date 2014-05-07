@@ -640,6 +640,19 @@ class StrictRedis(object):
         return self.execute_command('SENTINEL', 'get-master-addr-by-name',
                                     service_name, parse='SENTINEL_ADDR_PORT')
 
+    def sentinel_monitor(self, name, ip, port, quorum):
+        "Add a new master to Sentinel to be monitored"
+        return self.execute_command('SENTINEL', 'MONITOR', name, ip, port,
+                                    quorum)
+
+    def sentinel_remove(self, name):
+        "Remove a master from Sentinel's monitoring"
+        return self.execute_command('SENTINEL', 'REMOVE', name)
+
+    def sentinel_set(self, name, option, value):
+        "Set Sentinel monitoring parameters for a given master"
+        return self.execute_command('SENTINEL', 'SET', name, option, value)
+
     def shutdown(self):
         "Shutdown the server"
         try:
