@@ -688,7 +688,7 @@ class TestRedisCommands(object):
         r.set('b', 2)
         r.set('c', 3)
         cursor, keys = r.scan()
-        assert cursor == '0'
+        assert cursor == 0
         assert set(keys) == set([b('a'), b('b'), b('c')])
         _, keys = r.scan(match='a')
         assert set(keys) == set([b('a')])
@@ -707,7 +707,7 @@ class TestRedisCommands(object):
     def test_sscan(self, r):
         r.sadd('a', 1, 2, 3)
         cursor, members = r.sscan('a')
-        assert cursor == '0'
+        assert cursor == 0
         assert set(members) == set([b('1'), b('2'), b('3')])
         _, members = r.sscan('a', match=b('1'))
         assert set(members) == set([b('1')])
@@ -724,7 +724,7 @@ class TestRedisCommands(object):
     def test_hscan(self, r):
         r.hmset('a', {'a': 1, 'b': 2, 'c': 3})
         cursor, dic = r.hscan('a')
-        assert cursor == '0'
+        assert cursor == 0
         assert dic == {b('a'): b('1'), b('b'): b('2'), b('c'): b('3')}
         _, dic = r.hscan('a', match='a')
         assert dic == {b('a'): b('1')}
@@ -741,7 +741,7 @@ class TestRedisCommands(object):
     def test_zscan(self, r):
         r.zadd('a', 'a', 1, 'b', 2, 'c', 3)
         cursor, pairs = r.zscan('a')
-        assert cursor == '0'
+        assert cursor == 0
         assert set(pairs) == set([(b('a'), 1), (b('b'), 2), (b('c'), 3)])
         _, pairs = r.zscan('a', match='a')
         assert set(pairs) == set([(b('a'), 1)])

@@ -8,6 +8,10 @@
       Pepijn de Vos and Vincent Ohprecio.
     * Updated TTL and PTTL commands with Redis 2.8+ semantics. Thanks Markus
       Kaiserswerth.
+    * *SCAN commands now return a long (int on Python3) cursor value rather
+      than the string representation. This might be slightly backwards
+      incompatible in code using *SCAN commands loops such as
+      "while cursor != '0':".
     * Added extra *SCAN commands that return iterators instead of the normal
       [cursor, data] type. Use scan_iter, hscan_iter, sscan_iter, and
       zscan_iter for iterators. Thanks Mathieu Longtin.

@@ -266,19 +266,19 @@ def parse_script(response, **options):
 
 def parse_scan(response, **options):
     cursor, r = response
-    return nativestr(cursor), r
+    return long(cursor), r
 
 
 def parse_hscan(response, **options):
     cursor, r = response
-    return nativestr(cursor), r and pairs_to_dict(r) or {}
+    return long(cursor), r and pairs_to_dict(r) or {}
 
 
 def parse_zscan(response, **options):
     score_cast_func = options.get('score_cast_func', float)
     cursor, r = response
     it = iter(r)
-    return nativestr(cursor), list(izip(it, imap(score_cast_func, it)))
+    return long(cursor), list(izip(it, imap(score_cast_func, it)))
 
 
 def parse_slowlog(response, **options):
@@ -1280,8 +1280,8 @@ class StrictRedis(object):
 
         ``count`` allows for hint the minimum number of returns
         """
-        cursor = 0
-        while cursor != '0':
+        cursor = '0'
+        while cursor != 0:
             cursor, data = self.scan(cursor=cursor, match=match, count=count)
             for item in data:
                 yield item
@@ -1311,8 +1311,8 @@ class StrictRedis(object):
 
         ``count`` allows for hint the minimum number of returns
         """
-        cursor = 0
-        while cursor != '0':
+        cursor = '0'
+        while cursor != 0:
             cursor, data = self.sscan(name, cursor=cursor,
                                       match=match, count=count)
             for item in data:
@@ -1343,8 +1343,8 @@ class StrictRedis(object):
 
         ``count`` allows for hint the minimum number of returns
         """
-        cursor = 0
-        while cursor != '0':
+        cursor = '0'
+        while cursor != 0:
             cursor, data = self.hscan(name, cursor=cursor,
                                       match=match, count=count)
             for item in data.items():
@@ -1382,8 +1382,8 @@ class StrictRedis(object):
 
         ``score_cast_func`` a callable used to cast the score return value
         """
-        cursor = 0
-        while cursor != '0':
+        cursor = '0'
+        while cursor != 0:
             cursor, data = self.zscan(name, cursor=cursor, match=match,
                                       count=count,
                                       score_cast_func=score_cast_func)
