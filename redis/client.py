@@ -550,6 +550,10 @@ class StrictRedis(object):
         "Reset runtime statistics"
         return self.execute_command('CONFIG', 'RESETSTAT', parse='RESETSTAT')
 
+    def config_rewrite(self):
+        "Rewrite config file with the minimal change to reflect running config"
+        return self.execute_command('CONFIG', 'REWRITE')
+
     def dbsize(self):
         "Returns the number of keys in the current database"
         return self.execute_command('DBSIZE')
