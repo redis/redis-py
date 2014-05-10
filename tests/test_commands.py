@@ -280,7 +280,7 @@ class TestRedisCommands(object):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         r['a'] = 'foo'
         assert r.expireat('a', expire_at)
-        assert 0 < r.ttl('a') <= 60
+        assert 0 < r.ttl('a') <= 61
 
     def test_expireat_no_key(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
@@ -291,7 +291,7 @@ class TestRedisCommands(object):
         r['a'] = 'foo'
         expire_at_seconds = int(time.mktime(expire_at.timetuple()))
         assert r.expireat('a', expire_at_seconds)
-        assert 0 < r.ttl('a') <= 60
+        assert 0 < r.ttl('a') <= 61
 
     def test_get_and_set(self, r):
         # get and set can't be tested independently of each other
@@ -421,7 +421,7 @@ class TestRedisCommands(object):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         r['a'] = 'foo'
         assert r.pexpireat('a', expire_at)
-        assert 0 < r.pttl('a') <= 60000
+        assert 0 < r.pttl('a') <= 61000
 
     @skip_if_server_version_lt('2.6.0')
     def test_pexpireat_no_key(self, r):
@@ -434,7 +434,7 @@ class TestRedisCommands(object):
         r['a'] = 'foo'
         expire_at_seconds = int(time.mktime(expire_at.timetuple())) * 1000
         assert r.pexpireat('a', expire_at_seconds)
-        assert 0 < r.pttl('a') <= 60000
+        assert 0 < r.pttl('a') <= 61000
 
     @skip_if_server_version_lt('2.6.0')
     def test_psetex(self, r):
