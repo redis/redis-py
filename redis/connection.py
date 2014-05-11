@@ -399,6 +399,7 @@ class Connection(object):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(self.socket_timeout)
             sock.connect((self.host, self.port))
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         return sock
 
     def _error_message(self, exception):
