@@ -649,20 +649,28 @@ class ConnectionPool(object):
         Any additional keyword arguments are passed to the constructor of
         connection_class.
         """
-        self.pid = os.getpid()
+        max_connections = max_connections or 2 ** 31
+        if not isinstance(max_connections, int) or max_connections < 0:
+            raise ValueError('"max_connections" must be a positive integer, %s' % type(max_connections).__name__)
+
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
-        self.max_connections = max_connections or 2 ** 31
-        self._created_connections = 0
-        self._available_connections = []
-        self._in_use_connections = set()
-        self._check_lock = threading.Lock()
+        self.max_connections = max_connections
+
+        self.reset()
 
     def __repr__(self):
         return "%s<%s>" % (
             type(self).__name__,
             self.connection_class.description_format % self.connection_kwargs,
         )
+
+    def reset(self):
+        self.pid = os.getpid()
+        self._created_connections = 0
+        self._available_connections = []
+        self._in_use_connections = set()
+        self._check_lock = threading.Lock()
 
     def _checkpid(self):
         if self.pid != os.getpid():
@@ -672,8 +680,7 @@ class ConnectionPool(object):
                     # on the lock.
                     return
                 self.disconnect()
-                self.__init__(self.connection_class, self.max_connections,
-                              **self.connection_kwargs)
+                self.reset()
 
     def get_connection(self, command_name, *keys, **options):
         "Get a connection from the pool"
@@ -695,9 +702,10 @@ class ConnectionPool(object):
     def release(self, connection):
         "Releases the connection back to the pool"
         self._checkpid()
-        if connection.pid == self.pid:
-            self._in_use_connections.remove(connection)
-            self._available_connections.append(connection)
+        if connection.pid != self.pid:
+            return
+        self._in_use_connections.remove(connection)
+        self._available_connections.append(connection)
 
     def disconnect(self):
         "Disconnects all connections in the pool"
@@ -707,7 +715,7 @@ class ConnectionPool(object):
             connection.disconnect()
 
 
-class BlockingConnectionPool(object):
+class BlockingConnectionPool(ConnectionPool):
     """
     Thread-safe blocking connection pool::
 
@@ -740,61 +748,27 @@ class BlockingConnectionPool(object):
         # not available.
         >>> pool = BlockingConnectionPool(timeout=5)
     """
-    @classmethod
-    def from_url(cls, url, db=None, **kwargs):
-        """
-        Return a blocking connection pool configured from the given URL.
+    def __init__(self, max_connections=50, timeout=20,
+                 connection_class=Connection, queue_class=LifoQueue,
+                 **connection_kwargs):
 
-        For example::
+        if not isinstance(max_connections, int) or max_connections < 0:
+            raise ValueError('"max_connections" must be a positive integer')
 
-            redis://username:password@localhost:6379/0
-            unix:///path/to/socket.sock
-
-        If using a "redis" URL and ``db`` is None, this method will attempt to
-        extract the database ID from the URL path component.  When using a
-        UNIX domain socket URL, ``db`` defaults to 0 if not specified.
-
-        Any additional keyword arguments will be passed along to the
-        BlockingConnectionPool class's initializer.
-        """
-        kwargs = parse_url(url, db=db, **kwargs)
-        # parse_url adds "unix_socket_path" to arguments for StrictRedis
-        # parameters, convert it to "path" for BlockingConnectionPool
-        path = kwargs.pop('unix_socket_path', None)
-        if path is not None:
-            kwargs['path'] = path
-            kwargs.setdefault('connection_class', UnixDomainSocketConnection)
-        return cls(**kwargs)
-
-    def __init__(self, max_connections=50, timeout=20, connection_class=None,
-                 queue_class=None, **connection_kwargs):
-        "Compose and assign values."
-        # Compose.
-        if connection_class is None:
-            connection_class = Connection
-        if queue_class is None:
-            queue_class = LifoQueue
-
-        # Assign.
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
         self.queue_class = queue_class
         self.max_connections = max_connections
         self.timeout = timeout
 
-        # Validate the ``max_connections``.  With the "fill up the queue"
-        # algorithm we use, it must be a positive integer.
-        is_valid = isinstance(max_connections, int) and max_connections > 0
-        if not is_valid:
-            raise ValueError('``max_connections`` must be a positive integer')
+        self.reset()
 
-        # Get the current process id, so we can disconnect and reinstantiate if
-        # it changes.
+    def reset(self):
         self.pid = os.getpid()
         self._check_lock = threading.Lock()
 
         # Create and fill up a thread safe queue with ``None`` values.
-        self.pool = self.queue_class(max_connections)
+        self.pool = self.queue_class(self.max_connections)
         while True:
             try:
                 self.pool.put_nowait(None)
@@ -804,27 +778,6 @@ class BlockingConnectionPool(object):
         # Keep a list of actual connection instances so that we can
         # disconnect them later.
         self._connections = []
-
-    def __repr__(self):
-        return "%s<%s>" % (
-            type(self).__name__,
-            self.connection_class.description_format % self.connection_kwargs,
-        )
-
-    def _checkpid(self):
-        """
-        Check the current process id.  If it has changed, disconnect and
-        re-instantiate this connection pool instance.
-        """
-        pid = os.getpid()
-        if self.pid != pid:
-            with self._check_lock:
-                if self.pid == os.getpid():
-                    # another thread already did the work while we waited
-                    # on the lock.
-                    return
-                self.disconnect()
-                self.reinstantiate()
 
     def make_connection(self):
         "Make a fresh connection."
@@ -868,28 +821,18 @@ class BlockingConnectionPool(object):
         "Releases the connection back to the pool."
         # Make sure we haven't changed process.
         self._checkpid()
+        if connection.pid != self.pid:
+            return
 
         # Put the connection back into the pool.
         try:
             self.pool.put_nowait(connection)
         except Full:
-            # This shouldn't normally happen but might perhaps happen after a
-            # reinstantiation. So, we can handle the exception by not putting
-            # the connection back on the pool, because we definitely do not
-            # want to reuse it.
+            # perhaps the pool has been reset() after a fork? regardless,
+            # we don't want this connection
             pass
 
     def disconnect(self):
         "Disconnects all connections in the pool."
         for connection in self._connections:
             connection.disconnect()
-
-    def reinstantiate(self):
-        """
-        Reinstatiate this instance within a new process with a new connection
-        pool set.
-        """
-        self.__init__(max_connections=self.max_connections,
-                      timeout=self.timeout,
-                      connection_class=self.connection_class,
-                      queue_class=self.queue_class, **self.connection_kwargs)
