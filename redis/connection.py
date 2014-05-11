@@ -10,7 +10,7 @@ import warnings
 
 from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
                            BytesIO, nativestr, basestring,
-                           LifoQueue, Empty, Full)
+                           LifoQueue, Empty, Full, urlparse)
 from redis.exceptions import (
     RedisError,
     ConnectionError,
@@ -39,6 +39,57 @@ SYM_STAR = b('*')
 SYM_DOLLAR = b('$')
 SYM_CRLF = b('\r\n')
 SYM_EMPTY = b('')
+
+
+def parse_url(url, db=None, **kwargs):
+    """
+    Return a dictionary of arguments suitable for constructing a Redis
+    client object configured from the given URL.
+
+    For example::
+
+        redis://username:password@localhost:6379/0
+        unix:///path/to/socket.sock
+
+    If using a "redis" URL and ``db`` is None, this method will attempt to
+    extract the database ID from the URL path component.  When using a UNIX
+    domain socket URL, ``db`` defaults to 0 if not specified.
+
+    Keyword arguments to this function that are also specified by the URL
+    get overridden, any additional keyword arguments will be preserved in
+    the return value.
+    """
+    url = urlparse(url)
+
+    # We only support redis:// and unix:// schemes.
+    if url.scheme == 'redis' or not url.scheme:
+        # Extract the database ID from the path component
+        # if it hasn't been given.
+        if db is None:
+            try:
+                db = int(url.path.replace('/', ''))
+            except (AttributeError, ValueError):
+                db = 0
+        url_settings = {
+            'host': url.hostname,
+            'port': int(url.port or 6379),
+            'db': db,
+            'password': url.password,
+        }
+    elif url.scheme == 'unix':
+        if db is None:
+            db = 0
+        url_settings = {
+            'unix_socket_path': url.path,
+            'db': db,
+        }
+    else:
+        raise ValueError('only redis:// and unix:// schemes are supported')
+
+    # update the arguments from the URL values
+    kwargs.update(url_settings)
+
+    return kwargs
 
 
 class BaseParser(object):
@@ -560,6 +611,32 @@ class UnixDomainSocketConnection(Connection):
 
 class ConnectionPool(object):
     "Generic connection pool"
+    @classmethod
+    def from_url(cls, url, db=None, **kwargs):
+        """
+        Return a connection pool configured from the given URL.
+
+        For example::
+
+            redis://username:password@localhost:6379/0
+            unix:///path/to/socket.sock
+
+        If using a "redis" URL and ``db`` is None, this method will attempt to
+        extract the database ID from the URL path component.  When using a
+        UNIX domain socket URL, ``db`` defaults to 0 if not specified.
+
+        Any additional keyword arguments will be passed along to the
+        ConnectionPool class's initializer.
+        """
+        kwargs = parse_url(url, db=db, **kwargs)
+        # parse_url adds "unix_socket_path" to arguments for StrictRedis
+        # parameters, convert it to "path" for ConnectionPool
+        path = kwargs.pop('unix_socket_path', None)
+        if path is not None:
+            kwargs['path'] = path
+            kwargs.setdefault('connection_class', UnixDomainSocketConnection)
+        return cls(**kwargs)
+
     def __init__(self, connection_class=Connection, max_connections=None,
                  **connection_kwargs):
         """
@@ -663,6 +740,32 @@ class BlockingConnectionPool(object):
         # not available.
         >>> pool = BlockingConnectionPool(timeout=5)
     """
+    @classmethod
+    def from_url(cls, url, db=None, **kwargs):
+        """
+        Return a blocking connection pool configured from the given URL.
+
+        For example::
+
+            redis://username:password@localhost:6379/0
+            unix:///path/to/socket.sock
+
+        If using a "redis" URL and ``db`` is None, this method will attempt to
+        extract the database ID from the URL path component.  When using a
+        UNIX domain socket URL, ``db`` defaults to 0 if not specified.
+
+        Any additional keyword arguments will be passed along to the
+        BlockingConnectionPool class's initializer.
+        """
+        kwargs = parse_url(url, db=db, **kwargs)
+        # parse_url adds "unix_socket_path" to arguments for StrictRedis
+        # parameters, convert it to "path" for BlockingConnectionPool
+        path = kwargs.pop('unix_socket_path', None)
+        if path is not None:
+            kwargs['path'] = path
+            kwargs.setdefault('connection_class', UnixDomainSocketConnection)
+        return cls(**kwargs)
+
     def __init__(self, max_connections=50, timeout=20, connection_class=None,
                  queue_class=None, **connection_kwargs):
         "Compose and assign values."
