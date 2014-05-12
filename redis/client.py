@@ -7,8 +7,7 @@ import threading
 import time as mod_time
 from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
                            itervalues, izip, long, nativestr, unicode)
-from redis.connection import (ConnectionPool, parse_url,
-                              UnixDomainSocketConnection)
+from redis.connection import (ConnectionPool, UnixDomainSocketConnection)
 from redis.exceptions import (
     ConnectionError,
     DataError,
@@ -372,17 +371,24 @@ class StrictRedis(object):
 
         For example::
 
-            redis://username:password@localhost:6379/0
-            unix:///path/to/socket.sock
+            redis://[:password]@localhost:6379/0
+            unix://[:password]@/path/to/socket.sock?db=0
 
-        If using a "redis" URL and ``db`` is None, this method will attempt to
-        extract the database ID from the URL path component.  When using a
-        UNIX domain socket URL, ``db`` defaults to 0 if not specified.
+        There are several ways to specify a database number. The parse function
+        will return the first specified option:
+            1. A ``db`` querystring option, e.g. redis://localhost?db=0
+            2. If using the redis:// scheme, the path argument of the url, e.g.
+               redis://localhost/0
+            3. The ``db`` argument to this function.
 
-        Any additional keyword arguments will be passed along to the Redis
-        class's initializer.
+        If none of these options are specified, db=0 is used.
+
+        Any additional querystring arguments and keyword arguments will be
+        passed along to the ConnectionPool class's initializer. In the case
+        of conflicting arguments, querystring arguments always win.
         """
-        return cls(**parse_url(url, db=db, **kwargs))
+        connection_pool = ConnectionPool.from_url(url, db=db, **kwargs)
+        return cls(connection_pool=connection_pool)
 
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,

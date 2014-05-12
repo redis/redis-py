@@ -9,8 +9,8 @@ import threading
 import warnings
 
 from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
-                           BytesIO, nativestr, basestring,
-                           LifoQueue, Empty, Full, urlparse)
+                           BytesIO, nativestr, basestring, iteritems,
+                           LifoQueue, Empty, Full, urlparse, parse_qs)
 from redis.exceptions import (
     RedisError,
     ConnectionError,
@@ -39,57 +39,6 @@ SYM_STAR = b('*')
 SYM_DOLLAR = b('$')
 SYM_CRLF = b('\r\n')
 SYM_EMPTY = b('')
-
-
-def parse_url(url, db=None, **kwargs):
-    """
-    Return a dictionary of arguments suitable for constructing a Redis
-    client object configured from the given URL.
-
-    For example::
-
-        redis://username:password@localhost:6379/0
-        unix:///path/to/socket.sock
-
-    If using a "redis" URL and ``db`` is None, this method will attempt to
-    extract the database ID from the URL path component.  When using a UNIX
-    domain socket URL, ``db`` defaults to 0 if not specified.
-
-    Keyword arguments to this function that are also specified by the URL
-    get overridden, any additional keyword arguments will be preserved in
-    the return value.
-    """
-    url = urlparse(url)
-
-    # We only support redis:// and unix:// schemes.
-    if url.scheme == 'redis' or not url.scheme:
-        # Extract the database ID from the path component
-        # if it hasn't been given.
-        if db is None:
-            try:
-                db = int(url.path.replace('/', ''))
-            except (AttributeError, ValueError):
-                db = 0
-        url_settings = {
-            'host': url.hostname,
-            'port': int(url.port or 6379),
-            'db': db,
-            'password': url.password,
-        }
-    elif url.scheme == 'unix':
-        if db is None:
-            db = 0
-        url_settings = {
-            'unix_socket_path': url.path,
-            'db': db,
-        }
-    else:
-        raise ValueError('only redis:// and unix:// schemes are supported')
-
-    # update the arguments from the URL values
-    kwargs.update(url_settings)
-
-    return kwargs
 
 
 class BaseParser(object):
@@ -618,23 +567,56 @@ class ConnectionPool(object):
 
         For example::
 
-            redis://username:password@localhost:6379/0
-            unix:///path/to/socket.sock
+            redis://[:password]@localhost:6379/0
+            unix://[:password]@/path/to/socket.sock?db=0
 
-        If using a "redis" URL and ``db`` is None, this method will attempt to
-        extract the database ID from the URL path component.  When using a
-        UNIX domain socket URL, ``db`` defaults to 0 if not specified.
+        There are several ways to specify a database number. The parse function
+        will return the first specified option:
+            1. A ``db`` querystring option, e.g. redis://localhost?db=0
+            2. If using the redis:// scheme, the path argument of the url, e.g.
+               redis://localhost/0
+            3. The ``db`` argument to this function.
 
-        Any additional keyword arguments will be passed along to the
-        ConnectionPool class's initializer.
+        If none of these options are specified, db=0 is used.
+
+        Any additional querystring arguments and keyword arguments will be
+        passed along to the ConnectionPool class's initializer. In the case
+        of conflicting arguments, querystring arguments always win.
         """
-        kwargs = parse_url(url, db=db, **kwargs)
-        # parse_url adds "unix_socket_path" to arguments for StrictRedis
-        # parameters, convert it to "path" for ConnectionPool
-        path = kwargs.pop('unix_socket_path', None)
-        if path is not None:
-            kwargs['path'] = path
-            kwargs.setdefault('connection_class', UnixDomainSocketConnection)
+        url = urlparse(url)
+        url_options = {}
+        for name, value in iteritems(parse_qs(url.query)):
+            if value and len(value) > 0:
+                url_options[name] = value[0]
+
+        # We only support redis:// and unix:// schemes.
+        if url.scheme == 'unix':
+            url_options.update({
+                'password': url.password,
+                'path': url.path,
+                'connection_class': UnixDomainSocketConnection,
+            })
+
+        else:
+            url_options.update({
+                'host': url.hostname,
+                'port': int(url.port or 6379),
+                'password': url.password,
+            })
+
+            # If there's a path argument, use it as the db argument if a
+            # querystring value wasn't specified
+            if 'db' not in url_options and url.path:
+                try:
+                    url_options['db'] = int(url.path.replace('/', ''))
+                except (AttributeError, ValueError):
+                    pass
+
+        # last shot at the db value
+        url_options['db'] = int(url_options.get('db', db or 0))
+
+        # update the arguments from the URL values
+        kwargs.update(url_options)
         return cls(**kwargs)
 
     def __init__(self, connection_class=Connection, max_connections=None,

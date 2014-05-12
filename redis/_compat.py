@@ -3,7 +3,7 @@ import sys
 
 
 if sys.version_info[0] < 3:
-    from urlparse import urlparse
+    from urlparse import parse_qs, urlparse
     from itertools import imap, izip
     from string import letters as ascii_letters
     from Queue import Queue
@@ -28,7 +28,7 @@ if sys.version_info[0] < 3:
     bytes = str
     long = long
 else:
-    from urllib.parse import urlparse
+    from urllib.parse import parse_qs, urlparse
     from io import BytesIO
     from string import ascii_letters
     from queue import Queue
