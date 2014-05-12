@@ -39,6 +39,13 @@
       and 3 Sentinels. Future iterations of the test sutie will incorporate
       more integration style tests, ensuring things like failover happen
       correctly.
+    * It's now possible to create connection pool instances from a URL.
+      StrictRedis.from_url() now uses this feature to create a connection pool
+      instance and use that when creating a new client instance. Thanks
+      https://github.com/chillipino
+    * When creating client instances or connection pool instances from an URL,
+      it's now possible to pass additional options to the connection pool with
+      querystring arguments.
 * 2.9.1
     * IPv6 support. Thanks https://github.com/amashinchi
 * 2.9.0
