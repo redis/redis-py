@@ -41,6 +41,24 @@ SYM_CRLF = b('\r\n')
 SYM_EMPTY = b('')
 
 
+class Token(object):
+    """
+    Literal strings in Redis commands, such as the command names and any
+    hard-coded arguments are wrapped in this class so we know not to apply
+    and encoding rules on them.
+    """
+    def __init__(self, value):
+        if isinstance(value, Token):
+            value = value.value
+        self.value = value
+
+    def __repr__(self):
+        return self.value
+
+    def __str__(self):
+        return self.value
+
+
 class BaseParser(object):
     EXCEPTION_CLASSES = {
         'ERR': ResponseError,
@@ -487,32 +505,47 @@ class Connection(object):
 
     def encode(self, value):
         "Return a bytestring representation of the value"
+        if isinstance(value, Token):
+            return b(value.value)
         if isinstance(value, bytes):
             return value
-        if isinstance(value, float):
-            value = repr(value)
-        if not isinstance(value, basestring):
+        if isinstance(value, (int, long, float)):
+            value = b(repr(value))
+        elif not isinstance(value, basestring):
             value = str(value)
         if isinstance(value, unicode):
             value = value.encode(self.encoding, self.encoding_errors)
         return value
 
     def pack_command(self, *args):
-        "Pack a series of arguments into a value Redis command"
+        "Pack a series of arguments into the Redis protocol"
         output = []
+        # the client might have included 1 or more literal arguments in
+        # the command name, e.g., 'CONFIG GET'. The Redis server expects these
+        # arguments to be sent separately, so split the first argument
+        # manually. All of these arguements get wrapped in the Token class
+        # to prevent them from being encoded.
+        command = args[0]
+        if ' ' in command:
+            args = tuple([Token(s) for s in command.split(' ')]) + args[1:]
+        else:
+            args = (Token(command),) + args[1:]
+
         buff = SYM_EMPTY.join(
             (SYM_STAR, b(str(len(args))), SYM_CRLF))
 
-        for k in imap(self.encode, args):
-            if len(buff) > 6000 or len(k) > 6000:
+        for arg in imap(self.encode, args):
+            # to avoid large string mallocs, chunk the command into the
+            # output list if we're sending large values
+            if len(buff) > 6000 or len(arg) > 6000:
                 buff = SYM_EMPTY.join(
-                    (buff, SYM_DOLLAR, b(str(len(k))), SYM_CRLF))
+                    (buff, SYM_DOLLAR, b(str(len(arg))), SYM_CRLF))
                 output.append(buff)
-                output.append(k)
+                output.append(arg)
                 buff = SYM_CRLF
             else:
-                buff = SYM_EMPTY.join((buff, SYM_DOLLAR, b(str(len(k))),
-                                       SYM_CRLF, k, SYM_CRLF))
+                buff = SYM_EMPTY.join((buff, SYM_DOLLAR, b(str(len(arg))),
+                                       SYM_CRLF, arg, SYM_CRLF))
         output.append(buff)
         return output
 
