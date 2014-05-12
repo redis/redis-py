@@ -583,9 +583,19 @@ class ConnectionPool(object):
         passed along to the ConnectionPool class's initializer. In the case
         of conflicting arguments, querystring arguments always win.
         """
+        # in python2.6, custom URL schemes don't recognize querystring values
+        # split the url manually instead
+        pieces = url.split('?', 1)
+        url, qs = '', ''
+        if len(pieces) == 2:
+            url, qs = pieces
+        else:
+            url = pieces[0]
+
         url = urlparse(url)
         url_options = {}
-        for name, value in iteritems(parse_qs(url.query)):
+
+        for name, value in iteritems(parse_qs(qs)):
             if value and len(value) > 0:
                 url_options[name] = value[0]
 
