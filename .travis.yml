@@ -1,5 +1,6 @@
 language: python
 python:
+  - "3.4"
   - "3.3"
   - "3.2"
   - "2.7"
@@ -18,5 +19,5 @@ matrix:
   include:
     - python: "2.7"
       env: TEST_PEP8=1
-    - python: "3.3"
+    - python: "3.4"
       env: TEST_PEP8=1
