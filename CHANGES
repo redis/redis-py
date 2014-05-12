@@ -46,6 +46,8 @@
     * When creating client instances or connection pool instances from an URL,
       it's now possible to pass additional options to the connection pool with
       querystring arguments.
+    * Fixed a bug where some encodings (like utf-16) were unusable on Python 3
+      as command names and literals would get encoded.
 * 2.9.1
     * IPv6 support. Thanks https://github.com/amashinchi
 * 2.9.0
