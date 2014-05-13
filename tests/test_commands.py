@@ -124,17 +124,20 @@ class TestRedisCommands(object):
         r.get(unicode_string)
         slowlog = r.slowlog_get()
         assert isinstance(slowlog, list)
-        assert len(slowlog) == 2
-        get_command = slowlog[0]
-        assert isinstance(get_command['start_time'], int)
-        assert isinstance(get_command['duration'], int)
-        assert get_command['command'] == \
-            b(' ').join((b('GET'), unicode_string.encode('utf-8')))
+        commands = [log['command'] for log in slowlog]
 
-        slowlog_reset_command = slowlog[1]
-        assert isinstance(slowlog_reset_command['start_time'], int)
-        assert isinstance(slowlog_reset_command['duration'], int)
-        assert slowlog_reset_command['command'] == b('SLOWLOG RESET')
+        get_command = b(' ').join((b('GET'), unicode_string.encode('utf-8')))
+        assert get_command in commands
+        assert b('SLOWLOG RESET') in commands
+        # the order should be ['GET <uni string>', 'SLOWLOG RESET'],
+        # but if other clients are executing commands at the same time, there
+        # could be commands, before, between, or after, so just check that
+        # the two we care about are in the appropriate order.
+        assert commands.index(get_command) < commands.index(b('SLOWLOG RESET'))
+
+        # make sure other attributes are typed correctly
+        assert isinstance(slowlog[0]['start_time'], int)
+        assert isinstance(slowlog[0]['duration'], int)
 
     def test_slowlog_get_limit(self, r, slowlog):
         assert r.slowlog_reset()
@@ -142,13 +145,13 @@ class TestRedisCommands(object):
         r.get('bar')
         slowlog = r.slowlog_get(1)
         assert isinstance(slowlog, list)
-        assert len(slowlog) == 1
-        assert slowlog[0]['command'] == b('GET bar')
+        commands = [log['command'] for log in slowlog]
+        assert b('GET foo') not in commands
+        assert b('GET bar') in commands
 
     def test_slowlog_length(self, r, slowlog):
-        assert r.slowlog_reset()
         r.get('foo')
-        assert r.slowlog_len() == 2
+        assert isinstance(r.slowlog_len(), int)
 
     @skip_if_server_version_lt('2.6.0')
     def test_time(self, r):
