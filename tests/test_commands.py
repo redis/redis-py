@@ -75,9 +75,11 @@ class TestRedisCommands(object):
 
     def test_config_resetstat(self, r):
         r.ping()
-        assert int(r.info()['total_commands_processed']) > 1
+        prior_commands_processed = int(r.info()['total_commands_processed'])
+        assert prior_commands_processed >= 1
         r.config_resetstat()
-        assert int(r.info()['total_commands_processed']) == 1
+        reset_commands_processed = int(r.info()['total_commands_processed'])
+        assert reset_commands_processed < prior_commands_processed
 
     def test_config_set(self, r):
         data = r.config_get()
