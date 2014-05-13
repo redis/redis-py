@@ -7,7 +7,8 @@ import threading
 import time as mod_time
 from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
                            itervalues, izip, long, nativestr, unicode)
-from redis.connection import ConnectionPool, UnixDomainSocketConnection, Token
+from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
+                              SSLConnection, Token)
 from redis.exceptions import (
     ConnectionError,
     DataError,
@@ -389,7 +390,9 @@ class StrictRedis(object):
                  db=0, password=None, socket_timeout=None,
                  connection_pool=None, charset='utf-8',
                  errors='strict', decode_responses=False,
-                 unix_socket_path=None):
+                 unix_socket_path=None,
+                 ssl=False, ssl_keyfile=None, ssl_certfile=None,
+                 ssl_cert_reqs=None, ssl_ca_certs=None):
         if not connection_pool:
             kwargs = {
                 'db': db,
@@ -410,6 +413,15 @@ class StrictRedis(object):
                     'host': host,
                     'port': port
                 })
+
+                if ssl:
+                    kwargs.update({
+                        'connection_class': SSLConnection,
+                        'keyfile': ssl_keyfile,
+                        'certfile': ssl_certfile,
+                        'cert_reqs': ssl_cert_reqs,
+                        'ca_certs': ssl_ca_certs,
+                    })
             connection_pool = ConnectionPool(**kwargs)
         self.connection_pool = connection_pool
 

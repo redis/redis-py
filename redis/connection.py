@@ -11,10 +11,8 @@ import warnings
 try:
     import ssl
     ssl_available = True
-    ssl_cert_reqs = ssl.CERT_NONE
 except ImportError:
     ssl_available = False
-    ssl_cert_reqs = 0
 
 from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
                            BytesIO, nativestr, basestring, iteritems,
@@ -561,13 +559,17 @@ class Connection(object):
 class SSLConnection(Connection):
     description_format = "SSLConnection<host=%(host)s,port=%(port)s,db=%(db)s>"
 
-    def __init__(self, keyfile=None, certfile=None, cert_reqs=ssl_cert_reqs,
+    def __init__(self, keyfile=None, certfile=None, cert_reqs=None,
                  ca_certs=None, **kwargs):
         if not ssl_available:
-            raise RedisError("")
+            raise RedisError("Python wasn't built with SSL support")
+
         super(SSLConnection, self).__init__(**kwargs)
+
         self.keyfile = keyfile
         self.certfile = certfile
+        if cert_reqs is None:
+            cert_reqs = ssl.CERT_NONE
         self.cert_reqs = cert_reqs
         self.ca_certs = ca_certs
 
