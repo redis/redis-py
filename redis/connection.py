@@ -635,7 +635,13 @@ class ConnectionPool(object):
         For example::
 
             redis://[:password]@localhost:6379/0
+            rediss://[:password]@localhost:6379/0
             unix://[:password]@/path/to/socket.sock?db=0
+
+        Three URL schemes are supported:
+            redis:// creates a normal TCP socket connection
+            rediss:// creates a SSL wrapped TCP socket connection
+            unix:// creates a Unix Domain Socket connection
 
         There are several ways to specify a database number. The parse function
         will return the first specified option:
@@ -692,6 +698,9 @@ class ConnectionPool(object):
                     url_options['db'] = int(url.path.replace('/', ''))
                 except (AttributeError, ValueError):
                     pass
+
+            if url.scheme == 'rediss':
+                url_options['connection_class'] = SSLConnection
 
         # last shot at the db value
         url_options['db'] = int(url_options.get('db', db or 0))
