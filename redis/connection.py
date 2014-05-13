@@ -570,6 +570,16 @@ class SSLConnection(Connection):
         self.certfile = certfile
         if cert_reqs is None:
             cert_reqs = ssl.CERT_NONE
+        elif isinstance(cert_reqs, basestring):
+            CERT_REQS = {
+                'none': ssl.CERT_NONE,
+                'optional': ssl.CERT_OPTIONAL,
+                'required': ssl.CERT_REQUIRED
+            }
+            if cert_reqs not in CERT_REQS:
+                raise RedisError(
+                    "Invalid SSL Certificate Required Flag: %s" % cert_reqs)
+            cert_reqs = CERT_REQS[cert_reqs]
         self.cert_reqs = cert_reqs
         self.ca_certs = ca_certs
 

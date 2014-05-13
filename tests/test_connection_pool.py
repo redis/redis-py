@@ -6,6 +6,7 @@ import time
 import re
 
 from threading import Thread
+from redis.connection import ssl_available
 from .conftest import skip_if_server_version_lt
 
 
@@ -287,6 +288,31 @@ class TestConnectionPoolUnixSocketURLParsing(object):
             'a': '1',
             'b': '2'
         }
+
+
+class TestSSLConnectionURLParsing(object):
+    @pytest.mark.skipif(not ssl_available, reason="SSL not installed")
+    def test_defaults(self):
+        pool = redis.ConnectionPool.from_url('rediss://localhost')
+        assert pool.connection_class == redis.SSLConnection
+        assert pool.connection_kwargs == {
+            'host': 'localhost',
+            'port': 6379,
+            'db': 0,
+            'password': None,
+        }
+
+    @pytest.mark.skipif(not ssl_available, reason="SSL not installed")
+    def test_cert_reqs_options(self):
+        import ssl
+        pool = redis.ConnectionPool.from_url('rediss://?cert_reqs=none')
+        assert pool.get_connection('_').cert_reqs == ssl.CERT_NONE
+
+        pool = redis.ConnectionPool.from_url('rediss://?cert_reqs=optional')
+        assert pool.get_connection('_').cert_reqs == ssl.CERT_OPTIONAL
+
+        pool = redis.ConnectionPool.from_url('rediss://?cert_reqs=required')
+        assert pool.get_connection('_').cert_reqs == ssl.CERT_REQUIRED
 
 
 class TestConnection(object):
