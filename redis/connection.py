@@ -8,6 +8,14 @@ import sys
 import threading
 import warnings
 
+try:
+    import ssl
+    ssl_available = True
+    ssl_cert_reqs = ssl.CERT_NONE
+except ImportError:
+    ssl_available = False
+    ssl_cert_reqs = 0
+
 from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
                            BytesIO, nativestr, basestring, iteritems,
                            LifoQueue, Empty, Full, urlparse, parse_qs)
@@ -427,7 +435,7 @@ class Connection(object):
             return "Error connecting to %s:%s. %s." % \
                 (self.host, self.port, exception.args[0])
         else:
-            return "Error %s connecting %s:%s. %s." % \
+            return "Error %s connecting to %s:%s. %s." % \
                 (exception.args[0], self.host, self.port, exception.args[1])
 
     def on_connect(self):
@@ -548,6 +556,30 @@ class Connection(object):
                                        SYM_CRLF, arg, SYM_CRLF))
         output.append(buff)
         return output
+
+
+class SSLConnection(Connection):
+    description_format = "SSLConnection<host=%(host)s,port=%(port)s,db=%(db)s>"
+
+    def __init__(self, keyfile=None, certfile=None, cert_reqs=ssl_cert_reqs,
+                 ca_certs=None, **kwargs):
+        if not ssl_available:
+            raise RedisError("")
+        super(SSLConnection, self).__init__(**kwargs)
+        self.keyfile = keyfile
+        self.certfile = certfile
+        self.cert_reqs = cert_reqs
+        self.ca_certs = ca_certs
+
+    def _connect(self):
+        "Wrap the socket with SSL support"
+        sock = super(SSLConnection, self)._connect()
+        sock = ssl.wrap_socket(sock,
+                               cert_reqs=self.cert_reqs,
+                               keyfile=self.keyfile,
+                               certfile=self.certfile,
+                               ca_certs=self.ca_certs)
+        return sock
 
 
 class UnixDomainSocketConnection(Connection):
