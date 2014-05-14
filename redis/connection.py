@@ -591,29 +591,30 @@ class Connection(object):
 class SSLConnection(Connection):
     description_format = "SSLConnection<host=%(host)s,port=%(port)s,db=%(db)s>"
 
-    def __init__(self, keyfile=None, certfile=None, cert_reqs=None,
-                 ca_certs=None, **kwargs):
+    def __init__(self, ssl_keyfile=None, ssl_certfile=None, ssl_cert_reqs=None,
+                 ssl_ca_certs=None, **kwargs):
         if not ssl_available:
             raise RedisError("Python wasn't built with SSL support")
 
         super(SSLConnection, self).__init__(**kwargs)
 
-        self.keyfile = keyfile
-        self.certfile = certfile
-        if cert_reqs is None:
-            cert_reqs = ssl.CERT_NONE
-        elif isinstance(cert_reqs, basestring):
+        self.keyfile = ssl_keyfile
+        self.certfile = ssl_certfile
+        if ssl_cert_reqs is None:
+            ssl_cert_reqs = ssl.CERT_NONE
+        elif isinstance(ssl_cert_reqs, basestring):
             CERT_REQS = {
                 'none': ssl.CERT_NONE,
                 'optional': ssl.CERT_OPTIONAL,
                 'required': ssl.CERT_REQUIRED
             }
-            if cert_reqs not in CERT_REQS:
+            if ssl_cert_reqs not in CERT_REQS:
                 raise RedisError(
-                    "Invalid SSL Certificate Required Flag: %s" % cert_reqs)
-            cert_reqs = CERT_REQS[cert_reqs]
-        self.cert_reqs = cert_reqs
-        self.ca_certs = ca_certs
+                    "Invalid SSL Certificate Requirements Flag: %s" %
+                    ssl_cert_reqs)
+            ssl_cert_reqs = CERT_REQS[ssl_cert_reqs]
+        self.cert_reqs = ssl_cert_reqs
+        self.ca_certs = ssl_ca_certs
 
     def _connect(self):
         "Wrap the socket with SSL support"

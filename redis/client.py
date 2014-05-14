@@ -423,10 +423,10 @@ class StrictRedis(object):
                 if ssl:
                     kwargs.update({
                         'connection_class': SSLConnection,
-                        'keyfile': ssl_keyfile,
-                        'certfile': ssl_certfile,
-                        'cert_reqs': ssl_cert_reqs,
-                        'ca_certs': ssl_ca_certs,
+                        'ssl_keyfile': ssl_keyfile,
+                        'ssl_certfile': ssl_certfile,
+                        'ssl_cert_reqs': ssl_cert_reqs,
+                        'ssl_ca_certs': ssl_ca_certs,
                     })
             connection_pool = ConnectionPool(**kwargs)
         self.connection_pool = connection_pool

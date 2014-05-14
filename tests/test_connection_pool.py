@@ -305,13 +305,15 @@ class TestSSLConnectionURLParsing(object):
     @pytest.mark.skipif(not ssl_available, reason="SSL not installed")
     def test_cert_reqs_options(self):
         import ssl
-        pool = redis.ConnectionPool.from_url('rediss://?cert_reqs=none')
+        pool = redis.ConnectionPool.from_url('rediss://?ssl_cert_reqs=none')
         assert pool.get_connection('_').cert_reqs == ssl.CERT_NONE
 
-        pool = redis.ConnectionPool.from_url('rediss://?cert_reqs=optional')
+        pool = redis.ConnectionPool.from_url(
+            'rediss://?ssl_cert_reqs=optional')
         assert pool.get_connection('_').cert_reqs == ssl.CERT_OPTIONAL
 
-        pool = redis.ConnectionPool.from_url('rediss://?cert_reqs=required')
+        pool = redis.ConnectionPool.from_url(
+            'rediss://?ssl_cert_reqs=required')
         assert pool.get_connection('_').cert_reqs == ssl.CERT_REQUIRED
 
 
