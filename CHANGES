@@ -49,9 +49,19 @@
     * Fixed a bug where some encodings (like utf-16) were unusable on Python 3
       as command names and literals would get encoded.
     * Added an SSLConnection class that allows for secure connections through
-      stunnel or other means. Currently users must create a connection pool,
-      specifying connection_class=SSLConnection to use this feature. Thanks
-      https://github.com/oranagra.
+      stunnel or other means. Construct and SSL connection with the sll=True
+      option on client classes, using the rediss:// scheme from an URL, or
+      by passing the SSLConnection class to a connection pool's
+      connection_class argument. Thanks https://github.com/oranagra.
+    * Added a socket_connect_timeout option to control how long to wait while
+      establishing a TCP connection before timing out. This lets the client
+      fail fast when attempting to connect to a downed server while keeping
+      a more lenient timeout for all other socket operations.
+    * Added TCP Keep-alive support by passing use the socket_keepalive=True
+      option. Finer grain control can be achieved using the
+      socket_keepalive_options option which expects a dictionary with any of
+      the keys (socket.TCP_KEEPIDLE, socket.TCP_KEEPCNT, socket.TCP_KEEPINTVL)
+      and integers for values. Thanks Yossi Gottlieb.
 * 2.9.1
     * IPv6 support. Thanks https://github.com/amashinchi
 * 2.9.0

@@ -354,7 +354,9 @@ class Connection(object):
     description_format = "Connection<host=%(host)s,port=%(port)s,db=%(db)s>"
 
     def __init__(self, host='localhost', port=6379, db=0, password=None,
-                 socket_timeout=None, encoding='utf-8',
+                 socket_timeout=None, socket_connect_timeout=None,
+                 socket_keepalive=False, socket_keepalive_options=None,
+                 encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  parser_class=DefaultParser, socket_read_size=65536):
         self.pid = os.getpid()
@@ -363,6 +365,9 @@ class Connection(object):
         self.db = db
         self.password = password
         self.socket_timeout = socket_timeout
+        self.socket_connect_timeout = socket_connect_timeout or socket_timeout
+        self.socket_keepalive = socket_keepalive
+        self.socket_keepalive_options = socket_keepalive_options or {}
         self.encoding = encoding
         self.encoding_errors = encoding_errors
         self.decode_responses = decode_responses
@@ -415,16 +420,43 @@ class Connection(object):
 
     def _connect(self):
         "Create a TCP socket connection"
-        # in 2.6+ try to use IPv6/4 compatibility, else just original code
-        if hasattr(socket, 'create_connection'):
-            sock = socket.create_connection((self.host, self.port),
-                                            self.socket_timeout)
-        else:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(self.socket_timeout)
-            sock.connect((self.host, self.port))
-        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        return sock
+        # we want to mimic what socket.create_connection does to support
+        # ipv4/ipv6, but we want to set options prior to calling
+        # socket.connect()
+        err = None
+        for res in socket.getaddrinfo(self.host, self.port, 0,
+                                      socket.SOCK_STREAM):
+            family, socktype, proto, canonname, socket_address = res
+            sock = None
+            try:
+                sock = socket.socket(family, socktype, proto)
+                # TCP_NODELAY
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+                # TCP_KEEPALIVE
+                if self.socket_keepalive:
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                    for k, v in iteritems(self.socket_keepalive_options):
+                        sock.setsockopt(socket.SOL_TCP, k, v)
+
+                # set the socket_connect_timeout before we connect
+                sock.settimeout(self.socket_connect_timeout)
+
+                # connect
+                sock.connect(socket_address)
+
+                # set the socket_timeout now that we're connected
+                sock.settimeout(self.socket_timeout)
+                return sock
+
+            except socket.error as _:
+                err = _
+                if sock is not None:
+                    sock.close()
+
+        if err is not None:
+            raise err
+        raise socket.error("socket.getaddrinfo returned an empty list")
 
     def _error_message(self, exception):
         # args for socket.error can either be (errno, "message")
