@@ -18,7 +18,7 @@ To install redis-py, simply:
 
     $ sudo pip install redis
 
-or alternatively (you really should be using pip though):
+or alternatively (you *really* should be using pip though):
 
 .. code-block:: bash
 
