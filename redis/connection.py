@@ -765,7 +765,7 @@ class ConnectionPool(object):
         connection_class.
         """
         max_connections = max_connections or 2 ** 31
-        if not isinstance(max_connections, int) or max_connections < 0:
+        if not isinstance(max_connections, (int, long)) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
 
         self.connection_class = connection_class
@@ -867,16 +867,12 @@ class BlockingConnectionPool(ConnectionPool):
                  connection_class=Connection, queue_class=LifoQueue,
                  **connection_kwargs):
 
-        if not isinstance(max_connections, int) or max_connections < 0:
-            raise ValueError('"max_connections" must be a positive integer')
-
-        self.connection_class = connection_class
-        self.connection_kwargs = connection_kwargs
         self.queue_class = queue_class
-        self.max_connections = max_connections
         self.timeout = timeout
-
-        self.reset()
+        super(BlockingConnectionPool, self).__init__(
+            connection_class=connection_class,
+            max_connections=max_connections,
+            **connection_kwargs)
 
     def reset(self):
         self.pid = os.getpid()
