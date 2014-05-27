@@ -2,7 +2,7 @@ from __future__ import with_statement
 import pytest
 import time
 
-from redis.client import Lock, LockError
+from redis.lock import Lock, LockError
 
 
 class TestLock(object):

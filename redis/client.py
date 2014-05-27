@@ -9,6 +9,7 @@ from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
                            itervalues, izip, long, nativestr, unicode)
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
                               SSLConnection, Token)
+from redis.lock import Lock
 from redis.exceptions import (
     ConnectionError,
     DataError,
@@ -2576,95 +2577,3 @@ class Script(object):
             # that created this instance?
             self.sha = client.script_load(self.script)
             return client.evalsha(self.sha, len(keys), *args)
-
-
-class LockError(RedisError):
-    "Errors thrown from the Lock"
-    pass
-
-
-class Lock(object):
-    """
-    A shared, distributed Lock. Using Redis for locking allows the Lock
-    to be shared across processes and/or machines.
-
-    It's left to the user to resolve deadlock issues and make sure
-    multiple clients play nicely together.
-    """
-
-    LOCK_FOREVER = float(2 ** 31 + 1)  # 1 past max unix time
-
-    def __init__(self, redis, name, timeout=None, sleep=0.1):
-        """
-        Create a new Lock instance named ``name`` using the Redis client
-        supplied by ``redis``.
-
-        ``timeout`` indicates a maximum life for the lock.
-        By default, it will remain locked until release() is called.
-
-        ``sleep`` indicates the amount of time to sleep per loop iteration
-        when the lock is in blocking mode and another client is currently
-        holding the lock.
-
-        Note: If using ``timeout``, you should make sure all the hosts
-        that are running clients have their time synchronized with a network
-        time service like ntp.
-        """
-        self.redis = redis
-        self.name = name
-        self.acquired_until = None
-        self.timeout = timeout
-        self.sleep = sleep
-        if self.timeout and self.sleep > self.timeout:
-            raise LockError("'sleep' must be less than 'timeout'")
-
-    def __enter__(self):
-        return self.acquire()
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.release()
-
-    def acquire(self, blocking=True):
-        """
-        Use Redis to hold a shared, distributed lock named ``name``.
-        Returns True once the lock is acquired.
-
-        If ``blocking`` is False, always return immediately. If the lock
-        was acquired, return True, otherwise return False.
-        """
-        sleep = self.sleep
-        timeout = self.timeout
-        while 1:
-            unixtime = mod_time.time()
-            if timeout:
-                timeout_at = unixtime + timeout
-            else:
-                timeout_at = Lock.LOCK_FOREVER
-            timeout_at = float(timeout_at)
-            if self.redis.setnx(self.name, timeout_at):
-                self.acquired_until = timeout_at
-                return True
-            # We want blocking, but didn't acquire the lock
-            # check to see if the current lock is expired
-            existing = float(self.redis.get(self.name) or 1)
-            if existing < unixtime:
-                # the previous lock is expired, attempt to overwrite it
-                existing = float(self.redis.getset(self.name, timeout_at) or 1)
-                if existing < unixtime:
-                    # we successfully acquired the lock
-                    self.acquired_until = timeout_at
-                    return True
-            if not blocking:
-                return False
-            mod_time.sleep(sleep)
-
-    def release(self):
-        "Releases the already acquired lock"
-        if self.acquired_until is None:
-            raise ValueError("Cannot release an unlocked lock")
-        existing = float(self.redis.get(self.name) or 1)
-        # if the lock time is in the future, delete the lock
-        delete_lock = existing >= self.acquired_until
-        self.acquired_until = None
-        if delete_lock:
-            self.redis.delete(self.name)

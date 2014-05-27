@@ -62,3 +62,7 @@ class ExecAbortError(ResponseError):
 
 class ReadOnlyError(ResponseError):
     pass
+
+
+class LockError(RedisError):
+    pass
