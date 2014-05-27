@@ -62,6 +62,11 @@
       socket_keepalive_options option which expects a dictionary with any of
       the keys (socket.TCP_KEEPIDLE, socket.TCP_KEEPCNT, socket.TCP_KEEPINTVL)
       and integers for values. Thanks Yossi Gottlieb.
+    * Added a `retry_on_timeout` option that controls how socket.timeout errors
+      are handled. By default it is set to False and will cause the client to
+      raise a TimeoutError anytime a socket.timeout is encountered. If
+      `retry_on_timeout` is set to True, the client will retry a command that
+      timed out once like other `socket.error`s.
 * 2.9.1
     * IPv6 support. Thanks https://github.com/amashinchi
 * 2.9.0
