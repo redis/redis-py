@@ -20,6 +20,7 @@ from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
 from redis.exceptions import (
     RedisError,
     ConnectionError,
+    TimeoutError,
     BusyLoadingError,
     ResponseError,
     InvalidResponse,
@@ -117,7 +118,9 @@ class SocketBuffer(object):
                 if length is not None and length > marker:
                     continue
                 break
-        except (socket.error, socket.timeout):
+        except socket.timeout:
+            raise TimeoutError("Timeout reading from socket")
+        except socket.error:
             e = sys.exc_info()[1]
             raise ConnectionError("Error while reading from socket: %s" %
                                   (e.args,))
@@ -313,7 +316,9 @@ class HiredisParser(BaseParser):
                 # an empty string indicates the server shutdown the socket
                 if isinstance(buffer, str) and len(buffer) == 0:
                     raise socket.error("Connection closed by remote server.")
-            except (socket.error, socket.timeout):
+            except socket.timeout:
+                raise TimeoutError("Timeout reading from socket")
+            except socket.error:
                 e = sys.exc_info()[1]
                 raise ConnectionError("Error while reading from socket: %s" %
                                       (e.args,))
@@ -356,7 +361,7 @@ class Connection(object):
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None, socket_connect_timeout=None,
                  socket_keepalive=False, socket_keepalive_options=None,
-                 encoding='utf-8',
+                 retry_on_timeout=False, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  parser_class=DefaultParser, socket_read_size=65536):
         self.pid = os.getpid()
@@ -368,6 +373,7 @@ class Connection(object):
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout
         self.socket_keepalive = socket_keepalive
         self.socket_keepalive_options = socket_keepalive_options or {}
+        self.retry_on_timeout = retry_on_timeout
         self.encoding = encoding
         self.encoding_errors = encoding_errors
         self.decode_responses = decode_responses
@@ -505,6 +511,9 @@ class Connection(object):
                 command = [command]
             for item in command:
                 self._sock.sendall(item)
+        except socket.timeout:
+            self.disconnect()
+            raise TimeoutError("Timeout writing to socket")
         except socket.error:
             e = sys.exc_info()[1]
             self.disconnect()
@@ -633,12 +642,14 @@ class UnixDomainSocketConnection(Connection):
     def __init__(self, path='', db=0, password=None,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
+                 retry_on_timeout=False,
                  parser_class=DefaultParser, socket_read_size=65536):
         self.pid = os.getpid()
         self.path = path
         self.db = db
         self.password = password
         self.socket_timeout = socket_timeout
+        self.retry_on_timeout = retry_on_timeout
         self.encoding = encoding
         self.encoding_errors = encoding_errors
         self.decode_responses = decode_responses

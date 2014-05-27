@@ -20,11 +20,11 @@ class AuthenticationError(RedisError):
     pass
 
 
-class ServerError(RedisError):
+class ConnectionError(RedisError):
     pass
 
 
-class ConnectionError(ServerError):
+class TimeoutError(RedisError):
     pass
 
 
@@ -32,7 +32,7 @@ class BusyLoadingError(ConnectionError):
     pass
 
 
-class InvalidResponse(ServerError):
+class InvalidResponse(RedisError):
     pass
 
 

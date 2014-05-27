@@ -17,6 +17,7 @@ from redis.exceptions import (
     PubSubError,
     RedisError,
     ResponseError,
+    TimeoutError,
     WatchError,
 )
 
@@ -390,8 +391,8 @@ class StrictRedis(object):
                  db=0, password=None, socket_timeout=None,
                  socket_connect_timeout=None,
                  socket_keepalive=None, socket_keepalive_options=None,
-                 connection_pool=None, charset='utf-8',
-                 errors='strict', decode_responses=False,
+                 connection_pool=None, charset='utf-8', errors='strict',
+                 decode_responses=False, retry_on_timeout=False,
                  unix_socket_path=None,
                  ssl=False, ssl_keyfile=None, ssl_certfile=None,
                  ssl_cert_reqs=None, ssl_ca_certs=None):
@@ -403,6 +404,7 @@ class StrictRedis(object):
                 'encoding': charset,
                 'encoding_errors': errors,
                 'decode_responses': decode_responses,
+                'retry_on_timeout': retry_on_timeout
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -504,8 +506,10 @@ class StrictRedis(object):
         try:
             connection.send_command(*args)
             return self.parse_response(connection, command_name, **options)
-        except ConnectionError:
+        except (ConnectionError, TimeoutError) as e:
             connection.disconnect()
+            if not connection.retry_on_timeout and isinstance(e, TimeoutError):
+                raise
             connection.send_command(*args)
             return self.parse_response(connection, command_name, **options)
         finally:
@@ -2049,8 +2053,10 @@ class PubSub(object):
     def _execute(self, connection, command, *args):
         try:
             return command(*args)
-        except ConnectionError:
+        except (ConnectionError, TimeoutError) as e:
             connection.disconnect()
+            if not connection.retry_on_timeout and isinstance(e, TimeoutError):
+                raise
             # Connect manually here. If the Redis server is down, this will
             # fail and raise a ConnectionError as desired.
             connection.connect()
@@ -2328,8 +2334,10 @@ class BasePipeline(object):
         try:
             conn.send_command(*args)
             return self.parse_response(conn, command_name, **options)
-        except ConnectionError:
+        except (ConnectionError, TimeoutError) as e:
             conn.disconnect()
+            if not conn.retry_on_timeout and isinstance(e, TimeoutError):
+                raise
             # if we're not already watching, we can safely retry the command
             try:
                 if not self.watching:
@@ -2495,12 +2503,14 @@ class BasePipeline(object):
 
         try:
             return execute(conn, stack, raise_on_error)
-        except ConnectionError:
+        except (ConnectionError, TimeoutError) as e:
             conn.disconnect()
+            if not conn.retry_on_timeout and isinstance(e, TimeoutError):
+                raise
             # if we were watching a variable, the watch is no longer valid
             # since this connection has died. raise a WatchError, which
             # indicates the user should retry his transaction. If this is more
-            # than a temporary failure, the WATCH that the user next issue
+            # than a temporary failure, the WATCH that the user next issues
             # will fail, propegating the real ConnectionError
             if self.watching:
                 raise WatchError("A ConnectionError occured on while watching "
