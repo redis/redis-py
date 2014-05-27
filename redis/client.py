@@ -2663,8 +2663,9 @@ class Lock(object):
         if self.acquired_until is None:
             raise ValueError("Cannot release an unlocked lock")
         existing = float(self.redis.get(self.name) or 1)
+        unixtime = mod_time.time()
         # if the lock time is in the future, delete the lock
-        delete_lock = existing >= self.acquired_until
+        delete_lock = existing >= unixtime
         self.acquired_until = None
         if delete_lock:
             self.redis.delete(self.name)
