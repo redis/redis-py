@@ -554,9 +554,11 @@ class Connection(object):
         "Return a bytestring representation of the value"
         if isinstance(value, Token):
             return b(value.value)
-        if isinstance(value, bytes):
+        elif isinstance(value, bytes):
             return value
-        if isinstance(value, (int, long, float)):
+        elif isinstance(value, (int, long)):
+            value = b(str(value))
+        elif isinstance(value, float):
             value = b(repr(value))
         elif not isinstance(value, basestring):
             value = str(value)
