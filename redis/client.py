@@ -476,7 +476,7 @@ class StrictRedis(object):
                 except WatchError:
                     continue
 
-    def lock(self, name, timeout=None, sleep=0.1):
+    def lock(self, name, timeout=None, sleep=0.1, blocking_timeout=None):
         """
         Return a new Lock object using key ``name`` that mimics
         the behavior of threading.Lock.
@@ -487,8 +487,14 @@ class StrictRedis(object):
         ``sleep`` indicates the amount of time to sleep per loop iteration
         when the lock is in blocking mode and another client is currently
         holding the lock.
+
+        ``blocking_timeout`` indicates the maximum amount of time in seconds to
+        spend trying to acquire the lock. A value of ``None`` indicates
+        continue trying forever. ``blocking_timeout`` can be specified as a
+        float or integer, both representing the number of seconds to wait.
         """
-        return Lock(self, name, timeout=timeout, sleep=sleep)
+        return Lock(self, name, timeout=timeout, sleep=sleep,
+                    blocking_timeout=blocking_timeout)
 
     def pubsub(self, **kwargs):
         """
