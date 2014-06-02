@@ -9,7 +9,7 @@ from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
                            itervalues, izip, long, nativestr, unicode)
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
                               SSLConnection, Token)
-from redis.lock import Lock
+from redis.lock import Lock, LuaLock
 from redis.exceptions import (
     ConnectionError,
     DataError,
@@ -433,6 +433,7 @@ class StrictRedis(object):
                     })
             connection_pool = ConnectionPool(**kwargs)
         self.connection_pool = connection_pool
+        self._use_lua_lock = None
 
         self.response_callbacks = self.__class__.RESPONSE_CALLBACKS.copy()
 
@@ -476,7 +477,8 @@ class StrictRedis(object):
                 except WatchError:
                     continue
 
-    def lock(self, name, timeout=None, sleep=0.1, blocking_timeout=None):
+    def lock(self, name, timeout=None, sleep=0.1, blocking_timeout=None,
+             lock_class=None):
         """
         Return a new Lock object using key ``name`` that mimics
         the behavior of threading.Lock.
@@ -492,9 +494,21 @@ class StrictRedis(object):
         spend trying to acquire the lock. A value of ``None`` indicates
         continue trying forever. ``blocking_timeout`` can be specified as a
         float or integer, both representing the number of seconds to wait.
+
+        ``lock_class`` forces the specified lock implementation.
         """
-        return Lock(self, name, timeout=timeout, sleep=sleep,
-                    blocking_timeout=blocking_timeout)
+        if lock_class is None:
+            if self._use_lua_lock is None:
+                # the first time .lock() is called, determine if we can use
+                # Lua by attempting to register the necessary scripts
+                try:
+                    LuaLock.register_scripts(self)
+                    self._use_lua_lock = True
+                except ResponseError:
+                    self._use_lua_lock = False
+            lock_class = self._use_lua_lock and LuaLock or Lock
+        return lock_class(self, name, timeout=timeout, sleep=sleep,
+                          blocking_timeout=blocking_timeout)
 
     def pubsub(self, **kwargs):
         """

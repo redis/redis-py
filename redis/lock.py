@@ -1,7 +1,7 @@
 import time as mod_time
 import uuid
 from redis.exceptions import LockError, WatchError
-from redis._compat import long
+from redis._compat import b
 
 
 class Lock(object):
@@ -69,7 +69,7 @@ class Lock(object):
         wait trying to acquire the lock.
         """
         sleep = self.sleep
-        token = uuid.uuid1().hex
+        token = b(uuid.uuid1().hex)
         if blocking is None:
             blocking = self.blocking
         if blocking_timeout is None:
@@ -90,12 +90,9 @@ class Lock(object):
     def do_acquire(self, token):
         if self.redis.setnx(self.name, token):
             if self.timeout:
-                if isinstance(self.timeout, (int, long)):
-                    self.redis.expire(self.name, self.timeout)
-                else:
-                    # convert float to milliseconds
-                    timeout = int(self.timeout * 1000)
-                    self.redis.pexpire(self.name, timeout)
+                # convert to milliseconds
+                timeout = int(self.timeout * 1000)
+                self.redis.pexpire(self.name, timeout)
             return True
         return False
 
@@ -154,5 +151,94 @@ class Lock(object):
             raise LockError("Cannot extend a lock that's no longer owned")
         if not response[0]:
             # pexpire returns False if the key doesn't exist
+            raise LockError("Cannot extend a lock that's no longer owned")
+        return True
+
+
+class LuaLock(Lock):
+    """
+    A lock implementation that uses Lua scripts rather than pipelines
+    and watches.
+    """
+    lua_acquire = None
+    lua_release = None
+    lua_extend = None
+
+    # KEYS[1] - lock name
+    # ARGV[1] - token
+    # ARGV[2] - timeout in milliseconds
+    # return 1 if lock was acquired, otherwise 0
+    LUA_ACQUIRE_SCRIPT = """
+        if redis.call('setnx', KEYS[1], ARGV[1]) == 1 then
+            if ARGV[2] ~= '' then
+                redis.call('pexpire', KEYS[1], ARGV[2])
+            end
+            return 1
+        end
+        return 0
+    """
+
+    # KEYS[1] - lock name
+    # ARGS[1] - token
+    # return 1 if the lock was released, otherwise 0
+    LUA_RELEASE_SCRIPT = """
+        local token = redis.call('get', KEYS[1])
+        if not token or token ~= ARGV[1] then
+            return 0
+        end
+        redis.call('del', KEYS[1])
+        return 1
+    """
+
+    # KEYS[1] - lock name
+    # ARGS[1] - token
+    # ARGS[2] - additional milliseconds
+    # return 1 if the locks time was extended, otherwise 0
+    LUA_EXTEND_SCRIPT = """
+        local token = redis.call('get', KEYS[1])
+        if not token or token ~= ARGV[1] then
+            return 0
+        end
+        local expiration = redis.call('pttl', KEYS[1])
+        if not expiration then
+            expiration = 0
+        end
+        if expiration < 0 then
+            return 0
+        end
+        redis.call('pexpire', KEYS[1], expiration + ARGV[2])
+        return 1
+    """
+
+    def __init__(self, *args, **kwargs):
+        super(LuaLock, self).__init__(*args, **kwargs)
+        LuaLock.register_scripts(self.redis)
+
+    @classmethod
+    def register_scripts(cls, redis):
+        if cls.lua_acquire is None:
+            cls.lua_acquire = redis.register_script(cls.LUA_ACQUIRE_SCRIPT)
+        if cls.lua_release is None:
+            cls.lua_release = redis.register_script(cls.LUA_RELEASE_SCRIPT)
+        if cls.lua_extend is None:
+            cls.lua_extend = redis.register_script(cls.LUA_EXTEND_SCRIPT)
+
+    def do_acquire(self, token):
+        timeout = self.timeout and int(self.timeout * 1000) or ''
+        return bool(self.lua_acquire(keys=[self.name],
+                                     args=[token, timeout],
+                                     client=self.redis))
+
+    def do_release(self):
+        if not bool(self.lua_release(keys=[self.name],
+                                     args=[self.token],
+                                     client=self.redis)):
+            raise LockError("Cannot release a lock that's no longer owned")
+
+    def do_extend(self, additional_time):
+        additional_time = int(additional_time * 1000)
+        if not bool(self.lua_extend(keys=[self.name],
+                                    args=[self.token, additional_time],
+                                    client=self.redis)):
             raise LockError("Cannot extend a lock that's no longer owned")
         return True
