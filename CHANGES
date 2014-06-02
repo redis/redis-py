@@ -1,4 +1,4 @@
-* 2.10.0 (in development)
+* 2.10.0
     * Discontinuted support for Python 2.5. Upgrade. You'll be happier.
     * The HiRedis parser will now properly raise ConnectionErrors.
     * Completely refactored PubSub support. Fixes all known PubSub bugs and
