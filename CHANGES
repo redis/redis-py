@@ -67,6 +67,13 @@
       raise a TimeoutError anytime a socket.timeout is encountered. If
       `retry_on_timeout` is set to True, the client will retry a command that
       timed out once like other `socket.error`s.
+    * Completely refactored the Lock system. There is now a LuaLock class
+      that's used when the Redis server is capable of running Lua scripts along
+      with a fallback class for Redis servers < 2.6. The new locks fix several
+      subtle race consider that the old lock could face. In additional, a
+      new method, "extend" is available on lock instances that all a lock
+      owner to extend the amount of time they have the lock for. Thanks to
+      Eli Finkelshteyn and https://github.com/chillipino for contributions.
 * 2.9.1
     * IPv6 support. Thanks https://github.com/amashinchi
 * 2.9.0
