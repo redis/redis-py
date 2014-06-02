@@ -1,3 +1,7 @@
+* 2.10.1
+    * Fixed a bug where Sentinel connections to a server that's no longer a
+      master and receives a READONLY error will disconnect and reconnect to
+      the master.
 * 2.10.0
     * Discontinuted support for Python 2.5. Upgrade. You'll be happier.
     * The HiRedis parser will now properly raise ConnectionErrors.

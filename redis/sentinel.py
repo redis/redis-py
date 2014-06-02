@@ -50,9 +50,9 @@ class SentinelManagedConnection(Connection):
                     continue
             raise SlaveNotFoundError  # Never be here
 
-    def send_command(self, *args):
+    def read_response(self):
         try:
-            super(SentinelManagedConnection, self).send_command(*args)
+            return super(SentinelManagedConnection, self).read_response()
         except ReadOnlyError:
             if self.connection_pool.is_master:
                 # When talking to a master, a ReadOnlyError when likely
