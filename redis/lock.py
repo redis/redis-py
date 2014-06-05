@@ -100,18 +100,16 @@ class Lock(object):
         "Releases the already acquired lock"
         if self.token is None:
             raise LockError("Cannot release an unlocked lock")
-        try:
-            self.do_release()
-        finally:
-            self.token = None
+        expected_token = self.token
+        self.token = None
+        self.do_release(expected_token)
 
-    def do_release(self):
+    def do_release(self, expected_token):
         name = self.name
-        token = self.token
 
         def execute_release(pipe):
             lock_value = pipe.get(name)
-            if lock_value != token:
+            if lock_value != expected_token:
                 raise LockError("Cannot release a lock that's no longer owned")
             pipe.delete(name)
 
@@ -229,9 +227,9 @@ class LuaLock(Lock):
                                      args=[token, timeout],
                                      client=self.redis))
 
-    def do_release(self):
+    def do_release(self, expected_token):
         if not bool(self.lua_release(keys=[self.name],
-                                     args=[self.token],
+                                     args=[expected_token],
                                      client=self.redis)):
             raise LockError("Cannot release a lock that's no longer owned")
 
