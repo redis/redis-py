@@ -2,6 +2,7 @@ import threading
 import time as mod_time
 import uuid
 from redis.exceptions import LockError, WatchError
+from redis.utils import dummy
 from redis._compat import b
 
 
@@ -14,7 +15,7 @@ class Lock(object):
     multiple clients play nicely together.
     """
     def __init__(self, redis, name, timeout=None, sleep=0.1,
-                 blocking=True, blocking_timeout=None):
+                 blocking=True, blocking_timeout=None, thread_local=False):
         """
         Create a new Lock instance named ``name`` using the Redis client
         supplied by ``redis``.
@@ -38,6 +39,11 @@ class Lock(object):
         spend trying to acquire the lock. A value of ``None`` indicates
         continue trying forever. ``blocking_timeout`` can be specified as a
         float or integer, both representing the number of seconds to wait.
+
+        ``thread_local`` indicates whether the lock token is placed in
+        thread-local storage. Setting this to True may be necessary if
+        multiple execution contexts (such as threads or coroutines) share
+        a single Lock instance within a process. Defaults to False.
         """
         self.redis = redis
         self.name = name
@@ -45,7 +51,8 @@ class Lock(object):
         self.sleep = sleep
         self.blocking = blocking
         self.blocking_timeout = blocking_timeout
-        self.local = threading.local()
+        self.thread_local = bool(thread_local)
+        self.local = threading.local() if self.thread_local else dummy()
         self.local.token = None
         if self.timeout and self.sleep > self.timeout:
             raise LockError("'sleep' must be less than 'timeout'")

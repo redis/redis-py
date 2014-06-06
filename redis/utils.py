@@ -24,3 +24,10 @@ def pipeline(redis_obj):
     p = redis_obj.pipeline()
     yield p
     p.execute()
+
+
+class dummy(object):
+    """
+    Instances of this class can be used as an attribute container.
+    """
+    pass

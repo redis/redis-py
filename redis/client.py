@@ -478,7 +478,7 @@ class StrictRedis(object):
                     continue
 
     def lock(self, name, timeout=None, sleep=0.1, blocking_timeout=None,
-             lock_class=None):
+             lock_class=None, thread_local=False):
         """
         Return a new Lock object using key ``name`` that mimics
         the behavior of threading.Lock.
@@ -496,6 +496,11 @@ class StrictRedis(object):
         float or integer, both representing the number of seconds to wait.
 
         ``lock_class`` forces the specified lock implementation.
+
+        ``thread_local`` indicates whether the lock token is placed in
+        thread-local storage. Setting this to True may be necessary if
+        multiple execution contexts (such as threads or coroutines) share
+        a single Lock instance within a process. Defaults to False.
         """
         if lock_class is None:
             if self._use_lua_lock is None:
@@ -508,7 +513,8 @@ class StrictRedis(object):
                     self._use_lua_lock = False
             lock_class = self._use_lua_lock and LuaLock or Lock
         return lock_class(self, name, timeout=timeout, sleep=sleep,
-                          blocking_timeout=blocking_timeout)
+                          blocking_timeout=blocking_timeout,
+                          thread_local=thread_local)
 
     def pubsub(self, **kwargs):
         """
