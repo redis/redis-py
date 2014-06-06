@@ -16,7 +16,7 @@ class TestLock(object):
     def test_lock(self, sr):
         lock = self.get_lock(sr, 'foo')
         assert lock.acquire(blocking=False)
-        assert sr.get('foo') == lock.token
+        assert sr.get('foo') == lock.local.token
         assert sr.ttl('foo') == -1
         lock.release()
         assert sr.get('foo') is None
@@ -56,7 +56,7 @@ class TestLock(object):
         # blocking_timeout prevents a deadlock if the lock can't be acquired
         # for some reason
         with self.get_lock(sr, 'foo', blocking_timeout=0.2) as lock:
-            assert sr.get('foo') == lock.token
+            assert sr.get('foo') == lock.local.token
         assert sr.get('foo') is None
 
     def test_high_sleep_raises_error(self, sr):
@@ -77,7 +77,7 @@ class TestLock(object):
         with pytest.raises(LockError):
             lock.release()
         # even though we errored, the token is still cleared
-        assert lock.token is None
+        assert lock.local.token is None
 
     def test_extend_lock(self, sr):
         lock = self.get_lock(sr, 'foo', timeout=10)

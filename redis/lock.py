@@ -1,3 +1,4 @@
+import threading
 import time as mod_time
 import uuid
 from redis.exceptions import LockError, WatchError
@@ -44,7 +45,8 @@ class Lock(object):
         self.sleep = sleep
         self.blocking = blocking
         self.blocking_timeout = blocking_timeout
-        self.token = None
+        self.local = threading.local()
+        self.local.token = None
         if self.timeout and self.sleep > self.timeout:
             raise LockError("'sleep' must be less than 'timeout'")
 
@@ -79,7 +81,7 @@ class Lock(object):
             stop_trying_at = mod_time.time() + self.blocking_timeout
         while 1:
             if self.do_acquire(token):
-                self.token = token
+                self.local.token = token
                 return True
             if not blocking:
                 return False
@@ -98,10 +100,10 @@ class Lock(object):
 
     def release(self):
         "Releases the already acquired lock"
-        if self.token is None:
+        expected_token = self.local.token
+        if expected_token is None:
             raise LockError("Cannot release an unlocked lock")
-        expected_token = self.token
-        self.token = None
+        self.local.token = None
         self.do_release(expected_token)
 
     def do_release(self, expected_token):
@@ -122,7 +124,7 @@ class Lock(object):
         ``additional_time`` can be specified as an integer or a float, both
         representing the number of seconds to add.
         """
-        if self.token is None:
+        if self.local.token is None:
             raise LockError("Cannot extend an unlocked lock")
         if self.timeout is None:
             raise LockError("Cannot extend a lock with no timeout")
@@ -132,7 +134,7 @@ class Lock(object):
         pipe = self.redis.pipeline()
         pipe.watch(self.name)
         lock_value = pipe.get(self.name)
-        if lock_value != self.token:
+        if lock_value != self.local.token:
             raise LockError("Cannot extend a lock that's no longer owned")
         expiration = pipe.pttl(self.name)
         if expiration is None or expiration < 0:
@@ -236,7 +238,7 @@ class LuaLock(Lock):
     def do_extend(self, additional_time):
         additional_time = int(additional_time * 1000)
         if not bool(self.lua_extend(keys=[self.name],
-                                    args=[self.token, additional_time],
+                                    args=[self.local.token, additional_time],
                                     client=self.redis)):
             raise LockError("Cannot extend a lock that's no longer owned")
         return True
