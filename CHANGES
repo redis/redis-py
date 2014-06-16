@@ -1,3 +1,11 @@
+* 2.10.2 (in development)
+    * POSSIBLE BACKWARDS INCOMPATBLE CHANGE: Fixed a possible race condition
+      when multiple threads share the same Lock instance with a timeout. Lock
+      tokens are now stored in thread local storage by default. If you have
+      code that acquires a lock in one thread and passes that lock instance to
+      another thread to release it, you need to disable thread local storage.
+      Refer to the doc strings on the Lock class about the thread_local
+      argument information.
 * 2.10.1
     * Fixed a bug where Sentinel connections to a server that's no longer a
       master and receives a READONLY error will disconnect and reconnect to

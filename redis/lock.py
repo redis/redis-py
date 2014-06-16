@@ -15,7 +15,7 @@ class Lock(object):
     multiple clients play nicely together.
     """
     def __init__(self, redis, name, timeout=None, sleep=0.1,
-                 blocking=True, blocking_timeout=None, thread_local=False):
+                 blocking=True, blocking_timeout=None, thread_local=True):
         """
         Create a new Lock instance named ``name`` using the Redis client
         supplied by ``redis``.
@@ -41,9 +41,30 @@ class Lock(object):
         float or integer, both representing the number of seconds to wait.
 
         ``thread_local`` indicates whether the lock token is placed in
-        thread-local storage. Setting this to True may be necessary if
-        multiple execution contexts (such as threads or coroutines) share
-        a single Lock instance within a process. Defaults to False.
+        thread-local storage. By default, the token is placed in thread local
+        storage so that a thread only sees its token, not a token set by
+        another thread. Consider the following timeline:
+
+            time: 0, thread-1 acquires `my-lock`, with a timeout of 5 seconds.
+                     thread-1 sets the token to "abc"
+            time: 1, thread-2 blocks trying to acquire `my-lock` using the
+                     Lock instance.
+            time: 5, thread-1 has not yet completed. redis expires the lock
+                     key.
+            time: 5, thread-2 acquired `my-lock` now that it's available.
+                     thread-2 sets the token to "xyz"
+            time: 6, thread-1 finishes its work and calls release(). if the
+                     token is *not* stored in thread local storage, then
+                     thread-1 would see the token value as "xyz" and would be
+                     able to successfully release the thread-2's lock.
+
+        In some use cases it's necessary to disable thread local storage. For
+        example, if you have code where one thread acquires a lock and passes
+        that lock instance to a worker thread to release later. If thread
+        local storage isn't disabled in this case, the worker thread won't see
+        the token set by the thread that acquired the lock. Our assumption
+        is that these cases aren't common and as such default to using
+        thread local storage.
         """
         self.redis = redis
         self.name = name
