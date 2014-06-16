@@ -601,14 +601,14 @@ class Connection(object):
     def pack_commands(self, commands):
         "Pack multiple commands into the Redis protocol"
         pieces = []
-        buff = ''
+        buff = SYM_EMPTY
 
         for cmd in commands:
             packed = self.pack_command(*cmd)[0]
             buff = SYM_EMPTY.join((buff, packed))
             if len(buff) > 6000:
                 pieces.append(buff)
-                buff = ''
+                buff = SYM_EMPTY
 
         if buff:
             pieces.append(buff)
