@@ -600,19 +600,23 @@ class Connection(object):
 
     def pack_commands(self, commands):
         "Pack multiple commands into the Redis protocol"
+        output = []
         pieces = []
-        buff = SYM_EMPTY
+        buffer_length = 0
 
         for cmd in commands:
             packed = self.pack_command(*cmd)[0]
-            buff = SYM_EMPTY.join((buff, packed))
-            if len(buff) > 6000:
-                pieces.append(buff)
-                buff = SYM_EMPTY
+            pieces.append(packed)
+            buffer_length += len(packed)
 
-        if buff:
-            pieces.append(buff)
-        return pieces
+            if buffer_length > 6000:
+                output.append(SYM_EMPTY.join(pieces))
+                buffer_length = 0
+                pieces = []
+
+        if pieces:
+            output.append(SYM_EMPTY.join(pieces))
+        return output
 
 
 class SSLConnection(Connection):
