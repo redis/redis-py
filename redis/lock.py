@@ -105,8 +105,8 @@ class Lock(object):
         if blocking_timeout is None:
             blocking_timeout = self.blocking_timeout
         stop_trying_at = None
-        if self.blocking_timeout is not None:
-            stop_trying_at = mod_time.time() + self.blocking_timeout
+        if blocking_timeout is not None:
+            stop_trying_at = mod_time.time() + blocking_timeout
         while 1:
             if self.do_acquire(token):
                 self.local.token = token
