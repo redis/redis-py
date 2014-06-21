@@ -230,6 +230,28 @@ class TestRedisCommands(object):
         assert int(binascii.hexlify(r['res2']), 16) == 0x0102FFFF
         assert int(binascii.hexlify(r['res3']), 16) == 0x000000FF
 
+    @skip_if_server_version_lt('2.8.7')
+    def test_bitpos(self, r):
+        key = 'key:bitpos'
+        r.set(key, '\xff\xf0\x00')
+        assert r.bitpos(key, 0) == 12
+        assert r.bitpos(key, 0, 2, -1) == 16
+        assert r.bitpos(key, 0, -2, -1) == 12
+        r.set(key, '\x00\xff\xf0')
+        assert r.bitpos(key, 1, 0) == 8
+        assert r.bitpos(key, 1, 1) == 8
+        r.set(key, '\x00\x00\x00')
+        assert r.bitpos(key, 1) == -1
+
+    @skip_if_server_version_lt('2.8.7')
+    def test_bitpos_wrong_arguments(self, r):
+        key = 'key:bitpos:wrong:args'
+        r.set(key, '\xff\xf0\x00')
+        with pytest.raises(exceptions.RedisError):
+            r.bitpos(key, 0, end=1) == 12
+        with pytest.raises(exceptions.RedisError):
+            r.bitpos(key, 7) == 12
+
     def test_decr(self, r):
         assert r.decr('a') == -1
         assert r['a'] == b('-1')
