@@ -314,7 +314,7 @@ class HiredisParser(BaseParser):
             try:
                 buffer = self._sock.recv(socket_read_size)
                 # an empty string indicates the server shutdown the socket
-                if not data:
+                if not buffer:
                     raise socket.error("Connection closed by remote server.")
             except socket.timeout:
                 raise TimeoutError("Timeout reading from socket")
