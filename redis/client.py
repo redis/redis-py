@@ -392,18 +392,28 @@ class StrictRedis(object):
                  db=0, password=None, socket_timeout=None,
                  socket_connect_timeout=None,
                  socket_keepalive=None, socket_keepalive_options=None,
-                 connection_pool=None, charset='utf-8', errors='strict',
+                 connection_pool=None, unix_socket_path=None,
+                 encoding='utf-8', encoding_errors='strict',
+                 charset=None, errors=None,
                  decode_responses=False, retry_on_timeout=False,
-                 unix_socket_path=None,
                  ssl=False, ssl_keyfile=None, ssl_certfile=None,
                  ssl_cert_reqs=None, ssl_ca_certs=None):
         if not connection_pool:
+            if charset is not None:
+                warnings.warn(DeprecationWarning(
+                    '"charset" is deprecated. Use "encoding" instead'))
+                encoding = charset
+            if errors is not None:
+                warnings.warn(DeprecationWarning(
+                    '"errors" is deprecated. Use "encoding_errors" instead'))
+                encoding_errors = errors
+
             kwargs = {
                 'db': db,
                 'password': password,
                 'socket_timeout': socket_timeout,
-                'encoding': charset,
-                'encoding_errors': errors,
+                'encoding': encoding,
+                'encoding_errors': encoding_errors,
                 'decode_responses': decode_responses,
                 'retry_on_timeout': retry_on_timeout
             }

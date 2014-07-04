@@ -783,6 +783,17 @@ class ConnectionPool(object):
 
         # update the arguments from the URL values
         kwargs.update(url_options)
+
+        # backwards compatability
+        if 'charset' in kwargs:
+            warnings.warn(DeprecationWarning(
+                '"charset" is deprecated. Use "encoding" instead'))
+            kwargs['encoding'] = kwargs.pop('charset')
+        if 'errors' in kwargs:
+            warnings.warn(DeprecationWarning(
+                '"errors" is deprecated. Use "encoding_errors" instead'))
+            kwargs['encoding_errors'] = kwargs.pop('errors')
+
         return cls(**kwargs)
 
     def __init__(self, connection_class=Connection, max_connections=None,
