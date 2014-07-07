@@ -108,7 +108,7 @@ class SocketBuffer(object):
             while True:
                 data = self._sock.recv(socket_read_size)
                 # an empty string indicates the server shutdown the socket
-                if isinstance(data, str) and len(data) == 0:
+                if isinstance(data, bytes) and len(data) == 0:
                     raise socket.error("Connection closed by remote server.")
                 buf.write(data)
                 data_length = len(data)
@@ -314,7 +314,7 @@ class HiredisParser(BaseParser):
             try:
                 buffer = self._sock.recv(socket_read_size)
                 # an empty string indicates the server shutdown the socket
-                if isinstance(buffer, str) and len(buffer) == 0:
+                if isinstance(buffer, bytes) and len(buffer) == 0:
                     raise socket.error("Connection closed by remote server.")
             except socket.timeout:
                 raise TimeoutError("Timeout reading from socket")
