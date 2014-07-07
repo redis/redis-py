@@ -15,6 +15,7 @@
       "encoding_errors" options.
     * Fixed a compatability bug with Python 3 when sockets the server closes
       a connection.
+    * Added BITPOS command. Thanks https://github.com/jettify.
 * 2.10.1
     * Fixed a bug where Sentinel connections to a server that's no longer a
       master and receives a READONLY error will disconnect and reconnect to
