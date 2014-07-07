@@ -13,8 +13,8 @@
       either to StrictRedis.__init__ or from_url will still work but will
       also emit a DeprecationWarning. Instead use the "encoding" and
       "encoding_errors" options.
-    * Fixed a compatability bug with Python 3 when sockets the server closes
-      a connection.
+    * Fixed a compatability bug with Python 3 when the server closes a
+      connection.
     * Added BITPOS command. Thanks https://github.com/jettify.
 * 2.10.1
     * Fixed a bug where Sentinel connections to a server that's no longer a
