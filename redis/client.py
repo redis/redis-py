@@ -293,10 +293,10 @@ class StrictRedis(object):
             bool
         ),
         string_keys_to_dict(
-            'BITCOUNT DECRBY DEL GETBIT HDEL HLEN INCRBY LINSERT LLEN LPUSHX '
-            'PFADD PFCOUNT RPUSHX SADD SCARD SDIFFSTORE SETBIT SETRANGE '
-            'SINTERSTORE SREM STRLEN SUNIONSTORE ZADD ZCARD ZLEXCOUNT ZREM '
-            'ZREMRANGEBYLEX ZREMRANGEBYRANK ZREMRANGEBYSCORE',
+            'BITCOUNT BITPOS DECRBY DEL GETBIT HDEL HLEN INCRBY LINSERT LLEN '
+            'LPUSHX PFADD PFCOUNT RPUSHX SADD SCARD SDIFFSTORE SETBIT '
+            'SETRANGE SINTERSTORE SREM STRLEN SUNIONSTORE ZADD ZCARD '
+            'ZLEXCOUNT ZREM ZREMRANGEBYLEX ZREMRANGEBYRANK ZREMRANGEBYSCORE',
             int
         ),
         string_keys_to_dict('INCRBYFLOAT HINCRBYFLOAT', float),
@@ -791,6 +791,26 @@ class StrictRedis(object):
         store the result in ``dest``.
         """
         return self.execute_command('BITOP', operation, dest, *keys)
+
+    def bitpos(self, key, bit, start=None, end=None):
+        """
+        Return the position of the first bit set to 1 or 0 in a string.
+        ``start`` and ``end`` difines search range. The range is interpreted
+        as a range of bytes and not a range of bits, so start=0 and end=2
+        means to look at the first three bytes.
+        """
+        if bit not in (0, 1):
+            raise RedisError('bit must be 0 or 1')
+        params = [key, bit]
+
+        start is not None and params.append(start)
+
+        if start is not None and end is not None:
+            params.append(end)
+        elif start is None and end is not None:
+            raise RedisError("start argument is not set, "
+                             "when end is specified")
+        return self.execute_command('BITPOS', *params)
 
     def decr(self, name, amount=1):
         """
