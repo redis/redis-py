@@ -1,4 +1,6 @@
 * 2.10.2 (in development)
+    * Added support for Hiredis's new bytearray support. Thanks
+      https://github.com/tzickel
     * POSSIBLE BACKWARDS INCOMPATBLE CHANGE: Fixed a possible race condition
       when multiple threads share the same Lock instance with a timeout. Lock
       tokens are now stored in thread local storage by default. If you have
