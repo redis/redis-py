@@ -36,18 +36,28 @@ if HIREDIS_AVAILABLE:
     hiredis_version = StrictVersion(hiredis.__version__)
     HIREDIS_SUPPORTS_CALLABLE_ERRORS = \
         hiredis_version >= StrictVersion('0.1.3')
-    HIREDIS_SUPPORTS_SANE_BUFFER = \
+    HIREDIS_SUPPORTS_BYTE_BUFFER = \
         hiredis_version >= StrictVersion('0.1.4')
 
-    if not HIREDIS_SUPPORTS_CALLABLE_ERRORS:
-        msg = ("redis-py works best with hiredis >= 0.1.3. You're running "
+    if not HIREDIS_SUPPORTS_BYTE_BUFFER:
+        msg = ("redis-py works best with hiredis >= 0.1.4. You're running "
                "hiredis %s. Please consider upgrading." % hiredis.__version__)
         warnings.warn(msg)
+
+    HIREDIS_USE_BYTE_BUFFER = False
+    if HIREDIS_SUPPORTS_BYTE_BUFFER:
+        try:
+            bytearray
+            HIREDIS_USE_BYTE_BUFFER = True
+        except NameError:
+            pass
 
 SYM_STAR = b('*')
 SYM_DOLLAR = b('$')
 SYM_CRLF = b('\r\n')
 SYM_EMPTY = b('')
+
+SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
 
 
 class Token(object):
@@ -111,7 +121,7 @@ class SocketBuffer(object):
                 data = self._sock.recv(socket_read_size)
                 # an empty string indicates the server shutdown the socket
                 if isinstance(data, bytes) and len(data) == 0:
-                    raise socket.error("Connection closed by remote server.")
+                    raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
                 buf.write(data)
                 data_length = len(data)
                 self.bytes_written += data_length
@@ -214,7 +224,7 @@ class PythonParser(BaseParser):
     def read_response(self):
         response = self._buffer.readline()
         if not response:
-            raise ConnectionError("Socket closed on remote end")
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
         byte, response = byte_to_chr(response[0]), response[1:]
 
@@ -264,12 +274,8 @@ class HiredisParser(BaseParser):
         if not HIREDIS_AVAILABLE:
             raise RedisError("Hiredis is not installed")
         self.socket_read_size = socket_read_size
-        self.usebuffer = True
-        if sys.version[0] == '2' and sys.version[2] < '7':
-            self.usebuffer = False
-        if not HIREDIS_SUPPORTS_SANE_BUFFER:
-            self.usebuffer = False
-        if self.usebuffer:
+
+        if HIREDIS_USE_BYTE_BUFFER:
             self._buffer = bytearray(socket_read_size)
 
     def __del__(self):
@@ -301,7 +307,7 @@ class HiredisParser(BaseParser):
 
     def can_read(self):
         if not self._reader:
-            raise ConnectionError("Socket closed on remote end")
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
         if self._next_response is False:
             self._next_response = self._reader.gets()
@@ -309,7 +315,7 @@ class HiredisParser(BaseParser):
 
     def read_response(self):
         if not self._reader:
-            raise ConnectionError("Socket closed on remote end")
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
         # _next_response might be cached from a can_read() call
         if self._next_response is not False:
@@ -321,32 +327,28 @@ class HiredisParser(BaseParser):
         socket_read_size = self.socket_read_size
         while response is False:
             try:
-                if self.usebuffer:
+                if HIREDIS_USE_BYTE_BUFFER:
                     bufflen = self._sock.recv_into(self._buffer)
                     if bufflen == 0:
-                        raise socket.error("Connection closed by remote \
-server.")
+                        raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
                 else:
                     buffer = self._sock.recv(socket_read_size)
                     # an empty string indicates the server shutdown the socket
-                    if isinstance(buffer, bytes) and len(buffer) == 0:
-                        raise socket.error("Connection closed by remote \
-server.")
+                    if not isinstance(buffer, bytes) or len(buffer) == 0:
+                        raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
             except socket.timeout:
                 raise TimeoutError("Timeout reading from socket")
             except socket.error:
                 e = sys.exc_info()[1]
                 raise ConnectionError("Error while reading from socket: %s" %
                                       (e.args,))
-            if self.usebuffer:
+            if HIREDIS_USE_BYTE_BUFFER:
                 self._reader.feed(self._buffer, 0, bufflen)
             else:
-                if not buffer:
-                    raise ConnectionError("Socket closed on remote end")
                 self._reader.feed(buffer)
             # proactively, but not conclusively, check if more data is in the
             # buffer. if the data received doesn't end with \r\n, there's more.
-            if self.usebuffer:
+            if HIREDIS_USE_BYTE_BUFFER:
                 if self._buffer[bufflen - 2:bufflen] != SYM_CRLF:
                     continue
             else:
