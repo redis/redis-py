@@ -44,13 +44,12 @@ if HIREDIS_AVAILABLE:
                "hiredis %s. Please consider upgrading." % hiredis.__version__)
         warnings.warn(msg)
 
-    HIREDIS_USE_BYTE_BUFFER = False
-    if HIREDIS_SUPPORTS_BYTE_BUFFER:
-        try:
-            bytearray
-            HIREDIS_USE_BYTE_BUFFER = True
-        except NameError:
-            pass
+    HIREDIS_USE_BYTE_BUFFER = True
+    # only use byte buffer if hiredis supports it and the Python version
+    # is >= 2.7
+    if not HIREDIS_SUPPORTS_BYTE_BUFFER or (
+            sys.version_info[0] == 2 and sys.version_info[1] < 7):
+        HIREDIS_USE_BYTE_BUFFER = False
 
 SYM_STAR = b('*')
 SYM_DOLLAR = b('$')
