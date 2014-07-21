@@ -110,7 +110,7 @@ class SocketBuffer(object):
             while True:
                 data = self._sock.recv(socket_read_size)
                 # an empty string indicates the server shutdown the socket
-                if isinstance(data, str) and len(data) == 0:
+                if isinstance(data, bytes) and len(data) == 0:
                     raise socket.error("Connection closed by remote server.")
                 buf.write(data)
                 data_length = len(data)
@@ -329,7 +329,7 @@ server.")
                 else:
                     buffer = self._sock.recv(socket_read_size)
                     # an empty string indicates the server shutdown the socket
-                    if isinstance(buffer, str) and len(buffer) == 0:
+                    if isinstance(buffer, bytes) and len(buffer) == 0:
                         raise socket.error("Connection closed by remote \
 server.")
             except socket.timeout:
@@ -623,19 +623,23 @@ class Connection(object):
 
     def pack_commands(self, commands):
         "Pack multiple commands into the Redis protocol"
+        output = []
         pieces = []
-        buff = SYM_EMPTY
+        buffer_length = 0
 
         for cmd in commands:
             packed = self.pack_command(*cmd)[0]
-            buff = SYM_EMPTY.join((buff, packed))
-            if len(buff) > 6000:
-                pieces.append(buff)
-                buff = SYM_EMPTY
+            pieces.append(packed)
+            buffer_length += len(packed)
 
-        if buff:
-            pieces.append(buff)
-        return pieces
+            if buffer_length > 6000:
+                output.append(SYM_EMPTY.join(pieces))
+                buffer_length = 0
+                pieces = []
+
+        if pieces:
+            output.append(SYM_EMPTY.join(pieces))
+        return output
 
 
 class SSLConnection(Connection):
@@ -802,6 +806,17 @@ class ConnectionPool(object):
 
         # update the arguments from the URL values
         kwargs.update(url_options)
+
+        # backwards compatability
+        if 'charset' in kwargs:
+            warnings.warn(DeprecationWarning(
+                '"charset" is deprecated. Use "encoding" instead'))
+            kwargs['encoding'] = kwargs.pop('charset')
+        if 'errors' in kwargs:
+            warnings.warn(DeprecationWarning(
+                '"errors" is deprecated. Use "encoding_errors" instead'))
+            kwargs['encoding_errors'] = kwargs.pop('errors')
+
         return cls(**kwargs)
 
     def __init__(self, connection_class=Connection, max_connections=None,

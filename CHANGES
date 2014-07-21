@@ -6,6 +6,16 @@
       another thread to release it, you need to disable thread local storage.
       Refer to the doc strings on the Lock class about the thread_local
       argument information.
+    * Fixed a regression in from_url where "charset" and "errors" weren't
+      valid options. "encoding" and "encoding_errors" are still accepted
+      and preferred.
+    * The "charset" and "errors" options have been deprecated. Passing
+      either to StrictRedis.__init__ or from_url will still work but will
+      also emit a DeprecationWarning. Instead use the "encoding" and
+      "encoding_errors" options.
+    * Fixed a compatability bug with Python 3 when the server closes a
+      connection.
+    * Added BITPOS command. Thanks https://github.com/jettify.
 * 2.10.1
     * Fixed a bug where Sentinel connections to a server that's no longer a
       master and receives a READONLY error will disconnect and reconnect to
