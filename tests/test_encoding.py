@@ -22,3 +22,12 @@ class TestEncoding(object):
         result = [unicode_string, unicode_string, unicode_string]
         r.rpush('a', *result)
         assert r.lrange('a', 0, -1) == result
+
+
+class TestCommandsAndTokensArentEncoded(object):
+    @pytest.fixture()
+    def r(self, request):
+        return _redis_client(request=request, charset='utf-16')
+
+    def test_basic_command(self, r):
+        r.set('hello', 'world')

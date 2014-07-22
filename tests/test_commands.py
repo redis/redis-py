@@ -75,9 +75,11 @@ class TestRedisCommands(object):
 
     def test_config_resetstat(self, r):
         r.ping()
-        assert int(r.info()['total_commands_processed']) > 1
+        prior_commands_processed = int(r.info()['total_commands_processed'])
+        assert prior_commands_processed >= 1
         r.config_resetstat()
-        assert int(r.info()['total_commands_processed']) == 1
+        reset_commands_processed = int(r.info()['total_commands_processed'])
+        assert reset_commands_processed < prior_commands_processed
 
     def test_config_set(self, r):
         data = r.config_get()
@@ -122,17 +124,20 @@ class TestRedisCommands(object):
         r.get(unicode_string)
         slowlog = r.slowlog_get()
         assert isinstance(slowlog, list)
-        assert len(slowlog) == 2
-        get_command = slowlog[0]
-        assert isinstance(get_command['start_time'], int)
-        assert isinstance(get_command['duration'], int)
-        assert get_command['command'] == \
-            b(' ').join((b('GET'), unicode_string.encode('utf-8')))
+        commands = [log['command'] for log in slowlog]
 
-        slowlog_reset_command = slowlog[1]
-        assert isinstance(slowlog_reset_command['start_time'], int)
-        assert isinstance(slowlog_reset_command['duration'], int)
-        assert slowlog_reset_command['command'] == b('SLOWLOG RESET')
+        get_command = b(' ').join((b('GET'), unicode_string.encode('utf-8')))
+        assert get_command in commands
+        assert b('SLOWLOG RESET') in commands
+        # the order should be ['GET <uni string>', 'SLOWLOG RESET'],
+        # but if other clients are executing commands at the same time, there
+        # could be commands, before, between, or after, so just check that
+        # the two we care about are in the appropriate order.
+        assert commands.index(get_command) < commands.index(b('SLOWLOG RESET'))
+
+        # make sure other attributes are typed correctly
+        assert isinstance(slowlog[0]['start_time'], int)
+        assert isinstance(slowlog[0]['duration'], int)
 
     def test_slowlog_get_limit(self, r, slowlog):
         assert r.slowlog_reset()
@@ -140,13 +145,13 @@ class TestRedisCommands(object):
         r.get('bar')
         slowlog = r.slowlog_get(1)
         assert isinstance(slowlog, list)
-        assert len(slowlog) == 1
-        assert slowlog[0]['command'] == b('GET bar')
+        commands = [log['command'] for log in slowlog]
+        assert b('GET foo') not in commands
+        assert b('GET bar') in commands
 
     def test_slowlog_length(self, r, slowlog):
-        assert r.slowlog_reset()
         r.get('foo')
-        assert r.slowlog_len() == 2
+        assert isinstance(r.slowlog_len(), int)
 
     @skip_if_server_version_lt('2.6.0')
     def test_time(self, r):
@@ -224,6 +229,28 @@ class TestRedisCommands(object):
         assert int(binascii.hexlify(r['res1']), 16) == 0x0102FF00
         assert int(binascii.hexlify(r['res2']), 16) == 0x0102FFFF
         assert int(binascii.hexlify(r['res3']), 16) == 0x000000FF
+
+    @skip_if_server_version_lt('2.8.7')
+    def test_bitpos(self, r):
+        key = 'key:bitpos'
+        r.set(key, b('\xff\xf0\x00'))
+        assert r.bitpos(key, 0) == 12
+        assert r.bitpos(key, 0, 2, -1) == 16
+        assert r.bitpos(key, 0, -2, -1) == 12
+        r.set(key, b('\x00\xff\xf0'))
+        assert r.bitpos(key, 1, 0) == 8
+        assert r.bitpos(key, 1, 1) == 8
+        r.set(key, b('\x00\x00\x00'))
+        assert r.bitpos(key, 1) == -1
+
+    @skip_if_server_version_lt('2.8.7')
+    def test_bitpos_wrong_arguments(self, r):
+        key = 'key:bitpos:wrong:args'
+        r.set(key, b('\xff\xf0\x00'))
+        with pytest.raises(exceptions.RedisError):
+            r.bitpos(key, 0, end=1) == 12
+        with pytest.raises(exceptions.RedisError):
+            r.bitpos(key, 7) == 12
 
     def test_decr(self, r):
         assert r.decr('a') == -1

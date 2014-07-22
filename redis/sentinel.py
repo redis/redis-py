@@ -5,7 +5,7 @@ import weakref
 from redis.client import StrictRedis
 from redis.connection import ConnectionPool, Connection
 from redis.exceptions import ConnectionError, ResponseError, ReadOnlyError
-from redis._compat import xrange, nativestr
+from redis._compat import iteritems, nativestr, xrange
 
 
 class MasterNotFoundError(ConnectionError):
@@ -50,9 +50,9 @@ class SentinelManagedConnection(Connection):
                     continue
             raise SlaveNotFoundError  # Never be here
 
-    def send_command(self, *args):
+    def read_response(self):
         try:
-            super(SentinelManagedConnection, self).send_command(*args)
+            return super(SentinelManagedConnection, self).read_response()
         except ReadOnlyError:
             if self.connection_pool.is_master:
                 # When talking to a master, a ReadOnlyError when likely
@@ -82,8 +82,6 @@ class SentinelConnectionPool(ConnectionPool):
         self.connection_kwargs['connection_pool'] = weakref.proxy(self)
         self.service_name = service_name
         self.sentinel_manager = sentinel_manager
-        self.master_address = None
-        self.slave_rr_counter = None
 
     def __repr__(self):
         return "%s<service=%s(%s)" % (
@@ -91,6 +89,11 @@ class SentinelConnectionPool(ConnectionPool):
             self.service_name,
             self.is_master and 'master' or 'slave',
         )
+
+    def reset(self):
+        super(SentinelConnectionPool, self).reset()
+        self.master_address = None
+        self.slave_rr_counter = None
 
     def get_master_address(self):
         master_address = self.sentinel_manager.discover_master(
@@ -124,6 +127,7 @@ class SentinelConnectionPool(ConnectionPool):
     def _checkpid(self):
         if self.pid != os.getpid():
             self.disconnect()
+            self.reset()
             self.__init__(self.service_name, self.sentinel_manager,
                           connection_class=self.connection_class,
                           max_connections=self.max_connections,
@@ -145,18 +149,35 @@ class Sentinel(object):
     ``sentinels`` is a list of sentinel nodes. Each node is represented by
     a pair (hostname, port).
 
-    Use ``socket_timeout`` to specify a timeout for sentinel clients.
-    It's recommended to use short timeouts.
+    ``min_other_sentinels`` defined a minimum number of peers for a sentinel.
+    When querying a sentinel, if it doesn't meet this threshold, responses
+    from that sentinel won't be considered valid.
 
-    Use ``min_other_sentinels`` to filter out sentinels with not enough peers.
+    ``sentinel_kwargs`` is a dictionary of connection arguments used when
+    connecting to sentinel instances. Any argument that can be passed to
+    a normal Redis connection can be specified here. If ``sentinel_kwargs`` is
+    not specified, any socket_timeout and socket_keepalive options specified
+    in ``connection_kwargs`` will be used.
+
+    ``connection_kwargs`` are keyword arguments that will be used when
+    establishing a connection to a Redis server.
     """
 
-    def __init__(self, sentinels, password=None, socket_timeout=None,
-                 min_other_sentinels=0):
-        self.sentinels = [StrictRedis(hostname, port, password=password,
-                                      socket_timeout=socket_timeout)
+    def __init__(self, sentinels, min_other_sentinels=0, sentinel_kwargs=None,
+                 **connection_kwargs):
+        # if sentinel_kwargs isn't defined, use the socket_* options from
+        # connection_kwargs
+        if sentinel_kwargs is None:
+            sentinel_kwargs = dict([(k, v)
+                                    for k, v in iteritems(connection_kwargs)
+                                    if k.startswith('socket_')
+                                    ])
+        self.sentinel_kwargs = sentinel_kwargs
+
+        self.sentinels = [StrictRedis(hostname, port, **self.sentinel_kwargs)
                           for hostname, port in sentinels]
         self.min_other_sentinels = min_other_sentinels
+        self.connection_kwargs = connection_kwargs
 
     def __repr__(self):
         sentinel_addresses = []
@@ -237,11 +258,15 @@ class Sentinel(object):
         The ``connection_pool_class`` specifies the connection pool to use.
         The SentinelConnectionPool will be used by default.
 
-        All other arguments are passed directly to the SentinelConnectionPool.
+        All other keyword arguments are merged with any connection_kwargs
+        passed to this class and passed to the connection pool as keyword
+        arguments to be used to initialize Redis connections.
         """
         kwargs['is_master'] = True
+        connection_kwargs = dict(self.connection_kwargs)
+        connection_kwargs.update(kwargs)
         return redis_class(connection_pool=connection_pool_class(
-            service_name, self, **kwargs))
+            service_name, self, **connection_kwargs))
 
     def slave_for(self, service_name, redis_class=StrictRedis,
                   connection_pool_class=SentinelConnectionPool, **kwargs):
@@ -258,8 +283,12 @@ class Sentinel(object):
         The ``connection_pool_class`` specifies the connection pool to use.
         The SentinelConnectionPool will be used by default.
 
-        All other arguments are passed directly to the SentinelConnectionPool.
+        All other keyword arguments are merged with any connection_kwargs
+        passed to this class and passed to the connection pool as keyword
+        arguments to be used to initialize Redis connections.
         """
         kwargs['is_master'] = False
+        connection_kwargs = dict(self.connection_kwargs)
+        connection_kwargs.update(kwargs)
         return redis_class(connection_pool=connection_pool_class(
-            service_name, self, **kwargs))
+            service_name, self, **connection_kwargs))

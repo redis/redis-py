@@ -1,4 +1,28 @@
-* 2.10.0 (in development)
+* 2.10.2 (in development)
+    * Added support for Hiredis's new bytearray support. Thanks
+      https://github.com/tzickel
+    * POSSIBLE BACKWARDS INCOMPATBLE CHANGE: Fixed a possible race condition
+      when multiple threads share the same Lock instance with a timeout. Lock
+      tokens are now stored in thread local storage by default. If you have
+      code that acquires a lock in one thread and passes that lock instance to
+      another thread to release it, you need to disable thread local storage.
+      Refer to the doc strings on the Lock class about the thread_local
+      argument information.
+    * Fixed a regression in from_url where "charset" and "errors" weren't
+      valid options. "encoding" and "encoding_errors" are still accepted
+      and preferred.
+    * The "charset" and "errors" options have been deprecated. Passing
+      either to StrictRedis.__init__ or from_url will still work but will
+      also emit a DeprecationWarning. Instead use the "encoding" and
+      "encoding_errors" options.
+    * Fixed a compatability bug with Python 3 when the server closes a
+      connection.
+    * Added BITPOS command. Thanks https://github.com/jettify.
+* 2.10.1
+    * Fixed a bug where Sentinel connections to a server that's no longer a
+      master and receives a READONLY error will disconnect and reconnect to
+      the master.
+* 2.10.0
     * Discontinuted support for Python 2.5. Upgrade. You'll be happier.
     * The HiRedis parser will now properly raise ConnectionErrors.
     * Completely refactored PubSub support. Fixes all known PubSub bugs and
@@ -46,6 +70,34 @@
     * When creating client instances or connection pool instances from an URL,
       it's now possible to pass additional options to the connection pool with
       querystring arguments.
+    * Fixed a bug where some encodings (like utf-16) were unusable on Python 3
+      as command names and literals would get encoded.
+    * Added an SSLConnection class that allows for secure connections through
+      stunnel or other means. Construct and SSL connection with the sll=True
+      option on client classes, using the rediss:// scheme from an URL, or
+      by passing the SSLConnection class to a connection pool's
+      connection_class argument. Thanks https://github.com/oranagra.
+    * Added a socket_connect_timeout option to control how long to wait while
+      establishing a TCP connection before timing out. This lets the client
+      fail fast when attempting to connect to a downed server while keeping
+      a more lenient timeout for all other socket operations.
+    * Added TCP Keep-alive support by passing use the socket_keepalive=True
+      option. Finer grain control can be achieved using the
+      socket_keepalive_options option which expects a dictionary with any of
+      the keys (socket.TCP_KEEPIDLE, socket.TCP_KEEPCNT, socket.TCP_KEEPINTVL)
+      and integers for values. Thanks Yossi Gottlieb.
+    * Added a `retry_on_timeout` option that controls how socket.timeout errors
+      are handled. By default it is set to False and will cause the client to
+      raise a TimeoutError anytime a socket.timeout is encountered. If
+      `retry_on_timeout` is set to True, the client will retry a command that
+      timed out once like other `socket.error`s.
+    * Completely refactored the Lock system. There is now a LuaLock class
+      that's used when the Redis server is capable of running Lua scripts along
+      with a fallback class for Redis servers < 2.6. The new locks fix several
+      subtle race consider that the old lock could face. In additional, a
+      new method, "extend" is available on lock instances that all a lock
+      owner to extend the amount of time they have the lock for. Thanks to
+      Eli Finkelshteyn and https://github.com/chillipino for contributions.
 * 2.9.1
     * IPv6 support. Thanks https://github.com/amashinchi
 * 2.9.0
