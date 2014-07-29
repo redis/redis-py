@@ -629,9 +629,9 @@ class Connection(object):
         buffer_length = 0
 
         for cmd in commands:
-            packed = self.pack_command(*cmd)[0]
-            pieces.append(packed)
-            buffer_length += len(packed)
+            for chunk in self.pack_command(*cmd):
+                pieces.append(chunk)
+                buffer_length += len(chunk)
 
             if buffer_length > 6000:
                 output.append(SYM_EMPTY.join(pieces))
