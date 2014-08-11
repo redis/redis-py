@@ -1,4 +1,4 @@
-* 2.10.2 (in development)
+* 2.10.2
     * Added support for Hiredis's new bytearray support. Thanks
       https://github.com/tzickel
     * POSSIBLE BACKWARDS INCOMPATBLE CHANGE: Fixed a possible race condition
