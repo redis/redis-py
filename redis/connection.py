@@ -555,13 +555,13 @@ class Connection(object):
         "Pack and send a command to the Redis server"
         self.send_packed_command(self.pack_command(*args))
 
-    def can_read(self):
+    def can_read(self, timeout=0):
         "Poll the socket to see if there's data that can be read."
         sock = self._sock
         if not sock:
             self.connect()
             sock = self._sock
-        return bool(select([sock], [], [], 0)[0]) or self._parser.can_read()
+        return self._parser.can_read() or bool(select([sock], [], [], timeout)[0])
 
     def read_response(self):
         "Read the response from a previously sent command"
