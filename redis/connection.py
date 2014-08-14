@@ -348,7 +348,8 @@ class HiredisParser(BaseParser):
             # proactively, but not conclusively, check if more data is in the
             # buffer. if the data received doesn't end with \r\n, there's more.
             if HIREDIS_USE_BYTE_BUFFER:
-                if bufflen > 2 and self._buffer[bufflen - 2:bufflen] != SYM_CRLF:
+                if bufflen > 2 and \
+                        self._buffer[bufflen - 2:bufflen] != SYM_CRLF:
                     continue
             else:
                 if not buffer.endswith(SYM_CRLF):
