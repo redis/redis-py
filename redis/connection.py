@@ -561,7 +561,8 @@ class Connection(object):
         if not sock:
             self.connect()
             sock = self._sock
-        return self._parser.can_read() or bool(select([sock], [], [], timeout)[0])
+        return self._parser.can_read() or \
+            bool(select([sock], [], [], timeout)[0])
 
     def read_response(self):
         "Read the response from a previously sent command"
