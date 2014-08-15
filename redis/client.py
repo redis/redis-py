@@ -2217,7 +2217,13 @@ class PubSub(object):
                 yield response
 
     def get_message(self, ignore_subscribe_messages=False, timeout=0):
-        "Get the next message if one is available, otherwise None"
+        """
+        Get the next message if one is available, otherwise None.
+
+        If timeout is specified, the system will wait for `timeout` seconds
+        before returning. Timeout should be specified as a floating point
+        number.
+        """
         response = self.parse_response(block=False, timeout=timeout)
         if response:
             return self.handle_message(response, ignore_subscribe_messages)
@@ -2294,8 +2300,8 @@ class PubSub(object):
                     return
                 self._running = True
                 while self._running and pubsub.subscribed:
-                    pubsub.get_message(ignore_subscribe_messages=True)
-                    mod_time.sleep(sleep_time)
+                    pubsub.get_message(ignore_subscribe_messages=True,
+                                       timeout=sleep_time)
 
             def stop(self):
                 self._running = False
