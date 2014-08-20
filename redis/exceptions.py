@@ -29,18 +29,23 @@ class TimeoutError(RedisError):
 
 
 class BusyLoadingError(ConnectionError):
+    "raised when the Redis server is starting up and not accepting commands yet"
     pass
 
 
 class InvalidResponse(RedisError):
+    "Failed to parse Redis RESP protocol response"
     pass
 
 
 class ResponseError(RedisError):
+    """ Wraps RESP type errors. See http://redis.io/topics/protocol. Subclasses
+    are specific RESP error types while this wraps generic ERR """
     pass
 
 
 class DataError(RedisError):
+    "Raised when invalid arguments are passed to Redis commands"
     pass
 
 
