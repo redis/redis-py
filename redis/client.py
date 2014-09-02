@@ -985,7 +985,7 @@ class StrictRedis(object):
             when = int(mod_time.mktime(when.timetuple())) * 1000 + ms
         return self.execute_command('PEXPIREAT', name, when)
 
-    def psetex(self, name, time_ms, value):
+    def psetex(self, name, value, time_ms):
         """
         Set the value of key ``name`` to ``value`` that expires in ``time_ms``
         milliseconds. ``time_ms`` can be represented by an integer or a Python
@@ -994,7 +994,7 @@ class StrictRedis(object):
         if isinstance(time_ms, datetime.timedelta):
             ms = int(time_ms.microseconds / 1000)
             time_ms = (time_ms.seconds + time_ms.days * 24 * 3600) * 1000 + ms
-        return self.execute_command('PSETEX', name, time_ms, value)
+        return self.execute_command('PSETEX', name, value, time_ms)
 
     def pttl(self, name):
         "Returns the number of milliseconds until the key ``name`` will expire"
@@ -1065,7 +1065,7 @@ class StrictRedis(object):
         value = value and 1 or 0
         return self.execute_command('SETBIT', name, offset, value)
 
-    def setex(self, name, time, value):
+    def setex(self, name, value, time):
         """
         Set the value of key ``name`` to ``value`` that expires in ``time``
         seconds. ``time`` can be represented by an integer or a Python
@@ -1073,7 +1073,7 @@ class StrictRedis(object):
         """
         if isinstance(time, datetime.timedelta):
             time = time.seconds + time.days * 24 * 3600
-        return self.execute_command('SETEX', name, time, value)
+        return self.execute_command('SETEX', name, value, time)
 
     def setnx(self, name, value):
         "Set the value of key ``name`` to ``value`` if key doesn't exist"
