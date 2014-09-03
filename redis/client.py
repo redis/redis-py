@@ -1978,7 +1978,7 @@ class Redis(StrictRedis):
         """
         if isinstance(time, datetime.timedelta):
             time = time.seconds + time.days * 24 * 3600
-        return self.execute_command('SETEX', name, time, value)
+        return self.execute_command('SETEX', name, value, time)
 
     def lrem(self, name, value, num=0):
         """
