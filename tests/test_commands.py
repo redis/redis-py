@@ -465,14 +465,14 @@ class TestRedisCommands(object):
 
     @skip_if_server_version_lt('2.6.0')
     def test_psetex(self, r):
-        assert r.psetex('a', 1000, 'value')
+        assert r.psetex('a', 'value', 1000)
         assert r['a'] == b('value')
         assert 0 < r.pttl('a') <= 1000
 
     @skip_if_server_version_lt('2.6.0')
     def test_psetex_timedelta(self, r):
         expire_at = datetime.timedelta(milliseconds=1000)
-        assert r.psetex('a', expire_at, 'value')
+        assert r.psetex('a', 'value', expire_at)
         assert r['a'] == b('value')
         assert 0 < r.pttl('a') <= 1000
 
@@ -1333,7 +1333,7 @@ class TestStrictCommands(object):
         assert sr.lrange('a', 0, -1) == [b('a2'), b('a3')]
 
     def test_strict_setex(self, sr):
-        assert sr.setex('a', 60, '1')
+        assert sr.setex('a', '1', 60)
         assert sr['a'] == b('1')
         assert 0 < sr.ttl('a') <= 60
 
