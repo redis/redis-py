@@ -29,7 +29,7 @@ class TimeoutError(RedisError):
 
 
 class BusyLoadingError(ConnectionError):
-    "raised when the Redis server is starting up and not accepting commands yet"
+    "Raised when the Redis server is starting up and not accepting commands yet"
     pass
 
 
