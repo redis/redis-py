@@ -126,7 +126,7 @@ You can create your own Connection subclasses as well. This may be useful if
 you want to control the socket behavior within an async framework. To
 instantiate a client class using your own connection, you need to create
 a connection pool, passing your class to the connection_class argument.
-Other keyword parameters your pass to the pool will be passed to the class
+Other keyword parameters you pass to the pool will be passed to the class
 specified during initialization.
 
 .. code-block:: pycon
@@ -613,7 +613,7 @@ Sentinel connection to discover the master and slaves network addresses:
     >>> sentinel.discover_slaves('mymaster')
     [('127.0.0.1', 6380)]
 
-You can also create Redis client connections from a Sentinel instnace. You can
+You can also create Redis client connections from a Sentinel instance. You can
 connect to either the master (for write operations) or a slave (for read-only
 operations).
 
