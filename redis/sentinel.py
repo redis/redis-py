@@ -130,6 +130,7 @@ class SentinelConnectionPool(ConnectionPool):
             self.reset()
             self.__init__(self.service_name, self.sentinel_manager,
                           is_master=self.is_master,
+                          check_connection=self.check_connection,
                           connection_class=self.connection_class,
                           max_connections=self.max_connections,
                           **self.connection_kwargs)
