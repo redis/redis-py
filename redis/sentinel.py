@@ -1,6 +1,7 @@
 import os
 import random
 import weakref
+from urlparse import urlparse, parse_qs
 
 from redis.client import StrictRedis
 from redis.connection import ConnectionPool, Connection
@@ -164,6 +165,60 @@ class Sentinel(object):
     ``connection_kwargs`` are keyword arguments that will be used when
     establishing a connection to a Redis server.
     """
+
+    @classmethod
+    def from_url(cls, url, **kwargs):
+        """
+        return a sentinel object from url
+        :param url: sentinels://<host1>:<port1>,<host2>:<port2>/<db>?<querystring>
+        :param kwargs: parameters for constructing Sentinel object
+        :return: tuple of sentinel object, db from url, service_name parsed from url
+
+        url example::
+            sentinels://10.1.2.122:17700
+            sentinels://10.1.2.122:17700, 10.1.2.128:17700
+            sentinels://node1:17700,node2:17700
+
+        if db appears in both querystring and path, use path as first choice.
+        For example:
+            sentinels://node1:17700,node2:17700/1?db=2 return db 2
+        """
+        url_string = url
+        url = urlparse(url)
+
+        if url.scheme != "sentinels":
+            raise Exception("sentinel url must start with sentinels://")
+
+        # in python2.6, custom URL schemes don't recognize querystring values
+        # they're left as part of the url.path.
+        if '?' in url.path and not url.query:
+            # chop the querystring including the ? off the end of the url
+            # and reparse it.
+            qs = url.path.split('?', 1)[1]
+            url = urlparse(url_string[:-(len(qs) + 1)])
+        else:
+            qs = url.query
+
+        url_options = {}  # redis options
+
+        for name, value in iteritems(parse_qs(qs)):
+            if value and len(value) > 0:
+                url_options[name] = value[0]
+
+        service_name = url_options.get('service_name')
+
+        sentinels = [host.split(':') for host in url.netloc.split(',')]
+
+        # If there's a path argument, use it as the db argument if a
+        # querystring value wasn't specified
+        db_from_url = url_options.get('db')
+        if db_from_url is None and url.path:
+            try:
+                db_from_url = int(url.path.replace('/', ''))
+            except (AttributeError, ValueError):
+                pass
+
+        return Sentinel(sentinels, **kwargs), db_from_url, service_name
 
     def __init__(self, sentinels, min_other_sentinels=0, sentinel_kwargs=None,
                  **connection_kwargs):
