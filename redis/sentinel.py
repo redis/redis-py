@@ -170,9 +170,9 @@ class Sentinel(object):
     def from_url(cls, url, **kwargs):
         """
         return a sentinel object from url
-        :param url: sentinels://<host1>:<port1>,<host2>:<port2>/<db>?<querystring>
-        :param kwargs: parameters for constructing Sentinel object
-        :return: tuple of sentinel object, db from url, service_name parsed from url
+        ``url`` sentinels://<host1>:<port1>,<host2>:<port2>/<db>?<querystring>
+        ``param`` kwargs: parameters for constructing Sentinel object
+        ``return`` tuple of sentinel object, db from url, service_name in url
 
         url example::
             sentinels://10.1.2.122:17700

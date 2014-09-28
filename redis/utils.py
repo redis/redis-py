@@ -17,16 +17,25 @@ def from_url(url, db=None, master_for_args={}, **kwargs):
     none is provided.
 
     When url is starting with sentinels://, a sentinel object will be returned
-    if no query parameter service_name in url, otherwise the master redis client
-    will be returned. master_for_args will be applied to  Sentinel.master_for.
+    if no query parameter service_name in url, otherwise the master redis
+    client will be returned. master_for_args will be applied to
+    Sentinel.master_for.
     >>> import redis
     >>> redis.from_url('sentinels://node1:17700,node2:17700')
     Sentinel<sentinels=[node1:17700,node2:17700]>
-    >>> redis.from_url('sentinels://node1:17700,node2:17700?service_name=mymaster', db=1)
+
+    >>> redis.from_url(
+        'sentinels://node1:17700,node2:17700?service_name=mymaster', db=1)
     StrictRedis<SentinelConnectionPool<service=mymaster(master)>
-    >>> redis.from_url('sentinels://node1:17700,node2:17700?service_name=mymaster&db=3', db=1)
+
+    >>> redis.from_url(
+       'sentinels://node1:17700,node2:17700?service_name=mymaster&db=3', db=1)
     StrictRedis<SentinelConnectionPool<service=mymaster(master)>
-    >>> redis.from_url('sentinels://node1:17700,node2:17700?service_name=mymaster', db=1, master_for_args={'redis_class':redis.Redis})
+
+    >>> redis.from_url(
+        'sentinels://node1:17700,node2:17700?service_name=mymaster',
+        db=1,
+        master_for_args={'redis_class':redis.Redis})
     Redis<SentinelConnectionPool<service=mymaster(master)>
     """
     parse_result = urlparse(url)
