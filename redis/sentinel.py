@@ -1,12 +1,11 @@
 import os
 import random
 import weakref
-from urlparse import urlparse, parse_qs
 
 from redis.client import StrictRedis
 from redis.connection import ConnectionPool, Connection
 from redis.exceptions import ConnectionError, ResponseError, ReadOnlyError
-from redis._compat import iteritems, nativestr, xrange
+from redis._compat import iteritems, nativestr, xrange, urlparse, parse_qs
 
 
 class MasterNotFoundError(ConnectionError):

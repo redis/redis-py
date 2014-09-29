@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from urlparse import urlparse
+from redis._compat import urlparse
 
 
 try:
