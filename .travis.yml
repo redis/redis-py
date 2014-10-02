@@ -11,12 +11,17 @@ env:
   - TEST_HIREDIS=1
 install:
   - pip install -e .
+  - pip install pytest>=2.5.0
+  - pip install pytest-cov>=1.8.0
+  - pip install coveralls
   - "if [[ $TEST_PEP8 == '1' ]]; then pip install pep8; fi"
   - "if [[ $TEST_HIREDIS == '1' ]]; then pip install hiredis; fi"
-script: "if [[ $TEST_PEP8 == '1' ]]; then pep8 --repeat --show-source --exclude=.venv,.tox,dist,docs,build,*.egg .; else python setup.py test; fi"
+script: "if [[ $TEST_PEP8 == '1' ]]; then pep8 --repeat --show-source --exclude=.venv,.tox,dist,docs,build,*.egg .; else py.test --cov redis --cov-report=term-missing; fi"
 matrix:
   include:
     - python: "2.7"
       env: TEST_PEP8=1
     - python: "3.4"
       env: TEST_PEP8=1
+after_success:
+  coveralls --verbose
