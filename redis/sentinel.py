@@ -104,6 +104,7 @@ class SentinelConnectionPool(ConnectionPool):
             elif master_address != self.master_address:
                 # Master address changed, disconnect all clients in this pool
                 self.disconnect()
+                self.reset()
         return master_address
 
     def rotate_slaves(self):
