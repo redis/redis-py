@@ -9,9 +9,9 @@ print(redis.__file__)
 try:
     import redis._pack
 except ImportError:
-    print('not pure python _pack_command')
+    print('using pure python _pack_command')
 else:
-    print('using c _pack_command')
+    print('using cython _pack_command')
 from redis.connection import Connection
 
 
