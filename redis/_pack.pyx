@@ -1,3 +1,7 @@
+cimport cython
+
+cdef extern from *:
+    long LONG_MAX
 
 cdef bytes SYM_STAR = b'*'
 cdef bytes SYM_DOLLAR = b'$'
@@ -6,7 +10,7 @@ cdef bytes SYM_LF = b'\n'
 
 DEF CHAR_BIT = 8
 
-cdef bytes size_to_decimal_bytes(Py_ssize_t n):
+cdef bytes size_to_decimal_bytes(long n):
     # sizeof(long)*CHAR_BIT/3+6
     cdef char buf[32]
     cdef char *p
@@ -29,19 +33,30 @@ cdef bytes size_to_decimal_bytes(Py_ssize_t n):
         p[0] = '-'
     return p[:(bufend-p)]
 
+cdef bytes simple_bytes(s):
+    if isinstance(s, unicode):
+        return (<unicode>s).encode('latin-1')
+    elif isinstance(s, bytes):
+        return s
+    else:
+        s = str(s)
+        if isinstance(s, unicode):
+            return (<unicode>s).encode('latin-1')
+        else:
+            return s
+
 cdef bytes int_to_decimal_bytes(n):
-    if isinstance(n, int):
+    if n <= LONG_MAX:
         return size_to_decimal_bytes(n)
-    elif isinstance(n, long):
-        return bytes(str(n), 'latin-1')
-    raise ValueError
+    else:
+        return simple_bytes(str(n))
 
 cdef bytes _encode(self, value):
     "Return a bytestring representation of the value"
     if isinstance(value, bytes):
         return value
     elif isinstance(value, float):
-        return bytes(repr(value), 'latin-1')
+        return simple_bytes(repr(value))
     elif isinstance(value, (int, long)):
         return int_to_decimal_bytes(value)
     elif not isinstance(value, basestring):
