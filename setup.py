@@ -7,6 +7,7 @@ from redis import __version__
 try:
     from setuptools import setup
     from setuptools.command.test import test as TestCommand
+    from setuptools.extension import Extension
 
     class PyTest(TestCommand):
         def finalize_options(self):
@@ -23,11 +24,17 @@ try:
 except ImportError:
 
     from distutils.core import setup
+    from distutils.extension import Extension
     PyTest = lambda x: x
 
 f = open(os.path.join(os.path.dirname(__file__), 'README.rst'))
 long_description = f.read()
 f.close()
+
+if os.path.isfile('redis/_pack.c'):
+    ext_modules = [Extension('redis._pack', ['redis/_pack.c'])]
+else:
+    ext_modules = []
 
 setup(
     name='redis',
@@ -57,5 +64,6 @@ setup(
         'Programming Language :: Python :: 3.2',
         'Programming Language :: Python :: 3.3',
         'Programming Language :: Python :: 3.4',
-    ]
+    ],
+    ext_modules=ext_modules,
 )

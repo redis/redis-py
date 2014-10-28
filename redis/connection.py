@@ -77,6 +77,43 @@ class Token(object):
         return self.value
 
 
+try:
+    from ._pack import _pack_command
+except ImportError:
+    def _encode(self, value):
+        "Return a bytestring representation of the value"
+        if isinstance(value, bytes):
+            return value
+        elif isinstance(value, float):
+            return b(repr(value))
+        elif not isinstance(value, basestring):
+            value = str(value)
+        elif isinstance(value, Token):
+            return b(value.value)
+
+        if isinstance(value, unicode):
+            value = value.encode(self.encoding, self.encoding_errors)
+        return value
+
+    def _pack_command(self, *args):
+        "Pack a series of arguments into a value Redis command"
+        command = args[0]
+        if ' ' in command:
+            args = tuple([Token(s) for s in command.split(' ')]) + args[1:]
+        else:
+            args = (Token(command),) + args[1:]
+
+        output = [SYM_STAR, b(str(len(args))), SYM_CRLF]
+        for arg in args:
+            enc_value = _encode(self, arg)
+            output.append(SYM_DOLLAR)
+            output.append(b(str(len(enc_value))))
+            output.append(SYM_CRLF)
+            output.append(enc_value)
+            output.append(SYM_CRLF)
+        return b('').join(output)
+
+
 class BaseParser(object):
     EXCEPTION_CLASSES = {
         'ERR': ResponseError,
@@ -556,6 +593,9 @@ class Connection(object):
         "Pack and send a command to the Redis server"
         self.send_packed_command(self.pack_command(*args))
 
+    def pack_command(self, *args):
+        return _pack_command(self, *args)
+
     def can_read(self, timeout=0):
         "Poll the socket to see if there's data that can be read."
         sock = self._sock
@@ -576,54 +616,6 @@ class Connection(object):
             raise response
         return response
 
-    def encode(self, value):
-        "Return a bytestring representation of the value"
-        if isinstance(value, Token):
-            return b(value.value)
-        elif isinstance(value, bytes):
-            return value
-        elif isinstance(value, (int, long)):
-            value = b(str(value))
-        elif isinstance(value, float):
-            value = b(repr(value))
-        elif not isinstance(value, basestring):
-            value = str(value)
-        if isinstance(value, unicode):
-            value = value.encode(self.encoding, self.encoding_errors)
-        return value
-
-    def pack_command(self, *args):
-        "Pack a series of arguments into the Redis protocol"
-        output = []
-        # the client might have included 1 or more literal arguments in
-        # the command name, e.g., 'CONFIG GET'. The Redis server expects these
-        # arguments to be sent separately, so split the first argument
-        # manually. All of these arguements get wrapped in the Token class
-        # to prevent them from being encoded.
-        command = args[0]
-        if ' ' in command:
-            args = tuple([Token(s) for s in command.split(' ')]) + args[1:]
-        else:
-            args = (Token(command),) + args[1:]
-
-        buff = SYM_EMPTY.join(
-            (SYM_STAR, b(str(len(args))), SYM_CRLF))
-
-        for arg in imap(self.encode, args):
-            # to avoid large string mallocs, chunk the command into the
-            # output list if we're sending large values
-            if len(buff) > 6000 or len(arg) > 6000:
-                buff = SYM_EMPTY.join(
-                    (buff, SYM_DOLLAR, b(str(len(arg))), SYM_CRLF))
-                output.append(buff)
-                output.append(arg)
-                buff = SYM_CRLF
-            else:
-                buff = SYM_EMPTY.join((buff, SYM_DOLLAR, b(str(len(arg))),
-                                       SYM_CRLF, arg, SYM_CRLF))
-        output.append(buff)
-        return output
-
     def pack_commands(self, commands):
         "Pack multiple commands into the Redis protocol"
         output = []
@@ -631,7 +623,7 @@ class Connection(object):
         buffer_length = 0
 
         for cmd in commands:
-            for chunk in self.pack_command(*cmd):
+            for chunk in _pack_command(self, *cmd):
                 pieces.append(chunk)
                 buffer_length += len(chunk)
 
