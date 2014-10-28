@@ -113,7 +113,8 @@ except ImportError:
         buff = SYM_EMPTY.join(
             (SYM_STAR, b(str(len(args))), SYM_CRLF))
 
-        for arg in imap(lambda arg:_encode(self, arg), args):
+        for arg in args:
+            arg = _encode(self, arg)
             # to avoid large string mallocs, chunk the command into the
             # output list if we're sending large values
             if len(buff) > 6000 or len(arg) > 6000:
