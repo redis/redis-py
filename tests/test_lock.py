@@ -3,7 +3,7 @@ import pytest
 import time
 
 from redis.exceptions import LockError, ResponseError
-from redis.lock import Lock, LuaLock
+from redis.lock import Lock, LuaLock, EvalLock
 
 
 class TestLock(object):
@@ -117,6 +117,10 @@ class TestLock(object):
 
 class TestLuaLock(TestLock):
     lock_class = LuaLock
+
+
+class TestEvalLock(TestLock):
+    lock_class = EvalLock
 
 
 class TestLockClassSelection(object):

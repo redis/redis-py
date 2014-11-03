@@ -270,3 +270,20 @@ class LuaLock(Lock):
                                     client=self.redis)):
             raise LockError("Cannot extend a lock that's no longer owned")
         return True
+
+
+class EvalLock(LuaLock):
+    @classmethod
+    def lua_acquire(cls, keys, args, client):
+        args = tuple(keys) + tuple(args)
+        return client.eval(cls.LUA_ACQUIRE_SCRIPT, len(keys), *args)
+
+    @classmethod
+    def lua_release(cls, keys, args, client):
+        args = tuple(keys) + tuple(args)
+        return client.eval(cls.LUA_RELEASE_SCRIPT, len(keys), *args)
+
+    @classmethod
+    def lua_extend(cls, keys, args, client):
+        args = tuple(keys) + tuple(args)
+        return client.eval(cls.LUA_EXTEND_SCRIPT, len(keys), *args)
