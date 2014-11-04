@@ -273,6 +273,11 @@ class LuaLock(Lock):
 
 
 class EvalLock(LuaLock):
+    """
+    A lock implementation that uses eval to evaluate Lua scripts.
+
+    This lock works with twemproxy.
+    """
     @classmethod
     def lua_acquire(cls, keys, args, client):
         args = tuple(keys) + tuple(args)
