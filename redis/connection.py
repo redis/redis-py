@@ -834,11 +834,23 @@ class ConnectionPool(object):
         Any additional keyword arguments are passed to the constructor of
         connection_class.
         """
+        host = 'localhost'
+        port = 6379
+        db = 0
+        if 'host' in connection_kwargs:
+          host = connection_kwargs['host']
+        if 'port' in connection_kwargs:
+          port = connection_kwargs['port']
+        if 'db' in connection_kwargs:
+          db = connection_kwargs['db']
         max_connections = max_connections or 2 ** 31
         if not isinstance(max_connections, (int, long)) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
-        if 'db' not in connection_kwargs:
-          connection_kwargs['db'] = 0
+        self._description_args = {
+            'host': host,
+            'port': port,
+            'db': db,
+        }
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
@@ -848,7 +860,7 @@ class ConnectionPool(object):
     def __repr__(self):
         return "%s<%s>" % (
             type(self).__name__,
-            self.connection_class.description_format % self.connection_kwargs,
+            self.connection_class.description_format % self._description_args,
         )
 
     def reset(self):
