@@ -837,7 +837,8 @@ class ConnectionPool(object):
         max_connections = max_connections or 2 ** 31
         if not isinstance(max_connections, (int, long)) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
-
+        if 'db' not in connection_kwargs:
+          connection_kwargs['db'] = 0
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
