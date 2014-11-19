@@ -2062,10 +2062,10 @@ class PubSub(object):
             pass
 
     def __enter__(self):
-      return self
+        return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-      self.close()
+        self.close()
 
     def reset(self):
         if self.connection:
