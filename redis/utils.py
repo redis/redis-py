@@ -1,4 +1,6 @@
+import functools
 from contextlib import contextmanager
+from redis.exceptions import WatchError
 
 
 try:
@@ -17,6 +19,33 @@ def from_url(url, db=None, **kwargs):
     """
     from redis.client import Redis
     return Redis.from_url(url, db, **kwargs)
+
+
+def transactional(*watches, **trans_kwargs):
+    """
+    Convenience function for decorating a callable `func` as executable in a
+    transaction while watching all keys specified in `watches`. The 'func'
+    callable should expect a Pipeline object as its first argument.
+    """
+    shard_hint = trans_kwargs.get('shard_hint')
+    value_from_callable = trans_kwargs.get('value_from_callable', False)
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(redis_obj, *args, **kwargs):
+            with redis_obj.pipeline(True, shard_hint) as pipe:
+                while 1:
+                    try:
+                        if watches:
+                            pipe.watch(*watches)
+                        func_value = func(pipe, *args, **kwargs)
+                        exec_value = pipe.execute()
+                        return func_value if value_from_callable else exec_value
+                    except WatchError:
+                        continue
+        return wrapper
+
+    return decorator
 
 
 @contextmanager

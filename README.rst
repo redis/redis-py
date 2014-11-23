@@ -324,6 +324,25 @@ which is much easier to read:
     >>> r.transaction(client_side_incr, 'OUR-SEQUENCE-KEY')
     [True]
 
+There is also a similar convenience decorator named "transactional" for
+decorating functions to be executed in a transaction. The decorated callable
+can take any number of positional and keyword parameters with the first one
+being a pipeline object. The client-side INCR command above can be also
+written like this:
+
+.. code-block:: pycon
+
+    >>> @redis.transactional('OUR-SEQUENCE-KEY'):
+    ... def client_side_incr(pipe):
+    ...     current_value = pipe.get('OUR-SEQUENCE-KEY')
+    ...     next_value = int(current_value) + 1
+    ...     pipe.multi()
+    ...     pipe.set('OUR-SEQUENCE-KEY', next_value)
+    >>>
+    >>> client_side_incr(r)
+    [True]
+
+
 Publish / Subscribe
 ^^^^^^^^^^^^^^^^^^^
 

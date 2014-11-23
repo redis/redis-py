@@ -195,6 +195,31 @@ class TestPipeline(object):
         assert result == [True]
         assert r['c'] == b('4')
 
+    def test_transactional_decorator(self, r):
+        r['a'] = 1
+        r['b'] = 2
+        has_run = []
+
+        @redis.transactional('a', 'b')
+        def my_transaction(pipe):
+            a_value = pipe.get('a')
+            assert a_value in (b('1'), b('2'))
+            b_value = pipe.get('b')
+            assert b_value == b('2')
+
+            # silly run-once code... incr's "a" so WatchError should be raised
+            # forcing this all to run again. this should incr "a" once to "2"
+            if not has_run:
+                r.incr('a')
+                has_run.append('it has')
+
+            pipe.multi()
+            pipe.set('c', int(a_value) + int(b_value))
+
+        result = my_transaction(r)
+        assert result == [True]
+        assert r['c'] == b('4')
+
     def test_exec_error_in_no_transaction_pipeline(self, r):
         r['a'] = 1
         with r.pipeline(transaction=False) as pipe:

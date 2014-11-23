@@ -6,7 +6,7 @@ from redis.connection import (
     SSLConnection,
     UnixDomainSocketConnection
 )
-from redis.utils import from_url
+from redis.utils import from_url, transactional
 from redis.exceptions import (
     AuthenticationError,
     BusyLoadingError,
