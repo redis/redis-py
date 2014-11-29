@@ -2305,7 +2305,11 @@ class PubSub(object):
 
             def stop(self):
                 self._running = False
-                self.join()
+                try:
+                  self.join()
+                except RuntimeError:
+                  # safe to ignore this, called stop from WorkerThread
+                  pass
 
         thread = WorkerThread()
         thread.start()
