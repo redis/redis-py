@@ -97,17 +97,18 @@ class TestScripting(object):
 
         pipe = r.pipeline()
 
-        # avoiding a dependency to msgpack, this is the output of msgpack.dumps({"name": "joe"})
+        # avoiding a dependency to msgpack, this is the output of
+        # msgpack.dumps({"name": "joe"})
         msgpack_message_1 = b'\x81\xa4name\xa3Joe'
 
-        msgpack_hello(args=[msgpack_message_1], client = pipe)
+        msgpack_hello(args=[msgpack_message_1], client=pipe)
 
         assert r.script_exists(msgpack_hello.sha) == [True]
         assert pipe.execute()[0] == b'hello Joe'
 
         msgpack_hello_broken = r.register_script(msgpack_hello_script_broken)
 
-        msgpack_hello_broken(args=[msgpack_message_1], client = pipe)
+        msgpack_hello_broken(args=[msgpack_message_1], client=pipe)
         with pytest.raises(exceptions.ResponseError) as excinfo:
             pipe.execute()
         assert excinfo.type == exceptions.ResponseError

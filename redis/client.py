@@ -6,7 +6,8 @@ import warnings
 import threading
 import time as mod_time
 from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
-                           itervalues, izip, long, nativestr, unicode, safe_unicode)
+                           itervalues, izip, long, nativestr, unicode,
+                           safe_unicode)
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
                               SSLConnection, Token)
 from redis.lock import Lock, LuaLock
