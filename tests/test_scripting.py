@@ -21,6 +21,7 @@ local names = message['name']
 return "hello " .. name
 """
 
+
 class TestScripting(object):
     @pytest.fixture(autouse=True)
     def reset_scripts(self, r):
