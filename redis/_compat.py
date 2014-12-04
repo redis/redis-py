@@ -12,6 +12,16 @@ if sys.version_info[0] < 3:
     except ImportError:
         from StringIO import StringIO as BytesIO
 
+    # special unicode handling for python2 to avoid UnicodeDecodeError
+    def safe_unicode(obj, *args):
+        """ return the unicode representation of obj """
+        try:
+            return unicode(obj, *args)
+        except UnicodeDecodeError:
+            # obj is byte string
+            ascii_text = str(obj).encode('string_escape')
+            return unicode(ascii_text)
+
     iteritems = lambda x: x.iteritems()
     iterkeys = lambda x: x.iterkeys()
     itervalues = lambda x: x.itervalues()
@@ -48,6 +58,7 @@ else:
     xrange = range
     basestring = str
     unicode = str
+    safe_unicode = str
     bytes = bytes
     long = int
 
