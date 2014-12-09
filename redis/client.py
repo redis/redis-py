@@ -3,6 +3,7 @@ from itertools import chain
 import datetime
 import sys
 import warnings
+import time
 import threading
 import time as mod_time
 from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
@@ -477,6 +478,7 @@ class StrictRedis(object):
         """
         shard_hint = kwargs.pop('shard_hint', None)
         value_from_callable = kwargs.pop('value_from_callable', False)
+        watch_delay = kwargs.pop('watch_delay', None)
         with self.pipeline(True, shard_hint) as pipe:
             while 1:
                 try:
@@ -486,6 +488,8 @@ class StrictRedis(object):
                     exec_value = pipe.execute()
                     return func_value if value_from_callable else exec_value
                 except WatchError:
+                    if watch_delay is not None and watch_delay > 0:
+                        time.sleep(watch_delay)
                     continue
 
     def lock(self, name, timeout=None, sleep=0.1, blocking_timeout=None,
