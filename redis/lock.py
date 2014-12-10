@@ -123,7 +123,7 @@ class Lock(object):
             timeout = int(self.timeout * 1000)
         else:
             timeout = None
-        if redis.set(self.name, token, nx=True, px=timeout):
+        if self.redis.set(self.name, token, nx=True, px=timeout):
             return True
         return False
 
@@ -198,15 +198,11 @@ class LuaLock(Lock):
     # ARGV[2] - timeout in milliseconds
     # return 1 if lock was acquired, otherwise 0
     LUA_ACQUIRE_SCRIPT = """
-        local args
-
+        local args = {}
         if ARGV[2] ~= '' then
-            args = {'set', KEYS[1], ARGV[1], 'nx'}
-        else
-            args = {'set', KEYS[1], ARGV[1], 'nx', 'px', ARGV[2]}
+            args = {'px', ARGV[2]}
         end
-
-        if redis.call(unpack(args)) == 1 then
+        if redis.call('set', KEYS[1], ARGV[1], 'nx', unpack(args)) then
             return 1
         end
         return 0
