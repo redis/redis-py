@@ -6,6 +6,7 @@ import os
 import socket
 import sys
 import threading
+import time
 import warnings
 
 try:
@@ -386,7 +387,8 @@ class Connection(object):
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None, socket_connect_timeout=None,
                  socket_keepalive=False, socket_keepalive_options=None,
-                 retry_on_timeout=False, encoding='utf-8',
+                 retry_on_timeout=False, connection_retries=0,
+                 connection_retry_wait=5, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  parser_class=DefaultParser, socket_read_size=65536):
         self.pid = os.getpid()
@@ -399,6 +401,8 @@ class Connection(object):
         self.socket_keepalive = socket_keepalive
         self.socket_keepalive_options = socket_keepalive_options or {}
         self.retry_on_timeout = retry_on_timeout
+        self.connection_retries = connection_retries
+        self.connection_retry_wait = connection_retry_wait
         self.encoding = encoding
         self.encoding_errors = encoding_errors
         self.decode_responses = decode_responses
@@ -430,11 +434,19 @@ class Connection(object):
         "Connects to the Redis server if not already connected"
         if self._sock:
             return
-        try:
-            sock = self._connect()
-        except socket.error:
-            e = sys.exc_info()[1]
-            raise ConnectionError(self._error_message(e))
+
+        retries = self.connection_retries
+        while retries >= 0:
+            try:
+                sock = self._connect()
+                retries = -1
+            except socket.error:
+                retries -= 1
+                if retries < 0:
+                    e = sys.exc_info()[1]
+                    raise ConnectionError(self._error_message(e))
+                elif self.connection_retry_wait:
+                    time.sleep(self.connection_retry_wait)
 
         self._sock = sock
         try:
@@ -690,14 +702,17 @@ class UnixDomainSocketConnection(Connection):
     def __init__(self, path='', db=0, password=None,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
-                 retry_on_timeout=False,
-                 parser_class=DefaultParser, socket_read_size=65536):
+                 retry_on_timeout=False, connection_retries=0,
+                 connection_retry_wait=5, parser_class=DefaultParser,
+                 socket_read_size=65536):
         self.pid = os.getpid()
         self.path = path
         self.db = db
         self.password = password
         self.socket_timeout = socket_timeout
         self.retry_on_timeout = retry_on_timeout
+        self.connection_retries = connection_retries
+        self.connection_retry_wait = connection_retry_wait
         self.encoding = encoding
         self.encoding_errors = encoding_errors
         self.decode_responses = decode_responses
