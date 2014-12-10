@@ -118,11 +118,12 @@ class Lock(object):
             mod_time.sleep(sleep)
 
     def do_acquire(self, token):
-        if self.redis.setnx(self.name, token):
-            if self.timeout:
-                # convert to milliseconds
-                timeout = int(self.timeout * 1000)
-                self.redis.pexpire(self.name, timeout)
+        if self.timeout:
+            # convert to milliseconds
+            timeout = int(self.timeout * 1000)
+        else:
+            timeout = None
+        if redis.set(self.name, token, nx=True, px=timeout):
             return True
         return False
 
@@ -197,10 +198,15 @@ class LuaLock(Lock):
     # ARGV[2] - timeout in milliseconds
     # return 1 if lock was acquired, otherwise 0
     LUA_ACQUIRE_SCRIPT = """
-        if redis.call('setnx', KEYS[1], ARGV[1]) == 1 then
-            if ARGV[2] ~= '' then
-                redis.call('pexpire', KEYS[1], ARGV[2])
-            end
+        local args
+
+        if ARGV[2] ~= '' then
+            args = {'set', KEYS[1], ARGV[1], 'nx'}
+        else
+            args = {'set', KEYS[1], ARGV[1], 'nx', 'px', ARGV[2]}
+        end
+
+        if redis.call(unpack(args)) == 1 then
             return 1
         end
         return 0
