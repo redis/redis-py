@@ -189,24 +189,8 @@ class LuaLock(Lock):
     A lock implementation that uses Lua scripts rather than pipelines
     and watches.
     """
-    lua_acquire = None
     lua_release = None
     lua_extend = None
-
-    # KEYS[1] - lock name
-    # ARGV[1] - token
-    # ARGV[2] - timeout in milliseconds
-    # return 1 if lock was acquired, otherwise 0
-    LUA_ACQUIRE_SCRIPT = """
-        local args = {}
-        if ARGV[2] ~= '' then
-            args = {'px', ARGV[2]}
-        end
-        if redis.call('set', KEYS[1], ARGV[1], 'nx', unpack(args)) then
-            return 1
-        end
-        return 0
-    """
 
     # KEYS[1] - lock name
     # ARGS[1] - token
@@ -246,18 +230,10 @@ class LuaLock(Lock):
 
     @classmethod
     def register_scripts(cls, redis):
-        if cls.lua_acquire is None:
-            cls.lua_acquire = redis.register_script(cls.LUA_ACQUIRE_SCRIPT)
         if cls.lua_release is None:
             cls.lua_release = redis.register_script(cls.LUA_RELEASE_SCRIPT)
         if cls.lua_extend is None:
             cls.lua_extend = redis.register_script(cls.LUA_EXTEND_SCRIPT)
-
-    def do_acquire(self, token):
-        timeout = self.timeout and int(self.timeout * 1000) or ''
-        return bool(self.lua_acquire(keys=[self.name],
-                                     args=[token, timeout],
-                                     client=self.redis))
 
     def do_release(self, expected_token):
         if not bool(self.lua_release(keys=[self.name],
