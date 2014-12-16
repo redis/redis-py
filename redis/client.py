@@ -1589,7 +1589,7 @@ class StrictRedis(object):
         """
         return self.execute_command('ZCOUNT', name, min, max)
 
-    def zincrby(self, name, value, amount=1):
+    def zincrby(self, name, amount=1, value=None):
         "Increment the score of ``value`` in sorted set ``name`` by ``amount``"
         return self.execute_command('ZINCRBY', name, amount, value)
 
