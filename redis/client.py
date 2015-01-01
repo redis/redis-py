@@ -2306,10 +2306,10 @@ class PubSub(object):
             def stop(self):
                 self._running = False
                 try:
-                  self.join()
+                    self.join()
                 except RuntimeError:
-                  # safe to ignore this, called stop from WorkerThread
-                  pass
+                    # safe to ignore this, called stop from WorkerThread
+                    pass
 
         thread = WorkerThread()
         thread.start()
