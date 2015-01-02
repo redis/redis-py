@@ -3,10 +3,12 @@ from itertools import chain
 import datetime
 import sys
 import warnings
+import time
 import threading
 import time as mod_time
 from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
-                           itervalues, izip, long, nativestr, unicode)
+                           itervalues, izip, long, nativestr, unicode,
+                           safe_unicode)
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
                               SSLConnection, Token)
 from redis.lock import Lock, LuaLock
@@ -476,6 +478,7 @@ class StrictRedis(object):
         """
         shard_hint = kwargs.pop('shard_hint', None)
         value_from_callable = kwargs.pop('value_from_callable', False)
+        watch_delay = kwargs.pop('watch_delay', None)
         with self.pipeline(True, shard_hint) as pipe:
             while 1:
                 try:
@@ -485,6 +488,8 @@ class StrictRedis(object):
                     exec_value = pipe.execute()
                     return func_value if value_from_callable else exec_value
                 except WatchError:
+                    if watch_delay is not None and watch_delay > 0:
+                        time.sleep(watch_delay)
                     continue
 
     def lock(self, name, timeout=None, sleep=0.1, blocking_timeout=None,
@@ -2541,9 +2546,9 @@ class BasePipeline(object):
                 raise r
 
     def annotate_exception(self, exception, number, command):
-        cmd = unicode(' ').join(imap(unicode, command))
+        cmd = safe_unicode(' ').join(imap(safe_unicode, command))
         msg = unicode('Command # %d (%s) of pipeline caused error: %s') % (
-            number, cmd, unicode(exception.args[0]))
+            number, cmd, safe_unicode(exception.args[0]))
         exception.args = (msg,) + exception.args[1:]
 
     def parse_response(self, connection, command_name, **options):
