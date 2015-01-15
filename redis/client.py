@@ -767,6 +767,15 @@ class StrictRedis(object):
         """
         return self.execute_command('TIME')
 
+    def wait(self, num_replicas, timeout):
+        """
+        Redis synchronous replication
+        That returns the number of replicas that processed the query when
+        we finally have at least ``num_replicas``, or when the ``timeout`` was
+        reached.
+        """
+        return self.execute_command('WAIT', num_replicas, timeout)
+
     # BASIC KEY COMMANDS
     def append(self, key, value):
         """
