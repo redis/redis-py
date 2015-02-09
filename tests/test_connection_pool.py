@@ -163,6 +163,17 @@ class TestConnectionPoolURLParsing(object):
             'password': None,
         }
 
+    def test_quoted_hostname(self):
+        pool = redis.ConnectionPool.from_url('redis://my %2F host %2B%3D+',
+                                             decode_components=True)
+        assert pool.connection_class == redis.Connection
+        assert pool.connection_kwargs == {
+            'host': 'my / host +=+',
+            'port': 6379,
+            'db': 0,
+            'password': None,
+        }
+
     def test_port(self):
         pool = redis.ConnectionPool.from_url('redis://localhost:6380')
         assert pool.connection_class == redis.Connection
@@ -181,6 +192,18 @@ class TestConnectionPoolURLParsing(object):
             'port': 6379,
             'db': 0,
             'password': 'mypassword',
+        }
+
+    def test_quoted_password(self):
+        pool = redis.ConnectionPool.from_url(
+            'redis://:%2Fmypass%2F%2B word%3D%24+@localhost',
+            decode_components=True)
+        assert pool.connection_class == redis.Connection
+        assert pool.connection_kwargs == {
+            'host': 'localhost',
+            'port': 6379,
+            'db': 0,
+            'password': '/mypass/+ word=$+',
         }
 
     def test_db_as_argument(self):
@@ -256,6 +279,28 @@ class TestConnectionPoolUnixSocketURLParsing(object):
         assert pool.connection_class == redis.UnixDomainSocketConnection
         assert pool.connection_kwargs == {
             'path': '/socket',
+            'db': 0,
+            'password': 'mypassword',
+        }
+
+    def test_quoted_password(self):
+        pool = redis.ConnectionPool.from_url(
+            'unix://:%2Fmypass%2F%2B word%3D%24+@/socket',
+            decode_components=True)
+        assert pool.connection_class == redis.UnixDomainSocketConnection
+        assert pool.connection_kwargs == {
+            'path': '/socket',
+            'db': 0,
+            'password': '/mypass/+ word=$+',
+        }
+
+    def test_quoted_path(self):
+        pool = redis.ConnectionPool.from_url(
+            'unix://:mypassword@/my%2Fpath%2Fto%2F..%2F+_%2B%3D%24ocket',
+            decode_components=True)
+        assert pool.connection_class == redis.UnixDomainSocketConnection
+        assert pool.connection_kwargs == {
+            'path': '/my/path/to/../+_+=$ocket',
             'db': 0,
             'password': 'mypassword',
         }
