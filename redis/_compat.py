@@ -23,15 +23,23 @@ if sys.version_info[0] < 3:
             ascii_text = str(obj).encode('string_escape')
             return unicode(ascii_text)
 
-    iteritems = lambda x: x.iteritems()
-    iterkeys = lambda x: x.iterkeys()
-    itervalues = lambda x: x.itervalues()
-    nativestr = lambda x: \
-        x if isinstance(x, str) else x.encode('utf-8', 'replace')
-    u = lambda x: x.decode()
-    b = lambda x: x
-    next = lambda x: x.next()
-    byte_to_chr = lambda x: x
+    def iteritems(x): return x.iteritems()
+
+    def iterkeys(x): return x.iterkeys()
+
+    def itervalues(x): return x.itervalues()
+
+    def nativestr(x):
+        return x if isinstance(x, str) else x.encode('utf-8', 'replace')
+
+    def u(x): return x.decode()
+
+    def b(x): return x
+
+    def next(x): return x.next()
+
+    def byte_to_chr(x): return x
+
     unichr = unichr
     xrange = xrange
     basestring = basestring
@@ -44,14 +52,21 @@ else:
     from string import ascii_letters
     from queue import Queue
 
-    iteritems = lambda x: iter(x.items())
-    iterkeys = lambda x: iter(x.keys())
-    itervalues = lambda x: iter(x.values())
-    byte_to_chr = lambda x: chr(x)
-    nativestr = lambda x: \
-        x if isinstance(x, str) else x.decode('utf-8', 'replace')
-    u = lambda x: x
-    b = lambda x: x.encode('latin-1') if not isinstance(x, bytes) else x
+    def iteritems(x): return iter(x.items())
+
+    def iterkeys(x): return iter(x.keys())
+
+    def itervalues(x): return iter(x.values())
+
+    def byte_to_chr(x): return chr(x)
+
+    def nativestr(x):
+        return x if isinstance(x, str) else x.decode('utf-8', 'replace')
+
+    def u(x): return x
+
+    def b(x): return x.encode('latin-1') if not isinstance(x, bytes) else x
+
     next = next
     unichr = chr
     imap = map
