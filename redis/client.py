@@ -1660,10 +1660,10 @@ class StrictRedis(object):
             pieces.extend([Token('LIMIT'), start, num])
         return self.execute_command(*pieces)
 
-    def zrevrangebylex(self, name, min, max, start=None, num=None):
+    def zrevrangebylex(self, name, upper, lower, start=None, num=None):
         """
         Return the reversed lexicographical range of values from sorted set
-        ``name`` between ``min`` and ``max``.
+        ``name`` between ``upper`` and ``lower``.
 
         If ``start`` and ``num`` are specified, then return a slice of the
         range.
@@ -1671,7 +1671,7 @@ class StrictRedis(object):
         if (start is not None and num is None) or \
                 (num is not None and start is None):
             raise RedisError("``start`` and ``num`` must both be specified")
-        pieces = ['ZREVRANGEBYLEX', name, min, max]
+        pieces = ['ZREVRANGEBYLEX', name, upper, lower]
         if start is not None and num is not None:
             pieces.extend([Token('LIMIT'), start, num])
         return self.execute_command(*pieces)
