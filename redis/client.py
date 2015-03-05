@@ -733,8 +733,9 @@ class StrictRedis(object):
                 connection.send_command(command_name)
             except (ConnectionError, TimeoutError) as e:
                 connection.disconnect()
-                if not connection.retry_on_timeout and isinstance(e, TimeoutError):
-                    raise
+                if not connection.retry_on_timeout:
+                    if isinstance(e, TimeoutError):
+                        raise
                 connection.send_command(command_name)
             try:
                 self.parse_response(connection, command_name)
