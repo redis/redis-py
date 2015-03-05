@@ -725,12 +725,25 @@ class StrictRedis(object):
 
     def shutdown(self):
         "Shutdown the server"
+        pool = self.connection_pool
+        command_name = "SHUTDOWN"
+        connection = pool.get_connection(command_name)
         try:
-            self.execute_command('SHUTDOWN')
-        except ConnectionError:
-            # a ConnectionError here is expected
-            return
-        raise RedisError("SHUTDOWN seems to have failed.")
+            try:
+                connection.send_command(command_name)
+            except (ConnectionError, TimeoutError) as e:
+                connection.disconnect()
+                if not connection.retry_on_timeout and isinstance(e, TimeoutError):
+                    raise
+                connection.send_command(command_name)
+            try:
+                self.parse_response(connection, command_name)
+            except ConnectionError:
+                # a ConnectionError here is expected
+                return
+            raise RedisError("SHUTDOWN seems to have failed.")
+        finally:
+            pool.release(connection)
 
     def slaveof(self, host=None, port=None):
         """
