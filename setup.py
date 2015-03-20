@@ -43,7 +43,7 @@ setup(
     keywords=['Redis', 'key-value store'],
     license='MIT',
     packages=['redis'],
-    tests_require=['pytest>=2.5.0', 'coverage>=4.0a5', 'coveralls'],
+    tests_require=['pytest>=2.5.0'],
     cmdclass={'test': PyTest},
     classifiers=[
         'Development Status :: 5 - Production/Stable',
