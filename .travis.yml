@@ -9,7 +9,6 @@ services:
 install:
   - pip install -e .
   - pip install coverage>=4.0a5 coveralls
-  - pip install hiredis
   - "if [[ $TEST_PEP8 == '1' ]]; then pip install pep8; fi"
 script: "bash ./travis-script.sh"
 matrix:
