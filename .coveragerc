@@ -2,5 +2,5 @@
 parallel = True
 source =
     redis
-exclude =
+omit =
     redis/_compat.py
