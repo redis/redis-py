@@ -1,0 +1,6 @@
+[run]
+parallel = True
+source =
+    redis
+exclude =
+    redis/_compat.py
