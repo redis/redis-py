@@ -278,6 +278,26 @@ def parse_slowlog_get(response, **options):
     } for item in response]
 
 
+def parse_not_implemented(r, **options):
+    raise NotImplementedError()
+
+
+def parse_cluster_slots(resp, **options):
+    current_host = options.get('current_host', None)
+    fix_server = lambda (host, port): (host or current_host, port)
+
+    slots = {}
+    for slot in resp:
+        start, end, master = slot[:3]
+        slaves = slot[3:]
+        slots[start, end] = {
+            'master': fix_server(master),
+            'slaves': [fix_server(slave) for slave in slaves],
+        }
+
+    return slots
+
+
 class StrictRedis(object):
     """
     Implementation of the Redis protocol.
@@ -361,6 +381,27 @@ class StrictRedis(object):
             'SSCAN': parse_scan,
             'TIME': lambda x: (int(x[0]), int(x[1])),
             'ZSCAN': parse_zscan
+        },
+        # cluster
+        {
+            'CLUSTER ADDSLOTS': bool_ok,
+            'CLUSTER COUNT-FAILURE-REPORTS': int,
+            'CLUSTER COUNTKEYSINSLOT': int,
+            'CLUSTER DELSLOTS': bool_ok,
+            'CLUSTER FAILOVER': bool_ok,
+            'CLUSTER FORGET': bool_ok,
+            'CLUSTER GETKEYSINSLOT': int,
+            'CLUSTER INFO': parse_info,
+            'CLUSTER KEYSLOT': int,
+            'CLUSTER MEET': bool_ok,
+            'CLUSTER NODES': parse_not_implemented,
+            'CLUSTER REPLICATE': bool_ok,
+            'CLUSTER RESET': bool_ok,
+            'CLUSTER SAVECONFIG': bool_ok,
+            'CLUSTER SET-CONFIG-EPOCH': bool_ok,
+            'CLUSTER SETSLOT': bool_ok,
+            'CLUSTER SLAVES': parse_not_implemented,
+            'CLUSTER SLOTS': parse_cluster_slots,
         }
     )
 
@@ -444,6 +485,7 @@ class StrictRedis(object):
                         'ssl_ca_certs': ssl_ca_certs,
                     })
             connection_pool = ConnectionPool(**kwargs)
+            self.host = host
         self.connection_pool = connection_pool
         self._use_lua_lock = None
 
@@ -612,8 +654,72 @@ class StrictRedis(object):
         "Sets the current connection name"
         return self.execute_command('CLIENT SETNAME', name)
 
+    def cluster_addslots(self, *slots):
+        """Assign new hash slots to receiving node"""
+        return self.execute_command('CLUSTER ADDSLOTS', *slots)
+
+    def cluster_countkeysinslot(self, slot_id):
+        """Return the number of local keys in the specified hash slot"""
+        return self.execute_command('CLUSTER COUNTKEYSINSLOT', slot_id)
+
+    def cluster_count_failure_report(self, node_id):
+        """Return the number of failure reports active for a given node"""
+        return self.execute_command('CLUSTER COUNT-FAILURE-REPORTS', node_id)
+
+    def cluster_delslots(self, *slots):
+        """Set hash slots as unbound in receiving node"""
+        return self.execute_command('CLUSTER DELSLOTS', *slots)
+
+    def cluster_failover(self, option):
+        """Forces a slave to perform a manual failover of its master."""
+        assert option.upper() in ('FORCE', 'TAKEOVER')
+        return self.execute_command('CLUSTER FAILOVER', Token(option))
+
+    def cluster_info(self):
+        """Provides info about Redis Cluster node state"""
+        return self.execute_command('CLUSTER INFO')
+
+    def cluster_keyslot(self, name):
+        """Returns the hash slot of the specified key"""
+        return self.execute_command('CLUSTER KEYSLOT', name)
+
+    def cluster_meet(self, host, port):
+        """Force a node cluster to handshake with another node"""
+        return self.execute_command('CLUSTER MEET', host, port)
+
+    def cluster_replicate(self, node_id):
+        """Reconfigure a node as a slave of the specified master node"""
+        return self.execute_command('CLUSTER REPLICATE', node_id)
+
+    def cluster_reset(self, option='SOFT'):
+        """Reset a Redis Cluster node"""
+        assert option.upper() in ('SOFT', 'HARD')
+        return self.execute_command('CLUSTER RESET', Token(option))
+
+    def cluster_save_config(self):
+        """Forces the node to save cluster state on disk"""
+        return self.execute_command('CLUSTER SAVECONFIG')
+
+    def cluster_set_config_epoch(self, epoch):
+        """Set the configuration epoch in a new node"""
+        return self.execute_command('CLUSTER SET-CONFIG-EPOCH', epoch)
+
+    def cluster_setslot(self, slot_id, state, node_id=None):
+        """Bind an hash slot to a specific node"""
+        if state.upper() in ('IMPORTING', 'MIGRATING', 'NODE'):
+            if node_id is not None:
+                return self.execute_command('CLUSTER SETSLOT', slot_id, Token(state), node_id)
+        elif state.upper() == 'STABLE':
+            return self.execute_command('CLUSTER SETSLOT', slot_id, Token('STABLE'))
+        else:
+            raise RedisError('Invalid slot state: %s' % state)
+
+    def cluster_slots(self):
+        """Get array of Cluster slot to node mappings"""
+        return self.execute_command('CLUSTER SLOTS', current_host=self.host)
+
     def config_get(self, pattern="*"):
-        "Return a dictionary of configuration based on the ``pattern``"
+        """Return a dictionary of configuration based on the ``pattern``"""
         return self.execute_command('CONFIG GET', pattern)
 
     def config_set(self, name, value):
