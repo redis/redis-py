@@ -69,3 +69,25 @@ class LockError(RedisError, ValueError):
     # NOTE: For backwards compatability, this class derives from ValueError.
     # This was originally chosen to behave like threading.Lock.
     pass
+
+
+class ClusterError(RedisError):
+    pass
+
+
+class ClusterCrossSlotError(RedisError):
+    def __init__(self, resp):
+        print resp
+
+
+class ClusterSlotNotServedError(RedisError):
+    pass
+
+
+class ClusterPartitionError(RedisError):
+    pass
+
+
+class ClusterDownError(ClusterError, ResponseError):
+    def __init__(self, resp):
+        print resp
