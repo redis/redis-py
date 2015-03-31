@@ -14,7 +14,6 @@ from redis.exceptions import (
 )
 
 # TODO: loose redis interface
-# TODO: collect results
 # TODO: advanced balancer
 # TODO: pipeline
 # TODO: script
@@ -32,7 +31,7 @@ class ClusterBalancer(object):
     def get_random_node(self, readonly):
         raise NotImplementedError()
 
-    def get_random_nodes(self, readonly):
+    def get_shards_nodes(self, readonly):
         """one each shard"""
         raise NotImplementedError()
 
@@ -67,7 +66,7 @@ class RoundRobinClusterNodeBalancer(ClusterBalancer):
 
         return list(nodes)[counter % len(nodes)]
 
-    def get_random_nodes(self, readonly):
+    def get_shards_nodes(self, readonly):
         """one each shard"""
         for master, slaves in self.manager.master_slaves.items():
             if readonly:
@@ -325,7 +324,7 @@ class StrictClusterRedis(StrictRedis):
             'SENTINEL SLAVES',
 
             # admin commands
-            'BGREWRITEAOF', 'BGSAVE', 'SAVE', 'INFO', 'KEYS', 'LASTSAVE',
+            'BGREWRITEAOF', 'BGSAVE', 'SAVE', 'INFO', 'LASTSAVE',
             'CONFIG GET', 'CONFIG SET', 'CONFIG RESETSTAT', 'CONFIG REWRITE',
             'CLIENT KILL', 'CLIENT LIST', 'CLIENT GETNAME', 'CLIENT SETNAME',
             'SLOWLOG GET', 'SLOWLOG RESET', 'SLOWLOG LEN', 'SHUTDOWN',
@@ -334,7 +333,7 @@ class StrictClusterRedis(StrictRedis):
             'EVALSHA', 'SCRIPT EXISTS', 'SCRIPT KILL', 'SCRIPT LOAD', 'SCRIPT FLUSH',
 
             # unknown behaviors in cluster
-            'DBSIZE', 'PING', 'MONITOR', 'TIME', 'PFSELFTEST', 'READONLY', 'READWRITE',
+            'PING', 'MONITOR', 'TIME', 'READONLY', 'READWRITE',
             'OBJECT REFCOUNT', 'OBJECT ENCODING', 'OBJECT IDLETIME',
 
             # test/doc command
@@ -351,9 +350,6 @@ class StrictClusterRedis(StrictRedis):
 
             # all_master for loose
             'FLUSHALL', 'FLUSHDB', 'SCAN',
-
-            # all_shard for loose
-            'KEYS',
 
             # pubsub_node for loose
             'PUBLISH', 'SUBSCRIBE', 'PSUBSCRIBE', 'UNSUBSCRIBE', 'PUNSUBSCRIBE',
@@ -379,7 +375,6 @@ class StrictClusterRedis(StrictRedis):
         ], lambda args: args[1:]),
         {
             'BITOP': lambda args: args[2:],
-            '': lambda args: args[2:-1],
         },
     ),
     READONLY_COMMANDS = {
@@ -409,7 +404,7 @@ class StrictClusterRedis(StrictRedis):
     }
 
     def __init__(self, startup_nodes, max_connections=32, discover_cluster=True,
-                 pipeline_use_threads=True, node_balancer=None, packer_kwargs=None, **kwargs):
+                 node_balancer=None, packer_kwargs=None, **kwargs):
         """
         startup_nodes    --> List of nodes that initial bootstrapping can be done from
         max_connections  --> Maximum number of connections that should be kept open at one time
@@ -434,13 +429,6 @@ class StrictClusterRedis(StrictRedis):
 
         self.packer_conn = Connection(**packer_kwargs or {})
         self.response_callbacks = self.__class__.RESPONSE_CALLBACKS.copy()
-        self.pipeline_use_threads = pipeline_use_threads
-
-    def _get_random_node(self):
-        """for read"""
-        slot_id = self.__class__.RANDOM_RR_COUNT = (self.__class__.RANDOM_RR_COUNT + 1) % Cluster.KEY_SLOTS
-        nodes = self.manager.get_slave_nodes(slot_id, slave_only=False)
-        return nodes[slot_id % len(nodes)]
 
     def mget(self, keys, *args):
         """collects from slots
@@ -448,31 +436,47 @@ class StrictClusterRedis(StrictRedis):
         slot_keys = {}
         origin_keys = list_or_args(keys, args)
         for key in origin_keys:
-            slot_keys.setdefault(Cluster.keyslot(key), []).append(key)
+            slot_keys.setdefault(Cluster.keyslot(key), set()).add(key)
 
         results = {}
         for slot_id, keys in slot_keys.iteritems():
+            keys = list(keys)
             values = super(StrictClusterRedis, self).mget(keys)
             results.update(dict(zip(keys, values)))
 
         return [results[key] for key in origin_keys]
 
+    def delete(self, *names):
+        """collects from slots
+        """
+        slot_keys = {}
+        for key in names:
+            slot_keys.setdefault(Cluster.keyslot(key), set()).add(key)
+
+        result = 0
+        for slot_id, keys in slot_keys.iteritems():
+            result += super(StrictClusterRedis, self).delete(*keys)
+
+        return result
+
     def dbsize(self):
-        """collects from masters
+        """collects from all shards
         """
         result = 0
-        for node in self.node_balancer.get_random_nodes(readonly=True):
+        for node in self.node_balancer.get_shards_nodes(readonly=True):
             connection = self.connection_pool.get_connection(node)
             try:
                 result += self.execute_connection_command(connection, ('DBSIZE', ))
             finally:
                 self.connection_pool.release(connection)
 
+        return result
+
     def keys(self, pattern='*'):
-        """collects from masters
+        """collects from all shards
         """
         result = []
-        for node in self.node_balancer.get_random_nodes(readonly=True):
+        for node in self.node_balancer.get_shards_nodes(readonly=True):
             connection = self.connection_pool.get_connection(node)
             try:
                 result += self.execute_connection_command(connection, ('KEYS', pattern))
@@ -481,7 +485,7 @@ class StrictClusterRedis(StrictRedis):
 
         return result
 
-    def get_connection(self, command_args):
+    def determine_node(self, command_args):
         command = command_args[0]
         readonly = command in self.READONLY_COMMANDS
 
@@ -505,8 +509,7 @@ class StrictClusterRedis(StrictRedis):
             key_name = command_args[1]
             node = self.node_balancer.get_node_for_key(key_name=key_name, readonly=readonly)
 
-        connection = self.connection_pool.get_connection(node)
-        return connection
+        return node
 
     @classmethod
     def _desc_node(cls, node_or_conn):
@@ -530,7 +533,7 @@ class StrictClusterRedis(StrictRedis):
 
         1. single key  [v]
         2. no key [v]
-        3. multiple key in one slot [v]
+        3. multiple key in single slot [v]
         """
         command = command_args[0]
         packed_command = self.packer_conn.pack_command(*command_args)
@@ -539,7 +542,8 @@ class StrictClusterRedis(StrictRedis):
         while ttl > 0:
             ttl -= 1
 
-            connection = self.get_connection(command_args)
+            node = self.determine_node(command_args)
+            connection = self.connection_pool.get_connection(node)
             try:
                 connection.send_packed_command(packed_command)
                 return self.parse_response(connection, command, **parser_args)
