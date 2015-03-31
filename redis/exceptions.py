@@ -76,8 +76,7 @@ class ClusterError(RedisError):
 
 
 class ClusterCrossSlotError(RedisError):
-    def __init__(self, resp):
-        print resp
+    pass
 
 
 class ClusterSlotNotServedError(RedisError):
