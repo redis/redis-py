@@ -47,6 +47,8 @@ class RoundRobinClusterNodeBalancer(ClusterBalancer):
         return counter
 
     def get_node_for_slot(self, slot_id, readonly):
+        self.manager.discover_cluster()
+
         if not readonly:
             return self.manager.get_master_node(slot_id)
         else:
@@ -57,17 +59,19 @@ class RoundRobinClusterNodeBalancer(ClusterBalancer):
         return self.get_node_for_slot(Cluster.keyslot(key_name), readonly=readonly)
 
     def get_random_node(self, readonly):
-        counter = self._incr()
+        self.manager.discover_cluster()
 
         if readonly:
             nodes = self.manager.nodes
         else:
             nodes = self.manager.master_slaves.keys()
 
-        return list(nodes)[counter % len(nodes)]
+        return list(nodes)[self._incr() % len(nodes)]
 
     def get_shards_nodes(self, readonly):
         """one each shard"""
+        self.manager.discover_cluster()
+
         for master, slaves in self.manager.master_slaves.items():
             if readonly:
                 nodes = list(slaves) + [master]
@@ -495,7 +499,7 @@ class StrictClusterRedis(StrictRedis):
         elif node_flag == 'random':
             node = self.node_balancer.get_random_node(readonly=readonly)
         elif node_flag == 'slot-id':
-            node = self.node_balancer.get_node_for_slot(slot_id=command_args[1], readonly=readonly)
+            node = self.node_balancer.get_node_for_slot(slot_id=int(command_args[1]), readonly=readonly)
         elif command in self.COMMAND_PARSE_KEYS:
             slot_ids = set()
             for key_name in self.COMMAND_PARSE_KEYS[command](command_args):
