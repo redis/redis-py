@@ -13,23 +13,23 @@ from redis.exceptions import (
     ClusterSlotNotServedError, ClusterDownError,
 )
 
-# TODO: loose redis interface(cross slot ops)
-# TODO: advanced balancer
-# TODO: pipeline
-# TODO: script
-# TODO: pubsub
-# TODO: lock
 # TODO: ASK
+# TODO: pipeline
+# TODO: generator as interactive load balancer
 # TODO: master slave changed
 # TODO: master timed out
 # TODO: slave timed out
-# TODO: read from slave, but slave changed to master
 # TODO: READWRITE/READONLY switching
 # TODO: connection_pool (partially) rebuild
-# TODO: check discover code
 # TODO: every possible situation in cluster
-# TODO: generator as interactive load balancer
+
+# TODO: read from slave, but slave changed to master
+# TODO: pubsub
+# TODO: lock
+# TODO: advanced balancer
+# TODO: loose redis interface(cross slot ops)
 # TODO: migrate tests
+# TODO: script
 LOGGER = logging #.getLogger(__name__)
 
 

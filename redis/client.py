@@ -278,10 +278,6 @@ def parse_slowlog_get(response, **options):
     } for item in response]
 
 
-def parse_not_implemented(r, **options):
-    raise NotImplementedError()
-
-
 def parse_cluster_slots(resp, **options):
     current_host = options.get('current_host', '')
     fix_server = lambda (host, port): (host or current_host, port)
