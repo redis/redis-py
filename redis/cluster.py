@@ -13,17 +13,29 @@ from redis.exceptions import (
     ClusterSlotNotServedError, ClusterDownError,
 )
 
-# TODO: loose redis interface
+# TODO: loose redis interface(cross slot ops)
 # TODO: advanced balancer
 # TODO: pipeline
 # TODO: script
 # TODO: pubsub
+# TODO: lock
+# TODO: ASK
+# TODO: master slave changed
+# TODO: master timed out
+# TODO: slave timed out
+# TODO: read from slave, but slave changed to master
+# TODO: READWRITE/READONLY switching
+# TODO: connection_pool (partially) rebuild
+# TODO: check discover code
+# TODO: every possible situation in cluster
+# TODO: generator as interactive load balancer
+# TODO: migrate tests
 LOGGER = logging #.getLogger(__name__)
 
 
 class ClusterBalancer(object):
     def get_node_for_key(self, key_name, readonly):
-        raise NotImplementedError()
+        return self.get_node_for_slot(Cluster.keyslot(key_name), readonly=readonly)
 
     def get_node_for_slot(self, slot_id, readonly):
         raise NotImplementedError()
@@ -55,29 +67,25 @@ class RoundRobinClusterNodeBalancer(ClusterBalancer):
             nodes = self.manager.get_slave_nodes(slot_id, slave_only=False)
             return list(nodes)[self._incr() % len(nodes)]
 
-    def get_node_for_key(self, key_name, readonly):
-        return self.get_node_for_slot(Cluster.keyslot(key_name), readonly=readonly)
-
     def get_random_node(self, readonly):
         self.manager.discover_cluster()
 
         if readonly:
-            nodes = self.manager.nodes
+            nodes = self.manager.nodes.keys()
         else:
-            nodes = self.manager.master_slaves.keys()
+            nodes = self.manager.shards.keys()
 
-        return list(nodes)[self._incr() % len(nodes)]
+        return nodes[self._incr() % len(nodes)]
 
     def get_shards_nodes(self, readonly):
-        """one each shard"""
         self.manager.discover_cluster()
 
-        for master, slaves in self.manager.master_slaves.items():
+        for shard in self.manager.shards.values():
             if readonly:
-                nodes = list(slaves) + [master]
+                nodes = list(shard['slaves']) + [shard['master']]
                 yield list(nodes)[self._incr() % len(nodes)]
             else:
-                yield master
+                yield shard['master']
 
 
 class ClusterParser(DefaultParser):
@@ -106,14 +114,14 @@ class ClusterConnection(Connection):
     description_format = "ClusterConnection<host=%(host)s,port=%(port)s>"
 
     def __init__(self, *args, **kwargs):
-        self.use_readonly = kwargs.pop('use_readonly', False)
+        self.readonly = kwargs.pop('readonly', False)
         kwargs['parser_class'] = ClusterParser
         super(ClusterConnection, self).__init__(*args, **kwargs)
 
     def on_connect(self):
         """Initialize the connection, set readonly is required"""
         super(ClusterConnection, self).on_connect()
-        if self.use_readonly:
+        if self.readonly:
             self.send_command('READONLY')
             if nativestr(self.read_response()) != 'OK':
                 raise ResponseError('Cannot set READONLY flag')
@@ -121,7 +129,10 @@ class ClusterConnection(Connection):
 
 class Cluster(object):
     """keep knowledge of cluster"""
+
     KEY_SLOTS = 16384
+    # timeout for collecting from startup nodes
+    DEFAULT_TIMEOUT = 0.5
 
     def __init__(self, startup_nodes=None, allow_partition=False, **cluster_kwargs):
         """allow_partition: raise Exception when partition appears or not."""
@@ -136,13 +147,17 @@ class Cluster(object):
 
         self.cluster_kwargs['decode_responses'] = True
         self.cluster_kwargs['password'] = cluster_kwargs.get('password')
+        self.cluster_kwargs.setdefault('socket_timeout', self.DEFAULT_TIMEOUT)
         self.allow_partition = allow_partition
 
-        self.master_slaves = {}
-        self.nodes = set(startup_nodes)
+        self.shards = {}  # master_id -> shard_info
+        self.nodes = {}
+        self.startup_nodes = set(startup_nodes)  # [(host, port), ...]
         self.slots = {}
         self.pubsub_node = None
-        self.state = None
+
+        # version for keep generators work
+        self.slots_epoch = 0
 
     @classmethod
     def keyslot(cls, key):
@@ -158,69 +173,95 @@ class Cluster(object):
                 k = k[start + 1:end]
         return crc16(k) % cls.KEY_SLOTS
 
-    def discover_cluster(self, force=False):
-        if len(self.slots) == self.KEY_SLOTS and not force:
+    def discover_cluster(self, force=False, check_all=False):
+        """
+        check_all: read from each startup nodes for detect cluster partition
+        force: do the discover action even cluster slot info is complete
+        """
+        if not force and len(self.slots) == self.KEY_SLOTS:
             return
 
-        slots_node = {}
-        startup_nodes, self.nodes, self.master_slaves = self.nodes, set(), {}
-        for node in startup_nodes:
-            host, port = node
-            node_conn = StrictRedis(host, port, **self.cluster_kwargs)
+        self.nodes, self.shards = {}, {}
+        # TODO: discover more node dynamically
+        for startup_node in self.startup_nodes:
             try:
-                node_conn.ping()
+                nodes = StrictRedis(*startup_node, **self.cluster_kwargs).cluster_nodes()
             except ConnectionError:
+                LOGGER.warning('Startup node: %s:%s not responding in time.' % startup_node)
                 continue
 
-            if self.state is None:
-                # TODO: upgrade to use CLUSTER NODES
-                self.state = node_conn.cluster_info()['cluster_state']
+            # build shards
+            for node in nodes:
+                node_id = node['id']
+                self.nodes[node_id] = {
+                    'connected': node['link-state'] == 'connected',
+                    'id': node['id'],
+                    'host': node['host'],
+                    'port': node['port'],
+                    'addr': (node['host'], node['port']),
+                    'flags': node['flags'],
+                    'master': node['master'],
+                    'is_master': not node['master'],
+                    'slots': node['slots'],
+                }
 
-            for (start, end), slot in node_conn.cluster_slots().items():
-                for slot_id in range(start, end + 1):
-                    if not self.allow_partition and slot_id in self.slots:
-                        old_master = self.slots[slot_id]['master']
-                        if old_master != slot['master']:
-                            raise ClusterPartitionError(
-                                'Cluster partition appears: slot #%s, node: [%s]:[%s] and [%s]:[%s]' % (
-                                    slot_id, slots_node[slot_id], old_master, node, slot['master']))
+                if 'master' not in node['flags']:
+                    continue
 
-                    self.master_slaves.setdefault(slot['master'], set()).update(slot['slaves'])
-                    self.nodes.update([slot['master']] + slot['slaves'])
-                    self.slots[slot_id] = {
-                        'master': slot['master'],
-                        'slaves': set(slot['slaves']),
-                    }
-                    slots_node[slot_id] = node
+                self.shards[node_id] = {
+                    'master': node_id,
+                    'slaves': set(),
+                    'slots': node['slots'],
+                }
 
-            if len(self.slots) == self.KEY_SLOTS:
-                self.pubsub_node = self.determine_pubsub_node()
+            # fill slaves & slots
+            for node in nodes:
+                shard_id = node['master'] or node['id']
+
+                if 'slave' in node['flags']:
+                    self.shards[shard_id]['slaves'].add(node['id'])
+
+                for slot_id in node['slots']:
+                    old_master = self.slots.setdefault(slot_id, shard_id)
+                    if old_master != shard_id:
+                        raise ClusterPartitionError(
+                            'Cluster partition appears: slot #%s, node: %s:[%s] and %s:[%s]' % (
+                                slot_id, old_master, self.node_addr(old_master),
+                                shard_id, self.node_addr(shard_id)))
+                    else:
+                        self.slots[slot_id] = shard_id
+
+            if not check_all and len(self.slots) == self.KEY_SLOTS:
                 break
 
         if not self.nodes:
-            self.nodes = startup_nodes
-            raise ClusterDownError('no startup node can be reached.')
+            raise ClusterDownError('No startup node can be reached. [\n%s\n]' % self.startup_nodes)
+
+        self.startup_nodes = set([node['addr'] for node in self.nodes.values()])
+        self.pubsub_node = self.determine_pubsub_node()
+        self.slots_epoch += 1
 
     def get_master_node(self, slot_id):
         self.discover_cluster()
         try:
-            node = self.slots[slot_id]
-        except IndexError:
+            shard_id = self.slots[slot_id]
+        except KeyError:
             raise ClusterSlotNotServedError(slot_id)
         else:
-            return node['master']
+            return self.shards[shard_id]['master']
 
     def get_slave_nodes(self, slot_id, slave_only=True):
         self.discover_cluster()
         try:
-            node = self.slots[slot_id]
-        except IndexError:
+            shard_id = self.slots[slot_id]
+        except KeyError:
             raise ClusterSlotNotServedError(slot_id)
         else:
+            shard = self.shards[shard_id]
             if slave_only:
-                return list(node['slaves'])
+                return list(shard['slaves'])
             else:
-                return list(node['slaves']) + [node['master']]
+                return list(shard['slaves']) + [shard['master']]
 
     def determine_pubsub_node(self):
         """
@@ -229,25 +270,28 @@ class Cluster(object):
         All clients in the cluster will talk to the same pubsub node to ensure
         all code stay compatible. See pubsub doc for more details why.
 
-        Allways use the server with highest port number
+        Always use the server with highest port number
         """
         highest = -1
-        node = None, None
-        for host, port in self.nodes:
+        node = None
+        for node in self.nodes.values():
+            host, port = node['addr']
             if port > highest:
                 highest = port
-                node = host, port
 
         return node
 
-    def slot_moved(self, slot_id, node):
-        """signal from response"""
-        slot = self.slots.setdefault(slot_id, {'master': None, 'slaves': set()})
-        slot['master'] = node
-        self.nodes.add(node)
+    def all_nodes(self):
+        return self.nodes.values()
 
-        # FIXME: should we trigger reload?
-        self.master_slaves.setdefault(node, [])
+    def node_addr(self, node_id):
+        return self.nodes[node_id]['addr']
+
+    def slot_moved(self, slot_id, addr):
+        """signal from response, target node should be master"""
+        # XXX: maybe no rebuild cluster? only current slot?
+        self.startup_nodes.add(addr)
+        self.discover_cluster(force=True)
 
 
 class ClusterConnectionPool(object):
@@ -277,22 +321,20 @@ class ClusterConnectionPool(object):
     def reset(self, force=False):
         self.manager.discover_cluster(force=force)
         self.pools = dict([
-            (node, self.make_connection_pool(node))
-            for node in self.manager.nodes
+            (node['addr'], self.make_connection_pool(node['addr'], not node['is_master']))
+            for node in self.manager.all_nodes()
         ])
 
-    def get_connection(self, node):
+    def get_connection(self, addr, command_name=None, *keys, **options):
         """Get a connection from the pool"""
-        return self.pools[node].get_connection(None)
+        return self.pools[addr].get_connection(command_name, *keys, **options)
 
-    def make_connection_pool(self, node):
-        """Create a new connection"""
-        host, port = node
-        use_readonly = node not in self.manager.master_slaves
+    def make_connection_pool(self, (host, port), readonly):
+        """Create a new connection pool"""
         return ConnectionPool(host=host, port=port,
                               connection_class=self.connection_class,
                               max_connections=self.max_connections,
-                              use_readonly=use_readonly,
+                              readonly=readonly,
                               **self.connection_kwargs)
 
     def release(self, connection):
@@ -497,9 +539,9 @@ class StrictClusterRedis(StrictRedis):
         if node_flag == 'blocked':
             raise ClusterError('Blocked command: %s' % command)
         elif node_flag == 'random':
-            node = self.node_balancer.get_random_node(readonly=readonly)
+            node_id = self.node_balancer.get_random_node(readonly=readonly)
         elif node_flag == 'slot-id':
-            node = self.node_balancer.get_node_for_slot(slot_id=int(command_args[1]), readonly=readonly)
+            node_id = self.node_balancer.get_node_for_slot(slot_id=int(command_args[1]), readonly=readonly)
         elif command in self.COMMAND_PARSE_KEYS:
             slot_ids = set()
             for key_name in self.COMMAND_PARSE_KEYS[command](command_args):
@@ -508,12 +550,12 @@ class StrictClusterRedis(StrictRedis):
             if len(slot_ids) != 1:
                 raise ClusterCrossSlotError()
 
-            node = self.node_balancer.get_node_for_slot(slot_id=slot_ids.pop(), readonly=readonly)
+            node_id = self.node_balancer.get_node_for_slot(slot_id=slot_ids.pop(), readonly=readonly)
         else:
             key_name = command_args[1]
-            node = self.node_balancer.get_node_for_key(key_name=key_name, readonly=readonly)
+            node_id = self.node_balancer.get_node_for_key(key_name=key_name, readonly=readonly)
 
-        return node
+        return node_id
 
     @classmethod
     def _desc_node(cls, node_or_conn):
@@ -546,21 +588,22 @@ class StrictClusterRedis(StrictRedis):
         while ttl > 0:
             ttl -= 1
 
-            node = self.determine_node(command_args)
-            connection = self.connection_pool.get_connection(node)
+            node_id = self.determine_node(command_args)
+            node_addr = self.manager.node_addr(node_id)
+            connection = self.connection_pool.get_connection(node_addr)
             try:
                 connection.send_packed_command(packed_command)
                 return self.parse_response(connection, command, **parser_args)
             except BusyLoadingError:
                 raise
             except (ConnectionError, TimeoutError) as e:
+                LOGGER.warning('Node %s: %s' % (e.__class__.__name__, self._desc_node(connection)))
                 if ttl < self.COMMAND_TTL / 2:
                     time.sleep(0.01)
-                LOGGER.warning('Node %s: %s' % (e.__class__.__name__, self._desc_node(connection)))
             except ClusterParser.MovedError as e:
-                self.manager.slot_moved(e.slot_id, e.node)
-                LOGGER.warning('slot moved: %s [%s] -> [%s]' % (
+                LOGGER.warning('Slot moved: %s [%s] -> [%s]' % (
                     e.slot_id, self._desc_node(connection), self._desc_node(e.node)))
+                self.manager.slot_moved(e.slot_id, e.node)
             finally:
                 self.connection_pool.release(connection)
 
