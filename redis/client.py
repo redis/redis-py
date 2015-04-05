@@ -300,25 +300,8 @@ def parse_cluster_slots(resp, **options):
 
 def parse_cluster_nodes(resp, **options):
     """
-    id The node ID, a 40 characters random string generated when a node is created and never changed again
-        (unless CLUSTER RESET HARD is used).
-    ip:port The node address where clients should contact the node to run queries.
-    flags A list of comma separated flags: myself, master, slave, fail?, fail, handshake, noaddr, noflags.
-        Flags are explained in detail in the next section.
-    master If the node is a slave, and the master is known, the master node ID, otherwise the "-" character.
-    ping-sent Milliseconds unix time at which the currently active ping was sent, or zero if there are no pending pings.
-    pong-recv Milliseconds unix time the last pong was received.
-    config-epoch The configuration epoch (or version) of the current node
-        (or of the current master if the node is a slave).
-        Each time there is a failover, a new, unique, monotonically increasing configuration epoch is created.
-        If multiple nodes claim to serve the same hash slots, the one with higher configuration epoch wins.
-    link-state The state of the link used for the node-to-node cluster bus.
-        We use this link to communicate with the node. Can be connected or disconnected.
-    slot An hash slot number or range. Starting from argument number 9,
-        but there may be up to 16384 entries in total (limit never reached).
-        This is the list of hash slots served by this node. If the entry is just a number, is parsed as such.
-        If it is a range, it is in the form start-end, and means that the node is responsible for all the hash slots
-        from start to end including the start and end values.
+    @see: http://redis.io/commands/cluster-nodes  # string
+    @see: http://redis.io/commands/cluster-slaves # list of string
     """
     current_host = options.get('current_host', '')
 
@@ -333,10 +316,10 @@ def parse_cluster_nodes(resp, **options):
 
         return slots
 
-    nodes = {}
     if isinstance(resp, basestring):
         resp = resp.splitlines()
 
+    nodes = []
     for line in resp:
         parts = line.split(' ', 8)
         self_id, addr, flags, master_id, ping_sent, \
@@ -344,7 +327,7 @@ def parse_cluster_nodes(resp, **options):
 
         host, port = addr.rsplit(':', 1)
 
-        node = nodes[self_id] = {
+        node = {
             'id': self_id,
             'host': host or current_host,
             'port': int(port),
@@ -358,6 +341,8 @@ def parse_cluster_nodes(resp, **options):
 
         if len(parts) >= 9:
             node['slots'] = tuple(parse_slots(parts[8]))
+
+        nodes.append(node)
 
     return nodes
 
