@@ -283,7 +283,7 @@ def parse_not_implemented(r, **options):
 
 
 def parse_cluster_slots(resp, **options):
-    current_host = options.get('current_host', None)
+    current_host = options.get('current_host', '')
     fix_server = lambda (host, port): (host or current_host, port)
 
     slots = {}
@@ -296,6 +296,70 @@ def parse_cluster_slots(resp, **options):
         }
 
     return slots
+
+
+def parse_cluster_nodes(resp, **options):
+    """
+    id The node ID, a 40 characters random string generated when a node is created and never changed again
+        (unless CLUSTER RESET HARD is used).
+    ip:port The node address where clients should contact the node to run queries.
+    flags A list of comma separated flags: myself, master, slave, fail?, fail, handshake, noaddr, noflags.
+        Flags are explained in detail in the next section.
+    master If the node is a slave, and the master is known, the master node ID, otherwise the "-" character.
+    ping-sent Milliseconds unix time at which the currently active ping was sent, or zero if there are no pending pings.
+    pong-recv Milliseconds unix time the last pong was received.
+    config-epoch The configuration epoch (or version) of the current node
+        (or of the current master if the node is a slave).
+        Each time there is a failover, a new, unique, monotonically increasing configuration epoch is created.
+        If multiple nodes claim to serve the same hash slots, the one with higher configuration epoch wins.
+    link-state The state of the link used for the node-to-node cluster bus.
+        We use this link to communicate with the node. Can be connected or disconnected.
+    slot An hash slot number or range. Starting from argument number 9,
+        but there may be up to 16384 entries in total (limit never reached).
+        This is the list of hash slots served by this node. If the entry is just a number, is parsed as such.
+        If it is a range, it is in the form start-end, and means that the node is responsible for all the hash slots
+        from start to end including the start and end values.
+    """
+    current_host = options.get('current_host', '')
+
+    def parse_slots(s):
+        slots = []
+        for r in s.split(' '):
+            if '-' in r:
+                start, end = r.split('-')
+                slots.extend(range(int(start), int(end) + 1))
+            else:
+                slots.append(int(r))
+
+        return slots
+
+    nodes = {}
+    if isinstance(resp, basestring):
+        resp = resp.splitlines()
+
+    for line in resp:
+        parts = line.split(' ', 8)
+        self_id, addr, flags, master_id, ping_sent, \
+            pong_recv, config_epoch, link_state = parts[:8]
+
+        host, port = addr.rsplit(':', 1)
+
+        node = nodes[self_id] = {
+            'id': self_id,
+            'host': host or current_host,
+            'port': int(port),
+            'flags': tuple(flags.split(',')),
+            'master': master_id if master_id != '-' else None,
+            'ping-sent': int(ping_sent),
+            'pong-recv': int(pong_recv),
+            'link-state': link_state,
+            'slots': [],
+        }
+
+        if len(parts) >= 9:
+            node['slots'] = tuple(parse_slots(parts[8]))
+
+    return nodes
 
 
 class StrictRedis(object):
@@ -394,13 +458,13 @@ class StrictRedis(object):
             'CLUSTER INFO': parse_info,
             'CLUSTER KEYSLOT': int,
             'CLUSTER MEET': bool_ok,
-            'CLUSTER NODES': parse_not_implemented,
+            'CLUSTER NODES': parse_cluster_nodes,
             'CLUSTER REPLICATE': bool_ok,
             'CLUSTER RESET': bool_ok,
             'CLUSTER SAVECONFIG': bool_ok,
             'CLUSTER SET-CONFIG-EPOCH': bool_ok,
             'CLUSTER SETSLOT': bool_ok,
-            'CLUSTER SLAVES': parse_not_implemented,
+            'CLUSTER SLAVES': parse_cluster_nodes,
             'CLUSTER SLOTS': parse_cluster_slots,
         }
     )
@@ -687,6 +751,10 @@ class StrictRedis(object):
         """Force a node cluster to handshake with another node"""
         return self.execute_command('CLUSTER MEET', host, port)
 
+    def cluster_nodes(self):
+        """Force a node cluster to handshake with another node"""
+        return self.execute_command('CLUSTER NODES', current_host=self.host)
+
     def cluster_replicate(self, node_id):
         """Reconfigure a node as a slave of the specified master node"""
         return self.execute_command('CLUSTER REPLICATE', node_id)
@@ -713,6 +781,10 @@ class StrictRedis(object):
             return self.execute_command('CLUSTER SETSLOT', slot_id, Token('STABLE'))
         else:
             raise RedisError('Invalid slot state: %s' % state)
+
+    def cluster_slaves(self, node_id):
+        """Force a node cluster to handshake with another node"""
+        return self.execute_command('CLUSTER SLAVES', node_id)
 
     def cluster_slots(self):
         """Get array of Cluster slot to node mappings"""
