@@ -27,7 +27,6 @@ from redis.exceptions import (
     ClusterSlotNotServedError, ClusterDownError,
 )
 
-# TODO: handle TryAgain
 # TODO: pipeline
 # TODO: generator as interactive load balancer
 # TODO: master slave changed
@@ -36,13 +35,13 @@ from redis.exceptions import (
 # TODO: READWRITE/READONLY switching
 # TODO: connection_pool (partially) rebuild
 # TODO: every possible situation in cluster
+# TODO: migrate test cases from redis-py-cluster
 
 # TODO: read from slave, but slave changed to master
 # TODO: pubsub
 # TODO: lock
 # TODO: advanced balancer
 # TODO: loose redis interface(cross slot ops)
-# TODO: migrate tests
 # TODO: script
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.DEBUG)
@@ -602,8 +601,10 @@ class StrictClusterRedis(StrictRedis):
         return self.parse_response(connection, command, **parser_args or {})
 
     def stack_commands(self, connection):
-        """like a pipeline, collect and execute and parse"""
+        """like a pipeline, collect and execute and parse
+        """
 
+        # TODO: debug code
         # collect commands
         stack = []
         while True:
@@ -670,7 +671,14 @@ class StrictClusterRedis(StrictRedis):
             except (ConnectionError, TimeoutError) as e:
                 LOGGER.warning('Node %s: %s' % (e.__class__.__name__, self._desc_node(connection)))
                 if ttl < self.COMMAND_TTL / 2:
-                    time.sleep(0.01)
+                    time.sleep(0.05)
+            except ClusterParser.TryAgainError:
+                LOGGER.warning('Cluster in unstable state.')
+                if ttl < self.COMMAND_TTL / 2:
+                    time.sleep(0.05)
+
+                # prevent re-determine node
+                redirect_addr = node_addr
             except ClusterParser.MovedError as e:
                 LOGGER.warning('MOVED: %s [%s] -> [%s]' % (
                     e.slot_id, self._desc_node(connection), self._desc_node(e.node_addr)))
