@@ -65,7 +65,7 @@ class ClusterBalancer(object):
 
 
 class RoundRobinClusterNodeBalancer(ClusterBalancer):
-    RR_COUNTER = 1
+    RR_COUNTER = 0
 
     def __init__(self, manager):
         self.manager = manager
@@ -601,6 +601,32 @@ class StrictClusterRedis(StrictRedis):
         connection.send_command(*command_args)
         return self.parse_response(connection, command, **parser_args or {})
 
+    def stack_commands(self, connection):
+        """like a pipeline, collect and execute and parse"""
+
+        # collect commands
+        stack = []
+        while True:
+            command = yield len(stack)
+            if command is None:
+                break
+
+            if not isinstance(command, tuple) or len(command) != 2:
+                raise ValueError('command should be 2-tuple (command_args, parser_args)')
+
+            stack.append(command)
+
+        packed_command = connection.pack_commands(cmd_args for cmd_args, _ in stack)
+        connection.send_packed_command(packed_command)
+        for command_args, parse_args in stack:
+            # ensure all responses are consumed
+            try:
+                resp = self.parse_response(connection, command_args[0], **parse_args)
+            except Exception as e:
+                resp = e
+
+            yield resp
+
     def execute_command(self, *command_args, **parser_args):
         """Send a command to a node in the cluster
         SINGLE & SIMPLE MODE
@@ -632,12 +658,12 @@ class StrictClusterRedis(StrictRedis):
             try:
                 if asking:
                     asking = False
-                    connection.send_command('ASKING')
-                    resp = self.parse_response(connection, 'ASKING')
-                    if resp != 'OK':
-                        raise ResponseError('ASKING %s is %s' % (self._desc_node(connection), resp))
-
-                connection.send_packed_command(packed_command)
+                    multi_command = connection.pack_commands((('ASKING', ), command_args))
+                    connection.send_packed_command(multi_command)
+                    if not self.parse_response(connection, 'ASKING'):
+                        raise ResponseError('ASKING %s is not OK' % (self._desc_node(connection)))
+                else:
+                    connection.send_packed_command(packed_command)
                 return self.parse_response(connection, command, **parser_args)
             except BusyLoadingError:
                 raise

@@ -463,6 +463,9 @@ class StrictRedis(object):
             'CLUSTER SETSLOT': bool_ok,
             'CLUSTER SLAVES': parse_cluster_nodes,
             'CLUSTER SLOTS': parse_cluster_slots,
+            'ASKING': bool_ok,
+            'READONLY': bool_ok,
+            'READWRITE': bool_ok,
         }
     )
 
