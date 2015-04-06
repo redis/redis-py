@@ -302,15 +302,29 @@ def parse_cluster_nodes(resp, **options):
     current_host = options.get('current_host', '')
 
     def parse_slots(s):
-        slots = []
+        slots, migrations = [], []
         for r in s.split(' '):
-            if '-' in r:
+            if '->-' in r:
+                slot_id, dst_node_id = r[1:-1].split('->-', 1)
+                migrations.append({
+                    'slot': int(slot_id),
+                    'node_id': dst_node_id,
+                    'state': 'migrating'
+                })
+            elif '-<-' in r:
+                slot_id, src_node_id = r[1:-1].split('-<-', 1)
+                migrations.append({
+                    'slot': int(slot_id),
+                    'node_id': src_node_id,
+                    'state': 'importing'
+                })
+            elif '-' in r:
                 start, end = r.split('-')
                 slots.extend(range(int(start), int(end) + 1))
             else:
                 slots.append(int(r))
 
-        return slots
+        return slots, migrations
 
     if isinstance(resp, basestring):
         resp = resp.splitlines()
@@ -333,10 +347,12 @@ def parse_cluster_nodes(resp, **options):
             'pong-recv': int(pong_recv),
             'link-state': link_state,
             'slots': [],
+            'migrations': [],
         }
 
         if len(parts) >= 9:
-            node['slots'] = tuple(parse_slots(parts[8]))
+            slots, migrations = parse_slots(parts[8])
+            node['slots'], node['migrations'] = tuple(slots), migrations
 
         nodes.append(node)
 

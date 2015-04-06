@@ -1,4 +1,18 @@
 """cluster support ported from https://github.com/Grokzen/redis-py-cluster
+
+MY GOALS:
+
+1. expose abilities which redis cluster provided
+  - high availability, endure partially slot coverage
+  - scaling up read operations using slave nodes
+  - interactive load balance interface via python generator
+2. Strict interface provides
+  - commands without ambiguity
+  - multiple-key operations MUST located in single slot
+3. Loose interface provides
+  - cross slot helper methods
+4. ability to adapt tornado's Future, via some external component(not-included)
+5. let exception just raise to user if it's not in redis protocol.
 """
 import time
 import logging
@@ -13,7 +27,7 @@ from redis.exceptions import (
     ClusterSlotNotServedError, ClusterDownError,
 )
 
-# TODO: ASK
+# TODO: handle TryAgain
 # TODO: pipeline
 # TODO: generator as interactive load balancer
 # TODO: master slave changed
@@ -30,7 +44,9 @@ from redis.exceptions import (
 # TODO: loose redis interface(cross slot ops)
 # TODO: migrate tests
 # TODO: script
-LOGGER = logging #.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
+LOGGER.setLevel(logging.DEBUG)
+LOGGER.addHandler(logging.StreamHandler())
 
 
 class ClusterBalancer(object):
@@ -90,20 +106,32 @@ class RoundRobinClusterNodeBalancer(ClusterBalancer):
 
 class ClusterParser(DefaultParser):
     class AskError(ResponseError):
+        """
+        src node: MIGRATING to dst node
+            get > ASK error
+            ask dst node > ASKING command
+        dst node: IMPORTING from src node
+            asking command only affects next command
+            any op will be allowed after asking command
+        """
         def __init__(self, resp):
-            print resp
-
-    class MovedError(ResponseError):
-        def __init__(self, resp):
-            """redis only redirect to master node"""
+            """should only redirect to master node"""
             slot_id, new_node = resp.split(' ')
             host, port = new_node.rsplit(':', 1)
             self.slot_id = int(slot_id)
-            self.node = self.host, self.port = host, int(port)
+            self.node_addr = self.host, self.port = host, int(port)
+
+    class TryAgainError(ResponseError):
+        def __init__(self, resp):
+            pass
+
+    class MovedError(AskError):
+        pass
 
     EXCEPTION_CLASSES = dict_merge(
         DefaultParser.EXCEPTION_CLASSES, {
             'ASK': AskError,
+            'TRYAGAIN': TryAgainError,
             'MOVED': MovedError,
             'CLUSTERDOWN': ClusterDownError,
             'CROSSSLOT': ClusterCrossSlotError,
@@ -292,6 +320,10 @@ class Cluster(object):
         # XXX: maybe no rebuild cluster? only current slot?
         self.startup_nodes.add(addr)
         self.discover_cluster(force=True)
+
+    def ask_node(self, slot_id, addr):
+        """signal from response, target node should be master"""
+        self.startup_nodes.add(addr)
 
 
 class ClusterConnectionPool(object):
@@ -585,13 +617,26 @@ class StrictClusterRedis(StrictRedis):
         packed_command = self.packer_conn.pack_command(*command_args)
 
         ttl = self.COMMAND_TTL
+        redirect_addr = None
+        asking = False
         while ttl > 0:
             ttl -= 1
 
-            node_id = self.determine_node(command_args)
-            node_addr = self.manager.node_addr(node_id)
+            if not redirect_addr:
+                node_id = self.determine_node(command_args)
+                node_addr = self.manager.node_addr(node_id)
+            else:
+                node_addr, redirect_addr = redirect_addr, None
+
             connection = self.connection_pool.get_connection(node_addr)
             try:
+                if asking:
+                    asking = False
+                    connection.send_command('ASKING')
+                    resp = self.parse_response(connection, 'ASKING')
+                    if resp != 'OK':
+                        raise ResponseError('ASKING %s is %s' % (self._desc_node(connection), resp))
+
                 connection.send_packed_command(packed_command)
                 return self.parse_response(connection, command, **parser_args)
             except BusyLoadingError:
@@ -601,9 +646,15 @@ class StrictClusterRedis(StrictRedis):
                 if ttl < self.COMMAND_TTL / 2:
                     time.sleep(0.01)
             except ClusterParser.MovedError as e:
-                LOGGER.warning('Slot moved: %s [%s] -> [%s]' % (
-                    e.slot_id, self._desc_node(connection), self._desc_node(e.node)))
-                self.manager.slot_moved(e.slot_id, e.node)
+                LOGGER.warning('MOVED: %s [%s] -> [%s]' % (
+                    e.slot_id, self._desc_node(connection), self._desc_node(e.node_addr)))
+                self.manager.slot_moved(e.slot_id, e.node_addr)
+                redirect_addr = e.node_addr
+            except ClusterParser.AskError as e:
+                LOGGER.warning('ASK redirect: %s [%s] -> [%s]' % (
+                    e.slot_id, self._desc_node(connection), self._desc_node(e.node_addr)))
+                self.manager.ask_node(e.slot_id, e.node_addr)
+                redirect_addr, asking = e.node_addr, True
             finally:
                 self.connection_pool.release(connection)
 
