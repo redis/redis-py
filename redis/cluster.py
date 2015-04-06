@@ -27,15 +27,15 @@ from redis.exceptions import (
     ClusterSlotNotServedError, ClusterDownError,
 )
 
-# TODO: pipeline
-# TODO: generator as interactive load balancer
+# TODO: every possible situation in cluster
 # TODO: master slave changed
 # TODO: master timed out
 # TODO: slave timed out
 # TODO: READWRITE/READONLY switching
 # TODO: connection_pool (partially) rebuild
-# TODO: every possible situation in cluster
 # TODO: migrate test cases from redis-py-cluster
+# TODO: pipeline
+# TODO: generator as interactive load balancer
 
 # TODO: read from slave, but slave changed to master
 # TODO: pubsub
@@ -448,7 +448,7 @@ class StrictClusterRedis(StrictRedis):
         ], lambda args: args[1::2]),
         dict.fromkeys([
             'DEL', 'RPOPLPUSH', 'RENAME', 'RENAMENX', 'SMOVE', 'SDIFF', 'SDIFFSTORE',
-            'SINTER', 'SINTERSTORE', 'SUNION', 'SUNIONSTORE', 'PFMERGE', 'MGET',
+            'SINTER', 'SINTERSTORE', 'SUNION', 'SUNIONSTORE', 'PFMERGE', 'MGET', 'PFCOUNT',
         ], lambda args: args[1:]),
         {
             'BITOP': lambda args: args[2:],
