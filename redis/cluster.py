@@ -13,6 +13,18 @@ MY GOALS:
   - cross slot helper methods
 4. ability to adapt tornado's Future, via some external component(not-included)
 5. let exception just raise to user if it's not in redis protocol.
+
+
+REFERENCES:
+
+about pipeline:
+@see: https://groups.google.com/forum/#!topic/jedis_redis/u6j8slokO3E
+@see: https://groups.google.com/forum/#!msg/redis-db/4I0ELYnf3bk/Lrctk0ULm6AJ
+
+about readonly slaves:
+@see: https://github.com/antirez/redis/issues/2216
+@see: https://github.com/xetorthio/jedis/issues/790
+
 """
 import time
 import logging
@@ -27,6 +39,7 @@ from redis.exceptions import (
     ClusterSlotNotServedError, ClusterDownError,
 )
 
+# TODO: partially update cluster slot info
 # TODO: every possible situation in cluster
 # TODO: master slave changed
 # TODO: master timed out
