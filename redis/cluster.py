@@ -466,7 +466,7 @@ class StrictClusterRedis(StrictRedis):
         {
             'BITOP': lambda args: args[2:],
         },
-    ),
+    )
     READONLY_COMMANDS = {
         # single key ops
         # - bits

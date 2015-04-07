@@ -75,11 +75,11 @@ class ClusterError(RedisError):
     pass
 
 
-class ClusterCrossSlotError(RedisError):
-    pass
+class ClusterCrossSlotError(ResponseError):
+    message = "Keys in request don't hash to the same slot"
 
 
-class ClusterSlotNotServedError(RedisError):
+class ClusterSlotNotServedError(ResponseError):
     pass
 
 
