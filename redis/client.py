@@ -119,8 +119,8 @@ def parse_info(response):
             else:
                 # if the line isn't splittable, append it to the "__raw__" key
                 info.setdefault('__raw__', []).append(line)
-        elif line and not line.startswith('#') and \
-           re.match('^master[0-9]*:', line):
+        elif line and not line.startswith('#') and re.match('^master[0-9]*:',
+                                                            line):
             newline = re.match('([^:]*):(.*)', line)
             master = newline.groups()[0]
             info[master] = {}
