@@ -1,6 +1,7 @@
 from __future__ import with_statement
 from itertools import chain
 import datetime
+import re
 import sys
 import warnings
 import time
@@ -110,13 +111,26 @@ def parse_info(response):
             return sub_dict
 
     for line in response.splitlines():
-        if line and not line.startswith('#'):
+        if line and not line.startswith('#') and not re.match('^master[0-9]*:', line):
             if line.find(':') != -1:
                 key, value = line.split(':', 1)
                 info[key] = get_value(value)
             else:
                 # if the line isn't splittable, append it to the "__raw__" key
                 info.setdefault('__raw__', []).append(line)
+         elif line and not line.startswith('#') and re.match('^master[0-9]*:', line):
+             newline = re.match('([^:]*):(.*)', line)
+             master = newline.groups()[0]
+             info[master]= {}
+             for kv in newline.groups()[1].split(','):
+                 key, value = kv.split('=')
+                 try:
+                     if '.' in value:
+                         info[master][key] = get_value(value)
+                     else:
+                         info[master][key] = get_value(value)
+                 except ValueError:
+                     info[master][key] = get_value(value)
 
     return info
 
