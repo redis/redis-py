@@ -111,17 +111,19 @@ def parse_info(response):
             return sub_dict
 
     for line in response.splitlines():
-        if line and not line.startswith('#') and not re.match('^master[0-9]*:', line):
+        if line and not line.startswith('#') and \
+           not re.match('^master[0-9]*:', line):
             if line.find(':') != -1:
                 key, value = line.split(':', 1)
                 info[key] = get_value(value)
             else:
                 # if the line isn't splittable, append it to the "__raw__" key
                 info.setdefault('__raw__', []).append(line)
-        elif line and not line.startswith('#') and re.match('^master[0-9]*:', line):
+        elif line and not line.startswith('#') and \
+           re.match('^master[0-9]*:', line):
             newline = re.match('([^:]*):(.*)', line)
             master = newline.groups()[0]
-            info[master]= {}
+            info[master] = {}
             for kv in newline.groups()[1].split(','):
                 key, value = kv.split('=')
                 info[master][key] = get_value(value)
