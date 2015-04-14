@@ -124,13 +124,7 @@ def parse_info(response):
             info[master]= {}
             for kv in newline.groups()[1].split(','):
                 key, value = kv.split('=')
-                try:
-                    if '.' in value:
-                        info[master][key] = get_value(value)
-                    else:
-                        info[master][key] = get_value(value)
-                except ValueError:
-                    info[master][key] = get_value(value)
+                info[master][key] = get_value(value)
 
     return info
 
