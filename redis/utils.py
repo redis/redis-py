@@ -40,7 +40,10 @@ def transactional(*watches, **trans_kwargs):
                             pipe.watch(*watches)
                         func_value = func(pipe, *args, **kwargs)
                         exec_value = pipe.execute()
-                        return func_value if value_from_callable else exec_value
+                        if value_from_callable:
+                            return func_value
+                        else:
+                            return exec_value
                     except WatchError:
                         continue
         return wrapper
