@@ -588,7 +588,7 @@ class Connection(object):
         elif isinstance(value, float):
             value = b(repr(value))
         elif not isinstance(value, basestring):
-            value = str(value)
+            value = unicode(value)
         if isinstance(value, unicode):
             value = value.encode(self.encoding, self.encoding_errors)
         return value
