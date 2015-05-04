@@ -339,7 +339,7 @@ class HiredisParser(BaseParser):
                     # an empty string indicates the server shutdown the socket
                     if not isinstance(buffer, bytes) or len(buffer) == 0:
                         raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
-                    tail = tail[-2:] + bytes(buffer[-2:])
+                    tail = tail[-2:] + buffer[-2:]
             except socket.timeout:
                 raise TimeoutError("Timeout reading from socket")
             except socket.error:
