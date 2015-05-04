@@ -323,6 +323,7 @@ class HiredisParser(BaseParser):
             self._next_response = False
             return response
 
+        tail = bytearray()
         response = self._reader.gets()
         socket_read_size = self.socket_read_size
         while response is False:
@@ -331,11 +332,14 @@ class HiredisParser(BaseParser):
                     bufflen = self._sock.recv_into(self._buffer)
                     if bufflen == 0:
                         raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
+                    tail_offset = bufflen - 2 if bufflen >= 2 else 0
+                    tail = tail[-2:] + self._buffer[tail_offset:bufflen]
                 else:
                     buffer = self._sock.recv(socket_read_size)
                     # an empty string indicates the server shutdown the socket
                     if not isinstance(buffer, bytes) or len(buffer) == 0:
                         raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
+                    tail = tail[-2:] + bytes(buffer[-2:])
             except socket.timeout:
                 raise TimeoutError("Timeout reading from socket")
             except socket.error:
@@ -348,13 +352,8 @@ class HiredisParser(BaseParser):
                 self._reader.feed(buffer)
             # proactively, but not conclusively, check if more data is in the
             # buffer. if the data received doesn't end with \r\n, there's more.
-            if HIREDIS_USE_BYTE_BUFFER:
-                if bufflen > 2 and \
-                        self._buffer[bufflen - 2:bufflen] != SYM_CRLF:
-                    continue
-            else:
-                if not buffer.endswith(SYM_CRLF):
-                    continue
+            if tail[-2:] != SYM_CRLF:
+                continue
             response = self._reader.gets()
         # if an older version of hiredis is installed, we need to attempt
         # to convert ResponseErrors to their appropriate types.
