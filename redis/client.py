@@ -470,6 +470,23 @@ class StrictRedis(object):
             transaction,
             shard_hint)
 
+    def batched_pipeline(self, batch_size, transaction=True, shard_hint=None):
+        """
+        Return a new batched pipeline object that can queue multiple commands
+        for later execution. ``batch_size`` represent the maximum number of
+        commands to buffer before executing them against the server
+        ``transaction`` indicates whether all commands should be executed
+        atomically. Apart from making a group of operations atomic, pipelines
+        are useful for reducing the back-and-forth overhead between the client
+        and server.
+        """
+        return BatchedPipeline(
+            batch_size,
+            self.connection_pool,
+            self.response_callbacks,
+            transaction,
+            shard_hint)
+
     def transaction(self, func, *watches, **kwargs):
         """
         Convenience method for executing the callable `func` as a transaction
@@ -1984,6 +2001,20 @@ class Redis(StrictRedis):
             transaction,
             shard_hint)
 
+    def pipeline(self, transaction=True, shard_hint=None):
+        """
+        Return a new pipeline object that can queue multiple commands for
+        later execution. ``transaction`` indicates whether all commands
+        should be executed atomically. Apart from making a group of operations
+        atomic, pipelines are useful for reducing the back-and-forth overhead
+        between the client and server.
+        """
+        return Pipeline(
+            self.connection_pool,
+            self.response_callbacks,
+            transaction,
+            shard_hint)
+
     def setex(self, name, value, time):
         """
         Set the value of key ``name`` to ``value`` that expires in ``time``
@@ -2644,6 +2675,51 @@ class BasePipeline(object):
         self.scripts.add(script)
 
 
+class BatchedBasePipeline(BasePipeline):
+    """
+    A sublclass of the redis pipeline object that will execute staged commands
+    after a preset number or when execute is explicitly called.
+    It will also execute staged commands on exit from a context manager. This
+    allow for large numbers of commands to be batched behind the scenes:
+
+    with client.batched_pipeline(100) as pipe:
+        for i in range(10000):
+            pipe.set(i, i)
+
+    Every 100 commands will be executed and then the all remaining commands
+    will be executed on exiting the context manager.
+    """
+    def __init__(self, batch_size, connection_pool, response_callbacks,
+                 transaction=True, shard_hint=None):
+        self.batch_size = batch_size
+        super(BatchedBasePipeline, self).__init__(
+            connection_pool,
+            response_callbacks,
+            transaction,
+            shard_hint
+        )
+
+    def pipeline_execute_command(self, *args, **options):
+        """
+        Stage a command to be executed when the total number of commands
+        reaches the batch size param or when execute() is next called
+        Returns the current Pipeline object back so commands can be
+        chained together, such as:
+        pipe = pipe.set('foo', 'bar').incr('baz').decr('bang')
+        At some other point, you can then run: pipe.execute(),
+        which will execute all commands queued in the pipe.
+        """
+        self.command_stack.append((args, options))
+
+        if len(self.command_stack) >= self.batch_size:
+            self.execute()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.execute()
+        self.reset()
+
+
 class StrictPipeline(BasePipeline, StrictRedis):
     "Pipeline for the StrictRedis class"
     pass
@@ -2651,6 +2727,16 @@ class StrictPipeline(BasePipeline, StrictRedis):
 
 class Pipeline(BasePipeline, Redis):
     "Pipeline for the Redis class"
+    pass
+
+
+class StrictBatchedPipeline(BatchedBasePipeline, StrictRedis):
+    "BatchedPipeline for the StrictRedis class"
+    pass
+
+
+class BatchedPipeline(BatchedBasePipeline, Redis):
+    "BatchedPipeline for the Redis class"
     pass
 
 
