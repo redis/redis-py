@@ -59,6 +59,15 @@ SYM_EMPTY = b('')
 
 SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
 
+"""
+This is used in determining when to close sockets in the release()
+methods of the connection pool classes below. The value 8 maps to
+TCP_CLOSE_WAIT in <netinet/tcp.h> - which indicates that the TCP 
+connection has been terminated and the socket can be closed. 
+"""
+TCP_CLOSE_WAIT = 8
+
+
 
 class Token(object):
     """
@@ -883,6 +892,21 @@ class ConnectionPool(object):
                 self.disconnect()
                 self.reset()
 
+    def _connection_open(self, connection):
+        try:
+            # TCP state is the first byte in struct tcp_info,
+            # defined in <linux/tcp.h>
+            conn_state = ord(connection._sock.getsockopt(
+                   socket.SOL_TCP, socket.TCP_INFO, 1
+                   ))
+        except socket.error:
+            # If there is a socket error, we want to close
+            # the connection anyways. 
+            conn_state = TCP_CLOSE_WAIT
+
+        return conn_state != TCP_CLOSE_WAIT 
+
+
     def get_connection(self, command_name, *keys, **options):
         "Get a connection from the pool"
         self._checkpid()
@@ -906,7 +930,13 @@ class ConnectionPool(object):
         if connection.pid != self.pid:
             return
         self._in_use_connections.remove(connection)
-        self._available_connections.append(connection)
+        # If the connection is still open, return it to the pool
+        # to be reused. Otherwise, close the socket. 
+        if self._connection_open(connection):
+            self._available_connections.append(connection)
+        else:
+            connection.disconnect()
+            self._created_connections -= 1
 
     def disconnect(self):
         "Disconnects all connections in the pool"
@@ -1021,13 +1051,17 @@ class BlockingConnectionPool(ConnectionPool):
         if connection.pid != self.pid:
             return
 
-        # Put the connection back into the pool.
-        try:
-            self.pool.put_nowait(connection)
-        except Full:
-            # perhaps the pool has been reset() after a fork? regardless,
-            # we don't want this connection
-            pass
+        if self._connection_open(connection):
+            # Put the connection back into the pool.
+            try:
+                self.pool.put_nowait(connection)
+            except Full:
+                # perhaps the pool has been reset() after a fork? regardless,
+                # we don't want this connection
+                pass
+        else:
+            # Close the socket
+            connection.disconnect()
 
     def disconnect(self):
         "Disconnects all connections in the pool."
