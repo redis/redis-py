@@ -279,11 +279,12 @@ def parse_slowlog_get(response, **options):
         }
         if len(item) == 5:
             # Garantia Data custom Redis result, with complexity analysis
+            command_idx = 4
             result['complexity'] = item[3]
-            result['command'] = b(' ').join(item[4])
         else:
             # Vanilla Redis result
-            result['command'] = b(' ').join(item[3])
+            command_idx = 3
+        result['command'] = b(' ').join(item[command_idx])
         return result
     return [parse_item(item) for item in response]
 
