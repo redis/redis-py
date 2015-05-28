@@ -139,6 +139,35 @@ class TestRedisCommands(object):
         assert isinstance(slowlog[0]['start_time'], int)
         assert isinstance(slowlog[0]['duration'], int)
 
+        # fake/test Garantia Data custom Redis result if we didn't get it
+        # (with complexity analysis)
+        if 'complexity' not in slowlog[0]:
+            # monkey patch parse_response()
+            COMPLEXITY_STATEMENT = "Complexity info: N:4712,M:3788"
+            old_parse_response = r.parse_response
+            def parse_response(connection, command_name, **options):
+                if command_name != 'SLOWLOG GET':
+                    return old_parse_response(connection,
+                                              command_name,
+                                              **options)
+                responses = connection.read_response()
+                for response in responses:
+                    # Garantia Data returns complexity as fourth item in list
+                    response.insert(3, COMPLEXITY_STATEMENT)
+                return r.response_callbacks[command_name](responses, **options)
+            r.parse_response = parse_response
+
+            # test
+            slowlog = r.slowlog_get()
+            assert isinstance(slowlog, list)
+            commands = [log['command'] for log in slowlog]
+            assert get_command in commands
+            idx = commands.index(get_command)
+            assert slowlog[idx]['complexity'] == COMPLEXITY_STATEMENT
+
+            # tear down monkeypatch
+            r.parse_response = old_parse_response
+
     def test_slowlog_get_limit(self, r, slowlog):
         assert r.slowlog_reset()
         r.get('foo')
