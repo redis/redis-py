@@ -271,12 +271,21 @@ def parse_zscan(response, **options):
 
 
 def parse_slowlog_get(response, **options):
-    return [{
-        'id': item[0],
-        'start_time': int(item[1]),
-        'duration': int(item[2]),
-        'command': b(' ').join(item[3])
-    } for item in response]
+    def parse_item(item):
+        result = {
+            'id': item[0],
+            'start_time': int(item[1]),
+            'duration': int(item[2]),
+        }
+        if len(item) == 5:
+            # Garantia Data custom Redis result, with complexity analysis
+            result['complexity'] = item[3]
+            result['command'] = b(' ').join(item[4])
+        else:
+            # Vanilla Redis result
+            result['command'] = b(' ').join(item[3])
+        return result
+    return [parse_item(item) for item in response]
 
 
 def parse_cluster_info(response, **options):
