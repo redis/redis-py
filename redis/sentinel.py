@@ -2,7 +2,7 @@ import os
 import random
 import weakref
 
-from redis.client import StrictRedis
+from redis.client import PubSub, StrictRedis
 from redis.connection import ConnectionPool, Connection
 from redis.exceptions import ConnectionError, ResponseError, ReadOnlyError
 from redis._compat import iteritems, nativestr, xrange
@@ -294,3 +294,11 @@ class Sentinel(object):
         connection_kwargs.update(kwargs)
         return redis_class(connection_pool=connection_pool_class(
             service_name, self, **connection_kwargs))
+
+    def pubsub(self, **kwargs):
+        """
+        Return a Publish/Subscribe object. With this object, you can
+        subscribe to channels and listen for messages that get published to
+        them.
+        """
+        return PubSub(self.sentinels[0].connection_pool, **kwargs)
