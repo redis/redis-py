@@ -446,11 +446,17 @@ class StrictRedis(object):
             connection_pool = ConnectionPool(**kwargs)
         self.connection_pool = connection_pool
         self._use_lua_lock = None
+        self.closed = False
 
         self.response_callbacks = self.__class__.RESPONSE_CALLBACKS.copy()
 
     def __repr__(self):
         return "%s<%s>" % (type(self).__name__, repr(self.connection_pool))
+
+    def close(self):
+        if not self.closed:
+            self.connection_pool.disconnect()
+            self.closed = True
 
     def set_response_callback(self, command, callback):
         "Set a custom Response Callback"
@@ -476,6 +482,8 @@ class StrictRedis(object):
         while watching all keys specified in `watches`. The 'func' callable
         should expect a single argument which is a Pipeline object.
         """
+        if self.closed:
+            raise ConnectionError("Connection has been closed")
         shard_hint = kwargs.pop('shard_hint', None)
         value_from_callable = kwargs.pop('value_from_callable', False)
         watch_delay = kwargs.pop('watch_delay', None)
@@ -557,11 +565,15 @@ class StrictRedis(object):
         subscribe to channels and listen for messages that get published to
         them.
         """
+        if self.closed:
+            raise ConnectionError("Connection has been closed")
         return PubSub(self.connection_pool, **kwargs)
 
     # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
         "Execute a command and return a parsed response"
+        if self.closed:
+            raise ConnectionError("Connection has been closed")
         pool = self.connection_pool
         command_name = args[0]
         connection = pool.get_connection(command_name, **options)
