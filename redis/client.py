@@ -1,5 +1,6 @@
 from __future__ import with_statement
 from itertools import chain
+import itertools
 import datetime
 import sys
 import warnings
@@ -1366,7 +1367,22 @@ class StrictRedis(object):
             pieces.extend([Token('COUNT'), count])
         return self.execute_command('SCAN', *pieces)
 
-    def scan_iter(self, match=None, count=None):
+    def _scan_iter(self, scan_func, deduplicate=False, **kwargs):
+        if deduplicate:
+            seen = set()
+        cursor = '0'
+        while cursor != 0:
+            cursor, data = scan_func(cursor=cursor, **kwargs)
+            if deduplicate:
+                for item in data:
+                    if item not in seen:
+                        yield item
+                        seen.add(item)
+            else:
+                for item in data:
+                    yield item
+
+    def scan_iter(self, match=None, count=None, deduplicate=False):
         """
         Make an iterator using the SCAN command so that the client doesn't
         need to remember the cursor position.
@@ -1374,12 +1390,38 @@ class StrictRedis(object):
         ``match`` allows for filtering the keys by pattern
 
         ``count`` allows for hint the minimum number of returns
+
+        ``deduplicate`` remembers seen keys and avoids them being returned in
+        duplicate
         """
-        cursor = '0'
-        while cursor != 0:
-            cursor, data = self.scan(cursor=cursor, match=match, count=count)
-            for item in data:
-                yield item
+        return self._scan_iter(self.scan, match=match, count=count)
+
+    def scan_iteritems(self, match=None, count=None, method='get',
+                       deduplicate=False):
+        """
+        Iterate over key-value pairs, for string values by default.
+        Values of the wrong type will be skipped.
+        Wraps the SCAN and GET commands.
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+
+        ``method`` allows this to be used to access types other than strings,
+        such as setting method to ``'hscan_iteritems'`` or ``'llen'``
+
+        ``deduplicate`` remembers seen keys and avoids them being returned in
+        duplicate
+        """
+        if not callable(method):
+            method = getattr(self, method)
+        for key in self.scan_iter(match, count):
+            try:
+                yield key, method(key)
+            except ResponseError as exc:
+                if exc.message.startswith('WRONGTYPE '):
+                    continue
+                raise
 
     def sscan(self, name, cursor=0, match=None, count=None):
         """
@@ -1399,19 +1441,14 @@ class StrictRedis(object):
 
     def sscan_iter(self, name, match=None, count=None):
         """
-        Make an iterator using the SSCAN command so that the client doesn't
-        need to remember the cursor position.
+        Iterate through set elements at the key ``name``.
+        Wraps the SSCAN command.
 
         ``match`` allows for filtering the keys by pattern
 
         ``count`` allows for hint the minimum number of returns
         """
-        cursor = '0'
-        while cursor != 0:
-            cursor, data = self.sscan(name, cursor=cursor,
-                                      match=match, count=count)
-            for item in data:
-                yield item
+        return self._scan_iter(self.sscan, name=name, match=match, count=count)
 
     def hscan(self, name, cursor=0, match=None, count=None):
         """
@@ -1429,21 +1466,36 @@ class StrictRedis(object):
             pieces.extend([Token('COUNT'), count])
         return self.execute_command('HSCAN', *pieces)
 
-    def hscan_iter(self, name, match=None, count=None):
+    def hscan_iter(self, name, match=None, count=None, deduplicate=False):
         """
-        Make an iterator using the HSCAN command so that the client doesn't
-        need to remember the cursor position.
+        Iterate through hash fields for the hash at key ``name``.
+        Wraps the HSCAN command.
 
         ``match`` allows for filtering the keys by pattern
 
         ``count`` allows for hint the minimum number of returns
+
+        ``deduplicate`` remembers seen keys and avoids them being returned in
+        duplicate
         """
-        cursor = '0'
-        while cursor != 0:
-            cursor, data = self.hscan(name, cursor=cursor,
-                                      match=match, count=count)
-            for item in data.items():
-                yield item
+        return self._scan_iter(self.hscan, name=name, match=match, count=count,
+                               deduplicate=deduplicate)
+
+    def hscan_iteritems(self, name, match=None, count=None,
+                        deduplicate=False):
+        """
+        Iterate through hash field-value pairs for the hash at key ``name``.
+        Wraps the HSCAN command.
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+
+        ``deduplicate`` remembers seen keys and avoids them being returned in
+        duplicate
+        """
+        for key in self.hscan_iter(name, match, count, deduplicate):
+            yield key, self.hget(key)
 
     def zscan(self, name, cursor=0, match=None, count=None,
               score_cast_func=float):
@@ -1466,24 +1518,23 @@ class StrictRedis(object):
         return self.execute_command('ZSCAN', *pieces, **options)
 
     def zscan_iter(self, name, match=None, count=None,
-                   score_cast_func=float):
+                   score_cast_func=float, deduplicate=False):
         """
-        Make an iterator using the ZSCAN command so that the client doesn't
-        need to remember the cursor position.
+        Iterate through sorted set elements and their scores at key ``name``.
+        Wraps the ZSCAN command.
 
         ``match`` allows for filtering the keys by pattern
 
         ``count`` allows for hint the minimum number of returns
 
         ``score_cast_func`` a callable used to cast the score return value
+
+        ``deduplicate`` remembers seen keys and avoids them being returned in
+        duplicate
         """
-        cursor = '0'
-        while cursor != 0:
-            cursor, data = self.zscan(name, cursor=cursor, match=match,
-                                      count=count,
-                                      score_cast_func=score_cast_func)
-            for item in data:
-                yield item
+        return self._scan_iter(self.zscan, name=name, match=match, count=count,
+                               score_cast_func=score_cast_func,
+                               deduplicate=deduplicate)
 
     # SET COMMANDS
     def sadd(self, name, *values):
@@ -1643,6 +1694,44 @@ class StrictRedis(object):
             'score_cast_func': score_cast_func
         }
         return self.execute_command(*pieces, **options)
+
+    def zrange_iter(self, name, desc=False, withscores=False, count=10,
+                    score_cast_func=float, deduplicate=False):
+        """
+        Iterate through a sorted set using Z[REV]RANGE.
+
+        Note this does not provide the assurance of ZSCAN that all elements
+        will be returned under concurrent insertions.
+
+        ``desc`` a boolean indicating whether to sort the results descendingly
+
+        ``withscores`` indicates to return the scores along with the values.
+        The return type is a list of (value, score) pairs
+
+        ``count`` is the number of elements to fetch in each batch
+
+        ``score_cast_func`` a callable used to cast the score return value
+
+        ``deduplicate`` remembers seen keys and avoids them being returned in
+        duplicate
+        """
+        if deduplicate:
+            seen = set()
+        for start in itertools.count(0, step=count):
+            batch = self.zrange(name, start, start + count - 1,
+                                desc=desc, withscores=withscores,
+                                score_cast_func=score_cast_func)
+            if not batch:
+                break
+            if deduplicate:
+                for element in batch:
+                    key = element[0] if withscores else element
+                    if key not in seen:
+                        yield element
+                        seen.add(key)
+            else:
+                for element in batch:
+                    yield element
 
     def zrangebylex(self, name, min, max, start=None, num=None):
         """
