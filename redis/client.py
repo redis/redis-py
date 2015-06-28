@@ -1478,8 +1478,20 @@ class StrictRedis(object):
         ``deduplicate`` remembers seen keys and avoids them being returned in
         duplicate
         """
-        return self._scan_iter(self.hscan, name=name, match=match, count=count,
-                               deduplicate=deduplicate)
+        if deduplicate:
+            seen = set()
+        cursor = '0'
+        while cursor != 0:
+            cursor, data = scan_func(cursor=cursor, **kwargs)
+            if deduplicate:
+                for key, value in data.items():
+                    if key not in seen:
+                        yield key, value
+                        seen.add(key)
+            else:
+                for key, value in data.items():
+                    yield key, value
+
 
     def hscan_iteritems(self, name, match=None, count=None,
                         deduplicate=False):
