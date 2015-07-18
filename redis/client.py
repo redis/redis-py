@@ -1565,13 +1565,13 @@ class StrictRedis(object):
         return self.execute_command('SUNIONSTORE', dest, *args)
 
     # SORTED SET COMMANDS
-    def zadd(self, name, *args, **kwargs):
+    def _zaddbasic(self, command_name, key_name, args, kwargs):
         """
         Set any number of score, element-name pairs to the key ``name``. Pairs
         can be specified in two ways:
 
-        As *args, in the form of: score1, name1, score2, name2, ...
-        or as **kwargs, in the form of: name1=score1, name2=score2, ...
+        As args, in the form of: score1, name1, score2, name2, ...
+        or as kwargs, in the form of: name1=score1, name2=score2, ...
 
         The following example would add four values to the 'my-key' key:
         redis.zadd('my-key', 1.1, 'name1', 2.2, 'name2', name3=3.3, name4=4.4)
@@ -1585,7 +1585,30 @@ class StrictRedis(object):
         for pair in iteritems(kwargs):
             pieces.append(pair[1])
             pieces.append(pair[0])
-        return self.execute_command('ZADD', name, *pieces)
+        return self.execute_command(command_name, key_name, *pieces)
+
+    def zadd(self, name, *args, **kwargs):
+        return self._zaddbasic('ZADD', name, args, kwargs)
+
+    def zaddxx(self, name, *args, **kwargs):
+        return self._zaddbasic('ZADDXX', name, args, kwargs)
+
+    def zaddnx(self, name, *args, **kwargs):
+        return self._zaddbasic('ZADDNX', name, args, kwargs)
+
+    def zaddch(self, name, *args, **kwargs):
+        return self._zaddbasic('ZADDCH', name, args, kwargs)
+
+    def zaddincr(self, name, *args, **kwargs):
+        """
+        ZADDINCR allows only pair at most - so it's either (in args and not in kwargs)
+        or (in kwargs but not in args), otherwise that's an error
+        """
+        if (len(args) == 2 and len(kwargs) == 0) or 
+                (len(args) == 0 and len(kwargs) == 1):
+            return self._zaddbasic('ZADDINCR', name, args, kwargs)
+        else
+            raise RedisError("ZADDINCR only accepts one score-element pair")
 
     def zcard(self, name):
         "Return the number of elements in the sorted set ``name``"
@@ -2006,7 +2029,7 @@ class Redis(StrictRedis):
         """
         return self.execute_command('LREM', name, num, value)
 
-    def zadd(self, name, *args, **kwargs):
+    def _zaddbasic(self, command_name, key_name, args, kwargs):
         """
         NOTE: The order of arguments differs from that of the official ZADD
         command. For backwards compatability, this method accepts arguments
@@ -2020,8 +2043,8 @@ class Redis(StrictRedis):
         Set any number of element-name, score pairs to the key ``name``. Pairs
         can be specified in two ways:
 
-        As *args, in the form of: name1, score1, name2, score2, ...
-        or as **kwargs, in the form of: name1=score1, name2=score2, ...
+        As args, in the form of: name1, score1, name2, score2, ...
+        or as kwargs, in the form of: name1=score1, name2=score2, ...
 
         The following example would add four values to the 'my-key' key:
         redis.zadd('my-key', 'name1', 1.1, 'name2', 2.2, name3=3.3, name4=4.4)
@@ -2035,7 +2058,7 @@ class Redis(StrictRedis):
         for pair in iteritems(kwargs):
             pieces.append(pair[1])
             pieces.append(pair[0])
-        return self.execute_command('ZADD', name, *pieces)
+        return self.execute_command(command_name, key_name, *pieces)
 
 
 class PubSub(object):
