@@ -879,6 +879,52 @@ class TestRedisCommands(object):
         r.zadd('a', a1=1, a2=2, a3=3)
         assert r.zrange('a', 0, -1) == [b('a1'), b('a2'), b('a3')]
 
+    @skip_if_server_version_lt('3.0.2')
+    def test_zaddxx_with_empty_set(self, r):
+        key_name = 'first'
+        assert r.zcard(key_name) == 0
+        #zaddxx only updates existing elements
+        assert r.zaddxx(key_name, x=5, y=12, z=27) == 0
+
+    @skip_if_server_version_lt('3.0.2')
+    def test_zaddxx_with_non_empty_set(self, r):
+        key_name = 'non_empty'
+        assert r.zcard(key_name) == 0
+        assert r.zadd(key_name, 5, 'a', 19, 'b', 48, 'c') == 3
+        assert r.zaddxx(key_name, 5, 'a', 59, 'z', 37, 'e') == 2
+
+    @skip_if_server_version_lt('3.0.2')
+    def test_zaddnx_with_empty_set(self, r):
+        key_name = 'empty_one'
+        assert r.zcard(key_name) == 0
+        assert r.zaddnx(key_name, ping=1, pong=4) == 2
+
+    @skip_if_server_version_lt('3.0.2')
+    def test_zaddnx_with_non_empty_set(self, r):
+        key_name = 'non_empty'
+        assert r.zadd(key_name, b1=6, b2=9, b3=17) == 3
+        assert r.zaddnx(key_name, b1=10, b3=11) == 0
+        assert r.zaddnx(key_name, b3=15, t1=50, t2=65) == 2
+
+    @skip_if_server_version_lt('3.0.2')
+    def test_zaddch_when_updating_score(self, r):
+        key_name = 'updating_score'
+        assert r.zadd(key_name, rev=12, time=80) == 2
+        assert r.zaddch(key_name, rev=15, visits=120) == 2
+
+    @skip_if_server_version_lt('3.0.2')
+    def test_zaddch_when_not_updating_score(self, r):
+        key_name = 'not_updating_score'
+        assert r.zadd(key_name, commit_count=50, status=4) == 2
+        assert r.zaddch(key_name, year=2010, repo=5) == 2
+
+    @skip_if_server_version_lt('3.0.2')
+    def test_zaddincr(self, r):
+        key_name = 'search_results'
+        assert r.zadd(key_name, id15=0.2, id7=0.57) == 2
+        assert r.zaddincr(key_name, id60=5) == 5
+        assert r.zaddincr(key_name, id15=4) == 4.2
+
     def test_zcard(self, r):
         r.zadd('a', a1=1, a2=2, a3=3)
         assert r.zcard('a') == 3
