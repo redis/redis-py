@@ -1604,10 +1604,10 @@ class StrictRedis(object):
         ZADDINCR allows only pair at most - so it's either (in args and not in kwargs)
         or (in kwargs but not in args), otherwise that's an error
         """
-        if (len(args) == 2 and len(kwargs) == 0) or 
-                (len(args) == 0 and len(kwargs) == 1):
+        if ((len(args) == 2 and len(kwargs) == 0) or 
+                (len(args) == 0 and len(kwargs) == 1)):
             return self._zaddbasic('ZADDINCR', name, args, kwargs)
-        else
+        else:
             raise RedisError("ZADDINCR only accepts one score-element pair")
 
     def zcard(self, name):
