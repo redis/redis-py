@@ -883,7 +883,7 @@ class TestRedisCommands(object):
     def test_zaddxx_with_empty_set(self, r):
         key_name = 'first'
         assert r.zcard(key_name) == 0
-        #zaddxx only updates existing elements
+        # zaddxx only updates existing elements
         assert r.zaddxx(key_name, x=5, y=12, z=27) == 0
 
     @skip_if_server_version_lt('3.0.2')

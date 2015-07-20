@@ -297,8 +297,9 @@ class StrictRedis(object):
         string_keys_to_dict(
             'BITCOUNT BITPOS DECRBY DEL GETBIT HDEL HLEN INCRBY LINSERT LLEN '
             'LPUSHX PFADD PFCOUNT RPUSHX SADD SCARD SDIFFSTORE SETBIT '
-            'SETRANGE SINTERSTORE SREM STRLEN SUNIONSTORE ZADD ZADDXX XADDNX XADDCH XADDINCR ZCARD '
-            'ZLEXCOUNT ZREM ZREMRANGEBYLEX ZREMRANGEBYRANK ZREMRANGEBYSCORE',
+            'SETRANGE SINTERSTORE SREM STRLEN SUNIONSTORE ZADD ZADDXX XADDNX '
+            'XADDCH XADDINCR ZCARD ZLEXCOUNT ZREM ZREMRANGEBYLEX '
+            'ZREMRANGEBYRANK ZREMRANGEBYSCORE',
             int
         ),
         string_keys_to_dict('INCRBYFLOAT HINCRBYFLOAT', float),
@@ -1601,10 +1602,11 @@ class StrictRedis(object):
 
     def zaddincr(self, name, *args, **kwargs):
         """
-        ZADDINCR allows only pair at most - so it's either (in args and not in kwargs)
+        ZADDINCR allows only pair at most - so it's either
+        (in args and not in kwargs)
         or (in kwargs but not in args), otherwise that's an error
         """
-        if ((len(args) == 2 and len(kwargs) == 0) or 
+        if ((len(args) == 2 and len(kwargs) == 0) or
                 (len(args) == 0 and len(kwargs) == 1)):
             return self._zaddbasic('ZADDINCR', name, args, kwargs)
         else:
