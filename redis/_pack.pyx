@@ -57,6 +57,8 @@ cdef bytes _encode(self, value):
         return value
     elif isinstance(value, float):
         return simple_bytes(repr(value))
+    elif isinstance(value, bool):
+        return str(value)
     elif isinstance(value, (int, long)):
         return int_to_decimal_bytes(value)
     elif not isinstance(value, basestring):
