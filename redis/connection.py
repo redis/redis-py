@@ -532,9 +532,16 @@ class Connection(object):
         "Send an already packed command to the Redis server"
         if not self._sock:
             self.connect()
+        python_version = sys.version_info.major
         try:
-            if isinstance(command, str):
-                command = [command]
+            if isinstance(command, str): #Works in Python 2 only, must be <class 'bytes'> in 3
+                if python_version == 2: 
+                    command = [command]
+                elif python_version == 3:
+                    raise TypeError("Expected <class 'bytes'> argument, got string instead."\
+                                    + " Use string.encode(encoding) method to convert the argument before passing.")
+            elif isinstance(command, bytes): #Works both in Python 2 and 3
+                    command = [command]
             for item in command:
                 self._sock.sendall(item)
         except socket.timeout:
