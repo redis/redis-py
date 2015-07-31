@@ -533,18 +533,21 @@ class Connection(object):
         if not self._sock:
             self.connect()
         try:
-            python_version = sys.version_info.major  #Python 2.7 and above
-        except AttributeError:  #Below 2.7
+            python_version = sys.version_info.major  # Python 2.7 and above
+        except AttributeError:  # Below 2.7
             python_version = sys.version_info[0]
         try:
-            if isinstance(command, str):  #Works in Python 2 only, must be <class 'bytes'> in 3
+            if isinstance(command, str):
+            # Works in Python 2 only, must be <class 'bytes'> in 3
                 if python_version == 2:
                     command = [command]
                 elif python_version == 3:
-                    raise TypeError("Expected <class 'bytes'> argument, got string instead."\
-                                    + " Use string.encode(encoding) method to convert the"\
+                    raise TypeError("Expected <class 'bytes'> argument,"\
+                                    + " got string instead."\
+                                    + " Use string.encode(encoding) method"\
+                                    + " to convert the"\
                                     + " argument before passing.")
-            elif isinstance(command, bytes):  #Works both in Python 2 and 3
+            elif isinstance(command, bytes):  # Works both in Python 2 and 3
                     command = [command]
             for item in command:
                 self._sock.sendall(item)
