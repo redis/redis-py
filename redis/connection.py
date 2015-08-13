@@ -742,9 +742,14 @@ class ConnectionPool(object):
             unix://[:password]@/path/to/socket.sock?db=0
 
         Three URL schemes are supported:
-            redis:// creates a normal TCP socket connection
-            rediss:// creates a SSL wrapped TCP socket connection
-            unix:// creates a Unix Domain Socket connection
+
+        - ```redis://``
+          <http://www.iana.org/assignments/uri-schemes/prov/redis>`_ creates a
+          normal TCP socket connection
+        - ```rediss://``
+          <http://www.iana.org/assignments/uri-schemes/prov/rediss>`_ creates a
+          SSL wrapped TCP socket connection
+        - ``unix://`` creates a Unix Domain Socket connection
 
         There are several ways to specify a database number. The parse function
         will return the first specified option:
