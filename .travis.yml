@@ -1,5 +1,7 @@
 language: python
 python:
+  - "pypy3"
+  - "pypy"
   - "3.3"
   - "3.2"
   - "2.7"
