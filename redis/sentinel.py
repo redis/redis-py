@@ -4,7 +4,8 @@ import weakref
 
 from redis.client import StrictRedis
 from redis.connection import ConnectionPool, Connection
-from redis.exceptions import ConnectionError, ResponseError, ReadOnlyError, TimeoutError
+from redis.exceptions import (ConnectionError, ResponseError, ReadOnlyError,
+                              TimeoutError)
 from redis._compat import iteritems, nativestr, xrange
 
 
