@@ -175,7 +175,9 @@ class Sentinel(object):
                                     if k.startswith('socket_')
                                     ])
         self.sentinel_kwargs = sentinel_kwargs
-
+        
+        # Round-robin sentinel nodes balancer
+        random.shuffle(sentinels)
         self.sentinels = [StrictRedis(hostname, port, **self.sentinel_kwargs)
                           for hostname, port in sentinels]
         self.min_other_sentinels = min_other_sentinels
