@@ -73,13 +73,8 @@ def convertToNumber(a):
                 t=1
 
     if t == 1:
-        a = float(a)
-    else:
-        print("a:", type(a), a)
-        a = int(a)
-        print("a2:", type(a), a)
-
-    return a
+        return float(a)
+    return int(a)
 
 
 class Token(object):
