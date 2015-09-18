@@ -283,8 +283,6 @@ class PythonParser(BaseParser):
         if isinstance(response, bytes) and self.encoding:
             response = response.decode(self.encoding)
             response = convertToNumber(response)
-            #if response.isdecimal():
-                #response = int(response)
         return response
 
 
@@ -395,7 +393,6 @@ class HiredisParser(BaseParser):
         
 
         if isinstance(response, list):
-            #response = [(not v) or ((not v.isdecimal()) and v or int(v)) for v in response]
             response = [(not v and v or convertToNumber(v)) for v in response]
         return response
 
