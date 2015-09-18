@@ -265,6 +265,8 @@ class PythonParser(BaseParser):
             response = [self.read_response() for i in xrange(length)]
         if isinstance(response, bytes) and self.encoding:
             response = response.decode(self.encoding)
+            if response.isdecimal():
+                response = int(response)
         return response
 
 
@@ -372,6 +374,10 @@ class HiredisParser(BaseParser):
         elif isinstance(response, list) and response and \
                 isinstance(response[0], ConnectionError):
             raise response[0]
+        
+
+        if isinstance(response, list):
+            response = [(not v) or ((not v.isdecimal()) and v or int(v)) for v in response]
         return response
 
 if HIREDIS_AVAILABLE:
