@@ -15,6 +15,10 @@
       to the master when the connection pool resets. Thanks
       https://github.com/df3n5
     * Better timeout support in Pubsub get_message. Thanks Andy Isaacson.
+    * Fixed a bug with the HiredisParser that would cause the parser to
+      get stuck in an endless loop if a specific number of bytes were
+      delivered from the socket. This fix also increases performance of
+      parsing large responses from the Redis server.
 * 2.10.3
     * Fixed a bug with the bytearray support introduced in 2.10.2. Thanks
       Josh Owen.

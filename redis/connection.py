@@ -346,15 +346,6 @@ class HiredisParser(BaseParser):
                 self._reader.feed(self._buffer, 0, bufflen)
             else:
                 self._reader.feed(buffer)
-            # proactively, but not conclusively, check if more data is in the
-            # buffer. if the data received doesn't end with \r\n, there's more.
-            if HIREDIS_USE_BYTE_BUFFER:
-                if bufflen > 2 and \
-                        self._buffer[bufflen - 2:bufflen] != SYM_CRLF:
-                    continue
-            else:
-                if not buffer.endswith(SYM_CRLF):
-                    continue
             response = self._reader.gets()
         # if an older version of hiredis is installed, we need to attempt
         # to convert ResponseErrors to their appropriate types.
