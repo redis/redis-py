@@ -59,7 +59,8 @@ def string_keys_to_dict(key_string, callback):
 
 def dict_merge(*dicts):
     merged = {}
-    [merged.update(d) for d in dicts]
+    for d in dicts:
+        merged.update(d)
     return merged
 
 
