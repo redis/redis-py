@@ -23,22 +23,29 @@ if sys.version_info[0] < 3:
             ascii_text = str(obj).encode('string_escape')
             return unicode(ascii_text)
 
-    def iteritems(x): return x.iteritems()
+    def iteritems(x):
+        return x.iteritems()
 
-    def iterkeys(x): return x.iterkeys()
+    def iterkeys(x):
+        return x.iterkeys()
 
-    def itervalues(x): return x.itervalues()
+    def itervalues(x):
+        return x.itervalues()
 
     def nativestr(x):
         return x if isinstance(x, str) else x.encode('utf-8', 'replace')
 
-    def u(x): return x.decode()
+    def u(x):
+        return x.decode()
 
-    def b(x): return x
+    def b(x):
+        return x
 
-    def next(x): return x.next()
+    def next(x):
+        return x.next()
 
-    def byte_to_chr(x): return x
+    def byte_to_chr(x):
+        return x
 
     unichr = unichr
     xrange = xrange
@@ -52,20 +59,26 @@ else:
     from string import ascii_letters
     from queue import Queue
 
-    def iteritems(x): return iter(x.items())
+    def iteritems(x):
+        return iter(x.items())
 
-    def iterkeys(x): return iter(x.keys())
+    def iterkeys(x):
+        return iter(x.keys())
 
-    def itervalues(x): return iter(x.values())
+    def itervalues(x):
+        return iter(x.values())
 
-    def byte_to_chr(x): return chr(x)
+    def byte_to_chr(x):
+        return chr(x)
 
     def nativestr(x):
         return x if isinstance(x, str) else x.decode('utf-8', 'replace')
 
-    def u(x): return x
+    def u(x):
+        return x
 
-    def b(x): return x.encode('latin-1') if not isinstance(x, bytes) else x
+    def b(x):
+        return x.encode('latin-1') if not isinstance(x, bytes) else x
 
     next = next
     unichr = chr
