@@ -211,7 +211,7 @@ class Sentinel(object):
         for sentinel_no, sentinel in enumerate(self.sentinels):
             try:
                 masters = sentinel.sentinel_masters()
-            except ConnectionError:
+            except (ConnectionError, ResponseError):
                 continue
             state = masters.get(service_name)
             if state and self.check_master_state(state, service_name):
