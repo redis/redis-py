@@ -2317,10 +2317,11 @@ class PubSub(object):
     UNSUBSCRIBE_MESSAGE_TYPES = ('unsubscribe', 'punsubscribe')
 
     def __init__(self, connection_pool, shard_hint=None,
-                 ignore_subscribe_messages=False):
+                 ignore_subscribe_messages=False, close_on_error=False):
         self.connection_pool = connection_pool
         self.shard_hint = shard_hint
         self.ignore_subscribe_messages = ignore_subscribe_messages
+        self.close_on_error = close_on_error
         self.connection = None
         # we need to know the encoding options for this connection in order
         # to lookup channel and pattern names for callback handlers.
@@ -2413,6 +2414,8 @@ class PubSub(object):
             return command(*args)
         except (ConnectionError, TimeoutError) as e:
             connection.disconnect()
+            if self.close_on_error:
+                raise
             if not connection.retry_on_timeout and isinstance(e, TimeoutError):
                 raise
             # Connect manually here. If the Redis server is down, this will
