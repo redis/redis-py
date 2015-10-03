@@ -409,7 +409,8 @@ class Connection(object):
                  socket_keepalive=False, socket_keepalive_options=None,
                  retry_on_timeout=False, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
-                 parser_class=DefaultParser, socket_read_size=65536):
+                 parser_class=DefaultParser, socket_read_size=65536,
+                 client_name=None):
         self.pid = os.getpid()
         self.host = host
         self.port = int(port)
@@ -423,6 +424,7 @@ class Connection(object):
         self.encoding = encoding
         self.encoding_errors = encoding_errors
         self.decode_responses = decode_responses
+        self.client_name = client_name
         self._sock = None
         self._parser = parser_class(socket_read_size=socket_read_size)
         self._description_args = {
@@ -537,6 +539,12 @@ class Connection(object):
             self.send_command('SELECT', self.db)
             if nativestr(self.read_response()) != 'OK':
                 raise ConnectionError('Invalid Database')
+
+        # if a client name is specified, set it
+        if self.client_name:
+            self.send_command('CLIENT SETNAME', self.client_name)
+            # raises redis.exceptions.ResponseError for invalid client names
+            self.read_response()
 
     def disconnect(self):
         "Disconnects from the Redis server"

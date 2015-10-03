@@ -490,3 +490,12 @@ class TestConnection(object):
             'UnixDomainSocketConnection',
             'path=/path/to/socket,db=0',
         )
+
+    def test_on_reconnect_set_client_name(self):
+        name = 'my-client-name'
+        connection = redis.Redis(client_name=name)
+        assert connection.client_getname() == name
+        connection.client_kill([client['addr']
+                               for client in connection.client_list()
+                               if client['name'] == name][0])
+        assert connection.client_getname() == name
