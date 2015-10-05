@@ -59,6 +59,16 @@ class TestLock(object):
             assert sr.get('foo') == lock.local.token
         assert sr.get('foo') is None
 
+    def test_context_manager_failed_acquire(self, sr):
+        # Ensure context manager block isn't run when lock can't be acquired.
+        run = False
+        sr.setnx("foo", "bar")
+        with pytest.raises(LockError) as excinfo:
+            with self.get_lock(sr, 'foo', blocking_timeout=0.2) as lock:
+                run = True
+        assert str(excinfo.value) == "unable to acquire lock"
+        assert run is False
+
     def test_high_sleep_raises_error(self, sr):
         "If sleep is higher than timeout, it should raise an error"
         with pytest.raises(LockError):

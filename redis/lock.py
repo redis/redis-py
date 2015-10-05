@@ -81,7 +81,8 @@ class Lock(object):
     def __enter__(self):
         # force blocking, as otherwise the user would have to check whether
         # the lock was actually acquired or not.
-        self.acquire(blocking=True)
+        if not self.acquire(blocking=True):
+            raise LockError("unable to acquire lock")
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
