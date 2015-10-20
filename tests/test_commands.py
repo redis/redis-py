@@ -959,6 +959,17 @@ class TestRedisCommands(object):
         assert r.zrangebylex('a', '[f', '+') == [b('f'), b('g')]
         assert r.zrangebylex('a', '-', '+', start=3, num=2) == [b('d'), b('e')]
 
+    @skip_if_server_version_lt('2.9.9')
+    def test_zrevrangebylex(self, r):
+        r.zadd('a', a=0, b=0, c=0, d=0, e=0, f=0, g=0)
+        assert r.zrevrangebylex('a', '[c', '-') == [b('c'), b('b'), b('a')]
+        assert r.zrevrangebylex('a', '(c', '-') == [b('b'), b('a')]
+        assert r.zrevrangebylex('a', '(g', '[aaa') == \
+            [b('f'), b('e'), b('d'), b('c'), b('b')]
+        assert r.zrevrangebylex('a', '+', '[f') == [b('g'), b('f')]
+        assert r.zrevrangebylex('a', '+', '-', start=3, num=2) == \
+            [b('d'), b('c')]
+
     def test_zrangebyscore(self, r):
         r.zadd('a', a1=1, a2=2, a3=3, a4=4, a5=5)
         assert r.zrangebyscore('a', 2, 4) == [b('a2'), b('a3'), b('a4')]
