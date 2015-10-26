@@ -97,7 +97,10 @@ class BaseParser(object):
             response = response[len(error_code) + 1:]
             exception_class = self.EXCEPTION_CLASSES[error_code]
             if isinstance(exception_class, dict):
-                return exception_class.get(response, exception_class['default'])(response)
+                return exception_class.get(
+                    response,
+                    exception_class['default']
+                )(response)
             else:
                 return exception_class(response)
         return ResponseError(response)
