@@ -1,4 +1,4 @@
-* 2.10.4 (in development)
+* 2.10.4
     * Allow URL encoded parameters in Redis URLs. Characters like a "/" can
       now be URL encoded and redis-py will correctly decode them. Thanks
       Paul Keene.
