@@ -80,7 +80,10 @@ class Token(object):
 
 class BaseParser(object):
     EXCEPTION_CLASSES = {
-        'ERR': ResponseError,
+        'ERR': {
+            'default': ResponseError,
+            'max number of clients reached': ConnectionError
+        },
         'EXECABORT': ExecAbortError,
         'LOADING': BusyLoadingError,
         'NOSCRIPT': NoScriptError,
@@ -92,7 +95,14 @@ class BaseParser(object):
         error_code = response.split(' ')[0]
         if error_code in self.EXCEPTION_CLASSES:
             response = response[len(error_code) + 1:]
-            return self.EXCEPTION_CLASSES[error_code](response)
+            exception_class = self.EXCEPTION_CLASSES[error_code]
+            if isinstance(exception_class, dict):
+                return exception_class.get(
+                    response,
+                    exception_class['default']
+                )(response)
+            else:
+                return exception_class(response)
         return ResponseError(response)
 
 
