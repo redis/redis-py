@@ -401,7 +401,7 @@ class StrictRedis(object):
                  decode_responses=False, retry_on_timeout=False,
                  ssl=False, ssl_keyfile=None, ssl_certfile=None,
                  ssl_cert_reqs=None, ssl_ca_certs=None,
-                 max_connections=10000):
+                 max_connections=None):
         if not connection_pool:
             if charset is not None:
                 warnings.warn(DeprecationWarning(

@@ -21,7 +21,9 @@
       parsing large responses from the Redis server.
     * Added support for ZREVRANGEBYLEX.
     * ConnectionErrors are now raised if Redis refuses a connection due to
-      the maxclients limit being exceeded.
+      the maxclients limit being exceeded. Thanks Roman Karpovich.
+    * max_connections can now be set when instantiating client instances.
+      Thanks Ohad Perry.
 * 2.10.3
     * Fixed a bug with the bytearray support introduced in 2.10.2. Thanks
       Josh Owen.
