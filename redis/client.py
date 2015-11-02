@@ -400,7 +400,8 @@ class StrictRedis(object):
                  charset=None, errors=None,
                  decode_responses=False, retry_on_timeout=False,
                  ssl=False, ssl_keyfile=None, ssl_certfile=None,
-                 ssl_cert_reqs=None, ssl_ca_certs=None):
+                 ssl_cert_reqs=None, ssl_ca_certs=None,
+                 max_connections=10000):
         if not connection_pool:
             if charset is not None:
                 warnings.warn(DeprecationWarning(
@@ -418,7 +419,8 @@ class StrictRedis(object):
                 'encoding': encoding,
                 'encoding_errors': encoding_errors,
                 'decode_responses': decode_responses,
-                'retry_on_timeout': retry_on_timeout
+                'retry_on_timeout': retry_on_timeout,
+                'max_connections': max_connections
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
