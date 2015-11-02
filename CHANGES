@@ -20,6 +20,8 @@
       delivered from the socket. This fix also increases performance of
       parsing large responses from the Redis server.
     * Added support for ZREVRANGEBYLEX.
+    * ConnectionErrors are now raised if Redis refuses a connection due to
+      the maxclients limit being exceeded.
 * 2.10.3
     * Fixed a bug with the bytearray support introduced in 2.10.2. Thanks
       Josh Owen.
