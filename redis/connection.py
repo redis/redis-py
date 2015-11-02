@@ -548,11 +548,12 @@ class Connection(object):
             e = sys.exc_info()[1]
             self.disconnect()
             if len(e.args) == 1:
-                _errno, errmsg = 'UNKNOWN', e.args[0]
+                errno, errmsg = 'UNKNOWN', e.args[0]
             else:
-                _errno, errmsg = e.args
+                errno = e.args[0]
+                errmsg = e.args[1]
             raise ConnectionError("Error %s while writing to socket. %s." %
-                                  (_errno, errmsg))
+                                  (errno, errmsg))
         except:
             self.disconnect()
             raise
