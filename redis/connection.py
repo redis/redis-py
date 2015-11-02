@@ -185,8 +185,16 @@ class SocketBuffer(object):
         self.bytes_read = 0
 
     def close(self):
-        self.purge()
-        self._buffer.close()
+        try:
+            self.purge()
+            self._buffer.close()
+        except:
+            # issue #633 suggests the purge/close someone raised a
+            # BadFileDescriptor error. Perhaps the client ran out of
+            # memory or something else? It's probably OK to ignore
+            # any error being raised from purge/close since we're
+            # removing the the reference to the instance below.
+            pass
         self._buffer = None
         self._sock = None
 
