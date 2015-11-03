@@ -1,4 +1,4 @@
-* 2.10.4
+* 2.10.5
     * Allow URL encoded parameters in Redis URLs. Characters like a "/" can
       now be URL encoded and redis-py will correctly decode them. Thanks
       Paul Keene.
@@ -24,6 +24,8 @@
       the maxclients limit being exceeded. Thanks Roman Karpovich.
     * max_connections can now be set when instantiating client instances.
       Thanks Ohad Perry.
+* 2.10.4
+    (skipped due to a PyPI snafu)
 * 2.10.3
     * Fixed a bug with the bytearray support introduced in 2.10.2. Thanks
       Josh Owen.
