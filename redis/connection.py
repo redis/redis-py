@@ -437,6 +437,8 @@ class Connection(object):
             return
         try:
             sock = self._connect()
+        except socket.timeout:
+            raise TimeoutError("Timeout connecting to server")
         except socket.error:
             e = sys.exc_info()[1]
             raise ConnectionError(self._error_message(e))
