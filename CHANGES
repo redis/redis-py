@@ -1,3 +1,6 @@
+* 2.10.6 (in development)
+    * Socket timeouts when connecting to a server are now properly raised
+      as TimeoutErrors.
 * 2.10.5
     * Allow URL encoded parameters in Redis URLs. Characters like a "/" can
       now be URL encoded and redis-py will correctly decode them. Thanks
