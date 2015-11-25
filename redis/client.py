@@ -885,7 +885,7 @@ class StrictRedis(object):
         doesn't exist.
         """
         value = self.get(name)
-        if value:
+        if value is not None:
             return value
         raise KeyError(name)
 

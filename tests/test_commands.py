@@ -341,6 +341,10 @@ class TestRedisCommands(object):
         with pytest.raises(KeyError):
             r['a']
 
+    def test_getitem_does_not_raise_keyerror_for_empty_string(self, r):
+        r['a'] = b("")
+        assert r['a'] == b("")
+
     def test_get_set_bit(self, r):
         # no value
         assert not r.getbit('a', 5)
