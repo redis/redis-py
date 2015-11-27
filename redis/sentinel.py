@@ -4,7 +4,8 @@ import weakref
 
 from redis.client import StrictRedis
 from redis.connection import ConnectionPool, Connection
-from redis.exceptions import ConnectionError, ResponseError, ReadOnlyError
+from redis.exceptions import (ConnectionError, ResponseError, ReadOnlyError,
+                              TimeoutError)
 from redis._compat import iteritems, nativestr, xrange
 
 
@@ -211,7 +212,7 @@ class Sentinel(object):
         for sentinel_no, sentinel in enumerate(self.sentinels):
             try:
                 masters = sentinel.sentinel_masters()
-            except ConnectionError:
+            except (ConnectionError, TimeoutError):
                 continue
             state = masters.get(service_name)
             if state and self.check_master_state(state, service_name):
@@ -235,7 +236,7 @@ class Sentinel(object):
         for sentinel in self.sentinels:
             try:
                 slaves = sentinel.sentinel_slaves(service_name)
-            except (ConnectionError, ResponseError):
+            except (ConnectionError, ResponseError, TimeoutError):
                 continue
             slaves = self.filter_slaves(slaves)
             if slaves:
