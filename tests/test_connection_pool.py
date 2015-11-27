@@ -31,28 +31,28 @@ class TestConnectionPool(object):
     def test_connection_creation(self):
         connection_kwargs = {'foo': 'bar', 'biz': 'baz'}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
-        connection = pool.get_connection('_')
+        connection = pool.get_connection()
         assert isinstance(connection, DummyConnection)
         assert connection.kwargs == connection_kwargs
 
     def test_multiple_connections(self):
         pool = self.get_pool()
-        c1 = pool.get_connection('_')
-        c2 = pool.get_connection('_')
+        c1 = pool.get_connection()
+        c2 = pool.get_connection()
         assert c1 != c2
 
     def test_max_connections(self):
         pool = self.get_pool(max_connections=2)
-        pool.get_connection('_')
-        pool.get_connection('_')
+        pool.get_connection()
+        pool.get_connection()
         with pytest.raises(redis.ConnectionError):
-            pool.get_connection('_')
+            pool.get_connection()
 
     def test_reuse_previously_released_connection(self):
         pool = self.get_pool()
-        c1 = pool.get_connection('_')
+        c1 = pool.get_connection()
         pool.release(c1)
-        c2 = pool.get_connection('_')
+        c2 = pool.get_connection()
         assert c1 == c2
 
     def test_repr_contains_db_info_tcp(self):
@@ -82,24 +82,24 @@ class TestBlockingConnectionPool(object):
     def test_connection_creation(self):
         connection_kwargs = {'foo': 'bar', 'biz': 'baz'}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
-        connection = pool.get_connection('_')
+        connection = pool.get_connection()
         assert isinstance(connection, DummyConnection)
         assert connection.kwargs == connection_kwargs
 
     def test_multiple_connections(self):
         pool = self.get_pool()
-        c1 = pool.get_connection('_')
-        c2 = pool.get_connection('_')
+        c1 = pool.get_connection()
+        c2 = pool.get_connection()
         assert c1 != c2
 
     def test_connection_pool_blocks_until_timeout(self):
         "When out of connections, block for timeout seconds, then raise"
         pool = self.get_pool(max_connections=1, timeout=0.1)
-        pool.get_connection('_')
+        pool.get_connection()
 
         start = time.time()
         with pytest.raises(redis.ConnectionError):
-            pool.get_connection('_')
+            pool.get_connection()
         # we should have waited at least 0.1 seconds
         assert time.time() - start >= 0.1
 
@@ -109,7 +109,7 @@ class TestBlockingConnectionPool(object):
         to the pool
         """
         pool = self.get_pool(max_connections=1, timeout=2)
-        c1 = pool.get_connection('_')
+        c1 = pool.get_connection()
 
         def target():
             time.sleep(0.1)
@@ -117,14 +117,14 @@ class TestBlockingConnectionPool(object):
 
         Thread(target=target).start()
         start = time.time()
-        pool.get_connection('_')
+        pool.get_connection()
         assert time.time() - start >= 0.1
 
     def test_reuse_previously_released_connection(self):
         pool = self.get_pool()
-        c1 = pool.get_connection('_')
+        c1 = pool.get_connection()
         pool.release(c1)
-        c2 = pool.get_connection('_')
+        c2 = pool.get_connection()
         assert c1 == c2
 
     def test_repr_contains_db_info_tcp(self):
@@ -351,15 +351,15 @@ class TestSSLConnectionURLParsing(object):
     def test_cert_reqs_options(self):
         import ssl
         pool = redis.ConnectionPool.from_url('rediss://?ssl_cert_reqs=none')
-        assert pool.get_connection('_').cert_reqs == ssl.CERT_NONE
+        assert pool.get_connection().cert_reqs == ssl.CERT_NONE
 
         pool = redis.ConnectionPool.from_url(
             'rediss://?ssl_cert_reqs=optional')
-        assert pool.get_connection('_').cert_reqs == ssl.CERT_OPTIONAL
+        assert pool.get_connection().cert_reqs == ssl.CERT_OPTIONAL
 
         pool = redis.ConnectionPool.from_url(
             'rediss://?ssl_cert_reqs=required')
-        assert pool.get_connection('_').cert_reqs == ssl.CERT_REQUIRED
+        assert pool.get_connection().cert_reqs == ssl.CERT_REQUIRED
 
 
 class TestConnection(object):

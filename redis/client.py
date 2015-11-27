@@ -567,7 +567,7 @@ class StrictRedis(object):
         "Execute a command and return a parsed response"
         pool = self.connection_pool
         command_name = args[0]
-        connection = pool.get_connection(command_name, **options)
+        connection = pool.get_connection()
         try:
             connection.send_command(*args)
             return self.parse_response(connection, command_name, **options)
@@ -2076,7 +2076,7 @@ class PubSub(object):
         self.connection = None
         # we need to know the encoding options for this connection in order
         # to lookup channel and pattern names for callback handlers.
-        conn = connection_pool.get_connection('pubsub', shard_hint)
+        conn = connection_pool.get_connection()
         try:
             self.encoding = conn.encoding
             self.encoding_errors = conn.encoding_errors
@@ -2150,10 +2150,7 @@ class PubSub(object):
         # subscribed to one or more channels
 
         if self.connection is None:
-            self.connection = self.connection_pool.get_connection(
-                'pubsub',
-                self.shard_hint
-            )
+            self.connection = self.connection_pool.get_connection()
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
@@ -2453,8 +2450,7 @@ class BasePipeline(object):
         conn = self.connection
         # if this is the first call, we need a connection
         if not conn:
-            conn = self.connection_pool.get_connection(command_name,
-                                                       self.shard_hint)
+            conn = self.connection_pool.get_connection()
             self.connection = conn
         try:
             conn.send_command(*args)
@@ -2616,8 +2612,7 @@ class BasePipeline(object):
 
         conn = self.connection
         if not conn:
-            conn = self.connection_pool.get_connection('MULTI',
-                                                       self.shard_hint)
+            conn = self.connection_pool.get_connection()
             # assign to self.connection so reset() releases the connection
             # back to the pool after we're done
             self.connection = conn
