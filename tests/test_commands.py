@@ -1338,6 +1338,56 @@ class TestRedisCommands(object):
         assert r.lrange('sorted', 0, 10) == \
             [b('vodka'), b('milk'), b('gin'), b('apple juice')]
 
+    def test_cluster_addslots(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('ADDSLOTS', 1) == True
+
+    def test_cluster_count_failure_reports(self, mock_cluster_resp_int):
+        assert isinstance(mock_cluster_resp_int.cluster(
+            'COUNT-FAILURE-REPORTS', 'node'), int)
+
+    def test_cluster_countkeysinslot(self, mock_cluster_resp_int):
+        assert isinstance(mock_cluster_resp_int.cluster(
+            'COUNTKEYSINSLOT', 2), int)
+
+    def test_cluster_delslots(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('DELSLOTS', 1) == True
+
+    def test_cluster_failover(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('FAILOVER', 1) == True
+
+    def test_cluster_forget(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('FORGET', 1) == True
+
+    def test_cluster_info(self, mock_cluster_resp_info):
+        assert isinstance(mock_cluster_resp_info.cluster('info'), dict)
+
+    def test_cluster_keyslot(self, mock_cluster_resp_int):
+        assert isinstance(mock_cluster_resp_int.cluster(
+            'keyslot', 'asdf'), int)
+
+    def test_cluster_meet(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('meet', 'ip', 'port', 1) == True
+
+    def test_cluster_nodes(self, mock_cluster_resp_nodes):
+        assert isinstance(mock_cluster_resp_nodes.cluster('nodes'), dict)
+
+    def test_cluster_replicate(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('replicate', 'nodeid') == True
+
+    def test_cluster_reset(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('reset', 'hard') == True
+
+    def test_cluster_saveconfig(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('saveconfig') == True
+
+    def test_cluster_setslot(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('setslot', 1,
+                                            'IMPORTING', 'nodeid') == True
+
+    def test_cluster_slaves(self, mock_cluster_resp_slaves):
+        assert isinstance(mock_cluster_resp_slaves.cluster(
+            'slaves', 'nodeid'), dict)
+
 
 class TestStrictCommands(object):
 

@@ -279,6 +279,35 @@ def parse_slowlog_get(response, **options):
     } for item in response]
 
 
+def parse_cluster_info(response, **options):
+    return dict([line.split(':') for line in response.splitlines() if line])
+
+
+def _parse_node_line(line):
+    line_items = line.split(' ')
+    node_id, addr, flags, master_id, ping, pong, epoch, \
+        connected = line.split(' ')[:8]
+    slots = [sl.split('-') for sl in line_items[8:]]
+    node_dict = {
+        'node_id': node_id,
+        'flags': flags,
+        'master_id': master_id,
+        'last_ping_sent': ping,
+        'last_pong_rcvd': pong,
+        'epoch': epoch,
+        'slots': slots,
+        'connected': True if connected == 'connected' else False
+    }
+    return addr, node_dict
+
+
+def parse_cluster_nodes(response, **options):
+    raw_lines = response
+    if isinstance(response, basestring):
+        raw_lines = response.splitlines()
+    return dict([_parse_node_line(line) for line in raw_lines])
+
+
 class StrictRedis(object):
     """
     Implementation of the Redis protocol.
@@ -361,7 +390,23 @@ class StrictRedis(object):
             'SLOWLOG RESET': bool_ok,
             'SSCAN': parse_scan,
             'TIME': lambda x: (int(x[0]), int(x[1])),
-            'ZSCAN': parse_zscan
+            'ZSCAN': parse_zscan,
+            'CLUSTER ADDSLOTS': bool_ok,
+            'CLUSTER COUNT-FAILURE-REPORTS': lambda x: int(x),
+            'CLUSTER COUNTKEYSINSLOT': lambda x: int(x),
+            'CLUSTER DELSLOTS': bool_ok,
+            'CLUSTER FAILOVER': bool_ok,
+            'CLUSTER FORGET': bool_ok,
+            'CLUSTER INFO': parse_cluster_info,
+            'CLUSTER KEYSLOT': lambda x: int(x),
+            'CLUSTER MEET': bool_ok,
+            'CLUSTER NODES': parse_cluster_nodes,
+            'CLUSTER REPLICATE': bool_ok,
+            'CLUSTER RESET': bool_ok,
+            'CLUSTER SAVECONFIG': bool_ok,
+            'CLUSTER SET-CONFIG-EPOCH': bool_ok,
+            'CLUSTER SETSLOT': bool_ok,
+            'CLUSTER SLAVES': parse_cluster_nodes
         }
     )
 
@@ -1919,6 +1964,9 @@ class StrictRedis(object):
         Returns the number of subscribers the message was delivered to.
         """
         return self.execute_command('PUBLISH', channel, message)
+
+    def cluster(self, cluster_arg, *args):
+        return self.execute_command('CLUSTER %s' % cluster_arg.upper(), *args)
 
     def eval(self, script, numkeys, *keys_and_args):
         """
