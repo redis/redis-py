@@ -209,7 +209,7 @@ class Sentinel(object):
         for sentinel in sentinels:
             if sentinel['is_sentinel']:
                 if not sentinel['is_sdown']:
-                    num_other_sentinels +=1
+                    num_other_sentinels += 1
         if self.min_other_sentinels:
             if num_other_sentinels < self.min_other_sentinels:
                 return False
