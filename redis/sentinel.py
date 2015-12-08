@@ -214,7 +214,7 @@ class Sentinel(object):
             if num_other_sentinels < self.min_other_sentinels:
                 return False
         else:
-            # to skip the isolated island problem,
+            # to skip the isolate island problem,
             # there should be one *not s_down* sentinel at least
             if num_other_sentinels == 0:
                 return False
