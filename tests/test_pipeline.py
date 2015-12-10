@@ -72,6 +72,38 @@ class TestPipeline(object):
 
             assert r['a'] == b('bad')
 
+    def test_pipeline_transaction_shortcut(self, r):
+        r.set('a', 13)
+        calls = []
+
+        def client_side_incr(pipe):
+            calls.append((pipe,))
+            current_value = pipe.get('a')
+            next_value = int(current_value) + 1
+
+            if len(calls) < 3:
+                # Simulate a change from another thread.
+                r.set('a', next_value)
+
+            pipe.multi()
+            pipe.set('a', next_value)
+
+        res = r.transaction(client_side_incr, 'a')
+
+        assert res == [True]
+        assert int(r.get('a')) == 16
+        assert len(calls) == 3
+
+    def test_pipeline_transaction_value_from_callable(self, r):
+        def callback(pipe):
+            # No need to do anything here since we only want the return value
+            return 'a'
+
+        res = r.transaction(callback, 'a',
+                            value_from_callable=True)
+
+        assert res == 'a'
+
     def test_exec_error_in_response(self, r):
         """
         an invalid pipeline command at exec time adds the exception instance
