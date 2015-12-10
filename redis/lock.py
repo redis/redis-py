@@ -1,7 +1,7 @@
 import threading
 import time as mod_time
 import uuid
-from redis.exceptions import LockError, WatchError
+from redis.exceptions import LockError, LockNotOwnedError, WatchError
 from redis.utils import dummy
 from redis._compat import b
 
@@ -140,7 +140,8 @@ class Lock(object):
         def execute_release(pipe):
             lock_value = pipe.get(name)
             if lock_value != expected_token:
-                raise LockError("Cannot release a lock that's no longer owned")
+                raise LockNotOwnedError("Cannot release a lock that's"
+                                        " no longer owned")
             pipe.delete(name)
 
         self.redis.transaction(execute_release, name)
@@ -163,7 +164,8 @@ class Lock(object):
         pipe.watch(self.name)
         lock_value = pipe.get(self.name)
         if lock_value != self.local.token:
-            raise LockError("Cannot extend a lock that's no longer owned")
+            raise LockNotOwnedError("Cannot extend a lock that's no"
+                                    " longer owned")
         expiration = pipe.pttl(self.name)
         if expiration is None or expiration < 0:
             # Redis evicted the lock key between the previous get() and now
@@ -176,10 +178,12 @@ class Lock(object):
             response = pipe.execute()
         except WatchError:
             # someone else acquired the lock
-            raise LockError("Cannot extend a lock that's no longer owned")
+            raise LockNotOwnedError("Cannot extend a lock that's no"
+                                    " longer owned")
         if not response[0]:
             # pexpire returns False if the key doesn't exist
-            raise LockError("Cannot extend a lock that's no longer owned")
+            raise LockNotOwnedError("Cannot extend a lock that's no"
+                                    " longer owned")
         return True
 
 
@@ -261,12 +265,14 @@ class LuaLock(Lock):
         if not bool(self.lua_release(keys=[self.name],
                                      args=[expected_token],
                                      client=self.redis)):
-            raise LockError("Cannot release a lock that's no longer owned")
+            raise LockNotOwnedError("Cannot release a lock that's no"
+                                    " longer owned")
 
     def do_extend(self, additional_time):
         additional_time = int(additional_time * 1000)
         if not bool(self.lua_extend(keys=[self.name],
                                     args=[self.local.token, additional_time],
                                     client=self.redis)):
-            raise LockError("Cannot extend a lock that's no longer owned")
+            raise LockNotOwnedError("Cannot extend a lock that's no"
+                                    " longer owned")
         return True

@@ -69,3 +69,7 @@ class LockError(RedisError, ValueError):
     # NOTE: For backwards compatability, this class derives from ValueError.
     # This was originally chosen to behave like threading.Lock.
     pass
+
+
+class LockNotOwnedError(LockError):
+    """Lock errors related to lose of prior ownership."""
