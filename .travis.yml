@@ -19,6 +19,7 @@ after_script:
   - lsb_release -r
   - lsb_release -c
   - cat /etc/apt/sources.list
+  - apt-cache show redis-server
 matrix:
   include:
     - python: "2.7"
