@@ -18,6 +18,7 @@ after_script:
   - redis-cli --version
   - lsb_release -r
   - lsb_release -c
+  - cat /etc/apt/sources.list
 matrix:
   include:
     - python: "2.7"
