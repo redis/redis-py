@@ -17,6 +17,7 @@ script: "if [[ $TEST_PEP8 == '1' ]]; then pep8 --repeat --show-source --exclude=
 after_script:
   - redis-cli --version
   - lsb_release -r
+  - lsb_release -c
 matrix:
   include:
     - python: "2.7"
