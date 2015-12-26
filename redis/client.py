@@ -1990,23 +1990,17 @@ class StrictRedis(object):
             geoadd("Sicily", [(13.361389, 38.115556, "Palermo"), (15.087269, 37.502669, "Catania")] )
         """
         pieces = []
-        print len(args)
         if len(args) == 1 and hasattr(args[0], '__iter__'):
-            print 'here'
             for x in args[0]:
-                print x
                 if hasattr(x, '__iter__'):
-                    print 'extend'
                     pieces.extend(x)
                 else:
-                    print 'append'
                     pieces.append(x)
 
         elif len(args) % 3 != 0:
             raise RedisError("GEOADD takes arguments dividable of three (longitude, latitude, member).")
         else:
             pieces = args
-        print pieces
         return self.execute_command('GEOADD', key, *pieces)
 
     def geodist(self, key, member1, member2, units='m'):
