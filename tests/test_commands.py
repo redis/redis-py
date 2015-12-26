@@ -1340,16 +1340,20 @@ class TestRedisCommands(object):
 
     @skip_if_server_version_lt('3.2.0')
     def test_geoadd(self, r):
-        first = r.geoadd("Sicily", 13.361389, 38.115556, "Palermo", 15.087269, 37.502669, "Catania")
-        second = r.geoadd("Sicily", [13.361389, 38.115556, "Palermo", 15.087269, 37.502669, "Catania"])
-        third = r.geoadd("Sicily", [(13.361389, 38.115556, "Palermo"), (15.087269, 37.502669, "Catania")])
+        first = r.geoadd("Sicily", 13.361389, 38.115556,
+                         "Palermo", 15.087269, 37.502669, "Catania")
+        second = r.geoadd("Sicily", [13.361389, 38.115556, "Palermo",
+                                     15.087269, 37.502669, "Catania"])
+        third = r.geoadd("Sicily", [(13.361389, 38.115556, "Palermo"),
+                                    (15.087269, 37.502669, "Catania")])
         assert first == 2
         assert second == 0
         assert third == 0
 
     @skip_if_server_version_lt('3.2.0')
     def test_geodist(self, r):
-        r.geoadd("Sicily", 13.361389, 38.115556, "Palermo", 15.087269, 37.502669, "Catania")
+        r.geoadd("Sicily", 13.361389, 38.115556, "Palermo",
+                 15.087269, 37.502669, "Catania")
         dist1 = r.geodist("Sicily", "Palermo", "Catania")
         dist2 = r.geodist("Sicily", "Palermo", "Catania", "km")
         dist3 = r.geodist("Sicily", "Palermo", "Catania", "mi")
@@ -1361,14 +1365,16 @@ class TestRedisCommands(object):
 
     @skip_if_server_version_lt('3.2.0')
     def test_geohash(self, r):
-        r.geoadd("Sicily", 13.361389, 38.115556, "Palermo", 15.087269, 37.502669, "Catania")
+        r.geoadd("Sicily", 13.361389, 38.115556, "Palermo",
+                 15.087269, 37.502669, "Catania")
         hash = r.geohash("Sicily", "Palermo", "Catania")
         assert set(hash) == set(["sqc8b49rny0", "sqdtr74hyu0"])
         assert set(hash) == set(["sqdtr74hyu0", "sqc8b49rny0"])
 
     @skip_if_server_version_lt('3.2.0')
     def test_geopos(self, r):
-        r.geoadd("Sicily", 13.361389, 38.115556, "Palermo", 15.087269, 37.502669, "Catania")
+        r.geoadd("Sicily", 13.361389, 38.115556, "Palermo",
+                 15.087269, 37.502669, "Catania")
         pos = r.geopos("Sicily", "Palermo", "Catania", "NonExisting")
         assert len(pos) == 3
 
@@ -1384,7 +1390,8 @@ class TestRedisCommands(object):
 
     @skip_if_server_version_lt('3.2.0')
     def test_georadius(self, r):
-        r.geoadd("Sicily", 13.361389, 38.115556, "Palermo", 15.087269, 37.502669, "Catania")
+        r.geoadd("Sicily", 13.361389, 38.115556, "Palermo",
+                 15.087269, 37.502669, "Catania")
         radius1 = r.georadius("Sicily", 15, 37, 100, "km")
         radius2 = r.georadius("Sicily", 15, 37, 200, "km")
         assert radius1 == ['Catania']
@@ -1433,7 +1440,8 @@ class TestRedisCommands(object):
     @skip_if_server_version_lt('3.2.0')
     def test_georadiusbymember(self, r):
         r.geoadd("Sicily", 13.583333, 37.316667, "Agrigento")
-        r.geoadd("Sicily", 13.361389, 38.115556, "Palermo", 15.087269, 37.502669, "Catania")
+        r.geoadd("Sicily", 13.361389, 38.115556, "Palermo",
+                 15.087269, 37.502669, "Catania")
         member_radius1 = r.georadiusbymember("Sicily", "Agrigento", 100, "km")
         assert set(member_radius1) == set(["Agrigento", "Palermo"])
         assert set(member_radius1) == set(["Palermo", "Agrigento"])

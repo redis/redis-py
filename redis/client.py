@@ -1983,11 +1983,18 @@ class StrictRedis(object):
         or single iterable (list) of:
             [(longiture, latitude, member), ...]
 
-        Returns number of elements added under key (serted set) excluding already existing elements.
+        Returns number of elements added under key (serted set)
+          excluding already existing elements.
 
         Examples:
-            geoadd("Sicily", 13.361389, 38.115556, "Palermo", 15.087269, 37.502669, "Catania")
-            geoadd("Sicily", [(13.361389, 38.115556, "Palermo"), (15.087269, 37.502669, "Catania")] )
+            geoadd("Sicily",
+                   13.361389, 38.115556, "Palermo",
+                   15.087269, 37.502669, "Catania")
+
+            geoadd("Sicily", [
+                    (13.361389, 38.115556, "Palermo"),
+                    (15.087269, 37.502669, "Catania")
+                   ])
         """
         pieces = []
         if len(args) == 1 and hasattr(args[0], '__iter__'):
@@ -1998,24 +2005,26 @@ class StrictRedis(object):
                     pieces.append(x)
 
         elif len(args) % 3 != 0:
-            raise RedisError("GEOADD takes arguments dividable of three (longitude, latitude, member).")
+            raise RedisError("invalid number of GEOADD arguments.")
         else:
             pieces = args
         return self.execute_command('GEOADD', key, *pieces)
 
     def geodist(self, key, member1, member2, units='m'):
         """
-        Returns distance between member1 and member2 under key(sorted set) in units.
-        Units can be: "m", "km", "mi", "ft" with defaults "m"
+        Returns distance between member1 and member2 under key(sorted set)
+        in specified units: "m", "km", "mi", "ft" (default "m")
 
         Examples:
             geodist("Sicily", "Palermo", "Catania", "km")
         """
-        return self.execute_command('GEODIST', key, member1, member2, self._validate_units(units))
+        return self.execute_command('GEODIST', key, member1, member2,
+                                    self._validate_units(units))
 
     def geohash(self, key, *args):
         """
-        Returns valid Geohash string representing position of one or more elements.
+        Returns valid Geohash string representing position
+        of one or more elements.
 
         Arguments are any number of members:
             member [member ...]
@@ -2053,41 +2062,49 @@ class StrictRedis(object):
             pieces = args
         return self.execute_command('GEOPOS', key, *pieces)
 
-    def georadius(self, key, longitude, latitude, radius, units, withcoord=None, withdist=None, withhash=None, count=None):
+    def georadius(self, key, longitude, latitude, radius, units,
+                  withcoord=None, withdist=None, withhash=None, count=None):
         """
-        Return the members of a key (sorted set) that are within range of radius (center set by longitude, latitude)
+        Return the members of a key (sorted set) that are within range
+        of radius (center set by longitude, latitude)
 
-        ``withcoord`` sets flag that will include coordinates (latitude, longitude) of members.
+        ``withcoord`` sets flag that will include coordinates of members.
 
-        ``withdist`` sets flag that will include distance (in units) from specified center.
+        ``withdist`` sets flag that will include distance from center.
 
-        ``withhash`` sets flag that will include 52bit int raw geohash of members.
+        ``withhash`` sets flag that will include 52bit int raw geohash.
 
         ``withhash`` sets limit of returned members.
         """
         pieces = [longitude, latitude, radius, self._validate_units(units)]
-        pieces.extend(self._withgeoradius(withcoord, withdist, withhash, count))
+        pieces.extend(self._withgeoradius(withcoord, withdist,
+                                          withhash, count))
 
         return self.execute_command('GEORADIUS', key, *pieces)
 
-    def georadiusbymember(self, key, member, radius, units, withcoord=None, withdist=None, withhash=None, count=None):
+    def georadiusbymember(self, key, member, radius, units,
+                          withcoord=None, withdist=None,
+                          withhash=None, count=None):
         """
-        Return the members of a key (sorted set) that are within range of radius (center set by member)
+        Return the members of a key (sorted set) that are within range
+        of radius (center set by member)
 
-        ``withcoord`` sets flag that will include coordinates (latitude, longitude) of members.
+        ``withcoord`` sets flag that will include coordinates of members.
 
-        ``withdist`` sets flag that will include distance (in units) from specified center.
+        ``withdist`` sets flag that will include distance from center.
 
-        ``withhash`` sets flag that will include 52bit int raw geohash of members.
+        ``withhash`` sets flag that will include 52bit int raw geohash.
 
         ``withhash`` sets limit of returned members.
         """
         pieces = [member, radius, self._validate_units(units)]
-        pieces.extend(self._withgeoradius(withcoord, withdist, withhash, count))
+        pieces.extend(self._withgeoradius(withcoord, withdist,
+                                          withhash, count))
 
         return self.execute_command('GEORADIUSBYMEMBER', key, *pieces)
 
-    def _withgeoradius(self, withcoord=None, withdist=None, withhash=None, count=None):
+    def _withgeoradius(self, withcoord=None, withdist=None,
+                       withhash=None, count=None):
         pieces = []
         if withcoord:
             pieces.append('WITHCOORD')
