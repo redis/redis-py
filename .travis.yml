@@ -1,3 +1,7 @@
+addons:
+  apt:
+    packages:
+      - redis-server
 language: python
 python:
   - "3.3"
