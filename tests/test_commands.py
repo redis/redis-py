@@ -1429,10 +1429,10 @@ class TestRedisCommands(object):
         assert len(extraradius3[1]) == 2
 
         assert extraradius3[0][0] == "Palermo"
-        assert extraradius3[0][1] == 3479099956230698L
+        assert extraradius3[0][1] == 3479099956230698
 
         assert extraradius3[1][0] == "Catania"
-        assert extraradius3[1][1] == 3479447370796909L
+        assert extraradius3[1][1] == 3479447370796909
 
         extraradius4 = r.georadius("Sicily", 15, 37, 200, "km", count=1)
         assert len(extraradius4) == 1
