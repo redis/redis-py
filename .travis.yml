@@ -14,7 +14,7 @@ install:
   - "if [[ $TEST_PEP8 == '1' ]]; then pip install pep8; fi"
   - "if [[ $TEST_HIREDIS == '1' ]]; then pip install hiredis; fi"
 script: "if [[ $TEST_PEP8 == '1' ]]; then pep8 --repeat --show-source --exclude=.venv,.tox,dist,docs,build,*.egg .; else python setup.py test; fi"
-after-script: redis-cli --version
+after_script: redis-cli --version
 matrix:
   include:
     - python: "2.7"
