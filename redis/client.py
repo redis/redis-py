@@ -1031,12 +1031,15 @@ class StrictRedis(object):
         "Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist"
         return self.execute_command('RENAMENX', src, dst)
 
-    def restore(self, name, ttl, value):
+    def restore(self, name, ttl, value, replace=False):
         """
         Create a key using the provided serialized value, previously obtained
         using DUMP.
         """
-        return self.execute_command('RESTORE', name, ttl, value)
+        params = [name, ttl, value]
+        if replace:
+            params.append('REPLACE')
+        return self.execute_command('RESTORE', *params)
 
     def set(self, name, value, ex=None, px=None, nx=False, xx=False):
         """
