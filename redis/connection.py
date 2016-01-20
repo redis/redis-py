@@ -97,7 +97,7 @@ class BaseParser(object):
             exception_class = self.EXCEPTION_CLASSES[error_code]
             if isinstance(exception_class, dict):
                 found = False
-                for reason, inner_exception_class in exception_class.iteritems():
+                for reason, inner_exception_class in exception_class.items():
                     new_response = response.replace(reason, '').strip()
                     if new_response != response:
                         exception_class = inner_exception_class
