@@ -64,6 +64,49 @@ def dict_merge(*dicts):
     return merged
 
 
+def dict_deep_merge(*dicts):
+    """
+    class BaseParser(object):
+        EXCEPTION_CLASSES = {
+            'ERR': {
+                'max number of clients reached': ConnectionError
+            }
+        }
+
+    class HedeParser(BaseParser):
+        EXCEPTION_CLASSES = dict_deep_merge(
+            DefaultParser.EXCEPTION_CLASSES, {
+                'ERR': {
+                    'Unknown node': UnknownNodeError
+                },
+            })
+
+    Result:
+
+    EXCEPTION_CLASSES = {
+            'ERR': {
+                'max number of clients reached': ConnectionError
+                'Unknown node': UnknownNodeError
+            }
+        }
+
+    """
+    def merge(source, destination):
+        for key, value in source.items():
+            if isinstance(value, dict):
+                node = destination.setdefault(key, {})
+                merge(value, node)
+            else:
+                destination[key] = value
+
+        return destination
+
+    merged = {}
+    for d in dicts:
+        merged = merge(d, merged)
+    return merged
+
+
 def parse_debug_object(response):
     "Parse the results of Redis's DEBUG OBJECT command into a Python dict"
     # The 'type' of the object is the first item in the response, but isn't

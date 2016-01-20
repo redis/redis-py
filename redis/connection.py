@@ -96,7 +96,16 @@ class BaseParser(object):
             response = response[len(error_code) + 1:]
             exception_class = self.EXCEPTION_CLASSES[error_code]
             if isinstance(exception_class, dict):
-                exception_class = exception_class.get(response, ResponseError)
+                found = False
+                for reason, inner_exception_class in exception_class.iteritems():
+                    new_response = response.replace(reason, '').strip()
+                    if new_response != response:
+                        exception_class = inner_exception_class
+                        response = new_response
+                        found = True
+                        break
+                if not found:
+                    exception_class = ResponseError
             return exception_class(response)
         return ResponseError(response)
 
