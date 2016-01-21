@@ -2226,6 +2226,10 @@ class PubSub(object):
     def parse_response(self, block=True, timeout=0):
         "Parse the response from a publish/subscribe command"
         connection = self.connection
+        if connection is None:
+            raise RuntimeError(
+                'pubsub connection not set: '
+                'did you forget to call subscribe() or psubscribe()?')
         if not block and not connection.can_read(timeout=timeout):
             return None
         return self._execute(connection, connection.read_response)
