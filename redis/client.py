@@ -2145,8 +2145,8 @@ class PubSub(object):
     def execute_command(self, *args, **kwargs):
         "Execute a publish/subscribe command"
 
-        # NOTE: don't parse the response in this function. it could pull a
-        # legitmate message off the stack if the connection is already
+        # NOTE: don't parse the response in this function -- it could pull a
+        # legitimate message off the stack if the connection is already
         # subscribed to one or more channels
 
         if self.connection is None:
