@@ -299,8 +299,11 @@ class TestPubSubMessages(object):
                   'did you forget to call subscribe() or psubscribe()?')
         assert expect in info.exconly()
 
-    @pytest.mark.skipif(SKIP_SLOW, reason='slow/unreliable tests disabled')
-    def test_parse_response(self, r):
+    def _test_parse_response_sigalrm(self, r,
+                                     expect_response,
+                                     expect_elapsed,
+                                     hard_timeout=1, fuzz=0.005,
+                                     **kwargs):
         p = r.pubsub()
         p.subscribe('foobar')
         response = p.parse_response(timeout=None)
@@ -310,42 +313,47 @@ class TestPubSubMessages(object):
         # Use SIGALRM to impose a hard timeout: any call that would take
         # > 1 sec will be interrupted.
         signal.signal(signal.SIGALRM, lambda sig, frame: None)
-        hard_timeout = 1
-        fuzz = 0.005
+        signal.alarm(hard_timeout)
+        try:
+            (response, elapsed) = self._parse_response_sigalrm(p, **kwargs)
+        finally:
+            signal.signal(signal.SIGALRM, signal.SIG_DFL)
 
-        def parse_response_sigalrm(**kwargs):
-            signal.alarm(hard_timeout)
-            start = time.time()
-            try:
-                response = p.parse_response(**kwargs)
-            except select.error as err:
-                # if SIGALRM arrives while we're calling select(), we
-                # get an EINTR exception -- ignore it
-                if err.args[0] != errno.EINTR:
-                    raise
-                response = None
-            elapsed = time.time() - start
-            return (response, elapsed)
+        assert response == expect_response
+        assert expect_elapsed <= elapsed <= expect_elapsed + fuzz
 
-        # hard_timeout beats the timeout passed to parse_response()
-        (response, elapsed) = parse_response_sigalrm(timeout=1.5)
-        assert response is None
-        assert hard_timeout <= elapsed <= hard_timeout + fuzz
+    def _parse_response_sigalrm(self, p, **kwargs):
+        start = time.time()
+        try:
+            response = p.parse_response(**kwargs)
+        except select.error as err:
+            # if SIGALRM arrives while we're calling select(), we
+            # get an EINTR exception -- ignore it
+            if err.args[0] != errno.EINTR:
+                raise
+            response = None
+        elapsed = time.time() - start
+        return (response, elapsed)
 
-        # timeout passed to parse_response() wins because it's shorter
-        (response, elapsed) = parse_response_sigalrm(timeout=0.5)
-        assert response is None
-        assert 0.5 <= elapsed <= 0.5 + fuzz
+    @pytest.mark.skipif(SKIP_SLOW, reason='slow/unreliable tests disabled')
+    def test_parse_response_long_timeout(self, r):
+        self._test_parse_response_sigalrm(
+            r, None, 1.0, timeout=1.5)
 
-        # same thing -- this is really non-blocking
-        (response, elapsed) = parse_response_sigalrm(timeout=0)
-        assert response is None
-        assert 0 <= elapsed <= 0 + fuzz
+    @pytest.mark.skipif(SKIP_SLOW, reason='slow/unreliable tests disabled')
+    def test_parse_response_short_timeout(self, r):
+        self._test_parse_response_sigalrm(
+            r, None, 0.5, timeout=0.5)
 
-        # this blocks forever too, but does not have that bug
-        (response, elapsed) = parse_response_sigalrm(timeout=None)
-        assert hard_timeout <= elapsed <= hard_timeout + fuzz
-        assert response is None
+    @pytest.mark.skipif(SKIP_SLOW, reason='slow/unreliable tests disabled')
+    def test_parse_response_no_timeout(self, r):
+        self._test_parse_response_sigalrm(
+            r, None, 0.0, timeout=0)
+
+    @pytest.mark.skipif(SKIP_SLOW, reason='slow/unreliable tests disabled')
+    def test_parse_response_block_implicit(self, r):
+        self._test_parse_response_sigalrm(
+            r, None, 1.0, timeout=None)
 
 
 class TestPubSubAutoDecoding(object):
