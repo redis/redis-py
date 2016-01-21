@@ -1338,6 +1338,114 @@ class TestRedisCommands(object):
         assert r.lrange('sorted', 0, 10) == \
             [b('vodka'), b('milk'), b('gin'), b('apple juice')]
 
+    @skip_if_server_version_lt('3.2.0')
+    def test_geoadd(self, r):
+        first = r.geoadd("Sicily", 13.361389, 38.115556,
+                         "Palermo", 15.087269, 37.502669, "Catania")
+        second = r.geoadd("Sicily", [13.361389, 38.115556, "Palermo",
+                                     15.087269, 37.502669, "Catania"])
+        third = r.geoadd("Sicily", [(13.361389, 38.115556, "Palermo"),
+                                    (15.087269, 37.502669, "Catania")])
+        assert first == 2
+        assert second == 0
+        assert third == 0
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_geodist(self, r):
+        r.geoadd("Sicily", 13.361389, 38.115556, "Palermo",
+                 15.087269, 37.502669, "Catania")
+        dist1 = r.geodist("Sicily", "Palermo", "Catania")
+        dist2 = r.geodist("Sicily", "Palermo", "Catania", "km")
+        dist3 = r.geodist("Sicily", "Palermo", "Catania", "mi")
+        dist4 = r.geodist("Sicily", "Foo", "Bar")
+        assert abs(float(dist1) - float("166274.15156960039")) < 0.0000000001
+        assert abs(float(dist2) - float("166.27415156960038")) < 0.0000000001
+        assert abs(float(dist3) - float("103.31822459492736")) < 0.0000000001
+        assert dist4 is None
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_geohash(self, r):
+        r.geoadd("Sicily", 13.361389, 38.115556, "Palermo",
+                 15.087269, 37.502669, "Catania")
+        hash = r.geohash("Sicily", "Palermo", "Catania")
+        assert set(hash) == set(["sqc8b49rny0", "sqdtr74hyu0"])
+        assert set(hash) == set(["sqdtr74hyu0", "sqc8b49rny0"])
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_geopos(self, r):
+        r.geoadd("Sicily", 13.361389, 38.115556, "Palermo",
+                 15.087269, 37.502669, "Catania")
+        pos = r.geopos("Sicily", "Palermo", "Catania", "NonExisting")
+        assert len(pos) == 3
+
+        assert len(pos[0]) == 2
+        assert abs(float(pos[0][0]) - 13.361389) < 0.00001
+        assert abs(float(pos[0][1]) - 38.115556) < 0.00001
+
+        assert len(pos[1]) == 2
+        assert abs(float(pos[1][0]) - 15.087269) < 0.00001
+        assert abs(float(pos[1][1]) - 37.502669) < 0.00001
+
+        assert pos[2] is None
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadius(self, r):
+        r.geoadd("Sicily", 13.361389, 38.115556, "Palermo",
+                 15.087269, 37.502669, "Catania")
+        radius1 = r.georadius("Sicily", 15, 37, 100, "km")
+        radius2 = r.georadius("Sicily", 15, 37, 200, "km")
+        assert radius1 == ['Catania']
+        assert set(radius2) == set(["Catania", "Palermo"])
+        assert set(radius2) == set(["Palermo", "Catania"])
+
+        extraradius1 = r.georadius("Sicily", 15, 37, 200, "km", withdist=True)
+        assert len(extraradius1) == 2
+        assert len(extraradius1[0]) == 2
+        assert len(extraradius1[1]) == 2
+
+        assert extraradius1[0][0] == "Palermo"
+        assert abs(float(extraradius1[0][1]) - 190.4424) < 0.01
+
+        assert extraradius1[1][0] == "Catania"
+        assert abs(float(extraradius1[1][1]) - 56.4413) < 0.01
+
+        extraradius2 = r.georadius("Sicily", 15, 37, 200, "km", withcoord=True)
+        assert len(extraradius2) == 2
+        assert len(extraradius2[0]) == 2
+        assert len(extraradius2[1]) == 2
+
+        assert extraradius2[0][0] == "Palermo"
+        assert len(extraradius2[0][1]) == 2
+        assert abs(float(extraradius2[0][1][0]) - 13.361389) < 0.00001
+        assert abs(float(extraradius2[0][1][1]) - 38.115556) < 0.00001
+
+        assert extraradius2[1][0] == "Catania"
+        assert abs(float(extraradius2[1][1][0]) - 15.087269) < 0.00001
+        assert abs(float(extraradius2[1][1][1]) - 37.502669) < 0.00001
+
+        extraradius3 = r.georadius("Sicily", 15, 37, 200, "km", withhash=True)
+        assert len(extraradius3) == 2
+        assert len(extraradius3[0]) == 2
+        assert len(extraradius3[1]) == 2
+
+        assert extraradius3[0][0] == "Palermo"
+        assert extraradius3[0][1] == 3479099956230698
+
+        assert extraradius3[1][0] == "Catania"
+        assert extraradius3[1][1] == 3479447370796909
+
+        extraradius4 = r.georadius("Sicily", 15, 37, 200, "km", count=1)
+        assert len(extraradius4) == 1
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadiusbymember(self, r):
+        r.geoadd("Sicily", 13.583333, 37.316667, "Agrigento")
+        r.geoadd("Sicily", 13.361389, 38.115556, "Palermo",
+                 15.087269, 37.502669, "Catania")
+        member_radius1 = r.georadiusbymember("Sicily", "Agrigento", 100, "km")
+        assert set(member_radius1) == set(["Agrigento", "Palermo"])
+        assert set(member_radius1) == set(["Palermo", "Agrigento"])
+
 
 class TestStrictCommands(object):
 
