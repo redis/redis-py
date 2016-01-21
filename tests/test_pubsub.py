@@ -303,7 +303,7 @@ class TestPubSubMessages(object):
     def test_parse_response(self, r):
         p = r.pubsub()
         p.subscribe('foobar')
-        response = p.parse_response(block=True)
+        response = p.parse_response(timeout=None)
         assert isinstance(response, list)
         assert response[0:2] == ['subscribe', 'foobar']
 
@@ -328,28 +328,22 @@ class TestPubSubMessages(object):
             return (response, elapsed)
 
         # hard_timeout beats the timeout passed to parse_response()
-        (response, elapsed) = parse_response_sigalrm(block=False, timeout=1.5)
+        (response, elapsed) = parse_response_sigalrm(timeout=1.5)
         assert response is None
         assert hard_timeout <= elapsed <= hard_timeout + fuzz
 
         # timeout passed to parse_response() wins because it's shorter
-        (response, elapsed) = parse_response_sigalrm(block=False, timeout=0.5)
+        (response, elapsed) = parse_response_sigalrm(timeout=0.5)
         assert response is None
         assert 0.5 <= elapsed <= 0.5 + fuzz
 
         # same thing -- this is really non-blocking
-        (response, elapsed) = parse_response_sigalrm(block=False, timeout=0)
+        (response, elapsed) = parse_response_sigalrm(timeout=0)
         assert response is None
         assert 0 <= elapsed <= 0 + fuzz
 
-        # and this blocks forever, so hard_timeout is essential here!
-        (response, elapsed) = parse_response_sigalrm(block=True)
-        assert hard_timeout <= elapsed <= hard_timeout + fuzz
-        # this test fails! response == ['subscribe', 'foobar', 1L]
-        # assert response is None
-
         # this blocks forever too, but does not have that bug
-        (response, elapsed) = parse_response_sigalrm(block=False, timeout=None)
+        (response, elapsed) = parse_response_sigalrm(timeout=None)
         assert hard_timeout <= elapsed <= hard_timeout + fuzz
         assert response is None
 

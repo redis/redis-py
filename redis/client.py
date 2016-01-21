@@ -2175,17 +2175,28 @@ class PubSub(object):
             # previously listening to
             return command(*args)
 
-    def parse_response(self, block=True, timeout=0):
-        "Parse the response from a publish/subscribe command"
-        # block=True: block forever, ignoring timeout
-        # block=False, timeout > 0: block for up to timeout sec
-        # block=False, timeout=0: non-blocking, return immediately
+    def parse_response(self, block=None, timeout=0):
+        """
+        Read and parse the response from a publish/subscribe command.
+
+        For a non-blocking read, pass timeout=0 (the default). To
+        block for a limited time, pass any positive float as timeout.
+        To block forever (or until a response is available), pass
+        timeout=None.
+
+        With timeout not None, return None if no response is available.
+        """
+        if block:
+            warnings.warn(
+                DeprecationWarning('block=True is deprecated: '
+                                   'pass timeout=None instead'))
+            timeout = None
         connection = self.connection
         if connection is None:
             raise RuntimeError(
                 'pubsub connection not set: '
                 'did you forget to call subscribe() or psubscribe()?')
-        if not block and not connection.can_read(timeout=timeout):
+        if not connection.can_read(timeout=timeout):
             return None
         return self._execute(connection, connection.read_response)
 
@@ -2252,7 +2263,7 @@ class PubSub(object):
     def listen(self):
         "Listen for messages on channels this client has been subscribed to"
         while self.subscribed:
-            response = self.handle_message(self.parse_response(block=True))
+            response = self.handle_message(self.parse_response(timeout=None))
             if response is not None:
                 yield response
 
@@ -2264,7 +2275,7 @@ class PubSub(object):
         before returning. Timeout should be specified as a floating point
         number.
         """
-        response = self.parse_response(block=False, timeout=timeout)
+        response = self.parse_response(timeout=timeout)
         if response:
             return self.handle_message(response, ignore_subscribe_messages)
         return None
