@@ -283,6 +283,14 @@ class TestPubSubMessages(object):
         assert self.message == make_message('pmessage', channel,
                                             'test message', pattern=pattern)
 
+    def test_get_message_without_subscribe(self, r):
+        p = r.pubsub()
+        with pytest.raises(RuntimeError) as info:
+            p.get_message()
+        expect = ('connection not set: '
+                  'did you forget to call subscribe() or psubscribe()?')
+        assert expect in info.exconly()
+
 
 class TestPubSubAutoDecoding(object):
     "These tests only validate that we get unicode values back"
