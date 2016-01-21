@@ -2177,6 +2177,9 @@ class PubSub(object):
 
     def parse_response(self, block=True, timeout=0):
         "Parse the response from a publish/subscribe command"
+        # block=True: block forever, ignoring timeout
+        # block=False, timeout > 0: block for up to timeout sec
+        # block=False, timeout=0: non-blocking, return immediately
         connection = self.connection
         if connection is None:
             raise RuntimeError(

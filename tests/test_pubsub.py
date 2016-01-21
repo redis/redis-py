@@ -1,5 +1,9 @@
 from __future__ import with_statement
 import pytest
+import os
+import errno
+import select
+import signal
 import time
 
 import redis
@@ -7,6 +11,10 @@ from redis.exceptions import ConnectionError
 from redis._compat import basestring, u, unichr
 
 from .conftest import r as _redis_client
+
+# by default, skip slow/unreliable tests; run tests like
+# "SKIP_SLOW=0 py.test" to run them
+SKIP_SLOW = int(os.environ.get('SKIP_SLOW', '1'))
 
 
 def wait_for_message(pubsub, timeout=0.1, ignore_subscribe_messages=False):
@@ -290,6 +298,60 @@ class TestPubSubMessages(object):
         expect = ('connection not set: '
                   'did you forget to call subscribe() or psubscribe()?')
         assert expect in info.exconly()
+
+    @pytest.mark.skipif(SKIP_SLOW, reason='slow/unreliable tests disabled')
+    def test_parse_response(self, r):
+        p = r.pubsub()
+        p.subscribe('foobar')
+        response = p.parse_response(block=True)
+        assert isinstance(response, list)
+        assert response[0:2] == ['subscribe', 'foobar']
+
+        # Use SIGALRM to impose a hard timeout: any call that would take
+        # > 1 sec will be interrupted.
+        signal.signal(signal.SIGALRM, lambda sig, frame: None)
+        hard_timeout = 1
+        fuzz = 0.005
+
+        def parse_response_sigalrm(**kwargs):
+            signal.alarm(hard_timeout)
+            start = time.time()
+            try:
+                response = p.parse_response(**kwargs)
+            except select.error as err:
+                # if SIGALRM arrives while we're calling select(), we
+                # get an EINTR exception -- ignore it
+                if err.args[0] != errno.EINTR:
+                    raise
+                response = None
+            elapsed = time.time() - start
+            return (response, elapsed)
+
+        # hard_timeout beats the timeout passed to parse_response()
+        (response, elapsed) = parse_response_sigalrm(block=False, timeout=1.5)
+        assert response is None
+        assert hard_timeout <= elapsed <= hard_timeout + fuzz
+
+        # timeout passed to parse_response() wins because it's shorter
+        (response, elapsed) = parse_response_sigalrm(block=False, timeout=0.5)
+        assert response is None
+        assert 0.5 <= elapsed <= 0.5 + fuzz
+
+        # same thing -- this is really non-blocking
+        (response, elapsed) = parse_response_sigalrm(block=False, timeout=0)
+        assert response is None
+        assert 0 <= elapsed <= 0 + fuzz
+
+        # and this blocks forever, so hard_timeout is essential here!
+        (response, elapsed) = parse_response_sigalrm(block=True)
+        assert hard_timeout <= elapsed <= hard_timeout + fuzz
+        # this test fails! response == ['subscribe', 'foobar', 1L]
+        # assert response is None
+
+        # this blocks forever too, but does not have that bug
+        (response, elapsed) = parse_response_sigalrm(block=False, timeout=None)
+        assert hard_timeout <= elapsed <= hard_timeout + fuzz
+        assert response is None
 
 
 class TestPubSubAutoDecoding(object):
