@@ -356,7 +356,7 @@ class HiredisParser(BaseParser):
                 raise ConnectionError("Error while reading from socket: %s" %
                                       (e.args,))
             if HIREDIS_USE_BYTE_BUFFER:
-                self._reader.feed(self._buffer, 0, bufflen)
+                self._reader.feed(bytes(self._buffer), 0, bufflen)
             else:
                 self._reader.feed(buffer)
             response = self._reader.gets()
