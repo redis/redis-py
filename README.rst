@@ -444,7 +444,7 @@ application.
     >>> r.publish('my-channel')
     1
     >>> p.get_message()
-    {'channel': 'my-channel', data': 'my data', 'pattern': None, 'type': 'message'}
+    {'channel': 'my-channel', 'data': 'my data', 'pattern': None, 'type': 'message'}
 
 There are three different strategies for reading messages.
 
