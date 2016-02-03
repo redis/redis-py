@@ -15,10 +15,12 @@ class SentinelTestClient(object):
 
     def sentinel_masters(self):
         self.cluster.connection_error_if_down(self)
+        self.cluster.timeout_if_down(self)
         return {self.cluster.service_name: self.cluster.master}
 
     def sentinel_slaves(self, master_name):
         self.cluster.connection_error_if_down(self)
+        self.cluster.timeout_if_down(self)
         if master_name != self.cluster.service_name:
             return []
         return self.cluster.slaves
@@ -38,10 +40,15 @@ class SentinelTestCluster(object):
         self.service_name = service_name
         self.slaves = []
         self.nodes_down = set()
+        self.nodes_timeout = set()
 
     def connection_error_if_down(self, node):
         if node.id in self.nodes_down:
             raise exceptions.ConnectionError
+
+    def timeout_if_down(self, node):
+        if node.id in self.nodes_timeout:
+            raise exceptions.TimeoutError
 
     def client(self, host, port, **kwargs):
         return SentinelTestClient(self, (host, port))
@@ -76,6 +83,15 @@ def test_discover_master_error(sentinel):
 def test_discover_master_sentinel_down(cluster, sentinel):
     # Put first sentinel 'foo' down
     cluster.nodes_down.add(('foo', 26379))
+    address = sentinel.discover_master('mymaster')
+    assert address == ('127.0.0.1', 6379)
+    # 'bar' is now first sentinel
+    assert sentinel.sentinels[0].id == ('bar', 26379)
+
+
+def test_discover_master_sentinel_timeout(cluster, sentinel):
+    # Put first sentinel 'foo' down
+    cluster.nodes_timeout.add(('foo', 26379))
     address = sentinel.discover_master('mymaster')
     assert address == ('127.0.0.1', 6379)
     # 'bar' is now first sentinel
@@ -128,6 +144,12 @@ def test_discover_slaves(cluster, sentinel):
 
     # node0 -> DOWN
     cluster.nodes_down.add(('foo', 26379))
+    assert sentinel.discover_slaves('mymaster') == [
+        ('slave0', 1234), ('slave1', 1234)]
+    cluster.nodes_down.clear()
+
+    # node0 -> TIMEOUT
+    cluster.nodes_timeout.add(('foo', 26379))
     assert sentinel.discover_slaves('mymaster') == [
         ('slave0', 1234), ('slave1', 1234)]
 

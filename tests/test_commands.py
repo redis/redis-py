@@ -112,7 +112,7 @@ class TestRedisCommands(object):
         r['a'] = 'foo'
         assert isinstance(r.object('refcount', 'a'), int)
         assert isinstance(r.object('idletime', 'a'), int)
-        assert r.object('encoding', 'a') == b('raw')
+        assert r.object('encoding', 'a') in (b('raw'), b('embstr'))
         assert r.object('idletime', 'invalid-key') is None
 
     def test_ping(self, r):
@@ -340,6 +340,10 @@ class TestRedisCommands(object):
     def test_getitem_raises_keyerror_for_missing_key(self, r):
         with pytest.raises(KeyError):
             r['a']
+
+    def test_getitem_does_not_raise_keyerror_for_empty_string(self, r):
+        r['a'] = b("")
+        assert r['a'] == b("")
 
     def test_get_set_bit(self, r):
         # no value
@@ -959,6 +963,17 @@ class TestRedisCommands(object):
         assert r.zrangebylex('a', '[f', '+') == [b('f'), b('g')]
         assert r.zrangebylex('a', '-', '+', start=3, num=2) == [b('d'), b('e')]
 
+    @skip_if_server_version_lt('2.9.9')
+    def test_zrevrangebylex(self, r):
+        r.zadd('a', a=0, b=0, c=0, d=0, e=0, f=0, g=0)
+        assert r.zrevrangebylex('a', '[c', '-') == [b('c'), b('b'), b('a')]
+        assert r.zrevrangebylex('a', '(c', '-') == [b('b'), b('a')]
+        assert r.zrevrangebylex('a', '(g', '[aaa') == \
+            [b('f'), b('e'), b('d'), b('c'), b('b')]
+        assert r.zrevrangebylex('a', '+', '[f') == [b('g'), b('f')]
+        assert r.zrevrangebylex('a', '+', '-', start=3, num=2) == \
+            [b('d'), b('c')]
+
     def test_zrangebyscore(self, r):
         r.zadd('a', a1=1, a2=2, a3=3, a4=4, a5=5)
         assert r.zrangebyscore('a', 2, 4) == [b('a2'), b('a3'), b('a4')]
@@ -1106,6 +1121,10 @@ class TestRedisCommands(object):
         members = set([b('1'), b('2'), b('3')])
         r.pfadd('a', *members)
         assert r.pfcount('a') == len(members)
+        members_b = set([b('2'), b('3'), b('4')])
+        r.pfadd('b', *members_b)
+        assert r.pfcount('b') == len(members_b)
+        assert r.pfcount('a', 'b') == len(members_b.union(members))
 
     @skip_if_server_version_lt('2.8.9')
     def test_pfmerge(self, r):

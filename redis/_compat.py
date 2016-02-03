@@ -3,6 +3,7 @@ import sys
 
 
 if sys.version_info[0] < 3:
+    from urllib import unquote
     from urlparse import parse_qs, urlparse
     from itertools import imap, izip
     from string import letters as ascii_letters
@@ -12,15 +13,40 @@ if sys.version_info[0] < 3:
     except ImportError:
         from StringIO import StringIO as BytesIO
 
-    iteritems = lambda x: x.iteritems()
-    iterkeys = lambda x: x.iterkeys()
-    itervalues = lambda x: x.itervalues()
-    nativestr = lambda x: \
-        x if isinstance(x, str) else x.encode('utf-8', 'replace')
-    u = lambda x: x.decode()
-    b = lambda x: x
-    next = lambda x: x.next()
-    byte_to_chr = lambda x: x
+    # special unicode handling for python2 to avoid UnicodeDecodeError
+    def safe_unicode(obj, *args):
+        """ return the unicode representation of obj """
+        try:
+            return unicode(obj, *args)
+        except UnicodeDecodeError:
+            # obj is byte string
+            ascii_text = str(obj).encode('string_escape')
+            return unicode(ascii_text)
+
+    def iteritems(x):
+        return x.iteritems()
+
+    def iterkeys(x):
+        return x.iterkeys()
+
+    def itervalues(x):
+        return x.itervalues()
+
+    def nativestr(x):
+        return x if isinstance(x, str) else x.encode('utf-8', 'replace')
+
+    def u(x):
+        return x.decode()
+
+    def b(x):
+        return x
+
+    def next(x):
+        return x.next()
+
+    def byte_to_chr(x):
+        return x
+
     unichr = unichr
     xrange = xrange
     basestring = basestring
@@ -28,19 +54,32 @@ if sys.version_info[0] < 3:
     bytes = str
     long = long
 else:
-    from urllib.parse import parse_qs, urlparse
+    from urllib.parse import parse_qs, unquote, urlparse
     from io import BytesIO
     from string import ascii_letters
     from queue import Queue
 
-    iteritems = lambda x: iter(x.items())
-    iterkeys = lambda x: iter(x.keys())
-    itervalues = lambda x: iter(x.values())
-    byte_to_chr = lambda x: chr(x)
-    nativestr = lambda x: \
-        x if isinstance(x, str) else x.decode('utf-8', 'replace')
-    u = lambda x: x
-    b = lambda x: x.encode('latin-1') if not isinstance(x, bytes) else x
+    def iteritems(x):
+        return iter(x.items())
+
+    def iterkeys(x):
+        return iter(x.keys())
+
+    def itervalues(x):
+        return iter(x.values())
+
+    def byte_to_chr(x):
+        return chr(x)
+
+    def nativestr(x):
+        return x if isinstance(x, str) else x.decode('utf-8', 'replace')
+
+    def u(x):
+        return x
+
+    def b(x):
+        return x.encode('latin-1') if not isinstance(x, bytes) else x
+
     next = next
     unichr = chr
     imap = map
@@ -48,6 +87,7 @@ else:
     xrange = range
     basestring = str
     unicode = str
+    safe_unicode = str
     bytes = bytes
     long = int
 

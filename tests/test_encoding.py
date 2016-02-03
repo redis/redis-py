@@ -23,6 +23,13 @@ class TestEncoding(object):
         r.rpush('a', *result)
         assert r.lrange('a', 0, -1) == result
 
+    def test_object_value(self, r):
+        unicode_string = unichr(3456) + u('abcd') + unichr(3421)
+        r['unicode-string'] = Exception(unicode_string)
+        cached_val = r['unicode-string']
+        assert isinstance(cached_val, unicode)
+        assert unicode_string == cached_val
+
 
 class TestCommandsAndTokensArentEncoded(object):
     @pytest.fixture()

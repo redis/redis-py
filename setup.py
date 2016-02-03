@@ -23,7 +23,9 @@ try:
 except ImportError:
 
     from distutils.core import setup
-    PyTest = lambda x: x
+
+    def PyTest(x):
+        x
 
 f = open(os.path.join(os.path.dirname(__file__), 'README.rst'))
 long_description = f.read()
@@ -57,5 +59,6 @@ setup(
         'Programming Language :: Python :: 3.2',
         'Programming Language :: Python :: 3.3',
         'Programming Language :: Python :: 3.4',
+        'Programming Language :: Python :: 3.5',
     ]
 )

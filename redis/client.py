@@ -3,10 +3,12 @@ from itertools import chain
 import datetime
 import sys
 import warnings
+import time
 import threading
 import time as mod_time
 from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
-                           itervalues, izip, long, nativestr, unicode)
+                           itervalues, izip, long, nativestr, unicode,
+                           safe_unicode)
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
                               SSLConnection, Token)
 from redis.lock import Lock, LuaLock
@@ -57,7 +59,8 @@ def string_keys_to_dict(key_string, callback):
 
 def dict_merge(*dicts):
     merged = {}
-    [merged.update(d) for d in dicts]
+    for d in dicts:
+        merged.update(d)
     return merged
 
 
@@ -397,7 +400,8 @@ class StrictRedis(object):
                  charset=None, errors=None,
                  decode_responses=False, retry_on_timeout=False,
                  ssl=False, ssl_keyfile=None, ssl_certfile=None,
-                 ssl_cert_reqs=None, ssl_ca_certs=None):
+                 ssl_cert_reqs=None, ssl_ca_certs=None,
+                 max_connections=None):
         if not connection_pool:
             if charset is not None:
                 warnings.warn(DeprecationWarning(
@@ -415,7 +419,8 @@ class StrictRedis(object):
                 'encoding': encoding,
                 'encoding_errors': encoding_errors,
                 'decode_responses': decode_responses,
-                'retry_on_timeout': retry_on_timeout
+                'retry_on_timeout': retry_on_timeout,
+                'max_connections': max_connections
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -476,6 +481,7 @@ class StrictRedis(object):
         """
         shard_hint = kwargs.pop('shard_hint', None)
         value_from_callable = kwargs.pop('value_from_callable', False)
+        watch_delay = kwargs.pop('watch_delay', None)
         with self.pipeline(True, shard_hint) as pipe:
             while 1:
                 try:
@@ -485,6 +491,8 @@ class StrictRedis(object):
                     exec_value = pipe.execute()
                     return func_value if value_from_callable else exec_value
                 except WatchError:
+                    if watch_delay is not None and watch_delay > 0:
+                        time.sleep(watch_delay)
                     continue
 
     def lock(self, name, timeout=None, sleep=0.1, blocking_timeout=None,
@@ -762,6 +770,15 @@ class StrictRedis(object):
         """
         return self.execute_command('TIME')
 
+    def wait(self, num_replicas, timeout):
+        """
+        Redis synchronous replication
+        That returns the number of replicas that processed the query when
+        we finally have at least ``num_replicas``, or when the ``timeout`` was
+        reached.
+        """
+        return self.execute_command('WAIT', num_replicas, timeout)
+
     # BASIC KEY COMMANDS
     def append(self, key, value):
         """
@@ -868,7 +885,7 @@ class StrictRedis(object):
         doesn't exist.
         """
         value = self.get(name)
-        if value:
+        if value is not None:
             return value
         raise KeyError(name)
 
@@ -1646,6 +1663,22 @@ class StrictRedis(object):
             pieces.extend([Token('LIMIT'), start, num])
         return self.execute_command(*pieces)
 
+    def zrevrangebylex(self, name, max, min, start=None, num=None):
+        """
+        Return the reversed lexicographical range of values from sorted set
+        ``name`` between ``max`` and ``min``.
+
+        If ``start`` and ``num`` are specified, then return a slice of the
+        range.
+        """
+        if (start is not None and num is None) or \
+                (num is not None and start is None):
+            raise RedisError("``start`` and ``num`` must both be specified")
+        pieces = ['ZREVRANGEBYLEX', name, max, min]
+        if start is not None and num is not None:
+            pieces.extend([Token('LIMIT'), start, num])
+        return self.execute_command(*pieces)
+
     def zrangebyscore(self, name, min, max, start=None, num=None,
                       withscores=False, score_cast_func=float):
         """
@@ -1799,12 +1832,12 @@ class StrictRedis(object):
         "Adds the specified elements to the specified HyperLogLog."
         return self.execute_command('PFADD', name, *values)
 
-    def pfcount(self, name):
+    def pfcount(self, *sources):
         """
         Return the approximated cardinality of
-        the set observed by the HyperLogLog at key.
+        the set observed by the HyperLogLog at key(s).
         """
-        return self.execute_command('PFCOUNT', name)
+        return self.execute_command('PFCOUNT', *sources)
 
     def pfmerge(self, dest, *sources):
         "Merge N different HyperLogLogs into a single one."
@@ -2112,8 +2145,8 @@ class PubSub(object):
     def execute_command(self, *args, **kwargs):
         "Execute a publish/subscribe command"
 
-        # NOTE: don't parse the response in this function. it could pull a
-        # legitmate message off the stack if the connection is already
+        # NOTE: don't parse the response in this function -- it could pull a
+        # legitimate message off the stack if the connection is already
         # subscribed to one or more channels
 
         if self.connection is None:
@@ -2288,28 +2321,37 @@ class PubSub(object):
         for pattern, handler in iteritems(self.patterns):
             if handler is None:
                 raise PubSubError("Pattern: '%s' has no handler registered")
-        pubsub = self
 
-        class WorkerThread(threading.Thread):
-            def __init__(self, *args, **kwargs):
-                super(WorkerThread, self).__init__(*args, **kwargs)
-                self._running = False
-
-            def run(self):
-                if self._running:
-                    return
-                self._running = True
-                while self._running and pubsub.subscribed:
-                    pubsub.get_message(ignore_subscribe_messages=True,
-                                       timeout=sleep_time)
-
-            def stop(self):
-                self._running = False
-                self.join()
-
-        thread = WorkerThread()
+        thread = PubSubWorkerThread(self, sleep_time)
         thread.start()
         return thread
+
+
+class PubSubWorkerThread(threading.Thread):
+    def __init__(self, pubsub, sleep_time):
+        super(PubSubWorkerThread, self).__init__()
+        self.pubsub = pubsub
+        self.sleep_time = sleep_time
+        self._running = False
+
+    def run(self):
+        if self._running:
+            return
+        self._running = True
+        pubsub = self.pubsub
+        sleep_time = self.sleep_time
+        while pubsub.subscribed:
+            pubsub.get_message(ignore_subscribe_messages=True,
+                               timeout=sleep_time)
+        pubsub.close()
+        self._running = False
+
+    def stop(self):
+        # stopping simply unsubscribes from all channels and patterns.
+        # the unsubscribe responses that are generated will short circuit
+        # the loop in run(), calling pubsub.close() to clean up the connection
+        self.pubsub.unsubscribe()
+        self.pubsub.punsubscribe()
 
 
 class BasePipeline(object):
@@ -2532,9 +2574,9 @@ class BasePipeline(object):
                 raise r
 
     def annotate_exception(self, exception, number, command):
-        cmd = unicode(' ').join(imap(unicode, command))
+        cmd = safe_unicode(' ').join(imap(safe_unicode, command))
         msg = unicode('Command # %d (%s) of pipeline caused error: %s') % (
-            number, cmd, unicode(exception.args[0]))
+            number, cmd, safe_unicode(exception.args[0]))
         exception.args = (msg,) + exception.args[1:]
 
     def parse_response(self, connection, command_name, **options):

@@ -1,5 +1,34 @@
-* 2.10.4 (in development)
+* 2.10.6 (in development)
+    * Socket timeouts when connecting to a server are now properly raised
+      as TimeoutErrors.
+* 2.10.5
+    * Allow URL encoded parameters in Redis URLs. Characters like a "/" can
+      now be URL encoded and redis-py will correctly decode them. Thanks
+      Paul Keene.
+    * Added support for the WAIT command. Thanks https://github.com/eshizhan
+    * Better shutdown support for the PubSub Worker Thread. It now properly
+      cleans up the connection, unsubscribes from any channels and patterns
+      previously subscribed to and consumes any waiting messages on the socket.
+    * Added the ability to sleep for a brief period in the event of a
+      WatchError occuring. Thanks Joshua Harlow.
+    * Fixed a bug with pipeline error reporting when dealing with characters
+      in error messages that could not be encoded to the connection's
+      character set. Thanks Hendrik Muhs.
+    * Fixed a bug in Sentinel connections that would inadvertantly connect
+      to the master when the connection pool resets. Thanks
+      https://github.com/df3n5
     * Better timeout support in Pubsub get_message. Thanks Andy Isaacson.
+    * Fixed a bug with the HiredisParser that would cause the parser to
+      get stuck in an endless loop if a specific number of bytes were
+      delivered from the socket. This fix also increases performance of
+      parsing large responses from the Redis server.
+    * Added support for ZREVRANGEBYLEX.
+    * ConnectionErrors are now raised if Redis refuses a connection due to
+      the maxclients limit being exceeded. Thanks Roman Karpovich.
+    * max_connections can now be set when instantiating client instances.
+      Thanks Ohad Perry.
+* 2.10.4
+    (skipped due to a PyPI snafu)
 * 2.10.3
     * Fixed a bug with the bytearray support introduced in 2.10.2. Thanks
       Josh Owen.

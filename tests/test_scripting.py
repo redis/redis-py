@@ -10,6 +10,17 @@ local value = redis.call('GET', KEYS[1])
 value = tonumber(value)
 return value * ARGV[1]"""
 
+msgpack_hello_script = """
+local message = cmsgpack.unpack(ARGV[1])
+local name = message['name']
+return "hello " .. name
+"""
+msgpack_hello_script_broken = """
+local message = cmsgpack.unpack(ARGV[1])
+local names = message['name']
+return "hello " .. name
+"""
+
 
 class TestScripting(object):
     @pytest.fixture(autouse=True)
@@ -80,3 +91,25 @@ class TestScripting(object):
         assert r.script_exists(multiply.sha) == [False]
         # [SET worked, GET 'a', result of multiple script]
         assert pipe.execute() == [True, b('2'), 6]
+
+    def test_eval_msgpack_pipeline_error_in_lua(self, r):
+        msgpack_hello = r.register_script(msgpack_hello_script)
+        assert not msgpack_hello.sha
+
+        pipe = r.pipeline()
+
+        # avoiding a dependency to msgpack, this is the output of
+        # msgpack.dumps({"name": "joe"})
+        msgpack_message_1 = b'\x81\xa4name\xa3Joe'
+
+        msgpack_hello(args=[msgpack_message_1], client=pipe)
+
+        assert r.script_exists(msgpack_hello.sha) == [True]
+        assert pipe.execute()[0] == b'hello Joe'
+
+        msgpack_hello_broken = r.register_script(msgpack_hello_script_broken)
+
+        msgpack_hello_broken(args=[msgpack_message_1], client=pipe)
+        with pytest.raises(exceptions.ResponseError) as excinfo:
+            pipe.execute()
+        assert excinfo.type == exceptions.ResponseError
