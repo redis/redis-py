@@ -100,12 +100,14 @@ def mock_cluster_resp_nodes(request, **kwargs):
                 'master - 0 1447836263562 3 connected 10923-16383\n'
                 'fbb23ed8cfa23f17eaf27ff7d0c410492a1093d6 172.17.0.7:7002 '
                 'master,fail - 1447829446956 1447829444948 1 disconnected\n'
-    )
+                )
     return _gen_cluster_mock_resp(r, response)
 
 
 @pytest.fixture()
 def mock_cluster_resp_slaves(request, **kwargs):
     r = _get_client(redis.Redis, request, **kwargs)
-    response = "['1df047e5a594f945d82fc140be97a1452bcbf93e 172.17.0.7:7007 slave 19efe5a631f3296fdf21a5441680f893e8cc96ec 0 1447836789290 3 connected']"
+    response = ("['1df047e5a594f945d82fc140be97a1452bcbf93e 172.17.0.7:7007 "
+                "slave 19efe5a631f3296fdf21a5441680f893e8cc96ec 0 "
+                "1447836789290 3 connected']")
     return _gen_cluster_mock_resp(r, response)
