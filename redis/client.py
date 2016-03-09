@@ -443,7 +443,7 @@ class StrictRedis(object):
             'CLUSTER SETSLOT': bool_ok,
             'CLUSTER SLAVES': parse_cluster_nodes,
             'GEOPOS': lambda r: list(map(lambda ll: (float(ll[0]),
-                                         float(ll[1])), r)),
+                                                     float(ll[1])), r)),
             'GEOHASH': lambda r: list(map(nativestr, r)),
             'GEORADIUS': parse_georadius_generic,
             'GEORADIUSBYMEMBER': parse_georadius_generic,
@@ -486,7 +486,7 @@ class StrictRedis(object):
                  decode_responses=False, retry_on_timeout=False,
                  ssl=False, ssl_keyfile=None, ssl_certfile=None,
                  ssl_cert_reqs=None, ssl_ca_certs=None,
-                 max_connections=None):
+                 max_connections=None, renamed_commands={}):
         if not connection_pool:
             if charset is not None:
                 warnings.warn(DeprecationWarning(
@@ -534,7 +534,7 @@ class StrictRedis(object):
             connection_pool = ConnectionPool(**kwargs)
         self.connection_pool = connection_pool
         self._use_lua_lock = None
-
+        self.renamed_commands = renamed_commands
         self.response_callbacks = self.__class__.RESPONSE_CALLBACKS.copy()
 
     def __repr__(self):
@@ -647,20 +647,26 @@ class StrictRedis(object):
         """
         return PubSub(self.connection_pool, **kwargs)
 
+    def find_renamed_command(self, command_name):
+        if not self.renamed_commands:
+            return command_name
+        return self.renamed_commands.get(command_name, command_name)
+
     # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
         "Execute a command and return a parsed response"
         pool = self.connection_pool
         command_name = args[0]
         connection = pool.get_connection(command_name, **options)
+        renamed_command = self.find_renamed_command(command_name)
         try:
-            connection.send_command(*args)
+            connection.send_command(renamed_command, *args[1:])
             return self.parse_response(connection, command_name, **options)
         except (ConnectionError, TimeoutError) as e:
             connection.disconnect()
             if not connection.retry_on_timeout and isinstance(e, TimeoutError):
                 raise
-            connection.send_command(*args)
+            connection.send_command(renamed_command, *args[1:])
             return self.parse_response(connection, command_name, **options)
         finally:
             pool.release(connection)
@@ -2553,6 +2559,7 @@ class PubSub(object):
 
 
 class PubSubWorkerThread(threading.Thread):
+
     def __init__(self, pubsub, sleep_time, daemon=False):
         super(PubSubWorkerThread, self).__init__()
         self.daemon = daemon
