@@ -1954,6 +1954,11 @@ class StrictRedis(object):
         args = list_or_args(keys, args)
         return self.execute_command('HMGET', name, *args)
 
+    def hmget_dict(self, name, keys, *args):
+        "Return a dict with keys equal to ``keys`` from within hash ``name``"
+        args = list_or_args(keys, args)
+        return dict(izip(args, self.execute_command('HMGET', name, *args)))
+
     def hvals(self, name):
         "Return the list of values within hash ``name``"
         return self.execute_command('HVALS', name)
