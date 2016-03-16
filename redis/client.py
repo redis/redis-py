@@ -441,8 +441,8 @@ class StrictRedis(object):
                  socket_connect_timeout=None,
                  socket_keepalive=None, socket_keepalive_options=None,
                  connection_pool=None, unix_socket_path=None,
-                 encoding='utf-8', encoding_errors='strict',
-                 charset=None, errors=None,
+                 pool_class=ConnectionPool, encoding='utf-8',
+                 encoding_errors='strict', charset=None, errors=None,
                  decode_responses=False, retry_on_timeout=False,
                  ssl=False, ssl_keyfile=None, ssl_certfile=None,
                  ssl_cert_reqs=None, ssl_ca_certs=None,
@@ -491,7 +491,7 @@ class StrictRedis(object):
                         'ssl_cert_reqs': ssl_cert_reqs,
                         'ssl_ca_certs': ssl_ca_certs,
                     })
-            connection_pool = ConnectionPool(**kwargs)
+            connection_pool = pool_class(**kwargs)
         self.connection_pool = connection_pool
         self._use_lua_lock = None
 
