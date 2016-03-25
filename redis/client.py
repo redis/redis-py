@@ -1626,6 +1626,14 @@ class StrictRedis(object):
         """
         pieces = []
         if args:
+          
+            args = list(args)
+            for each in args:
+                if 'INCR' in str(each).upper():
+                    pieces.append('INCR')
+                    args.remove(each)
+            args = tuple(args)
+          
             if len(args) % 2 != 0:
                 raise RedisError("ZADD requires an equal number of "
                                  "values and scores")
