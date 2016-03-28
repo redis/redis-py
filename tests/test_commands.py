@@ -1295,7 +1295,7 @@ class TestRedisCommands(object):
                 (b('u1'), b('d1'), b('1')),
                 (b('u2'), b('d2'), b('2')),
                 (b('u3'), b('d3'), b('3'))
-            ]
+        ]
 
     def test_sort_desc(self, r):
         r.rpush('a', '2', '3', '1')
@@ -1338,6 +1338,56 @@ class TestRedisCommands(object):
         assert r.lrange('sorted', 0, 10) == \
             [b('vodka'), b('milk'), b('gin'), b('apple juice')]
 
+    def test_cluster_addslots(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('ADDSLOTS', 1) is True
+
+    def test_cluster_count_failure_reports(self, mock_cluster_resp_int):
+        assert isinstance(mock_cluster_resp_int.cluster(
+            'COUNT-FAILURE-REPORTS', 'node'), int)
+
+    def test_cluster_countkeysinslot(self, mock_cluster_resp_int):
+        assert isinstance(mock_cluster_resp_int.cluster(
+            'COUNTKEYSINSLOT', 2), int)
+
+    def test_cluster_delslots(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('DELSLOTS', 1) is True
+
+    def test_cluster_failover(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('FAILOVER', 1) is True
+
+    def test_cluster_forget(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('FORGET', 1) is True
+
+    def test_cluster_info(self, mock_cluster_resp_info):
+        assert isinstance(mock_cluster_resp_info.cluster('info'), dict)
+
+    def test_cluster_keyslot(self, mock_cluster_resp_int):
+        assert isinstance(mock_cluster_resp_int.cluster(
+            'keyslot', 'asdf'), int)
+
+    def test_cluster_meet(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('meet', 'ip', 'port', 1) is True
+
+    def test_cluster_nodes(self, mock_cluster_resp_nodes):
+        assert isinstance(mock_cluster_resp_nodes.cluster('nodes'), dict)
+
+    def test_cluster_replicate(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('replicate', 'nodeid') is True
+
+    def test_cluster_reset(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('reset', 'hard') is True
+
+    def test_cluster_saveconfig(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('saveconfig') is True
+
+    def test_cluster_setslot(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('setslot', 1,
+                                            'IMPORTING', 'nodeid') is True
+
+    def test_cluster_slaves(self, mock_cluster_resp_slaves):
+        assert isinstance(mock_cluster_resp_slaves.cluster(
+            'slaves', 'nodeid'), dict)
+
 
 class TestStrictCommands(object):
 
@@ -1375,6 +1425,7 @@ class TestStrictCommands(object):
 
 
 class TestBinarySave(object):
+
     def test_binary_get_set(self, r):
         assert r.set(' foo bar ', '123')
         assert r.get(' foo bar ') == b('123')
