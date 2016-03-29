@@ -735,6 +735,22 @@ class UnixDomainSocketConnection(Connection):
                 (exception.args[0], self.path, exception.args[1])
 
 
+def to_bool(value):
+    if value is None or value == '':
+        return None
+    if isinstance(value, basestring) and value.upper() in ('0', 'F', 'FALSE', 'N', 'NO'):
+        return False
+    return bool(value)
+
+
+URL_QUERY_PARAMETER_TYPES = {
+    'socket_timeout': float,
+    'socket_connect_timeout': float,
+    'socket_keepalive': to_bool,
+    'retry_on_timeout': to_bool
+}
+
+
 class ConnectionPool(object):
     "Generic connection pool"
     @classmethod
@@ -769,8 +785,13 @@ class ConnectionPool(object):
         ``path``, and ``password`` components.
 
         Any additional querystring arguments and keyword arguments will be
-        passed along to the ConnectionPool class's initializer. In the case
-        of conflicting arguments, querystring arguments always win.
+        passed along to the ConnectionPool class's initializer. The querystring
+        arguments ``socket_connect_timeout`` and ``socket_timeout`` if supplied
+        are parsed as float values. The arguments ``socket_keepalive`` and
+        ``retry_on_timeout`` are parsed to boolean values that accept
+        True/False, Yes/No values to indicate state. Invalid types cause a
+        ``UserWarning`` to be raised. In the case of conflicting arguments,
+        querystring arguments always win.
         """
         url_string = url
         url = urlparse(url)
@@ -790,7 +811,13 @@ class ConnectionPool(object):
 
         for name, value in iteritems(parse_qs(qs)):
             if value and len(value) > 0:
-                url_options[name] = value[0]
+                if name in URL_QUERY_PARAMETER_TYPES:
+                    try:
+                        url_options[name] = URL_QUERY_PARAMETER_TYPES[name](value[0])
+                    except (TypeError, ValueError):
+                        warnings.warn(UserWarning("Invalid value for `%s` in connection URL." % name))
+                else:
+                    url_options[name] = value[0]
 
         if decode_components:
             password = unquote(url.password) if url.password else None
