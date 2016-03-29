@@ -239,7 +239,9 @@ class TestConnectionPoolURLParsing(object):
 
     def test_extra_typed_querystring_options(self):
         pool = redis.ConnectionPool.from_url(
-            'redis://localhost/2?socket_timeout=20&socket_connect_timeout=10&socket_keepalive=&retry_on_timeout=Yes')
+            'redis://localhost/2?socket_timeout=20&socket_connect_timeout=10'
+            '&socket_keepalive=&retry_on_timeout=Yes'
+        )
 
         assert pool.connection_class == redis.Connection
         assert pool.connection_kwargs == {
@@ -267,9 +269,15 @@ class TestConnectionPoolURLParsing(object):
     def test_invalid_extra_typed_querystring_options(self):
         import warnings
         with warnings.catch_warnings(record=True) as warning_log:
-            redis.ConnectionPool.from_url('redis://localhost/2?socket_timeout=_&socket_connect_timeout=abc')
+            redis.ConnectionPool.from_url(
+                'redis://localhost/2?socket_timeout=_&'
+                'socket_connect_timeout=abc'
+            )
         # Compare the message values
-        assert [str(m.message) for m in sorted(warning_log, key=lambda l: str(l.message))] == [
+        assert [
+            str(m.message) for m in
+            sorted(warning_log, key=lambda l: str(l.message))
+        ] == [
             'Invalid value for `socket_connect_timeout` in connection URL.',
             'Invalid value for `socket_timeout` in connection URL.',
         ]

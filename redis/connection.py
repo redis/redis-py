@@ -735,15 +735,18 @@ class UnixDomainSocketConnection(Connection):
                 (exception.args[0], self.path, exception.args[1])
 
 
+FALSE_STRINGS = ('0', 'F', 'FALSE', 'N', 'NO')
+
+
 def to_bool(value):
     if value is None or value == '':
         return None
-    if isinstance(value, basestring) and value.upper() in ('0', 'F', 'FALSE', 'N', 'NO'):
+    if isinstance(value, basestring) and value.upper() in FALSE_STRINGS:
         return False
     return bool(value)
 
 
-URL_QUERY_PARAMETER_TYPES = {
+URL_QUERY_ARGUMENT_PARSERS = {
     'socket_timeout': float,
     'socket_connect_timeout': float,
     'socket_keepalive': to_bool,
@@ -811,11 +814,14 @@ class ConnectionPool(object):
 
         for name, value in iteritems(parse_qs(qs)):
             if value and len(value) > 0:
-                if name in URL_QUERY_PARAMETER_TYPES:
+                parser = URL_QUERY_ARGUMENT_PARSERS.get(name)
+                if parser:
                     try:
-                        url_options[name] = URL_QUERY_PARAMETER_TYPES[name](value[0])
+                        url_options[name] = parser(value[0])
                     except (TypeError, ValueError):
-                        warnings.warn(UserWarning("Invalid value for `%s` in connection URL." % name))
+                        warnings.warn(UserWarning(
+                            "Invalid value for `%s` in connection URL." % name
+                        ))
                 else:
                     url_options[name] = value[0]
 
