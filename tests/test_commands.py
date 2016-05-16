@@ -1388,6 +1388,139 @@ class TestRedisCommands(object):
         assert isinstance(mock_cluster_resp_slaves.cluster(
             'slaves', 'nodeid'), dict)
 
+    # GEO COMMANDS
+    @skip_if_server_version_lt('3.2.0')
+    def test_geoadd(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.zcard('barcelona') == 2
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_geoadd_invalid_params(self, r):
+        with pytest.raises(exceptions.RedisError):
+            r.geoadd('barcelona', *(1, 2))
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_geodist(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.geodist('barcelona', 'place1', 'place2') == b('3067.4157')
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_geodist_units(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.geodist('barcelona', 'place1', 'place2', 'km') == b('3.0674')
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_geodist_invalid_units(self, r):
+        with pytest.raises(exceptions.RedisError):
+            assert r.geodist('x', 'y', 'z', 'inches')
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_geohash(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.geohash('barcelona', 'place1', 'place2') ==\
+            [b('sp3e9yg3kd0'), b('sp3e9cbc3t0')]
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_geopos(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        # redis uses 52 bits precision, hereby small errors may be introduced.
+        assert r.geopos('barcelona', 'place1', 'place2') ==\
+            [[b('2.19093829393386841'), b('41.43379028184083523')],
+             [b('2.18737632036209106'), b('41.40634178640635099')]]
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadius(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.georadius('barcelona', 2.191, 41.433, 1000) == [b('place1')]
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadius_units(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.georadius('barcelona', 2.191, 41.433, 1, unit='km') ==\
+            [b('place1')]
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadius_with_all(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.georadius('barcelona', 2.191, 41.433, 1, unit='km',
+                           withdist=True, withcoord=True, withhash=True) ==\
+            [[b('place1'), b('0.0881'), b(3471609698139488),
+              [b('2.19093829393386841'), b('41.43379028184083523')]]]
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadius_count(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.georadius('barcelona', 2.191, 41.433, 3000, count=1) ==\
+            [b('place1')]
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadius_sort(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.georadius('barcelona', 2.191, 41.433, 3000, sort='ASC') ==\
+            [b('place1'), b('place2')]
+        assert r.georadius('barcelona', 2.191, 41.433, 3000, sort='DESC') ==\
+            [b('place2'), b('place1')]
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadius_store(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        r.georadius('barcelona', 2.191, 41.433, 1000, store='places_barcelona')
+        assert r.zrange('places_barcelona', 0, -1) == [b('place1')]
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadius_store_dist(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        r.georadius('barcelona', 2.191, 41.433, 1000,
+                    store_dist='places_barcelona')
+        # instead of save the geo score, the distance is saved.
+        assert r.zscore('places_barcelona', 'place1') == 88.05060698409301
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadiusmember(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.georadiusbymember('barcelona', 'place1', 4000) ==\
+            [b('place2'), b('place1')]
+        assert r.georadiusbymember('barcelona', 'place1', 10) == [b('place1')]
+
 
 class TestStrictCommands(object):
 
