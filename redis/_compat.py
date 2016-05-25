@@ -2,7 +2,8 @@
 import sys
 
 # For Python older than 3.5, retry EINTR.
-if sys.version_info[0] < 3 or sys.version_info[0] == 3 and sys.version_info[1] < 5:
+if sys.version_info[0] < 3 or (sys.version_info[0] == 3
+                               and sys.version_info[1] < 5):
     # Adapted from https://bugs.python.org/review/23863/patch/14532/54418
     import socket
     import time
@@ -52,7 +53,7 @@ if sys.version_info[0] < 3 or sys.version_info[0] == 3 and sys.version_info[1] <
     def recv_into(sock, *args, **kwargs):
         return _retryable_call(sock, sock.recv_into, *args, **kwargs)
 
-else: # Python 3.5 and above automatically retry EINTR
+else:  # Python 3.5 and above automatically retry EINTR
     def recv(sock, *args, **kwargs):
         return sock.recv(*args, **kwargs)
 
