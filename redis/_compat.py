@@ -2,8 +2,8 @@
 import sys
 
 # For Python older than 3.5, retry EINTR.
-if sys.version_info[0] < 3 or (sys.version_info[0] == 3
-                               and sys.version_info[1] < 5):
+if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and
+                               sys.version_info[1] < 5):
     # Adapted from https://bugs.python.org/review/23863/patch/14532/54418
     import socket
     import time
