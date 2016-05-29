@@ -335,7 +335,7 @@ class StrictRedis(object):
         string_keys_to_dict(
             # these return OK, or int if redis-server is >=1.3.4
             'LPUSH RPUSH',
-            lambda r: isinstance(r, long) and r or nativestr(r) == 'OK'
+            lambda r: isinstance(r, (long, int)) and r or nativestr(r) == 'OK'
         ),
         string_keys_to_dict('SORT', sort_return_tuples),
         string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
