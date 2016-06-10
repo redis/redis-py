@@ -1,7 +1,6 @@
 from __future__ import with_statement
 from distutils.version import StrictVersion
 from itertools import chain
-from select import select
 import os
 import socket
 import sys
@@ -17,7 +16,7 @@ except ImportError:
 from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
                            BytesIO, nativestr, basestring, iteritems,
                            LifoQueue, Empty, Full, urlparse, parse_qs,
-                           recv, recv_into, unquote)
+                           recv, recv_into, select, unquote)
 from redis.exceptions import (
     RedisError,
     ConnectionError,
