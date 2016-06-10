@@ -17,7 +17,7 @@ except ImportError:
 from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
                            BytesIO, nativestr, basestring, iteritems,
                            LifoQueue, Empty, Full, urlparse, parse_qs,
-                           unquote)
+                           recv, recv_into, unquote)
 from redis.exceptions import (
     RedisError,
     ConnectionError,
@@ -123,7 +123,7 @@ class SocketBuffer(object):
 
         try:
             while True:
-                data = self._sock.recv(socket_read_size)
+                data = recv(self._sock, socket_read_size)
                 # an empty string indicates the server shutdown the socket
                 if isinstance(data, bytes) and len(data) == 0:
                     raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
@@ -341,11 +341,11 @@ class HiredisParser(BaseParser):
         while response is False:
             try:
                 if HIREDIS_USE_BYTE_BUFFER:
-                    bufflen = self._sock.recv_into(self._buffer)
+                    bufflen = recv_into(self._sock, self._buffer)
                     if bufflen == 0:
                         raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
                 else:
-                    buffer = self._sock.recv(socket_read_size)
+                    buffer = recv(self._sock, socket_read_size)
                     # an empty string indicates the server shutdown the socket
                     if not isinstance(buffer, bytes) or len(buffer) == 0:
                         raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
