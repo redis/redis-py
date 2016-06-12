@@ -8,6 +8,7 @@ from argparse import ArgumentParser
 if sys.version_info[0] == 3:
     long = int
 
+
 def parse_args():
     parser = ArgumentParser()
     parser.add_argument('-n',
@@ -26,6 +27,7 @@ def parse_args():
 
     args = parser.parse_args()
     return args
+
 
 def run():
     args = parse_args()
