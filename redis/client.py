@@ -787,7 +787,8 @@ class StrictRedis(object):
         instance is promoted to a master instead.
         """
         if host is None and port is None:
-            return self.execute_command('SLAVEOF', Token('NO'), Token('ONE'))
+            return self.execute_command('SLAVEOF', Token.get_token('NO'),
+                                        Token.get_token('ONE'))
         return self.execute_command('SLAVEOF', host, port)
 
     def slowlog_get(self, num=None):
@@ -1362,10 +1363,10 @@ class StrictRedis(object):
 
         pieces = [name]
         if by is not None:
-            pieces.append(Token('BY'))
+            pieces.append(Token.get_token('BY'))
             pieces.append(by)
         if start is not None and num is not None:
-            pieces.append(Token('LIMIT'))
+            pieces.append(Token.get_token('LIMIT'))
             pieces.append(start)
             pieces.append(num)
         if get is not None:
@@ -1374,18 +1375,18 @@ class StrictRedis(object):
             # values. We can't just iterate blindly because strings are
             # iterable.
             if isinstance(get, basestring):
-                pieces.append(Token('GET'))
+                pieces.append(Token.get_token('GET'))
                 pieces.append(get)
             else:
                 for g in get:
-                    pieces.append(Token('GET'))
+                    pieces.append(Token.get_token('GET'))
                     pieces.append(g)
         if desc:
-            pieces.append(Token('DESC'))
+            pieces.append(Token.get_token('DESC'))
         if alpha:
-            pieces.append(Token('ALPHA'))
+            pieces.append(Token.get_token('ALPHA'))
         if store is not None:
-            pieces.append(Token('STORE'))
+            pieces.append(Token.get_token('STORE'))
             pieces.append(store)
 
         if groups:
@@ -1409,9 +1410,9 @@ class StrictRedis(object):
         """
         pieces = [cursor]
         if match is not None:
-            pieces.extend([Token('MATCH'), match])
+            pieces.extend([Token.get_token('MATCH'), match])
         if count is not None:
-            pieces.extend([Token('COUNT'), count])
+            pieces.extend([Token.get_token('COUNT'), count])
         return self.execute_command('SCAN', *pieces)
 
     def scan_iter(self, match=None, count=None):
@@ -1440,9 +1441,9 @@ class StrictRedis(object):
         """
         pieces = [name, cursor]
         if match is not None:
-            pieces.extend([Token('MATCH'), match])
+            pieces.extend([Token.get_token('MATCH'), match])
         if count is not None:
-            pieces.extend([Token('COUNT'), count])
+            pieces.extend([Token.get_token('COUNT'), count])
         return self.execute_command('SSCAN', *pieces)
 
     def sscan_iter(self, name, match=None, count=None):
@@ -1472,9 +1473,9 @@ class StrictRedis(object):
         """
         pieces = [name, cursor]
         if match is not None:
-            pieces.extend([Token('MATCH'), match])
+            pieces.extend([Token.get_token('MATCH'), match])
         if count is not None:
-            pieces.extend([Token('COUNT'), count])
+            pieces.extend([Token.get_token('COUNT'), count])
         return self.execute_command('HSCAN', *pieces)
 
     def hscan_iter(self, name, match=None, count=None):
@@ -1507,9 +1508,9 @@ class StrictRedis(object):
         """
         pieces = [name, cursor]
         if match is not None:
-            pieces.extend([Token('MATCH'), match])
+            pieces.extend([Token.get_token('MATCH'), match])
         if count is not None:
-            pieces.extend([Token('COUNT'), count])
+            pieces.extend([Token.get_token('COUNT'), count])
         options = {'score_cast_func': score_cast_func}
         return self.execute_command('ZSCAN', *pieces, **options)
 
@@ -1685,7 +1686,7 @@ class StrictRedis(object):
                                   score_cast_func)
         pieces = ['ZRANGE', name, start, end]
         if withscores:
-            pieces.append(Token('WITHSCORES'))
+            pieces.append(Token.get_token('WITHSCORES'))
         options = {
             'withscores': withscores,
             'score_cast_func': score_cast_func
@@ -1705,7 +1706,7 @@ class StrictRedis(object):
             raise RedisError("``start`` and ``num`` must both be specified")
         pieces = ['ZRANGEBYLEX', name, min, max]
         if start is not None and num is not None:
-            pieces.extend([Token('LIMIT'), start, num])
+            pieces.extend([Token.get_token('LIMIT'), start, num])
         return self.execute_command(*pieces)
 
     def zrevrangebylex(self, name, max, min, start=None, num=None):
@@ -1721,7 +1722,7 @@ class StrictRedis(object):
             raise RedisError("``start`` and ``num`` must both be specified")
         pieces = ['ZREVRANGEBYLEX', name, max, min]
         if start is not None and num is not None:
-            pieces.extend([Token('LIMIT'), start, num])
+            pieces.extend([Token.get_token('LIMIT'), start, num])
         return self.execute_command(*pieces)
 
     def zrangebyscore(self, name, min, max, start=None, num=None,
@@ -1743,9 +1744,9 @@ class StrictRedis(object):
             raise RedisError("``start`` and ``num`` must both be specified")
         pieces = ['ZRANGEBYSCORE', name, min, max]
         if start is not None and num is not None:
-            pieces.extend([Token('LIMIT'), start, num])
+            pieces.extend([Token.get_token('LIMIT'), start, num])
         if withscores:
-            pieces.append(Token('WITHSCORES'))
+            pieces.append(Token.get_token('WITHSCORES'))
         options = {
             'withscores': withscores,
             'score_cast_func': score_cast_func
@@ -1803,7 +1804,7 @@ class StrictRedis(object):
         """
         pieces = ['ZREVRANGE', name, start, end]
         if withscores:
-            pieces.append(Token('WITHSCORES'))
+            pieces.append(Token.get_token('WITHSCORES'))
         options = {
             'withscores': withscores,
             'score_cast_func': score_cast_func
@@ -1829,9 +1830,9 @@ class StrictRedis(object):
             raise RedisError("``start`` and ``num`` must both be specified")
         pieces = ['ZREVRANGEBYSCORE', name, max, min]
         if start is not None and num is not None:
-            pieces.extend([Token('LIMIT'), start, num])
+            pieces.extend([Token.get_token('LIMIT'), start, num])
         if withscores:
-            pieces.append(Token('WITHSCORES'))
+            pieces.append(Token.get_token('WITHSCORES'))
         options = {
             'withscores': withscores,
             'score_cast_func': score_cast_func
@@ -1865,10 +1866,10 @@ class StrictRedis(object):
             weights = None
         pieces.extend(keys)
         if weights:
-            pieces.append(Token('WEIGHTS'))
+            pieces.append(Token.get_token('WEIGHTS'))
             pieces.extend(weights)
         if aggregate:
-            pieces.append(Token('AGGREGATE'))
+            pieces.append(Token.get_token('AGGREGATE'))
             pieces.append(aggregate)
         return self.execute_command(*pieces)
 

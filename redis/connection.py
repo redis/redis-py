@@ -65,10 +65,27 @@ class Token(object):
     hard-coded arguments are wrapped in this class so we know not to apply
     and encoding rules on them.
     """
+
+    _cache = {}
+
+    @classmethod
+    def get_token(cls, value):
+        "Gets a cached token object or creates a new one if not already cached"
+
+        # Use try/except because after running for a short time most tokens
+        # should already be cached
+        try:
+            return cls._cache[value]
+        except KeyError:
+            token = Token(value)
+            cls._cache[value] = token
+            return token
+
     def __init__(self, value):
         if isinstance(value, Token):
             value = value.value
         self.value = value
+        self.encoded_value = b(value)
 
     def __repr__(self):
         return self.value
@@ -586,7 +603,7 @@ class Connection(object):
     def encode(self, value):
         "Return a bytestring representation of the value"
         if isinstance(value, Token):
-            return b(value.value)
+            return value.encoded_value
         elif isinstance(value, bytes):
             return value
         elif isinstance(value, (int, long)):
@@ -609,9 +626,10 @@ class Connection(object):
         # to prevent them from being encoded.
         command = args[0]
         if ' ' in command:
-            args = tuple([Token(s) for s in command.split(' ')]) + args[1:]
+            args = tuple([Token.get_token(s)
+                          for s in command.split()]) + args[1:]
         else:
-            args = (Token(command),) + args[1:]
+            args = (Token.get_token(command),) + args[1:]
 
         buff = SYM_EMPTY.join(
             (SYM_STAR, b(str(len(args))), SYM_CRLF))
