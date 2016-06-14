@@ -1,4 +1,5 @@
 pidfile /var/run/redis-master.pid
+bind *
 port 6379
 daemonize yes
 unixsocket /tmp/redis_master.sock
