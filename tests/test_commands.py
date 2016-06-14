@@ -1523,7 +1523,7 @@ class TestRedisCommands(object):
 
         r.geoadd('barcelona', *values)
         r.georadius('barcelona', 2.191, 41.433, 1000, store='places_barcelona')
-        assert r.zrange('places_barcelona', 0, -1) == ['place1']
+        assert r.zrange('places_barcelona', 0, -1) == [b'place1']
 
     @skip_if_server_version_lt('3.2.0')
     def test_georadius_store_dist(self, r):

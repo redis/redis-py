@@ -322,7 +322,7 @@ def parse_georadius_generic(response, **options):
     if not options['withdist'] and not options['withcoord']\
             and not options['withhash']:
         # just a bunch of places
-        return [str(r) for r in response_list]
+        return [nativestr(r) for r in response_list]
 
     cast = {
         'withdist': float,
@@ -332,10 +332,10 @@ def parse_georadius_generic(response, **options):
 
     # zip all output results with each casting functino to get
     # the properly native Python value.
-    f = [str]
+    f = [nativestr]
     f += [cast[o] for o in ['withdist', 'withhash', 'withcoord'] if options[o]]
     return [
-        map(lambda fv: fv[0](fv[1]), zip(f, r)) for r in response_list
+        list(map(lambda fv: fv[0](fv[1]), zip(f, r))) for r in response_list
     ]
 
 
@@ -444,7 +444,7 @@ class StrictRedis(object):
             'CLUSTER SLAVES': parse_cluster_nodes,
             'GEOPOS': lambda r: list(map(lambda ll: (float(ll[0]),
                                          float(ll[1])), r)),
-            'GEOHASH': lambda r: list(map(str, r)),
+            'GEOHASH': lambda r: list(map(nativestr, r)),
             'GEORADIUS': parse_georadius_generic,
             'GEORADIUSBYMEMBER': parse_georadius_generic,
         }
