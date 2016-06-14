@@ -308,6 +308,37 @@ def parse_cluster_nodes(response, **options):
     return dict([_parse_node_line(line) for line in raw_lines])
 
 
+def parse_georadius_generic(response, **options):
+    if options['store'] or options['store_dist']:
+        # `store` and `store_diff` cant be combined
+        # with other command arguments.
+        return response
+
+    if type(response) != list:
+        response_list = [response]
+    else:
+        response_list = response
+
+    if not options['withdist'] and not options['withcoord']\
+            and not options['withhash']:
+        # just a bunch of places
+        return [str(r) for r in response_list]
+
+    cast = {
+        'withdist': float,
+        'withcoord': lambda ll: (float(ll[0]), float(ll[1])),
+        'withhash': int
+    }
+
+    # zip all output results with each casting functino to get
+    # the properly native Python value.
+    f = [str]
+    f += [cast[o] for o in ['withdist', 'withhash', 'withcoord'] if options[o]]
+    return [
+        map(lambda fv: fv[0](fv[1]), zip(f, r)) for r in response_list
+    ]
+
+
 class StrictRedis(object):
     """
     Implementation of the Redis protocol.
@@ -328,10 +359,14 @@ class StrictRedis(object):
             'BITCOUNT BITPOS DECRBY DEL GETBIT HDEL HLEN INCRBY LINSERT LLEN '
             'LPUSHX PFADD PFCOUNT RPUSHX SADD SCARD SDIFFSTORE SETBIT '
             'SETRANGE SINTERSTORE SREM STRLEN SUNIONSTORE ZADD ZCARD '
-            'ZLEXCOUNT ZREM ZREMRANGEBYLEX ZREMRANGEBYRANK ZREMRANGEBYSCORE',
+            'ZLEXCOUNT ZREM ZREMRANGEBYLEX ZREMRANGEBYRANK ZREMRANGEBYSCORE '
+            'GEOADD',
             int
         ),
-        string_keys_to_dict('INCRBYFLOAT HINCRBYFLOAT', float),
+        string_keys_to_dict(
+            'INCRBYFLOAT HINCRBYFLOAT GEODIST',
+            float
+        ),
         string_keys_to_dict(
             # these return OK, or int if redis-server is >=1.3.4
             'LPUSH RPUSH',
@@ -406,7 +441,12 @@ class StrictRedis(object):
             'CLUSTER SAVECONFIG': bool_ok,
             'CLUSTER SET-CONFIG-EPOCH': bool_ok,
             'CLUSTER SETSLOT': bool_ok,
-            'CLUSTER SLAVES': parse_cluster_nodes
+            'CLUSTER SLAVES': parse_cluster_nodes,
+            'GEOPOS': lambda r: list(map(lambda ll: (float(ll[0]),
+                                         float(ll[1])), r)),
+            'GEOHASH': lambda r: list(map(str, r)),
+            'GEORADIUS': parse_georadius_generic,
+            'GEORADIUSBYMEMBER': parse_georadius_generic,
         }
     )
 
@@ -2147,7 +2187,7 @@ class StrictRedis(object):
         if kwargs['store_dist']:
             pieces.extend([Token('STOREDIST'), kwargs['store_dist']])
 
-        return self.execute_command(command, *pieces)
+        return self.execute_command(command, *pieces, **kwargs)
 
 
 class Redis(StrictRedis):
