@@ -308,6 +308,37 @@ def parse_cluster_nodes(response, **options):
     return dict([_parse_node_line(line) for line in raw_lines])
 
 
+def parse_georadius_generic(response, **options):
+    if options['store'] or options['store_dist']:
+        # `store` and `store_diff` cant be combined
+        # with other command arguments.
+        return response
+
+    if type(response) != list:
+        response_list = [response]
+    else:
+        response_list = response
+
+    if not options['withdist'] and not options['withcoord']\
+            and not options['withhash']:
+        # just a bunch of places
+        return [nativestr(r) for r in response_list]
+
+    cast = {
+        'withdist': float,
+        'withcoord': lambda ll: (float(ll[0]), float(ll[1])),
+        'withhash': int
+    }
+
+    # zip all output results with each casting functino to get
+    # the properly native Python value.
+    f = [nativestr]
+    f += [cast[o] for o in ['withdist', 'withhash', 'withcoord'] if options[o]]
+    return [
+        list(map(lambda fv: fv[0](fv[1]), zip(f, r))) for r in response_list
+    ]
+
+
 class StrictRedis(object):
     """
     Implementation of the Redis protocol.
@@ -328,10 +359,14 @@ class StrictRedis(object):
             'BITCOUNT BITPOS DECRBY DEL GETBIT HDEL HLEN INCRBY LINSERT LLEN '
             'LPUSHX PFADD PFCOUNT RPUSHX SADD SCARD SDIFFSTORE SETBIT '
             'SETRANGE SINTERSTORE SREM STRLEN SUNIONSTORE ZADD ZCARD '
-            'ZLEXCOUNT ZREM ZREMRANGEBYLEX ZREMRANGEBYRANK ZREMRANGEBYSCORE',
+            'ZLEXCOUNT ZREM ZREMRANGEBYLEX ZREMRANGEBYRANK ZREMRANGEBYSCORE '
+            'GEOADD',
             int
         ),
-        string_keys_to_dict('INCRBYFLOAT HINCRBYFLOAT', float),
+        string_keys_to_dict(
+            'INCRBYFLOAT HINCRBYFLOAT GEODIST',
+            float
+        ),
         string_keys_to_dict(
             # these return OK, or int if redis-server is >=1.3.4
             'LPUSH RPUSH',
@@ -406,7 +441,12 @@ class StrictRedis(object):
             'CLUSTER SAVECONFIG': bool_ok,
             'CLUSTER SET-CONFIG-EPOCH': bool_ok,
             'CLUSTER SETSLOT': bool_ok,
-            'CLUSTER SLAVES': parse_cluster_nodes
+            'CLUSTER SLAVES': parse_cluster_nodes,
+            'GEOPOS': lambda r: list(map(lambda ll: (float(ll[0]),
+                                         float(ll[1])), r)),
+            'GEOHASH': lambda r: list(map(nativestr, r)),
+            'GEORADIUS': parse_georadius_generic,
+            'GEORADIUSBYMEMBER': parse_georadius_generic,
         }
     )
 
@@ -2020,6 +2060,135 @@ class StrictRedis(object):
         with Lua scripts.
         """
         return Script(self, script)
+
+    # GEO COMMANDS
+    def geoadd(self, name, *values):
+        """
+        Add the specified geospatial items to the specified key identified
+        by the ``name`` argument. The Geospatial items are given as ordered
+        members of the ``values`` argument, each item or place is formed b
+        the triad latitude, longitude and name.
+        """
+        if len(values) % 3 != 0:
+            raise RedisError("GEOADD requires places with lat, lon and name"
+                             " values")
+        return self.execute_command('GEOADD', name, *values)
+
+    def geodist(self, name, place1, place2, unit=None):
+        """
+        Return the distance between ``place1`` and ``place2`` members of the
+        ``name`` key.
+        The units must be one o fthe following : m, km mi, ft. By default
+        meters are used.
+        """
+        pieces = [name, place1, place2]
+        if unit and unit not in ('m', 'km', 'mi', 'ft'):
+            raise RedisError("GEODIST invalid unit")
+        elif unit:
+            pieces.append(unit)
+        return self.execute_command('GEODIST', *pieces)
+
+    def geohash(self, name, *values):
+        """
+        Return the geo hash string for each item of ``values`` members of
+        the specified key identified by the ``name``argument.
+        """
+        return self.execute_command('GEOHASH', name, *values)
+
+    def geopos(self, name, *values):
+        """
+        Return the postitions of each item of ``values`` as members of
+        the specified key identified by the ``name``argument. Each position
+        is represented by the pairs lat and lon.
+        """
+        return self.execute_command('GEOPOS', name, *values)
+
+    def georadius(self, name, latitude, longitude, radius, unit=None,
+                  withdist=False, withcoord=False, withhash=False, count=None,
+                  sort=None, store=None, store_dist=None):
+        """
+        Return the members of the of the specified key identified by the
+        ``name``argument which are within the borders of the area specified
+        with the ``latitude`` and ``longitude`` location and the maxium
+        distnance from the center specified by the ``radius`` value.
+
+        The units must be one o fthe following : m, km mi, ft. By default
+
+        ``withdist`` indicates to return the distances of each place.
+
+        ``withcoord`` indicates to return the latitude and longitude of
+        each place.
+
+        ``withhash`` indicates to return the geohash string of each place.
+
+        ``count`` indicates to return the number of elements up to N.
+
+        ``sort`` indicates to return the places in a sorted way, ASC for
+        nearest to fairest and DESC for fairest to nearest.
+
+        ``store`` indicates to save the places names in a sorted set named
+        with a specific key, each element of the destination sorted set is
+        populated with the score got from the original geo sorted set.
+
+        ``store_dist`` indicates to save the places names in a sorted set
+        named with a sepcific key, instead of ``store`` the sorted set
+        destination score is set with the distance.
+        """
+        return self._georadiusgeneric('GEORADIUS',
+                                      name, latitude, longitude, radius,
+                                      unit=unit, withdist=withdist,
+                                      withcoord=withcoord, withhash=withhash,
+                                      count=count, sort=sort, store=store,
+                                      store_dist=store_dist)
+
+    def georadiusbymember(self, name, member, radius, unit=None,
+                          withdist=False, withcoord=False, withhash=False,
+                          count=None, sort=None, store=None, store_dist=None):
+        """
+        This command is exactly like ``georadius`` with the sole difference
+        that instead of taking, as the center of the area to query, a longitude
+        and latitude value, it takes the name of a member already existing
+        inside the geospatial index represented by the sorted set.
+        """
+        return self._georadiusgeneric('GEORADIUSBYMEMBER',
+                                      name, member, radius, unit=unit,
+                                      withdist=withdist, withcoord=withcoord,
+                                      withhash=withhash, count=count,
+                                      sort=sort, store=store,
+                                      store_dist=store_dist)
+
+    def _georadiusgeneric(self, command, *args, **kwargs):
+        pieces = list(args)
+        if kwargs['unit'] and kwargs['unit'] not in ('m', 'km', 'mi', 'ft'):
+            raise RedisError("GEORADIUS invalid unit")
+        elif kwargs['unit']:
+            pieces.append(kwargs['unit'])
+        else:
+            pieces.append('m',)
+
+        for token in ('withdist', 'withcoord', 'withhash'):
+            if kwargs[token]:
+                pieces.append(Token(token.upper()))
+
+        if kwargs['count']:
+            pieces.extend([Token('COUNT'), kwargs['count']])
+
+        if kwargs['sort'] and kwargs['sort'] not in ('ASC', 'DESC'):
+            raise RedisError("GEORADIUS invalid sort")
+        elif kwargs['sort']:
+            pieces.append(Token(kwargs['sort']))
+
+        if kwargs['store'] and kwargs['store_dist']:
+            raise RedisError("GEORADIUS store and store_dist cant be set"
+                             " together")
+
+        if kwargs['store']:
+            pieces.extend([Token('STORE'), kwargs['store']])
+
+        if kwargs['store_dist']:
+            pieces.extend([Token('STOREDIST'), kwargs['store_dist']])
+
+        return self.execute_command(command, *pieces, **kwargs)
 
 
 class Redis(StrictRedis):
