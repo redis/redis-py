@@ -285,6 +285,16 @@ class TestRedisCommands(object):
         r.restore('a', 0, dumped)
         assert r['a'] == b('foo')
 
+    @skip_if_server_version_lt('3.0.0')
+    def test_dump_and_restore_and_replace(self, r):
+        r['a'] = 'bar'
+        dumped = r.dump('a')
+        with pytest.raises(redis.ResponseError):
+            r.restore('a', 0, dumped)
+
+        r.restore('a', 0, dumped, replace=True)
+        assert r['a'] == b('bar')
+
     def test_exists(self, r):
         assert not r.exists('a')
         r['a'] = 'foo'
