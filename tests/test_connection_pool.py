@@ -1,5 +1,4 @@
 from __future__ import with_statement
-from mock import Mock
 
 import os
 import pytest
