@@ -534,6 +534,20 @@ class Connection(object):
             pass
         self._sock = None
 
+    def shutdown_socket(self):
+        """
+        Shutdown the socket hold by the current connection, called from
+        the connection pool class u other manager to singal it that has to be
+        disconnected in a thread safe way. Later the connection instance
+        will get an error and will call `disconnect` by it self.
+        """
+        try:
+            self._sock.shutdown(socket.SHUT_RDWR)
+        except AttributeError:
+            # either _sock attribute does not exist or
+            # connection thread removed it.
+            pass
+
     def send_packed_command(self, command):
         "Send an already packed command to the Redis server"
         if not self._sock:
@@ -953,7 +967,7 @@ class ConnectionPool(object):
         all_conns = chain(self._available_connections,
                           self._in_use_connections)
         for connection in all_conns:
-            connection.disconnect()
+            connection.shutdown_socket()
 
 
 class BlockingConnectionPool(ConnectionPool):
@@ -1072,4 +1086,4 @@ class BlockingConnectionPool(ConnectionPool):
     def disconnect(self):
         "Disconnects all connections in the pool."
         for connection in self._connections:
-            connection.disconnect()
+            connection.shutdown_socket()

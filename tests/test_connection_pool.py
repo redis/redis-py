@@ -1,4 +1,6 @@
 from __future__ import with_statement
+from mock import Mock
+
 import os
 import pytest
 import redis
@@ -68,6 +70,30 @@ class TestConnectionPool(object):
                              connection_class=redis.UnixDomainSocketConnection)
         expected = 'ConnectionPool<UnixDomainSocketConnection<path=/abc,db=1>>'
         assert repr(pool) == expected
+
+    def test_disconnect_active_connections(self):
+
+        class MyConnection(redis.Connection):
+
+            connect_calls = 0
+
+            def __init__(self, *args, **kwargs):
+                super(MyConnection, self).__init__(*args, **kwargs)
+                self.register_connect_callback(self.count_connect)
+
+            def count_connect(self, connection):
+                MyConnection.connect_calls += 1
+
+        pool = self.get_pool(connection_class=MyConnection)
+        r = redis.StrictRedis(connection_pool=pool)
+        r.ping()
+        pool.disconnect()
+        r.ping()
+
+        # If the connection is not disconnected by the pool the
+        # callback belonging to Connection will be called just
+        # one time.
+        assert MyConnection.connect_calls == 2
 
 
 class TestBlockingConnectionPool(object):
