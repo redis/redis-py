@@ -2,6 +2,8 @@ from __future__ import with_statement
 from distutils.version import StrictVersion
 from itertools import chain
 from select import select
+from copy import copy
+
 import os
 import socket
 import sys
@@ -547,6 +549,12 @@ class Connection(object):
             # either _sock attribute does not exist or
             # connection thread removed it.
             pass
+        except OSError as e:
+            if e.errno == 107:
+                # Transport endpoint is not connected
+                pass
+            else:
+                raise
 
     def send_packed_command(self, command):
         "Send an already packed command to the Redis server"
@@ -964,8 +972,8 @@ class ConnectionPool(object):
 
     def disconnect(self):
         "Disconnects all connections in the pool"
-        all_conns = chain(self._available_connections,
-                          self._in_use_connections)
+        all_conns = chain(copy(self._available_connections),
+                          copy(self._in_use_connections.copy()))
         for connection in all_conns:
             connection.shutdown_socket()
 
