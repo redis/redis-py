@@ -973,7 +973,7 @@ class ConnectionPool(object):
     def disconnect(self):
         "Disconnects all connections in the pool"
         all_conns = chain(copy(self._available_connections),
-                          copy(self._in_use_connections.copy()))
+                          copy(self._in_use_connections))
         for connection in all_conns:
             connection.shutdown_socket()
 
