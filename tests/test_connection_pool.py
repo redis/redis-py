@@ -407,6 +407,18 @@ class TestSSLConnectionURLParsing(object):
         assert pool.get_connection('_').cert_reqs == ssl.CERT_REQUIRED
 
 
+class TestConnectionPoolWeirdURLParsing(object):
+    def test_unknown_scheme_raise_exception(self):
+        with pytest.raises(ValueError) as excinfo:
+            redis.ConnectionPool.from_url('uni:/dev/null')
+        assert 'invalid scheme "uni"' in str(excinfo.value)
+
+    def test_missing_scheme_raise_exception(self):
+        with pytest.raises(ValueError) as excinfo:
+            redis.ConnectionPool.from_url('/dev/null')
+        assert 'invalid scheme ""' in str(excinfo.value)
+
+
 class TestConnection(object):
     def test_on_connect_error(self):
         """

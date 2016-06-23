@@ -859,7 +859,7 @@ class ConnectionPool(object):
                 'connection_class': UnixDomainSocketConnection,
             })
 
-        else:
+        elif url.scheme in ['redis', 'rediss']:
             url_options.update({
                 'host': hostname,
                 'port': int(url.port or 6379),
@@ -876,6 +876,8 @@ class ConnectionPool(object):
 
             if url.scheme == 'rediss':
                 url_options['connection_class'] = SSLConnection
+        else:
+            raise ValueError('invalid scheme "%s"' % url.scheme)
 
         # last shot at the db value
         url_options['db'] = int(url_options.get('db', db or 0))
