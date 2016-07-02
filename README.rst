@@ -291,7 +291,7 @@ duration of a WATCH, care must be taken to ensure that the connection is
 returned to the connection pool by calling the reset() method. If the
 Pipeline is used as a context manager (as in the example above) reset()
 will be called automatically. Of course you can do this the manual way by
-explicity calling reset():
+explicitly calling reset():
 
 .. code-block:: pycon
 
