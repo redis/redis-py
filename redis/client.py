@@ -2106,7 +2106,7 @@ class StrictRedis(object):
         """
         return self.execute_command('GEOPOS', name, *values)
 
-    def georadius(self, name, latitude, longitude, radius, unit=None,
+    def georadius(self, name, longitude, latitude, radius, unit=None,
                   withdist=False, withcoord=False, withhash=False, count=None,
                   sort=None, store=None, store_dist=None):
         """
@@ -2138,7 +2138,7 @@ class StrictRedis(object):
         destination score is set with the distance.
         """
         return self._georadiusgeneric('GEORADIUS',
-                                      name, latitude, longitude, radius,
+                                      name, longitude, latitude, radius,
                                       unit=unit, withdist=withdist,
                                       withcoord=withcoord, withhash=withhash,
                                       count=count, sort=sort, store=store,
