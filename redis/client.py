@@ -2816,17 +2816,24 @@ class BasePipeline(object):
 
     def load_scripts(self):
         # make sure all scripts that are about to be run on this pipeline exist
-        scripts = list(self.scripts)
+        scripts = {}
+
+        for script in self.scripts:
+            scripts.setdefault(script.sha, []).append(script)
+
         immediate = self.immediate_execute_command
-        shas = [s.sha for s in scripts]
+        shas = [sha for sha in scripts if sha]
         # we can't use the normal script_* methods because they would just
         # get buffered in the pipeline.
         exists = immediate('SCRIPT', 'EXISTS', *shas, **{'parse': 'EXISTS'})
         if not all(exists):
-            for s, exist in izip(scripts, exists):
+            for s, exist in izip(scripts.values(), exists):
                 if not exist:
-                    s.sha = immediate('SCRIPT', 'LOAD', s.script,
-                                      **{'parse': 'LOAD'})
+                    sha = immediate(
+                        'SCRIPT', 'LOAD', s[0].script, **{'parse': 'LOAD'})
+
+                    for script in s:
+                        script.sha = sha
 
     def execute(self, raise_on_error=True):
         "Execute all the commands in the current pipeline"
