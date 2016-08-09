@@ -2,10 +2,13 @@ from __future__ import with_statement
 from distutils.version import StrictVersion
 from itertools import chain
 import os
+import time
 import socket
 import sys
 import threading
 import warnings
+
+from collections import defaultdict
 
 try:
     import ssl
@@ -424,6 +427,7 @@ class Connection(object):
         self.encoding_errors = encoding_errors
         self.decode_responses = decode_responses
         self._sock = None
+        self._sock_is_ok = False
         self._parser = parser_class(socket_read_size=socket_read_size)
         self._description_args = {
             'host': self.host,
@@ -460,6 +464,7 @@ class Connection(object):
             raise ConnectionError(self._error_message(e))
 
         self._sock = sock
+        self._sock_is_ok = True
         try:
             self.on_connect()
         except RedisError:
@@ -549,6 +554,7 @@ class Connection(object):
         except socket.error:
             pass
         self._sock = None
+        self._sock_is_ok = False
 
     def send_packed_command(self, command):
         "Send an already packed command to the Redis server"
@@ -914,8 +920,11 @@ class ConnectionPool(object):
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
+        t = threading.Thread(target=self.maintain_available_connections,
+                             args=())
 
         self.reset()
+        t.start()
 
     def __repr__(self):
         return "%s<%s>" % (
@@ -927,6 +936,7 @@ class ConnectionPool(object):
         self.pid = os.getpid()
         self._created_connections = 0
         self._available_connections = []
+        self._dead_connections = defaultdict(int)
         self._in_use_connections = set()
         self._check_lock = threading.Lock()
 
@@ -971,6 +981,22 @@ class ConnectionPool(object):
                           self._in_use_connections)
         for connection in all_conns:
             connection.disconnect()
+
+    def maintain_available_connections(self, interval=10, threshold=3):
+        while 1:
+            time.sleep(interval)
+
+            for conn in self._available_connections:
+                if not conn._sock_is_ok:
+                    self._available_connections.remove(conn)
+                    self._dead_connections[conn] += 1
+            for (conn, value) in self._dead_connections.items():
+                if value > threshold:
+                    self._dead_connections.pop(conn)
+                try:
+                    conn.connect()
+                except Exception:
+                    self._dead_connections[conn] += 1
 
 
 class BlockingConnectionPool(ConnectionPool):
