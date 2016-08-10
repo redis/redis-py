@@ -990,7 +990,7 @@ class ConnectionPool(object):
                 if not conn._sock_is_ok:
                     self._available_connections.remove(conn)
                     self._dead_connections[conn] += 1
-            for (conn, value) in self._dead_connections.items():
+            for (conn, value) in list(self._dead_connections.items()):
                 if value > threshold:
                     self._dead_connections.pop(conn)
                 try:

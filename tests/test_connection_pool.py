@@ -16,6 +16,7 @@ class DummyConnection(object):
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.pid = os.getpid()
+        self._sock_is_ok = True
 
 
 class TestConnectionPool(object):
@@ -54,6 +55,15 @@ class TestConnectionPool(object):
         pool.release(c1)
         c2 = pool.get_connection('_')
         assert c1 == c2
+
+    def test_close_connection_put_to_dead_connections(self):
+        pool = self.get_pool()
+        c1 = pool.get_connection('_')
+        c1._sock_is_ok = False
+        pool.release(c1)
+        # after `interval(default: 10)`
+        time.sleep(10)
+        assert c1 in pool._dead_connections
 
     def test_repr_contains_db_info_tcp(self):
         connection_kwargs = {'host': 'localhost', 'port': 6379, 'db': 1}
@@ -126,6 +136,14 @@ class TestBlockingConnectionPool(object):
         pool.release(c1)
         c2 = pool.get_connection('_')
         assert c1 == c2
+
+    def test_close_connection_not_put_back(self):
+        pool = self.get_pool()
+        c1 = pool.get_connection('_')
+        c1._sock_is_ok = False
+        pool.release(c1)
+        c2 = pool.get_connection('_')
+        assert c1 != c2
 
     def test_repr_contains_db_info_tcp(self):
         pool = redis.ConnectionPool(host='localhost', port=6379, db=0)
