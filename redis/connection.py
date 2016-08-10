@@ -995,6 +995,8 @@ class ConnectionPool(object):
                     self._dead_connections.pop(conn)
                 try:
                     conn.connect()
+                    self._available_connections.append(conn)
+                    self._dead_connections.pop(conn)
                 except Exception:
                     self._dead_connections[conn] += 1
 
@@ -1106,7 +1108,9 @@ class BlockingConnectionPool(ConnectionPool):
 
         # Put the connection back into the pool.
         try:
-            self.pool.put_nowait(connection)
+            # only put alive connect to pool
+            if connection._sock_is_ok:
+                self.pool.put_nowait(connection)
         except Full:
             # perhaps the pool has been reset() after a fork? regardless,
             # we don't want this connection
@@ -1116,3 +1120,8 @@ class BlockingConnectionPool(ConnectionPool):
         "Disconnects all connections in the pool."
         for connection in self._connections:
             connection.disconnect()
+
+    def maintain_available_connections(self, interval=10, threshold=3):
+        """BlockingConnectionPool do not need maintain connections.
+        As method **release** has already only put alive connect to pool
+        """
