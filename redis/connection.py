@@ -911,6 +911,10 @@ class ConnectionPool(object):
         if not isinstance(max_connections, (int, long)) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
 
+        connection_kwargs.setdefault('host', 'localhost')
+        connection_kwargs.setdefault('port', 6379)
+        connection_kwargs.setdefault('db', 0)
+
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
