@@ -76,6 +76,11 @@ def sentinel(request, cluster):
     return Sentinel([('foo', 26379), ('bar', 26379)])
 
 
+@pytest.fixture()
+def sentinel_with_weight(request, cluster):
+    return Sentinel([('foo', 26379, 1), ('bar', 26379, 2)])
+
+
 def test_discover_master(sentinel, master_ip):
     address = sentinel.discover_master('mymaster')
     assert address == (master_ip, 6379)

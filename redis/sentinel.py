@@ -1,4 +1,5 @@
 import random
+import sys
 import weakref
 
 from redis.client import Redis
@@ -6,6 +7,7 @@ from redis.connection import ConnectionPool, Connection
 from redis.exceptions import (ConnectionError, ResponseError, ReadOnlyError,
                               TimeoutError)
 from redis._compat import iteritems, nativestr, xrange
+from redis.utils import random_choices
 
 
 class MasterNotFoundError(ConnectionError):
@@ -137,7 +139,7 @@ class Sentinel(object):
     Redis Sentinel cluster client
 
     >>> from redis.sentinel import Sentinel
-    >>> sentinel = Sentinel([('localhost', 26379)], socket_timeout=0.1)
+    >>> sentinel = Sentinel([('localhost', 26379, 0)], socket_timeout=0.1)
     >>> master = sentinel.master_for('mymaster', socket_timeout=0.1)
     >>> master.set('foo', 'bar')
     >>> slave = sentinel.slave_for('mymaster', socket_timeout=0.1)
@@ -145,7 +147,8 @@ class Sentinel(object):
     b'bar'
 
     ``sentinels`` is a list of sentinel nodes. Each node is represented by
-    a pair (hostname, port).
+    a pair (hostname, port, weight optional).
+    >= Python3.6, if weight set, sentinel node will be discovered randomly by weight
 
     ``min_other_sentinels`` defined a minimum number of peers for a sentinel.
     When querying a sentinel, if it doesn't meet this threshold, responses
@@ -161,7 +164,7 @@ class Sentinel(object):
     establishing a connection to a Redis server.
     """
 
-    def __init__(self, sentinels, min_other_sentinels=0, sentinel_kwargs=None,
+    def __init__(self, origin_sentinels, min_other_sentinels=0, sentinel_kwargs=None,
                  **connection_kwargs):
         # if sentinel_kwargs isn't defined, use the socket_* options from
         # connection_kwargs
@@ -172,7 +175,13 @@ class Sentinel(object):
                 if k.startswith('socket_')
             }
         self.sentinel_kwargs = sentinel_kwargs
-
+        sentinels = []
+        self.weights = []
+        for node in origin_sentinels:
+            sentinels.append((node[0], node[1]))
+            self.weights.append(node[2] if len(node) >= 3 else -1)
+        # if config with weight, random_mode is true, sentinels will use random node with weight
+        self.random_mode = sys.version_info[0] == 3 and sys.version_info[1] >= 6 and sum(self.weights) != len(origin_sentinels) * -1
         self.sentinels = [Redis(hostname, port, **self.sentinel_kwargs)
                           for hostname, port in sentinels]
         self.min_other_sentinels = min_other_sentinels
@@ -205,16 +214,20 @@ class Sentinel(object):
         Returns a pair (address, port) or raises MasterNotFoundError if no
         master is found.
         """
-        for sentinel_no, sentinel in enumerate(self.sentinels):
+        if self.random_mode:
+            sentinels = random_choices(self.sentinels, self.weights)
+        else:
+            sentinels = self.sentinels
+        for sentinel_no, sentinel in enumerate(sentinels):
             try:
                 masters = sentinel.sentinel_masters()
             except (ConnectionError, TimeoutError):
                 continue
             state = masters.get(service_name)
             if state and self.check_master_state(state, service_name):
-                # Put this sentinel at the top of the list
-                self.sentinels[0], self.sentinels[sentinel_no] = (
-                    sentinel, self.sentinels[0])
+                if not self.random_mode:
+                    # Put this sentinel at the top of the list
+                    self.sentinels[0], self.sentinels[sentinel_no] = sentinel, self.sentinels[0]
                 return state['ip'], state['port']
         raise MasterNotFoundError("No master found for %r" % (service_name,))
 
@@ -229,7 +242,11 @@ class Sentinel(object):
 
     def discover_slaves(self, service_name):
         "Returns a list of alive slaves for service ``service_name``"
-        for sentinel in self.sentinels:
+        if self.random_mode:
+            sentinels = random_choices(self.sentinels, self.weights)
+        else:
+            sentinels = self.sentinels
+        for sentinel in sentinels:
             try:
                 slaves = sentinel.sentinel_slaves(service_name)
             except (ConnectionError, ResponseError, TimeoutError):

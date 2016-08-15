@@ -1,3 +1,4 @@
+import sys
 from contextlib import contextmanager
 
 
@@ -31,3 +32,14 @@ class dummy(object):
     Instances of this class can be used as an attribute container.
     """
     pass
+
+
+def random_choices(population, weights):
+    """
+    randomly by weight
+    """
+    if sys.version_info[0] == 3 and sys.version_info[1] >= 6:
+        from random import choices
+        return choices(population, weights, k=len(population))
+    else:
+        return population
