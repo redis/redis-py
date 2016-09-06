@@ -453,7 +453,10 @@ class StrictRedis(object):
     @classmethod
     def from_url(cls, url, db=None, **kwargs):
         """
-        Return a Redis client object configured from the given URL.
+        Return a Redis client object configured from the given URL, which must
+        use either `the ``redis://`` scheme
+        <http://www.iana.org/assignments/uri-schemes/prov/redis>`_ for RESP
+        connections or the ``unix://`` scheme for Unix domain sockets.
 
         For example::
 
