@@ -3,7 +3,6 @@ python:
   - "3.5"
   - "3.4"
   - "3.3"
-  - "3.2"
   - "2.7"
   - "2.6"
 services:
@@ -20,5 +19,5 @@ matrix:
   include:
     - python: "2.7"
       env: TEST_PEP8=1
-    - python: "3.4"
+    - python: "3.5"
       env: TEST_PEP8=1
