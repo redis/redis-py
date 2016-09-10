@@ -26,7 +26,7 @@ def _get_client(cls, request=None, **kwargs):
     if request:
         def teardown():
             client.flushdb()
-            client.connection_pool.disconnect()
+            client.connection_pool.disconnect(immediate=True)
         request.addfinalizer(teardown)
     return client
 
