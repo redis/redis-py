@@ -2072,7 +2072,7 @@ class StrictRedis(object):
         """
         Add the specified geospatial items to the specified key identified
         by the ``name`` argument. The Geospatial items are given as ordered
-        members of the ``values`` argument, each item or place is formed b
+        members of the ``values`` argument, each item or place is formed by
         the triad latitude, longitude and name.
         """
         if len(values) % 3 != 0:
@@ -2084,7 +2084,7 @@ class StrictRedis(object):
         """
         Return the distance between ``place1`` and ``place2`` members of the
         ``name`` key.
-        The units must be one o fthe following : m, km mi, ft. By default
+        The units must be one of the following : m, km mi, ft. By default
         meters are used.
         """
         pieces = [name, place1, place2]
@@ -2103,7 +2103,7 @@ class StrictRedis(object):
 
     def geopos(self, name, *values):
         """
-        Return the postitions of each item of ``values`` as members of
+        Return the positions of each item of ``values`` as members of
         the specified key identified by the ``name``argument. Each position
         is represented by the pairs lat and lon.
         """
@@ -2113,12 +2113,12 @@ class StrictRedis(object):
                   withdist=False, withcoord=False, withhash=False, count=None,
                   sort=None, store=None, store_dist=None):
         """
-        Return the members of the of the specified key identified by the
+        Return the members of the specified key identified by the
         ``name``argument which are within the borders of the area specified
-        with the ``latitude`` and ``longitude`` location and the maxium
-        distnance from the center specified by the ``radius`` value.
+        with the ``latitude`` and ``longitude`` location and the maximum
+        distance from the center specified by the ``radius`` value.
 
-        The units must be one o fthe following : m, km mi, ft. By default
+        The units must be one of the following : m, km mi, ft. By default
 
         ``withdist`` indicates to return the distances of each place.
 
@@ -2137,7 +2137,7 @@ class StrictRedis(object):
         populated with the score got from the original geo sorted set.
 
         ``store_dist`` indicates to save the places names in a sorted set
-        named with a sepcific key, instead of ``store`` the sorted set
+        named with a specific key, instead of ``store`` the sorted set
         destination score is set with the distance.
         """
         return self._georadiusgeneric('GEORADIUS',
