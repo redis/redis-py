@@ -134,6 +134,10 @@ class Lock(object):
         self.local.token = None
         self.do_release(expected_token)
 
+    @property
+    def locked(self):
+        return bool(self.local.token)
+
     def do_release(self, expected_token):
         name = self.name
 
