@@ -406,7 +406,8 @@ class Connection(object):
 
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None, socket_connect_timeout=None,
-                 socket_keepalive=False, socket_keepalive_options=None,
+                 socket_keepalive=False, socket_keepalive_keepidle=None,
+                 socket_keepalive_keepcnt=None, socket_keepalive_keepintvl=None,
                  retry_on_timeout=False, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  parser_class=DefaultParser, socket_read_size=65536):
@@ -418,7 +419,7 @@ class Connection(object):
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout
         self.socket_keepalive = socket_keepalive
-        self.socket_keepalive_options = socket_keepalive_options or {}
+        self.socket_keepalive_options = (socket_keepalive,socket_keepalive_keepidle,socket_keepalive_keepcnt,socket_keepalive_keepintvl)
         self.retry_on_timeout = retry_on_timeout
         self.encoding = encoding
         self.encoding_errors = encoding_errors
@@ -472,6 +473,51 @@ class Connection(object):
         for callback in self._connect_callbacks:
             callback(self)
 
+    def _set_tcp_keepalive(self,s, keepalive, tcp_keepidle, tcp_keepcnt, tcp_keepintvl):
+        """Turn on TCP keepalive.  The fd can be either numeric or socket
+        object with 'fileno' method.
+        OS defaults for SO_KEEPALIVE=1:
+         - Linux: (7200, 9, 75) - can configure all.
+         - MacOS: (7200, 8, 75) - can configure only tcp_keepidle.
+         - Win32: (7200, 5|10, 1) - can configure tcp_keepidle and tcp_keepintvl.
+        """
+
+        # usable on this OS?
+        if not hasattr(socket, 'SO_KEEPALIVE'):
+            return
+
+        # no keepalive?
+        if not keepalive:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 0)
+            return
+
+        # basic keepalive
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+
+        if tcp_keepidle is None:
+            return
+
+        # detect available options
+        TCP_KEEPCNT = getattr(socket, 'TCP_KEEPCNT', None)
+        TCP_KEEPINTVL = getattr(socket, 'TCP_KEEPINTVL', None)
+        TCP_KEEPIDLE = getattr(socket, 'TCP_KEEPIDLE', None)
+        TCP_KEEPALIVE = getattr(socket, 'TCP_KEEPALIVE', None)
+        SIO_KEEPALIVE_VALS = getattr(socket, 'SIO_KEEPALIVE_VALS', None)
+        if TCP_KEEPIDLE is None and TCP_KEEPALIVE is None and sys.platform == 'darwin':
+            TCP_KEEPALIVE = 0x10
+
+        # configure
+        if TCP_KEEPCNT is not None:
+            s.setsockopt(socket.IPPROTO_TCP, TCP_KEEPCNT, tcp_keepcnt)
+        if TCP_KEEPINTVL is not None:
+            s.setsockopt(socket.IPPROTO_TCP, TCP_KEEPINTVL, tcp_keepintvl)
+        if TCP_KEEPIDLE is not None:
+            s.setsockopt(socket.IPPROTO_TCP, TCP_KEEPIDLE, tcp_keepidle)
+        elif TCP_KEEPALIVE is not None:
+            s.setsockopt(socket.IPPROTO_TCP, TCP_KEEPALIVE, tcp_keepidle)
+        elif SIO_KEEPALIVE_VALS is not None:
+            s.ioctl(SIO_KEEPALIVE_VALS, (1, tcp_keepidle * 1000, tcp_keepintvl * 1000))
+
     def _connect(self):
         "Create a TCP socket connection"
         # we want to mimic what socket.create_connection does to support
@@ -488,10 +534,8 @@ class Connection(object):
                 sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
                 # TCP_KEEPALIVE
-                if self.socket_keepalive:
-                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                    for k, v in iteritems(self.socket_keepalive_options):
-                        sock.setsockopt(socket.SOL_TCP, k, v)
+                if self.socket_keepalive is not None:
+                    self._set_tcp_keepalive(sock,*self.socket_keepalive_options)
 
                 # set the socket_connect_timeout before we connect
                 sock.settimeout(self.socket_connect_timeout)

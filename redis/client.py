@@ -482,7 +482,8 @@ class StrictRedis(object):
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
                  socket_connect_timeout=None,
-                 socket_keepalive=None, socket_keepalive_options=None,
+                 socket_keepalive=None, socket_keepalive_keepidle=None,
+                 socket_keepalive_keepcnt=None, socket_keepalive_keepintvl=None,
                  connection_pool=None, unix_socket_path=None,
                  encoding='utf-8', encoding_errors='strict',
                  charset=None, errors=None,
@@ -523,7 +524,9 @@ class StrictRedis(object):
                     'port': port,
                     'socket_connect_timeout': socket_connect_timeout,
                     'socket_keepalive': socket_keepalive,
-                    'socket_keepalive_options': socket_keepalive_options,
+                    'socket_keepalive_keepidle':socket_keepalive_keepidle,
+                    'socket_keepalive_keepcnt': socket_keepalive_keepcnt,
+                    'socket_keepalive_keepintvl': socket_keepalive_keepintvl,
                 })
 
                 if ssl:
