@@ -118,6 +118,7 @@ class BaseParser(object):
 
 
 class SocketBuffer(object):
+
     def __init__(self, socket, socket_read_size):
         self._sock = socket
         self.socket_read_size = socket_read_size
@@ -299,6 +300,7 @@ class PythonParser(BaseParser):
 
 class HiredisParser(BaseParser):
     "Parser class for connections using Hiredis"
+
     def __init__(self, socket_read_size):
         if not HIREDIS_AVAILABLE:
             raise RedisError("Hiredis is not installed")
@@ -406,8 +408,10 @@ class Connection(object):
 
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None, socket_connect_timeout=None,
-                 socket_keepalive=False, socket_keepalive_keepidle=None,
-                 socket_keepalive_keepcnt=None, socket_keepalive_keepintvl=None,
+                 socket_keepalive=False,
+                 socket_keepalive_keepidle=None,
+                 socket_keepalive_keepcnt=None,
+                 socket_keepalive_keepintvl=None,
                  retry_on_timeout=False, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  parser_class=DefaultParser, socket_read_size=65536):
@@ -419,7 +423,11 @@ class Connection(object):
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout
         self.socket_keepalive = socket_keepalive
-        self.socket_keepalive_options = (socket_keepalive,socket_keepalive_keepidle,socket_keepalive_keepcnt,socket_keepalive_keepintvl)
+        self.socket_keepalive_options = (
+            socket_keepalive,
+            socket_keepalive_keepidle,
+            socket_keepalive_keepcnt,
+            socket_keepalive_keepintvl)
         self.retry_on_timeout = retry_on_timeout
         self.encoding = encoding
         self.encoding_errors = encoding_errors
@@ -473,13 +481,14 @@ class Connection(object):
         for callback in self._connect_callbacks:
             callback(self)
 
-    def _set_tcp_keepalive(self,s, keepalive, tcp_keepidle, tcp_keepcnt, tcp_keepintvl):
+    def _set_tcp_keepalive(self, s, keepalive,
+                           tcp_keepidle, tcp_keepcnt, tcp_keepintvl):
         """Turn on TCP keepalive.  The fd can be either numeric or socket
         object with 'fileno' method.
         OS defaults for SO_KEEPALIVE=1:
          - Linux: (7200, 9, 75) - can configure all.
          - MacOS: (7200, 8, 75) - can configure only tcp_keepidle.
-         - Win32: (7200, 5|10, 1) - can configure tcp_keepidle and tcp_keepintvl.
+         - Win32: (7200, 5|10, 1) - can configure tcp_keepidle, tcp_keepintvl.
         """
 
         # usable on this OS?
@@ -503,7 +512,8 @@ class Connection(object):
         TCP_KEEPIDLE = getattr(socket, 'TCP_KEEPIDLE', None)
         TCP_KEEPALIVE = getattr(socket, 'TCP_KEEPALIVE', None)
         SIO_KEEPALIVE_VALS = getattr(socket, 'SIO_KEEPALIVE_VALS', None)
-        if TCP_KEEPIDLE is None and TCP_KEEPALIVE is None and sys.platform == 'darwin':
+        if TCP_KEEPIDLE is None and TCP_KEEPALIVE is None \
+                and sys.platform == 'darwin':
             TCP_KEEPALIVE = 0x10
 
         # configure
@@ -516,7 +526,8 @@ class Connection(object):
         elif TCP_KEEPALIVE is not None:
             s.setsockopt(socket.IPPROTO_TCP, TCP_KEEPALIVE, tcp_keepidle)
         elif SIO_KEEPALIVE_VALS is not None:
-            s.ioctl(SIO_KEEPALIVE_VALS, (1, tcp_keepidle * 1000, tcp_keepintvl * 1000))
+            s.ioctl(SIO_KEEPALIVE_VALS,
+                    (1, tcp_keepidle * 1000, tcp_keepintvl * 1000))
 
     def _connect(self):
         "Create a TCP socket connection"
@@ -535,7 +546,8 @@ class Connection(object):
 
                 # TCP_KEEPALIVE
                 if self.socket_keepalive is not None:
-                    self._set_tcp_keepalive(sock,*self.socket_keepalive_options)
+                    self._set_tcp_keepalive(
+                        sock, *self.socket_keepalive_options)
 
                 # set the socket_connect_timeout before we connect
                 sock.settimeout(self.socket_connect_timeout)
@@ -1055,6 +1067,7 @@ class BlockingConnectionPool(ConnectionPool):
         # not available.
         >>> pool = BlockingConnectionPool(timeout=5)
     """
+
     def __init__(self, max_connections=50, timeout=20,
                  connection_class=Connection, queue_class=LifoQueue,
                  **connection_kwargs):

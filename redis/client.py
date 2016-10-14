@@ -443,7 +443,7 @@ class StrictRedis(object):
             'CLUSTER SETSLOT': bool_ok,
             'CLUSTER SLAVES': parse_cluster_nodes,
             'GEOPOS': lambda r: list(map(lambda ll: (float(ll[0]),
-                                         float(ll[1])), r)),
+                                                     float(ll[1])), r)),
             'GEOHASH': lambda r: list(map(nativestr, r)),
             'GEORADIUS': parse_georadius_generic,
             'GEORADIUSBYMEMBER': parse_georadius_generic,
@@ -482,8 +482,10 @@ class StrictRedis(object):
     def __init__(self, host='localhost', port=6379,
                  db=0, password=None, socket_timeout=None,
                  socket_connect_timeout=None,
-                 socket_keepalive=None, socket_keepalive_keepidle=None,
-                 socket_keepalive_keepcnt=None, socket_keepalive_keepintvl=None,
+                 socket_keepalive=None,
+                 socket_keepalive_keepidle=None,
+                 socket_keepalive_keepcnt=None,
+                 socket_keepalive_keepintvl=None,
                  connection_pool=None, unix_socket_path=None,
                  encoding='utf-8', encoding_errors='strict',
                  charset=None, errors=None,
@@ -524,7 +526,7 @@ class StrictRedis(object):
                     'port': port,
                     'socket_connect_timeout': socket_connect_timeout,
                     'socket_keepalive': socket_keepalive,
-                    'socket_keepalive_keepidle':socket_keepalive_keepidle,
+                    'socket_keepalive_keepidle': socket_keepalive_keepidle,
                     'socket_keepalive_keepcnt': socket_keepalive_keepcnt,
                     'socket_keepalive_keepintvl': socket_keepalive_keepintvl,
                 })
@@ -2559,6 +2561,7 @@ class PubSub(object):
 
 
 class PubSubWorkerThread(threading.Thread):
+
     def __init__(self, pubsub, sleep_time, daemon=False):
         super(PubSubWorkerThread, self).__init__()
         self.daemon = daemon
