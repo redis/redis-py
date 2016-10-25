@@ -45,10 +45,8 @@ if HIREDIS_AVAILABLE:
         warnings.warn(msg)
 
     HIREDIS_USE_BYTE_BUFFER = True
-    # only use byte buffer if hiredis supports it and the Python version
-    # is >= 2.7
-    if not HIREDIS_SUPPORTS_BYTE_BUFFER or (
-            sys.version_info[0] == 2 and sys.version_info[1] < 7):
+    # only use byte buffer if hiredis supports it
+    if not HIREDIS_SUPPORTS_BYTE_BUFFER:
         HIREDIS_USE_BYTE_BUFFER = False
 
 SYM_STAR = b('*')
@@ -820,17 +818,7 @@ class ConnectionPool(object):
         """
         url_string = url
         url = urlparse(url)
-        qs = ''
-
-        # in python2.6, custom URL schemes don't recognize querystring values
-        # they're left as part of the url.path.
-        if '?' in url.path and not url.query:
-            # chop the querystring including the ? off the end of the url
-            # and reparse it.
-            qs = url.path.split('?', 1)[1]
-            url = urlparse(url_string[:-(len(qs) + 1)])
-        else:
-            qs = url.query
+        qs = url.query
 
         url_options = {}
 
