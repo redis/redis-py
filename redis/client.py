@@ -2114,7 +2114,7 @@ class StrictRedis(object):
                   sort=None, store=None, store_dist=None):
         """
         Return the members of the specified key identified by the
-        ``name``argument which are within the borders of the area specified
+        ``name`` argument which are within the borders of the area specified
         with the ``latitude`` and ``longitude`` location and the maximum
         distance from the center specified by the ``radius`` value.
 
