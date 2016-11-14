@@ -906,8 +906,8 @@ class ConnectionPool(object):
         Create a connection pool. If max_connections is set, then this
         object raises redis.ConnectionError when the pool's limit is reached.
 
-        By default, TCP connections are created connection_class is specified.
-        Use redis.UnixDomainSocketConnection for unix sockets.
+        By default, TCP connections are created unless connection_class is
+        specified. Use redis.UnixDomainSocketConnection for unix sockets.
 
         Any additional keyword arguments are passed to the constructor of
         connection_class.
