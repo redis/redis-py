@@ -684,7 +684,7 @@ class Redis(object):
                  ssl=False, ssl_keyfile=None, ssl_certfile=None,
                  ssl_cert_reqs='required', ssl_ca_certs=None,
                  max_connections=None, single_connection_client=False,
-                 health_check_interval=0):
+                 health_check_interval=0, client_name=None):
         if not connection_pool:
             if charset is not None:
                 warnings.warn(DeprecationWarning(
@@ -706,6 +706,7 @@ class Redis(object):
                 'retry_on_timeout': retry_on_timeout,
                 'max_connections': max_connections,
                 'health_check_interval': health_check_interval,
+                'client_name': client_name
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:

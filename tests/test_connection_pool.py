@@ -64,17 +64,28 @@ class TestConnectionPool(object):
         assert c1 == c2
 
     def test_repr_contains_db_info_tcp(self):
-        connection_kwargs = {'host': 'localhost', 'port': 6379, 'db': 1}
+        connection_kwargs = {
+            'host': 'localhost',
+            'port': 6379,
+            'db': 1,
+            'client_name': 'test-client'
+        }
         pool = self.get_pool(connection_kwargs=connection_kwargs,
                              connection_class=redis.Connection)
-        expected = 'ConnectionPool<Connection<host=localhost,port=6379,db=1>>'
+        expected = ('ConnectionPool<Connection<'
+                    'host=localhost,port=6379,db=1,client_name=test-client>>')
         assert repr(pool) == expected
 
     def test_repr_contains_db_info_unix(self):
-        connection_kwargs = {'path': '/abc', 'db': 1}
+        connection_kwargs = {
+            'path': '/abc',
+            'db': 1,
+            'client_name': 'test-client'
+        }
         pool = self.get_pool(connection_kwargs=connection_kwargs,
                              connection_class=redis.UnixDomainSocketConnection)
-        expected = 'ConnectionPool<UnixDomainSocketConnection<path=/abc,db=1>>'
+        expected = ('ConnectionPool<UnixDomainSocketConnection<'
+                    'path=/abc,db=1,client_name=test-client>>')
         assert repr(pool) == expected
 
     def test_pool_equality(self):
@@ -177,8 +188,14 @@ class TestBlockingConnectionPool(object):
         assert c1 == c2
 
     def test_repr_contains_db_info_tcp(self):
-        pool = redis.ConnectionPool(host='localhost', port=6379, db=0)
-        expected = 'ConnectionPool<Connection<host=localhost,port=6379,db=0>>'
+        pool = redis.ConnectionPool(
+            host='localhost',
+            port=6379,
+            db=0,
+            client_name='test-client'
+        )
+        expected = ('ConnectionPool<Connection<'
+                    'host=localhost,port=6379,db=0,client_name=test-client>>')
         assert repr(pool) == expected
 
     def test_repr_contains_db_info_unix(self):
@@ -186,8 +203,10 @@ class TestBlockingConnectionPool(object):
             connection_class=redis.UnixDomainSocketConnection,
             path='abc',
             db=0,
+            client_name='test-client'
         )
-        expected = 'ConnectionPool<UnixDomainSocketConnection<path=abc,db=0>>'
+        expected = ('ConnectionPool<UnixDomainSocketConnection<'
+                    'path=abc,db=0,client_name=test-client>>')
         assert repr(pool) == expected
 
 
@@ -364,6 +383,12 @@ class TestConnectionPoolURLParsing(object):
         ):
             assert expected is to_bool(value)
 
+    def test_client_name_in_querystring(self):
+        pool = redis.ConnectionPool.from_url(
+            'redis://location?client_name=test-client'
+        )
+        assert pool.connection_kwargs['client_name'] == 'test-client'
+
     def test_invalid_extra_typed_querystring_options(self):
         import warnings
         with warnings.catch_warnings(record=True) as warning_log:
@@ -501,6 +526,12 @@ class TestConnectionPoolUnixSocketURLParsing(object):
             'username': None,
             'password': None,
         }
+
+    def test_client_name_in_querystring(self):
+        pool = redis.ConnectionPool.from_url(
+            'redis://location?client_name=test-client'
+        )
+        assert pool.connection_kwargs['client_name'] == 'test-client'
 
     def test_extra_querystring_options(self):
         pool = redis.ConnectionPool.from_url('unix:///socket?a=1&b=2')

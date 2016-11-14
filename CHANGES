@@ -10,6 +10,10 @@
       pipeline instances relied on __len__ for boolean evaluation which
       meant that pipelines with no commands on the stack would be considered
       False. #994
+    * Client instances and Connection pools now support a 'client_name'
+      argument. If supplied, all connections created will call CLIENT SETNAME
+      as soon as the connection is opened. Thanks to @Habbie for supplying
+      the basis of this chanfge. #802
 * 3.3.11
     * Further fix for the SSLError -> TimeoutError mapping to work
       on obscure releases of Python 2.7.

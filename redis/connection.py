@@ -485,7 +485,6 @@ else:
 
 class Connection(object):
     "Manages TCP communication to and from a Redis server"
-    description_format = "Connection<host=%(host)s,port=%(port)s,db=%(db)s>"
 
     def __init__(self, host='localhost', port=6379, db=0, username=None,
                  password=None, socket_timeout=None,
@@ -494,12 +493,13 @@ class Connection(object):
                  retry_on_timeout=False, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  parser_class=DefaultParser, socket_read_size=65536,
-                 health_check_interval=0):
+                 health_check_interval=0, client_name=None):
         self.pid = os.getpid()
         self.host = host
         self.port = int(port)
         self.db = db
         self.username = username
+        self.client_name = client_name
         self.password = password
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout
@@ -512,16 +512,22 @@ class Connection(object):
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
         self._parser = parser_class(socket_read_size=socket_read_size)
-        self._description_args = {
-            'host': self.host,
-            'port': self.port,
-            'db': self.db,
-        }
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
 
     def __repr__(self):
-        return self.description_format % self._description_args
+        repr_args = ','.join(['%s=%s' % (k, v) for k, v in self.repr_pieces()])
+        return '%s<%s>' % (self.__class__.__name__, repr_args)
+
+    def repr_pieces(self):
+        pieces = [
+            ('host', self.host),
+            ('port', self.port),
+            ('db', self.db)
+        ]
+        if self.client_name:
+            pieces.append(('client_name', self.client_name))
+        return pieces
 
     def __del__(self):
         try:
@@ -625,6 +631,12 @@ class Connection(object):
             self.send_command('AUTH', *auth_args, check_health=False)
             if nativestr(self.read_response()) != 'OK':
                 raise AuthenticationError('Invalid Username or Password')
+
+        # if a client_name is given, set it
+        if self.client_name:
+            self.send_command('CLIENT', 'SETNAME', self.client_name)
+            if nativestr(self.read_response()) != 'OK':
+                raise ConnectionError('Error setting client name')
 
         # if a database is specified, switch to it
         if self.db:
@@ -785,7 +797,6 @@ class Connection(object):
 
 
 class SSLConnection(Connection):
-    description_format = "SSLConnection<host=%(host)s,port=%(port)s,db=%(db)s>"
 
     def __init__(self, ssl_keyfile=None, ssl_certfile=None,
                  ssl_cert_reqs='required', ssl_ca_certs=None, **kwargs):
@@ -838,18 +849,18 @@ class SSLConnection(Connection):
 
 
 class UnixDomainSocketConnection(Connection):
-    description_format = "UnixDomainSocketConnection<path=%(path)s,db=%(db)s>"
 
     def __init__(self, path='', db=0, username=None, password=None,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  retry_on_timeout=False,
                  parser_class=DefaultParser, socket_read_size=65536,
-                 health_check_interval=0):
+                 health_check_interval=0, client_name=None):
         self.pid = os.getpid()
         self.path = path
         self.db = db
         self.username = username
+        self.client_name = client_name
         self.password = password
         self.socket_timeout = socket_timeout
         self.retry_on_timeout = retry_on_timeout
@@ -858,12 +869,17 @@ class UnixDomainSocketConnection(Connection):
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
         self._parser = parser_class(socket_read_size=socket_read_size)
-        self._description_args = {
-            'path': self.path,
-            'db': self.db,
-        }
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
+
+    def repr_pieces(self):
+        pieces = [
+            ('path', self.path),
+            ('db', self.db),
+        ]
+        if self.client_name:
+            pieces.append(('client_name', self.client_name))
+        return pieces
 
     def _connect(self):
         "Create a Unix domain socket connection"
