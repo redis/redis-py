@@ -402,18 +402,21 @@ else:
 
 class Connection(object):
     "Manages TCP communication to and from a Redis server"
-    description_format = "Connection<host=%(host)s,port=%(port)s,db=%(db)s>"
+    description_format = \
+        "Connection<host=%(host)s,port=%(port)s,db=%(db)s,clientname=%(clientname)s>"
 
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None, socket_connect_timeout=None,
                  socket_keepalive=False, socket_keepalive_options=None,
                  retry_on_timeout=False, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
-                 parser_class=DefaultParser, socket_read_size=65536):
+                 parser_class=DefaultParser, socket_read_size=65536,
+                 clientname="redis-py"):
         self.pid = os.getpid()
         self.host = host
         self.port = int(port)
         self.db = db
+        self.clientname = clientname
         self.password = password
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout
@@ -429,6 +432,7 @@ class Connection(object):
             'host': self.host,
             'port': self.port,
             'db': self.db,
+            'clientname': self.clientname,
         }
         self._connect_callbacks = []
 
@@ -531,6 +535,12 @@ class Connection(object):
             self.send_command('AUTH', self.password)
             if nativestr(self.read_response()) != 'OK':
                 raise AuthenticationError('Invalid Password')
+
+        # if a clientname is given, set it
+        if self.clientname:
+            self.send_command('CLIENT', 'SETNAME', self.clientname)
+            if nativestr(self.read_response()) != 'OK':
+                raise ConnectionError('Error setting client name')
 
         # if a database is specified, switch to it
         if self.db:
@@ -710,16 +720,19 @@ class SSLConnection(Connection):
 
 
 class UnixDomainSocketConnection(Connection):
-    description_format = "UnixDomainSocketConnection<path=%(path)s,db=%(db)s>"
+    description_format = \
+        "UnixDomainSocketConnection<path=%(path)s,db=%(db)s,clientname=%(clientname)s>"
 
     def __init__(self, path='', db=0, password=None,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  retry_on_timeout=False,
-                 parser_class=DefaultParser, socket_read_size=65536):
+                 parser_class=DefaultParser, socket_read_size=65536,
+                 clientname="redis-py-unix"):
         self.pid = os.getpid()
         self.path = path
         self.db = db
+        self.clientname = clientname
         self.password = password
         self.socket_timeout = socket_timeout
         self.retry_on_timeout = retry_on_timeout
@@ -731,6 +744,7 @@ class UnixDomainSocketConnection(Connection):
         self._description_args = {
             'path': self.path,
             'db': self.db,
+            'clientname': self.clientname,
         }
         self._connect_callbacks = []
 
