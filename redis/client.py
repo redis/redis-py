@@ -2208,12 +2208,24 @@ class StrictRedis(object):
 
     # MODULE COMMANDS
     def module_load(self, path):
+        """
+        Loads the module from ``path``.
+        Raises ``ModuleError`` if a module is not found at ``path``.
+        """
         return self.execute_command('MODULE LOAD', path)
 
     def module_unload(self, module_name):
+        """
+        Unloads the module ``module_name``.
+        Raises ``ModuleError`` if ``module_name`` is not in loaded modules.
+        """
         return self.execute_command('MODULE UNLOAD', module_name)
 
     def module_list(self):
+        """
+        Returns a list of dictionaries containing the name and version of
+        all loaded modules.
+        """
         return self.execute_command('MODULE LIST')
 
 
