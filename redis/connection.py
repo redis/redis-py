@@ -27,7 +27,8 @@ from redis.exceptions import (
     AuthenticationError,
     NoScriptError,
     ExecAbortError,
-    ReadOnlyError
+    ReadOnlyError,
+    ModuleError
 )
 from redis.utils import HIREDIS_AVAILABLE
 if HIREDIS_AVAILABLE:
@@ -95,9 +96,20 @@ class Token(object):
 
 
 class BaseParser(object):
+    module_load_err = 'Error loading the extension. ' \
+                      'Please check the server logs.'
+    no_such_module_err = 'Error unloading module: ' \
+                         'no such module with that name'
+    cant_unload_module_err = "Error unloading module: the module exports one" \
+                             " or more module-side data types, can't unload"
+
     EXCEPTION_CLASSES = {
         'ERR': {
-            'max number of clients reached': ConnectionError
+            'max number of clients reached': ConnectionError,
+            module_load_err: ModuleError,
+            no_such_module_err: ModuleError,
+            cant_unload_module_err: ModuleError,
+            'Error unloading module: operation not possible.': ModuleError
         },
         'EXECABORT': ExecAbortError,
         'LOADING': BusyLoadingError,
