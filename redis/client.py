@@ -22,6 +22,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
     WatchError,
+    ModuleError
 )
 
 SYM_EMPTY = b('')
@@ -339,6 +340,12 @@ def parse_georadius_generic(response, **options):
     ]
 
 
+def parse_module_result(response):
+    if isinstance(response, ModuleError):
+        raise response
+    return True
+
+
 class StrictRedis(object):
     """
     Implementation of the Redis protocol.
@@ -447,6 +454,9 @@ class StrictRedis(object):
             'GEOHASH': lambda r: list(map(nativestr, r)),
             'GEORADIUS': parse_georadius_generic,
             'GEORADIUSBYMEMBER': parse_georadius_generic,
+            'MODULE LOAD': parse_module_result,
+            'MODULE UNLOAD': parse_module_result,
+            'MODULE LIST': lambda r: [pairs_to_dict(l) for l in r]
         }
     )
 
@@ -2195,6 +2205,16 @@ class StrictRedis(object):
             pieces.extend([Token('STOREDIST'), kwargs['store_dist']])
 
         return self.execute_command(command, *pieces, **kwargs)
+
+    # MODULE COMMANDS
+    def module_load(self, path):
+        return self.execute_command('MODULE LOAD', path)
+
+    def module_unload(self, module_name):
+        return self.execute_command('MODULE UNLOAD', module_name)
+
+    def module_list(self):
+        return self.execute_command('MODULE LIST')
 
 
 class Redis(StrictRedis):
