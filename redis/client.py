@@ -1159,7 +1159,7 @@ class StrictRedis(object):
 
         if nx:
             pieces.append('NX')
-        if xx:
+        elif xx:
             pieces.append('XX')
         return self.execute_command('SET', *pieces)
 
