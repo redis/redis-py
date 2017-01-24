@@ -2019,7 +2019,7 @@ class StrictRedis(object):
 
     def pubsub_channels(self):
         """
-        Return a list of channels
+        Return a list of channels that have at least one subscriber
         """
         return self.execute_command('PUBSUB CHANNELS')
 
@@ -2031,7 +2031,7 @@ class StrictRedis(object):
 
     def pubsub_numsub(self, *args):
         """
-        Return a list of the number of subscribers for each channel given in ``*args``
+        Return a list of (channel, number of subscribers) tuples for each channel given in ``*args``
         """
         return self.execute_command('PUBSUB NUMSUB', *args)
 
