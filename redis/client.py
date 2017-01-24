@@ -2031,7 +2031,8 @@ class StrictRedis(object):
 
     def pubsub_numsub(self, *args):
         """
-        Return a list of (channel, number of subscribers) tuples for each channel given in ``*args``
+        Return a list of (channel, number of subscribers) tuples
+        for each channel given in ``*args``
         """
         return self.execute_command('PUBSUB NUMSUB', *args)
 

@@ -423,4 +423,3 @@ class TestPubSubPubSubSubcommands(object):
         p = r.pubsub(ignore_subscribe_messages=True)
         p.psubscribe('*oo', '*ar', 'b*z')
         assert r.pubsub_numpat() == 3
-
