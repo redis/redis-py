@@ -34,7 +34,7 @@ class TestEncoding(object):
 class TestCommandsAndTokensArentEncoded(object):
     @pytest.fixture()
     def r(self, request):
-        return _redis_client(request=request, charset='utf-16')
+        return _redis_client(request=request, encoding='utf-16')
 
     def test_basic_command(self, r):
         r.set('hello', 'world')
