@@ -824,7 +824,7 @@ class ConnectionPool(object):
 
         # in python2.6, custom URL schemes don't recognize querystring values
         # they're left as part of the url.path.
-        if '?' in url.path and not url.query:
+        if sys.version_info[0] == 2 and '?' in url.path and not url.query:
             # chop the querystring including the ? off the end of the url
             # and reparse it.
             qs = url.path.split('?', 1)[1]
