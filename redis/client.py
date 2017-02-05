@@ -2017,11 +2017,11 @@ class StrictRedis(object):
         """
         return self.execute_command('PUBLISH', channel, message)
 
-    def pubsub_channels(self):
+    def pubsub_channels(self, pattern='*'):
         """
         Return a list of channels that have at least one subscriber
         """
-        return self.execute_command('PUBSUB CHANNELS')
+        return self.execute_command('PUBSUB CHANNELS', pattern)
 
     def pubsub_numpat(self):
         """
