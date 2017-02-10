@@ -58,7 +58,15 @@ SYM_CRLF = b('\r\n')
 SYM_EMPTY = b('')
 
 SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
-
+MAX_CLIENTS_REACHED_ERROR = 'max number of clients reached'
+MODULE_LOAD_ERROR = 'Error loading the extension. ' \
+                    'Please check the server logs.'
+NO_SUCH_MODULE_ERROR = 'Error unloading module: no such module with that name'
+MODULE_UNLOAD_NOT_POSSIBLE_ERROR = 'Error unloading module: operation not ' \
+                                   'possible.'
+MODULE_EXPORTS_DATA_TYPES_ERROR = "Error unloading module: the module " \
+                                  "exports one or more module-side data " \
+                                  "types, can't unload"
 
 class Token(object):
     """
@@ -96,20 +104,13 @@ class Token(object):
 
 
 class BaseParser(object):
-    module_load_err = 'Error loading the extension. ' \
-                      'Please check the server logs.'
-    no_such_module_err = 'Error unloading module: ' \
-                         'no such module with that name'
-    cant_unload_module_err = "Error unloading module: the module exports one" \
-                             " or more module-side data types, can't unload"
-
     EXCEPTION_CLASSES = {
         'ERR': {
-            'max number of clients reached': ConnectionError,
-            module_load_err: ModuleError,
-            no_such_module_err: ModuleError,
-            cant_unload_module_err: ModuleError,
-            'Error unloading module: operation not possible.': ModuleError
+            MAX_CLIENTS_REACHED_ERROR: ConnectionError,
+            MODULE_LOAD_ERROR: ModuleError,
+            MODULE_EXPORTS_DATA_TYPES_ERROR: ModuleError,
+            NO_SUCH_MODULE_ERROR: ModuleError,
+            MODULE_UNLOAD_NOT_POSSIBLE_ERROR: ModuleError
         },
         'EXECABORT': ExecAbortError,
         'LOADING': BusyLoadingError,

@@ -2214,12 +2214,12 @@ class StrictRedis(object):
         """
         return self.execute_command('MODULE LOAD', path)
 
-    def module_unload(self, module_name):
+    def module_unload(self, name):
         """
-        Unloads the module ``module_name``.
-        Raises ``ModuleError`` if ``module_name`` is not in loaded modules.
+        Unloads the module ``name``.
+        Raises ``ModuleError`` if ``name`` is not in loaded modules.
         """
-        return self.execute_command('MODULE UNLOAD', module_name)
+        return self.execute_command('MODULE UNLOAD', name)
 
     def module_list(self):
         """
