@@ -322,9 +322,7 @@ class Sentinel(object):
         configuration will be published so that the other Sentinels will
         update their configurations).
         """
-        return self._execute_command(
-            'failover {}'.format(new_master_name)
-        )
+        return self._execute_command('failover {}'.format(new_master_name))
 
     def sentinel_ckquorum(self, new_master_name):
         """
@@ -335,9 +333,7 @@ class Sentinel(object):
         This command should be used in monitoring systems to check if a
         Sentinel deployment is ok.
         """
-        return self._execute_command(
-            'ckquorum {}'.format(new_master_name)
-        )
+        return self._execute_command('ckquorum {}'.format(new_master_name))
 
     def sentinel_flushconfig(self):
         """
