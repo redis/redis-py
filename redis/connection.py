@@ -1030,11 +1030,7 @@ class BlockingConnectionPool(ConnectionPool):
 
         # Create and fill up a thread safe queue with ``None`` values.
         self.pool = self.queue_class(self.max_connections)
-        while True:
-            try:
-                self.pool.put_nowait(None)
-            except Full:
-                break
+        self._fill_pool()
 
         # Keep a list of actual connection instances so that we can
         # disconnect them later.
@@ -1071,6 +1067,12 @@ class BlockingConnectionPool(ConnectionPool):
             # raised unless handled by application code. If you want never to
             raise ConnectionError("No connection available.")
 
+        # If the pool generation differs, close the connection and open a new one.
+        if connection is not None and connection.pool_generation != self.generation:
+            self._remove_connection(connection)
+            connection.disconnect()
+            connection = None
+
         # If the ``connection`` is actually ``None`` then that's a cue to make
         # a new connection to add to the pool.
         if connection is None:
@@ -1085,7 +1087,14 @@ class BlockingConnectionPool(ConnectionPool):
         if connection.pid != self.pid:
             return
 
-        # Put the connection back into the pool.
+        # If we are releasing a connection that is no longer the same as the pool's generation,
+        # we will disconnect it.
+        if connection.pool_generation != self.generation:
+            self._remove_connection(connection)
+            connection.disconnect()
+            connection = None
+
+        # Put the connection, or None back into the pool.
         try:
             self.pool.put_nowait(connection)
         except Full:
@@ -1093,7 +1102,37 @@ class BlockingConnectionPool(ConnectionPool):
             # we don't want this connection
             pass
 
-    def disconnect(self):
+    def disconnect(self, immediate=False):
         "Disconnects all connections in the pool."
-        for connection in self._connections:
-            connection.disconnect()
+        self.generation += 1
+
+        if immediate:
+            for connection in self._connections:
+                connection.disconnect()
+
+            self._connections[:] = []
+            self._drain_pool()
+            self._fill_pool()
+
+    def _remove_connection(self, connection):
+        "Remove a connection from the list of connections."
+        try:
+            self._connections.remove(connection)
+        except IndexError:
+            pass
+
+    def _fill_pool(self):
+        "Fill the connection pool with sentinel values to represent that we need to make a new connection."
+        while True:
+            try:
+                self.pool.put_nowait(None)
+            except Full:
+                break
+
+    def _drain_pool(self):
+        "Drain the pool, removing all items from it."
+        while True:
+            try:
+                self.pool.get_nowait()
+            except Empty:
+                break
