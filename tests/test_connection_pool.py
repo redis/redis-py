@@ -131,6 +131,15 @@ class TestBlockingConnectionPool(object):
         c2 = pool.get_connection('_')
         assert c1 == c2
 
+    def test_connection_uses_pool_generation(self):
+        pool = self.get_pool()
+        c1 = pool.get_connection('_')
+        assert c1.pool_generation == pool.generation == 0
+        pool.release(c1)
+        pool.disconnect()
+        c2 = pool.get_connection('_')
+        assert c2.pool_generation == pool.generation == 1
+
     def test_disconnect_changes_generation_and_returns_new_connection(self):
         pool = self.get_pool()
         c1 = pool.get_connection('_')
