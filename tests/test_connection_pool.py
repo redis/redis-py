@@ -157,7 +157,6 @@ class TestBlockingConnectionPool(object):
         pool.disconnect(immediate=True)
         assert c1.disconnected
         pool.release(c1)
-        assert c1.disconnected
         c2 = pool.get_connection('_')
         assert c1 != c2
 
