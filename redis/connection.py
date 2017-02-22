@@ -1043,6 +1043,7 @@ class BlockingConnectionPool(ConnectionPool):
     def make_connection(self):
         "Make a fresh connection."
         connection = self.connection_class(**self.connection_kwargs)
+        connection.pool_generation = self.generation
         self._connections.append(connection)
         return connection
 
@@ -1071,6 +1072,12 @@ class BlockingConnectionPool(ConnectionPool):
             # raised unless handled by application code. If you want never to
             raise ConnectionError("No connection available.")
 
+        # If the pool generation differs, close the connection and open a new one.
+        if connection is not None and connection.pool_generation != self.generation:
+            self._remove_connection(connection)
+            connection.disconnect()
+            connection = None
+
         # If the ``connection`` is actually ``None`` then that's a cue to make
         # a new connection to add to the pool.
         if connection is None:
@@ -1085,7 +1092,14 @@ class BlockingConnectionPool(ConnectionPool):
         if connection.pid != self.pid:
             return
 
-        # Put the connection back into the pool.
+        # If we are releasing a connection that is no longer the same as the pool's generation,
+        # we will disconnect it.
+        if connection.pool_generation != self.generation:
+            self._remove_connection(connection)
+            connection.disconnect()
+            connection = None
+
+        # Put the connection, or None back into the pool.
         try:
             self.pool.put_nowait(connection)
         except Full:
@@ -1093,7 +1107,17 @@ class BlockingConnectionPool(ConnectionPool):
             # we don't want this connection
             pass
 
-    def disconnect(self):
+    def disconnect(self, immediate=False):
         "Disconnects all connections in the pool."
-        for connection in self._connections:
-            connection.disconnect()
+        self.generation += 1
+
+        if immediate:
+            for connection in self._connections:
+                connection.disconnect()
+
+    def _remove_connection(self, connection):
+        "Remove a connection from the list of connections."
+        try:
+            self._connections.remove(connection)
+        except IndexError:
+            pass
