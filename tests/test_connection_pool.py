@@ -16,6 +16,10 @@ class DummyConnection(object):
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.pid = os.getpid()
+        self.disconnected = False
+
+    def disconnect(self):
+        self.disconnected = True
 
 
 class TestConnectionPool(object):
@@ -126,6 +130,36 @@ class TestBlockingConnectionPool(object):
         pool.release(c1)
         c2 = pool.get_connection('_')
         assert c1 == c2
+
+    def test_disconnect_changes_generation_and_returns_new_connection(self):
+        pool = self.get_pool()
+        c1 = pool.get_connection('_')
+        pool.release(c1)
+        assert pool.generation == 0
+        pool.disconnect()
+        assert pool.generation == 1
+        c2 = pool.get_connection('_')
+        assert c1 != c2
+
+    def test_disconnect_happens_when_releasing_connection_when_pool_generation_changes(self):
+        pool = self.get_pool()
+        c1 = pool.get_connection('_')
+        pool.disconnect()
+        assert not c1.disconnected
+        pool.release(c1)
+        assert c1.disconnected
+        c2 = pool.get_connection('_')
+        assert c1 != c2
+
+    def test_disconnect_disconnects_immediately(self):
+        pool = self.get_pool()
+        c1 = pool.get_connection('_')
+        pool.disconnect(immediate=True)
+        assert c1.disconnected
+        pool.release(c1)
+        assert c1.disconnected
+        c2 = pool.get_connection('_')
+        assert c1 != c2
 
     def test_repr_contains_db_info_tcp(self):
         pool = redis.ConnectionPool(host='localhost', port=6379, db=0)
