@@ -68,7 +68,7 @@ to the official command syntax. There are a few exceptions:
   `this comment on issue #151
   <https://github.com/andymccurdy/redis-py/issues/151#issuecomment-1545015>`_
   for details).
-* **SCAN/SSCAN/HSCAN/ZSCAN**: The *SCAN commands are implemented as they
+* **SCAN/SSCAN/HSCAN/ZSCAN**: The \*SCAN commands are implemented as they
   exist in the Redis documentation. In addition, each command has an equivilant
   iterator method. These are purely for convenience so the user doesn't have
   to keep track of the cursor while iterating. Use the
@@ -126,7 +126,7 @@ You can create your own Connection subclasses as well. This may be useful if
 you want to control the socket behavior within an async framework. To
 instantiate a client class using your own connection, you need to create
 a connection pool, passing your class to the connection_class argument.
-Other keyword parameters your pass to the pool will be passed to the class
+Other keyword parameters you pass to the pool will be passed to the class
 specified during initialization.
 
 .. code-block:: pycon
@@ -291,7 +291,7 @@ duration of a WATCH, care must be taken to ensure that the connection is
 returned to the connection pool by calling the reset() method. If the
 Pipeline is used as a context manager (as in the example above) reset()
 will be called automatically. Of course you can do this the manual way by
-explicity calling reset():
+explicitly calling reset():
 
 .. code-block:: pycon
 
@@ -444,7 +444,7 @@ application.
     >>> r.publish('my-channel')
     1
     >>> p.get_message()
-    {'channel': 'my-channel', data': 'my data', 'pattern': None, 'type': 'message'}
+    {'channel': 'my-channel', 'data': 'my data', 'pattern': None, 'type': 'message'}
 
 There are three different strategies for reading messages.
 
@@ -518,6 +518,22 @@ cannot be delivered. When you're finished with a PubSub object, call its
     >>> p = r.pubsub()
     >>> ...
     >>> p.close()
+
+
+The PUBSUB set of subcommands CHANNELS, NUMSUB and NUMPAT are also
+supported:
+
+.. code-block:: pycon
+
+    >>> r.pubsub_channels()
+    ['foo', 'bar']
+    >>> r.pubsub_numsub('foo', 'bar')
+    [('foo', 9001), ('bar', 42)]
+    >>> r.pubsub_numsub('baz')
+    [('baz', 0)]
+    >>> r.pubsub_numpat()
+    1204
+
 
 LUA Scripting
 ^^^^^^^^^^^^^
@@ -613,7 +629,7 @@ Sentinel connection to discover the master and slaves network addresses:
     >>> sentinel.discover_slaves('mymaster')
     [('127.0.0.1', 6380)]
 
-You can also create Redis client connections from a Sentinel instnace. You can
+You can also create Redis client connections from a Sentinel instance. You can
 connect to either the master (for write operations) or a slave (for read-only
 operations).
 
@@ -643,7 +659,7 @@ See `Guidelines for Redis clients with support for Redis Sentinel
 Scan Iterators
 ^^^^^^^^^^^^^^
 
-The *SCAN commands introduced in Redis 2.8 can be cumbersome to use. While
+The \*SCAN commands introduced in Redis 2.8 can be cumbersome to use. While
 these commands are fully supported, redis-py also exposes the following methods
 that return Python iterators for convenience: `scan_iter`, `hscan_iter`,
 `sscan_iter` and `zscan_iter`.
