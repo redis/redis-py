@@ -1,6 +1,11 @@
 """Internal module for Python 2 backwards compatibility."""
 import sys
 
+try:
+    InterruptedError = InterruptedError
+except:
+    InterruptedError = OSError
+
 # For Python older than 3.5, retry EINTR.
 if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and
                                sys.version_info[1] < 5):
@@ -15,8 +20,12 @@ if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and
         while True:
             try:
                 return _select(rlist, wlist, xlist, timeout)
-            except InterruptedError:
-                continue
+            except InterruptedError as e:
+                # Python 2 does not define InterruptedError, instead
+                # try to catch an OSError with errno == EINTR == 4.
+                if hasattr(e, 'errno') and (e.errno == 4 or e.errno is None):
+                    continue
+                raise e
 
     # Wrapper for handling interruptable system calls.
     def _retryable_call(s, func, *args, **kwargs):
