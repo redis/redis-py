@@ -24,7 +24,7 @@ if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and
             except InterruptedError as e:
                 # Python 2 does not define InterruptedError, instead
                 # try to catch an OSError with errno == EINTR == 4.
-                if hasattr(e, 'errno') and e.errno == getattr(errno, 'EINTR', 4):
+                if getattr(e, 'errno', None) == getattr(errno, 'EINTR', 4):
                     continue
                 raise
 
