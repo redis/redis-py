@@ -103,6 +103,7 @@ class SentinelConnectionPool(ConnectionPool):
                 self.master_address = master_address
             elif master_address != self.master_address:
                 # Master address changed, disconnect all clients in this pool
+                self.master_address = master_address
                 self.disconnect()
         return master_address
 
