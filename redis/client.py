@@ -1155,7 +1155,7 @@ class StrictRedis(object):
             if isinstance(ex, datetime.timedelta):
                 ex = ex.seconds + ex.days * 24 * 3600
             pieces.append(ex)
-        if px:
+        if px is not None:
             pieces.append('PX')
             if isinstance(px, datetime.timedelta):
                 ms = int(px.microseconds / 1000)
