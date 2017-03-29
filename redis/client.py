@@ -1408,8 +1408,7 @@ class StrictRedis(object):
             values fetched from the arguments to ``get``.
 
         """
-        if (start is not None and num is None) or \
-                (num is not None and start is None):
+        if type(start)!=type(num):
             raise RedisError("``start`` and ``num`` must both be specified")
 
         pieces = [name]
@@ -1790,8 +1789,7 @@ class StrictRedis(object):
 
         `score_cast_func`` a callable used to cast the score return value
         """
-        if (start is not None and num is None) or \
-                (num is not None and start is None):
+        if type(start)!=type(num):
             raise RedisError("``start`` and ``num`` must both be specified")
         pieces = ['ZRANGEBYSCORE', name, min, max]
         if start is not None and num is not None:
@@ -1876,8 +1874,7 @@ class StrictRedis(object):
 
         ``score_cast_func`` a callable used to cast the score return value
         """
-        if (start is not None and num is None) or \
-                (num is not None and start is None):
+        if type(start)!=type(num):
             raise RedisError("``start`` and ``num`` must both be specified")
         pieces = ['ZREVRANGEBYSCORE', name, max, min]
         if start is not None and num is not None:
