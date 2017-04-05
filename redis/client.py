@@ -2586,6 +2586,7 @@ class PubSubWorkerThread(threading.Thread):
         self.pubsub = pubsub
         self.sleep_time = sleep_time
         self._running = False
+        self.daemon = True
 
     def run(self):
         if self._running:
