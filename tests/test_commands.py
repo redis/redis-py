@@ -145,6 +145,7 @@ class TestRedisCommands(object):
             # monkey patch parse_response()
             COMPLEXITY_STATEMENT = "Complexity info: N:4712,M:3788"
             old_parse_response = r.parse_response
+
             def parse_response(connection, command_name, **options):
                 if command_name != 'SLOWLOG GET':
                     return old_parse_response(connection,
