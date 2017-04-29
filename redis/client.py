@@ -2097,7 +2097,7 @@ class StrictRedis(object):
         Add the specified geospatial items to the specified key identified
         by the ``name`` argument. The Geospatial items are given as ordered
         members of the ``values`` argument, each item or place is formed by
-        the triad latitude, longitude and name.
+        the triad longitude, latitude and name.
         """
         if len(values) % 3 != 0:
             raise RedisError("GEOADD requires places with lat, lon and name"
