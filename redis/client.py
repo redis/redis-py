@@ -2893,6 +2893,8 @@ class BasePipeline(object):
             # predicated on any state
             return execute(conn, stack, raise_on_error)
         finally:
+            if conn and not self.connection:
+                self.connection_pool.release(conn)
             self.reset()
 
     def watch(self, *names):
