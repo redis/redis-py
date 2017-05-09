@@ -948,9 +948,9 @@ class ConnectionPool(object):
     def get_connection(self, command_name, *keys, **options):
         "Get a connection from the pool"
         self._checkpid()
-        try:
+        if self._available_connections:
             connection = self._available_connections.pop()
-        except IndexError:
+        else:
             connection = self.make_connection()
         self._in_use_connections.add(connection)
         return connection
