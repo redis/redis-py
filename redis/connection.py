@@ -1,4 +1,5 @@
 from __future__ import with_statement
+from copy import copy
 from distutils.version import StrictVersion
 from itertools import chain
 import os
@@ -409,7 +410,8 @@ class Connection(object):
                  socket_keepalive=False, socket_keepalive_options=None,
                  retry_on_timeout=False, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
-                 parser_class=DefaultParser, socket_read_size=65536):
+                 parser_class=DefaultParser, socket_read_size=65536,
+                 **kwargs):
         self.pid = os.getpid()
         self.host = host
         self.port = int(port)
@@ -431,6 +433,14 @@ class Connection(object):
             'db': self.db,
         }
         self._connect_callbacks = []
+
+        # If the connection isn't used in a process that forks, there are
+        # certain optimizations we can make. Default assumes that we have to
+        # be safe for process forks.
+        self.fork_safe = kwargs.get('fork_safe', True)
+
+        # Connection pool generation id
+        self.pool_generation = 0
 
     def __repr__(self):
         return self.description_format % self._description_args
@@ -544,7 +554,14 @@ class Connection(object):
         if self._sock is None:
             return
         try:
-            self._sock.shutdown(socket.SHUT_RDWR)
+            # socket.shutdown() kills the underlying TCP connection
+            # immediately. Good when you can do it, but it ignores
+            # the ref count on the descriptor. If the process forked
+            # and the child inherited the socket, it's not safe to
+            # call .shutdown(). Just close() the socket and let the OS
+            # close the connection when appropriate.
+            if not self.fork_safe:
+                self._sock.shutdown(socket.SHUT_RDWR)
             self._sock.close()
         except socket.error:
             pass
@@ -716,7 +733,8 @@ class UnixDomainSocketConnection(Connection):
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  retry_on_timeout=False,
-                 parser_class=DefaultParser, socket_read_size=65536):
+                 parser_class=DefaultParser, socket_read_size=65536,
+                 **kwargs):
         self.pid = os.getpid()
         self.path = path
         self.db = db
@@ -733,6 +751,14 @@ class UnixDomainSocketConnection(Connection):
             'db': self.db,
         }
         self._connect_callbacks = []
+
+        # If the connection isn't used in a process that forks, there are
+        # certain optimizations we can make. Default assumes that we have to
+        # be safe for process forks.
+        self.fork_safe = kwargs.get('fork_safe', True)
+
+        # Connection pool generation id
+        self.pool_generation = 0
 
     def _connect(self):
         "Create a Unix domain socket connection"
@@ -919,6 +945,9 @@ class ConnectionPool(object):
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
+        self.fork_safe = connection_kwargs.get('fork_safe', True)
+
+        self.generation = 0
 
         self.reset()
 
@@ -936,20 +965,28 @@ class ConnectionPool(object):
         self._check_lock = threading.Lock()
 
     def _checkpid(self):
-        if self.pid != os.getpid():
-            with self._check_lock:
-                if self.pid == os.getpid():
-                    # another thread already did the work while we waited
-                    # on the lock.
-                    return
-                self.disconnect()
-                self.reset()
+        # No need to check PID if process isn't supposed to fork
+        if self.fork_safe:
+            if self.pid != os.getpid():
+                with self._check_lock:
+                    if self.pid == os.getpid():
+                        # another thread already did the work while we waited
+                        # on the lock.
+                        return
+                    self.disconnect()
+                    self.reset()
 
     def get_connection(self, command_name, *keys, **options):
         "Get a connection from the pool"
         self._checkpid()
         try:
             connection = self._available_connections.pop()
+            if connection.pool_generation != self.generation:
+                # generation counter mismatch: let this connection go and
+                # create a new one
+                connection.disconnect()
+                self._created_connections -= 1
+                connection = self.make_connection()
         except IndexError:
             connection = self.make_connection()
         self._in_use_connections.add(connection)
@@ -959,8 +996,11 @@ class ConnectionPool(object):
         "Create a new connection"
         if self._created_connections >= self.max_connections:
             raise ConnectionError("Too many connections")
+
+        new_connection = self.connection_class(**self.connection_kwargs)
+        new_connection.pool_generation = self.generation
         self._created_connections += 1
-        return self.connection_class(**self.connection_kwargs)
+        return new_connection
 
     def release(self, connection):
         "Releases the connection back to the pool"
@@ -968,14 +1008,33 @@ class ConnectionPool(object):
         if connection.pid != self.pid:
             return
         self._in_use_connections.remove(connection)
-        self._available_connections.append(connection)
 
-    def disconnect(self):
-        "Disconnects all connections in the pool"
-        all_conns = chain(self._available_connections,
-                          self._in_use_connections)
-        for connection in all_conns:
+        # Verify generation id before putting connection back in the free list
+        if connection.pool_generation == self.generation:
+            self._available_connections.append(connection)
+        else:
+            # generation id mismatch, kill the connection
             connection.disconnect()
+            self._created_connections -= 1
+
+    def disconnect(self, immediate=False):
+        """
+        Disconnects all connections in the pool
+
+        By default, the disconnect happens over time as connections
+        cycle into and out of the pool. This avoids the problem of ripping
+        connections out from under threads that are using them.
+
+        If `immediate` is True, then we forcibly disconnect all connections
+        and leave it to the owner of the connection to deal with the various
+        errors that can occur. This option is not recommended.
+        """
+        self.generation += 1
+        if immediate:
+            all_conns = chain(copy(self._available_connections),
+                              copy(self._in_use_connections))
+            for connection in all_conns:
+                connection.disconnect()
 
 
 class BlockingConnectionPool(ConnectionPool):
@@ -1028,11 +1087,7 @@ class BlockingConnectionPool(ConnectionPool):
 
         # Create and fill up a thread safe queue with ``None`` values.
         self.pool = self.queue_class(self.max_connections)
-        while True:
-            try:
-                self.pool.put_nowait(None)
-            except Full:
-                break
+        self._fill_pool()
 
         # Keep a list of actual connection instances so that we can
         # disconnect them later.
@@ -1069,6 +1124,12 @@ class BlockingConnectionPool(ConnectionPool):
             # raised unless handled by application code. If you want never to
             raise ConnectionError("No connection available.")
 
+        # If the pool generation differs, close the connection and open a new one.
+        if connection is not None and connection.pool_generation != self.generation:
+            self._remove_connection(connection)
+            connection.disconnect()
+            connection = None
+
         # If the ``connection`` is actually ``None`` then that's a cue to make
         # a new connection to add to the pool.
         if connection is None:
@@ -1083,7 +1144,14 @@ class BlockingConnectionPool(ConnectionPool):
         if connection.pid != self.pid:
             return
 
-        # Put the connection back into the pool.
+        # If we are releasing a connection that is no longer the same as the pool's generation,
+        # we will disconnect it.
+        if connection.pool_generation != self.generation:
+            self._remove_connection(connection)
+            connection.disconnect()
+            connection = None
+
+        # Put the connection, or None back into the pool.
         try:
             self.pool.put_nowait(connection)
         except Full:
@@ -1091,7 +1159,37 @@ class BlockingConnectionPool(ConnectionPool):
             # we don't want this connection
             pass
 
-    def disconnect(self):
+    def disconnect(self, immediate=False):
         "Disconnects all connections in the pool."
-        for connection in self._connections:
-            connection.disconnect()
+        self.generation += 1
+
+        if immediate:
+            for connection in self._connections:
+                connection.disconnect()
+
+            self._connections[:] = []
+            self._drain_pool()
+            self._fill_pool()
+
+    def _remove_connection(self, connection):
+        "Remove a connection from the list of connections."
+        try:
+            self._connections.remove(connection)
+        except IndexError:
+            pass
+
+    def _fill_pool(self):
+        "Fill the connection pool with sentinel values to represent that we need to make a new connection."
+        while True:
+            try:
+                self.pool.put_nowait(None)
+            except Full:
+                break
+
+    def _drain_pool(self):
+        "Drain the pool, removing all items from it."
+        while True:
+            try:
+                self.pool.get_nowait()
+            except Empty:
+                break
