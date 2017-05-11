@@ -1,6 +1,10 @@
 from __future__ import with_statement
 import os
+import socket
+
 import pytest
+import sys
+
 import redis
 import time
 import re
@@ -407,6 +411,14 @@ class TestSSLConnectionURLParsing(object):
         assert pool.get_connection('_').cert_reqs == ssl.CERT_REQUIRED
 
 
+class TestSocket(socket.socket):
+
+    if sys.version_info < (3, ):
+        @property
+        def timeout(self):
+            return self._sock.timeout
+
+
 class TestConnection(object):
     def test_on_connect_error(self):
         """
@@ -422,6 +434,69 @@ class TestConnection(object):
         pool = bad_connection.connection_pool
         assert len(pool._available_connections) == 1
         assert not pool._available_connections[0]._sock
+
+    def test_socket_connect_timeout(self, timeout=0.5):
+        conn = redis.Redis(host='127.0.0.1',
+                           socket_timeout=timeout+5,
+                           socket_connect_timeout=timeout)
+        connect_attempts = []
+
+        class TimeoutSocket(TestSocket):
+            def connect(self, addr):
+                connect_attempts.append(addr)
+                assert self.timeout == timeout
+                raise socket.timeout("timedout")
+        old_socket = socket.socket
+        socket.socket = TimeoutSocket
+        try:
+            with pytest.raises(redis.TimeoutError):
+                conn.info()
+        finally:
+            socket.socket = old_socket
+        assert 1 == len(connect_attempts)
+
+    def test_socket_timeout(self, timeout=0.5):
+        connect_timeout = timeout + 1
+        conn = redis.Redis(host='127.0.0.1', socket_timeout=timeout,
+                           socket_connect_timeout=connect_timeout)
+
+        class TimeoutSocket(TestSocket):
+            def connect(self, addr):
+                del addr
+                assert self.timeout == connect_timeout
+
+            def sendall(self, data):
+                assert self.timeout == timeout
+                raise socket.timeout("timedout")
+
+        old_socket = socket.socket
+        socket.socket = TimeoutSocket
+        try:
+            with pytest.raises(redis.TimeoutError):
+                conn.info()
+        finally:
+            socket.socket = old_socket
+
+    def test_retry_on_timeout(self, timeout=0.1):
+        connect_timeout = timeout + 1
+        conn = redis.Redis(host='127.0.0.1', socket_timeout=timeout,
+                           socket_connect_timeout=connect_timeout,
+                           retry_on_timeout=True)
+        connect_attempts = []
+
+        class TimeoutSocket(TestSocket):
+            def connect(self, addr):
+                connect_attempts.append(addr)
+                assert self.timeout == connect_timeout
+                raise socket.timeout("timedout")
+        old_socket = socket.socket
+        socket.socket = TimeoutSocket
+        try:
+            with pytest.raises(redis.TimeoutError):
+                conn.info()
+        finally:
+            socket.socket = old_socket
+        assert 2 == len(connect_attempts)
 
     @skip_if_server_version_lt('2.8.8')
     def test_busy_loading_disconnects_socket(self, r):

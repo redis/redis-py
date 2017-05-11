@@ -509,6 +509,8 @@ class Connection(object):
                     sock.close()
 
         if err is not None:
+            if isinstance(err, socket.timeout):
+                raise TimeoutError(err)
             raise err
         raise socket.error("socket.getaddrinfo returned an empty list")
 
