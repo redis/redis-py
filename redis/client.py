@@ -2594,8 +2594,11 @@ class PubSubWorkerThread(threading.Thread):
         pubsub = self.pubsub
         sleep_time = self.sleep_time
         while pubsub.subscribed:
-            pubsub.get_message(ignore_subscribe_messages=True,
-                               timeout=sleep_time)
+            try:
+                pubsub.get_message(ignore_subscribe_messages=True,
+                                   timeout=sleep_time)
+            except InterruptedError:
+                pass  # Ignore "Interrupted system call" errors.
         pubsub.close()
         self._running = False
 
