@@ -454,7 +454,7 @@ class Connection(object):
         # ipv4/ipv6, but we want to set options prior to calling
         # socket.connect()
         err = None
-        for res in socket.getaddrinfo(self.host, self.port, 0,
+        for res in socket.getaddrinfo(self.host, self.port, socket.AF_INET,
                                       socket.SOCK_STREAM):
             family, socktype, proto, canonname, socket_address = res
             sock = None
