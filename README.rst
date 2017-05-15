@@ -510,8 +510,9 @@ PubSub objects remember what channels and patterns they are subscribed to. In
 the event of a disconnection such as a network error or timeout, the
 PubSub object will re-subscribe to all prior channels and patterns when
 reconnecting. Messages that were published while the client was disconnected
-cannot be delivered. When you're finished with a PubSub object, call its
-`.close()` method to shutdown the connection.
+cannot be delivered. Automated reconnection can be disabled by passing
+`close_on_error=True` to `r.pubsub()`. When you're finished with a PubSub object,
+call its `.close()` method to shutdown the connection.
 
 .. code-block:: pycon
 
