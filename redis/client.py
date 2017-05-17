@@ -355,7 +355,7 @@ class StrictRedis(object):
     """
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict(
-            'AUTH EXISTS EXPIRE EXPIREAT HEXISTS HMSET MOVE MSETNX PERSIST '
+            'AUTH EXISTS EXPIRE EXPIREAT HEXISTS HMSET MIGRATE, MOVE MSETNX PERSIST '
             'PSETEX RENAMENX SISMEMBER SMOVE SETEX SETNX',
             bool
         ),
@@ -1065,6 +1065,10 @@ class StrictRedis(object):
         for pair in iteritems(kwargs):
             items.extend(pair)
         return self.execute_command('MSETNX', *items)
+
+    def migrate(self, dest_host, dest_port, name, dest_db=0, timeout=60):
+        "Atomically transfer a key ``name`` from a source Redis instance to a destination Redis instance  ``dest_host`` and  ``dest_port`` and ``dest_db`` with ``timeout``"
+        return self.execute_command('MIGRATE', dest_host, dest_port, name, dest_db, timeout)
 
     def move(self, name, db):
         "Moves the key ``name`` to a different Redis database ``db``"
