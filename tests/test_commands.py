@@ -1210,6 +1210,13 @@ class TestRedisCommands(object):
         assert r.hmset('a', {'a': 1, 'b': 2, 'c': 3})
         assert r.hmget('a', 'a', 'b', 'c') == [b('1'), b('2'), b('3')]
 
+    def test_hmget_dict(self, r):
+        assert r.hmset('a', {'a': 1, 'b': 2, 'c': 3})
+        assert r.hmget_dict('a', 'a', 'b', 'c') == \
+            {'a': b('1'), 'b': b('2'), 'c': b('3')}
+        assert r.hmget_dict('a', ['a', 'b', 'c']) == \
+            {'a': b('1'), 'b': b('2'), 'c': b('3')}
+
     def test_hmset(self, r):
         h = {b('a'): b('1'), b('b'): b('2'), b('c'): b('3')}
         assert r.hmset('a', h)
