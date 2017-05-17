@@ -948,10 +948,10 @@ class ConnectionPool(object):
     def get_connection(self, command_name, *keys, **options):
         "Get a connection from the pool"
         self._checkpid()
-        try:
-            connection = self._available_connections.pop()
-        except IndexError:
+        if not self._available_connections:
             connection = self.make_connection()
+        else:
+            connection = self._available_connections.pop()
         self._in_use_connections.add(connection)
         return connection
 
@@ -1063,7 +1063,8 @@ class BlockingConnectionPool(ConnectionPool):
         # self.timeout then raise a ``ConnectionError``.
         connection = None
         try:
-            connection = self.pool.get(block=True, timeout=self.timeout)
+            if not self.pool.empty():
+                connection = self.pool.get(block=True, timeout=self.timeout)
         except Empty:
             # Note that this is not caught by the redis client and will be
             # raised unless handled by application code. If you want never to
