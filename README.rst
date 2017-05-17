@@ -174,7 +174,7 @@ set_response_callback method. This method accepts two arguments: a command
 name and the callback. Callbacks added in this manner are only valid on the
 instance the callback is added to. If you want to define or override a callback
 globally, you should make a subclass of the Redis client and add your callback
-to its REDIS_CALLBACKS class dictionary.
+to its RESPONSE_CALLBACKS class dictionary.
 
 Response callbacks take at least one parameter: the response from the Redis
 server. Keyword arguments may also be accepted in order to further control
