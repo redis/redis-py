@@ -59,6 +59,23 @@ SYM_EMPTY = b('')
 SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
 
 
+def convertToNumber(a):
+    if not a:
+        return a
+
+    t=0
+    for i in range(0,len(a)): 
+        if  ord(a[i]) > 57 or ord(a[i]) < 48:
+            if a[i] != '.' or t == 1 :
+                return a
+            elif a[i] == '.':
+                t=1
+
+    if t == 1:
+        return float(a)
+    return int(a)
+
+
 class Token(object):
     """
     Literal strings in Redis commands, such as the command names and any
@@ -294,6 +311,7 @@ class PythonParser(BaseParser):
             response = [self.read_response() for i in xrange(length)]
         if isinstance(response, bytes) and self.encoding:
             response = response.decode(self.encoding)
+            response = convertToNumber(response)
         return response
 
 
@@ -392,6 +410,10 @@ class HiredisParser(BaseParser):
         elif isinstance(response, list) and response and \
                 isinstance(response[0], ConnectionError):
             raise response[0]
+        
+
+        if isinstance(response, list):
+            response = [(not v and v or convertToNumber(v)) for v in response]
         return response
 
 if HIREDIS_AVAILABLE:
