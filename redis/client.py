@@ -456,7 +456,7 @@ class StrictRedis(object):
     )
 
     @classmethod
-    def from_url(cls, url, db=None, **kwargs):
+    def from_url(cls, url, connection_pool_class=None, db=None, **kwargs):
         """
         Return a Redis client object configured from the given URL, which must
         use either `the ``redis://`` scheme
@@ -478,10 +478,15 @@ class StrictRedis(object):
         If none of these options are specified, db=0 is used.
 
         Any additional querystring arguments and keyword arguments will be
-        passed along to the ConnectionPool class's initializer. In the case
-        of conflicting arguments, querystring arguments always win.
+        passed along to the ``connections_pool_class`` class's initializer.
+        In the case of conflicting arguments, querystring arguments always win.
         """
-        connection_pool = ConnectionPool.from_url(url, db=db, **kwargs)
+        if connection_pool_class is None:
+            connection_pool_class = ConnectionPool
+
+        call = getattr(connection_pool_class, 'from_url')
+
+        connection_pool = call(url, db=db, **kwargs)
         return cls(connection_pool=connection_pool)
 
     def __init__(self, host='localhost', port=6379,
