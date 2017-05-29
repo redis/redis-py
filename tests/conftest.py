@@ -4,7 +4,6 @@ from mock import Mock
 
 from distutils.version import StrictVersion
 
-
 _REDIS_VERSIONS = {}
 
 
@@ -28,6 +27,7 @@ def _get_client(cls, request=None, **kwargs):
         def teardown():
             client.flushdb()
             client.connection_pool.disconnect()
+
         request.addfinalizer(teardown)
     return client
 
@@ -111,6 +111,7 @@ def mock_cluster_resp_slaves(request, **kwargs):
                 "slave 19efe5a631f3296fdf21a5441680f893e8cc96ec 0 "
                 "1447836789290 3 connected']")
     return _gen_cluster_mock_resp(r, response)
+
 
 @pytest.fixture()
 def mock_resp_role(**kwargs):
