@@ -343,6 +343,49 @@ def parse_pubsub_numsub(response, **options):
     return list(zip(response[0::2], response[1::2]))
 
 
+def parse_role(response):
+    print(response)
+    role = response[0].decode()
+
+    def _parse_master(response):
+        offset, slaves = response[1:]
+        res = {
+            'role': role,
+            'offset': offset,
+            'slaves': []
+        }
+        for slave in slaves:
+            host, port, offset = slave
+            res['slaves'].append({
+                'host': host,
+                'port': int(port),
+                'offset': int(offset)
+            })
+        return res
+
+    def _parse_slave(response):
+        host, port, status, offset = response[1:]
+        return {
+            'role': role,
+            'host': host,
+            'port': port,
+            'status': status,
+            'offset': offset
+        }
+
+    def _parse_sentinel(response):
+        return {
+            'role': role,
+            'masters': response[1:]
+        }
+    parser = {
+        'master': _parse_master,
+        'slave': _parse_slave,
+        'sentinel': _parse_sentinel
+    }[role]
+    return parser(response)
+
+
 class StrictRedis(object):
     """
     Implementation of the Redis protocol.
@@ -410,6 +453,7 @@ class StrictRedis(object):
             'OBJECT': parse_object,
             'PING': lambda r: nativestr(r) == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
+            'ROLE': parse_role,
             'SCAN': parse_scan,
             'SCRIPT EXISTS': lambda r: list(imap(bool, r)),
             'SCRIPT FLUSH': bool_ok,
@@ -838,6 +882,17 @@ class StrictRedis(object):
             return self.execute_command('SLAVEOF', Token.get_token('NO'),
                                         Token.get_token('ONE'))
         return self.execute_command('SLAVEOF', host, port)
+
+    def role(self):
+        """
+        Provide information on the role of a Redis instance in the context of replication,
+        by returning if the instance is currently a master, slave, or sentinel.
+        The command also returns additional information about the state of the replication
+        (if the role is master or slave)
+        or the list of monitored master names (if the role is sentinel).
+        :return:
+        """
+        return self.execute_command('ROLE')
 
     def slowlog_get(self, num=None):
         """
