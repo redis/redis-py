@@ -1,11 +1,15 @@
 import pytest
+import sys
 import redis
 from mock import Mock
 
 from distutils.version import StrictVersion
 
+from redis._compat import b
+
 
 _REDIS_VERSIONS = {}
+NAMESPACE = "namespace:"
 
 
 def get_version(**kwargs):
@@ -37,6 +41,19 @@ def skip_if_server_version_lt(min_version):
     return pytest.mark.skipif(check, reason="")
 
 
+def add_namespace(key):
+    if isinstance(key, str):
+        return '{0}{1}'.format(NAMESPACE, key)
+    elif sys.version_info[0] == 3 and isinstance(key, bytes):
+        return b''.join([b(NAMESPACE), key])
+    elif isinstance(key, unicode):
+        return u'{0}{1}'.format(NAMESPACE, key)
+
+
+def rm_namespace(key):
+    return key[len(NAMESPACE):]
+
+
 @pytest.fixture()
 def r(request, **kwargs):
     return _get_client(redis.Redis, request, **kwargs)
@@ -45,6 +62,18 @@ def r(request, **kwargs):
 @pytest.fixture()
 def sr(request, **kwargs):
     return _get_client(redis.StrictRedis, request, **kwargs)
+
+
+@pytest.fixture()
+def nr(request, **kwargs):
+    return _get_client(redis.Redis, request, add_namespace=add_namespace,
+                       rm_namespace=rm_namespace, **kwargs)
+
+
+@pytest.fixture()
+def nsr(request, **kwargs):
+    return _get_client(redis.StrictRedis, request, add_namespace=add_namespace,
+                       rm_namespace=rm_namespace, **kwargs)
 
 
 def _gen_cluster_mock_resp(r, response):

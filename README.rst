@@ -674,6 +674,59 @@ that return Python iterators for convenience: `scan_iter`, `hscan_iter`,
     B 2
     C 3
 
+Namespacing
+^^^^^^^^^^^
+
+Namespacing keys is possible with the `StrictRedis`, `Redis`, `PubSub`,
+`StrictPipeline` and `Pipeline` objects using `add_namespace` and
+`rm_namespace` kwargs during instantiation.  `add_namespace` should be a
+function that takes a key argument and returns your namespaced key.
+`rm_namespace` function should take a namespace key argument and return
+your original key without the namespace. This allows you to create your own
+namespacing logic.  `Pipeline` and `PubSub` objects created via methods on
+a `Redis` or `StrictRedis` instance will receive the parent instance's
+namespace methods.
+
+.. code-block:: pycon
+
+    >>> import redis
+    >>>
+    >>> def add_namespace(key):
+    ...     return 'ns:{}'.format(key)
+    ...
+    >>> def rm_namespace(key):
+    ...     return key[3:]
+    ...
+    >>> r = redis.StrictRedis(host='localhost', port=6379, db=0,
+    ...                       add_namespace=add_namespace,
+    ...                       rm_namespace=rm_namespace)
+    ...
+    >>> # Sets key "ns:foo".
+    >>> r.set('foo', 'bar')
+    True
+    >>> # Gets key "ns:foo".
+    >>> r.get('foo')
+    'bar'
+
+Care must be taken when adding namespacing support to existing systems. The
+following caveats need be considered:
+
+- The `KEYS` command will namespace any provided pattern and default to the
+  return value of `add_namespace('*')`.  The `SCAN` command's `MATCH` arg
+  will default to `add_namespace('*')`.
+
+- There is no way to know if your existing data structures contain
+  non-namespaced keys. Therefore, any existing data structures that
+  may store historical keys in your current system should be carefully
+  considered before adding namespace support.
+
+- The `SLOWLOG GET` and `RANDOMKEY` commands will returned keys
+  **without** removing the namespace because there is no way to know which
+  returned keys are namespaced.
+
+- Cluster commands, using `r.cluster(...)`, **do not** currently support
+  namespacing.
+
 Author
 ^^^^^^
 
@@ -686,4 +739,3 @@ Special thanks to:
   which some of the socket code is still used.
 * Alexander Solovyov for ideas on the generic response callback system.
 * Paul Hubbard for initial packaging support.
-
