@@ -109,8 +109,9 @@ class TestScripting(object):
 
         msgpack_hello(args=[msgpack_message_1], client=pipe)
 
-        assert r.script_exists(msgpack_hello.sha) == [True]
+        assert r.script_exists(msgpack_hello.sha) == [False]
         assert pipe.execute()[0] == b'hello Joe'
+        assert r.script_exists(msgpack_hello.sha) == [True]
 
         msgpack_hello_broken = r.register_script(msgpack_hello_script_broken)
 
