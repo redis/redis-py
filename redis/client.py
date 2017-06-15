@@ -2907,13 +2907,7 @@ class BasePipeline(object):
         return self.watching and self.execute_command('UNWATCH') or True
 
     def script_load_for_pipeline(self, script):
-        "Make sure scripts are loaded prior to pipeline execution"
-        # we need the sha now so that Script.__call__ can use it to run
-        # evalsha.
-        if not script.sha:
-            script.sha = self.immediate_execute_command('SCRIPT', 'LOAD',
-                                                        script.script,
-                                                        **{'parse': 'LOAD'})
+        "Make sure scripts can be loaded prior to pipeline execution"
         self.scripts.add(script)
 
 
@@ -2933,7 +2927,7 @@ class Script(object):
     def __init__(self, registered_client, script):
         self.registered_client = registered_client
         self.script = script
-        self.sha = hashlib.sha1(script).hexdigest()
+        self.sha = hashlib.sha1(script.encode('utf-8')).hexdigest()
 
     def __call__(self, keys=[], args=[], client=None):
         "Execute the script, passing any required ``args``"
@@ -2949,5 +2943,6 @@ class Script(object):
         except NoScriptError:
             # Maybe the client is pointed to a differnet server than the client
             # that created this instance?
+            # Overwrite the sha just in case there was a discrepancy
             self.sha = client.script_load(self.script)
             return client.evalsha(self.sha, len(keys), *args)
