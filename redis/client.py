@@ -6,6 +6,7 @@ import warnings
 import time
 import threading
 import time as mod_time
+import hashlib
 from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
                            itervalues, izip, long, nativestr, unicode,
                            safe_unicode)
@@ -2932,7 +2933,7 @@ class Script(object):
     def __init__(self, registered_client, script):
         self.registered_client = registered_client
         self.script = script
-        self.sha = ''
+        self.sha = hashlib.sha1(script).hexdigest()
 
     def __call__(self, keys=[], args=[], client=None):
         "Execute the script, passing any required ``args``"
