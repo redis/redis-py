@@ -2927,7 +2927,10 @@ class Script(object):
     def __init__(self, registered_client, script):
         self.registered_client = registered_client
         self.script = script
-        self.sha = hashlib.sha1(script.encode('utf-8')).hexdigest()
+        # Precalculate and store the SHA1 hex digest of the script.
+        # Encode the digest because it should match the return type of script_load, which
+        # in Python 3 is bytes.
+        self.sha = hashlib.sha1(script.encode('utf-8')).hexdigest().encode('utf-8')
 
     def __call__(self, keys=[], args=[], client=None):
         "Execute the script, passing any required ``args``"
