@@ -2906,10 +2906,6 @@ class BasePipeline(object):
         "Unwatches all previously specified keys"
         return self.watching and self.execute_command('UNWATCH') or True
 
-    def script_load_for_pipeline(self, script):
-        "Make sure scripts can be loaded prior to pipeline execution"
-        self.scripts.add(script)
-
 
 class StrictPipeline(BasePipeline, StrictRedis):
     "Pipeline for the StrictRedis class"
@@ -2939,13 +2935,13 @@ class Script(object):
         args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
         if isinstance(client, BasePipeline):
-            # make sure this script is good to go on pipeline
-            client.script_load_for_pipeline(self)
+            # Make sure the pipeline can register the script before executing.
+            client.scripts.add(self)
         try:
             return client.evalsha(self.sha, len(keys), *args)
         except NoScriptError:
             # Maybe the client is pointed to a differnet server than the client
             # that created this instance?
-            # Overwrite the sha just in case there was a discrepancy
+            # Overwrite the sha just in case there was a discrepancy.
             self.sha = client.script_load(self.script)
             return client.evalsha(self.sha, len(keys), *args)
