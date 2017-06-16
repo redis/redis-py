@@ -2849,12 +2849,11 @@ class BasePipeline(object):
         shas = [s.sha for s in scripts]
         # we can't use the normal script_* methods because they would just
         # get buffered in the pipeline.
-        exists = immediate('SCRIPT', 'EXISTS', *shas, **{'parse': 'EXISTS'})
+        exists = immediate('SCRIPT EXISTS', *shas)
         if not all(exists):
             for s, exist in izip(scripts, exists):
                 if not exist:
-                    s.sha = immediate('SCRIPT', 'LOAD', s.script,
-                                      **{'parse': 'LOAD'})
+                    s.sha = immediate('SCRIPT LOAD', s.script)
 
     def execute(self, raise_on_error=True):
         "Execute all the commands in the current pipeline"
@@ -2924,9 +2923,7 @@ class Script(object):
         self.registered_client = registered_client
         self.script = script
         # Precalculate and store the SHA1 hex digest of the script.
-        # Encode the digest because it should match the return type of script_load, which
-        # in Python 3 is bytes.
-        self.sha = hashlib.sha1(script.encode('utf-8')).hexdigest().encode('utf-8')
+        self.sha = hashlib.sha1(b(script)).hexdigest()
 
     def __call__(self, keys=[], args=[], client=None):
         "Execute the script, passing any required ``args``"
