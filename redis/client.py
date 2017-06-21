@@ -1217,6 +1217,12 @@ class StrictRedis(object):
         """
         return self.execute_command('SUBSTR', name, start, end)
 
+    def touch(self, *args):
+        """
+        Alters the last access time of a key(s) ``*args``. A key is ignored if it does not exist.
+        """
+        return self.execute_command('TOUCH', *args)
+
     def ttl(self, name):
         "Returns the number of seconds until the key ``name`` will expire"
         return self.execute_command('TTL', name)
