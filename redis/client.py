@@ -1219,7 +1219,8 @@ class StrictRedis(object):
 
     def touch(self, *args):
         """
-        Alters the last access time of a key(s) ``*args``. A key is ignored if it does not exist.
+        Alters the last access time of a key(s) ``*args``. A key is ignored
+        if it does not exist.
         """
         return self.execute_command('TOUCH', *args)
 
