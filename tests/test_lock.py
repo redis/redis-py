@@ -87,6 +87,13 @@ class TestLock(object):
         assert 16000 < sr.pttl('foo') <= 20000
         lock.release()
 
+    def test_is_mine(self, sr):
+        lock = self.get_lock(sr, 'foo', timeout=10)
+        assert lock.acquire(blocking=False)
+        assert lock.is_mine()
+        lock.local.token = 'dummy'
+        assert not lock.is_mine()
+
     def test_extend_lock_float(self, sr):
         lock = self.get_lock(sr, 'foo', timeout=10.0)
         assert lock.acquire(blocking=False)

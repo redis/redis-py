@@ -126,6 +126,9 @@ class Lock(object):
             return True
         return False
 
+    def is_mine(self):
+        return self.local.token == self.redis.get(self.name)
+
     def release(self):
         "Releases the already acquired lock"
         expected_token = self.local.token
