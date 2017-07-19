@@ -207,7 +207,7 @@ def zset_score_pairs(response, **options):
     If ``withscores`` is specified in the options, return the response as
     a list of (value, score) pairs
     """
-    if not response or not options['withscores']:
+    if not response or 'withscores' not in options.keys() or options['withscores'] is None:
         return response
     score_cast_func = options.get('score_cast_func', float)
     it = iter(response)
