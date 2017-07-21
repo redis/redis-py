@@ -360,9 +360,9 @@ class StrictRedis(object):
             bool
         ),
         string_keys_to_dict(
-            'BITCOUNT BITPOS DECRBY DEL GETBIT HDEL HLEN INCRBY LINSERT LLEN '
-            'LPUSHX PFADD PFCOUNT RPUSHX SADD SCARD SDIFFSTORE SETBIT '
-            'SETRANGE SINTERSTORE SREM STRLEN SUNIONSTORE ZADD ZCARD '
+            'BITCOUNT BITPOS DECRBY DEL GETBIT HDEL HLEN HSTRLEN INCRBY '
+            'LINSERT LLEN LPUSHX PFADD PFCOUNT RPUSHX SADD SCARD SDIFFSTORE '
+            'SETBIT SETRANGE SINTERSTORE SREM STRLEN SUNIONSTORE ZADD ZCARD '
             'ZLEXCOUNT ZREM ZREMRANGEBYLEX ZREMRANGEBYRANK ZREMRANGEBYSCORE '
             'GEOADD',
             int
@@ -2009,6 +2009,10 @@ class StrictRedis(object):
     def hvals(self, name):
         "Return the list of values within hash ``name``"
         return self.execute_command('HVALS', name)
+
+    def hstrlen(self, name, key):
+        "Return the number of bytes stored in the value of ``key`` within hash ``name``"
+        return self.execute_command('HSTRLEN', name, key)
 
     def publish(self, channel, message):
         """
