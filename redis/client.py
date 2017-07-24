@@ -1644,7 +1644,7 @@ class StrictRedis(object):
         memebers of set ``name``. Note this is only available when running
         Redis 2.6+.
         """
-        args = number and [number] or []
+        args = (number is not None) and [number] or []
         return self.execute_command('SRANDMEMBER', name, *args)
 
     def srem(self, name, *values):
