@@ -1229,6 +1229,7 @@ class TestRedisCommands(object):
         remote_vals = r.hvals('a')
         assert sorted(local_vals) == sorted(remote_vals)
 
+    @skip_if_server_version_lt('3.2.0')
     def test_hstrlen(self, r):
         r.hmset('a', {'1': '22', '2': '333'})
         assert r.hstrlen('a', '1') == 2
