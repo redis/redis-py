@@ -2338,13 +2338,10 @@ class PubSub(object):
         self.connection = None
         # we need to know the encoding options for this connection in order
         # to lookup channel and pattern names for callback handlers.
-        conn = connection_pool.get_connection('pubsub', shard_hint)
-        try:
-            self.encoding = conn.encoding
-            self.encoding_errors = conn.encoding_errors
-            self.decode_responses = conn.decode_responses
-        finally:
-            connection_pool.release(conn)
+        encoding_options = self.connection_pool.get_encoding()
+        self.encoding = encoding_options['encoding']
+        self.encoding_errors = encoding_options['encoding_errors']
+        self.decode_responses = encoding_options['decode_responses']
         self.reset()
 
     def __del__(self):

@@ -394,6 +394,7 @@ class HiredisParser(BaseParser):
             raise response[0]
         return response
 
+
 if HIREDIS_AVAILABLE:
     DefaultParser = HiredisParser
 else:
@@ -954,6 +955,15 @@ class ConnectionPool(object):
             connection = self.make_connection()
         self._in_use_connections.add(connection)
         return connection
+
+    def get_encoding(self):
+        "Return information about the encoding settings"
+        kwargs = self.connection_kwargs
+        return {
+            'encoding': kwargs.get('encoding', 'utf-8'),
+            'encoding_errors': kwargs.get('encoding_errors', 'strict'),
+            'decode_responses': kwargs.get('decode_responses', False)
+        }
 
     def make_connection(self):
         "Create a new connection"
