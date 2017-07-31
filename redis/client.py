@@ -2934,7 +2934,15 @@ class Script(object):
         self.registered_client = registered_client
         self.script = script
         # Precalculate and store the SHA1 hex digest of the script.
-        self.sha = hashlib.sha1(b(script)).hexdigest()
+
+        if isinstance(script, basestring):
+            # We need the encoding from the client in order to generate an
+            # accurate byte representation of the script
+            encoding_options = registered_client.connection_pool.get_encoding()
+            encoding = encoding_options['encoding']
+            encoding_errors = encoding_options['encoding_errors']
+            script = script.encode(encoding, encoding_errors)
+        self.sha = hashlib.sha1(script).hexdigest()
 
     def __call__(self, keys=[], args=[], client=None):
         "Execute the script, passing any required ``args``"
