@@ -1229,6 +1229,11 @@ class TestRedisCommands(object):
         remote_vals = r.hvals('a')
         assert sorted(local_vals) == sorted(remote_vals)
 
+    def test_hstrlen(self, r):
+        r.hmset('a', {'1': '22', '2': '333'})
+        assert r.hstrlen('a', '1') == 2
+        assert r.hstrlen('a', '2') == 3
+
     # SORT
     def test_sort_basic(self, r):
         r.rpush('a', '3', '2', '1', '4')
