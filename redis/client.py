@@ -2011,7 +2011,10 @@ class StrictRedis(object):
         return self.execute_command('HVALS', name)
 
     def hstrlen(self, name, key):
-        "Return the number of bytes stored in the value of ``key`` within hash ``name``"
+        """
+        Return the number of bytes stored in the value of ``key``
+        within hash ``name``
+        """
         return self.execute_command('HSTRLEN', name, key)
 
     def publish(self, channel, message):
