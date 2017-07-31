@@ -6,6 +6,7 @@ import warnings
 import time
 import threading
 import time as mod_time
+import hashlib
 from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
                            itervalues, izip, long, nativestr, unicode,
                            safe_unicode)
@@ -2859,12 +2860,11 @@ class BasePipeline(object):
         shas = [s.sha for s in scripts]
         # we can't use the normal script_* methods because they would just
         # get buffered in the pipeline.
-        exists = immediate('SCRIPT', 'EXISTS', *shas, **{'parse': 'EXISTS'})
+        exists = immediate('SCRIPT EXISTS', *shas)
         if not all(exists):
             for s, exist in izip(scripts, exists):
                 if not exist:
-                    s.sha = immediate('SCRIPT', 'LOAD', s.script,
-                                      **{'parse': 'LOAD'})
+                    s.sha = immediate('SCRIPT LOAD', s.script)
 
     def execute(self, raise_on_error=True):
         "Execute all the commands in the current pipeline"
@@ -2916,16 +2916,6 @@ class BasePipeline(object):
         "Unwatches all previously specified keys"
         return self.watching and self.execute_command('UNWATCH') or True
 
-    def script_load_for_pipeline(self, script):
-        "Make sure scripts are loaded prior to pipeline execution"
-        # we need the sha now so that Script.__call__ can use it to run
-        # evalsha.
-        if not script.sha:
-            script.sha = self.immediate_execute_command('SCRIPT', 'LOAD',
-                                                        script.script,
-                                                        **{'parse': 'LOAD'})
-        self.scripts.add(script)
-
 
 class StrictPipeline(BasePipeline, StrictRedis):
     "Pipeline for the StrictRedis class"
@@ -2943,7 +2933,8 @@ class Script(object):
     def __init__(self, registered_client, script):
         self.registered_client = registered_client
         self.script = script
-        self.sha = ''
+        # Precalculate and store the SHA1 hex digest of the script.
+        self.sha = hashlib.sha1(b(script)).hexdigest()
 
     def __call__(self, keys=[], args=[], client=None):
         "Execute the script, passing any required ``args``"
@@ -2952,12 +2943,13 @@ class Script(object):
         args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
         if isinstance(client, BasePipeline):
-            # make sure this script is good to go on pipeline
-            client.script_load_for_pipeline(self)
+            # Make sure the pipeline can register the script before executing.
+            client.scripts.add(self)
         try:
             return client.evalsha(self.sha, len(keys), *args)
         except NoScriptError:
             # Maybe the client is pointed to a differnet server than the client
             # that created this instance?
+            # Overwrite the sha just in case there was a discrepancy.
             self.sha = client.script_load(self.script)
             return client.evalsha(self.sha, len(keys), *args)
