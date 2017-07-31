@@ -2114,7 +2114,7 @@ class StrictRedis(object):
         the triad longitude, latitude and name.
         """
         if len(values) % 3 != 0:
-            raise RedisError("GEOADD requires places with lat, lon and name"
+            raise RedisError("GEOADD requires places with lon, lat and name"
                              " values")
         return self.execute_command('GEOADD', name, *values)
 
@@ -2143,7 +2143,7 @@ class StrictRedis(object):
         """
         Return the positions of each item of ``values`` as members of
         the specified key identified by the ``name``argument. Each position
-        is represented by the pairs lat and lon.
+        is represented by the pairs lon and lat.
         """
         return self.execute_command('GEOPOS', name, *values)
 
