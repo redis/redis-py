@@ -2946,7 +2946,7 @@ class Script(object):
     def __init__(self, registered_client, script):
         self.registered_client = registered_client
         self.script = script
-        self.sha = ''
+        self.sha = None
 
     def __call__(self, keys=[], args=[], client=None):
         "Execute the script, passing any required ``args``"
@@ -2957,10 +2957,13 @@ class Script(object):
         if isinstance(client, BasePipeline):
             # make sure this script is good to go on pipeline
             client.script_load_for_pipeline(self)
+
+        if self.sha is None:
+            self.sha = client.script_load(self.script)
+
         try:
             return client.evalsha(self.sha, len(keys), *args)
         except NoScriptError:
             # Maybe the client is pointed to a differnet server than the client
             # that created this instance?
-            self.sha = client.script_load(self.script)
             return client.evalsha(self.sha, len(keys), *args)
