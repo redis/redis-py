@@ -1272,7 +1272,7 @@ class StrictRedis(object):
         RPOP a value off of the first non-empty list
         named in the ``keys`` list.
 
-        If none of the lists in ``keys`` has a value to LPOP, then block
+        If none of the lists in ``keys`` has a value to RPOP, then block
         for ``timeout`` seconds, or until a value gets pushed on to one
         of the lists.
 
