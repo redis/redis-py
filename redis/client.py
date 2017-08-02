@@ -2339,10 +2339,7 @@ class PubSub(object):
         self.connection = None
         # we need to know the encoding options for this connection in order
         # to lookup channel and pattern names for callback handlers.
-        encoding_options = self.connection_pool.get_encoding()
-        self.encoding = encoding_options['encoding']
-        self.encoding_errors = encoding_options['encoding_errors']
-        self.decode_responses = encoding_options['decode_responses']
+        self.encoder = self.connection_pool.get_encoder()
         self.reset()
 
     def __del__(self):
@@ -2374,28 +2371,13 @@ class PubSub(object):
         if self.channels:
             channels = {}
             for k, v in iteritems(self.channels):
-                if not self.decode_responses:
-                    k = k.decode(self.encoding, self.encoding_errors)
-                channels[k] = v
+                channels[self.encoder.decode(k, force=True)] = v
             self.subscribe(**channels)
         if self.patterns:
             patterns = {}
             for k, v in iteritems(self.patterns):
-                if not self.decode_responses:
-                    k = k.decode(self.encoding, self.encoding_errors)
-                patterns[k] = v
+                patterns[self.encoder.decode(k, force=True)] = v
             self.psubscribe(**patterns)
-
-    def encode(self, value):
-        """
-        Encode the value so that it's identical to what we'll
-        read off the connection
-        """
-        if self.decode_responses and isinstance(value, bytes):
-            value = value.decode(self.encoding, self.encoding_errors)
-        elif not self.decode_responses and isinstance(value, unicode):
-            value = value.encode(self.encoding, self.encoding_errors)
-        return value
 
     @property
     def subscribed(self):
@@ -2446,6 +2428,16 @@ class PubSub(object):
             return None
         return self._execute(connection, connection.read_response)
 
+    def _normalize_keys(self, data):
+        """
+        normalize channel/pattern names to be either bytes or strings
+        based on whether responses are automatically decoded. this saves us
+        from coercing the value for each message coming in.
+        """
+        encode = self.encoder.encode
+        decode = self.encoder.decode
+        return dict([(decode(encode(k)), v) for k, v in iteritems(data)])
+
     def psubscribe(self, *args, **kwargs):
         """
         Subscribe to channel patterns. Patterns supplied as keyword arguments
@@ -2456,15 +2448,13 @@ class PubSub(object):
         """
         if args:
             args = list_or_args(args[0], args[1:])
-        new_patterns = {}
-        new_patterns.update(dict.fromkeys(imap(self.encode, args)))
-        for pattern, handler in iteritems(kwargs):
-            new_patterns[self.encode(pattern)] = handler
+        new_patterns = dict.fromkeys(args)
+        new_patterns.update(kwargs)
         ret_val = self.execute_command('PSUBSCRIBE', *iterkeys(new_patterns))
         # update the patterns dict AFTER we send the command. we don't want to
         # subscribe twice to these patterns, once for the command and again
         # for the reconnection.
-        self.patterns.update(new_patterns)
+        self.patterns.update(self._normalize_keys(new_patterns))
         return ret_val
 
     def punsubscribe(self, *args):
@@ -2486,15 +2476,13 @@ class PubSub(object):
         """
         if args:
             args = list_or_args(args[0], args[1:])
-        new_channels = {}
-        new_channels.update(dict.fromkeys(imap(self.encode, args)))
-        for channel, handler in iteritems(kwargs):
-            new_channels[self.encode(channel)] = handler
+        new_channels = dict.fromkeys(args)
+        new_channels.update(kwargs)
         ret_val = self.execute_command('SUBSCRIBE', *iterkeys(new_channels))
         # update the channels dict AFTER we send the command. we don't want to
         # subscribe twice to these channels, once for the command and again
         # for the reconnection.
-        self.channels.update(new_channels)
+        self.channels.update(self._normalize_keys(new_channels))
         return ret_val
 
     def unsubscribe(self, *args):
@@ -2938,10 +2926,8 @@ class Script(object):
         if isinstance(script, basestring):
             # We need the encoding from the client in order to generate an
             # accurate byte representation of the script
-            encoding_options = registered_client.connection_pool.get_encoding()
-            encoding = encoding_options['encoding']
-            encoding_errors = encoding_options['encoding_errors']
-            script = script.encode(encoding, encoding_errors)
+            encoder = registered_client.connection_pool.get_encoder()
+            script = encoder.encode(script)
         self.sha = hashlib.sha1(script).hexdigest()
 
     def __call__(self, keys=[], args=[], client=None):
