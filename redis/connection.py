@@ -57,6 +57,7 @@ SYM_CRLF = b('\r\n')
 SYM_EMPTY = b('')
 
 SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
+TCP_CLOSE_WAIT = 8
 
 
 class Token(object):
@@ -670,6 +671,27 @@ class Connection(object):
             output.append(SYM_EMPTY.join(pieces))
         return output
 
+    def validate(self):
+        # If we are not yet connected, this connection is valid.
+        if self._sock is None:
+            return
+
+        # Check that connection is usable. We check specifically for the
+        # CLOSE_WAIT state on the socket. The socket enters this state for
+        # example when the Redis server times out the connection due to
+        # idleness.
+        try:
+            state = ord(self._sock.getsockopt(
+                socket.SOL_TCP, socket.TCP_INFO, 1))
+
+            if state == TCP_CLOSE_WAIT:
+                raise ConnectionError()
+
+        except socket.error:
+            raise ConnectionError()
+
+        return True
+
 
 class SSLConnection(Connection):
     description_format = "SSLConnection<host=%(host)s,port=%(port)s,db=%(db)s>"
@@ -751,6 +773,9 @@ class UnixDomainSocketConnection(Connection):
         else:
             return "Error %s connecting to unix socket: %s. %s." % \
                 (exception.args[0], self.path, exception.args[1])
+
+    def validate(self):
+        return True
 
 
 FALSE_STRINGS = ('0', 'F', 'FALSE', 'N', 'NO')
@@ -949,10 +974,22 @@ class ConnectionPool(object):
     def get_connection(self, command_name, *keys, **options):
         "Get a connection from the pool"
         self._checkpid()
-        try:
-            connection = self._available_connections.pop()
-        except IndexError:
-            connection = self.make_connection()
+        while True:
+            try:
+                # Pop the connection from the head of the list, this ensures
+                # that we "cycle" through the pool instead of repeatedly
+                # reusing only the connection at the tail.
+                connection = self._available_connections.pop(0)
+                # Raises ConnectionError if connection is invalid.
+                connection.validate()
+                break
+            except IndexError:
+                # All connections are in use, create a new one.
+                connection = self.make_connection()
+                break
+            except ConnectionError:
+                # Connection is unusable, close it and move on.
+                connection.disconnect()
         self._in_use_connections.add(connection)
         return connection
 
@@ -978,6 +1015,11 @@ class ConnectionPool(object):
         if connection.pid != self.pid:
             return
         self._in_use_connections.remove(connection)
+        if self._available_connections:
+            # There is already an idle, available connection, we can afford to
+            # shut this one down.
+            connection.disconnect()
+            return
         self._available_connections.append(connection)
 
     def disconnect(self):

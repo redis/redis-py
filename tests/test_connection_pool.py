@@ -17,6 +17,9 @@ class DummyConnection(object):
         self.kwargs = kwargs
         self.pid = os.getpid()
 
+    def validate(self):
+        return True
+
 
 class TestConnectionPool(object):
     def get_pool(self, connection_kwargs=None, max_connections=None,
