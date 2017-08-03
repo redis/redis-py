@@ -1144,11 +1144,11 @@ class StrictRedis(object):
 
         ``px`` sets an expire flag on key ``name`` for ``px`` milliseconds.
 
-        ``nx`` if set to True, set the value at key ``name`` to ``value`` if it
-            does not already exist.
+        ``nx`` if set to True, set the value at key ``name`` to ``value`` only
+            if it does not exist.
 
-        ``xx`` if set to True, set the value at key ``name`` to ``value`` if it
-            already exists.
+        ``xx`` if set to True, set the value at key ``name`` to ``value`` only
+            if it already exists.
         """
         pieces = [name, value]
         if ex is not None:
