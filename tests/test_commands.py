@@ -1460,6 +1460,10 @@ class TestRedisCommands(object):
              (2.18737632036209106, 41.40634178640635099)]
 
     @skip_if_server_version_lt('3.2.0')
+    def test_geopos_no_value(self, r):
+        assert r.geopos('barcelona', 'place1', 'place2') == [None, None]
+
+    @skip_if_server_version_lt('3.2.0')
     def test_georadius(self, r):
         values = (2.1909389952632, 41.433791470673, 'place1') +\
                  (2.1873744593677, 41.406342043777, 'place2')
