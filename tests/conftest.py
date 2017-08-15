@@ -37,6 +37,11 @@ def skip_if_server_version_lt(min_version):
     return pytest.mark.skipif(check, reason="")
 
 
+def skip_if_server_version_gte(min_version):
+    check = StrictVersion(get_version()) >= StrictVersion(min_version)
+    return pytest.mark.skipif(check, reason="")
+
+
 @pytest.fixture()
 def r(request, **kwargs):
     return _get_client(redis.Redis, request, **kwargs)
