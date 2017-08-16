@@ -728,7 +728,7 @@ class UnixDomainSocketConnection(Connection):
     def __init__(self, path='', db=0, password=None,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
-                 retry_on_timeout=False,
+                 retry_on_timeout=False, socket_connect_timeout=None,
                  parser_class=DefaultParser, socket_read_size=65536):
         self.pid = os.getpid()
         self.path = path
