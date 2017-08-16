@@ -333,6 +333,8 @@ class TestRedisCommands(object):
     def test_get_and_set(self, r):
         # get and set can't be tested independently of each other
         assert r.get('a') is None
+        default = object()
+        assert r.get('a', default) == default
         byte_string = b('value')
         integer = 5
         unicode_string = unichr(3456) + u('abcd') + unichr(3421)

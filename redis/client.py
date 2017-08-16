@@ -969,11 +969,12 @@ class StrictRedis(object):
             when = int(mod_time.mktime(when.timetuple()))
         return self.execute_command('EXPIREAT', name, when)
 
-    def get(self, name):
+    def get(self, name, default=None):
         """
         Return the value at key ``name``, or None if the key doesn't exist
         """
-        return self.execute_command('GET', name)
+        return_value = self.execute_command('GET', name)
+        return [return_value, default][return_value is None]
 
     def __getitem__(self, name):
         """
