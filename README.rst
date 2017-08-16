@@ -34,8 +34,30 @@ or from source:
 Getting Started
 ---------------
 
+For using Redis backed by collections
 .. code-block:: pycon
 
+    >>> from redis.collections import ObjectRedis
+    >>> r = ObjectRedis()
+    >>> r['myset']=('oats','peas','beans')
+    >>> len(r['myset'])
+    3
+    >>> r['mylist']=['bread','milk','butter']
+    >>> str(r['mylist'])
+    "['bread', 'milk', 'butter']"
+    >>> r['mykey']='myvalue'
+    >>> r['ltue']=42
+    >>> r['ltue']
+    42
+    >>> r['truth']=True
+    >>> r['truth']
+    True
+
+You can also instantiate a RedisList, RedisDict, RedisSet, or RedisSortedSet directly.  All take a name parameter
+and offer redis parameter for passing in the StrictRedis instance to use.
+
+For executing Redis commands explicitly
+.. code-block:: pycon
     >>> import redis
     >>> r = redis.StrictRedis(host='localhost', port=6379, db=0)
     >>> r.set('foo', 'bar')
