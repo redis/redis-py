@@ -1,4 +1,32 @@
-* 2.10.6 (in development)
+* 2.10.6
+    * Various performance improvements. Thanks cjsimpson
+    * Fixed a bug with SRANDMEMBER where
+    * Added HSTRLEN command. Thanks Alexander Putilin
+    * Added the TOUCH command. Thanks Anis Jonischkeit
+    * Remove unnecessary calls to the server when registering Lua scripts.
+      Thanks Ben Greenberg
+    * SET's EX and PX arguments now allow values of zero. Thanks huangqiyin
+    * Added PUBSUB {CHANNELS, NUMPAT, NUMSUB} commands. Thanks Angus Pearson
+    * PubSub connections that that encounter `InterruptedError`s now
+      retry automatically. Thanks Carlton Gibson and Seth M. Larson
+    * LPUSH and RPUSH commands run on PyPy now correctly returns the number
+      of items of the list. Thanks Jeong YunWon
+    * Added support to automatically retry socket EINTR errors. Thanks
+      Thomas Steinacher
+    * PubSubWorker threads started with `run_in_thread` are now daemonized
+      so the thread shuts down when the running process goes away. Thanks
+      Keith Ainsworth
+    * Added support for GEO commands. Thanks Pau Freixes, Alex DeBrie and
+      Abraham Toriz
+    * Made client construction from URLs smarter. Thanks Tim Savage
+    * Added support for CLUSTER * commands. Thanks Andy Huang
+    * The RESTORE command now accepts an optional `replace` boolean.
+      Thanks Yoshinari Takaoka
+    * Attempt to connect to a new Sentinel if a TimeoutError occurs. Thanks
+      Bo Lopker
+    * Fixed a bug in the client's `__getitem__` where a KeyError would be
+      raised if the value returned by the server is an empty string.
+      Thanks Javier Candeira.
     * Socket timeouts when connecting to a server are now properly raised
       as TimeoutErrors.
 * 2.10.5
