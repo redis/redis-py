@@ -3,7 +3,7 @@ from redis import StrictRedis
 import pickle
 import collections
 from collections import OrderedDict
-from future.utils import listitems
+from ._compat import iteritems
 
 __author__ = 'jscarbor'
 
@@ -381,7 +381,7 @@ class RedisDict(collections.MutableMapping):
         return d
 
     def __str__(self):
-        return '{%s}' % ', '.join(([": ".join(map(repr, (k, v))) for k, v in listitems(self)]))
+        return '{%s}' % ', '.join(([": ".join(map(repr, (k, v))) for k, v in iteritems(self)]))
 
 
 class RedisSortedSet(collections.MutableMapping):
@@ -453,11 +453,11 @@ class RedisSortedSet(collections.MutableMapping):
         args = args[1:]
         newstuff.update(*args, **kwds)
         self.redis.zadd(self.name,
-                        *[i for sub in [(v + 0, self.serializer.dumps(k)) for k, v in listitems(newstuff)] for i in
+                        *[i for sub in [(v + 0, self.serializer.dumps(k)) for k, v in iteritems(newstuff)] for i in
                           sub])
 
     def clear(self):
         self.redis.delete(self.name)
 
     def __str__(self):
-        return 'RedisSortedSet({%s})' % ', '.join(([": ".join(map(repr, (k, v))) for k, v in listitems(self)]))
+        return 'RedisSortedSet({%s})' % ', '.join(([": ".join(map(repr, (k, v))) for k, v in iteritems(self)]))
