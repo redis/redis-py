@@ -37,11 +37,14 @@ Getting Started
 .. code-block:: pycon
 
     >>> import redis
-    >>> r = redis.StrictRedis(host='localhost', port=6379, db=0) #Add `decode_responses=True` if you are using Python 3
+    >>> r = redis.StrictRedis(host='localhost', port=6379, db=0)
     >>> r.set('foo', 'bar')
     True
     >>> r.get('foo')
     'bar'
+
+By default, the value returned if you are using Python3 are in raw byte strings.
+If you want a decoded response you can add `decode_response=True` in `redis.StrictRedis()`.
 
 API Reference
 -------------
