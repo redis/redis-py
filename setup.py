@@ -44,6 +44,11 @@ setup(
     keywords=['Redis', 'key-value store'],
     license='MIT',
     packages=['redis'],
+    extras_require={
+        'hiredis': [
+            "hiredis>=0.1.3",
+        ],
+    },
     tests_require=[
         'mock',
         'pytest>=2.5.0',
