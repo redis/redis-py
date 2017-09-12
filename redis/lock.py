@@ -118,12 +118,15 @@ class Lock(object):
             mod_time.sleep(sleep)
 
     def do_acquire(self, token):
-        if self.redis.setnx(self.name, token):
-            if self.timeout:
-                # convert to milliseconds
-                timeout = int(self.timeout * 1000)
-                self.redis.pexpire(self.name, timeout)
-            return True
+        if self.timeout:
+            # convert to milliseconds
+            timeout = int(self.timeout * 1000)
+            if self.redis.set(self.name, token, px=timeout, nx=True):
+                return True
+        else:
+            if self.redis.setnx(self.name, token):
+                return True
+
         return False
 
     def release(self):
