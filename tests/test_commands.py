@@ -68,6 +68,14 @@ class TestRedisCommands(object):
         assert r.client_setname('redis_py_test')
         assert r.client_getname() == 'redis_py_test'
 
+    @skip_if_server_version_lt('2.6.9')
+    def test_client_list_after_client_setname(self, r):
+        r.client_setname('cl=i=ent')
+        clients = r.client_list()
+        assert isinstance(clients[0], dict)
+        assert 'name' in clients[0]
+        assert clients[0]['name'] == 'cl=i=ent'
+
     def test_config_get(self, r):
         data = r.config_get()
         assert 'maxmemory' in data
