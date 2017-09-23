@@ -245,7 +245,8 @@ def bool_ok(response):
 def parse_client_list(response, **options):
     clients = []
     for c in nativestr(response).splitlines():
-        clients.append(dict([pair.split('=') for pair in c.split(' ')]))
+        # Values might contain '='
+        clients.append(dict([pair.split('=', 1) for pair in c.split(' ')]))
     return clients
 
 
