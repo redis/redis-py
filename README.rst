@@ -43,8 +43,14 @@ Getting Started
     >>> r.get('foo')
     'bar'
 
-By default, the value returned are bytes in python3.
-If you want a decoded response you can add `decode_response=True` in `redis.StrictRedis()`.
+By default, all responses are returned as `bytes` in Python 3 and `str` in
+Python 2. The user is responsible for decoding to Python 3 strings or Python 2
+unicode objects.
+
+If **all** string responses from a client should be decoded, the user can
+specify `decode_responses=True` to `StrictRedis.__init__`. In this case, any
+Redis command that returns a string type will be decoded with the `encoding`
+specified.
 
 API Reference
 -------------
