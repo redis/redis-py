@@ -43,7 +43,7 @@ Getting Started
     >>> r.get('foo')
     'bar'
 
-By default, the value returned if you are using Python3 are in raw byte strings.
+By default, the value returned are bytes in python3.
 If you want a decoded response you can add `decode_response=True` in `redis.StrictRedis()`.
 
 API Reference
