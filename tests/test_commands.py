@@ -866,6 +866,17 @@ class TestRedisCommands(object):
         assert value in s
         assert r.smembers('a') == set(s) - set([value])
 
+    def test_spop_multi_value(self, r):
+        s = [b('1'), b('2'), b('3')]
+        r.sadd('a', *s)
+        values = r.spop('a', 2)
+        assert len(values) == 2
+
+        for value in values:
+            assert value in s
+
+        assert r.spop('a', 1) == list(set(s) - set(values))
+
     def test_srandmember(self, r):
         s = [b('1'), b('2'), b('3')]
         r.sadd('a', *s)
