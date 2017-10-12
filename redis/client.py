@@ -1642,9 +1642,10 @@ class StrictRedis(object):
         "Move ``value`` from set ``src`` to set ``dst`` atomically"
         return self.execute_command('SMOVE', src, dst, value)
 
-    def spop(self, name):
+    def spop(self, name, count=None):
         "Remove and return a random member of set ``name``"
-        return self.execute_command('SPOP', name)
+        args = (count is not None) and [count] or []
+        return self.execute_command('SPOP', name, *args)
 
     def srandmember(self, name, number=None):
         """
