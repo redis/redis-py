@@ -1,0 +1,9 @@
+Release Process
+===============
+
+1. Make sure all tests pass.
+2. Make sure CHANGES is up to date.
+3. Update redis.__init__.__version__ and commit
+4. git tag <version-number>
+5. git push --tag
+6. rm dist/* && python setup.py sdist bdist_wheel && twine upload dist/*
