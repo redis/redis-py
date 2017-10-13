@@ -193,11 +193,11 @@ class Sentinel(object):
             type(self).__name__,
             ','.join(sentinel_addresses))
 
-    def check_master_state(self, state, service_name):
-        if not state['is_master'] or state['is_sdown'] or state['is_odown']:
+    def check_master_state(self, master):
+        if not master['is_master'] or master['is_sdown'] or master['is_odown']:
             return False
         # Check if our sentinel doesn't see other nodes
-        if state['num-other-sentinels'] < self.min_other_sentinels:
+        if master['num-other-sentinels'] < self.min_other_sentinels:
             return False
         return True
 
@@ -211,16 +211,16 @@ class Sentinel(object):
         """
         for sentinel_no, sentinel in enumerate(self.sentinels):
             try:
-                masters = sentinel.sentinel_masters()
+                master = sentinel.sentinel_master(service_name)
             except (ConnectionError, TimeoutError):
                 continue
-            state = masters.get(service_name)
-            if state and self.check_master_state(state, service_name):
+            if master and self.check_master_state(master):
                 # Put this sentinel at the top of the list
                 self.sentinels[0], self.sentinels[sentinel_no] = (
                     sentinel, self.sentinels[0])
-                return state['ip'], state['port']
+                return master['ip'], master['port']
         raise MasterNotFoundError("No master found for %r" % (service_name,))
+
 
     def filter_slaves(self, slaves):
         "Remove slaves that are in an ODOWN or SDOWN state"
@@ -232,7 +232,10 @@ class Sentinel(object):
         return slaves_alive
 
     def discover_slaves(self, service_name):
-        "Returns a list of alive slaves for service ``service_name``"
+        """
+        Returns a list of alive slaves for service ``service_name`` or
+        raises SlaveNotFoundError if no slave is found.
+        """
         for sentinel in self.sentinels:
             try:
                 slaves = sentinel.sentinel_slaves(service_name)
@@ -241,7 +244,7 @@ class Sentinel(object):
             slaves = self.filter_slaves(slaves)
             if slaves:
                 return slaves
-        return []
+        raise SlaveNotFoundError("No slave found for %r" % (service_name,))
 
     def master_for(self, service_name, redis_class=StrictRedis,
                    connection_pool_class=SentinelConnectionPool, **kwargs):

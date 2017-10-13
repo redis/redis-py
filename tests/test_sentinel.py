@@ -121,7 +121,8 @@ def test_master_sdown(cluster, sentinel):
 
 
 def test_discover_slaves(cluster, sentinel):
-    assert sentinel.discover_slaves('mymaster') == []
+    with pytest.raises(SlaveNotFoundError):
+        sentinel.discover_slaves('mymaster')
 
     cluster.slaves = [
         {'ip': 'slave0', 'port': 1234, 'is_odown': False, 'is_sdown': False},
@@ -137,7 +138,8 @@ def test_discover_slaves(cluster, sentinel):
 
     # slave1 -> SDOWN
     cluster.slaves[1]['is_sdown'] = True
-    assert sentinel.discover_slaves('mymaster') == []
+    with pytest.raises(SlaveNotFoundError):
+        sentinel.discover_slaves('mymaster')
 
     cluster.slaves[0]['is_odown'] = False
     cluster.slaves[1]['is_sdown'] = False
