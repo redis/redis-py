@@ -2,11 +2,14 @@ from __future__ import with_statement
 import os
 import pytest
 import redis
+import socket
 import time
 import re
 
+from mock import patch
 from threading import Thread
-from redis.connection import ssl_available, to_bool
+from redis.connection import ssl_available, to_bool, Connection
+from redis.exceptions import ConnectionError, TimeoutError
 from .conftest import skip_if_server_version_lt
 
 
@@ -490,3 +493,40 @@ class TestConnection(object):
             'UnixDomainSocketConnection',
             'path=/path/to/socket,db=0',
         )
+
+    def _connect_that_raises_timeout():
+        raise socket.timeout('socket timed out')
+
+    def _connect_that_raises_error():
+        raise socket.error('socket errored')
+
+
+    @patch('redis.Connection._connect', side_effect=_connect_that_raises_timeout)
+    def test_connect_with_retries_and_timeout_error(self, _connect_mock):
+        pool = redis.ConnectionPool(host='localhost', port=6378, db=0)
+        conn = pool.get_connection('_')
+        with pytest.raises(TimeoutError):
+            conn.connect()
+
+    @patch('redis.Connection._connect', side_effect=_connect_that_raises_error)
+    def test_connect_with_retries_and_socket_error(self, _connect_mock):
+        pool = redis.ConnectionPool(host='localhost', port=6378, db=0)
+        conn = pool.get_connection('_')
+        with pytest.raises(ConnectionError):
+            conn.connect()
+
+    @patch('redis.Connection._connect', side_effect=_connect_that_raises_timeout)
+    def test_connect_with_retries_and_timeout_error(self, _connect_mock):
+        pool = redis.ConnectionPool(host='localhost', port=6378, db=0)
+        conn = pool.get_connection('_')
+        with pytest.raises(TimeoutError):
+            conn.connect()
+        assert _connect_mock.call_count == 6
+
+    @patch('redis.Connection._connect', side_effect=_connect_that_raises_error)
+    def test_connect_with_retries_and_socket_error(self, _connect_mock):
+        pool = redis.ConnectionPool(host='localhost', port=6378, db=0)
+        conn = pool.get_connection('_')
+        with pytest.raises(ConnectionError):
+            conn.connect()
+        assert _connect_mock.call_count == 6

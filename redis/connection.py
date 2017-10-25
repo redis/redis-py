@@ -5,6 +5,7 @@ import os
 import socket
 import sys
 import threading
+import time
 import warnings
 
 try:
@@ -440,7 +441,8 @@ class Connection(object):
                  socket_keepalive=False, socket_keepalive_options=None,
                  retry_on_timeout=False, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
-                 parser_class=DefaultParser, socket_read_size=65536):
+                 parser_class=DefaultParser, socket_read_size=65536,
+                 retry_count=0, retry_wait=0):
         self.pid = os.getpid()
         self.host = host
         self.port = int(port)
@@ -451,6 +453,8 @@ class Connection(object):
         self.socket_keepalive = socket_keepalive
         self.socket_keepalive_options = socket_keepalive_options or {}
         self.retry_on_timeout = retry_on_timeout
+        self.retry_count = retry_count + 1  # account for initial try
+        self.retry_wait = retry_wait
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
         self._parser = parser_class(socket_read_size=socket_read_size)
@@ -480,13 +484,34 @@ class Connection(object):
         "Connects to the Redis server if not already connected"
         if self._sock:
             return
-        try:
-            sock = self._connect()
-        except socket.timeout:
-            raise TimeoutError("Timeout connecting to server")
-        except socket.error:
-            e = sys.exc_info()[1]
-            raise ConnectionError(self._error_message(e))
+
+        retry_count = self.retry_count
+        exception_to_raise = None
+
+        while retry_count > 0:
+            try:
+                sock = self._connect()
+            except socket.timeout:
+                exception_to_raise = TimeoutError("Timeout connecting to server")
+                retry_count = retry_count - 1
+                # if we got a failure sleep for the specified time
+                time.sleep(self.retry_wait)
+            except socket.error:
+                e = sys.exc_info()[1]
+                exception_to_raise = ConnectionError(self._error_message(e))
+                retry_count = retry_count - 1
+                # if we got a failure sleep for the specified time
+                time.sleep(self.retry_wait)
+            else:
+                # if the connection succeeded after a failure unset
+                # exception to raise and break out of the while
+                exception_to_raise = None
+                break
+
+        # if we made it through retry_count and have an exception to raise
+        # raise it
+        if exception_to_raise is not None:
+            raise exception_to_raise
 
         self._sock = sock
         try:
