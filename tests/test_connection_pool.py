@@ -517,7 +517,7 @@ class TestConnection(object):
 
     @patch('redis.Connection._connect', side_effect=_connect_that_raises_timeout)
     def test_connect_with_retries_and_timeout_error(self, _connect_mock):
-        pool = redis.ConnectionPool(host='localhost', port=6378, db=0)
+        pool = redis.ConnectionPool(host='localhost', port=6378, db=0, retry_count=5)
         conn = pool.get_connection('_')
         with pytest.raises(TimeoutError):
             conn.connect()
@@ -525,7 +525,7 @@ class TestConnection(object):
 
     @patch('redis.Connection._connect', side_effect=_connect_that_raises_error)
     def test_connect_with_retries_and_socket_error(self, _connect_mock):
-        pool = redis.ConnectionPool(host='localhost', port=6378, db=0)
+        pool = redis.ConnectionPool(host='localhost', port=6378, db=0, retry_count=5)
         conn = pool.get_connection('_')
         with pytest.raises(ConnectionError):
             conn.connect()
