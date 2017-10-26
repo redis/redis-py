@@ -438,9 +438,10 @@ class Connection(object):
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None, socket_connect_timeout=None,
                  socket_keepalive=False, socket_keepalive_options=None,
-                 retry_on_timeout=False, encoding='utf-8',
-                 encoding_errors='strict', decode_responses=False,
-                 parser_class=DefaultParser, socket_read_size=65536):
+                 retry_on_timeout=False, retry_on_connerror=True,
+                 encoding='utf-8', encoding_errors='strict',
+                 decode_responses=False, parser_class=DefaultParser,
+                 socket_read_size=65536):
         self.pid = os.getpid()
         self.host = host
         self.port = int(port)
@@ -451,6 +452,7 @@ class Connection(object):
         self.socket_keepalive = socket_keepalive
         self.socket_keepalive_options = socket_keepalive_options or {}
         self.retry_on_timeout = retry_on_timeout
+        self.retry_on_connerror = retry_on_connerror
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
         self._parser = parser_class(socket_read_size=socket_read_size)

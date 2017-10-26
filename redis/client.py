@@ -65,6 +65,14 @@ def dict_merge(*dicts):
     return merged
 
 
+def handle_connection_error(connection, e):
+    connection.disconnect()
+    if not connection.retry_on_timeout and isinstance(e, TimeoutError):
+        raise
+    if not connection.retry_on_connerror and isinstance(e, ConnectionError):
+        raise
+
+
 def parse_debug_object(response):
     "Parse the results of Redis's DEBUG OBJECT command into a Python dict"
     # The 'type' of the object is the first item in the response, but isn't
@@ -494,7 +502,8 @@ class StrictRedis(object):
                  connection_pool=None, unix_socket_path=None,
                  encoding='utf-8', encoding_errors='strict',
                  charset=None, errors=None,
-                 decode_responses=False, retry_on_timeout=False,
+                 decode_responses=False,
+                 retry_on_timeout=False, retry_on_connerror=True,
                  ssl=False, ssl_keyfile=None, ssl_certfile=None,
                  ssl_cert_reqs=None, ssl_ca_certs=None,
                  max_connections=None):
@@ -516,6 +525,7 @@ class StrictRedis(object):
                 'encoding_errors': encoding_errors,
                 'decode_responses': decode_responses,
                 'retry_on_timeout': retry_on_timeout,
+                'retry_on_connerror': retry_on_connerror,
                 'max_connections': max_connections
             }
             # based on input, setup appropriate connection args
@@ -668,9 +678,7 @@ class StrictRedis(object):
             connection.send_command(*args)
             return self.parse_response(connection, command_name, **options)
         except (ConnectionError, TimeoutError) as e:
-            connection.disconnect()
-            if not connection.retry_on_timeout and isinstance(e, TimeoutError):
-                raise
+            handle_connection_error(connection, e)
             connection.send_command(*args)
             return self.parse_response(connection, command_name, **options)
         finally:
@@ -2409,9 +2417,7 @@ class PubSub(object):
         try:
             return command(*args)
         except (ConnectionError, TimeoutError) as e:
-            connection.disconnect()
-            if not connection.retry_on_timeout and isinstance(e, TimeoutError):
-                raise
+            handle_connection_error(connection, e)
             # Connect manually here. If the Redis server is down, this will
             # fail and raise a ConnectionError as desired.
             connection.connect()
@@ -2716,9 +2722,7 @@ class BasePipeline(object):
             conn.send_command(*args)
             return self.parse_response(conn, command_name, **options)
         except (ConnectionError, TimeoutError) as e:
-            conn.disconnect()
-            if not conn.retry_on_timeout and isinstance(e, TimeoutError):
-                raise
+            handle_connection_error(conn, e)
             # if we're not already watching, we can safely retry the command
             try:
                 if not self.watching:
@@ -2880,9 +2884,7 @@ class BasePipeline(object):
         try:
             return execute(conn, stack, raise_on_error)
         except (ConnectionError, TimeoutError) as e:
-            conn.disconnect()
-            if not conn.retry_on_timeout and isinstance(e, TimeoutError):
-                raise
+            handle_connection_error(conn, e)
             # if we were watching a variable, the watch is no longer valid
             # since this connection has died. raise a WatchError, which
             # indicates the user should retry his transaction. If this is more
