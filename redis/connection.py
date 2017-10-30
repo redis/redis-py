@@ -485,21 +485,20 @@ class Connection(object):
         if self._sock:
             return
 
-        retry_count = self.retry_count
         exception_to_raise = None
 
-        while retry_count > 0:
+        for i in range(self.retry_count):
             try:
                 sock = self._connect()
             except socket.timeout:
-                exception_to_raise = TimeoutError("Timeout connecting to server")
-                retry_count = retry_count - 1
+                exception_to_raise = TimeoutError(
+                    "Timeout connecting to server"
+                )
                 # if we got a failure sleep for the specified time
                 time.sleep(self.retry_wait)
             except socket.error:
                 e = sys.exc_info()[1]
                 exception_to_raise = ConnectionError(self._error_message(e))
-                retry_count = retry_count - 1
                 # if we got a failure sleep for the specified time
                 time.sleep(self.retry_wait)
             else:
