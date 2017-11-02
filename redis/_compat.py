@@ -86,10 +86,6 @@ if sys.version_info[0] < 3:
     from itertools import imap, izip
     from string import letters as ascii_letters
     from Queue import Queue
-    try:
-        from cStringIO import StringIO as BytesIO
-    except ImportError:
-        from StringIO import StringIO as BytesIO
 
     # special unicode handling for python2 to avoid UnicodeDecodeError
     def safe_unicode(obj, *args):
@@ -133,7 +129,6 @@ if sys.version_info[0] < 3:
     long = long
 else:
     from urllib.parse import parse_qs, unquote, urlparse
-    from io import BytesIO
     from string import ascii_letters
     from queue import Queue
 

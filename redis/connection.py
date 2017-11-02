@@ -1,5 +1,6 @@
 from distutils.version import StrictVersion
 from itertools import chain
+import io
 import os
 import socket
 import sys
@@ -13,7 +14,7 @@ except ImportError:
     ssl_available = False
 
 from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
-                           BytesIO, nativestr, basestring, iteritems,
+                           nativestr, basestring, iteritems,
                            LifoQueue, Empty, Full, urlparse, parse_qs,
                            recv, recv_into, select, unquote)
 from redis.exceptions import (
@@ -152,7 +153,7 @@ class SocketBuffer(object):
     def __init__(self, socket, socket_read_size):
         self._sock = socket
         self.socket_read_size = socket_read_size
-        self._buffer = BytesIO()
+        self._buffer = io.BytesIO()
         # number of bytes written to the buffer from the socket
         self.bytes_written = 0
         # number of bytes read from the buffer
