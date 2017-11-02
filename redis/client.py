@@ -2901,7 +2901,7 @@ class PubSub(object):
         """
         encode = self.encoder.encode
         decode = self.encoder.decode
-        return dict((decode(encode(k)), v) for k, v in iteritems(data))
+        return {decode(encode(k)): v for k, v in iteritems(data)}
 
     def psubscribe(self, *args, **kwargs):
         """
