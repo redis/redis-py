@@ -70,7 +70,7 @@ def parse_debug_object(response):
     # prefixed with a name
     response = nativestr(response)
     response = 'type:' + response
-    response = dict([kv.split(':') for kv in response.split()])
+    response = dict(kv.split(':') for kv in response.split())
 
     # parse some expected int values from the string response
     # note: this cmd isn't spec'd so these may not appear in all redis versions
@@ -303,7 +303,7 @@ def parse_client_list(response, **options):
     clients = []
     for c in nativestr(response).splitlines():
         # Values might contain '='
-        clients.append(dict([pair.split('=', 1) for pair in c.split(' ')]))
+        clients.append(dict(pair.split('=', 1) for pair in c.split(' ')))
     return clients
 
 
@@ -339,7 +339,7 @@ def parse_slowlog_get(response, **options):
 
 
 def parse_cluster_info(response, **options):
-    return dict([line.split(':') for line in response.splitlines() if line])
+    return dict(line.split(':') for line in response.splitlines() if line)
 
 
 def _parse_node_line(line):
@@ -364,7 +364,7 @@ def parse_cluster_nodes(response, **options):
     raw_lines = response
     if isinstance(response, basestring):
         raw_lines = response.splitlines()
-    return dict([_parse_node_line(line) for line in raw_lines])
+    return dict(_parse_node_line(line) for line in raw_lines)
 
 
 def parse_georadius_generic(response, **options):
@@ -2901,7 +2901,7 @@ class PubSub(object):
         """
         encode = self.encoder.encode
         decode = self.encoder.decode
-        return dict([(decode(encode(k)), v) for k, v in iteritems(data)])
+        return dict((decode(encode(k)), v) for k, v in iteritems(data))
 
     def psubscribe(self, *args, **kwargs):
         """

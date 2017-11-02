@@ -171,10 +171,10 @@ class Sentinel(object):
         # if sentinel_kwargs isn't defined, use the socket_* options from
         # connection_kwargs
         if sentinel_kwargs is None:
-            sentinel_kwargs = dict([(k, v)
+            sentinel_kwargs = dict((k, v)
                                     for k, v in iteritems(connection_kwargs)
                                     if k.startswith('socket_')
-                                    ])
+                                    )
         self.sentinel_kwargs = sentinel_kwargs
 
         self.sentinels = [StrictRedis(hostname, port, **self.sentinel_kwargs)
