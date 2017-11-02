@@ -109,12 +109,6 @@ if sys.version_info[0] < 3:
     def nativestr(x):
         return x if isinstance(x, str) else x.encode('utf-8', 'replace')
 
-    def u(x):
-        return x.decode()
-
-    def b(x):
-        return x
-
     def next(x):
         return x.next()
 
@@ -146,12 +140,6 @@ else:
 
     def nativestr(x):
         return x if isinstance(x, str) else x.decode('utf-8', 'replace')
-
-    def u(x):
-        return x
-
-    def b(x):
-        return x.encode('latin-1') if not isinstance(x, bytes) else x
 
     next = next
     unichr = chr

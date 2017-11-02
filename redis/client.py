@@ -1,3 +1,4 @@
+from __future__ import unicode_literals
 from itertools import chain
 import datetime
 import sys
@@ -6,9 +7,8 @@ import time
 import threading
 import time as mod_time
 import hashlib
-from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
-                           itervalues, izip, long, nativestr, unicode,
-                           safe_unicode)
+from redis._compat import (basestring, bytes, imap, iteritems, iterkeys,
+                           itervalues, izip, long, nativestr, safe_unicode)
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
                               SSLConnection, Token)
 from redis.lock import Lock, LuaLock
@@ -24,7 +24,7 @@ from redis.exceptions import (
     WatchError,
 )
 
-SYM_EMPTY = b('')
+SYM_EMPTY = b''
 
 
 def list_or_args(keys, args):
@@ -334,7 +334,7 @@ def parse_slowlog_get(response, **options):
         'id': item[0],
         'start_time': int(item[1]),
         'duration': int(item[2]),
-        'command': b(' ').join(item[3])
+        'command': b' '.join(item[3])
     } for item in response]
 
 
@@ -3292,8 +3292,8 @@ class BasePipeline(object):
                 raise r
 
     def annotate_exception(self, exception, number, command):
-        cmd = safe_unicode(' ').join(imap(safe_unicode, command))
-        msg = unicode('Command # %d (%s) of pipeline caused error: %s') % (
+        cmd = ' '.join(imap(safe_unicode, command))
+        msg = 'Command # %d (%s) of pipeline caused error: %s' % (
             number, cmd, safe_unicode(exception.args[0]))
         exception.args = (msg,) + exception.args[1:]
 
