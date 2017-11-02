@@ -3091,7 +3091,7 @@ class BasePipeline(object):
     on a key of a different datatype.
     """
 
-    UNWATCH_COMMANDS = set(('DISCARD', 'EXEC', 'UNWATCH'))
+    UNWATCH_COMMANDS = {'DISCARD', 'EXEC', 'UNWATCH'}
 
     def __init__(self, connection_pool, response_callbacks, transaction,
                  shard_hint):

@@ -418,8 +418,8 @@ class TestRedisCommands(object):
 
     def test_keys(self, r):
         assert r.keys() == []
-        keys_with_underscores = set([b('test_a'), b('test_b')])
-        keys = keys_with_underscores.union(set([b('testc')]))
+        keys_with_underscores = {b('test_a'), b('test_b')}
+        keys = keys_with_underscores.union({b('testc')})
         for key in keys:
             r[key] = 1
         assert set(r.keys(pattern='test_*')) == keys_with_underscores
@@ -744,9 +744,9 @@ class TestRedisCommands(object):
         r.set('c', 3)
         cursor, keys = r.scan()
         assert cursor == 0
-        assert set(keys) == set([b('a'), b('b'), b('c')])
+        assert set(keys) == {b('a'), b('b'), b('c')}
         _, keys = r.scan(match='a')
-        assert set(keys) == set([b('a')])
+        assert set(keys) == {b('a')}
 
     @skip_if_server_version_lt('2.8.0')
     def test_scan_iter(self, r):
@@ -754,26 +754,26 @@ class TestRedisCommands(object):
         r.set('b', 2)
         r.set('c', 3)
         keys = list(r.scan_iter())
-        assert set(keys) == set([b('a'), b('b'), b('c')])
+        assert set(keys) == {b('a'), b('b'), b('c')}
         keys = list(r.scan_iter(match='a'))
-        assert set(keys) == set([b('a')])
+        assert set(keys) == {b('a')}
 
     @skip_if_server_version_lt('2.8.0')
     def test_sscan(self, r):
         r.sadd('a', 1, 2, 3)
         cursor, members = r.sscan('a')
         assert cursor == 0
-        assert set(members) == set([b('1'), b('2'), b('3')])
+        assert set(members) == {b('1'), b('2'), b('3')}
         _, members = r.sscan('a', match=b('1'))
-        assert set(members) == set([b('1')])
+        assert set(members) == {b('1')}
 
     @skip_if_server_version_lt('2.8.0')
     def test_sscan_iter(self, r):
         r.sadd('a', 1, 2, 3)
         members = list(r.sscan_iter('a'))
-        assert set(members) == set([b('1'), b('2'), b('3')])
+        assert set(members) == {b('1'), b('2'), b('3')}
         members = list(r.sscan_iter('a', match=b('1')))
-        assert set(members) == set([b('1')])
+        assert set(members) == {b('1')}
 
     @skip_if_server_version_lt('2.8.0')
     def test_hscan(self, r):
@@ -797,21 +797,21 @@ class TestRedisCommands(object):
         r.zadd('a', 'a', 1, 'b', 2, 'c', 3)
         cursor, pairs = r.zscan('a')
         assert cursor == 0
-        assert set(pairs) == set([(b('a'), 1), (b('b'), 2), (b('c'), 3)])
+        assert set(pairs) == {(b('a'), 1), (b('b'), 2), (b('c'), 3)}
         _, pairs = r.zscan('a', match='a')
-        assert set(pairs) == set([(b('a'), 1)])
+        assert set(pairs) == {(b('a'), 1)}
 
     @skip_if_server_version_lt('2.8.0')
     def test_zscan_iter(self, r):
         r.zadd('a', 'a', 1, 'b', 2, 'c', 3)
         pairs = list(r.zscan_iter('a'))
-        assert set(pairs) == set([(b('a'), 1), (b('b'), 2), (b('c'), 3)])
+        assert set(pairs) == {(b('a'), 1), (b('b'), 2), (b('c'), 3)}
         pairs = list(r.zscan_iter('a', match='a'))
-        assert set(pairs) == set([(b('a'), 1)])
+        assert set(pairs) == {(b('a'), 1)}
 
     # SET COMMANDS
     def test_sadd(self, r):
-        members = set([b('1'), b('2'), b('3')])
+        members = {b('1'), b('2'), b('3')}
         r.sadd('a', *members)
         assert r.smembers('a') == members
 
@@ -821,23 +821,23 @@ class TestRedisCommands(object):
 
     def test_sdiff(self, r):
         r.sadd('a', '1', '2', '3')
-        assert r.sdiff('a', 'b') == set([b('1'), b('2'), b('3')])
+        assert r.sdiff('a', 'b') == {b('1'), b('2'), b('3')}
         r.sadd('b', '2', '3')
-        assert r.sdiff('a', 'b') == set([b('1')])
+        assert r.sdiff('a', 'b') == {b('1')}
 
     def test_sdiffstore(self, r):
         r.sadd('a', '1', '2', '3')
         assert r.sdiffstore('c', 'a', 'b') == 3
-        assert r.smembers('c') == set([b('1'), b('2'), b('3')])
+        assert r.smembers('c') == {b('1'), b('2'), b('3')}
         r.sadd('b', '2', '3')
         assert r.sdiffstore('c', 'a', 'b') == 1
-        assert r.smembers('c') == set([b('1')])
+        assert r.smembers('c') == {b('1')}
 
     def test_sinter(self, r):
         r.sadd('a', '1', '2', '3')
         assert r.sinter('a', 'b') == set()
         r.sadd('b', '2', '3')
-        assert r.sinter('a', 'b') == set([b('2'), b('3')])
+        assert r.sinter('a', 'b') == {b('2'), b('3')}
 
     def test_sinterstore(self, r):
         r.sadd('a', '1', '2', '3')
@@ -845,7 +845,7 @@ class TestRedisCommands(object):
         assert r.smembers('c') == set()
         r.sadd('b', '2', '3')
         assert r.sinterstore('c', 'a', 'b') == 2
-        assert r.smembers('c') == set([b('2'), b('3')])
+        assert r.smembers('c') == {b('2'), b('3')}
 
     def test_sismember(self, r):
         r.sadd('a', '1', '2', '3')
@@ -856,21 +856,21 @@ class TestRedisCommands(object):
 
     def test_smembers(self, r):
         r.sadd('a', '1', '2', '3')
-        assert r.smembers('a') == set([b('1'), b('2'), b('3')])
+        assert r.smembers('a') == {b('1'), b('2'), b('3')}
 
     def test_smove(self, r):
         r.sadd('a', 'a1', 'a2')
         r.sadd('b', 'b1', 'b2')
         assert r.smove('a', 'b', 'a1')
-        assert r.smembers('a') == set([b('a2')])
-        assert r.smembers('b') == set([b('b1'), b('b2'), b('a1')])
+        assert r.smembers('a') == {b('a2')}
+        assert r.smembers('b') == {b('b1'), b('b2'), b('a1')}
 
     def test_spop(self, r):
         s = [b('1'), b('2'), b('3')]
         r.sadd('a', *s)
         value = r.spop('a')
         assert value in s
-        assert r.smembers('a') == set(s) - set([value])
+        assert r.smembers('a') == set(s) - {value}
 
     def test_spop_multi_value(self, r):
         s = [b('1'), b('2'), b('3')]
@@ -900,18 +900,18 @@ class TestRedisCommands(object):
         r.sadd('a', '1', '2', '3', '4')
         assert r.srem('a', '5') == 0
         assert r.srem('a', '2', '4') == 2
-        assert r.smembers('a') == set([b('1'), b('3')])
+        assert r.smembers('a') == {b('1'), b('3')}
 
     def test_sunion(self, r):
         r.sadd('a', '1', '2')
         r.sadd('b', '2', '3')
-        assert r.sunion('a', 'b') == set([b('1'), b('2'), b('3')])
+        assert r.sunion('a', 'b') == {b('1'), b('2'), b('3')}
 
     def test_sunionstore(self, r):
         r.sadd('a', '1', '2')
         r.sadd('b', '2', '3')
         assert r.sunionstore('c', 'a', 'b') == 3
-        assert r.smembers('c') == set([b('1'), b('2'), b('3')])
+        assert r.smembers('c') == {b('1'), b('2'), b('3')}
 
     # SORTED SET COMMANDS
     def test_zadd(self, r):
@@ -1190,26 +1190,26 @@ class TestRedisCommands(object):
     # HYPERLOGLOG TESTS
     @skip_if_server_version_lt('2.8.9')
     def test_pfadd(self, r):
-        members = set([b('1'), b('2'), b('3')])
+        members = {b('1'), b('2'), b('3')}
         assert r.pfadd('a', *members) == 1
         assert r.pfadd('a', *members) == 0
         assert r.pfcount('a') == len(members)
 
     @skip_if_server_version_lt('2.8.9')
     def test_pfcount(self, r):
-        members = set([b('1'), b('2'), b('3')])
+        members = {b('1'), b('2'), b('3')}
         r.pfadd('a', *members)
         assert r.pfcount('a') == len(members)
-        members_b = set([b('2'), b('3'), b('4')])
+        members_b = {b('2'), b('3'), b('4')}
         r.pfadd('b', *members_b)
         assert r.pfcount('b') == len(members_b)
         assert r.pfcount('a', 'b') == len(members_b.union(members))
 
     @skip_if_server_version_lt('2.8.9')
     def test_pfmerge(self, r):
-        mema = set([b('1'), b('2'), b('3')])
-        memb = set([b('2'), b('3'), b('4')])
-        memc = set([b('5'), b('6'), b('7')])
+        mema = {b('1'), b('2'), b('3')}
+        memb = {b('2'), b('3'), b('4')}
+        memc = {b('5'), b('6'), b('7')}
         r.pfadd('a', *mema)
         r.pfadd('b', *memb)
         r.pfadd('c', *memc)
