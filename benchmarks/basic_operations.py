@@ -54,7 +54,7 @@ def timer(func):
             count = kwargs['num']
         else:
             count = args[1]
-        print('{0} - {1} Requests'.format(func.__name__, count))
+        print('{} - {} Requests'.format(func.__name__, count))
         print('Duration  = {}'.format(duration))
         print('Rate = {}'.format(count/duration))
         print('')
