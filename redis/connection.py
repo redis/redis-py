@@ -1,4 +1,3 @@
-from __future__ import with_statement
 from distutils.version import StrictVersion
 from itertools import chain
 import os

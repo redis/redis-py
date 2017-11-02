@@ -1,4 +1,3 @@
-from __future__ import with_statement
 from itertools import chain
 import datetime
 import sys
