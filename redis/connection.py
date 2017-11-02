@@ -640,8 +640,8 @@ class Connection(object):
         # to prevent them from being encoded.
         command = args[0]
         if ' ' in command:
-            args = tuple([Token.get_token(s)
-                          for s in command.split()]) + args[1:]
+            args = tuple(Token.get_token(s)
+                         for s in command.split()) + args[1:]
         else:
             args = (Token.get_token(command),) + args[1:]
 
