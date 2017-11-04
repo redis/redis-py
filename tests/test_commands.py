@@ -1603,6 +1603,68 @@ class TestRedisCommands(object):
 
 class TestStrictCommands(object):
 
+    @skip_if_server_version_lt('6.0.0')
+    def test_strict_xrange(self, sr):
+        varname = 'xrange_test'
+        sr.delete(varname)
+        assert sr.xlen(varname) == 0
+        stamp1 = sr.xadd(varname, name="bar", other="rab", maxlen=4)
+        assert sr.xlen(varname) == 1
+        stamp2 = sr.xadd(varname, name="baz", other="zab")
+        assert sr.xlen(varname) == 2
+        assert stamp1 != stamp2
+
+        milli, offset = stamp2.decode('utf-8').split('-')
+        new_id = ("%s-0" % (milli + 10000)).encode('utf-8')
+        stamp3 = sr.xadd(varname, id=new_id, foo="bar")
+        assert sr.xlen(varname) == 3
+        assert stamp3 == new_id
+        stamp4 = sr.xadd(varname, foo="baz")
+        assert sr.xlen(varname) == 4
+
+        def get_ids(results):
+            return [result[0] for result in results]
+
+        results = sr.xrange(varname, start=stamp1)
+        assert get_ids(results) == [stamp1, stamp2, stamp3, stamp4]
+
+        results = sr.xrange(varname, start=stamp2, finish=stamp3)
+        assert get_ids(results) == [stamp2, stamp3]
+
+        results = sr.xrange(varname, finish=stamp3)
+        assert get_ids(results) == [stamp1, stamp2, stamp3]
+
+        results = sr.xrange(varname, finish=stamp2, count=1)
+        assert get_ids(results) == [stamp1]
+
+        results = sr.xrevrange(varname, start=stamp1)
+        assert get_ids(results) == [stamp4, stamp3, stamp2, stamp1]
+
+        results = sr.xrevrange(varname, start=stamp3, finish=stamp2)
+        assert get_ids(results) == [stamp3, stamp2]
+
+        results = sr.xrevrange(varname, finish=stamp3)
+        assert get_ids(results) == [stamp4, stamp3]
+
+        results = sr.xrevrange(varname, finish=stamp2, count=1)
+        assert get_ids(results) == [stamp4]
+
+        assert sr.xlen(varname) == 4
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_strict_xread(self, sr):
+        varname = 'xread_test'
+        sr.delete(varname)
+        stamp1 = sr.xadd(varname, name="bar", other="rab", maxlen=4)
+        stamp2 = sr.xadd(varname, name="baz", other="zab")
+        assert stamp1 != stamp2
+
+        results = sr.xread(varname='$', count=10, block=10)
+        assert results is None
+
+        results = sr.xread(count=3, block=1000, **{varname: stamp1})
+        assert results[varname][0][0] == stamp2
+
     def test_strict_zadd(self, sr):
         sr.zadd('a', 1.0, 'a1', 2.0, 'a2', a3=3.0)
         assert sr.zrange('a', 0, -1, withscores=True) == \
