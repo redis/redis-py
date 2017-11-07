@@ -438,7 +438,7 @@ class Connection(object):
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None, socket_connect_timeout=None,
                  socket_keepalive=False, socket_keepalive_options=None,
-                 retry_on_timeout=False, encoding='utf-8',
+                 socket_type=0, retry_on_timeout=False, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  parser_class=DefaultParser, socket_read_size=65536):
         self.pid = os.getpid()
@@ -450,6 +450,7 @@ class Connection(object):
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout
         self.socket_keepalive = socket_keepalive
         self.socket_keepalive_options = socket_keepalive_options or {}
+        self.socket_type = socket_type
         self.retry_on_timeout = retry_on_timeout
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
@@ -507,7 +508,7 @@ class Connection(object):
         # ipv4/ipv6, but we want to set options prior to calling
         # socket.connect()
         err = None
-        for res in socket.getaddrinfo(self.host, self.port, 0,
+        for res in socket.getaddrinfo(self.host, self.port, self.socket_type,
                                       socket.SOCK_STREAM):
             family, socktype, proto, canonname, socket_address = res
             sock = None
