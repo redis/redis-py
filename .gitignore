@@ -2,6 +2,7 @@
 redis.egg-info
 build/
 dist/
+.idea/
 dump.rdb
 /.tox
 _build

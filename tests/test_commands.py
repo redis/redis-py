@@ -126,6 +126,14 @@ class TestRedisCommands(object):
     def test_ping(self, r):
         assert r.ping()
 
+    @skip_if_server_version_lt('2.8.12')
+    def test_role_master(self, mock_resp_role):
+        role = mock_resp_role.role()
+        assert isinstance(role, dict)
+        assert role['role'] == 'master'
+        slave_offset = role['slaves'][0]['offset']
+        assert slave_offset == role['offset']
+
     def test_slowlog_get(self, r, slowlog):
         assert r.slowlog_reset()
         unicode_string = unichr(3456) + u('abcd') + unichr(3421)
