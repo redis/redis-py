@@ -559,7 +559,12 @@ class Connection(object):
         # if a password is specified, authenticate
         if self.password:
             self.send_command('AUTH', self.password)
-            if nativestr(self.read_response()) != 'OK':
+            try:
+                response = self.read_response()
+            except ResponseError as error:
+                raise AuthenticationError(str(error))
+
+            if nativestr(response) != 'OK':
                 raise AuthenticationError('Invalid Password')
 
         # if a database is specified, switch to it
