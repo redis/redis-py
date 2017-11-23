@@ -79,10 +79,9 @@ class Lock(object):
             raise LockError("'sleep' must be less than 'timeout'")
 
     def __enter__(self):
-        # force blocking, as otherwise the user would have to check whether
-        # the lock was actually acquired or not.
-        self.acquire(blocking=True)
-        return self
+        if self.acquire(blocking=True):
+            return self
+        raise LockError("Cannot acquire lock")
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.release()
