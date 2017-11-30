@@ -3,7 +3,7 @@ import random
 import weakref
 
 from redis.client import StrictRedis
-from redis.connection import ConnectionPool, Connection
+from redis.connection import ConnectionPool, Connection, SSLConnection
 from redis.exceptions import (ConnectionError, ResponseError, ReadOnlyError,
                               TimeoutError)
 from redis._compat import iteritems, nativestr, xrange
@@ -17,53 +17,56 @@ class SlaveNotFoundError(ConnectionError):
     pass
 
 
-class SentinelManagedConnection(Connection):
-    def __init__(self, **kwargs):
-        self.connection_pool = kwargs.pop('connection_pool')
-        super(SentinelManagedConnection, self).__init__(**kwargs)
+def _make_managed_connection_class(base):
+    class _SentinelManagedConnection(base):
+        def __init__(self, **kwargs):
+            self.connection_pool = kwargs.pop('connection_pool')
+            super(_SentinelManagedConnection, self).__init__(**kwargs)
 
-    def __repr__(self):
-        pool = self.connection_pool
-        s = '%s<service=%s%%s>' % (type(self).__name__, pool.service_name)
-        if self.host:
-            host_info = ',host=%s,port=%s' % (self.host, self.port)
-            s = s % host_info
-        return s
+        def __repr__(self):
+            pool = self.connection_pool
+            s = '%s<service=%s%%s>' % (type(self).__name__, pool.service_name)
+            if self.host:
+                host_info = ',host=%s,port=%s' % (self.host, self.port)
+                s = s % host_info
+            return s
 
-    def connect_to(self, address):
-        self.host, self.port = address
-        super(SentinelManagedConnection, self).connect()
-        if self.connection_pool.check_connection:
-            self.send_command('PING')
-            if nativestr(self.read_response()) != 'PONG':
-                raise ConnectionError('PING failed')
+        def connect_to(self, address):
+            self.host, self.port = address
+            super(_SentinelManagedConnection, self).connect()
+            if self.connection_pool.check_connection:
+                self.send_command('PING')
+                if nativestr(self.read_response()) != 'PONG':
+                    raise ConnectionError('PING failed')
 
-    def connect(self):
-        if self._sock:
-            return  # already connected
-        if self.connection_pool.is_master:
-            self.connect_to(self.connection_pool.get_master_address())
-        else:
-            for slave in self.connection_pool.rotate_slaves():
-                try:
-                    return self.connect_to(slave)
-                except ConnectionError:
-                    continue
-            raise SlaveNotFoundError  # Never be here
-
-    def read_response(self):
-        try:
-            return super(SentinelManagedConnection, self).read_response()
-        except ReadOnlyError:
+        def connect(self):
+            if self._sock:
+                return  # already connected
             if self.connection_pool.is_master:
-                # When talking to a master, a ReadOnlyError when likely
-                # indicates that the previous master that we're still connected
-                # to has been demoted to a slave and there's a new master.
-                # calling disconnect will force the connection to re-query
-                # sentinel during the next connect() attempt.
-                self.disconnect()
-                raise ConnectionError('The previous master is now a slave')
-            raise
+                self.connect_to(self.connection_pool.get_master_address())
+            else:
+                for slave in self.connection_pool.rotate_slaves():
+                    try:
+                        return self.connect_to(slave)
+                    except ConnectionError:
+                        continue
+                raise SlaveNotFoundError  # Never be here
+
+        def read_response(self):
+            try:
+                return super(_SentinelManagedConnection, self).read_response()
+            except ReadOnlyError:
+                if self.connection_pool.is_master:
+                    # When talking to a master, a ReadOnlyError when likely
+                    # indicates that the previous master that we're still connected
+                    # to has been demoted to a slave and there's a new master.
+                    # calling disconnect will force the connection to re-query
+                    # sentinel during the next connect() attempt.
+                    self.disconnect()
+                    raise ConnectionError('The previous master is now a slave')
+                raise
+
+    return _SentinelManagedConnection
 
 
 class SentinelConnectionPool(ConnectionPool):
@@ -74,9 +77,9 @@ class SentinelConnectionPool(ConnectionPool):
     sends a PING command right after establishing the connection.
     """
 
-    def __init__(self, service_name, sentinel_manager, **kwargs):
+    def __init__(self, service_name, sentinel_manager, connection_class, **kwargs):
         kwargs['connection_class'] = kwargs.get(
-            'connection_class', SentinelManagedConnection)
+            'connection_class', connection_class)
         self.is_master = kwargs.pop('is_master', True)
         self.check_connection = kwargs.pop('check_connection', False)
         super(SentinelConnectionPool, self).__init__(**kwargs)
@@ -166,7 +169,8 @@ class Sentinel(object):
     establishing a connection to a Redis server.
     """
 
-    def __init__(self, sentinels, min_other_sentinels=0, sentinel_kwargs=None,
+    def __init__(self, sentinels, min_other_sentinels=0, ssl_args=None,
+                 sentinel_kwargs=None,
                  **connection_kwargs):
         # if sentinel_kwargs isn't defined, use the socket_* options from
         # connection_kwargs
@@ -176,6 +180,15 @@ class Sentinel(object):
                                     if k.startswith('socket_')
                                     ])
         self.sentinel_kwargs = sentinel_kwargs
+        self.ssl_args = ssl_args
+
+        if self.ssl_args:
+            connection_kwargs.update(self.ssl_args)
+            self.sentinel_kwargs.update(self.ssl_args)
+            self.sentinel_kwargs['ssl'] = True
+            self.connection_class = _make_managed_connection_class(SSLConnection)
+        else:
+            self.connection_class = _make_managed_connection_class(Connection)
 
         self.sentinels = [StrictRedis(hostname, port, **self.sentinel_kwargs)
                           for hostname, port in sentinels]
@@ -212,7 +225,7 @@ class Sentinel(object):
         for sentinel_no, sentinel in enumerate(self.sentinels):
             try:
                 masters = sentinel.sentinel_masters()
-            except (ConnectionError, TimeoutError):
+            except (ConnectionError, TimeoutError) as e:
                 continue
             state = masters.get(service_name)
             if state and self.check_master_state(state, service_name):
@@ -269,7 +282,7 @@ class Sentinel(object):
         connection_kwargs = dict(self.connection_kwargs)
         connection_kwargs.update(kwargs)
         return redis_class(connection_pool=connection_pool_class(
-            service_name, self, **connection_kwargs))
+            service_name, self, self.connection_class, **connection_kwargs))
 
     def slave_for(self, service_name, redis_class=StrictRedis,
                   connection_pool_class=SentinelConnectionPool, **kwargs):
