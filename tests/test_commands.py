@@ -285,6 +285,21 @@ class TestRedisCommands(object):
         del r['a']
         assert r.get('a') is None
 
+    @skip_if_server_version_lt('4.0.0')
+    def test_unlink(self, r):
+        assert r.unlink('a') == 0
+        r['a'] = 'foo'
+        assert r.unlink('a') == 1
+        assert r.get('a') is None
+
+    @skip_if_server_version_lt('4.0.0')
+    def test_unlink_with_multiple_keys(self, r):
+        r['a'] = 'foo'
+        r['b'] = 'bar'
+        assert r.unlink('a', 'b') == 2
+        assert r.get('a') is None
+        assert r.get('b') is None
+
     @skip_if_server_version_lt('2.6.0')
     def test_dump_and_restore(self, r):
         r['a'] = 'foo'
