@@ -1468,6 +1468,13 @@ class TestRedisCommands(object):
         assert r.geodist('barcelona', 'place1', 'missing_member', 'km') is None
 
     @skip_if_server_version_lt('3.2.0')
+    def test_geodist_missing_one_member(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1')
+
+        r.geoadd('barcelona', *values)
+        assert r.geodist('barcelona', 'place1', 'missing_member', 'km') is None
+
+    @skip_if_server_version_lt('3.2.0')
     def test_geohash(self, r):
         values = (2.1909389952632, 41.433791470673, 'place1') +\
                  (2.1873744593677, 41.406342043777, 'place2')
