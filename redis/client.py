@@ -370,7 +370,7 @@ class StrictRedis(object):
             int
         ),
         string_keys_to_dict(
-            'INCRBYFLOAT HINCRBYFLOAT GEODIST',
+            'INCRBYFLOAT HINCRBYFLOAT',
             float
         ),
         string_keys_to_dict(
@@ -448,6 +448,7 @@ class StrictRedis(object):
             'CLUSTER SET-CONFIG-EPOCH': bool_ok,
             'CLUSTER SETSLOT': bool_ok,
             'CLUSTER SLAVES': parse_cluster_nodes,
+            'GEODIST': lambda r: float(r) if r else None,
             'GEOPOS': lambda r: list(map(lambda ll: (float(ll[0]),
                                          float(ll[1]))
                                          if ll is not None else None, r)),
