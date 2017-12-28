@@ -1036,7 +1036,7 @@ class StrictRedis(object):
         can be represented by an integer or a Python timedelta object.
         """
         if isinstance(time, datetime.timedelta):
-            time = time.seconds + time.days * 24 * 3600
+            time = int(time.total_seconds())
         return self.execute_command('EXPIRE', name, time)
 
     def expireat(self, name, when):
@@ -1162,8 +1162,7 @@ class StrictRedis(object):
         object.
         """
         if isinstance(time, datetime.timedelta):
-            ms = int(time.microseconds / 1000)
-            time = (time.seconds + time.days * 24 * 3600) * 1000 + ms
+            time = int(time.total_seconds() * 1000)
         return self.execute_command('PEXPIRE', name, time)
 
     def pexpireat(self, name, when):
@@ -1184,8 +1183,7 @@ class StrictRedis(object):
         timedelta object
         """
         if isinstance(time_ms, datetime.timedelta):
-            ms = int(time_ms.microseconds / 1000)
-            time_ms = (time_ms.seconds + time_ms.days * 24 * 3600) * 1000 + ms
+            time_ms = int(time_ms.total_seconds() * 1000)
         return self.execute_command('PSETEX', name, time_ms, value)
 
     def pttl(self, name):
@@ -1234,13 +1232,12 @@ class StrictRedis(object):
         if ex is not None:
             pieces.append('EX')
             if isinstance(ex, datetime.timedelta):
-                ex = ex.seconds + ex.days * 24 * 3600
+                ex = int(ex.total_seconds())
             pieces.append(ex)
         if px is not None:
             pieces.append('PX')
             if isinstance(px, datetime.timedelta):
-                ms = int(px.microseconds / 1000)
-                px = (px.seconds + px.days * 24 * 3600) * 1000 + ms
+                px = int(px.total_seconds() * 1000)
             pieces.append(px)
 
         if nx:
@@ -1267,7 +1264,7 @@ class StrictRedis(object):
         timedelta object.
         """
         if isinstance(time, datetime.timedelta):
-            time = time.seconds + time.days * 24 * 3600
+            time = int(time.total_seconds())
         return self.execute_command('SETEX', name, time, value)
 
     def setnx(self, name, value):
@@ -2738,7 +2735,7 @@ class Redis(StrictRedis):
         timedelta object.
         """
         if isinstance(time, datetime.timedelta):
-            time = time.seconds + time.days * 24 * 3600
+            time = int(time.total_seconds())
         return self.execute_command('SETEX', name, time, value)
 
     def lrem(self, name, value, num=0):
