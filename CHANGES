@@ -1,5 +1,5 @@
 * UNRELEASED
-    * Removed support for EOL Python 2.6.
+    * Removed support for EOL Python 2.6 and 3.3.
 * 2.10.6
     * Various performance improvements. Thanks cjsimpson
     * Fixed a bug with SRANDMEMBER where the behavior for `number=0` did
