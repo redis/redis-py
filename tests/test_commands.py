@@ -4,11 +4,11 @@ import datetime
 import pytest
 import re
 import redis
-import time
 
 from redis._compat import (unichr, ascii_letters, iteritems, iterkeys,
                            itervalues, long)
-from redis.client import parse_info
+from redis.client import (parse_info, UTC, timestamp_to_datetime,
+                          datetime_to_timestamp)
 from redis import exceptions
 
 from .conftest import skip_if_server_version_lt, skip_if_server_version_gte
@@ -32,7 +32,7 @@ def slowlog(request, r):
 def redis_server_time(client):
     seconds, milliseconds = client.time()
     timestamp = float('%s.%s' % (seconds, milliseconds))
-    return datetime.datetime.fromtimestamp(timestamp)
+    return timestamp_to_datetime(timestamp)
 
 
 def get_stream_message(client, stream, message_id):
@@ -389,7 +389,7 @@ class TestRedisCommands(object):
     def test_expireat_unixtime(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         r['a'] = 'foo'
-        expire_at_seconds = int(time.mktime(expire_at.timetuple()))
+        expire_at_seconds = int(datetime_to_timestamp(expire_at))
         assert r.expireat('a', expire_at_seconds)
         assert 0 < r.ttl('a') <= 61
 
@@ -522,7 +522,7 @@ class TestRedisCommands(object):
     def test_pexpireat_unixtime(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         r['a'] = 'foo'
-        expire_at_seconds = int(time.mktime(expire_at.timetuple())) * 1000
+        expire_at_seconds = int(datetime_to_timestamp(expire_at) * 1000)
         assert r.pexpireat('a', expire_at_seconds)
         assert 0 < r.pttl('a') <= 61000
 

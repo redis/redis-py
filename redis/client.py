@@ -1,11 +1,11 @@
 from __future__ import unicode_literals
 from itertools import chain
+import calendar
 import datetime
 import sys
 import warnings
 import time
 import threading
-import time as mod_time
 import hashlib
 from redis._compat import (basestring, bytes, imap, iteritems, iterkeys,
                            itervalues, izip, long, nativestr, safe_unicode)
@@ -26,6 +26,17 @@ from redis.exceptions import (
 
 SYM_EMPTY = b''
 EMPTY_RESPONSE = 'EMPTY_RESPONSE'
+
+
+class UTC(datetime.tzinfo):
+    def utcoffset(self, dt):
+        return datetime.timedelta(0)
+
+    def tzname(self, dt):
+        return "UTC"
+
+    def dst(self, dt):
+        return datetime.timedelta(0)
 
 
 def list_or_args(keys, args):
@@ -53,7 +64,16 @@ def timestamp_to_datetime(response):
         response = int(response)
     except ValueError:
         return None
-    return datetime.datetime.fromtimestamp(response)
+    return datetime.datetime.utcfromtimestamp(response).replace(tzinfo=UTC())
+
+
+def datetime_to_timestamp(dt):
+    "Get a UTC unix timestamp from a datetime"
+    # If dt is naive, assume it to be UTC
+    # If dt is aware, convert to UTC
+    utc_tt = dt.utctimetuple()
+    # calendar.timegm assumes time_struct to be UTC
+    return int(calendar.timegm(utc_tt))
 
 
 def string_keys_to_dict(key_string, callback):
@@ -1197,7 +1217,7 @@ class Redis(object):
         as an integer indicating unix time or a Python datetime object.
         """
         if isinstance(when, datetime.datetime):
-            when = int(mod_time.mktime(when.timetuple()))
+            when = int(datetime_to_timestamp(when))
         return self.execute_command('EXPIREAT', name, when)
 
     def get(self, name):
@@ -1319,8 +1339,8 @@ class Redis(object):
         or a Python datetime object.
         """
         if isinstance(when, datetime.datetime):
-            ms = int(when.microsecond / 1000)
-            when = int(mod_time.mktime(when.timetuple())) * 1000 + ms
+            us_as_ms = when.microsecond / 1000
+            when = int(datetime_to_timestamp(when) * 1000 + us_as_ms)
         return self.execute_command('PEXPIREAT', name, when)
 
     def psetex(self, name, time_ms, value):
