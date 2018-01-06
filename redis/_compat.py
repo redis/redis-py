@@ -15,7 +15,7 @@ if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and
     import time
     import errno
 
-    from select import select as _select
+    from select import select as _select, error as _select_error
 
     def select(rlist, wlist, xlist, timeout):
         while True:
@@ -25,6 +25,10 @@ if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and
                 # Python 2 does not define InterruptedError, instead
                 # try to catch an OSError with errno == EINTR == 4.
                 if getattr(e, 'errno', None) == getattr(errno, 'EINTR', 4):
+                    continue
+                raise
+            except _select_error as e:
+                if e.args[0] == errno.EINTR:
                     continue
                 raise
 
