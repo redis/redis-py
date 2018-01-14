@@ -282,6 +282,9 @@ def parse_slowlog_get(response, **options):
 
 
 def parse_cluster_info(response, **options):
+    import sys
+    if sys.version_info >= (3, 0):
+        response = response.decode('utf-8')
     return dict([line.split(':') for line in response.splitlines() if line])
 
 
