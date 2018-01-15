@@ -282,6 +282,12 @@ def parse_slowlog_get(response, **options):
 
 
 def parse_cluster_info(response, **options):
+    import sys
+    if sys.version_info >= (3, 0):
+        try:
+           response = response.decode('utf-8')
+         except AttributeError:
+           pass
     return dict([line.split(':') for line in response.splitlines() if line])
 
 
@@ -304,6 +310,13 @@ def _parse_node_line(line):
 
 
 def parse_cluster_nodes(response, **options):
+    import sys
+    if sys.version_info >= (3, 0):
+        try:
+            response = response.decode('utf-8')
+        except AttributeError:
+            pass
+        
     raw_lines = response
     if isinstance(response, basestring):
         raw_lines = response.splitlines()
