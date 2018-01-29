@@ -333,6 +333,7 @@ class HiredisParser(BaseParser):
         if not HIREDIS_AVAILABLE:
             raise RedisError("Hiredis is not installed")
         self.socket_read_size = socket_read_size
+        self._sock = None
 
         if HIREDIS_USE_BYTE_BUFFER:
             self._buffer = bytearray(socket_read_size)
@@ -360,7 +361,9 @@ class HiredisParser(BaseParser):
         self._next_response = False
 
     def on_disconnect(self):
-        self._sock = None
+        if self._sock is not None:
+            self._sock.close()
+            self._sock = None
         self._reader = None
         self._next_response = False
 
