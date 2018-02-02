@@ -308,7 +308,6 @@ def _parse_node_line(line):
 
 
 def parse_cluster_nodes(response, **options):
-    import sys
     if sys.version_info >= (3, 0):
         try:
             response = response.decode('utf-8')
