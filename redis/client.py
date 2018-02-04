@@ -313,7 +313,6 @@ def parse_cluster_nodes(response, **options):
             response = response.decode('utf-8')
         except AttributeError:
             pass
-        
     raw_lines = response
     if isinstance(response, basestring):
         raw_lines = response.splitlines()
