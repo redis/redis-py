@@ -289,6 +289,7 @@ def parse_cluster_info(response, **options):
             pass
     return dict([line.split(':') for line in response.splitlines() if line])
 
+
 def _parse_node_line(line):
     line_items = line.split(' ')
     node_id, addr, flags, master_id, ping, pong, epoch, \
