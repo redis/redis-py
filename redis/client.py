@@ -831,6 +831,15 @@ class StrictRedis(object):
             return
         raise RedisError("SHUTDOWN seems to have failed.")
 
+    def shutdownnosave(self):
+        "Shutdown the server without save"
+        try:
+            self.execute_command('SHUTDOWN NOSAVE')
+        except ConnectionError:
+            # a ConnectionError here is expected
+            return
+        raise RedisError("SHUTDOWNNOSAVE seems to have failed.")
+
     def slaveof(self, host=None, port=None):
         """
         Set the server to be a replicated slave of the instance identified
