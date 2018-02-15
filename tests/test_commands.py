@@ -912,6 +912,14 @@ class TestRedisCommands(object):
         r.zadd('a', a1=1, a2=2, a3=3)
         assert r.zrange('a', 0, -1) == [b('a1'), b('a2'), b('a3')]
 
+    def test_zadd_with_options(self, r):
+        r.zadd('a', 'xx', 'INCR', a1=10)
+        assert r.zrange('a', 0, -1) == []
+
+        r.zadd('a', 'nx', 'INCR', a1=10)
+        r.zadd('a', 'nx', 'INCR', a1=10)
+        assert r.zrange('a', 0, -1, withscores=True) == [('a1', 10.0)]
+
     def test_zcard(self, r):
         r.zadd('a', a1=1, a2=2, a3=3)
         assert r.zcard('a') == 3
