@@ -367,7 +367,7 @@ class StrictRedis(object):
             'SETBIT SETRANGE SINTERSTORE SREM STRLEN SUNIONSTORE ZADD ZCARD '
             'ZLEXCOUNT ZREM ZREMRANGEBYLEX ZREMRANGEBYRANK ZREMRANGEBYSCORE '
             'GEOADD',
-            int
+            int_or_none
         ),
         string_keys_to_dict(
             'INCRBYFLOAT HINCRBYFLOAT GEODIST',
@@ -1688,11 +1688,10 @@ class StrictRedis(object):
         redis.zadd('my-key', 1.1, 'name1', 2.2, 'name2', name3=3.3, name4=4.4)
         """
         pieces = []
-        if args:
-            if len(args) % 2 != 0:
-                raise RedisError("ZADD requires an equal number of "
-                                 "values and scores")
-            pieces.extend(args)
+        if args and len(args) % 2 != 0:
+            raise RedisError("ZADD requires an equal number of "
+                             "values and scores")
+        pieces.extend(args)
         for pair in iteritems(kwargs):
             pieces.append(pair[1])
             pieces.append(pair[0])
