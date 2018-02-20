@@ -918,7 +918,7 @@ class TestRedisCommands(object):
 
         r.zadd('a', 'nx', 'INCR', a1=10)
         r.zadd('a', 'nx', 'INCR', a1=10)
-        assert r.zrange('a', 0, -1, withscores=True) == [('a1', 10.0)]
+        assert r.zrange('a', 0, -1, withscores=True) == [(b'a1', 10.0)]
 
     def test_zcard(self, r):
         r.zadd('a', a1=1, a2=2, a3=3)
