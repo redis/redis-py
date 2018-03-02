@@ -108,6 +108,8 @@ class Encoder(object):
             return value.encoded_value
         elif isinstance(value, bytes):
             return value
+        elif isinstance(value, bool):
+            value = b(str(int(value)))
         elif isinstance(value, (int, long)):
             value = b(str(value))
         elif isinstance(value, float):
