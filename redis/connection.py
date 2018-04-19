@@ -834,6 +834,10 @@ class ConnectionPool(object):
         url = urlparse(url)
         qs = ''
 
+        schemes = ['redis://', 'rediss://', 'unix://']
+        if not any([url.startswith(scheme) for scheme in schemes]):
+            raise ValueError("url {} must start with one of {}".format(url, schemes))
+
         # in python2.6, custom URL schemes don't recognize querystring values
         # they're left as part of the url.path.
         if '?' in url.path and not url.query:
