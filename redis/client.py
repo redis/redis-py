@@ -1,6 +1,7 @@
 from __future__ import with_statement
 from itertools import chain
 import datetime
+import os
 import sys
 import warnings
 import time
@@ -487,7 +488,7 @@ class StrictRedis(object):
         connection_pool = ConnectionPool.from_url(url, db=db, **kwargs)
         return cls(connection_pool=connection_pool)
 
-    def __init__(self, host='localhost', port=6379,
+    def __init__(self, host=None, port=None,
                  db=0, password=None, socket_timeout=None,
                  socket_connect_timeout=None,
                  socket_keepalive=None, socket_keepalive_options=None,
@@ -498,6 +499,21 @@ class StrictRedis(object):
                  ssl=False, ssl_keyfile=None, ssl_certfile=None,
                  ssl_cert_reqs=None, ssl_ca_certs=None,
                  max_connections=None):
+
+        # Hostname
+        if host is None:
+            host = os.getenv('REDIS_HOST')
+        if host is None:
+            host = 'localhost'
+        # Port
+        if port is None:
+            port = os.getenv('REDIS_PORT')
+        if port is None:
+            port = 6379
+        # Password
+        if password is None:
+            password = os.getenv('REDIS_PASS')
+
         if not connection_pool:
             if charset is not None:
                 warnings.warn(DeprecationWarning(
