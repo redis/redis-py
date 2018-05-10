@@ -975,7 +975,7 @@ class StrictRedis(object):
         Return the value at key ``name``, or None if the key doesn't exist
         """
         value = self.execute_command('GET', name)
-        if value:
+        if value is not None:
             return value
         return default
 
