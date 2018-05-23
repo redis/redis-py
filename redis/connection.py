@@ -779,7 +779,8 @@ URL_QUERY_ARGUMENT_PARSERS = {
     'socket_timeout': float,
     'socket_connect_timeout': float,
     'socket_keepalive': to_bool,
-    'retry_on_timeout': to_bool
+    'retry_on_timeout': to_bool,
+    'max_connections': int,
 }
 
 
