@@ -544,7 +544,7 @@ supported:
     1204
 
 
-LUA Scripting
+Lua Scripting
 ^^^^^^^^^^^^^
 
 redis-py supports the EVAL, EVALSHA, and SCRIPT commands. However, there are
@@ -553,10 +553,10 @@ scenarios. Therefore, redis-py exposes a Script object that makes scripting
 much easier to use.
 
 To create a Script instance, use the `register_script` function on a client
-instance passing the LUA code as the first argument. `register_script` returns
+instance passing the Lua code as the first argument. `register_script` returns
 a Script instance that you can use throughout your code.
 
-The following trivial LUA script accepts two parameters: the name of a key and
+The following trivial Lua script accepts two parameters: the name of a key and
 a multiplier value. The script fetches the value stored in the key, multiplies
 it with the multiplier value and returns the result.
 
@@ -573,8 +573,8 @@ it with the multiplier value and returns the result.
 function. Script instances accept the following optional arguments:
 
 * **keys**: A list of key names that the script will access. This becomes the
-  KEYS list in LUA.
-* **args**: A list of argument values. This becomes the ARGV list in LUA.
+  KEYS list in Lua.
+* **args**: A list of argument values. This becomes the ARGV list in Lua.
 * **client**: A redis-py Client or Pipeline instance that will invoke the
   script. If client isn't specified, the client that intiially
   created the Script instance (the one that `register_script` was
@@ -589,7 +589,7 @@ Continuing the example from above:
     10
 
 The value of key 'foo' is set to 2. When multiply is invoked, the 'foo' key is
-passed to the script along with the multiplier value of 5. LUA executes the
+passed to the script along with the multiplier value of 5. Lua executes the
 script and returns the result, 10.
 
 Script instances can be executed using a different client instance, even one
@@ -602,7 +602,7 @@ that points to a completely different Redis server.
     >>> multiply(keys=['foo'], args=[5], client=r2)
     15
 
-The Script object ensures that the LUA script is loaded into Redis's script
+The Script object ensures that the Lua script is loaded into Redis's script
 cache. In the event of a NOSCRIPT error, it will load the script and retry
 executing it.
 
