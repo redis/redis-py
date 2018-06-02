@@ -215,6 +215,13 @@ def zset_score_pairs(response, **options):
     return list(izip(it, imap(score_cast_func, it)))
 
 
+def zset_score_pairs_always(response, **options):
+    "Return the response as a list of (value, score) pairs"
+    score_cast_func = options.get('score_cast_func', float)
+    it = iter(response)
+    return list(izip(it, imap(score_cast_func, it)))
+
+
 def sort_return_tuples(response, **options):
     """
     If ``groups`` is specified, return the response as a list of
@@ -394,6 +401,7 @@ class StrictRedis(object):
             'ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
             zset_score_pairs
         ),
+        string_keys_to_dict('ZPOPMAX ZPOPMIN', zset_score_pairs_always),
         string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
         string_keys_to_dict('BGREWRITEAOF BGSAVE', lambda r: True),
         {
@@ -1934,6 +1942,20 @@ class StrictRedis(object):
             pieces.append(Token.get_token('AGGREGATE'))
             pieces.append(aggregate)
         return self.execute_command(*pieces)
+
+    def zpopmax(self, name, amount=1):
+        """
+        Remove and return up to ``amount`` members with the highest scores from
+        the sorted set ``name``
+        """
+        return self.execute_command('ZPOPMAX', name, amount)
+
+    def zpopmin(self, name, amount=1):
+        """
+        Remove and return up to ``amount`` members with the lowest scores from
+        the sorted set ``name``
+        """
+        return self.execute_command('ZPOPMIN', name, amount)
 
     # HYPERLOGLOG COMMANDS
     def pfadd(self, name, *values):

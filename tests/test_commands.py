@@ -1139,6 +1139,22 @@ class TestRedisCommands(object):
         assert r.zrange('d', 0, -1, withscores=True) == \
             [(b('a2'), 5), (b('a4'), 12), (b('a3'), 20), (b('a1'), 23)]
 
+    @skip_if_server_version_lt('5.0.0')
+    def test_zpopmax(self, r):
+        r.zadd('a', a=4, b=3, c=2, d=1)
+        assert r.zpopmax('a') == [b('a')]
+        assert r.zpopmax('a', 2) == [b('b'), b('c')]
+        assert r.zpopmax('a', 2) == [b('d')]
+        assert r.zpopmax('a') == []
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_zpopmin(self, r):
+        r.zadd('a', a=1, b=2, c=3, d=4)
+        assert r.zpopmin('a') == [b('a')]
+        assert r.zpopmin('a', 2) == [b('b'), b('c')]
+        assert r.zpopmin('a', 2) == [b('d')]
+        assert r.zpopmin('a') == []
+
     # HYPERLOGLOG TESTS
     @skip_if_server_version_lt('2.8.9')
     def test_pfadd(self, r):
