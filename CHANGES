@@ -1,6 +1,7 @@
 * 2.10.6
     * Various performance improvements. Thanks cjsimpson
-    * Fixed a bug with SRANDMEMBER where
+    * Fixed a bug with SRANDMEMBER where the behavior for `number=0` did
+      not match the spec. Thanks Alex Wang
     * Added HSTRLEN command. Thanks Alexander Putilin
     * Added the TOUCH command. Thanks Anis Jonischkeit
     * Remove unnecessary calls to the server when registering Lua scripts.
