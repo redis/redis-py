@@ -18,6 +18,11 @@ class SentinelTestClient(object):
         self.cluster.timeout_if_down(self)
         return {self.cluster.service_name: self.cluster.master}
 
+    def sentinel_sentinels(self, master_name):
+        self.cluster.connection_error_if_down(self)
+        self.cluster.timeout_if_down(self)
+        return self.cluster.sentinels
+
     def sentinel_slaves(self, master_name):
         self.cluster.connection_error_if_down(self)
         self.cluster.timeout_if_down(self)
@@ -37,6 +42,7 @@ class SentinelTestCluster(object):
             'is_odown': False,
             'num-other-sentinels': 0,
         }
+        self.sentinels = []
         self.service_name = service_name
         self.slaves = []
         self.nodes_down = set()
@@ -67,6 +73,10 @@ def cluster(request):
 
 @pytest.fixture()
 def sentinel(request, cluster):
+    cluster.sentinels = [
+        {'ip': 'foo', 'port': 26379, 'is_sentinel': True, 'is_sdown': False},
+        {'ip': 'bar', 'port': 26379, 'is_sentinel': True, 'is_sdown': False},
+    ]
     return Sentinel([('foo', 26379), ('bar', 26379)])
 
 
@@ -99,6 +109,9 @@ def test_discover_master_sentinel_timeout(cluster, sentinel):
 
 
 def test_master_min_other_sentinels(cluster):
+    cluster.sentinels = [
+        {'ip': 'foo', 'port': 26379, 'is_sentinel': True, 'is_sdown': False},
+    ]
     sentinel = Sentinel([('foo', 26379)], min_other_sentinels=1)
     # min_other_sentinels
     with pytest.raises(MasterNotFoundError):

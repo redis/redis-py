@@ -201,6 +201,25 @@ class Sentinel(object):
             return False
         return True
 
+    def check_sentinel_state(self, sentinels):
+        """
+        Check if our sentinel doesn't see other nodes
+        """
+        num_other_sentinels = 0
+        for sentinel in sentinels:
+            if sentinel['is_sentinel']:
+                if not sentinel['is_sdown']:
+                    num_other_sentinels += 1
+        if self.min_other_sentinels:
+            if num_other_sentinels < self.min_other_sentinels:
+                return False
+        else:
+            # to skip the isolate island problem,
+            # there should be one *not s_down* sentinel at least
+            if num_other_sentinels == 0:
+                return False
+        return True
+
     def discover_master(self, service_name):
         """
         Asks sentinel servers for the Redis master's address corresponding
@@ -212,7 +231,10 @@ class Sentinel(object):
         for sentinel_no, sentinel in enumerate(self.sentinels):
             try:
                 masters = sentinel.sentinel_masters()
+                connected_sentinels = sentinel.sentinel_sentinels(service_name)
             except (ConnectionError, TimeoutError):
+                continue
+            if not self.check_sentinel_state(connected_sentinels):
                 continue
             state = masters.get(service_name)
             if state and self.check_master_state(state, service_name):
