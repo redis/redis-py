@@ -215,11 +215,11 @@ def zset_score_pairs(response, **options):
     return list(izip(it, imap(score_cast_func, it)))
 
 
-def zset_score_first_pairs(response, **options):
-    "Return the response as a list of (score, value) pairs"
+def zset_force_score_pairs(response, **options):
+    "Return the response as a list of (value, score) pairs"
     score_cast_func = options.get('score_cast_func', float)
     it = iter(response)
-    return list(izip(imap(score_cast_func, it), it))
+    return list(izip(it, imap(score_cast_func, it)))
 
 
 def sort_return_tuples(response, **options):
@@ -401,7 +401,7 @@ class StrictRedis(object):
             'ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
             zset_score_pairs
         ),
-        string_keys_to_dict('ZPOPMAX ZPOPMIN', zset_score_first_pairs),
+        string_keys_to_dict('ZPOPMAX ZPOPMIN', zset_force_score_pairs),
         string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
         string_keys_to_dict('BGREWRITEAOF BGSAVE', lambda r: True),
         {

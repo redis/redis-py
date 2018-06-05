@@ -1142,17 +1142,17 @@ class TestRedisCommands(object):
     @skip_if_server_version_lt('5.0.0')
     def test_zpopmax(self, r):
         r.zadd('a', a=4, b=3, c=2, d=1)
-        assert r.zpopmax('a') == [(b('a'), 4)]
-        assert r.zpopmax('a', 2) == [(b('b'), 3), (b('c'), 2)]
-        assert r.zpopmax('a', 2) == [(b('d'), 1)]
+        assert r.zpopmax('a') == [(4, b('a'))]
+        assert r.zpopmax('a', 2) == [(3, b('b')), (2, b('c'))]
+        assert r.zpopmax('a', 2) == [(1, b('d'))]
         assert r.zpopmax('a') == []
 
     @skip_if_server_version_lt('5.0.0')
     def test_zpopmin(self, r):
         r.zadd('a', a=1, b=2, c=3, d=4)
-        assert r.zpopmin('a') == [(b('a'), 1)]
-        assert r.zpopmin('a', 2) == [(b('b'), 2), (b('c'), 3)]
-        assert r.zpopmin('a', 2) == [(b('d'), 4)]
+        assert r.zpopmin('a') == [(1, b('a'))]
+        assert r.zpopmin('a', 2) == [(2, b('b')), (3, b('c'))]
+        assert r.zpopmin('a', 2) == [(4, b('d'))]
         assert r.zpopmin('a') == []
 
     # HYPERLOGLOG TESTS
