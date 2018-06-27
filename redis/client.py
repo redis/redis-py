@@ -787,8 +787,8 @@ class StrictRedis(object):
                 remain_args.append(auth)
             if len(keys):
                 remain_args.append('KEYS')
-                for key in keys:
-                    remain_args.append(key)
+                for akey in keys:
+                    remain_args.append(akey)
         return self.execute_command('MIGRATE', host, port, key, destination_db, timeout, *remain_args)
 
     def object(self, infotype, key):
