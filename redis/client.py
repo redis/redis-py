@@ -409,6 +409,7 @@ class StrictRedis(object):
             'HSCAN': parse_hscan,
             'INFO': parse_info,
             'LASTSAVE': timestamp_to_datetime,
+            'MIGRATE': bool_ok,
             'OBJECT': parse_object,
             'PING': lambda r: nativestr(r) == 'PONG',
             'RANDOMKEY': lambda r: r and r or None,
@@ -768,6 +769,27 @@ class StrictRedis(object):
         Redis database was saved to disk
         """
         return self.execute_command('LASTSAVE')
+
+    def migrate(self, host, port, key, destination_db, timeout, copy=False, replace=False, auth=None, keys=[]):
+        """
+        Atomically transfer a key from a Redis instance to another one.
+        migrate(host, port, key, destination_db, timeout, copy=False, replace=False, auth=None, *keys)
+        """
+        remain_args = None
+        if copy or replace or auth or len(keys) > 0:
+            remain_args = []
+            if copy:
+                remain_args.append('COPY')
+            if replace:
+                remain_args.append('REPLACE')
+            if auth:
+                remain_args.append('AUTH')
+                remain_args.append(auth)
+            if len(keys):
+                remain_args.append('KEYS')
+                for akey in keys:
+                    remain_args.append(akey)
+        return self.execute_command('MIGRATE', host, port, key, destination_db, timeout, *remain_args)
 
     def object(self, infotype, key):
         "Return the encoding, idletime, or refcount about the key"
