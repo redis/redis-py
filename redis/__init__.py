@@ -22,8 +22,8 @@ from redis.exceptions import (
 )
 
 
-__version__ = '2.10.3+dd.3'
-VERSION = (2, 10, 3)
+__version__ = '2.10.6+dd.1'
+VERSION = (2, 10, 6)
 
 __all__ = [
     'Redis', 'StrictRedis', 'ConnectionPool', 'BlockingConnectionPool',

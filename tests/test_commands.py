@@ -10,7 +10,7 @@ from redis._compat import (unichr, u, b, ascii_letters, iteritems, iterkeys,
 from redis.client import parse_info
 from redis import exceptions
 
-from .conftest import skip_if_server_version_lt
+from .conftest import skip_if_server_version_lt, skip_if_server_version_gte
 
 
 @pytest.fixture()
@@ -112,7 +112,7 @@ class TestRedisCommands(object):
         r['a'] = 'foo'
         assert isinstance(r.object('refcount', 'a'), int)
         assert isinstance(r.object('idletime', 'a'), int)
-        assert r.object('encoding', 'a') == b('raw')
+        assert r.object('encoding', 'a') in (b('raw'), b('embstr'))
         assert r.object('idletime', 'invalid-key') is None
 
     def test_ping(self, r):
@@ -285,6 +285,16 @@ class TestRedisCommands(object):
         r.restore('a', 0, dumped)
         assert r['a'] == b('foo')
 
+    @skip_if_server_version_lt('3.0.0')
+    def test_dump_and_restore_and_replace(self, r):
+        r['a'] = 'bar'
+        dumped = r.dump('a')
+        with pytest.raises(redis.ResponseError):
+            r.restore('a', 0, dumped)
+
+        r.restore('a', 0, dumped, replace=True)
+        assert r['a'] == b('bar')
+
     def test_exists(self, r):
         assert not r.exists('a')
         r['a'] = 'foo'
@@ -340,6 +350,10 @@ class TestRedisCommands(object):
     def test_getitem_raises_keyerror_for_missing_key(self, r):
         with pytest.raises(KeyError):
             r['a']
+
+    def test_getitem_does_not_raise_keyerror_for_empty_string(self, r):
+        r['a'] = b("")
+        assert r['a'] == b("")
 
     def test_get_set_bit(self, r):
         # no value
@@ -887,6 +901,8 @@ class TestRedisCommands(object):
         r.zadd('a', a1=1, a2=2, a3=3)
         assert r.zcount('a', '-inf', '+inf') == 3
         assert r.zcount('a', 1, 2) == 2
+        assert r.zcount('a', '(' + str(1), 2) == 1
+        assert r.zcount('a', 1, '(' + str(2)) == 1
         assert r.zcount('a', 10, 20) == 0
 
     def test_zincrby(self, r):
@@ -958,6 +974,17 @@ class TestRedisCommands(object):
             [b('b'), b('c'), b('d'), b('e'), b('f')]
         assert r.zrangebylex('a', '[f', '+') == [b('f'), b('g')]
         assert r.zrangebylex('a', '-', '+', start=3, num=2) == [b('d'), b('e')]
+
+    @skip_if_server_version_lt('2.9.9')
+    def test_zrevrangebylex(self, r):
+        r.zadd('a', a=0, b=0, c=0, d=0, e=0, f=0, g=0)
+        assert r.zrevrangebylex('a', '[c', '-') == [b('c'), b('b'), b('a')]
+        assert r.zrevrangebylex('a', '(c', '-') == [b('b'), b('a')]
+        assert r.zrevrangebylex('a', '(g', '[aaa') == \
+            [b('f'), b('e'), b('d'), b('c'), b('b')]
+        assert r.zrevrangebylex('a', '+', '[f') == [b('g'), b('f')]
+        assert r.zrevrangebylex('a', '+', '-', start=3, num=2) == \
+            [b('d'), b('c')]
 
     def test_zrangebyscore(self, r):
         r.zadd('a', a1=1, a2=2, a3=3, a4=4, a5=5)
@@ -1106,6 +1133,10 @@ class TestRedisCommands(object):
         members = set([b('1'), b('2'), b('3')])
         r.pfadd('a', *members)
         assert r.pfcount('a') == len(members)
+        members_b = set([b('2'), b('3'), b('4')])
+        r.pfadd('b', *members_b)
+        assert r.pfcount('b') == len(members_b)
+        assert r.pfcount('a', 'b') == len(members_b.union(members))
 
     @skip_if_server_version_lt('2.8.9')
     def test_pfmerge(self, r):
@@ -1200,6 +1231,12 @@ class TestRedisCommands(object):
         remote_vals = r.hvals('a')
         assert sorted(local_vals) == sorted(remote_vals)
 
+    @skip_if_server_version_lt('3.2.0')
+    def test_hstrlen(self, r):
+        r.hmset('a', {'1': '22', '2': '333'})
+        assert r.hstrlen('a', '1') == 2
+        assert r.hstrlen('a', '2') == 3
+
     # SORT
     def test_sort_basic(self, r):
         r.rpush('a', '3', '2', '1', '4')
@@ -1276,7 +1313,7 @@ class TestRedisCommands(object):
                 (b('u1'), b('d1'), b('1')),
                 (b('u2'), b('d2'), b('2')),
                 (b('u3'), b('d3'), b('3'))
-            ]
+        ]
 
     def test_sort_desc(self, r):
         r.rpush('a', '2', '3', '1')
@@ -1319,6 +1356,231 @@ class TestRedisCommands(object):
         assert r.lrange('sorted', 0, 10) == \
             [b('vodka'), b('milk'), b('gin'), b('apple juice')]
 
+    def test_cluster_addslots(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('ADDSLOTS', 1) is True
+
+    def test_cluster_count_failure_reports(self, mock_cluster_resp_int):
+        assert isinstance(mock_cluster_resp_int.cluster(
+            'COUNT-FAILURE-REPORTS', 'node'), int)
+
+    def test_cluster_countkeysinslot(self, mock_cluster_resp_int):
+        assert isinstance(mock_cluster_resp_int.cluster(
+            'COUNTKEYSINSLOT', 2), int)
+
+    def test_cluster_delslots(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('DELSLOTS', 1) is True
+
+    def test_cluster_failover(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('FAILOVER', 1) is True
+
+    def test_cluster_forget(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('FORGET', 1) is True
+
+    def test_cluster_info(self, mock_cluster_resp_info):
+        assert isinstance(mock_cluster_resp_info.cluster('info'), dict)
+
+    def test_cluster_keyslot(self, mock_cluster_resp_int):
+        assert isinstance(mock_cluster_resp_int.cluster(
+            'keyslot', 'asdf'), int)
+
+    def test_cluster_meet(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('meet', 'ip', 'port', 1) is True
+
+    def test_cluster_nodes(self, mock_cluster_resp_nodes):
+        assert isinstance(mock_cluster_resp_nodes.cluster('nodes'), dict)
+
+    def test_cluster_replicate(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('replicate', 'nodeid') is True
+
+    def test_cluster_reset(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('reset', 'hard') is True
+
+    def test_cluster_saveconfig(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('saveconfig') is True
+
+    def test_cluster_setslot(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.cluster('setslot', 1,
+                                            'IMPORTING', 'nodeid') is True
+
+    def test_cluster_slaves(self, mock_cluster_resp_slaves):
+        assert isinstance(mock_cluster_resp_slaves.cluster(
+            'slaves', 'nodeid'), dict)
+
+    # GEO COMMANDS
+    @skip_if_server_version_lt('3.2.0')
+    def test_geoadd(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        assert r.geoadd('barcelona', *values) == 2
+        assert r.zcard('barcelona') == 2
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_geoadd_invalid_params(self, r):
+        with pytest.raises(exceptions.RedisError):
+            r.geoadd('barcelona', *(1, 2))
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_geodist(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        assert r.geoadd('barcelona', *values) == 2
+        assert r.geodist('barcelona', 'place1', 'place2') == 3067.4157
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_geodist_units(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.geodist('barcelona', 'place1', 'place2', 'km') == 3.0674
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_geodist_invalid_units(self, r):
+        with pytest.raises(exceptions.RedisError):
+            assert r.geodist('x', 'y', 'z', 'inches')
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_geohash(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.geohash('barcelona', 'place1', 'place2') ==\
+            ['sp3e9yg3kd0', 'sp3e9cbc3t0']
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_geopos(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        # redis uses 52 bits precision, hereby small errors may be introduced.
+        assert r.geopos('barcelona', 'place1', 'place2') ==\
+            [(2.19093829393386841, 41.43379028184083523),
+             (2.18737632036209106, 41.40634178640635099)]
+
+    @skip_if_server_version_lt('4.0.0')
+    def test_geopos_no_value(self, r):
+        assert r.geopos('barcelona', 'place1', 'place2') == [None, None]
+
+    @skip_if_server_version_lt('3.2.0')
+    @skip_if_server_version_gte('4.0.0')
+    def test_old_geopos_no_value(self, r):
+        assert r.geopos('barcelona', 'place1', 'place2') == []
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadius(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.georadius('barcelona', 2.191, 41.433, 1000) == ['place1']
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadius_no_values(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.georadius('barcelona', 1, 2, 1000) == []
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadius_units(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.georadius('barcelona', 2.191, 41.433, 1, unit='km') ==\
+            ['place1']
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadius_with(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+
+        # test a bunch of combinations to test the parse response
+        # function.
+        assert r.georadius('barcelona', 2.191, 41.433, 1, unit='km',
+                           withdist=True, withcoord=True, withhash=True) ==\
+            [['place1', 0.0881, 3471609698139488,
+              (2.19093829393386841, 41.43379028184083523)]]
+
+        assert r.georadius('barcelona', 2.191, 41.433, 1, unit='km',
+                           withdist=True, withcoord=True) ==\
+            [['place1', 0.0881,
+              (2.19093829393386841, 41.43379028184083523)]]
+
+        assert r.georadius('barcelona', 2.191, 41.433, 1, unit='km',
+                           withhash=True, withcoord=True) ==\
+            [['place1', 3471609698139488,
+              (2.19093829393386841, 41.43379028184083523)]]
+
+        # test no values.
+        assert r.georadius('barcelona', 2, 1, 1, unit='km',
+                           withdist=True, withcoord=True, withhash=True) == []
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadius_count(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.georadius('barcelona', 2.191, 41.433, 3000, count=1) ==\
+            ['place1']
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadius_sort(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.georadius('barcelona', 2.191, 41.433, 3000, sort='ASC') ==\
+            ['place1', 'place2']
+        assert r.georadius('barcelona', 2.191, 41.433, 3000, sort='DESC') ==\
+            ['place2', 'place1']
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadius_store(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        r.georadius('barcelona', 2.191, 41.433, 1000, store='places_barcelona')
+        assert r.zrange('places_barcelona', 0, -1) == [b'place1']
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadius_store_dist(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        r.georadius('barcelona', 2.191, 41.433, 1000,
+                    store_dist='places_barcelona')
+        # instead of save the geo score, the distance is saved.
+        assert r.zscore('places_barcelona', 'place1') == 88.05060698409301
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_georadiusmember(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') +\
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('barcelona', *values)
+        assert r.georadiusbymember('barcelona', 'place1', 4000) ==\
+            ['place2', 'place1']
+        assert r.georadiusbymember('barcelona', 'place1', 10) == ['place1']
+
+        assert r.georadiusbymember('barcelona', 'place1', 4000,
+                                   withdist=True, withcoord=True,
+                                   withhash=True) ==\
+            [['place2', 3067.4157, 3471609625421029,
+                (2.187376320362091, 41.40634178640635)],
+             ['place1', 0.0, 3471609698139488,
+                 (2.1909382939338684, 41.433790281840835)]]
+
 
 class TestStrictCommands(object):
 
@@ -1356,6 +1618,7 @@ class TestStrictCommands(object):
 
 
 class TestBinarySave(object):
+
     def test_binary_get_set(self, r):
         assert r.set(' foo bar ', '123')
         assert r.get(' foo bar ') == b('123')

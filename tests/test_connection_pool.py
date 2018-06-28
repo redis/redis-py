@@ -6,7 +6,7 @@ import time
 import re
 
 from threading import Thread
-from redis.connection import ssl_available
+from redis.connection import ssl_available, to_bool
 from .conftest import skip_if_server_version_lt
 
 
@@ -163,6 +163,17 @@ class TestConnectionPoolURLParsing(object):
             'password': None,
         }
 
+    def test_quoted_hostname(self):
+        pool = redis.ConnectionPool.from_url('redis://my %2F host %2B%3D+',
+                                             decode_components=True)
+        assert pool.connection_class == redis.Connection
+        assert pool.connection_kwargs == {
+            'host': 'my / host +=+',
+            'port': 6379,
+            'db': 0,
+            'password': None,
+        }
+
     def test_port(self):
         pool = redis.ConnectionPool.from_url('redis://localhost:6380')
         assert pool.connection_class == redis.Connection
@@ -181,6 +192,18 @@ class TestConnectionPoolURLParsing(object):
             'port': 6379,
             'db': 0,
             'password': 'mypassword',
+        }
+
+    def test_quoted_password(self):
+        pool = redis.ConnectionPool.from_url(
+            'redis://:%2Fmypass%2F%2B word%3D%24+@localhost',
+            decode_components=True)
+        assert pool.connection_class == redis.Connection
+        assert pool.connection_kwargs == {
+            'host': 'localhost',
+            'port': 6379,
+            'db': 0,
+            'password': '/mypass/+ word=$+',
         }
 
     def test_db_as_argument(self):
@@ -213,6 +236,51 @@ class TestConnectionPoolURLParsing(object):
             'db': 3,
             'password': None,
         }
+
+    def test_extra_typed_querystring_options(self):
+        pool = redis.ConnectionPool.from_url(
+            'redis://localhost/2?socket_timeout=20&socket_connect_timeout=10'
+            '&socket_keepalive=&retry_on_timeout=Yes'
+        )
+
+        assert pool.connection_class == redis.Connection
+        assert pool.connection_kwargs == {
+            'host': 'localhost',
+            'port': 6379,
+            'db': 2,
+            'socket_timeout': 20.0,
+            'socket_connect_timeout': 10.0,
+            'retry_on_timeout': True,
+            'password': None,
+        }
+
+    def test_boolean_parsing(self):
+        for expected, value in (
+                (None, None),
+                (None, ''),
+                (False, 0), (False, '0'),
+                (False, 'f'), (False, 'F'), (False, 'False'),
+                (False, 'n'), (False, 'N'), (False, 'No'),
+                (True, 1), (True, '1'),
+                (True, 'y'), (True, 'Y'), (True, 'Yes'),
+        ):
+            assert expected is to_bool(value)
+
+    def test_invalid_extra_typed_querystring_options(self):
+        import warnings
+        with warnings.catch_warnings(record=True) as warning_log:
+            redis.ConnectionPool.from_url(
+                'redis://localhost/2?socket_timeout=_&'
+                'socket_connect_timeout=abc'
+            )
+        # Compare the message values
+        assert [
+            str(m.message) for m in
+            sorted(warning_log, key=lambda l: str(l.message))
+        ] == [
+            'Invalid value for `socket_connect_timeout` in connection URL.',
+            'Invalid value for `socket_timeout` in connection URL.',
+        ]
 
     def test_extra_querystring_options(self):
         pool = redis.ConnectionPool.from_url('redis://localhost?a=1&b=2')
@@ -256,6 +324,28 @@ class TestConnectionPoolUnixSocketURLParsing(object):
         assert pool.connection_class == redis.UnixDomainSocketConnection
         assert pool.connection_kwargs == {
             'path': '/socket',
+            'db': 0,
+            'password': 'mypassword',
+        }
+
+    def test_quoted_password(self):
+        pool = redis.ConnectionPool.from_url(
+            'unix://:%2Fmypass%2F%2B word%3D%24+@/socket',
+            decode_components=True)
+        assert pool.connection_class == redis.UnixDomainSocketConnection
+        assert pool.connection_kwargs == {
+            'path': '/socket',
+            'db': 0,
+            'password': '/mypass/+ word=$+',
+        }
+
+    def test_quoted_path(self):
+        pool = redis.ConnectionPool.from_url(
+            'unix://:mypassword@/my%2Fpath%2Fto%2F..%2F+_%2B%3D%24ocket',
+            decode_components=True)
+        assert pool.connection_class == redis.UnixDomainSocketConnection
+        assert pool.connection_kwargs == {
+            'path': '/my/path/to/../+_+=$ocket',
             'db': 0,
             'password': 'mypassword',
         }

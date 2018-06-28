@@ -1,4 +1,5 @@
 pidfile /var/run/redis-slave.pid
+bind *
 port 6380
 daemonize yes
 unixsocket /tmp/redis-slave.sock

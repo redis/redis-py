@@ -3,10 +3,13 @@ from itertools import chain
 import datetime
 import sys
 import warnings
+import time
 import threading
 import time as mod_time
+import hashlib
 from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
-                           itervalues, izip, long, nativestr, unicode)
+                           itervalues, izip, long, nativestr, unicode,
+                           safe_unicode)
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
                               SSLConnection, Token)
 from redis.lock import Lock, LuaLock
@@ -57,7 +60,8 @@ def string_keys_to_dict(key_string, callback):
 
 def dict_merge(*dicts):
     merged = {}
-    [merged.update(d) for d in dicts]
+    for d in dicts:
+        merged.update(d)
     return merged
 
 
@@ -204,7 +208,7 @@ def zset_score_pairs(response, **options):
     If ``withscores`` is specified in the options, return the response as
     a list of (value, score) pairs
     """
-    if not response or not options['withscores']:
+    if not response or not options.get('withscores'):
         return response
     score_cast_func = options.get('score_cast_func', float)
     it = iter(response)
@@ -276,6 +280,70 @@ def parse_slowlog_get(response, **options):
     } for item in response]
 
 
+def parse_cluster_info(response, **options):
+    return dict([line.split(':') for line in response.splitlines() if line])
+
+
+def _parse_node_line(line):
+    line_items = line.split(' ')
+    node_id, addr, flags, master_id, ping, pong, epoch, \
+        connected = line.split(' ')[:8]
+    slots = [sl.split('-') for sl in line_items[8:]]
+    node_dict = {
+        'node_id': node_id,
+        'flags': flags,
+        'master_id': master_id,
+        'last_ping_sent': ping,
+        'last_pong_rcvd': pong,
+        'epoch': epoch,
+        'slots': slots,
+        'connected': True if connected == 'connected' else False
+    }
+    return addr, node_dict
+
+
+def parse_cluster_nodes(response, **options):
+    raw_lines = response
+    if isinstance(response, basestring):
+        raw_lines = response.splitlines()
+    return dict([_parse_node_line(line) for line in raw_lines])
+
+
+def parse_georadius_generic(response, **options):
+    if options['store'] or options['store_dist']:
+        # `store` and `store_diff` cant be combined
+        # with other command arguments.
+        return response
+
+    if type(response) != list:
+        response_list = [response]
+    else:
+        response_list = response
+
+    if not options['withdist'] and not options['withcoord']\
+            and not options['withhash']:
+        # just a bunch of places
+        return [nativestr(r) for r in response_list]
+
+    cast = {
+        'withdist': float,
+        'withcoord': lambda ll: (float(ll[0]), float(ll[1])),
+        'withhash': int
+    }
+
+    # zip all output results with each casting functino to get
+    # the properly native Python value.
+    f = [nativestr]
+    f += [cast[o] for o in ['withdist', 'withhash', 'withcoord'] if options[o]]
+    return [
+        list(map(lambda fv: fv[0](fv[1]), zip(f, r))) for r in response_list
+    ]
+
+
+def parse_pubsub_numsub(response, **options):
+    return list(zip(response[0::2], response[1::2]))
+
+
 class StrictRedis(object):
     """
     Implementation of the Redis protocol.
@@ -293,17 +361,21 @@ class StrictRedis(object):
             bool
         ),
         string_keys_to_dict(
-            'BITCOUNT BITPOS DECRBY DEL GETBIT HDEL HLEN INCRBY LINSERT LLEN '
-            'LPUSHX PFADD PFCOUNT RPUSHX SADD SCARD SDIFFSTORE SETBIT '
-            'SETRANGE SINTERSTORE SREM STRLEN SUNIONSTORE ZADD ZCARD '
-            'ZLEXCOUNT ZREM ZREMRANGEBYLEX ZREMRANGEBYRANK ZREMRANGEBYSCORE',
+            'BITCOUNT BITPOS DECRBY DEL GETBIT HDEL HLEN HSTRLEN INCRBY '
+            'LINSERT LLEN LPUSHX PFADD PFCOUNT RPUSHX SADD SCARD SDIFFSTORE '
+            'SETBIT SETRANGE SINTERSTORE SREM STRLEN SUNIONSTORE ZADD ZCARD '
+            'ZLEXCOUNT ZREM ZREMRANGEBYLEX ZREMRANGEBYRANK ZREMRANGEBYSCORE '
+            'GEOADD',
             int
         ),
-        string_keys_to_dict('INCRBYFLOAT HINCRBYFLOAT', float),
+        string_keys_to_dict(
+            'INCRBYFLOAT HINCRBYFLOAT GEODIST',
+            float
+        ),
         string_keys_to_dict(
             # these return OK, or int if redis-server is >=1.3.4
             'LPUSH RPUSH',
-            lambda r: isinstance(r, long) and r or nativestr(r) == 'OK'
+            lambda r: isinstance(r, (long, int)) and r or nativestr(r) == 'OK'
         ),
         string_keys_to_dict('SORT', sort_return_tuples),
         string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
@@ -358,14 +430,40 @@ class StrictRedis(object):
             'SLOWLOG RESET': bool_ok,
             'SSCAN': parse_scan,
             'TIME': lambda x: (int(x[0]), int(x[1])),
-            'ZSCAN': parse_zscan
+            'ZSCAN': parse_zscan,
+            'CLUSTER ADDSLOTS': bool_ok,
+            'CLUSTER COUNT-FAILURE-REPORTS': lambda x: int(x),
+            'CLUSTER COUNTKEYSINSLOT': lambda x: int(x),
+            'CLUSTER DELSLOTS': bool_ok,
+            'CLUSTER FAILOVER': bool_ok,
+            'CLUSTER FORGET': bool_ok,
+            'CLUSTER INFO': parse_cluster_info,
+            'CLUSTER KEYSLOT': lambda x: int(x),
+            'CLUSTER MEET': bool_ok,
+            'CLUSTER NODES': parse_cluster_nodes,
+            'CLUSTER REPLICATE': bool_ok,
+            'CLUSTER RESET': bool_ok,
+            'CLUSTER SAVECONFIG': bool_ok,
+            'CLUSTER SET-CONFIG-EPOCH': bool_ok,
+            'CLUSTER SETSLOT': bool_ok,
+            'CLUSTER SLAVES': parse_cluster_nodes,
+            'GEOPOS': lambda r: list(map(lambda ll: (float(ll[0]),
+                                         float(ll[1]))
+                                         if ll is not None else None, r)),
+            'GEOHASH': lambda r: list(map(nativestr, r)),
+            'GEORADIUS': parse_georadius_generic,
+            'GEORADIUSBYMEMBER': parse_georadius_generic,
+            'PUBSUB NUMSUB': parse_pubsub_numsub,
         }
     )
 
     @classmethod
     def from_url(cls, url, db=None, **kwargs):
         """
-        Return a Redis client object configured from the given URL.
+        Return a Redis client object configured from the given URL, which must
+        use either `the ``redis://`` scheme
+        <http://www.iana.org/assignments/uri-schemes/prov/redis>`_ for RESP
+        connections or the ``unix://`` scheme for Unix domain sockets.
 
         For example::
 
@@ -397,7 +495,8 @@ class StrictRedis(object):
                  charset=None, errors=None,
                  decode_responses=False, retry_on_timeout=False,
                  ssl=False, ssl_keyfile=None, ssl_certfile=None,
-                 ssl_cert_reqs=None, ssl_ca_certs=None):
+                 ssl_cert_reqs=None, ssl_ca_certs=None,
+                 max_connections=None):
         if not connection_pool:
             if charset is not None:
                 warnings.warn(DeprecationWarning(
@@ -415,7 +514,8 @@ class StrictRedis(object):
                 'encoding': encoding,
                 'encoding_errors': encoding_errors,
                 'decode_responses': decode_responses,
-                'retry_on_timeout': retry_on_timeout
+                'retry_on_timeout': retry_on_timeout,
+                'max_connections': max_connections
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -476,6 +576,7 @@ class StrictRedis(object):
         """
         shard_hint = kwargs.pop('shard_hint', None)
         value_from_callable = kwargs.pop('value_from_callable', False)
+        watch_delay = kwargs.pop('watch_delay', None)
         with self.pipeline(True, shard_hint) as pipe:
             while 1:
                 try:
@@ -485,6 +586,8 @@ class StrictRedis(object):
                     exec_value = pipe.execute()
                     return func_value if value_from_callable else exec_value
                 except WatchError:
+                    if watch_delay is not None and watch_delay > 0:
+                        time.sleep(watch_delay)
                     continue
 
     def lock(self, name, timeout=None, sleep=0.1, blocking_timeout=None,
@@ -734,7 +837,8 @@ class StrictRedis(object):
         instance is promoted to a master instead.
         """
         if host is None and port is None:
-            return self.execute_command('SLAVEOF', Token('NO'), Token('ONE'))
+            return self.execute_command('SLAVEOF', Token.get_token('NO'),
+                                        Token.get_token('ONE'))
         return self.execute_command('SLAVEOF', host, port)
 
     def slowlog_get(self, num=None):
@@ -761,6 +865,15 @@ class StrictRedis(object):
         (seconds since epoch, microseconds into this second).
         """
         return self.execute_command('TIME')
+
+    def wait(self, num_replicas, timeout):
+        """
+        Redis synchronous replication
+        That returns the number of replicas that processed the query when
+        we finally have at least ``num_replicas``, or when the ``timeout`` was
+        reached.
+        """
+        return self.execute_command('WAIT', num_replicas, timeout)
 
     # BASIC KEY COMMANDS
     def append(self, key, value):
@@ -868,7 +981,7 @@ class StrictRedis(object):
         doesn't exist.
         """
         value = self.get(name)
-        if value:
+        if value is not None:
             return value
         raise KeyError(name)
 
@@ -1014,12 +1127,15 @@ class StrictRedis(object):
         "Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist"
         return self.execute_command('RENAMENX', src, dst)
 
-    def restore(self, name, ttl, value):
+    def restore(self, name, ttl, value, replace=False):
         """
         Create a key using the provided serialized value, previously obtained
         using DUMP.
         """
-        return self.execute_command('RESTORE', name, ttl, value)
+        params = [name, ttl, value]
+        if replace:
+            params.append('REPLACE')
+        return self.execute_command('RESTORE', *params)
 
     def set(self, name, value, ex=None, px=None, nx=False, xx=False):
         """
@@ -1029,19 +1145,19 @@ class StrictRedis(object):
 
         ``px`` sets an expire flag on key ``name`` for ``px`` milliseconds.
 
-        ``nx`` if set to True, set the value at key ``name`` to ``value`` if it
-            does not already exist.
+        ``nx`` if set to True, set the value at key ``name`` to ``value`` only
+            if it does not exist.
 
-        ``xx`` if set to True, set the value at key ``name`` to ``value`` if it
-            already exists.
+        ``xx`` if set to True, set the value at key ``name`` to ``value`` only
+            if it already exists.
         """
         pieces = [name, value]
-        if ex:
+        if ex is not None:
             pieces.append('EX')
             if isinstance(ex, datetime.timedelta):
                 ex = ex.seconds + ex.days * 24 * 3600
             pieces.append(ex)
-        if px:
+        if px is not None:
             pieces.append('PX')
             if isinstance(px, datetime.timedelta):
                 ms = int(px.microseconds / 1000)
@@ -1103,6 +1219,13 @@ class StrictRedis(object):
         """
         return self.execute_command('SUBSTR', name, start, end)
 
+    def touch(self, *args):
+        """
+        Alters the last access time of a key(s) ``*args``. A key is ignored
+        if it does not exist.
+        """
+        return self.execute_command('TOUCH', *args)
+
     def ttl(self, name):
         "Returns the number of seconds until the key ``name`` will expire"
         return self.execute_command('TTL', name)
@@ -1150,7 +1273,7 @@ class StrictRedis(object):
         RPOP a value off of the first non-empty list
         named in the ``keys`` list.
 
-        If none of the lists in ``keys`` has a value to LPOP, then block
+        If none of the lists in ``keys`` has a value to RPOP, then block
         for ``timeout`` seconds, or until a value gets pushed on to one
         of the lists.
 
@@ -1300,10 +1423,10 @@ class StrictRedis(object):
 
         pieces = [name]
         if by is not None:
-            pieces.append(Token('BY'))
+            pieces.append(Token.get_token('BY'))
             pieces.append(by)
         if start is not None and num is not None:
-            pieces.append(Token('LIMIT'))
+            pieces.append(Token.get_token('LIMIT'))
             pieces.append(start)
             pieces.append(num)
         if get is not None:
@@ -1312,18 +1435,18 @@ class StrictRedis(object):
             # values. We can't just iterate blindly because strings are
             # iterable.
             if isinstance(get, basestring):
-                pieces.append(Token('GET'))
+                pieces.append(Token.get_token('GET'))
                 pieces.append(get)
             else:
                 for g in get:
-                    pieces.append(Token('GET'))
+                    pieces.append(Token.get_token('GET'))
                     pieces.append(g)
         if desc:
-            pieces.append(Token('DESC'))
+            pieces.append(Token.get_token('DESC'))
         if alpha:
-            pieces.append(Token('ALPHA'))
+            pieces.append(Token.get_token('ALPHA'))
         if store is not None:
-            pieces.append(Token('STORE'))
+            pieces.append(Token.get_token('STORE'))
             pieces.append(store)
 
         if groups:
@@ -1347,9 +1470,9 @@ class StrictRedis(object):
         """
         pieces = [cursor]
         if match is not None:
-            pieces.extend([Token('MATCH'), match])
+            pieces.extend([Token.get_token('MATCH'), match])
         if count is not None:
-            pieces.extend([Token('COUNT'), count])
+            pieces.extend([Token.get_token('COUNT'), count])
         return self.execute_command('SCAN', *pieces)
 
     def scan_iter(self, match=None, count=None):
@@ -1378,9 +1501,9 @@ class StrictRedis(object):
         """
         pieces = [name, cursor]
         if match is not None:
-            pieces.extend([Token('MATCH'), match])
+            pieces.extend([Token.get_token('MATCH'), match])
         if count is not None:
-            pieces.extend([Token('COUNT'), count])
+            pieces.extend([Token.get_token('COUNT'), count])
         return self.execute_command('SSCAN', *pieces)
 
     def sscan_iter(self, name, match=None, count=None):
@@ -1410,9 +1533,9 @@ class StrictRedis(object):
         """
         pieces = [name, cursor]
         if match is not None:
-            pieces.extend([Token('MATCH'), match])
+            pieces.extend([Token.get_token('MATCH'), match])
         if count is not None:
-            pieces.extend([Token('COUNT'), count])
+            pieces.extend([Token.get_token('COUNT'), count])
         return self.execute_command('HSCAN', *pieces)
 
     def hscan_iter(self, name, match=None, count=None):
@@ -1445,9 +1568,9 @@ class StrictRedis(object):
         """
         pieces = [name, cursor]
         if match is not None:
-            pieces.extend([Token('MATCH'), match])
+            pieces.extend([Token.get_token('MATCH'), match])
         if count is not None:
-            pieces.extend([Token('COUNT'), count])
+            pieces.extend([Token.get_token('COUNT'), count])
         options = {'score_cast_func': score_cast_func}
         return self.execute_command('ZSCAN', *pieces, **options)
 
@@ -1530,7 +1653,7 @@ class StrictRedis(object):
         memebers of set ``name``. Note this is only available when running
         Redis 2.6+.
         """
-        args = number and [number] or []
+        args = (number is not None) and [number] or []
         return self.execute_command('SRANDMEMBER', name, *args)
 
     def srem(self, name, *values):
@@ -1623,7 +1746,7 @@ class StrictRedis(object):
                                   score_cast_func)
         pieces = ['ZRANGE', name, start, end]
         if withscores:
-            pieces.append(Token('WITHSCORES'))
+            pieces.append(Token.get_token('WITHSCORES'))
         options = {
             'withscores': withscores,
             'score_cast_func': score_cast_func
@@ -1643,7 +1766,23 @@ class StrictRedis(object):
             raise RedisError("``start`` and ``num`` must both be specified")
         pieces = ['ZRANGEBYLEX', name, min, max]
         if start is not None and num is not None:
-            pieces.extend([Token('LIMIT'), start, num])
+            pieces.extend([Token.get_token('LIMIT'), start, num])
+        return self.execute_command(*pieces)
+
+    def zrevrangebylex(self, name, max, min, start=None, num=None):
+        """
+        Return the reversed lexicographical range of values from sorted set
+        ``name`` between ``max`` and ``min``.
+
+        If ``start`` and ``num`` are specified, then return a slice of the
+        range.
+        """
+        if (start is not None and num is None) or \
+                (num is not None and start is None):
+            raise RedisError("``start`` and ``num`` must both be specified")
+        pieces = ['ZREVRANGEBYLEX', name, max, min]
+        if start is not None and num is not None:
+            pieces.extend([Token.get_token('LIMIT'), start, num])
         return self.execute_command(*pieces)
 
     def zrangebyscore(self, name, min, max, start=None, num=None,
@@ -1665,9 +1804,9 @@ class StrictRedis(object):
             raise RedisError("``start`` and ``num`` must both be specified")
         pieces = ['ZRANGEBYSCORE', name, min, max]
         if start is not None and num is not None:
-            pieces.extend([Token('LIMIT'), start, num])
+            pieces.extend([Token.get_token('LIMIT'), start, num])
         if withscores:
-            pieces.append(Token('WITHSCORES'))
+            pieces.append(Token.get_token('WITHSCORES'))
         options = {
             'withscores': withscores,
             'score_cast_func': score_cast_func
@@ -1725,7 +1864,7 @@ class StrictRedis(object):
         """
         pieces = ['ZREVRANGE', name, start, end]
         if withscores:
-            pieces.append(Token('WITHSCORES'))
+            pieces.append(Token.get_token('WITHSCORES'))
         options = {
             'withscores': withscores,
             'score_cast_func': score_cast_func
@@ -1751,9 +1890,9 @@ class StrictRedis(object):
             raise RedisError("``start`` and ``num`` must both be specified")
         pieces = ['ZREVRANGEBYSCORE', name, max, min]
         if start is not None and num is not None:
-            pieces.extend([Token('LIMIT'), start, num])
+            pieces.extend([Token.get_token('LIMIT'), start, num])
         if withscores:
-            pieces.append(Token('WITHSCORES'))
+            pieces.append(Token.get_token('WITHSCORES'))
         options = {
             'withscores': withscores,
             'score_cast_func': score_cast_func
@@ -1787,10 +1926,10 @@ class StrictRedis(object):
             weights = None
         pieces.extend(keys)
         if weights:
-            pieces.append(Token('WEIGHTS'))
+            pieces.append(Token.get_token('WEIGHTS'))
             pieces.extend(weights)
         if aggregate:
-            pieces.append(Token('AGGREGATE'))
+            pieces.append(Token.get_token('AGGREGATE'))
             pieces.append(aggregate)
         return self.execute_command(*pieces)
 
@@ -1799,12 +1938,12 @@ class StrictRedis(object):
         "Adds the specified elements to the specified HyperLogLog."
         return self.execute_command('PFADD', name, *values)
 
-    def pfcount(self, name):
+    def pfcount(self, *sources):
         """
         Return the approximated cardinality of
-        the set observed by the HyperLogLog at key.
+        the set observed by the HyperLogLog at key(s).
         """
-        return self.execute_command('PFCOUNT', name)
+        return self.execute_command('PFCOUNT', *sources)
 
     def pfmerge(self, dest, *sources):
         "Merge N different HyperLogLogs into a single one."
@@ -1880,12 +2019,41 @@ class StrictRedis(object):
         "Return the list of values within hash ``name``"
         return self.execute_command('HVALS', name)
 
+    def hstrlen(self, name, key):
+        """
+        Return the number of bytes stored in the value of ``key``
+        within hash ``name``
+        """
+        return self.execute_command('HSTRLEN', name, key)
+
     def publish(self, channel, message):
         """
         Publish ``message`` on ``channel``.
         Returns the number of subscribers the message was delivered to.
         """
         return self.execute_command('PUBLISH', channel, message)
+
+    def pubsub_channels(self, pattern='*'):
+        """
+        Return a list of channels that have at least one subscriber
+        """
+        return self.execute_command('PUBSUB CHANNELS', pattern)
+
+    def pubsub_numpat(self):
+        """
+        Returns the number of subscriptions to patterns
+        """
+        return self.execute_command('PUBSUB NUMPAT')
+
+    def pubsub_numsub(self, *args):
+        """
+        Return a list of (channel, number of subscribers) tuples
+        for each channel given in ``*args``
+        """
+        return self.execute_command('PUBSUB NUMSUB', *args)
+
+    def cluster(self, cluster_arg, *args):
+        return self.execute_command('CLUSTER %s' % cluster_arg.upper(), *args)
 
     def eval(self, script, numkeys, *keys_and_args):
         """
@@ -1938,6 +2106,135 @@ class StrictRedis(object):
         with Lua scripts.
         """
         return Script(self, script)
+
+    # GEO COMMANDS
+    def geoadd(self, name, *values):
+        """
+        Add the specified geospatial items to the specified key identified
+        by the ``name`` argument. The Geospatial items are given as ordered
+        members of the ``values`` argument, each item or place is formed by
+        the triad longitude, latitude and name.
+        """
+        if len(values) % 3 != 0:
+            raise RedisError("GEOADD requires places with lon, lat and name"
+                             " values")
+        return self.execute_command('GEOADD', name, *values)
+
+    def geodist(self, name, place1, place2, unit=None):
+        """
+        Return the distance between ``place1`` and ``place2`` members of the
+        ``name`` key.
+        The units must be one of the following : m, km mi, ft. By default
+        meters are used.
+        """
+        pieces = [name, place1, place2]
+        if unit and unit not in ('m', 'km', 'mi', 'ft'):
+            raise RedisError("GEODIST invalid unit")
+        elif unit:
+            pieces.append(unit)
+        return self.execute_command('GEODIST', *pieces)
+
+    def geohash(self, name, *values):
+        """
+        Return the geo hash string for each item of ``values`` members of
+        the specified key identified by the ``name``argument.
+        """
+        return self.execute_command('GEOHASH', name, *values)
+
+    def geopos(self, name, *values):
+        """
+        Return the positions of each item of ``values`` as members of
+        the specified key identified by the ``name``argument. Each position
+        is represented by the pairs lon and lat.
+        """
+        return self.execute_command('GEOPOS', name, *values)
+
+    def georadius(self, name, longitude, latitude, radius, unit=None,
+                  withdist=False, withcoord=False, withhash=False, count=None,
+                  sort=None, store=None, store_dist=None):
+        """
+        Return the members of the specified key identified by the
+        ``name`` argument which are within the borders of the area specified
+        with the ``latitude`` and ``longitude`` location and the maximum
+        distance from the center specified by the ``radius`` value.
+
+        The units must be one of the following : m, km mi, ft. By default
+
+        ``withdist`` indicates to return the distances of each place.
+
+        ``withcoord`` indicates to return the latitude and longitude of
+        each place.
+
+        ``withhash`` indicates to return the geohash string of each place.
+
+        ``count`` indicates to return the number of elements up to N.
+
+        ``sort`` indicates to return the places in a sorted way, ASC for
+        nearest to fairest and DESC for fairest to nearest.
+
+        ``store`` indicates to save the places names in a sorted set named
+        with a specific key, each element of the destination sorted set is
+        populated with the score got from the original geo sorted set.
+
+        ``store_dist`` indicates to save the places names in a sorted set
+        named with a specific key, instead of ``store`` the sorted set
+        destination score is set with the distance.
+        """
+        return self._georadiusgeneric('GEORADIUS',
+                                      name, longitude, latitude, radius,
+                                      unit=unit, withdist=withdist,
+                                      withcoord=withcoord, withhash=withhash,
+                                      count=count, sort=sort, store=store,
+                                      store_dist=store_dist)
+
+    def georadiusbymember(self, name, member, radius, unit=None,
+                          withdist=False, withcoord=False, withhash=False,
+                          count=None, sort=None, store=None, store_dist=None):
+        """
+        This command is exactly like ``georadius`` with the sole difference
+        that instead of taking, as the center of the area to query, a longitude
+        and latitude value, it takes the name of a member already existing
+        inside the geospatial index represented by the sorted set.
+        """
+        return self._georadiusgeneric('GEORADIUSBYMEMBER',
+                                      name, member, radius, unit=unit,
+                                      withdist=withdist, withcoord=withcoord,
+                                      withhash=withhash, count=count,
+                                      sort=sort, store=store,
+                                      store_dist=store_dist)
+
+    def _georadiusgeneric(self, command, *args, **kwargs):
+        pieces = list(args)
+        if kwargs['unit'] and kwargs['unit'] not in ('m', 'km', 'mi', 'ft'):
+            raise RedisError("GEORADIUS invalid unit")
+        elif kwargs['unit']:
+            pieces.append(kwargs['unit'])
+        else:
+            pieces.append('m',)
+
+        for token in ('withdist', 'withcoord', 'withhash'):
+            if kwargs[token]:
+                pieces.append(Token(token.upper()))
+
+        if kwargs['count']:
+            pieces.extend([Token('COUNT'), kwargs['count']])
+
+        if kwargs['sort'] and kwargs['sort'] not in ('ASC', 'DESC'):
+            raise RedisError("GEORADIUS invalid sort")
+        elif kwargs['sort']:
+            pieces.append(Token(kwargs['sort']))
+
+        if kwargs['store'] and kwargs['store_dist']:
+            raise RedisError("GEORADIUS store and store_dist cant be set"
+                             " together")
+
+        if kwargs['store']:
+            pieces.extend([Token('STORE'), kwargs['store']])
+
+        if kwargs['store_dist']:
+            pieces.extend([Token('STOREDIST'), kwargs['store_dist']])
+
+        return self.execute_command(command, *pieces, **kwargs)
 
 
 class Redis(StrictRedis):
@@ -2043,13 +2340,7 @@ class PubSub(object):
         self.connection = None
         # we need to know the encoding options for this connection in order
         # to lookup channel and pattern names for callback handlers.
-        conn = connection_pool.get_connection('pubsub', shard_hint)
-        try:
-            self.encoding = conn.encoding
-            self.encoding_errors = conn.encoding_errors
-            self.decode_responses = conn.decode_responses
-        finally:
-            connection_pool.release(conn)
+        self.encoder = self.connection_pool.get_encoder()
         self.reset()
 
     def __del__(self):
@@ -2081,28 +2372,13 @@ class PubSub(object):
         if self.channels:
             channels = {}
             for k, v in iteritems(self.channels):
-                if not self.decode_responses:
-                    k = k.decode(self.encoding, self.encoding_errors)
-                channels[k] = v
+                channels[self.encoder.decode(k, force=True)] = v
             self.subscribe(**channels)
         if self.patterns:
             patterns = {}
             for k, v in iteritems(self.patterns):
-                if not self.decode_responses:
-                    k = k.decode(self.encoding, self.encoding_errors)
-                patterns[k] = v
+                patterns[self.encoder.decode(k, force=True)] = v
             self.psubscribe(**patterns)
-
-    def encode(self, value):
-        """
-        Encode the value so that it's identical to what we'll
-        read off the connection
-        """
-        if self.decode_responses and isinstance(value, bytes):
-            value = value.decode(self.encoding, self.encoding_errors)
-        elif not self.decode_responses and isinstance(value, unicode):
-            value = value.encode(self.encoding, self.encoding_errors)
-        return value
 
     @property
     def subscribed(self):
@@ -2112,8 +2388,8 @@ class PubSub(object):
     def execute_command(self, *args, **kwargs):
         "Execute a publish/subscribe command"
 
-        # NOTE: don't parse the response in this function. it could pull a
-        # legitmate message off the stack if the connection is already
+        # NOTE: don't parse the response in this function -- it could pull a
+        # legitimate message off the stack if the connection is already
         # subscribed to one or more channels
 
         if self.connection is None:
@@ -2142,12 +2418,26 @@ class PubSub(object):
             # previously listening to
             return command(*args)
 
-    def parse_response(self, block=True):
+    def parse_response(self, block=True, timeout=0):
         "Parse the response from a publish/subscribe command"
         connection = self.connection
-        if not block and not connection.can_read():
+        if connection is None:
+            raise RuntimeError(
+                'pubsub connection not set: '
+                'did you forget to call subscribe() or psubscribe()?')
+        if not block and not connection.can_read(timeout=timeout):
             return None
         return self._execute(connection, connection.read_response)
+
+    def _normalize_keys(self, data):
+        """
+        normalize channel/pattern names to be either bytes or strings
+        based on whether responses are automatically decoded. this saves us
+        from coercing the value for each message coming in.
+        """
+        encode = self.encoder.encode
+        decode = self.encoder.decode
+        return dict([(decode(encode(k)), v) for k, v in iteritems(data)])
 
     def psubscribe(self, *args, **kwargs):
         """
@@ -2159,15 +2449,13 @@ class PubSub(object):
         """
         if args:
             args = list_or_args(args[0], args[1:])
-        new_patterns = {}
-        new_patterns.update(dict.fromkeys(imap(self.encode, args)))
-        for pattern, handler in iteritems(kwargs):
-            new_patterns[self.encode(pattern)] = handler
+        new_patterns = dict.fromkeys(args)
+        new_patterns.update(kwargs)
         ret_val = self.execute_command('PSUBSCRIBE', *iterkeys(new_patterns))
         # update the patterns dict AFTER we send the command. we don't want to
         # subscribe twice to these patterns, once for the command and again
         # for the reconnection.
-        self.patterns.update(new_patterns)
+        self.patterns.update(self._normalize_keys(new_patterns))
         return ret_val
 
     def punsubscribe(self, *args):
@@ -2189,15 +2477,13 @@ class PubSub(object):
         """
         if args:
             args = list_or_args(args[0], args[1:])
-        new_channels = {}
-        new_channels.update(dict.fromkeys(imap(self.encode, args)))
-        for channel, handler in iteritems(kwargs):
-            new_channels[self.encode(channel)] = handler
+        new_channels = dict.fromkeys(args)
+        new_channels.update(kwargs)
         ret_val = self.execute_command('SUBSCRIBE', *iterkeys(new_channels))
         # update the channels dict AFTER we send the command. we don't want to
         # subscribe twice to these channels, once for the command and again
         # for the reconnection.
-        self.channels.update(new_channels)
+        self.channels.update(self._normalize_keys(new_channels))
         return ret_val
 
     def unsubscribe(self, *args):
@@ -2216,9 +2502,15 @@ class PubSub(object):
             if response is not None:
                 yield response
 
-    def get_message(self, ignore_subscribe_messages=False):
-        "Get the next message if one is available, otherwise None"
-        response = self.parse_response(block=False)
+    def get_message(self, ignore_subscribe_messages=False, timeout=0):
+        """
+        Get the next message if one is available, otherwise None.
+
+        If timeout is specified, the system will wait for `timeout` seconds
+        before returning. Timeout should be specified as a floating point
+        number.
+        """
+        response = self.parse_response(block=False, timeout=timeout)
         if response:
             return self.handle_message(response, ignore_subscribe_messages)
         return None
@@ -2275,35 +2567,45 @@ class PubSub(object):
 
         return message
 
-    def run_in_thread(self, sleep_time=0):
+    def run_in_thread(self, sleep_time=0, daemon=False):
         for channel, handler in iteritems(self.channels):
             if handler is None:
                 raise PubSubError("Channel: '%s' has no handler registered")
         for pattern, handler in iteritems(self.patterns):
             if handler is None:
                 raise PubSubError("Pattern: '%s' has no handler registered")
-        pubsub = self
 
-        class WorkerThread(threading.Thread):
-            def __init__(self, *args, **kwargs):
-                super(WorkerThread, self).__init__(*args, **kwargs)
-                self._running = False
-
-            def run(self):
-                if self._running:
-                    return
-                self._running = True
-                while self._running and pubsub.subscribed:
-                    pubsub.get_message(ignore_subscribe_messages=True)
-                    mod_time.sleep(sleep_time)
-
-            def stop(self):
-                self._running = False
-                self.join()
-
-        thread = WorkerThread()
+        thread = PubSubWorkerThread(self, sleep_time, daemon=daemon)
         thread.start()
         return thread
+
+
+class PubSubWorkerThread(threading.Thread):
+    def __init__(self, pubsub, sleep_time, daemon=False):
+        super(PubSubWorkerThread, self).__init__()
+        self.daemon = daemon
+        self.pubsub = pubsub
+        self.sleep_time = sleep_time
+        self._running = False
+
+    def run(self):
+        if self._running:
+            return
+        self._running = True
+        pubsub = self.pubsub
+        sleep_time = self.sleep_time
+        while pubsub.subscribed:
+            pubsub.get_message(ignore_subscribe_messages=True,
+                               timeout=sleep_time)
+        pubsub.close()
+        self._running = False
+
+    def stop(self):
+        # stopping simply unsubscribes from all channels and patterns.
+        # the unsubscribe responses that are generated will short circuit
+        # the loop in run(), calling pubsub.close() to clean up the connection
+        self.pubsub.unsubscribe()
+        self.pubsub.punsubscribe()
 
 
 class BasePipeline(object):
@@ -2526,9 +2828,9 @@ class BasePipeline(object):
                 raise r
 
     def annotate_exception(self, exception, number, command):
-        cmd = unicode(' ').join(imap(unicode, command))
+        cmd = safe_unicode(' ').join(imap(safe_unicode, command))
         msg = unicode('Command # %d (%s) of pipeline caused error: %s') % (
-            number, cmd, unicode(exception.args[0]))
+            number, cmd, safe_unicode(exception.args[0]))
         exception.args = (msg,) + exception.args[1:]
 
     def parse_response(self, connection, command_name, **options):
@@ -2547,12 +2849,11 @@ class BasePipeline(object):
         shas = [s.sha for s in scripts]
         # we can't use the normal script_* methods because they would just
         # get buffered in the pipeline.
-        exists = immediate('SCRIPT', 'EXISTS', *shas, **{'parse': 'EXISTS'})
+        exists = immediate('SCRIPT EXISTS', *shas)
         if not all(exists):
             for s, exist in izip(scripts, exists):
                 if not exist:
-                    s.sha = immediate('SCRIPT', 'LOAD', s.script,
-                                      **{'parse': 'LOAD'})
+                    s.sha = immediate('SCRIPT LOAD', s.script)
 
     def execute(self, raise_on_error=True):
         "Execute all the commands in the current pipeline"
@@ -2604,16 +2905,6 @@ class BasePipeline(object):
         "Unwatches all previously specified keys"
         return self.watching and self.execute_command('UNWATCH') or True
 
-    def script_load_for_pipeline(self, script):
-        "Make sure scripts are loaded prior to pipeline execution"
-        # we need the sha now so that Script.__call__ can use it to run
-        # evalsha.
-        if not script.sha:
-            script.sha = self.immediate_execute_command('SCRIPT', 'LOAD',
-                                                        script.script,
-                                                        **{'parse': 'LOAD'})
-        self.scripts.add(script)
-
 
 class StrictPipeline(BasePipeline, StrictRedis):
     "Pipeline for the StrictRedis class"
@@ -2631,7 +2922,14 @@ class Script(object):
     def __init__(self, registered_client, script):
         self.registered_client = registered_client
         self.script = script
-        self.sha = ''
+        # Precalculate and store the SHA1 hex digest of the script.
+
+        if isinstance(script, basestring):
+            # We need the encoding from the client in order to generate an
+            # accurate byte representation of the script
+            encoder = registered_client.connection_pool.get_encoder()
+            script = encoder.encode(script)
+        self.sha = hashlib.sha1(script).hexdigest()
 
     def __call__(self, keys=[], args=[], client=None):
         "Execute the script, passing any required ``args``"
@@ -2640,12 +2938,13 @@ class Script(object):
         args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
         if isinstance(client, BasePipeline):
-            # make sure this script is good to go on pipeline
-            client.script_load_for_pipeline(self)
+            # Make sure the pipeline can register the script before executing.
+            client.scripts.add(self)
         try:
             return client.evalsha(self.sha, len(keys), *args)
         except NoScriptError:
             # Maybe the client is pointed to a differnet server than the client
             # that created this instance?
+            # Overwrite the sha just in case there was a discrepancy.
             self.sha = client.script_load(self.script)
             return client.evalsha(self.sha, len(keys), *args)
