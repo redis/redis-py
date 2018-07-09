@@ -484,7 +484,8 @@ class StrictRedis(object):
         passed along to the ConnectionPool class's initializer. In the case
         of conflicting arguments, querystring arguments always win.
         """
-        connection_pool = ConnectionPool.from_url(url, db=db, **kwargs)
+        con_pool_cls = kwargs.pop('con_pool_cls', None) or ConnectionPool
+        connection_pool = con_pool_cls.from_url(url, db=db, **kwargs)
         return cls(connection_pool=connection_pool)
 
     def __init__(self, host='localhost', port=6379,
