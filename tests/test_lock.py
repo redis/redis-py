@@ -15,7 +15,9 @@ class TestLock(object):
 
     def test_lock(self, sr):
         lock = self.get_lock(sr, 'foo')
+        assert lock.locked() is False
         assert lock.acquire(blocking=False)
+        assert lock.locked() is True
         assert sr.get('foo') == lock.local.token
         assert sr.ttl('foo') == -1
         lock.release()
@@ -56,6 +58,7 @@ class TestLock(object):
         # blocking_timeout prevents a deadlock if the lock can't be acquired
         # for some reason
         with self.get_lock(sr, 'foo', blocking_timeout=0.2) as lock:
+            assert lock.locked() is True
             assert sr.get('foo') == lock.local.token
         assert sr.get('foo') is None
 
