@@ -1,1 +1,1 @@
-PATH=$PATH:/home/vagrant/redis/bin
+PATH=$PATH:/var/lib/redis/bin
