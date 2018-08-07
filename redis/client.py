@@ -496,7 +496,7 @@ class StrictRedis(object):
                  charset=None, errors=None,
                  decode_responses=False, retry_on_timeout=False,
                  ssl=False, ssl_keyfile=None, ssl_certfile=None,
-                 ssl_cert_reqs=None, ssl_ca_certs=None,
+                 ssl_cert_reqs='required', ssl_ca_certs=None,
                  max_connections=None):
         if not connection_pool:
             if charset is not None:
