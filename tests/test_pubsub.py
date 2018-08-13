@@ -437,5 +437,5 @@ class TestPubSubPings(object):
         p.subscribe('foo')
         p.ping()
         assert wait_for_message(p) == make_message(type='pong', channel=None,
-                                                 data='',
-                                                 pattern=None)
+                                                   data='',
+                                                   pattern=None)
