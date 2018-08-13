@@ -27,7 +27,7 @@ def make_message(type, channel, data, pattern=None):
     return {
         'type': type,
         'pattern': pattern and pattern.encode('utf-8') or None,
-        'channel': channel.encode('utf-8'),
+        'channel': channel and channel.encode('utf-8') or None,
         'data': data.encode('utf-8') if isinstance(data, basestring) else data
     }
 
@@ -427,3 +427,15 @@ class TestPubSubPubSubSubcommands(object):
         p = r.pubsub(ignore_subscribe_messages=True)
         p.psubscribe('*oo', '*ar', 'b*z')
         assert r.pubsub_numpat() == 3
+
+
+class TestPubSubPings(object):
+
+    @skip_if_server_version_lt('3.0.0')
+    def test_send_pubsub_ping(self, r):
+        p = r.pubsub(ignore_subscribe_messages=True)
+        p.subscribe('foo')
+        p.ping()
+        assert wait_for_message(p) == make_message(type='pong', channel=None,
+                                                 data='',
+                                                 pattern=None)

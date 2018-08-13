@@ -2574,7 +2574,7 @@ class PubSub(object):
             if handler:
                 handler(message)
                 return None
-        else:
+        elif message_type != 'pong':
             # this is a subscribe/unsubscribe message. ignore if we don't
             # want them
             if ignore_subscribe_messages or self.ignore_subscribe_messages:
