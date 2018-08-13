@@ -2517,6 +2517,12 @@ class PubSub(object):
             return self.handle_message(response, ignore_subscribe_messages)
         return None
 
+    def ping(self):
+        """
+        Ping the Redis server
+        """
+        return self.execute_command('PING')
+
     def handle_message(self, response, ignore_subscribe_messages=False):
         """
         Parses a pub/sub message. If the channel or pattern was subscribed to
@@ -2530,6 +2536,13 @@ class PubSub(object):
                 'pattern': response[1],
                 'channel': response[2],
                 'data': response[3]
+            }
+        elif message_type == 'pong':
+            message = {
+                'type': message_type,
+                'pattern': None,
+                'channel': None,
+                'data': response[1]
             }
         else:
             message = {
