@@ -2411,7 +2411,8 @@ class PubSub(object):
             return command(*args)
         except (ConnectionError, TimeoutError) as e:
             connection.disconnect()
-            if not connection.retry_on_timeout and isinstance(e, TimeoutError):
+            if (not connection.retry_on_timeout and
+                    isinstance(e, TimeoutError)):
                 raise
             # Connect manually here. If the Redis server is down, this will
             # fail and raise a ConnectionError as desired.
