@@ -592,7 +592,7 @@ class StrictRedis(object):
                     continue
 
     def lock(self, name, timeout=None, sleep=0.1, blocking_timeout=None,
-             lock_class=None, thread_local=True):
+             lock_class=None, thread_local=True, blocking=True):
         """
         Return a new Lock object using key ``name`` that mimics
         the behavior of threading.Lock.
@@ -648,7 +648,7 @@ class StrictRedis(object):
             lock_class = self._use_lua_lock and LuaLock or Lock
         return lock_class(self, name, timeout=timeout, sleep=sleep,
                           blocking_timeout=blocking_timeout,
-                          thread_local=thread_local)
+                          thread_local=thread_local, blocking=blocking)
 
     def pubsub(self, **kwargs):
         """
