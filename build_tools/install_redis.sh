@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-source /home/vagrant/redis-py/vagrant/redis_vars.sh
+source /home/vagrant/redis-py/build_tools/redis_vars.sh
 
 for filename in `ls $VAGRANT_REDIS_CONF_DIR`; do
     # cuts the order prefix off of the filename, e.g. 001-master -> master

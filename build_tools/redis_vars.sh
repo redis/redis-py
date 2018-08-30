@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-VAGRANT_DIR=/home/vagrant/redis-py/vagrant
+VAGRANT_DIR=/home/vagrant/redis-py/build_tools
 VAGRANT_REDIS_CONF_DIR=$VAGRANT_DIR/redis-configs
 VAGRANT_SENTINEL_CONF_DIR=$VAGRANT_DIR/sentinel-configs
 REDIS_VERSION=3.2.0
