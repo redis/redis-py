@@ -5,6 +5,10 @@ The Python interface to the Redis key-value store.
 
 .. image:: https://secure.travis-ci.org/andymccurdy/redis-py.png?branch=master
         :target: http://travis-ci.org/andymccurdy/redis-py
+.. image:: https://readthedocs.org/projects/redis-py/badge/?version=latest&style=flat
+        :target: https://redis-py.readthedocs.io/en/latest/
+.. image:: https://badge.fury.io/py/redis.svg
+        :target: https://pypi.org/project/redis/
 
 Installation
 ------------
