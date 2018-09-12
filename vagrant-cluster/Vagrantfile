@@ -1,0 +1,23 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+VAGRANTFILE_API_VERSION = "2"
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  config.vm.box = "ubuntu/trusty64"
+
+  config.vm.synced_folder ".", "/home/vagrant/redis-scripts"
+
+#  config.ssh.shell = "bash -c 'BASH_ENV=/etc/profile exec bash'"
+
+  config.vm.provision :shell, :path => "build_redis.sh"
+  config.vm.provision :shell, :path => "install_redis.sh"
+  config.vm.provision :file, :source => ".bash_profile", :destination => "/home/vagrant/.bash_profile"
+
+  config.vm.network "forwarded_port", guest: 7000, host: 7000
+  config.vm.network "forwarded_port", guest: 7001, host: 7001
+  config.vm.network "forwarded_port", guest: 7002, host: 7002
+  config.vm.network "forwarded_port", guest: 7003, host: 7003
+  config.vm.network "forwarded_port", guest: 7004, host: 7004
+  config.vm.network "forwarded_port", guest: 7005, host: 7005
+end
