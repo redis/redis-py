@@ -1,6 +1,7 @@
 language: python
 cache: pip
 python:
+  - "3.7"
   - "3.6"
   - "3.5"
   - "3.4"
@@ -21,5 +22,6 @@ matrix:
   include:
     - python: "2.7"
       env: TEST_PEP8=1
-    - python: "3.6"
+    - python: "3.7"
+      dist: xenial
       env: TEST_PEP8=1
