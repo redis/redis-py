@@ -142,6 +142,7 @@ class Lock(object):
             lock_value = pipe.get(name)
             if lock_value != expected_token:
                 raise LockError("Cannot release a lock that's no longer owned")
+            pipe.multi()
             pipe.delete(name)
 
         self.redis.transaction(execute_release, name)
