@@ -1615,7 +1615,7 @@ class TestStrictCommands(object):
         assert stamp1 != stamp2
 
         milli, offset = stamp2.decode('utf-8').split('-')
-        new_id = ("%s-0" % (milli + 10000)).encode('utf-8')
+        new_id = "{}-0".format(int(milli) + 10000).encode('utf-8')
         stamp3 = sr.xadd(varname, id=new_id, foo="bar")
         assert sr.xlen(varname) == 3
         assert stamp3 == new_id
@@ -1637,7 +1637,7 @@ class TestStrictCommands(object):
         results = sr.xrange(varname, finish=stamp2, count=1)
         assert get_ids(results) == [stamp1]
 
-        results = sr.xrevrange(varname, start=stamp1)
+        results = sr.xrevrange(varname, start=stamp4)
         assert get_ids(results) == [stamp4, stamp3, stamp2, stamp1]
 
         results = sr.xrevrange(varname, start=stamp3, finish=stamp2)
