@@ -1665,6 +1665,71 @@ class TestStrictCommands(object):
         results = sr.xread(count=3, block=0, **{varname: stamp1})
         assert results[varname][0][0] == stamp2
 
+    @skip_if_server_version_lt('5.0.0')
+    def test_strict_xgroup(self, sr):
+        stream_name = 'xgroup_test_stream'
+        sr.delete(stream_name)
+        group_name = 'xgroup_test_group'
+        try:
+            sr.xgroup_destroy(name=stream_name, groupname=group_name)
+        except redis.ResponseError:
+            pass
+
+        with pytest.raises(redis.ResponseError):
+            sr.xgroup_create(name=stream_name, groupname=group_name, id='$')
+        stamp1 = sr.xadd(stream_name, name="marco", other="polo")
+        assert sr.xgroup_create(name=stream_name, groupname=group_name, id='$')
+
+        with pytest.raises(redis.ResponseError):
+            sr.xgroup_setid(name='nosuchstream', groupname=group_name, id='0')
+        with pytest.raises(redis.ResponseError):
+            sr.xgroup_setid(name=stream_name, groupname='nosuchgroup', id='0')
+        assert sr.xgroup_setid(name=stream_name, groupname=group_name, id='0')
+
+        # TODO: test xgroup_delconsumer after implementing XREADGROUP
+
+        assert sr.xgroup_destroy(name=stream_name, groupname=group_name) == 1
+
+    @skip_if_server_version_lt('4.9.105')
+    def test_strict_xack(self, sr):
+        stream_name = 'xack_test_stream'
+        sr.delete(stream_name)
+        group_name = 'xack_test_group'
+
+        assert sr.xack(stream_name, group_name, 0) == 0
+        assert sr.xack(stream_name, group_name, '1-1') == 0
+        assert sr.xack(stream_name, group_name, *[x for x in range(5)]) == 0
+
+    @skip_if_server_version_lt('4.9.105')
+    def test_strict_xdel(self, sr):
+        stream_name = 'xdel_test_stream'
+        sr.delete(stream_name)
+
+        assert sr.xdel(stream_name, 1) == 0
+
+        sr.xadd(stream_name, id=1, foo='bar')
+        assert sr.xdel(stream_name, 1) == 1
+
+        stamp = sr.xadd(stream_name, baz='qaz')
+        assert sr.xdel(stream_name, 1, stamp) == 1
+        assert sr.xdel(stream_name, 1, stamp, 42) == 0
+
+    @skip_if_server_version_lt('4.9.105')
+    def test_strict_xtrim(self, sr):
+        stream_name = 'xtrim_test_stream'
+        sr.delete(stream_name)
+
+        assert sr.xtrim(stream_name, 1000) == 0
+
+        for i in range(300):
+            sr.xadd(stream_name, index=i)
+
+        assert sr.xtrim(stream_name, 1000, approximate=False) == 0
+        assert sr.xtrim(stream_name, 300) == 0
+        assert sr.xtrim(stream_name, 299) == 0
+        assert sr.xtrim(stream_name, 234) == 0
+        assert sr.xtrim(stream_name, 234, approximate=False) == 66
+
     def test_strict_zadd(self, sr):
         sr.zadd('a', 1.0, 'a1', 2.0, 'a2', a3=3.0)
         assert sr.zrange('a', 0, -1, withscores=True) == \

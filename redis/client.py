@@ -399,6 +399,12 @@ class StrictRedis(object):
         string_keys_to_dict('XADD', stream_key),
         string_keys_to_dict('XREVRANGE XRANGE', stream_list),
         string_keys_to_dict('XREAD', multi_stream_list),
+        {
+            'XGROUP CREATE': bool_ok,
+            'XGROUP DESTROY': int,
+            'XGROUP SETID': bool_ok,
+            'XGROUP DELCONSUMER': int
+         },
         string_keys_to_dict(
             'INCRBYFLOAT HINCRBYFLOAT GEODIST',
             float
@@ -1806,6 +1812,42 @@ class StrictRedis(object):
 
         pieces.extend(ids)
         return self.execute_command('XREAD', *pieces)
+
+    def xgroup_create(self, name, groupname, id):
+        """
+        Create a new consumer group associated with a stream.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        id: ID of the last item in the stream to consider already delivered.
+        """
+        return self.execute_command('XGROUP CREATE', name, groupname, id)
+
+    def xgroup_destroy(self, name, groupname):
+        """
+        Destroy a consumer group.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        """
+        return self.execute_command('XGROUP DESTROY', name, groupname)
+
+    def xgroup_setid(self, name, groupname, id):
+        """
+        Set the consumer group last delivered ID to something else.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        id: ID of the last item in the stream to consider already delivered.
+        """
+        return self.execute_command('XGROUP SETID', name, groupname, id)
+
+    def xgroup_delconsumer(self, name, groupname, consumername):
+        """
+        Remove a specific consumer from a consumer group.
+        Returns the number of pending messages that the consumer had before it was deleted.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        consumername: name of consumer to delete
+        """
+        return self.execute_command('XGROUP DELCONSUMER', name, groupname, consumername)
 
     # SORTED SET COMMANDS
     def zadd(self, name, *args, **kwargs):
