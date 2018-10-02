@@ -1603,7 +1603,7 @@ class TestRedisCommands(object):
 
 class TestStrictCommands(object):
 
-    @skip_if_server_version_lt('6.0.0')
+    @skip_if_server_version_lt('5.0.0')
     def test_strict_xrange(self, sr):
         varname = 'xrange_test'
         sr.delete(varname)
@@ -1690,7 +1690,7 @@ class TestStrictCommands(object):
 
         assert sr.xgroup_destroy(name=stream_name, groupname=group_name) == 1
 
-    @skip_if_server_version_lt('4.9.105')
+    @skip_if_server_version_lt('5.0.0')
     def test_strict_xack(self, sr):
         stream_name = 'xack_test_stream'
         sr.delete(stream_name)
@@ -1700,7 +1700,7 @@ class TestStrictCommands(object):
         assert sr.xack(stream_name, group_name, '1-1') == 0
         assert sr.xack(stream_name, group_name, *[x for x in range(5)]) == 0
 
-    @skip_if_server_version_lt('4.9.105')
+    @skip_if_server_version_lt('5.0.0')
     def test_strict_xdel(self, sr):
         stream_name = 'xdel_test_stream'
         sr.delete(stream_name)
@@ -1714,7 +1714,7 @@ class TestStrictCommands(object):
         assert sr.xdel(stream_name, 1, stamp) == 1
         assert sr.xdel(stream_name, 1, stamp, 42) == 0
 
-    @skip_if_server_version_lt('4.9.105')
+    @skip_if_server_version_lt('5.0.0')
     def test_strict_xtrim(self, sr):
         stream_name = 'xtrim_test_stream'
         sr.delete(stream_name)
