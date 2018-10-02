@@ -1662,7 +1662,7 @@ class TestStrictCommands(object):
         results = sr.xread(varname='$', count=10, block=10)
         assert results is None
 
-        results = sr.xread(count=3, block=1000, **{varname: stamp1})
+        results = sr.xread(count=3, block=0, **{varname: stamp1})
         assert results[varname][0][0] == stamp2
 
     def test_strict_zadd(self, sr):

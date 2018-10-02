@@ -1788,8 +1788,8 @@ class StrictRedis(object):
         """
         pieces = []
         if block is not None:
-            if not isinstance(block, int) or block < 1:
-                raise RedisError("XREAD block must be a positive integer")
+            if not isinstance(block, int) or block < 0:
+                raise RedisError("XREAD block must be a non-negative integer")
             pieces.append("BLOCK")
             pieces.append(str(block))
         if count is not None:
