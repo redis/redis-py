@@ -7,8 +7,9 @@ python:
   - "3.3"
   - "2.7"
   - "2.6"
-services:
-  - redis-server
+before_install:
+  - wget http://download.redis.io/releases/redis-5.0.0.tar.gz && mkdir redis_install && tar -xvzf redis-5.0.0.tar.gz -C redis_install && cd redis_install/redis-5.0.0 && make && src/redis-server --daemonize yes && cd ../..
+  - redis-cli info
 env:
   - TEST_HIREDIS=0
   - TEST_HIREDIS=1
@@ -16,7 +17,7 @@ install:
   - pip install -e .
   - "if [[ $TEST_PYCODESTYLE == '1' ]]; then pip install pycodestyle; fi"
   - "if [[ $TEST_HIREDIS == '1' ]]; then pip install hiredis; fi"
-script: "if [[ $TEST_PYCODESTYLE == '1' ]]; then pycodestyle --repeat --show-source --exclude=.venv,.tox,dist,docs,build,*.egg .; else python setup.py test; fi"
+script: "if [[ $TEST_PYCODESTYLE == '1' ]]; then pycodestyle --repeat --show-source --exclude=.venv,.tox,dist,docs,build,*.egg,redis_install .; else python setup.py test; fi"
 matrix:
   include:
     - python: "2.7"
