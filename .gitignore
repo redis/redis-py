@@ -9,3 +9,4 @@ vagrant/.vagrant
 .python-version
 .cache
 .eggs
+.idea
