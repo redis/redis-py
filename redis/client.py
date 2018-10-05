@@ -385,7 +385,7 @@ class StrictRedis(object):
             'SAVE SELECT SHUTDOWN SLAVEOF WATCH UNWATCH',
             bool_ok
         ),
-        string_keys_to_dict('BLPOP BRPOP', lambda r: r and tuple(r) or None),
+        string_keys_to_dict('BLPOP BRPOP BZPOPMIN BZPOPMAX', lambda r: r and tuple(r) or None),
         string_keys_to_dict(
             'SDIFF SINTER SMEMBERS SUNION',
             lambda r: r and set(r) or set()
@@ -1743,6 +1743,46 @@ class StrictRedis(object):
             'withscores': True
         }
         return self.execute_command('ZPOPMIN', name, *args, **options)
+
+    def bzpopmax(self, keys, timeout=0):
+        """
+        ZPOPMAX a value off of the first non-empty sorted set
+        named in the ``keys`` list.
+
+        If none of the sorted sets in ``keys`` has a value to ZPOPMAX, 
+        then block for ``timeout`` seconds, or until a member gets added 
+        to one of the sorted sets.
+
+        If timeout is 0, then block indefinitely.
+        """
+        if timeout is None:
+            timeout = 0
+        if isinstance(keys, basestring):
+            keys = [keys]
+        else:
+            keys = list(keys)
+        keys.append(timeout)
+        return self.execute_command('BZPOPMAX', *keys)
+
+    def bzpopmin(self, keys, timeout=0):
+        """
+        ZPOPMIN a value off of the first non-empty sorted set
+        named in the ``keys`` list.
+
+        If none of the sorted sets in ``keys`` has a value to ZPOPMIN, 
+        then block for ``timeout`` seconds, or until a member gets added 
+        to one of the sorted sets.
+
+        If timeout is 0, then block indefinitely.
+        """
+        if timeout is None:
+            timeout = 0
+        if isinstance(keys, basestring):
+            keys = [keys]
+        else:
+            keys = list(keys)
+        keys.append(timeout)
+        return self.execute_command('BZPOPMIN', *keys)
 
     def zrange(self, name, start, end, desc=False, withscores=False,
                score_cast_func=float):
