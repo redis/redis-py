@@ -398,6 +398,7 @@ class StrictRedis(object):
         string_keys_to_dict('BGREWRITEAOF BGSAVE', lambda r: True),
         {
             'CLIENT GETNAME': lambda r: r and nativestr(r),
+            'CLIENT ID': int,
             'CLIENT KILL': bool_ok,
             'CLIENT LIST': parse_client_list,
             'CLIENT SETNAME': bool_ok,
@@ -706,6 +707,10 @@ class StrictRedis(object):
     def client_getname(self):
         "Returns the current connection name"
         return self.execute_command('CLIENT GETNAME')
+
+    def client_id(self):
+        "Returns the current connection id"
+        return self.execute_command('CLIENT ID')
 
     def client_setname(self, name):
         "Sets the current connection name"
