@@ -1,7 +1,0 @@
-{
-    "python.venvPath": "${workspaceFolder}/.tox",
-    "python.linting.enabled": false,
-    "python.unitTest.unittestEnabled": false,
-    "python.unitTest.nosetestsEnabled": false,
-    "python.unitTest.pyTestEnabled": true
-}
