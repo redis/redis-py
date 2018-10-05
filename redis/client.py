@@ -391,7 +391,7 @@ class StrictRedis(object):
             lambda r: r and set(r) or set()
         ),
         string_keys_to_dict(
-            'ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
+            'ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
             zset_score_pairs
         ),
         string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
@@ -1727,6 +1727,22 @@ class StrictRedis(object):
         lexicographical range ``min`` and ``max``.
         """
         return self.execute_command('ZLEXCOUNT', name, min, max)
+
+    def zpopmax(self, name, count=None):
+        "Remove and return up to ``count`` members with the highest scores from the sorted set ``name``"
+        args = (count is not None) and [count] or []
+        options = {
+            'withscores': True
+        }
+        return self.execute_command('ZPOPMAX', name, *args, **options)
+
+    def zpopmin(self, name, count=None):
+        "Remove and return up to ``count`` members with the lowest scores from the sorted set ``name``"
+        args = (count is not None) and [count] or []
+        options = {
+            'withscores': True
+        }
+        return self.execute_command('ZPOPMIN', name, *args, **options)
 
     def zrange(self, name, start, end, desc=False, withscores=False,
                score_cast_func=float):
