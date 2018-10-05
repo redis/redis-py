@@ -385,7 +385,7 @@ class StrictRedis(object):
             'SAVE SELECT SHUTDOWN SLAVEOF WATCH UNWATCH',
             bool_ok
         ),
-        string_keys_to_dict('BLPOP BRPOP BZPOPMIN BZPOPMAX', lambda r: r and tuple(r) or None),
+        string_keys_to_dict('BLPOP BRPOP', lambda r: r and tuple(r) or None),
         string_keys_to_dict(
             'SDIFF SINTER SMEMBERS SUNION',
             lambda r: r and set(r) or set()
@@ -394,6 +394,7 @@ class StrictRedis(object):
             'ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
             zset_score_pairs
         ),
+        string_keys_to_dict('BZPOPMIN BZPOPMAX', lambda r: r and (r[0], r[1], float(r[2])) or None),
         string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
         string_keys_to_dict('BGREWRITEAOF BGSAVE', lambda r: True),
         {
