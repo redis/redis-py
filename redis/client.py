@@ -402,6 +402,7 @@ class StrictRedis(object):
             'CLIENT KILL': bool_ok,
             'CLIENT LIST': parse_client_list,
             'CLIENT SETNAME': bool_ok,
+            'CLIENT UNBLOCK': int,
             'CONFIG GET': parse_config_get,
             'CONFIG RESETSTAT': bool_ok,
             'CONFIG SET': bool_ok,
@@ -715,6 +716,10 @@ class StrictRedis(object):
     def client_setname(self, name):
         "Sets the current connection name"
         return self.execute_command('CLIENT SETNAME', name)
+
+    def client_unblock(self, client_id):
+        "Unblocks a connection by its client id"
+        return self.execute_command('CLIENT UNBLOCK', client_id)
 
     def config_get(self, pattern="*"):
         "Return a dictionary of configuration based on the ``pattern``"

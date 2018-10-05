@@ -63,6 +63,11 @@ class TestRedisCommands(object):
     def test_client_id(self, r):
         assert r.client_id() > 0
 
+    @skip_if_server_version_lt('5.0.0')
+    def test_client_unblock(self, r):
+        myid = r.client_id()
+        assert r.client_unblock(myid) == 0
+
     @skip_if_server_version_lt('2.6.9')
     def test_client_getname(self, r):
         assert r.client_getname() is None
