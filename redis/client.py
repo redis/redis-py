@@ -402,7 +402,7 @@ class StrictRedis(object):
             'CLIENT KILL': bool_ok,
             'CLIENT LIST': parse_client_list,
             'CLIENT SETNAME': bool_ok,
-            'CLIENT UNBLOCK': int,
+            'CLIENT UNBLOCK': lambda r: r and int(r) == 1 or False,
             'CONFIG GET': parse_config_get,
             'CONFIG RESETSTAT': bool_ok,
             'CONFIG SET': bool_ok,
@@ -717,9 +717,18 @@ class StrictRedis(object):
         "Sets the current connection name"
         return self.execute_command('CLIENT SETNAME', name)
 
-    def client_unblock(self, client_id):
-        "Unblocks a connection by its client id"
-        return self.execute_command('CLIENT UNBLOCK', client_id)
+    def client_unblock(self, client_id, reason=None):
+        """
+        Unblocks a connection by its client id
+
+        The ``reason`` argument, if set to ``'error'``, unblocks the client
+        with a special error message. When set to ``'timeout'`` or if not set,
+        the client is unblocked using the regular timeout mechanism.
+        """
+        args = ['CLIENT UNBLOCK', int(client_id)]
+        if reason is not None and isinstance(reason, str):
+            args.append(reason)
+        return self.execute_command(*args)
 
     def config_get(self, pattern="*"):
         "Return a dictionary of configuration based on the ``pattern``"
