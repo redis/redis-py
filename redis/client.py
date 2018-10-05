@@ -394,7 +394,8 @@ class StrictRedis(object):
             'ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
             zset_score_pairs
         ),
-        string_keys_to_dict('BZPOPMIN BZPOPMAX', lambda r: r and (r[0], r[1], float(r[2])) or None),
+        string_keys_to_dict('BZPOPMIN BZPOPMAX', \
+                            lambda r: r and (r[0], r[1], float(r[2])) or None),
         string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
         string_keys_to_dict('BGREWRITEAOF BGSAVE', lambda r: True),
         {
@@ -1730,7 +1731,10 @@ class StrictRedis(object):
         return self.execute_command('ZLEXCOUNT', name, min, max)
 
     def zpopmax(self, name, count=None):
-        "Remove and return up to ``count`` members with the highest scores from the sorted set ``name``"
+        """
+        Remove and return up to ``count`` members with the highest scores
+        from the sorted set ``name``.
+        """
         args = (count is not None) and [count] or []
         options = {
             'withscores': True
@@ -1738,7 +1742,10 @@ class StrictRedis(object):
         return self.execute_command('ZPOPMAX', name, *args, **options)
 
     def zpopmin(self, name, count=None):
-        "Remove and return up to ``count`` members with the lowest scores from the sorted set ``name``"
+        """
+        Remove and return up to ``count`` members with the lowest scores
+        from the sorted set ``name``.
+        """
         args = (count is not None) and [count] or []
         options = {
             'withscores': True
@@ -1750,8 +1757,8 @@ class StrictRedis(object):
         ZPOPMAX a value off of the first non-empty sorted set
         named in the ``keys`` list.
 
-        If none of the sorted sets in ``keys`` has a value to ZPOPMAX, 
-        then block for ``timeout`` seconds, or until a member gets added 
+        If none of the sorted sets in ``keys`` has a value to ZPOPMAX,
+        then block for ``timeout`` seconds, or until a member gets added
         to one of the sorted sets.
 
         If timeout is 0, then block indefinitely.
@@ -1770,8 +1777,8 @@ class StrictRedis(object):
         ZPOPMIN a value off of the first non-empty sorted set
         named in the ``keys`` list.
 
-        If none of the sorted sets in ``keys`` has a value to ZPOPMIN, 
-        then block for ``timeout`` seconds, or until a member gets added 
+        If none of the sorted sets in ``keys`` has a value to ZPOPMIN,
+        then block for ``timeout`` seconds, or until a member gets added
         to one of the sorted sets.
 
         If timeout is 0, then block indefinitely.

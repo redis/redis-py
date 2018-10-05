@@ -977,7 +977,7 @@ class TestRedisCommands(object):
 
         # with count
         assert r.zpopmax('a', count=2) == \
-        [(b('a2'), 2), (b('a1'), 1)]
+            [(b('a2'), 2), (b('a1'), 1)]
 
     @skip_if_server_version_lt('4.9.0')
     def test_zpopmin(self, r):
@@ -987,7 +987,7 @@ class TestRedisCommands(object):
 
         # with count
         assert r.zpopmin('a', count=2) == \
-        [(b('a2'), 2), (b('a3'), 3)]
+            [(b('a2'), 2), (b('a3'), 3)]
 
     @skip_if_server_version_lt('4.9.0')
     def test_bzpopmax(self, r):
