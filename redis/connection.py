@@ -729,11 +729,15 @@ class SSLConnection(Connection):
     def _connect(self):
         "Wrap the socket with SSL support"
         sock = super(SSLConnection, self)._connect()
-        sock = ssl.wrap_socket(sock,
-                               cert_reqs=self.cert_reqs,
-                               keyfile=self.keyfile,
-                               certfile=self.certfile,
-                               ca_certs=self.ca_certs)
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = self.cert_reqs
+        if self.certfile and self.keyfile:
+            context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
+        if self.ca_certs:
+            context.load_verify_locations(self.ca_certs)
+        sock = context.wrap_socket(sock,
+                               server_hostname=self.host)
         return sock
 
 
