@@ -250,7 +250,7 @@ def stream_list(response):
     return result
 
 
-def parse_xinfo_dict(response):
+def parse_recursive_dict(response):
     if response is None:
         return None
     result = {}
@@ -258,18 +258,24 @@ def parse_xinfo_dict(response):
         k = response.pop(0)
         v = response.pop(0)
         if isinstance(v, list):
-            v = parse_xinfo_dict(v)
+            v = parse_recursive_dict(v)
         result[k] = v
     return result
 
 
-def parse_xinfo_list(response):
+def parse_list_of_recursive_dicts(response):
     if response is None:
         return None
     result = []
     for group in response:
-        result.append(parse_xinfo_dict(group))
+        result.append(parse_recursive_dict(group))
     return result
+
+
+def parse_xclaim(response):
+    if isinstance(response, str):
+        return response
+    return stream_list(response)
 
 
 def multi_stream_list(response):
@@ -428,10 +434,11 @@ class StrictRedis(object):
             'XGROUP DELCONSUMER': int
         },
         {
-            'XINFO STREAM': parse_xinfo_dict,
-            'XINFO CONSUMERS': parse_xinfo_list,
-            'XINFO GROUPS': parse_xinfo_list
+            'XINFO STREAM': parse_recursive_dict,
+            'XINFO CONSUMERS': parse_list_of_recursive_dicts,
+            'XINFO GROUPS': parse_list_of_recursive_dicts
         },
+        string_keys_to_dict('XCLAIM', parse_xclaim),
         string_keys_to_dict(
             'XACK XDEL XTRIM',
             int
@@ -2019,6 +2026,30 @@ class StrictRedis(object):
             ids.append(partial_stream[1])
         pieces.extend(ids)
         return self.execute_command('XREADGROUP', *pieces)
+
+    def xpending(self, name, groupname, start=None, end=None, count=None,
+                 consumername=None):
+        """
+        Returns information about pending messages.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        consumername: name of a consumer to filter by (optional).
+        """
+        pieces = [name, groupname]
+        if start is not None or end is not None or count is not None:
+            if start is None or end is None or count is None:
+                raise RedisError("XPENDING must be provided with start, end "
+                                 "and count parameters, or none of them. ")
+            if not isinstance(count, int) or count < 1:
+                raise RedisError("XPENDING count must be a positive integer")
+            pieces.extend((start, end, str(count)))
+        if consumername is not None:
+            if start is None or end is None or count is None:
+                raise RedisError("if XPENDING is provided with consumername,"
+                                 " it must be provided with start, end and"
+                                 " count parameters")
+            pieces.append(consumername)
+        return self.execute_command('XPENDING', *pieces)
 
     # SORTED SET COMMANDS
     def zadd(self, name, *args, **kwargs):
