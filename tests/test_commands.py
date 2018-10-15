@@ -1670,8 +1670,10 @@ class TestStrictCommands(object):
         stream_name = 'xgroup_test_stream'
         sr.delete(stream_name)
         group_name = 'xgroup_test_group'
+        message = {'name': 'boaty', 'other': 'mcboatface'}
+        b_message = {b('name'): b('boaty'), b('other'): b('mcboatface')}
 
-        stamp1 = sr.xadd(stream_name, name="boaty", other="mcboatface")
+        stamp1 = sr.xadd(stream_name, **message)
         assert stamp1 in sr.xinfo_stream(name=stream_name)[b('first-entry')]
 
         assert sr.xinfo_groups(name=stream_name) == []
@@ -1682,13 +1684,21 @@ class TestStrictCommands(object):
             sr.xgroup_setid(name='nosuchstream', groupname=group_name, id='0')
         with pytest.raises(redis.ResponseError):
             sr.xgroup_setid(name=stream_name, groupname='nosuchgroup', id='0')
-        assert sr.xinfo_groups(name=stream_name)[0][b('last-delivered-id')] \
-               == b(stamp1)
+        assert sr.xinfo_groups(name=stream_name)[0][
+                   b('last-delivered-id')] == b(stamp1)
         assert sr.xgroup_setid(name=stream_name, groupname=group_name, id='0')
-        assert sr.xinfo_groups(name=stream_name)[0][b('last-delivered-id')]\
-               == b('0-0')
+        assert sr.xinfo_groups(name=stream_name)[0][
+                   b('last-delivered-id')] == b('0-0')
 
-        # TODO: test xgroup_delconsumer after implementing XREADGROUP
+        consumer_name = 'captain_jack_sparrow'
+
+        assert sr.xreadgroup(groupname=group_name, consumername=consumer_name,
+                             **{stream_name: '0'}) == {
+                   stream_name: [(b(stamp1), b_message)]}
+
+        assert sr.xinfo_groups(name=stream_name)[0][b('consumers')] == 1
+        sr.xgroup_delconsumer(stream_name, group_name, consumer_name)
+        assert sr.xinfo_groups(name=stream_name)[0][b('consumers')] == 0
 
         assert sr.xgroup_destroy(name=stream_name, groupname=group_name) == 1
 

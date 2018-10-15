@@ -420,7 +420,7 @@ class StrictRedis(object):
         ),
         string_keys_to_dict('XADD', stream_key),
         string_keys_to_dict('XREVRANGE XRANGE', stream_list),
-        string_keys_to_dict('XREAD', multi_stream_list),
+        string_keys_to_dict('XREAD XREADGROUP', multi_stream_list),
         {
             'XGROUP CREATE': bool_ok,
             'XGROUP DESTROY': int,
@@ -1985,6 +1985,40 @@ class StrictRedis(object):
             pieces.append('~')
         pieces.append(maxlen)
         return self.execute_command('XTRIM', name, *pieces)
+
+    def xreadgroup(self, groupname, consumername, count=None, block=None,
+                   **streams):
+        """
+        Read from a stream via a consumer group.
+        groupname: name of the consumer group.
+        consumername: name of the requesting consumer.
+        count: if set, only return this many items, beginning with the
+               earliest available.
+        block: number of milliseconds to wait, if nothing already present.
+        **streams: a mapping of stream names to stream IDs, where
+               IDs indicate the last ID already seen.
+        """
+        if streams is None:
+            streams = {}
+        pieces = ['GROUP', groupname, consumername]
+        if block is not None:
+            if not isinstance(block, int) or block < 0:
+                raise RedisError("XREAD block must be a non-negative integer")
+            pieces.append("BLOCK")
+            pieces.append(str(block))
+        if count is not None:
+            if not isinstance(count, int) or count < 1:
+                raise RedisError("XREAD count must be a positive integer")
+            pieces.append("COUNT")
+            pieces.append(str(count))
+
+        pieces.append("STREAMS")
+        ids = []
+        for partial_stream in iteritems(streams):
+            pieces.append(partial_stream[0])
+            ids.append(partial_stream[1])
+        pieces.extend(ids)
+        return self.execute_command('XREADGROUP', *pieces)
 
     # SORTED SET COMMANDS
     def zadd(self, name, *args, **kwargs):
