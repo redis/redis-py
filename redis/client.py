@@ -433,7 +433,7 @@ class StrictRedis(object):
             'XINFO GROUPS': parse_xinfo_list
         },
         string_keys_to_dict(
-            'XACK XDEL',
+            'XACK XDEL XTRIM',
             int
         ),
         string_keys_to_dict(
@@ -1972,6 +1972,19 @@ class StrictRedis(object):
         *ids: message ids to delete.
         """
         return self.execute_command('XDEL', name, *ids)
+
+    def xtrim(self, name, maxlen, approximate=True):
+        """
+        Trims old messages from a stream.
+        name: name of the stream.
+        maxlen: truncate old stream messages beyond this size
+        approximate: actual stream length may be slightly more than maxlen
+        """
+        pieces = ['MAXLEN']
+        if approximate:
+            pieces.append('~')
+        pieces.append(maxlen)
+        return self.execute_command('XTRIM', name, *pieces)
 
     # SORTED SET COMMANDS
     def zadd(self, name, *args, **kwargs):
