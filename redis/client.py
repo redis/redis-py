@@ -1763,10 +1763,10 @@ class StrictRedis(object):
         pieces = []
         if maxlen is not None:
             if not isinstance(maxlen, int) or maxlen < 1:
-                raise RedisError("XADD maxlen must be a positive integer")
-            pieces.append("MAXLEN")
+                raise RedisError('XADD maxlen must be a positive integer')
+            pieces.append('MAXLEN')
             if approximate:
-                pieces.append("~")
+                pieces.append('~')
             pieces.append(str(maxlen))
         pieces.append(id)
         for pair in iteritems(kwargs):
@@ -1788,8 +1788,8 @@ class StrictRedis(object):
         pieces = [start, finish]
         if count is not None:
             if not isinstance(count, int) or count < 1:
-                raise RedisError("XRANGE count must be a positive integer")
-            pieces.append("COUNT")
+                raise RedisError('XRANGE count must be a positive integer')
+            pieces.append('COUNT')
             pieces.append(str(count))
 
         return self.execute_command('XRANGE', name, *pieces)
@@ -1808,8 +1808,8 @@ class StrictRedis(object):
         pieces = [start, finish]
         if count is not None:
             if not isinstance(count, int) or count < 1:
-                raise RedisError("XREVRANGE count must be a positive integer")
-            pieces.append("COUNT")
+                raise RedisError('XREVRANGE count must be a positive integer')
+            pieces.append('COUNT')
             pieces.append(str(count))
 
         return self.execute_command('XREVRANGE', name, *pieces)
@@ -1832,16 +1832,16 @@ class StrictRedis(object):
         pieces = []
         if block is not None:
             if not isinstance(block, int) or block < 0:
-                raise RedisError("XREAD block must be a non-negative integer")
-            pieces.append("BLOCK")
+                raise RedisError('XREAD block must be a non-negative integer')
+            pieces.append('BLOCK')
             pieces.append(str(block))
         if count is not None:
             if not isinstance(count, int) or count < 1:
-                raise RedisError("XREAD count must be a positive integer")
-            pieces.append("COUNT")
+                raise RedisError('XREAD count must be a positive integer')
+            pieces.append('COUNT')
             pieces.append(str(count))
 
-        pieces.append("STREAMS")
+        pieces.append('STREAMS')
         ids = []
         for partial_stream in iteritems(streams):
             pieces.append(partial_stream[0])
