@@ -426,12 +426,13 @@ class StrictRedis(object):
             'XGROUP DESTROY': int,
             'XGROUP SETID': bool_ok,
             'XGROUP DELCONSUMER': int
-         },
+        },
         {
             'XINFO STREAM': parse_xinfo_dict,
             'XINFO CONSUMERS': parse_xinfo_list,
             'XINFO GROUPS': parse_xinfo_list
         },
+        string_keys_to_dict('XACK', int),
         string_keys_to_dict(
             'INCRBYFLOAT HINCRBYFLOAT GEODIST',
             float
@@ -1951,6 +1952,15 @@ class StrictRedis(object):
         name: name of the stream.
         """
         return self.execute_command('XINFO GROUPS', name)
+
+    def xack(self, name, groupname, *ids):
+        """
+        Acknowledges the successful processing of one or more messages.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        *ids: message ids to acknowlege.
+        """
+        return self.execute_command('XACK', name, groupname, *ids)
 
     # SORTED SET COMMANDS
     def zadd(self, name, *args, **kwargs):

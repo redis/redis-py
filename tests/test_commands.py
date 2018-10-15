@@ -1732,6 +1732,16 @@ class TestStrictCommands(object):
         assert sr.xtrim(stream_name, 234) == 0
         assert sr.xtrim(stream_name, 234, approximate=False) == 66
 
+    @skip_if_server_version_lt('5.0.0')
+    def test_strict_xack(self, sr):
+        stream_name = 'xack_test_stream'
+        sr.delete(stream_name)
+        group_name = 'xack_test_group'
+
+        assert sr.xack(stream_name, group_name, 0) == 0
+        assert sr.xack(stream_name, group_name, '1-1') == 0
+        assert sr.xack(stream_name, group_name, *[x for x in range(5)]) == 0
+
     def test_strict_zadd(self, sr):
         sr.zadd('a', 1.0, 'a1', 2.0, 'a2', a3=3.0)
         assert sr.zrange('a', 0, -1, withscores=True) == \
