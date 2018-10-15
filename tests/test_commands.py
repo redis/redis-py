@@ -1742,6 +1742,20 @@ class TestStrictCommands(object):
         assert sr.xack(stream_name, group_name, '1-1') == 0
         assert sr.xack(stream_name, group_name, *[x for x in range(5)]) == 0
 
+    @skip_if_server_version_lt('5.0.0')
+    def test_strict_xdel(self, sr):
+        stream_name = 'xdel_test_stream'
+        sr.delete(stream_name)
+
+        assert sr.xdel(stream_name, 1) == 0
+
+        sr.xadd(stream_name, id=1, foo='bar')
+        assert sr.xdel(stream_name, 1) == 1
+
+        stamp = sr.xadd(stream_name, baz='qaz')
+        assert sr.xdel(stream_name, 1, stamp) == 1
+        assert sr.xdel(stream_name, 1, stamp, 42) == 0
+
     def test_strict_zadd(self, sr):
         sr.zadd('a', 1.0, 'a1', 2.0, 'a2', a3=3.0)
         assert sr.zrange('a', 0, -1, withscores=True) == \

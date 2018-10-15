@@ -432,7 +432,10 @@ class StrictRedis(object):
             'XINFO CONSUMERS': parse_xinfo_list,
             'XINFO GROUPS': parse_xinfo_list
         },
-        string_keys_to_dict('XACK', int),
+        string_keys_to_dict(
+            'XACK XDEL',
+            int
+        ),
         string_keys_to_dict(
             'INCRBYFLOAT HINCRBYFLOAT GEODIST',
             float
@@ -1961,6 +1964,14 @@ class StrictRedis(object):
         *ids: message ids to acknowlege.
         """
         return self.execute_command('XACK', name, groupname, *ids)
+
+    def xdel(self, name, *ids):
+        """
+        Deletes one or more messages from a stream.
+        name: name of the stream.
+        *ids: message ids to delete.
+        """
+        return self.execute_command('XDEL', name, *ids)
 
     # SORTED SET COMMANDS
     def zadd(self, name, *args, **kwargs):
