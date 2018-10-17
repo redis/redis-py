@@ -195,7 +195,7 @@ def pairs_to_dict_typed(response, type_info):
         if key in type_info:
             try:
                 value = type_info[key](value)
-            except:
+            except Exception:
                 # if for some reason the value can't be coerced, just use
                 # the string value
                 pass
@@ -325,6 +325,7 @@ def parse_zscan(response, **options):
     cursor, r = response
     it = iter(r)
     return long(cursor), list(izip(it, imap(score_cast_func, it)))
+
 
 def parse_slowlog_get(response, **options):
     return [{
