@@ -126,34 +126,6 @@ class TestRedisCommands(object):
     def test_ping(self, r):
         assert r.ping()
 
-    def test_shutdown(self, r):
-        r.shutdown()
-        # Attempt to ping the server after the shutdown.  The library should
-        #    reconnect, but will return a connection error for the next couple
-        #    of attempts.  This loop will reattempt a ping until a success or
-        #    one second timeout.
-        for i in range(10):
-            try:
-                r.ping()
-                break
-            except:
-                time.sleep(0.1)
-        assert r.ping()
-
-    def test_shutdown_nosave(self, r):
-        r.shutdown(save=False)
-        # Attempt to ping the server after the shutdown.  The library should
-        #    reconnect, but will return a connection error for the next couple
-        #    of attempts.  This loop will reattempt a ping until a success or
-        #    one second timeout.
-        for i in range(10):
-            try:
-                r.ping()
-                break
-            except:
-                time.sleep(0.1)
-        assert r.ping()
-
     def test_slowlog_get(self, r, slowlog):
         assert r.slowlog_reset()
         unicode_string = unichr(3456) + u('abcd') + unichr(3421)
