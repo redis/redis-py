@@ -822,10 +822,13 @@ class StrictRedis(object):
         "Returns a list of slaves for ``service_name``"
         return self.execute_command('SENTINEL SLAVES', service_name)
 
-    def shutdown(self):
+    def shutdown(self, option=None):
         "Shutdown the server"
         try:
-            self.execute_command('SHUTDOWN')
+            args = ['SHUTDOWN']
+            if option is not None:
+                args.append(option)
+            self.execute_command(*args)
         except ConnectionError:
             # a ConnectionError here is expected
             return
