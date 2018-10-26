@@ -937,7 +937,7 @@ class ConnectionPool(object):
     def __repr__(self):
         return "%s<%s>" % (
             type(self).__name__,
-            self.connection_class.description_format % self.connection_kwargs,
+            repr(self.connection_class(**self.connection_kwargs)),
         )
 
     def reset(self):
