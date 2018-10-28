@@ -1763,7 +1763,7 @@ class StrictRedis(object):
         """
         pieces = []
         if maxlen is not None:
-            if not isinstance(maxlen, int) or maxlen < 1:
+            if not isinstance(maxlen, (int, long)) or maxlen < 1:
                 raise RedisError('XADD maxlen must be a positive integer')
             pieces.append('MAXLEN')
             if approximate:
@@ -1790,7 +1790,7 @@ class StrictRedis(object):
         """
         pieces = [start, finish]
         if count is not None:
-            if not isinstance(count, int) or count < 1:
+            if not isinstance(count, (int, long)) or count < 1:
                 raise RedisError('XRANGE count must be a positive integer')
             pieces.append('COUNT')
             pieces.append(str(count))
@@ -1810,7 +1810,7 @@ class StrictRedis(object):
         """
         pieces = [start, finish]
         if count is not None:
-            if not isinstance(count, int) or count < 1:
+            if not isinstance(count, (int, long)) or count < 1:
                 raise RedisError('XREVRANGE count must be a positive integer')
             pieces.append('COUNT')
             pieces.append(str(count))
@@ -1834,12 +1834,12 @@ class StrictRedis(object):
         """
         pieces = []
         if block is not None:
-            if not isinstance(block, int) or block < 0:
+            if not isinstance(block, (int, long)) or block < 0:
                 raise RedisError('XREAD block must be a non-negative integer')
             pieces.append('BLOCK')
             pieces.append(str(block))
         if count is not None:
-            if not isinstance(count, int) or count < 1:
+            if not isinstance(count, (int, long)) or count < 1:
                 raise RedisError('XREAD count must be a positive integer')
             pieces.append('COUNT')
             pieces.append(str(count))
@@ -2011,12 +2011,12 @@ class StrictRedis(object):
             streams = {}
         pieces = ['GROUP', groupname, consumername]
         if count is not None:
-            if not isinstance(count, int) or count < 1:
+            if not isinstance(count, (int, long)) or count < 1:
                 raise RedisError("XREADGROUP count must be a positive integer")
             pieces.append("COUNT")
             pieces.append(str(count))
         if block is not None:
-            if not isinstance(block, int) or block < 0:
+            if not isinstance(block, (int, long)) or block < 0:
                 raise RedisError("XREADGROUP block must be a non-negative "
                                  "integer")
             pieces.append("BLOCK")
@@ -2042,7 +2042,7 @@ class StrictRedis(object):
             if start is None or end is None or count is None:
                 raise RedisError("XPENDING must be provided with start, end "
                                  "and count parameters, or none of them. ")
-            if not isinstance(count, int) or count < 1:
+            if not isinstance(count, (int, long)) or count < 1:
                 raise RedisError("XPENDING count must be a positive integer")
             pieces.extend((start, end, str(count)))
         if consumername is not None:
@@ -2078,7 +2078,7 @@ class StrictRedis(object):
         justid: optional boolean, false by default. Return just an array of IDs
          of messages successfully claimed, without returning the actual message
         """
-        if not isinstance(min_idle_time, int) or min_idle_time < 0:
+        if not isinstance(min_idle_time, (int, long)) or min_idle_time < 0:
             raise RedisError("XCLAIM min_idle_time must be a non negative "
                              "integer")
         if not isinstance(message_ids, (list, tuple)) or not message_ids:
@@ -2091,7 +2091,7 @@ class StrictRedis(object):
         optional_ints = {idle: 'idle', time: 'time', retrycount: 'retrycount'}
         for param, param_name in optional_ints.items():
             if param is not None:
-                if not isinstance(param, int):
+                if not isinstance(param, (int, long)):
                     raise RedisError("XCLAIM {} must be an integer"
                                      .format(param_name))
                 pieces.append(str(param))
