@@ -1783,6 +1783,21 @@ class TestStrictCommands(object):
         assert sr.xtrim(stream_name, 234) == 0
         assert sr.xtrim(stream_name, 234, approximate=False) == 66
 
+    @skip_if_server_version_lt('5.0.0')
+    def test_strict_xclaim(self, sr):
+        stream_name = 'xclaim_test_stream'
+        group_name = 'xclaim_test_consumer_group'
+        sr.delete(stream_name)
+
+        stamp = sr.xadd(stream_name, {"john": "wick"})
+        sr.xgroup_create(stream_name, group_name, id='0')
+        sr.xreadgroup(group_name, 'action_movie_consumer',
+                      xclaim_test_stream=0)
+        assert sr.xinfo_consumers(stream_name, group_name)[0][
+                   b('name')] == b('action_movie_consumer')
+        assert sr.xclaim(stream_name, group_name, 'reeves_fan',
+                         min_idle_time=0, message_ids=(stamp,))[0][0] == stamp
+
     def test_strict_zadd(self, sr):
         sr.zadd('a', 1.0, 'a1', 2.0, 'a2', a3=3.0)
         assert sr.zrange('a', 0, -1, withscores=True) == \
