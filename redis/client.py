@@ -266,13 +266,10 @@ def parse_xclaim(response):
     return stream_list(response)
 
 
-def multi_stream_list(response):
+def parse_xreadgroup(response):
     if response is None:
         return None
-    result = dict()
-    for r in response:
-        result[nativestr(r[0])] = stream_list(r[1])
-    return result
+    return [[nativestr(r[0]), stream_list(r[1])] for r in response]
 
 
 def float_or_none(response):
@@ -413,7 +410,7 @@ class StrictRedis(object):
             int
         ),
         string_keys_to_dict('XREVRANGE XRANGE', stream_list),
-        string_keys_to_dict('XREAD XREADGROUP', multi_stream_list),
+        string_keys_to_dict('XREAD XREADGROUP', parse_xreadgroup),
         {
             'XGROUP CREATE': bool_ok,
             'XGROUP DESTROY': int,

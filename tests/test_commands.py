@@ -1692,9 +1692,10 @@ class TestStrictCommands(object):
 
         consumer_name = 'captain_jack_sparrow'
 
-        assert sr.xreadgroup(groupname=group_name, consumername=consumer_name,
-                             **{stream_name: '0'}) == {
-                   stream_name: [(b(stamp1), b_message)]}
+        expected_value = [['xgroup_test_stream', [(stamp1, b_message)]]]
+        assert sr.xreadgroup(groupname=group_name,
+                             consumername=consumer_name,
+                             **{stream_name: '0'}) == expected_value
 
         assert sr.xinfo_groups(name=stream_name)[0][b('consumers')] == 1
         sr.xgroup_delconsumer(stream_name, group_name, consumer_name)
