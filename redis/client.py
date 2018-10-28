@@ -2088,17 +2088,17 @@ class StrictRedis(object):
         pieces.extend(list(message_ids))
 
         optional_ints = {idle: 'idle', time: 'time', retrycount: 'retrycount'}
-        for param, param_name in optional_ints.items():
-            if param is not None:
-                if not isinstance(param, (int, long)):
+        for param_value, param_name in optional_ints.items():
+            if param_value is not None:
+                if not isinstance(param_value, (int, long)):
                     raise RedisError("XCLAIM {} must be an integer"
                                      .format(param_name))
-                pieces.append(str(param))
+                pieces.extend((param_name, str(param_value)))
 
         optional_bools = {force: 'force', justid: 'justid'}
-        for param, param_name in optional_bools.items():
-            if param:
-                if not isinstance(param, bool):
+        for param_value, param_name in optional_bools.items():
+            if param_value:
+                if not isinstance(param_value, bool):
                     raise RedisError("XCLAIM {} must be a boolean"
                                      .format(param_name))
                 pieces.append(param_name.upper())
