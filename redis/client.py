@@ -235,15 +235,7 @@ def int_or_none(response):
 def stream_list(response):
     if response is None:
         return None
-    result = []
-    for r in response:
-        kv_pairs = r[1]
-        kv_dict = dict()
-        while len(kv_pairs) > 1:
-            kv_dict[kv_pairs.pop()] = kv_pairs.pop()
-        result.append((r[0], kv_dict))
-
-    return result
+    return [(r[0], pairs_to_dict(r[1])) for r in response]
 
 
 def parse_recursive_dict(response):
