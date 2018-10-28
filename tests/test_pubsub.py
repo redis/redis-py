@@ -439,3 +439,12 @@ class TestPubSubPings(object):
         assert wait_for_message(p) == make_message(type='pong', channel=None,
                                                    data='',
                                                    pattern=None)
+
+    @skip_if_server_version_lt('3.0.0')
+    def test_send_pubsub_ping_message(self, r):
+        p = r.pubsub(ignore_subscribe_messages=True)
+        p.subscribe('foo')
+        p.ping(message='hello world')
+        assert wait_for_message(p) == make_message(type='pong', channel=None,
+                                                   data='hello world',
+                                                   pattern=None)

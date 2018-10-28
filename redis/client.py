@@ -2517,11 +2517,11 @@ class PubSub(object):
             return self.handle_message(response, ignore_subscribe_messages)
         return None
 
-    def ping(self):
+    def ping(self, message=None):
         """
         Ping the Redis server
         """
-        return self.execute_command('PING')
+        return self.execute_command('PING', message)
 
     def handle_message(self, response, ignore_subscribe_messages=False):
         """
