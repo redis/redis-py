@@ -1773,8 +1773,7 @@ class StrictRedis(object):
         if not isinstance(fields, dict) or len(fields) == 0:
             raise RedisError('XADD fields must be a non-empty dict')
         for pair in iteritems(fields):
-            pieces.append(pair[0])
-            pieces.append(pair[1])
+            pieces.extend(pair)
         return self.execute_command('XADD', _name, *pieces)
 
     def xrange(self, name, start='-', finish='+', count=None):
