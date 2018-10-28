@@ -2521,6 +2521,7 @@ class PubSub(object):
         """
         Ping the Redis server
         """
+        message = '' if message is None else message
         return self.execute_command('PING', message)
 
     def handle_message(self, response, ignore_subscribe_messages=False):
