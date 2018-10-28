@@ -232,10 +232,6 @@ def int_or_none(response):
     return int(response)
 
 
-def stream_key(response):
-    return response
-
-
 def stream_list(response):
     if response is None:
         return None
@@ -424,7 +420,6 @@ class StrictRedis(object):
             'GEOADD XLEN',
             int
         ),
-        string_keys_to_dict('XADD', stream_key),
         string_keys_to_dict('XREVRANGE XRANGE', stream_list),
         string_keys_to_dict('XREAD XREADGROUP', multi_stream_list),
         {
