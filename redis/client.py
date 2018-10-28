@@ -1750,15 +1750,15 @@ class StrictRedis(object):
         return self.execute_command('SUNIONSTORE', dest, *args)
 
     # STREAMS COMMANDS
-    def xadd(self, _name, id='*', maxlen=None, approximate=True, **kwargs):
+    def xadd(self, _name, fields, id='*', maxlen=None, approximate=True):
         """
         Add to a stream.
         _name: name of the stream (not using 'name' as this would
                prevent 'name' used in the kwargs
+        fields: dict of field/value pairs to insert into the stream
         id: Location to insert this record. By default it is appended.
         maxlen: truncate old stream members beyond this size
         approximate: actual stream length may be slightly more than maxlen
-        **kwargs: key/value pairs to insert into the stream
 
         """
         pieces = []
@@ -1770,7 +1770,9 @@ class StrictRedis(object):
                 pieces.append('~')
             pieces.append(str(maxlen))
         pieces.append(id)
-        for pair in iteritems(kwargs):
+        if not isinstance(fields, dict) or len(fields) == 0:
+            raise RedisError('XADD fields must be a non-empty dict')
+        for pair in iteritems(fields):
             pieces.append(pair[0])
             pieces.append(pair[1])
         return self.execute_command('XADD', _name, *pieces)

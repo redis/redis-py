@@ -1608,18 +1608,18 @@ class TestStrictCommands(object):
         varname = 'xrange_test'
         sr.delete(varname)
         assert sr.xlen(varname) == 0
-        stamp1 = sr.xadd(varname, name="bar", other="rab", maxlen=4)
+        stamp1 = sr.xadd(varname, {"name": "bar", "other": "rab"}, maxlen=4)
         assert sr.xlen(varname) == 1
-        stamp2 = sr.xadd(varname, name="baz", other="zab")
+        stamp2 = sr.xadd(varname, {"name": "baz", "other": "zab"})
         assert sr.xlen(varname) == 2
         assert stamp1 != stamp2
 
         milli, offset = stamp2.decode('utf-8').split('-')
         new_id = "{0}-0".format(int(milli) + 10000).encode('utf-8')
-        stamp3 = sr.xadd(varname, id=new_id, foo="bar")
+        stamp3 = sr.xadd(varname, {"foo": "bar"}, id=new_id)
         assert sr.xlen(varname) == 3
         assert stamp3 == new_id
-        stamp4 = sr.xadd(varname, foo="baz")
+        stamp4 = sr.xadd(varname, {"foo": "baz"})
         assert sr.xlen(varname) == 4
 
         def get_ids(results):
@@ -1655,15 +1655,15 @@ class TestStrictCommands(object):
     def test_strict_xread(self, sr):
         varname = 'xread_test'
         sr.delete(varname)
-        stamp1 = sr.xadd(varname, name="bar", other="rab", maxlen=4)
-        stamp2 = sr.xadd(varname, name="baz", other="zab")
+        stamp1 = sr.xadd(varname, {"name": "bar", "other": "rab"}, maxlen=4)
+        stamp2 = sr.xadd(varname, {"name": "baz", "other": "zab"})
         assert stamp1 != stamp2
 
         results = sr.xread(varname='$', count=10, block=10)
         assert results is None
 
         results = sr.xread(count=3, block=0, **{varname: stamp1})
-        assert results[varname][0][0] == stamp2
+        assert results[0][1][0][0] == stamp2
 
     @skip_if_server_version_lt('5.0.0')
     def test_strict_xgroup(self, sr):
@@ -1673,7 +1673,7 @@ class TestStrictCommands(object):
         message = {'name': 'boaty', 'other': 'mcboatface'}
         b_message = {b('name'): b('boaty'), b('other'): b('mcboatface')}
 
-        stamp1 = sr.xadd(stream_name, **message)
+        stamp1 = sr.xadd(stream_name, message)
         assert stamp1 in sr.xinfo_stream(name=stream_name)[b('first-entry')]
 
         assert sr.xinfo_groups(name=stream_name) == []
@@ -1719,10 +1719,10 @@ class TestStrictCommands(object):
 
         assert sr.xdel(stream_name, 1) == 0
 
-        sr.xadd(stream_name, id=1, foo='bar')
+        sr.xadd(stream_name, {"foo": "bar"}, id=1)
         assert sr.xdel(stream_name, 1) == 1
 
-        stamp = sr.xadd(stream_name, baz='qaz')
+        stamp = sr.xadd(stream_name, {"baz": "qaz"})
         assert sr.xdel(stream_name, 1, stamp) == 1
         assert sr.xdel(stream_name, 1, stamp, 42) == 0
 
@@ -1734,7 +1734,7 @@ class TestStrictCommands(object):
         assert sr.xtrim(stream_name, 1000) == 0
 
         for i in range(300):
-            sr.xadd(stream_name, index=i)
+            sr.xadd(stream_name, {"index": i})
 
         assert sr.xtrim(stream_name, 1000, approximate=False) == 0
         assert sr.xtrim(stream_name, 300) == 0
@@ -1759,10 +1759,10 @@ class TestStrictCommands(object):
 
         assert sr.xdel(stream_name, 1) == 0
 
-        sr.xadd(stream_name, id=1, foo='bar')
+        sr.xadd(stream_name, {"foo": "bar"}, id=1)
         assert sr.xdel(stream_name, 1) == 1
 
-        stamp = sr.xadd(stream_name, baz='qaz')
+        stamp = sr.xadd(stream_name, {"baz": "qaz"})
         assert sr.xdel(stream_name, 1, stamp) == 1
         assert sr.xdel(stream_name, 1, stamp, 42) == 0
 
@@ -1774,7 +1774,7 @@ class TestStrictCommands(object):
         assert sr.xtrim(stream_name, 1000) == 0
 
         for i in range(300):
-            sr.xadd(stream_name, index=i)
+            sr.xadd(stream_name, {"index": i})
 
         assert sr.xtrim(stream_name, 1000, approximate=False) == 0
         assert sr.xtrim(stream_name, 300) == 0
