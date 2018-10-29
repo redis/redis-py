@@ -1659,10 +1659,10 @@ class TestStrictCommands(object):
         stamp2 = sr.xadd(varname, {"name": "baz", "other": "zab"})
         assert stamp1 != stamp2
 
-        results = sr.xread(varname='$', count=10, block=10)
+        results = sr.xread(streams={varname: '$'}, count=10, block=10)
         assert results is None
 
-        results = sr.xread(count=3, block=0, **{varname: stamp1})
+        results = sr.xread(count=3, block=0, streams={varname: stamp1})
         assert results[0][1][0][0] == stamp2
 
     @skip_if_server_version_lt('5.0.0')
@@ -1695,7 +1695,7 @@ class TestStrictCommands(object):
         expected_value = [['xgroup_test_stream', [(stamp1, b_message)]]]
         assert sr.xreadgroup(groupname=group_name,
                              consumername=consumer_name,
-                             **{stream_name: '0'}) == expected_value
+                             streams={stream_name: '0'}) == expected_value
 
         assert sr.xinfo_groups(name=stream_name)[0][b('consumers')] == 1
         sr.xgroup_delconsumer(stream_name, group_name, consumer_name)
@@ -1792,7 +1792,7 @@ class TestStrictCommands(object):
         stamp = sr.xadd(stream_name, {"john": "wick"})
         sr.xgroup_create(stream_name, group_name, id='0')
         sr.xreadgroup(group_name, 'action_movie_consumer',
-                      xclaim_test_stream=0)
+                      streams={stream_name: 0})
         assert sr.xinfo_consumers(stream_name, group_name)[0][
                    b('name')] == b('action_movie_consumer')
         assert sr.xclaim(stream_name, group_name, 'reeves_fan',

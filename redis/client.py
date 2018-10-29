@@ -1806,14 +1806,14 @@ class StrictRedis(object):
         """
         return self.execute_command('XLEN', name)
 
-    def xread(self, count=None, block=None, **streams):
+    def xread(self, streams, count=None, block=None):
         """
         Block and monitor multiple streams for new data.
+        streams: a dict of stream names to stream IDs, where
+                   IDs indicate the last ID already seen.
         count: if set, only return this many items, beginning with the
                earliest available.
         block: number of milliseconds to wait, if nothing already present.
-        **streams: a mapping of stream names to stream IDs, where
-                   IDs indicate the last ID already seen.
         """
         pieces = []
         if block is not None:
@@ -1826,14 +1826,11 @@ class StrictRedis(object):
                 raise RedisError('XREAD count must be a positive integer')
             pieces.append(Token.get_token('COUNT'))
             pieces.append(str(count))
-
-        pieces.append('STREAMS')
-        ids = []
-        for partial_stream in iteritems(streams):
-            pieces.append(partial_stream[0])
-            ids.append(partial_stream[1])
-
-        pieces.extend(ids)
+        if not isinstance(streams, dict) or len(streams) == 0:
+            raise RedisError('XREAD streams must be a non empty dict')
+        pieces.append(Token.get_token('STREAMS'))
+        pieces.extend(streams.keys())
+        pieces.extend(streams.values())
         return self.execute_command('XREAD', *pieces)
 
     def xgroup_create(self, name, groupname, id):
@@ -1978,20 +1975,18 @@ class StrictRedis(object):
         pieces.append(maxlen)
         return self.execute_command('XTRIM', name, *pieces)
 
-    def xreadgroup(self, groupname, consumername, count=None, block=None,
-                   **streams):
+    def xreadgroup(self, groupname, consumername, streams, count=None,
+                   block=None):
         """
         Read from a stream via a consumer group.
         groupname: name of the consumer group.
         consumername: name of the requesting consumer.
+        streams: a dict of stream names to stream IDs, where
+               IDs indicate the last ID already seen.
         count: if set, only return this many items, beginning with the
                earliest available.
         block: number of milliseconds to wait, if nothing already present.
-        **streams: a mapping of stream names to stream IDs, where
-               IDs indicate the last ID already seen.
         """
-        if streams is None:
-            streams = {}
         pieces = [Token.get_token('GROUP'), groupname, consumername]
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
@@ -2004,12 +1999,11 @@ class StrictRedis(object):
                                  "integer")
             pieces.append(Token.get_token("BLOCK"))
             pieces.append(str(block))
-        pieces.append(Token.get_token("STREAMS"))
-        ids = []
-        for partial_stream in iteritems(streams):
-            pieces.append(partial_stream[0])
-            ids.append(partial_stream[1])
-        pieces.extend(ids)
+        if not isinstance(streams, dict) or len(streams) == 0:
+            raise RedisError('XREADGROUP streams must be a non empty dict')
+        pieces.append(Token.get_token('STREAMS'))
+        pieces.extend(streams.keys())
+        pieces.extend(streams.values())
         return self.execute_command('XREADGROUP', *pieces)
 
     def xpending(self, name, groupname, start=None, end=None, count=None,
