@@ -1749,9 +1749,9 @@ class StrictRedis(object):
         if maxlen is not None:
             if not isinstance(maxlen, (int, long)) or maxlen < 1:
                 raise RedisError('XADD maxlen must be a positive integer')
-            pieces.append('MAXLEN')
+            pieces.append(Token.get_token('MAXLEN'))
             if approximate:
-                pieces.append('~')
+                pieces.append(Token.get_token('~'))
             pieces.append(str(maxlen))
         pieces.append(id)
         if not isinstance(fields, dict) or len(fields) == 0:
@@ -1775,7 +1775,7 @@ class StrictRedis(object):
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
                 raise RedisError('XRANGE count must be a positive integer')
-            pieces.append('COUNT')
+            pieces.append(Token.get_token('COUNT'))
             pieces.append(str(count))
 
         return self.execute_command('XRANGE', name, *pieces)
@@ -1795,7 +1795,7 @@ class StrictRedis(object):
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
                 raise RedisError('XREVRANGE count must be a positive integer')
-            pieces.append('COUNT')
+            pieces.append(Token.get_token('COUNT'))
             pieces.append(str(count))
 
         return self.execute_command('XREVRANGE', name, *pieces)
@@ -1819,12 +1819,12 @@ class StrictRedis(object):
         if block is not None:
             if not isinstance(block, (int, long)) or block < 0:
                 raise RedisError('XREAD block must be a non-negative integer')
-            pieces.append('BLOCK')
+            pieces.append(Token.get_token('BLOCK'))
             pieces.append(str(block))
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
                 raise RedisError('XREAD count must be a positive integer')
-            pieces.append('COUNT')
+            pieces.append(Token.get_token('COUNT'))
             pieces.append(str(count))
 
         pieces.append('STREAMS')
@@ -1920,9 +1920,9 @@ class StrictRedis(object):
         maxlen: truncate old stream messages beyond this size
         approximate: actual stream length may be slightly more than maxlen
         """
-        pieces = ['MAXLEN']
+        pieces = [Token.get_token('MAXLEN')]
         if approximate:
-            pieces.append('~')
+            pieces.append(Token.get_token('~'))
         pieces.append(maxlen)
         return self.execute_command('XTRIM', name, *pieces)
 
@@ -1972,7 +1972,7 @@ class StrictRedis(object):
         maxlen: truncate old stream messages beyond this size
         approximate: actual stream length may be slightly more than maxlen
         """
-        pieces = ['MAXLEN']
+        pieces = [Token.get_token('MAXLEN')]
         if approximate:
             pieces.append('~')
         pieces.append(maxlen)
@@ -1992,19 +1992,19 @@ class StrictRedis(object):
         """
         if streams is None:
             streams = {}
-        pieces = ['GROUP', groupname, consumername]
+        pieces = [Token.get_token('GROUP'), groupname, consumername]
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
                 raise RedisError("XREADGROUP count must be a positive integer")
-            pieces.append("COUNT")
+            pieces.append(Token.get_token("COUNT"))
             pieces.append(str(count))
         if block is not None:
             if not isinstance(block, (int, long)) or block < 0:
                 raise RedisError("XREADGROUP block must be a non-negative "
                                  "integer")
-            pieces.append("BLOCK")
+            pieces.append(Token.get_token("BLOCK"))
             pieces.append(str(block))
-        pieces.append("STREAMS")
+        pieces.append(Token.get_token("STREAMS"))
         ids = []
         for partial_stream in iteritems(streams):
             pieces.append(partial_stream[0])
@@ -2034,7 +2034,7 @@ class StrictRedis(object):
                                  " it must be provided with start, end and"
                                  " count parameters")
             pieces.append(consumername)
-        return self.execute_command('XPENDING', *pieces)
+        return self.execute_command('XPENDING', *pieces, parse_detail=True)
 
     def xclaim(self, name, groupname, consumername, min_idle_time, message_ids,
                idle=None, time=None, retrycount=None, force=False,
@@ -2072,6 +2072,8 @@ class StrictRedis(object):
         pieces.extend(list(message_ids))
 
         optional_ints = {idle: 'idle', time: 'time', retrycount: 'retrycount'}
+        optional_ints = {k: Token.get_token(v) for k, v in
+                         optional_ints.items()}
         for param_value, param_name in optional_ints.items():
             if param_value is not None:
                 if not isinstance(param_value, (int, long)):
@@ -2080,6 +2082,8 @@ class StrictRedis(object):
                 pieces.extend((param_name, str(param_value)))
 
         optional_bools = {force: 'force', justid: 'justid'}
+        optional_bools = {k: Token.get_token(v) for k, v in
+                          optional_bools.items()}
         for param_value, param_name in optional_bools.items():
             if param_value:
                 if not isinstance(param_value, bool):
