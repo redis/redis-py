@@ -2071,7 +2071,7 @@ class StrictRedis(object):
         for param_value, param_name in optional_ints.items():
             if param_value is not None:
                 if not isinstance(param_value, (int, long)):
-                    raise RedisError("XCLAIM {} must be an integer"
+                    raise RedisError("XCLAIM {0} must be an integer"
                                      .format(param_name))
                 pieces.extend((param_name, str(param_value)))
 
@@ -2081,7 +2081,7 @@ class StrictRedis(object):
         for param_value, param_name in optional_bools.items():
             if param_value:
                 if not isinstance(param_value, bool):
-                    raise RedisError("XCLAIM {} must be a boolean"
+                    raise RedisError("XCLAIM {0} must be a boolean"
                                      .format(param_name))
                 pieces.append(param_name.upper())
         return self.execute_command('XCLAIM', *pieces)
