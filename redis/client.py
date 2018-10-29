@@ -1923,58 +1923,6 @@ class StrictRedis(object):
         pieces.append(maxlen)
         return self.execute_command('XTRIM', name, *pieces)
 
-    def xinfo_stream(self, name):
-        """
-        Returns general information about the stream.
-        name: name of the stream.
-        """
-        return self.execute_command('XINFO STREAM', name)
-
-    def xinfo_consumers(self, name, groupname):
-        """
-        Returns general information about the consumers in the group.
-        name: name of the stream.
-        groupname: name of the consumer group.
-        """
-        return self.execute_command('XINFO CONSUMERS', name, groupname)
-
-    def xinfo_groups(self, name):
-        """
-        Returns general information about the consumer groups of the stream.
-        name: name of the stream.
-        """
-        return self.execute_command('XINFO GROUPS', name)
-
-    def xack(self, name, groupname, *ids):
-        """
-        Acknowledges the successful processing of one or more messages.
-        name: name of the stream.
-        groupname: name of the consumer group.
-        *ids: message ids to acknowlege.
-        """
-        return self.execute_command('XACK', name, groupname, *ids)
-
-    def xdel(self, name, *ids):
-        """
-        Deletes one or more messages from a stream.
-        name: name of the stream.
-        *ids: message ids to delete.
-        """
-        return self.execute_command('XDEL', name, *ids)
-
-    def xtrim(self, name, maxlen, approximate=True):
-        """
-        Trims old messages from a stream.
-        name: name of the stream.
-        maxlen: truncate old stream messages beyond this size
-        approximate: actual stream length may be slightly more than maxlen
-        """
-        pieces = [Token.get_token('MAXLEN')]
-        if approximate:
-            pieces.append('~')
-        pieces.append(maxlen)
-        return self.execute_command('XTRIM', name, *pieces)
-
     def xreadgroup(self, groupname, consumername, streams, count=None,
                    block=None):
         """

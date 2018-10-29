@@ -1754,36 +1754,6 @@ class TestStrictCommands(object):
         assert sr.xack(stream_name, group_name, *[x for x in range(5)]) == 0
 
     @skip_if_server_version_lt('5.0.0')
-    def test_strict_xdel(self, sr):
-        stream_name = 'xdel_test_stream'
-        sr.delete(stream_name)
-
-        assert sr.xdel(stream_name, 1) == 0
-
-        sr.xadd(stream_name, {"foo": "bar"}, id=1)
-        assert sr.xdel(stream_name, 1) == 1
-
-        stamp = sr.xadd(stream_name, {"baz": "qaz"})
-        assert sr.xdel(stream_name, 1, stamp) == 1
-        assert sr.xdel(stream_name, 1, stamp, 42) == 0
-
-    @skip_if_server_version_lt('5.0.0')
-    def test_strict_xtrim(self, sr):
-        stream_name = 'xtrim_test_stream'
-        sr.delete(stream_name)
-
-        assert sr.xtrim(stream_name, 1000) == 0
-
-        for i in range(300):
-            sr.xadd(stream_name, {"index": i})
-
-        assert sr.xtrim(stream_name, 1000, approximate=False) == 0
-        assert sr.xtrim(stream_name, 300) == 0
-        assert sr.xtrim(stream_name, 299) == 0
-        assert sr.xtrim(stream_name, 234) == 0
-        assert sr.xtrim(stream_name, 234, approximate=False) == 66
-
-    @skip_if_server_version_lt('5.0.0')
     def test_strict_xclaim(self, sr):
         stream_name = 'xclaim_test_stream'
         group_name = 'xclaim_test_consumer_group'
