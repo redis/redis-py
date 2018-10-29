@@ -1767,6 +1767,9 @@ class TestStrictCommands(object):
                    b('name')] == b('action_movie_consumer')
         assert sr.xclaim(stream_name, group_name, 'reeves_fan',
                          min_idle_time=0, message_ids=(stamp,))[0][0] == stamp
+        assert sr.xclaim(stream_name, group_name, 'action_movie_consumer',
+                         min_idle_time=0, message_ids=(stamp,),
+                         justid=True) == [b(stamp), ]
 
     def test_strict_zadd(self, sr):
         sr.zadd('a', 1.0, 'a1', 2.0, 'a2', a3=3.0)

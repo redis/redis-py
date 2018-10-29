@@ -261,7 +261,7 @@ def parse_list_of_recursive_dicts(response):
 
 
 def parse_xclaim(response):
-    if isinstance(response, str):
+    if all(isinstance(r, (basestring, bytes)) for r in response):
         return response
     return stream_list(response)
 
@@ -2034,7 +2034,7 @@ class StrictRedis(object):
             if not isinstance(justid, bool):
                 raise RedisError("XCLAIM justid must be a boolean")
             pieces.append(Token.get_token('JUSTID'))
-
+        print(pieces)
         return self.execute_command('XCLAIM', *pieces)
 
     # SORTED SET COMMANDS
