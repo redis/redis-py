@@ -2013,25 +2013,28 @@ class StrictRedis(object):
         pieces = [name, groupname, consumername, str(min_idle_time)]
         pieces.extend(list(message_ids))
 
-        optional_ints = {idle: 'idle', time: 'time', retrycount: 'retrycount'}
-        optional_ints = {k: Token.get_token(v) for k, v in
-                         optional_ints.items()}
-        for param_value, param_name in optional_ints.items():
-            if param_value is not None:
-                if not isinstance(param_value, (int, long)):
-                    raise RedisError("XCLAIM {0} must be an integer"
-                                     .format(param_name))
-                pieces.extend((param_name, str(param_value)))
+        if idle is not None:
+            if not isinstance(idle, (int, long)):
+                raise RedisError("XCLAIM idle must be an integer")
+            pieces.extend((Token.get_token('IDLE'), str(idle)))
+        if time is not None:
+            if not isinstance(time, (int, long)):
+                raise RedisError("XCLAIM time must be an integer")
+            pieces.extend((Token.get_token('TIME'), str(time)))
+        if retrycount is not None:
+            if not isinstance(retrycount, (int, long)):
+                raise RedisError("XCLAIM retrycount must be an integer")
+            pieces.extend((Token.get_token('RETRYCOUNT'), str(retrycount)))
 
-        optional_bools = {force: 'force', justid: 'justid'}
-        optional_bools = {k: Token.get_token(v) for k, v in
-                          optional_bools.items()}
-        for param_value, param_name in optional_bools.items():
-            if param_value:
-                if not isinstance(param_value, bool):
-                    raise RedisError("XCLAIM {0} must be a boolean"
-                                     .format(param_name))
-                pieces.append(param_name.upper())
+        if force:
+            if not isinstance(force, bool):
+                raise RedisError("XCLAIM force must be a boolean")
+            pieces.append(Token.get_token('FORCE'))
+        if justid:
+            if not isinstance(justid, bool):
+                raise RedisError("XCLAIM justid must be a boolean")
+            pieces.append(Token.get_token('JUSTID'))
+
         return self.execute_command('XCLAIM', *pieces)
 
     # SORTED SET COMMANDS
