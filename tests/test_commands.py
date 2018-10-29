@@ -1771,6 +1771,27 @@ class TestStrictCommands(object):
                          min_idle_time=0, message_ids=(stamp,),
                          justid=True) == [b(stamp), ]
 
+    @skip_if_server_version_lt('5.0.0')
+    def test_strict_xpending(self, sr):
+        stream_name = 'xpending_test_stream'
+        group_name = 'xpending_test_consumer_group'
+        consumer_name = 'marie'
+        sr.delete(stream_name)
+
+        sr.xadd(stream_name, {"foo": "bar"})
+        sr.xgroup_create(stream_name, group_name, id='0')
+        sr.xreadgroup(group_name, consumer_name,
+                      streams={stream_name: 0})
+        response = sr.xpending(stream_name, group_name)
+        assert sorted(response.keys()) == ['consumers', 'lower', 'pending',
+                                           'upper']
+
+        response = sr.xpending_range(stream_name, group_name,
+                                     consumername=consumer_name)
+        assert sorted(response[0].keys()) == ['consumer', 'message_id',
+                                              'time_since_delivered',
+                                              'times_delivered']
+
     def test_strict_zadd(self, sr):
         sr.zadd('a', 1.0, 'a1', 2.0, 'a2', a3=3.0)
         assert sr.zrange('a', 0, -1, withscores=True) == \
