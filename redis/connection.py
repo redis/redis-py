@@ -236,7 +236,7 @@ class SocketBuffer(object):
         try:
             self.purge()
             self._buffer.close()
-        except:
+        except Exception:
             # issue #633 suggests the purge/close somehow raised a
             # BadFileDescriptor error. Perhaps the client ran out of
             # memory or something else? It's probably OK to ignore
@@ -602,9 +602,9 @@ class Connection(object):
                 errmsg = e.args[1]
             raise ConnectionError("Error %s while writing to socket. %s." %
                                   (errno, errmsg))
-        except:
+        except Exception as e:
             self.disconnect()
-            raise
+            raise e
 
     def send_command(self, *args):
         "Pack and send a command to the Redis server"
@@ -623,9 +623,9 @@ class Connection(object):
         "Read the response from a previously sent command"
         try:
             response = self._parser.read_response()
-        except:
+        except Exception as e:
             self.disconnect()
-            raise
+            raise e
         if isinstance(response, ResponseError):
             raise response
         return response

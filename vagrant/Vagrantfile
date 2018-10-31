@@ -12,11 +12,11 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   config.vm.synced_folder "../", "/home/vagrant/redis-py"
 
   # install the redis server
-  config.vm.provision :shell, :path => "bootstrap.sh"
-  config.vm.provision :shell, :path => "build_redis.sh"
-  config.vm.provision :shell, :path => "install_redis.sh"
-  config.vm.provision :shell, :path => "install_sentinel.sh"
-  config.vm.provision :file, :source => ".bash_profile", :destination => "/home/vagrant/.bash_profile"
+  config.vm.provision :shell, :path => "../build_tools/bootstrap.sh"
+  config.vm.provision :shell, :path => "../build_tools/build_redis.sh"
+  config.vm.provision :shell, :path => "../build_tools/install_redis.sh"
+  config.vm.provision :shell, :path => "../build_tools/install_sentinel.sh"
+  config.vm.provision :file, :source => "../build_tools/.bash_profile", :destination => "/home/vagrant/.bash_profile"
 
   # setup forwarded ports
   config.vm.network "forwarded_port", guest: 6379, host: 6379

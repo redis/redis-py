@@ -12,10 +12,10 @@
 
 SENTINELPORT={{ PORT }}
 PIDFILE=/var/run/{{ PROCESS_NAME }}.pid
-CONF=/home/vagrant/redis/conf/{{ PROCESS_NAME }}.conf
+CONF=/var/lib/redis/conf/{{ PROCESS_NAME }}.conf
 
-EXEC=/home/vagrant/redis/bin/redis-sentinel
-CLIEXEC=/home/vagrant/redis/bin/redis-cli
+EXEC=/var/lib/redis/bin/redis-sentinel
+CLIEXEC=/var/lib/redis/bin/redis-cli
 
 case "$1" in
     start)

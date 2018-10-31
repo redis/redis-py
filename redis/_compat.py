@@ -4,7 +4,7 @@ import sys
 
 try:
     InterruptedError = InterruptedError
-except:
+except NameError:
     InterruptedError = OSError
 
 # For Python older than 3.5, retry EINTR.

@@ -195,5 +195,6 @@ def hmset(conn, num, pipeline_size, data_size):
     if pipeline_size > 1:
         conn.execute()
 
+
 if __name__ == '__main__':
     run()

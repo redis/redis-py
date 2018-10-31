@@ -22,9 +22,9 @@ class StringJoiningConnection(Connection):
                 _errno, errmsg = e.args
             raise ConnectionError("Error %s while writing to socket. %s." %
                                   (_errno, errmsg))
-        except:
+        except Exception as e:
             self.disconnect()
-            raise
+            raise e
 
     def pack_command(self, *args):
         "Pack a series of arguments into a value Redis command"
@@ -54,9 +54,9 @@ class ListJoiningConnection(Connection):
                 _errno, errmsg = e.args
             raise ConnectionError("Error %s while writing to socket. %s." %
                                   (_errno, errmsg))
-        except:
+        except Exception as e:
             self.disconnect()
-            raise
+            raise e
 
     def pack_command(self, *args):
         output = []

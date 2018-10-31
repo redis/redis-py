@@ -195,7 +195,7 @@ def pairs_to_dict_typed(response, type_info):
         if key in type_info:
             try:
                 value = type_info[key](value)
-            except:
+            except Exception:
                 # if for some reason the value can't be coerced, just use
                 # the string value
                 pass
@@ -230,6 +230,76 @@ def int_or_none(response):
     if response is None:
         return None
     return int(response)
+
+
+def stream_list(response):
+    if response is None:
+        return None
+    return [(r[0], pairs_to_dict(r[1])) for r in response]
+
+
+def parse_recursive_dict(response):
+    if response is None:
+        return None
+    result = {}
+    while response:
+        k = response.pop(0)
+        v = response.pop(0)
+        if isinstance(v, list):
+            v = parse_recursive_dict(v)
+        result[k] = v
+    return result
+
+
+def parse_list_of_recursive_dicts(response):
+    if response is None:
+        return None
+    result = []
+    for group in response:
+        result.append(parse_recursive_dict(group))
+    return result
+
+
+def parse_xclaim(response):
+    if all(isinstance(r, (basestring, bytes)) for r in response):
+        return response
+    return stream_list(response)
+
+
+def parse_xread(response):
+    if response is None:
+        return []
+    return [[nativestr(r[0]), stream_list(r[1])] for r in response]
+
+
+def parse_xpending(response, **options):
+    if isinstance(response, list):
+        if options.get('parse_detail', False):
+            return parse_range_xpending(response)
+        consumers = []
+        for consumer_name, consumer_pending in response[3]:
+            consumers.append({
+                'name': consumer_name,
+                'pending': consumer_pending
+            })
+        return {
+            'pending': response[0],
+            'lower': response[1],
+            'upper': response[2],
+            'consumers': consumers
+        }
+
+
+def parse_range_xpending(response):
+    result = []
+    for message in response:
+        result.append({
+            'message_id': message[0],
+            'consumer': message[1],
+            'time_since_delivered': message[2],
+            'times_delivered': message[3]
+        })
+    return result
 
 
 def float_or_none(response):
@@ -366,7 +436,26 @@ class StrictRedis(object):
             'LINSERT LLEN LPUSHX PFADD PFCOUNT RPUSHX SADD SCARD SDIFFSTORE '
             'SETBIT SETRANGE SINTERSTORE SREM STRLEN SUNIONSTORE ZADD ZCARD '
             'ZLEXCOUNT ZREM ZREMRANGEBYLEX ZREMRANGEBYRANK ZREMRANGEBYSCORE '
-            'GEOADD',
+            'GEOADD XLEN',
+            int
+        ),
+        string_keys_to_dict('XREVRANGE XRANGE', stream_list),
+        string_keys_to_dict('XPENDING', parse_xpending),
+        string_keys_to_dict('XREAD XREADGROUP', parse_xread),
+        {
+            'XGROUP CREATE': bool_ok,
+            'XGROUP DESTROY': int,
+            'XGROUP SETID': bool_ok,
+            'XGROUP DELCONSUMER': int
+        },
+        {
+            'XINFO STREAM': parse_recursive_dict,
+            'XINFO CONSUMERS': parse_list_of_recursive_dicts,
+            'XINFO GROUPS': parse_list_of_recursive_dicts
+        },
+        string_keys_to_dict('XCLAIM', parse_xclaim),
+        string_keys_to_dict(
+            'XACK XDEL XTRIM',
             int
         ),
         string_keys_to_dict(
@@ -1674,6 +1763,323 @@ class StrictRedis(object):
         """
         args = list_or_args(keys, args)
         return self.execute_command('SUNIONSTORE', dest, *args)
+
+    # STREAMS COMMANDS
+    def xadd(self, _name, fields, id='*', maxlen=None, approximate=True):
+        """
+        Add to a stream.
+        _name: name of the stream (not using 'name' as this would
+               prevent 'name' used in the kwargs
+        fields: dict of field/value pairs to insert into the stream
+        id: Location to insert this record. By default it is appended.
+        maxlen: truncate old stream members beyond this size
+        approximate: actual stream length may be slightly more than maxlen
+
+        """
+        pieces = []
+        if maxlen is not None:
+            if not isinstance(maxlen, (int, long)) or maxlen < 1:
+                raise RedisError('XADD maxlen must be a positive integer')
+            pieces.append(Token.get_token('MAXLEN'))
+            if approximate:
+                pieces.append(Token.get_token('~'))
+            pieces.append(str(maxlen))
+        pieces.append(id)
+        if not isinstance(fields, dict) or len(fields) == 0:
+            raise RedisError('XADD fields must be a non-empty dict')
+        for pair in iteritems(fields):
+            pieces.extend(pair)
+        return self.execute_command('XADD', _name, *pieces)
+
+    def xrange(self, name, start='-', finish='+', count=None):
+        """
+        Read stream values within an interval.
+        name: name of the stream.
+        start: first stream ID. defaults to '-',
+               meaning the earliest available.
+        finish: last stream ID. defaults to '+',
+                meaning the latest available.
+        count: if set, only return this many items, beginning with the
+               earliest available.
+        """
+        pieces = [start, finish]
+        if count is not None:
+            if not isinstance(count, (int, long)) or count < 1:
+                raise RedisError('XRANGE count must be a positive integer')
+            pieces.append(Token.get_token('COUNT'))
+            pieces.append(str(count))
+
+        return self.execute_command('XRANGE', name, *pieces)
+
+    def xrevrange(self, name, start='+', finish='-', count=None):
+        """
+        Read stream values within an interval, in reverse order.
+        name: name of the stream
+        start: first stream ID. defaults to '+',
+               meaning the latest available.
+        finish: last stream ID. defaults to '-',
+                meaning the earliest available.
+        count: if set, only return this many items, beginning with the
+               latest available.
+        """
+        pieces = [start, finish]
+        if count is not None:
+            if not isinstance(count, (int, long)) or count < 1:
+                raise RedisError('XREVRANGE count must be a positive integer')
+            pieces.append(Token.get_token('COUNT'))
+            pieces.append(str(count))
+
+        return self.execute_command('XREVRANGE', name, *pieces)
+
+    def xlen(self, name):
+        """
+        Returns the number of elements in a given stream.
+        """
+        return self.execute_command('XLEN', name)
+
+    def xread(self, streams, count=None, block=None):
+        """
+        Block and monitor multiple streams for new data.
+        streams: a dict of stream names to stream IDs, where
+                   IDs indicate the last ID already seen.
+        count: if set, only return this many items, beginning with the
+               earliest available.
+        block: number of milliseconds to wait, if nothing already present.
+        """
+        pieces = []
+        if block is not None:
+            if not isinstance(block, (int, long)) or block < 0:
+                raise RedisError('XREAD block must be a non-negative integer')
+            pieces.append(Token.get_token('BLOCK'))
+            pieces.append(str(block))
+        if count is not None:
+            if not isinstance(count, (int, long)) or count < 1:
+                raise RedisError('XREAD count must be a positive integer')
+            pieces.append(Token.get_token('COUNT'))
+            pieces.append(str(count))
+        if not isinstance(streams, dict) or len(streams) == 0:
+            raise RedisError('XREAD streams must be a non empty dict')
+        pieces.append(Token.get_token('STREAMS'))
+        pieces.extend(streams.keys())
+        pieces.extend(streams.values())
+        return self.execute_command('XREAD', *pieces)
+
+    def xgroup_create(self, name, groupname, id):
+        """
+        Create a new consumer group associated with a stream.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        id: ID of the last item in the stream to consider already delivered.
+        """
+        return self.execute_command('XGROUP CREATE', name, groupname, id)
+
+    def xgroup_destroy(self, name, groupname):
+        """
+        Destroy a consumer group.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        """
+        return self.execute_command('XGROUP DESTROY', name, groupname)
+
+    def xgroup_setid(self, name, groupname, id):
+        """
+        Set the consumer group last delivered ID to something else.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        id: ID of the last item in the stream to consider already delivered.
+        """
+        return self.execute_command('XGROUP SETID', name, groupname, id)
+
+    def xgroup_delconsumer(self, name, groupname, consumername):
+        """
+        Remove a specific consumer from a consumer group.
+        Returns the number of pending messages that the consumer had before it
+        was deleted.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        consumername: name of consumer to delete
+        """
+        return self.execute_command('XGROUP DELCONSUMER', name, groupname,
+                                    consumername)
+
+    def xinfo_stream(self, name):
+        """
+        Returns general information about the stream.
+        name: name of the stream.
+        """
+        return self.execute_command('XINFO STREAM', name)
+
+    def xinfo_consumers(self, name, groupname):
+        """
+        Returns general information about the consumers in the group.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        """
+        return self.execute_command('XINFO CONSUMERS', name, groupname)
+
+    def xinfo_groups(self, name):
+        """
+        Returns general information about the consumer groups of the stream.
+        name: name of the stream.
+        """
+        return self.execute_command('XINFO GROUPS', name)
+
+    def xack(self, name, groupname, *ids):
+        """
+        Acknowledges the successful processing of one or more messages.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        *ids: message ids to acknowlege.
+        """
+        return self.execute_command('XACK', name, groupname, *ids)
+
+    def xdel(self, name, *ids):
+        """
+        Deletes one or more messages from a stream.
+        name: name of the stream.
+        *ids: message ids to delete.
+        """
+        return self.execute_command('XDEL', name, *ids)
+
+    def xtrim(self, name, maxlen, approximate=True):
+        """
+        Trims old messages from a stream.
+        name: name of the stream.
+        maxlen: truncate old stream messages beyond this size
+        approximate: actual stream length may be slightly more than maxlen
+        """
+        pieces = [Token.get_token('MAXLEN')]
+        if approximate:
+            pieces.append(Token.get_token('~'))
+        pieces.append(maxlen)
+        return self.execute_command('XTRIM', name, *pieces)
+
+    def xreadgroup(self, groupname, consumername, streams, count=None,
+                   block=None):
+        """
+        Read from a stream via a consumer group.
+        groupname: name of the consumer group.
+        consumername: name of the requesting consumer.
+        streams: a dict of stream names to stream IDs, where
+               IDs indicate the last ID already seen.
+        count: if set, only return this many items, beginning with the
+               earliest available.
+        block: number of milliseconds to wait, if nothing already present.
+        """
+        pieces = [Token.get_token('GROUP'), groupname, consumername]
+        if count is not None:
+            if not isinstance(count, (int, long)) or count < 1:
+                raise RedisError("XREADGROUP count must be a positive integer")
+            pieces.append(Token.get_token("COUNT"))
+            pieces.append(str(count))
+        if block is not None:
+            if not isinstance(block, (int, long)) or block < 0:
+                raise RedisError("XREADGROUP block must be a non-negative "
+                                 "integer")
+            pieces.append(Token.get_token("BLOCK"))
+            pieces.append(str(block))
+        if not isinstance(streams, dict) or len(streams) == 0:
+            raise RedisError('XREADGROUP streams must be a non empty dict')
+        pieces.append(Token.get_token('STREAMS'))
+        pieces.extend(streams.keys())
+        pieces.extend(streams.values())
+        return self.execute_command('XREADGROUP', *pieces)
+
+    def xpending(self, name, groupname):
+        """
+        Returns information about pending messages of a group.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        """
+        return self.execute_command('XPENDING', name, groupname)
+
+    def xpending_range(self, name, groupname, start='-', end='+', count=-1,
+                       consumername=None):
+        """
+        Returns information about pending messages, in a range.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        start: first stream ID. defaults to '-',
+               meaning the earliest available.
+        finish: last stream ID. defaults to '+',
+                meaning the latest available.
+        count: if set, only return this many items, beginning with the
+               earliest available.
+        consumername: name of a consumer to filter by (optional).
+        """
+        pieces = [name, groupname]
+        if start is not None or end is not None or count is not None:
+            if start is None or end is None or count is None:
+                raise RedisError("XPENDING must be provided with start, end "
+                                 "and count parameters, or none of them. ")
+            if not isinstance(count, (int, long)) or count < -1:
+                raise RedisError("XPENDING count must be a integer >= -1")
+            pieces.extend((start, end, str(count)))
+        if consumername is not None:
+            if start is None or end is None or count is None:
+                raise RedisError("if XPENDING is provided with consumername,"
+                                 " it must be provided with start, end and"
+                                 " count parameters")
+            pieces.append(consumername)
+        return self.execute_command('XPENDING', *pieces, parse_detail=True)
+
+    def xclaim(self, name, groupname, consumername, min_idle_time, message_ids,
+               idle=None, time=None, retrycount=None, force=False,
+               justid=False):
+        """
+        Changes the ownership of a pending message.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        consumername: name of a consumer that claims the message.
+        min_idle_time: filter messages that were idle less than this amount of
+        milliseconds
+        message_ids: non-empty list or tuple of message IDs to claim
+        idle: optional. Set the idle time (last time it was delivered) of the
+         message in ms
+        time: optional integer. This is the same as idle but instead of a
+         relative amount of milliseconds, it sets the idle time to a specific
+         Unix time (in milliseconds).
+        retrycount: optional integer. set the retry counter to the specified
+         value. This counter is incremented every time a message is delivered
+         again.
+        force: optional boolean, false by default. Creates the pending message
+         entry in the PEL even if certain specified IDs are not already in the
+         PEL assigned to a different client.
+        justid: optional boolean, false by default. Return just an array of IDs
+         of messages successfully claimed, without returning the actual message
+        """
+        if not isinstance(min_idle_time, (int, long)) or min_idle_time < 0:
+            raise RedisError("XCLAIM min_idle_time must be a non negative "
+                             "integer")
+        if not isinstance(message_ids, (list, tuple)) or not message_ids:
+            raise RedisError("XCLAIM message_ids must be a non empty list or "
+                             "tuple of message IDs to claim")
+
+        pieces = [name, groupname, consumername, str(min_idle_time)]
+        pieces.extend(list(message_ids))
+
+        if idle is not None:
+            if not isinstance(idle, (int, long)):
+                raise RedisError("XCLAIM idle must be an integer")
+            pieces.extend((Token.get_token('IDLE'), str(idle)))
+        if time is not None:
+            if not isinstance(time, (int, long)):
+                raise RedisError("XCLAIM time must be an integer")
+            pieces.extend((Token.get_token('TIME'), str(time)))
+        if retrycount is not None:
+            if not isinstance(retrycount, (int, long)):
+                raise RedisError("XCLAIM retrycount must be an integer")
+            pieces.extend((Token.get_token('RETRYCOUNT'), str(retrycount)))
+
+        if force:
+            if not isinstance(force, bool):
+                raise RedisError("XCLAIM force must be a boolean")
+            pieces.append(Token.get_token('FORCE'))
+        if justid:
+            if not isinstance(justid, bool):
+                raise RedisError("XCLAIM justid must be a boolean")
+            pieces.append(Token.get_token('JUSTID'))
+        return self.execute_command('XCLAIM', *pieces)
 
     # SORTED SET COMMANDS
     def zadd(self, name, *args, **kwargs):
