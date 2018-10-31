@@ -2008,6 +2008,37 @@ class StrictRedis(object):
         pieces.extend(streams.values())
         return self.execute_command('XREAD', *pieces)
 
+    def xreadgroup(self, groupname, consumername, streams, count=None,
+                   block=None):
+        """
+        Read from a stream via a consumer group.
+        groupname: name of the consumer group.
+        consumername: name of the requesting consumer.
+        streams: a dict of stream names to stream IDs, where
+               IDs indicate the last ID already seen.
+        count: if set, only return this many items, beginning with the
+               earliest available.
+        block: number of milliseconds to wait, if nothing already present.
+        """
+        pieces = [Token.get_token('GROUP'), groupname, consumername]
+        if count is not None:
+            if not isinstance(count, (int, long)) or count < 1:
+                raise RedisError("XREADGROUP count must be a positive integer")
+            pieces.append(Token.get_token("COUNT"))
+            pieces.append(str(count))
+        if block is not None:
+            if not isinstance(block, (int, long)) or block < 0:
+                raise RedisError("XREADGROUP block must be a non-negative "
+                                 "integer")
+            pieces.append(Token.get_token("BLOCK"))
+            pieces.append(str(block))
+        if not isinstance(streams, dict) or len(streams) == 0:
+            raise RedisError('XREADGROUP streams must be a non empty dict')
+        pieces.append(Token.get_token('STREAMS'))
+        pieces.extend(streams.keys())
+        pieces.extend(streams.values())
+        return self.execute_command('XREADGROUP', *pieces)
+
     def xrevrange(self, name, start='+', finish='-', count=None):
         """
         Read stream values within an interval, in reverse order.
@@ -2040,37 +2071,6 @@ class StrictRedis(object):
             pieces.append(Token.get_token('~'))
         pieces.append(maxlen)
         return self.execute_command('XTRIM', name, *pieces)
-
-    def xreadgroup(self, groupname, consumername, streams, count=None,
-                   block=None):
-        """
-        Read from a stream via a consumer group.
-        groupname: name of the consumer group.
-        consumername: name of the requesting consumer.
-        streams: a dict of stream names to stream IDs, where
-               IDs indicate the last ID already seen.
-        count: if set, only return this many items, beginning with the
-               earliest available.
-        block: number of milliseconds to wait, if nothing already present.
-        """
-        pieces = [Token.get_token('GROUP'), groupname, consumername]
-        if count is not None:
-            if not isinstance(count, (int, long)) or count < 1:
-                raise RedisError("XREADGROUP count must be a positive integer")
-            pieces.append(Token.get_token("COUNT"))
-            pieces.append(str(count))
-        if block is not None:
-            if not isinstance(block, (int, long)) or block < 0:
-                raise RedisError("XREADGROUP block must be a non-negative "
-                                 "integer")
-            pieces.append(Token.get_token("BLOCK"))
-            pieces.append(str(block))
-        if not isinstance(streams, dict) or len(streams) == 0:
-            raise RedisError('XREADGROUP streams must be a non empty dict')
-        pieces.append(Token.get_token('STREAMS'))
-        pieces.extend(streams.keys())
-        pieces.extend(streams.values())
-        return self.execute_command('XREADGROUP', *pieces)
 
     # SORTED SET COMMANDS
     def zadd(self, name, *args, **kwargs):
