@@ -1757,7 +1757,7 @@ class StrictRedis(object):
         return self.execute_command('SUNIONSTORE', dest, *args)
 
     # STREAMS COMMANDS
-    def xadd(self, _name, fields, id='*', maxlen=None, approximate=True):
+    def xadd(self, name, fields, id='*', maxlen=None, approximate=True):
         """
         Add to a stream.
         _name: name of the stream (not using 'name' as this would
@@ -1781,7 +1781,7 @@ class StrictRedis(object):
             raise RedisError('XADD fields must be a non-empty dict')
         for pair in iteritems(fields):
             pieces.extend(pair)
-        return self.execute_command('XADD', _name, *pieces)
+        return self.execute_command('XADD', name, *pieces)
 
     def xrange(self, name, start='-', finish='+', count=None):
         """
