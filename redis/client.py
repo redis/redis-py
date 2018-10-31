@@ -1760,8 +1760,7 @@ class StrictRedis(object):
     def xadd(self, name, fields, id='*', maxlen=None, approximate=True):
         """
         Add to a stream.
-        _name: name of the stream (not using 'name' as this would
-               prevent 'name' used in the kwargs
+        name: name of the stream
         fields: dict of field/value pairs to insert into the stream
         id: Location to insert this record. By default it is appended.
         maxlen: truncate old stream members beyond this size
