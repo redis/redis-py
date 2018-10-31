@@ -1660,7 +1660,7 @@ class TestStrictCommands(object):
         assert stamp1 != stamp2
 
         results = sr.xread(streams={varname: '$'}, count=10, block=10)
-        assert results is None
+        assert results == []
 
         results = sr.xread(count=3, block=0, streams={varname: stamp1})
         assert results[0][1][0][0] == stamp2

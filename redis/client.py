@@ -266,9 +266,9 @@ def parse_xclaim(response):
     return stream_list(response)
 
 
-def parse_xreadgroup(response):
+def parse_xread(response):
     if response is None:
-        return None
+        return []
     return [[nativestr(r[0]), stream_list(r[1])] for r in response]
 
 
@@ -441,7 +441,7 @@ class StrictRedis(object):
         ),
         string_keys_to_dict('XREVRANGE XRANGE', stream_list),
         string_keys_to_dict('XPENDING', parse_xpending),
-        string_keys_to_dict('XREAD XREADGROUP', parse_xreadgroup),
+        string_keys_to_dict('XREAD XREADGROUP', parse_xread),
         {
             'XGROUP CREATE': bool_ok,
             'XGROUP DESTROY': int,
