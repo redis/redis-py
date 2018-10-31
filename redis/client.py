@@ -232,7 +232,7 @@ def int_or_none(response):
     return int(response)
 
 
-def stream_list(response):
+def parse_stream_list(response):
     if response is None:
         return None
     return [(r[0], pairs_to_dict(r[1])) for r in response]
@@ -263,13 +263,13 @@ def parse_list_of_recursive_dicts(response):
 def parse_xclaim(response):
     if all(isinstance(r, (basestring, bytes)) for r in response):
         return response
-    return stream_list(response)
+    return parse_stream_list(response)
 
 
 def parse_xread(response):
     if response is None:
         return []
-    return [[nativestr(r[0]), stream_list(r[1])] for r in response]
+    return [[nativestr(r[0]), parse_stream_list(r[1])] for r in response]
 
 
 def parse_xpending(response, **options):
@@ -465,7 +465,7 @@ class StrictRedis(object):
             zset_score_pairs
         ),
         string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
-        string_keys_to_dict('XREVRANGE XRANGE', stream_list),
+        string_keys_to_dict('XREVRANGE XRANGE', parse_stream_list),
         string_keys_to_dict('XREAD XREADGROUP', parse_xread),
         string_keys_to_dict('BGREWRITEAOF BGSAVE', lambda r: True),
         {
