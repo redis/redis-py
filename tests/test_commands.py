@@ -976,6 +976,56 @@ class TestRedisCommands(object):
         assert r.zrange('d', 0, -1, withscores=True) == \
             [(b('a3'), 20), (b('a1'), 23)]
 
+    @skip_if_server_version_lt('4.9.0')
+    def test_zpopmax(self, r):
+        r.delete('a')
+        r.zadd('a', a1=1, a2=2, a3=3)
+        assert r.zpopmax('a') == [(b('a3'), 3)]
+
+        # with count
+        assert r.zpopmax('a', count=2) == \
+            [(b('a2'), 2), (b('a1'), 1)]
+
+    @skip_if_server_version_lt('4.9.0')
+    def test_zpopmin(self, r):
+        r.delete('a')
+        r.zadd('a', a1=1, a2=2, a3=3)
+        assert r.zpopmin('a') == [(b('a1'), 1)]
+
+        # with count
+        assert r.zpopmin('a', count=2) == \
+            [(b('a2'), 2), (b('a3'), 3)]
+
+    @skip_if_server_version_lt('4.9.0')
+    def test_bzpopmax(self, r):
+        r.delete('a')
+        r.delete('b')
+        r.delete('c')
+        r.zadd('a', a1=1, a2=2)
+        r.zadd('b', b1=10, b2=20)
+        assert r.bzpopmax(['b', 'a'], timeout=1) == (b('b'), b('b2'), 20)
+        assert r.bzpopmax(['b', 'a'], timeout=1) == (b('b'), b('b1'), 10)
+        assert r.bzpopmax(['b', 'a'], timeout=1) == (b('a'), b('a2'), 2)
+        assert r.bzpopmax(['b', 'a'], timeout=1) == (b('a'), b('a1'), 1)
+        assert r.bzpopmax(['b', 'a'], timeout=1) is None
+        r.zadd('c', c1=100)
+        assert r.bzpopmax('c', timeout=1) == (b('c'), b('c1'), 100)
+
+    @skip_if_server_version_lt('4.9.0')
+    def test_bzpopmin(self, r):
+        r.delete('a')
+        r.delete('b')
+        r.delete('c')
+        r.zadd('a', a1=1, a2=2)
+        r.zadd('b', b1=10, b2=20)
+        assert r.bzpopmin(['b', 'a'], timeout=1) == (b('b'), b('b1'), 10)
+        assert r.bzpopmin(['b', 'a'], timeout=1) == (b('b'), b('b2'), 20)
+        assert r.bzpopmin(['b', 'a'], timeout=1) == (b('a'), b('a1'), 1)
+        assert r.bzpopmin(['b', 'a'], timeout=1) == (b('a'), b('a2'), 2)
+        assert r.bzpopmin(['b', 'a'], timeout=1) is None
+        r.zadd('c', c1=100)
+        assert r.bzpopmin('c', timeout=1) == (b('c'), b('c1'), 100)
+
     def test_zrange(self, r):
         r.zadd('a', a1=1, a2=2, a3=3)
         assert r.zrange('a', 0, 1) == [b('a1'), b('a2')]
