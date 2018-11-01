@@ -1993,8 +1993,9 @@ class StrictRedis(object):
         if not isinstance(streams, dict) or len(streams) == 0:
             raise RedisError('XREAD streams must be a non empty dict')
         pieces.append(Token.get_token('STREAMS'))
-        pieces.extend(streams.keys())
-        pieces.extend(streams.values())
+        keys, values = izip(*iteritems(streams))
+        pieces.extend(keys)
+        pieces.extend(values)
         return self.execute_command('XREAD', *pieces)
 
     def xreadgroup(self, groupname, consumername, streams, count=None,
