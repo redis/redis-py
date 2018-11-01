@@ -1633,7 +1633,7 @@ class TestRedisCommands(object):
     def test_xadd(self, r):
         stream = 'stream'
         message_id = r.xadd(stream, {'foo': 'bar'})
-        assert re.match(rb'[0-9]+\-[0-9]+', message_id)
+        assert re.match(br'[0-9]+\-[0-9]+', message_id)
 
         # explicit message id
         message_id = b('9999999999999999999-0')
