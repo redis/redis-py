@@ -978,7 +978,6 @@ class TestRedisCommands(object):
 
     @skip_if_server_version_lt('4.9.0')
     def test_zpopmax(self, r):
-        r.delete('a')
         r.zadd('a', a1=1, a2=2, a3=3)
         assert r.zpopmax('a') == [(b('a3'), 3)]
 
@@ -988,7 +987,6 @@ class TestRedisCommands(object):
 
     @skip_if_server_version_lt('4.9.0')
     def test_zpopmin(self, r):
-        r.delete('a')
         r.zadd('a', a1=1, a2=2, a3=3)
         assert r.zpopmin('a') == [(b('a1'), 1)]
 
@@ -998,9 +996,6 @@ class TestRedisCommands(object):
 
     @skip_if_server_version_lt('4.9.0')
     def test_bzpopmax(self, r):
-        r.delete('a')
-        r.delete('b')
-        r.delete('c')
         r.zadd('a', a1=1, a2=2)
         r.zadd('b', b1=10, b2=20)
         assert r.bzpopmax(['b', 'a'], timeout=1) == (b('b'), b('b2'), 20)
@@ -1013,9 +1008,6 @@ class TestRedisCommands(object):
 
     @skip_if_server_version_lt('4.9.0')
     def test_bzpopmin(self, r):
-        r.delete('a')
-        r.delete('b')
-        r.delete('c')
         r.zadd('a', a1=1, a2=2)
         r.zadd('b', b1=10, b2=20)
         assert r.bzpopmin(['b', 'a'], timeout=1) == (b('b'), b('b1'), 10)
