@@ -1918,7 +1918,7 @@ class StrictRedis(object):
         """
         return self.execute_command('XPENDING', name, groupname)
 
-    def xpending_range(self, name, groupname, start='-', end='+', count=-1,
+    def xpending_range(self, name, groupname, min='-', max='+', count=-1,
                        consumername=None):
         """
         Returns information about pending messages, in a range.
@@ -1933,22 +1933,22 @@ class StrictRedis(object):
         consumername: name of a consumer to filter by (optional).
         """
         pieces = [name, groupname]
-        if start is not None or end is not None or count is not None:
-            if start is None or end is None or count is None:
-                raise RedisError("XPENDING must be provided with start, end "
+        if min is not None or max is not None or count is not None:
+            if min is None or max is None or count is None:
+                raise RedisError("XPENDING must be provided with min, max "
                                  "and count parameters, or none of them. ")
             if not isinstance(count, (int, long)) or count < -1:
                 raise RedisError("XPENDING count must be a integer >= -1")
-            pieces.extend((start, end, str(count)))
+            pieces.extend((min, max, str(count)))
         if consumername is not None:
-            if start is None or end is None or count is None:
+            if min is None or max is None or count is None:
                 raise RedisError("if XPENDING is provided with consumername,"
-                                 " it must be provided with start, end and"
+                                 " it must be provided with min, max and"
                                  " count parameters")
             pieces.append(consumername)
         return self.execute_command('XPENDING', *pieces, parse_detail=True)
 
-    def xrange(self, name, start='-', finish='+', count=None):
+    def xrange(self, name, min='-', max='+', count=None):
         """
         Read stream values within an interval.
         name: name of the stream.
@@ -1959,7 +1959,7 @@ class StrictRedis(object):
         count: if set, only return this many items, beginning with the
                earliest available.
         """
-        pieces = [start, finish]
+        pieces = [min, max]
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
                 raise RedisError('XRANGE count must be a positive integer')
@@ -2026,7 +2026,7 @@ class StrictRedis(object):
         pieces.extend(streams.values())
         return self.execute_command('XREADGROUP', *pieces)
 
-    def xrevrange(self, name, start='+', finish='-', count=None):
+    def xrevrange(self, name, max='+', min='-', count=None):
         """
         Read stream values within an interval, in reverse order.
         name: name of the stream
@@ -2037,7 +2037,7 @@ class StrictRedis(object):
         count: if set, only return this many items, beginning with the
                latest available.
         """
-        pieces = [start, finish]
+        pieces = [max, min]
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
                 raise RedisError('XREVRANGE count must be a positive integer')

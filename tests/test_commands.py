@@ -37,7 +37,7 @@ def redis_server_time(client):
 
 def get_stream_message(client, stream, message_id):
     "Fetch a stream message and format it as a (message_id, fields) pair"
-    response = client.xrange(stream, start=message_id, finish=message_id)
+    response = client.xrange(stream, min=message_id, max=message_id)
     assert len(response) == 1
     return response[0]
 
@@ -1866,16 +1866,16 @@ class TestRedisCommands(object):
         def get_ids(results):
             return [result[0] for result in results]
 
-        results = r.xrange(stream, start=m1)
+        results = r.xrange(stream, min=m1)
         assert get_ids(results) == [m1, m2, m3, m4]
 
-        results = r.xrange(stream, start=m2, finish=m3)
+        results = r.xrange(stream, min=m2, max=m3)
         assert get_ids(results) == [m2, m3]
 
-        results = r.xrange(stream, finish=m3)
+        results = r.xrange(stream, max=m3)
         assert get_ids(results) == [m1, m2, m3]
 
-        results = r.xrange(stream, finish=m2, count=1)
+        results = r.xrange(stream, max=m2, count=1)
         assert get_ids(results) == [m1]
 
     @skip_if_server_version_lt('5.0.0')
@@ -1994,16 +1994,16 @@ class TestRedisCommands(object):
         def get_ids(results):
             return [result[0] for result in results]
 
-        results = r.xrevrange(stream, start=m4)
+        results = r.xrevrange(stream, max=m4)
         assert get_ids(results) == [m4, m3, m2, m1]
 
-        results = r.xrevrange(stream, start=m3, finish=m2)
+        results = r.xrevrange(stream, max=m3, min=m2)
         assert get_ids(results) == [m3, m2]
 
-        results = r.xrevrange(stream, finish=m3)
+        results = r.xrevrange(stream, min=m3)
         assert get_ids(results) == [m4, m3]
 
-        results = r.xrevrange(stream, finish=m2, count=1)
+        results = r.xrevrange(stream, min=m2, count=1)
         assert get_ids(results) == [m4]
 
     @skip_if_server_version_lt('5.0.0')
