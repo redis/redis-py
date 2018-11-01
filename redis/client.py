@@ -2526,14 +2526,14 @@ class StrictRedis(object):
     def geohash(self, name, *values):
         """
         Return the geo hash string for each item of ``values`` members of
-        the specified key identified by the ``name``argument.
+        the specified key identified by the ``name`` argument.
         """
         return self.execute_command('GEOHASH', name, *values)
 
     def geopos(self, name, *values):
         """
         Return the positions of each item of ``values`` as members of
-        the specified key identified by the ``name``argument. Each position
+        the specified key identified by the ``name`` argument. Each position
         is represented by the pairs lon and lat.
         """
         return self.execute_command('GEOPOS', name, *values)
