@@ -276,7 +276,7 @@ could do something like this:
 .. code-block:: pycon
 
     >>> with r.pipeline() as pipe:
-    ...     while 1:
+    ...     while True:
     ...         try:
     ...             # put a WATCH on the key that holds our sequence value
     ...             pipe.watch('OUR-SEQUENCE-KEY')
@@ -309,7 +309,7 @@ explicitly calling reset():
 .. code-block:: pycon
 
     >>> pipe = r.pipeline()
-    >>> while 1:
+    >>> while True:
     ...     try:
     ...         pipe.watch('OUR-SEQUENCE-KEY')
     ...         ...
