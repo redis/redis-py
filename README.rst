@@ -22,12 +22,6 @@ To install redis-py, simply:
 
     $ sudo pip install redis
 
-or alternatively (you really should be using pip though):
-
-.. code-block:: bash
-
-    $ sudo easy_install redis
-
 or from source:
 
 .. code-block:: bash
@@ -168,12 +162,6 @@ just like redis-py.
 .. code-block:: bash
 
     $ pip install hiredis
-
-or
-
-.. code-block:: bash
-
-    $ easy_install hiredis
 
 Response Callbacks
 ^^^^^^^^^^^^^^^^^^
