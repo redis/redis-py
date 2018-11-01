@@ -251,8 +251,8 @@ def parse_list_of_dicts(response):
     return list(imap(pairs_to_dict_with_nativestr_keys, response))
 
 
-def parse_xclaim(response):
-    if all(isinstance(r, (basestring, bytes)) for r in response):
+def parse_xclaim(response, **options):
+    if options.get('parse_justid', False):
         return response
     return parse_stream_list(response)
 
@@ -1810,6 +1810,7 @@ class StrictRedis(object):
             raise RedisError("XCLAIM message_ids must be a non empty list or "
                              "tuple of message IDs to claim")
 
+        kwargs = {}
         pieces = [name, groupname, consumername, str(min_idle_time)]
         pieces.extend(list(message_ids))
 
@@ -1834,7 +1835,8 @@ class StrictRedis(object):
             if not isinstance(justid, bool):
                 raise RedisError("XCLAIM justid must be a boolean")
             pieces.append(Token.get_token('JUSTID'))
-        return self.execute_command('XCLAIM', *pieces)
+            kwargs['parse_justid'] = True
+        return self.execute_command('XCLAIM', *pieces, **kwargs)
 
     def xdel(self, name, *ids):
         """
