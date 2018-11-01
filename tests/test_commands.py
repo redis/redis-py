@@ -7,7 +7,7 @@ import redis
 import time
 
 from redis._compat import (unichr, u, b, ascii_letters, iteritems, iterkeys,
-                           itervalues)
+                           itervalues, long)
 from redis.client import parse_info
 from redis import exceptions
 
@@ -1774,8 +1774,8 @@ class TestRedisCommands(object):
         ]
 
         # we can't determine the idle time, so just make sure it's an int
-        assert isinstance(info[0].pop('idle'), int)
-        assert isinstance(info[1].pop('idle'), int)
+        assert isinstance(info[0].pop('idle'), (int, long))
+        assert isinstance(info[1].pop('idle'), (int, long))
         assert info == expected
 
     @skip_if_server_version_lt('5.0.0')
