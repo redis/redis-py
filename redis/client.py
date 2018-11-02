@@ -533,7 +533,7 @@ class StrictRedis(object):
         """
         Return a Redis client object configured from the given URL, which must
         use either `the ``redis://`` scheme
-        <http://www.iana.org/assignments/uri-schemes/prov/redis>`_ for RESP
+        <https://www.iana.org/assignments/uri-schemes/prov/redis>`_ for RESP
         connections or the ``unix://`` scheme for Unix domain sockets.
 
         For example::
@@ -649,7 +649,7 @@ class StrictRedis(object):
         value_from_callable = kwargs.pop('value_from_callable', False)
         watch_delay = kwargs.pop('watch_delay', None)
         with self.pipeline(True, shard_hint) as pipe:
-            while 1:
+            while True:
                 try:
                     if watches:
                         pipe.watch(*watches)

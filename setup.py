@@ -36,7 +36,7 @@ setup(
     version=__version__,
     description='Python client for Redis key-value store',
     long_description=long_description,
-    url='http://github.com/andymccurdy/redis-py',
+    url='https://github.com/andymccurdy/redis-py',
     author='Andy McCurdy',
     author_email='sedrik@gmail.com',
     maintainer='Andy McCurdy',
