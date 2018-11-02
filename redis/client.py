@@ -427,7 +427,7 @@ class StrictRedis(object):
             int
         ),
         string_keys_to_dict(
-            'INCRBYFLOAT HINCRBYFLOAT GEODIST',
+            'INCRBYFLOAT HINCRBYFLOAT',
             float
         ),
         string_keys_to_dict(
@@ -436,7 +436,7 @@ class StrictRedis(object):
             lambda r: isinstance(r, (long, int)) and r or nativestr(r) == 'OK'
         ),
         string_keys_to_dict('SORT', sort_return_tuples),
-        string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
+        string_keys_to_dict('ZSCORE ZINCRBY GEODIST', float_or_none),
         string_keys_to_dict(
             'FLUSHALL FLUSHDB LSET LTRIM MSET PFMERGE RENAME '
             'SAVE SELECT SHUTDOWN SLAVEOF WATCH UNWATCH',
