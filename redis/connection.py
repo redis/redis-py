@@ -799,11 +799,11 @@ class ConnectionPool(object):
         Three URL schemes are supported:
 
         - ```redis://``
-          <http://www.iana.org/assignments/uri-schemes/prov/redis>`_ creates a
+          <https://www.iana.org/assignments/uri-schemes/prov/redis>`_ creates a
           normal TCP socket connection
         - ```rediss://``
-          <http://www.iana.org/assignments/uri-schemes/prov/rediss>`_ creates a
-          SSL wrapped TCP socket connection
+          <https://www.iana.org/assignments/uri-schemes/prov/rediss>`_ creates
+          a SSL wrapped TCP socket connection
         - ``unix://`` creates a Unix Domain Socket connection
 
         There are several ways to specify a database number. The parse function
@@ -829,6 +829,7 @@ class ConnectionPool(object):
         True/False, Yes/No values to indicate state. Invalid types cause a
         ``UserWarning`` to be raised. In the case of conflicting arguments,
         querystring arguments always win.
+
         """
         url_string = url
         url = urlparse(url)

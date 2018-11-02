@@ -4,7 +4,7 @@ redis-py
 The Python interface to the Redis key-value store.
 
 .. image:: https://secure.travis-ci.org/andymccurdy/redis-py.png?branch=master
-        :target: http://travis-ci.org/andymccurdy/redis-py
+        :target: https://travis-ci.org/andymccurdy/redis-py
 .. image:: https://readthedocs.org/projects/redis-py/badge/?version=latest&style=flat
         :target: https://redis-py.readthedocs.io/en/latest/
 .. image:: https://badge.fury.io/py/redis.svg
@@ -14,7 +14,7 @@ Installation
 ------------
 
 redis-py requires a running Redis server. See `Redis's quickstart
-<http://redis.io/topics/quickstart>`_ for installation instructions.
+<https://redis.io/topics/quickstart>`_ for installation instructions.
 
 To install redis-py, simply:
 
@@ -53,7 +53,7 @@ specified.
 API Reference
 -------------
 
-The `official Redis command documentation <http://redis.io/commands>`_ does a
+The `official Redis command documentation <https://redis.io/commands>`_ does a
 great job of explaining each command in detail. redis-py exposes two client
 classes that implement these commands. The StrictRedis class attempts to adhere
 to the official command syntax. There are a few exceptions:
@@ -613,7 +613,7 @@ execution.
 Sentinel support
 ^^^^^^^^^^^^^^^^
 
-redis-py can be used together with `Redis Sentinel <http://redis.io/topics/sentinel>`_
+redis-py can be used together with `Redis Sentinel <https://redis.io/topics/sentinel>`_
 to discover Redis nodes. You need to have at least one Sentinel daemon running
 in order to use redis-py's Sentinel support.
 
@@ -654,7 +654,7 @@ If no slaves can be connected to, a connection will be established with the
 master.
 
 See `Guidelines for Redis clients with support for Redis Sentinel
-<http://redis.io/topics/sentinel-clients>`_ to learn more about Redis Sentinel.
+<https://redis.io/topics/sentinel-clients>`_ to learn more about Redis Sentinel.
 
 Scan Iterators
 ^^^^^^^^^^^^^^
@@ -678,7 +678,7 @@ Author
 ^^^^^^
 
 redis-py is developed and maintained by Andy McCurdy (sedrik@gmail.com).
-It can be found here: http://github.com/andymccurdy/redis-py
+It can be found here: https://github.com/andymccurdy/redis-py
 
 Special thanks to:
 
