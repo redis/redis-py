@@ -5,6 +5,6 @@ daemonize yes
 unixsocket /tmp/redis-slave.sock
 unixsocketperm 777
 dbfilename slave.rdb
-dir /home/vagrant/redis/backups
+dir /var/lib/redis/backups
 
 slaveof 127.0.0.1 6379

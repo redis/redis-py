@@ -4,25 +4,23 @@ redis-py
 The Python interface to the Redis key-value store.
 
 .. image:: https://secure.travis-ci.org/andymccurdy/redis-py.png?branch=master
-        :target: http://travis-ci.org/andymccurdy/redis-py
+        :target: https://travis-ci.org/andymccurdy/redis-py
+.. image:: https://readthedocs.org/projects/redis-py/badge/?version=latest&style=flat
+        :target: https://redis-py.readthedocs.io/en/latest/
+.. image:: https://badge.fury.io/py/redis.svg
+        :target: https://pypi.org/project/redis/
 
 Installation
 ------------
 
 redis-py requires a running Redis server. See `Redis's quickstart
-<http://redis.io/topics/quickstart>`_ for installation instructions.
+<https://redis.io/topics/quickstart>`_ for installation instructions.
 
 To install redis-py, simply:
 
 .. code-block:: bash
 
     $ sudo pip install redis
-
-or alternatively (you really should be using pip though):
-
-.. code-block:: bash
-
-    $ sudo easy_install redis
 
 or from source:
 
@@ -55,7 +53,7 @@ specified.
 API Reference
 -------------
 
-The `official Redis command documentation <http://redis.io/commands>`_ does a
+The `official Redis command documentation <https://redis.io/commands>`_ does a
 great job of explaining each command in detail. redis-py exposes two client
 classes that implement these commands. The StrictRedis class attempts to adhere
 to the official command syntax. There are a few exceptions:
@@ -158,18 +156,11 @@ kind enough to create Python bindings. Using Hiredis can provide up to a
 performance increase is most noticeable when retrieving many pieces of data,
 such as from LRANGE or SMEMBERS operations.
 
-Hiredis is available on PyPI, and can be installed via pip or easy_install
-just like redis-py.
+Hiredis is available on PyPI, and can be installed via pip just like redis-py.
 
 .. code-block:: bash
 
     $ pip install hiredis
-
-or
-
-.. code-block:: bash
-
-    $ easy_install hiredis
 
 Response Callbacks
 ^^^^^^^^^^^^^^^^^^
@@ -272,7 +263,7 @@ could do something like this:
 .. code-block:: pycon
 
     >>> with r.pipeline() as pipe:
-    ...     while 1:
+    ...     while True:
     ...         try:
     ...             # put a WATCH on the key that holds our sequence value
     ...             pipe.watch('OUR-SEQUENCE-KEY')
@@ -305,7 +296,7 @@ explicitly calling reset():
 .. code-block:: pycon
 
     >>> pipe = r.pipeline()
-    >>> while 1:
+    >>> while True:
     ...     try:
     ...         pipe.watch('OUR-SEQUENCE-KEY')
     ...         ...
@@ -544,7 +535,7 @@ supported:
     1204
 
 
-LUA Scripting
+Lua Scripting
 ^^^^^^^^^^^^^
 
 redis-py supports the EVAL, EVALSHA, and SCRIPT commands. However, there are
@@ -553,10 +544,10 @@ scenarios. Therefore, redis-py exposes a Script object that makes scripting
 much easier to use.
 
 To create a Script instance, use the `register_script` function on a client
-instance passing the LUA code as the first argument. `register_script` returns
+instance passing the Lua code as the first argument. `register_script` returns
 a Script instance that you can use throughout your code.
 
-The following trivial LUA script accepts two parameters: the name of a key and
+The following trivial Lua script accepts two parameters: the name of a key and
 a multiplier value. The script fetches the value stored in the key, multiplies
 it with the multiplier value and returns the result.
 
@@ -573,8 +564,8 @@ it with the multiplier value and returns the result.
 function. Script instances accept the following optional arguments:
 
 * **keys**: A list of key names that the script will access. This becomes the
-  KEYS list in LUA.
-* **args**: A list of argument values. This becomes the ARGV list in LUA.
+  KEYS list in Lua.
+* **args**: A list of argument values. This becomes the ARGV list in Lua.
 * **client**: A redis-py Client or Pipeline instance that will invoke the
   script. If client isn't specified, the client that intiially
   created the Script instance (the one that `register_script` was
@@ -589,7 +580,7 @@ Continuing the example from above:
     10
 
 The value of key 'foo' is set to 2. When multiply is invoked, the 'foo' key is
-passed to the script along with the multiplier value of 5. LUA executes the
+passed to the script along with the multiplier value of 5. Lua executes the
 script and returns the result, 10.
 
 Script instances can be executed using a different client instance, even one
@@ -602,7 +593,7 @@ that points to a completely different Redis server.
     >>> multiply(keys=['foo'], args=[5], client=r2)
     15
 
-The Script object ensures that the LUA script is loaded into Redis's script
+The Script object ensures that the Lua script is loaded into Redis's script
 cache. In the event of a NOSCRIPT error, it will load the script and retry
 executing it.
 
@@ -622,7 +613,7 @@ execution.
 Sentinel support
 ^^^^^^^^^^^^^^^^
 
-redis-py can be used together with `Redis Sentinel <http://redis.io/topics/sentinel>`_
+redis-py can be used together with `Redis Sentinel <https://redis.io/topics/sentinel>`_
 to discover Redis nodes. You need to have at least one Sentinel daemon running
 in order to use redis-py's Sentinel support.
 
@@ -663,7 +654,7 @@ If no slaves can be connected to, a connection will be established with the
 master.
 
 See `Guidelines for Redis clients with support for Redis Sentinel
-<http://redis.io/topics/sentinel-clients>`_ to learn more about Redis Sentinel.
+<https://redis.io/topics/sentinel-clients>`_ to learn more about Redis Sentinel.
 
 Scan Iterators
 ^^^^^^^^^^^^^^
@@ -687,7 +678,7 @@ Author
 ^^^^^^
 
 redis-py is developed and maintained by Andy McCurdy (sedrik@gmail.com).
-It can be found here: http://github.com/andymccurdy/redis-py
+It can be found here: https://github.com/andymccurdy/redis-py
 
 Special thanks to:
 

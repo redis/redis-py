@@ -1,14 +1,15 @@
 from __future__ import with_statement
 import pytest
+import redis
 
 from redis._compat import unichr, u, unicode
-from .conftest import r as _redis_client
+from .conftest import _get_client
 
 
 class TestEncoding(object):
     @pytest.fixture()
     def r(self, request):
-        return _redis_client(request=request, decode_responses=True)
+        return _get_client(redis.Redis, request=request, decode_responses=True)
 
     def test_simple_encoding(self, r):
         unicode_string = unichr(3456) + u('abcd') + unichr(3421)
@@ -34,7 +35,7 @@ class TestEncoding(object):
 class TestCommandsAndTokensArentEncoded(object):
     @pytest.fixture()
     def r(self, request):
-        return _redis_client(request=request, encoding='utf-16')
+        return _get_client(redis.Redis, request=request, encoding='utf-16')
 
     def test_basic_command(self, r):
         r.set('hello', 'world')

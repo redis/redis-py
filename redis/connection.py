@@ -236,7 +236,7 @@ class SocketBuffer(object):
         try:
             self.purge()
             self._buffer.close()
-        except:
+        except Exception:
             # issue #633 suggests the purge/close somehow raised a
             # BadFileDescriptor error. Perhaps the client ran out of
             # memory or something else? It's probably OK to ignore
@@ -602,9 +602,9 @@ class Connection(object):
                 errmsg = e.args[1]
             raise ConnectionError("Error %s while writing to socket. %s." %
                                   (errno, errmsg))
-        except:
+        except Exception as e:
             self.disconnect()
-            raise
+            raise e
 
     def send_command(self, *args):
         "Pack and send a command to the Redis server"
@@ -623,9 +623,9 @@ class Connection(object):
         "Read the response from a previously sent command"
         try:
             response = self._parser.read_response()
-        except:
+        except Exception as e:
             self.disconnect()
-            raise
+            raise e
         if isinstance(response, ResponseError):
             raise response
         return response
@@ -779,7 +779,8 @@ URL_QUERY_ARGUMENT_PARSERS = {
     'socket_timeout': float,
     'socket_connect_timeout': float,
     'socket_keepalive': to_bool,
-    'retry_on_timeout': to_bool
+    'retry_on_timeout': to_bool,
+    'max_connections': int,
 }
 
 
@@ -799,11 +800,11 @@ class ConnectionPool(object):
         Three URL schemes are supported:
 
         - ```redis://``
-          <http://www.iana.org/assignments/uri-schemes/prov/redis>`_ creates a
+          <https://www.iana.org/assignments/uri-schemes/prov/redis>`_ creates a
           normal TCP socket connection
         - ```rediss://``
-          <http://www.iana.org/assignments/uri-schemes/prov/rediss>`_ creates a
-          SSL wrapped TCP socket connection
+          <https://www.iana.org/assignments/uri-schemes/prov/rediss>`_ creates
+          a SSL wrapped TCP socket connection
         - ``unix://`` creates a Unix Domain Socket connection
 
         There are several ways to specify a database number. The parse function
@@ -829,6 +830,7 @@ class ConnectionPool(object):
         True/False, Yes/No values to indicate state. Invalid types cause a
         ``UserWarning`` to be raised. In the case of conflicting arguments,
         querystring arguments always win.
+
         """
         url_string = url
         url = urlparse(url)

@@ -114,7 +114,8 @@ def parse_info(response):
     for line in response.splitlines():
         if line and not line.startswith('#'):
             if line.find(':') != -1:
-                key, value = line.split(':', 1)
+                # support keys that include ':' by using rsplit
+                key, value = line.rsplit(':', 1)
                 info[key] = get_value(value)
             else:
                 # if the line isn't splittable, append it to the "__raw__" key
@@ -182,10 +183,15 @@ def parse_sentinel_get_master(response):
     return response and (response[0], int(response[1])) or None
 
 
-def pairs_to_dict(response):
+def pairs_to_dict(response, decode_keys=False):
     "Create a dict given a list of key/value pairs"
-    it = iter(response)
-    return dict(izip(it, it))
+    if decode_keys:
+        # the iter form is faster, but I don't know how to make that work
+        # with a nativestr() map
+        return dict(izip(imap(nativestr, response[::2]), response[1::2]))
+    else:
+        it = iter(response)
+        return dict(izip(it, it))
 
 
 def pairs_to_dict_typed(response, type_info):
@@ -195,7 +201,7 @@ def pairs_to_dict_typed(response, type_info):
         if key in type_info:
             try:
                 value = type_info[key](value)
-            except:
+            except Exception:
                 # if for some reason the value can't be coerced, just use
                 # the string value
                 pass
@@ -230,6 +236,58 @@ def int_or_none(response):
     if response is None:
         return None
     return int(response)
+
+
+def parse_stream_list(response):
+    if response is None:
+        return None
+    return [(r[0], pairs_to_dict(r[1])) for r in response]
+
+
+def pairs_to_dict_with_nativestr_keys(response):
+    return pairs_to_dict(response, decode_keys=True)
+
+
+def parse_list_of_dicts(response):
+    return list(imap(pairs_to_dict_with_nativestr_keys, response))
+
+
+def parse_xclaim(response, **options):
+    if options.get('parse_justid', False):
+        return response
+    return parse_stream_list(response)
+
+
+def parse_xinfo_stream(response):
+    data = pairs_to_dict(response, decode_keys=True)
+    first = data['first-entry']
+    data['first-entry'] = (first[0], pairs_to_dict(first[1]))
+    last = data['last-entry']
+    data['last-entry'] = (last[0], pairs_to_dict(last[1]))
+    return data
+
+
+def parse_xread(response):
+    if response is None:
+        return []
+    return [[nativestr(r[0]), parse_stream_list(r[1])] for r in response]
+
+
+def parse_xpending(response, **options):
+    if options.get('parse_detail', False):
+        return parse_xpending_range(response)
+    consumers = [{'name': n, 'pending': long(p)} for n, p in response[3] or []]
+    return {
+        'pending': response[0],
+        'min': response[1],
+        'max': response[2],
+        'consumers': consumers
+    }
+
+
+def parse_xpending_range(response):
+    k = ('message_id', 'consumer', 'time_since_delivered', 'times_delivered')
+    return [dict(izip(k, r)) for r in response]
 
 
 def float_or_none(response):
@@ -366,11 +424,11 @@ class StrictRedis(object):
             'LINSERT LLEN LPUSHX PFADD PFCOUNT RPUSHX SADD SCARD SDIFFSTORE '
             'SETBIT SETRANGE SINTERSTORE SREM STRLEN SUNIONSTORE ZADD ZCARD '
             'ZLEXCOUNT ZREM ZREMRANGEBYLEX ZREMRANGEBYRANK ZREMRANGEBYSCORE '
-            'GEOADD',
+            'GEOADD XACK XDEL XLEN XTRIM',
             int
         ),
         string_keys_to_dict(
-            'INCRBYFLOAT HINCRBYFLOAT GEODIST',
+            'INCRBYFLOAT HINCRBYFLOAT',
             float
         ),
         string_keys_to_dict(
@@ -379,7 +437,7 @@ class StrictRedis(object):
             lambda r: isinstance(r, (long, int)) and r or nativestr(r) == 'OK'
         ),
         string_keys_to_dict('SORT', sort_return_tuples),
-        string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
+        string_keys_to_dict('ZSCORE ZINCRBY GEODIST', float_or_none),
         string_keys_to_dict(
             'FLUSHALL FLUSHDB LSET LTRIM MSET PFMERGE RENAME '
             'SAVE SELECT SHUTDOWN SLAVEOF WATCH UNWATCH',
@@ -391,26 +449,53 @@ class StrictRedis(object):
             lambda r: r and set(r) or set()
         ),
         string_keys_to_dict(
-            'ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
+            'ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
             zset_score_pairs
         ),
+        string_keys_to_dict('BZPOPMIN BZPOPMAX', \
+                            lambda r: r and (r[0], r[1], float(r[2])) or None),
         string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
+        string_keys_to_dict('XREVRANGE XRANGE', parse_stream_list),
+        string_keys_to_dict('XREAD XREADGROUP', parse_xread),
         string_keys_to_dict('BGREWRITEAOF BGSAVE', lambda r: True),
         {
             'CLIENT GETNAME': lambda r: r and nativestr(r),
             'CLIENT KILL': bool_ok,
             'CLIENT LIST': parse_client_list,
             'CLIENT SETNAME': bool_ok,
+            'CLUSTER ADDSLOTS': bool_ok,
+            'CLUSTER COUNT-FAILURE-REPORTS': lambda x: int(x),
+            'CLUSTER COUNTKEYSINSLOT': lambda x: int(x),
+            'CLUSTER DELSLOTS': bool_ok,
+            'CLUSTER FAILOVER': bool_ok,
+            'CLUSTER FORGET': bool_ok,
+            'CLUSTER INFO': parse_cluster_info,
+            'CLUSTER KEYSLOT': lambda x: int(x),
+            'CLUSTER MEET': bool_ok,
+            'CLUSTER NODES': parse_cluster_nodes,
+            'CLUSTER REPLICATE': bool_ok,
+            'CLUSTER RESET': bool_ok,
+            'CLUSTER SAVECONFIG': bool_ok,
+            'CLUSTER SET-CONFIG-EPOCH': bool_ok,
+            'CLUSTER SETSLOT': bool_ok,
+            'CLUSTER SLAVES': parse_cluster_nodes,
             'CONFIG GET': parse_config_get,
             'CONFIG RESETSTAT': bool_ok,
             'CONFIG SET': bool_ok,
             'DEBUG OBJECT': parse_debug_object,
+            'GEOHASH': lambda r: list(map(nativestr, r)),
+            'GEOPOS': lambda r: list(map(lambda ll: (float(ll[0]),
+                                         float(ll[1]))
+                                         if ll is not None else None, r)),
+            'GEORADIUS': parse_georadius_generic,
+            'GEORADIUSBYMEMBER': parse_georadius_generic,
             'HGETALL': lambda r: r and pairs_to_dict(r) or {},
             'HSCAN': parse_hscan,
             'INFO': parse_info,
             'LASTSAVE': timestamp_to_datetime,
             'OBJECT': parse_object,
             'PING': lambda r: nativestr(r) == 'PONG',
+            'PUBSUB NUMSUB': parse_pubsub_numsub,
             'RANDOMKEY': lambda r: r and r or None,
             'SCAN': parse_scan,
             'SCRIPT EXISTS': lambda r: list(imap(bool, r)),
@@ -431,30 +516,16 @@ class StrictRedis(object):
             'SLOWLOG RESET': bool_ok,
             'SSCAN': parse_scan,
             'TIME': lambda x: (int(x[0]), int(x[1])),
+            'XCLAIM': parse_xclaim,
+            'XGROUP CREATE': bool_ok,
+            'XGROUP DELCONSUMER': int,
+            'XGROUP DESTROY': bool,
+            'XGROUP SETID': bool_ok,
+            'XINFO CONSUMERS': parse_list_of_dicts,
+            'XINFO GROUPS': parse_list_of_dicts,
+            'XINFO STREAM': parse_xinfo_stream,
+            'XPENDING': parse_xpending,
             'ZSCAN': parse_zscan,
-            'CLUSTER ADDSLOTS': bool_ok,
-            'CLUSTER COUNT-FAILURE-REPORTS': lambda x: int(x),
-            'CLUSTER COUNTKEYSINSLOT': lambda x: int(x),
-            'CLUSTER DELSLOTS': bool_ok,
-            'CLUSTER FAILOVER': bool_ok,
-            'CLUSTER FORGET': bool_ok,
-            'CLUSTER INFO': parse_cluster_info,
-            'CLUSTER KEYSLOT': lambda x: int(x),
-            'CLUSTER MEET': bool_ok,
-            'CLUSTER NODES': parse_cluster_nodes,
-            'CLUSTER REPLICATE': bool_ok,
-            'CLUSTER RESET': bool_ok,
-            'CLUSTER SAVECONFIG': bool_ok,
-            'CLUSTER SET-CONFIG-EPOCH': bool_ok,
-            'CLUSTER SETSLOT': bool_ok,
-            'CLUSTER SLAVES': parse_cluster_nodes,
-            'GEOPOS': lambda r: list(map(lambda ll: (float(ll[0]),
-                                         float(ll[1]))
-                                         if ll is not None else None, r)),
-            'GEOHASH': lambda r: list(map(nativestr, r)),
-            'GEORADIUS': parse_georadius_generic,
-            'GEORADIUSBYMEMBER': parse_georadius_generic,
-            'PUBSUB NUMSUB': parse_pubsub_numsub,
         }
     )
 
@@ -587,7 +658,7 @@ class StrictRedis(object):
         value_from_callable = kwargs.pop('value_from_callable', False)
         watch_delay = kwargs.pop('watch_delay', None)
         with self.pipeline(True, shard_hint) as pipe:
-            while 1:
+            while True:
                 try:
                     if watches:
                         pipe.watch(*watches)
@@ -1683,6 +1754,328 @@ class StrictRedis(object):
         args = list_or_args(keys, args)
         return self.execute_command('SUNIONSTORE', dest, *args)
 
+    # STREAMS COMMANDS
+    def xack(self, name, groupname, *ids):
+        """
+        Acknowledges the successful processing of one or more messages.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        *ids: message ids to acknowlege.
+        """
+        return self.execute_command('XACK', name, groupname, *ids)
+
+    def xadd(self, name, fields, id='*', maxlen=None, approximate=True):
+        """
+        Add to a stream.
+        name: name of the stream
+        fields: dict of field/value pairs to insert into the stream
+        id: Location to insert this record. By default it is appended.
+        maxlen: truncate old stream members beyond this size
+        approximate: actual stream length may be slightly more than maxlen
+
+        """
+        pieces = []
+        if maxlen is not None:
+            if not isinstance(maxlen, (int, long)) or maxlen < 1:
+                raise RedisError('XADD maxlen must be a positive integer')
+            pieces.append(Token.get_token('MAXLEN'))
+            if approximate:
+                pieces.append(Token.get_token('~'))
+            pieces.append(str(maxlen))
+        pieces.append(id)
+        if not isinstance(fields, dict) or len(fields) == 0:
+            raise RedisError('XADD fields must be a non-empty dict')
+        for pair in iteritems(fields):
+            pieces.extend(pair)
+        return self.execute_command('XADD', name, *pieces)
+
+    def xclaim(self, name, groupname, consumername, min_idle_time, message_ids,
+               idle=None, time=None, retrycount=None, force=False,
+               justid=False):
+        """
+        Changes the ownership of a pending message.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        consumername: name of a consumer that claims the message.
+        min_idle_time: filter messages that were idle less than this amount of
+        milliseconds
+        message_ids: non-empty list or tuple of message IDs to claim
+        idle: optional. Set the idle time (last time it was delivered) of the
+         message in ms
+        time: optional integer. This is the same as idle but instead of a
+         relative amount of milliseconds, it sets the idle time to a specific
+         Unix time (in milliseconds).
+        retrycount: optional integer. set the retry counter to the specified
+         value. This counter is incremented every time a message is delivered
+         again.
+        force: optional boolean, false by default. Creates the pending message
+         entry in the PEL even if certain specified IDs are not already in the
+         PEL assigned to a different client.
+        justid: optional boolean, false by default. Return just an array of IDs
+         of messages successfully claimed, without returning the actual message
+        """
+        if not isinstance(min_idle_time, (int, long)) or min_idle_time < 0:
+            raise RedisError("XCLAIM min_idle_time must be a non negative "
+                             "integer")
+        if not isinstance(message_ids, (list, tuple)) or not message_ids:
+            raise RedisError("XCLAIM message_ids must be a non empty list or "
+                             "tuple of message IDs to claim")
+
+        kwargs = {}
+        pieces = [name, groupname, consumername, str(min_idle_time)]
+        pieces.extend(list(message_ids))
+
+        if idle is not None:
+            if not isinstance(idle, (int, long)):
+                raise RedisError("XCLAIM idle must be an integer")
+            pieces.extend((Token.get_token('IDLE'), str(idle)))
+        if time is not None:
+            if not isinstance(time, (int, long)):
+                raise RedisError("XCLAIM time must be an integer")
+            pieces.extend((Token.get_token('TIME'), str(time)))
+        if retrycount is not None:
+            if not isinstance(retrycount, (int, long)):
+                raise RedisError("XCLAIM retrycount must be an integer")
+            pieces.extend((Token.get_token('RETRYCOUNT'), str(retrycount)))
+
+        if force:
+            if not isinstance(force, bool):
+                raise RedisError("XCLAIM force must be a boolean")
+            pieces.append(Token.get_token('FORCE'))
+        if justid:
+            if not isinstance(justid, bool):
+                raise RedisError("XCLAIM justid must be a boolean")
+            pieces.append(Token.get_token('JUSTID'))
+            kwargs['parse_justid'] = True
+        return self.execute_command('XCLAIM', *pieces, **kwargs)
+
+    def xdel(self, name, *ids):
+        """
+        Deletes one or more messages from a stream.
+        name: name of the stream.
+        *ids: message ids to delete.
+        """
+        return self.execute_command('XDEL', name, *ids)
+
+    def xgroup_create(self, name, groupname, id='$', mkstream=False):
+        """
+        Create a new consumer group associated with a stream.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        id: ID of the last item in the stream to consider already delivered.
+        """
+        pieces = ['XGROUP CREATE', name, groupname, id]
+        if mkstream:
+            pieces.append('MKSTREAM')
+        return self.execute_command(*pieces)
+
+    def xgroup_delconsumer(self, name, groupname, consumername):
+        """
+        Remove a specific consumer from a consumer group.
+        Returns the number of pending messages that the consumer had before it
+        was deleted.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        consumername: name of consumer to delete
+        """
+        return self.execute_command('XGROUP DELCONSUMER', name, groupname,
+                                    consumername)
+
+    def xgroup_destroy(self, name, groupname):
+        """
+        Destroy a consumer group.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        """
+        return self.execute_command('XGROUP DESTROY', name, groupname)
+
+    def xgroup_setid(self, name, groupname, id):
+        """
+        Set the consumer group last delivered ID to something else.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        id: ID of the last item in the stream to consider already delivered.
+        """
+        return self.execute_command('XGROUP SETID', name, groupname, id)
+
+    def xinfo_consumers(self, name, groupname):
+        """
+        Returns general information about the consumers in the group.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        """
+        return self.execute_command('XINFO CONSUMERS', name, groupname)
+
+    def xinfo_groups(self, name):
+        """
+        Returns general information about the consumer groups of the stream.
+        name: name of the stream.
+        """
+        return self.execute_command('XINFO GROUPS', name)
+
+    def xinfo_stream(self, name):
+        """
+        Returns general information about the stream.
+        name: name of the stream.
+        """
+        return self.execute_command('XINFO STREAM', name)
+
+    def xlen(self, name):
+        """
+        Returns the number of elements in a given stream.
+        """
+        return self.execute_command('XLEN', name)
+
+    def xpending(self, name, groupname):
+        """
+        Returns information about pending messages of a group.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        """
+        return self.execute_command('XPENDING', name, groupname)
+
+    def xpending_range(self, name, groupname, min='-', max='+', count=-1,
+                       consumername=None):
+        """
+        Returns information about pending messages, in a range.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        start: first stream ID. defaults to '-',
+               meaning the earliest available.
+        finish: last stream ID. defaults to '+',
+                meaning the latest available.
+        count: if set, only return this many items, beginning with the
+               earliest available.
+        consumername: name of a consumer to filter by (optional).
+        """
+        pieces = [name, groupname]
+        if min is not None or max is not None or count is not None:
+            if min is None or max is None or count is None:
+                raise RedisError("XPENDING must be provided with min, max "
+                                 "and count parameters, or none of them. ")
+            if not isinstance(count, (int, long)) or count < -1:
+                raise RedisError("XPENDING count must be a integer >= -1")
+            pieces.extend((min, max, str(count)))
+        if consumername is not None:
+            if min is None or max is None or count is None:
+                raise RedisError("if XPENDING is provided with consumername,"
+                                 " it must be provided with min, max and"
+                                 " count parameters")
+            pieces.append(consumername)
+        return self.execute_command('XPENDING', *pieces, parse_detail=True)
+
+    def xrange(self, name, min='-', max='+', count=None):
+        """
+        Read stream values within an interval.
+        name: name of the stream.
+        start: first stream ID. defaults to '-',
+               meaning the earliest available.
+        finish: last stream ID. defaults to '+',
+                meaning the latest available.
+        count: if set, only return this many items, beginning with the
+               earliest available.
+        """
+        pieces = [min, max]
+        if count is not None:
+            if not isinstance(count, (int, long)) or count < 1:
+                raise RedisError('XRANGE count must be a positive integer')
+            pieces.append(Token.get_token('COUNT'))
+            pieces.append(str(count))
+
+        return self.execute_command('XRANGE', name, *pieces)
+
+    def xread(self, streams, count=None, block=None):
+        """
+        Block and monitor multiple streams for new data.
+        streams: a dict of stream names to stream IDs, where
+                   IDs indicate the last ID already seen.
+        count: if set, only return this many items, beginning with the
+               earliest available.
+        block: number of milliseconds to wait, if nothing already present.
+        """
+        pieces = []
+        if block is not None:
+            if not isinstance(block, (int, long)) or block < 0:
+                raise RedisError('XREAD block must be a non-negative integer')
+            pieces.append(Token.get_token('BLOCK'))
+            pieces.append(str(block))
+        if count is not None:
+            if not isinstance(count, (int, long)) or count < 1:
+                raise RedisError('XREAD count must be a positive integer')
+            pieces.append(Token.get_token('COUNT'))
+            pieces.append(str(count))
+        if not isinstance(streams, dict) or len(streams) == 0:
+            raise RedisError('XREAD streams must be a non empty dict')
+        pieces.append(Token.get_token('STREAMS'))
+        keys, values = izip(*iteritems(streams))
+        pieces.extend(keys)
+        pieces.extend(values)
+        return self.execute_command('XREAD', *pieces)
+
+    def xreadgroup(self, groupname, consumername, streams, count=None,
+                   block=None):
+        """
+        Read from a stream via a consumer group.
+        groupname: name of the consumer group.
+        consumername: name of the requesting consumer.
+        streams: a dict of stream names to stream IDs, where
+               IDs indicate the last ID already seen.
+        count: if set, only return this many items, beginning with the
+               earliest available.
+        block: number of milliseconds to wait, if nothing already present.
+        """
+        pieces = [Token.get_token('GROUP'), groupname, consumername]
+        if count is not None:
+            if not isinstance(count, (int, long)) or count < 1:
+                raise RedisError("XREADGROUP count must be a positive integer")
+            pieces.append(Token.get_token("COUNT"))
+            pieces.append(str(count))
+        if block is not None:
+            if not isinstance(block, (int, long)) or block < 0:
+                raise RedisError("XREADGROUP block must be a non-negative "
+                                 "integer")
+            pieces.append(Token.get_token("BLOCK"))
+            pieces.append(str(block))
+        if not isinstance(streams, dict) or len(streams) == 0:
+            raise RedisError('XREADGROUP streams must be a non empty dict')
+        pieces.append(Token.get_token('STREAMS'))
+        pieces.extend(streams.keys())
+        pieces.extend(streams.values())
+        return self.execute_command('XREADGROUP', *pieces)
+
+    def xrevrange(self, name, max='+', min='-', count=None):
+        """
+        Read stream values within an interval, in reverse order.
+        name: name of the stream
+        start: first stream ID. defaults to '+',
+               meaning the latest available.
+        finish: last stream ID. defaults to '-',
+                meaning the earliest available.
+        count: if set, only return this many items, beginning with the
+               latest available.
+        """
+        pieces = [max, min]
+        if count is not None:
+            if not isinstance(count, (int, long)) or count < 1:
+                raise RedisError('XREVRANGE count must be a positive integer')
+            pieces.append(Token.get_token('COUNT'))
+            pieces.append(str(count))
+
+        return self.execute_command('XREVRANGE', name, *pieces)
+
+    def xtrim(self, name, maxlen, approximate=True):
+        """
+        Trims old messages from a stream.
+        name: name of the stream.
+        maxlen: truncate old stream messages beyond this size
+        approximate: actual stream length may be slightly more than maxlen
+        """
+        pieces = [Token.get_token('MAXLEN')]
+        if approximate:
+            pieces.append(Token.get_token('~'))
+        pieces.append(maxlen)
+        return self.execute_command('XTRIM', name, *pieces)
+
     # SORTED SET COMMANDS
     def zadd(self, name, *args, **kwargs):
         """
@@ -1735,6 +2128,68 @@ class StrictRedis(object):
         lexicographical range ``min`` and ``max``.
         """
         return self.execute_command('ZLEXCOUNT', name, min, max)
+
+    def zpopmax(self, name, count=None):
+        """
+        Remove and return up to ``count`` members with the highest scores
+        from the sorted set ``name``.
+        """
+        args = (count is not None) and [count] or []
+        options = {
+            'withscores': True
+        }
+        return self.execute_command('ZPOPMAX', name, *args, **options)
+
+    def zpopmin(self, name, count=None):
+        """
+        Remove and return up to ``count`` members with the lowest scores
+        from the sorted set ``name``.
+        """
+        args = (count is not None) and [count] or []
+        options = {
+            'withscores': True
+        }
+        return self.execute_command('ZPOPMIN', name, *args, **options)
+
+    def bzpopmax(self, keys, timeout=0):
+        """
+        ZPOPMAX a value off of the first non-empty sorted set
+        named in the ``keys`` list.
+
+        If none of the sorted sets in ``keys`` has a value to ZPOPMAX,
+        then block for ``timeout`` seconds, or until a member gets added
+        to one of the sorted sets.
+
+        If timeout is 0, then block indefinitely.
+        """
+        if timeout is None:
+            timeout = 0
+        if isinstance(keys, basestring):
+            keys = [keys]
+        else:
+            keys = list(keys)
+        keys.append(timeout)
+        return self.execute_command('BZPOPMAX', *keys)
+
+    def bzpopmin(self, keys, timeout=0):
+        """
+        ZPOPMIN a value off of the first non-empty sorted set
+        named in the ``keys`` list.
+
+        If none of the sorted sets in ``keys`` has a value to ZPOPMIN,
+        then block for ``timeout`` seconds, or until a member gets added
+        to one of the sorted sets.
+
+        If timeout is 0, then block indefinitely.
+        """
+        if timeout is None:
+            timeout = 0
+        if isinstance(keys, basestring):
+            keys = [keys]
+        else:
+            keys = list(keys)
+        keys.append(timeout)
+        return self.execute_command('BZPOPMIN', *keys)
 
     def zrange(self, name, start, end, desc=False, withscores=False,
                score_cast_func=float):
@@ -2147,14 +2602,14 @@ class StrictRedis(object):
     def geohash(self, name, *values):
         """
         Return the geo hash string for each item of ``values`` members of
-        the specified key identified by the ``name``argument.
+        the specified key identified by the ``name`` argument.
         """
         return self.execute_command('GEOHASH', name, *values)
 
     def geopos(self, name, *values):
         """
         Return the positions of each item of ``values`` as members of
-        the specified key identified by the ``name``argument. Each position
+        the specified key identified by the ``name`` argument. Each position
         is represented by the pairs lon and lat.
         """
         return self.execute_command('GEOPOS', name, *values)

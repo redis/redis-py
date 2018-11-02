@@ -22,15 +22,15 @@ class StringJoiningConnection(Connection):
                 _errno, errmsg = e.args
             raise ConnectionError("Error %s while writing to socket. %s." %
                                   (_errno, errmsg))
-        except:
+        except Exception as e:
             self.disconnect()
-            raise
+            raise e
 
     def pack_command(self, *args):
         "Pack a series of arguments into a value Redis command"
         args_output = SYM_EMPTY.join([
             SYM_EMPTY.join((SYM_DOLLAR, b(str(len(k))), SYM_CRLF, k, SYM_CRLF))
-            for k in imap(self.encode, args)])
+            for k in imap(self.encoder.encode, args)])
         output = SYM_EMPTY.join(
             (SYM_STAR, b(str(len(args))), SYM_CRLF, args_output))
         return output
@@ -54,16 +54,16 @@ class ListJoiningConnection(Connection):
                 _errno, errmsg = e.args
             raise ConnectionError("Error %s while writing to socket. %s." %
                                   (_errno, errmsg))
-        except:
+        except Exception as e:
             self.disconnect()
-            raise
+            raise e
 
     def pack_command(self, *args):
         output = []
         buff = SYM_EMPTY.join(
             (SYM_STAR, b(str(len(args))), SYM_CRLF))
 
-        for k in imap(self.encode, args):
+        for k in imap(self.encoder.encode, args):
             if len(buff) > 6000 or len(k) > 6000:
                 buff = SYM_EMPTY.join(
                     (buff, SYM_DOLLAR, b(str(len(k))), SYM_CRLF))
