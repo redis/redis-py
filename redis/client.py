@@ -114,7 +114,8 @@ def parse_info(response):
     for line in response.splitlines():
         if line and not line.startswith('#'):
             if line.find(':') != -1:
-                key, value = line.split(':', 1)
+                # support keys that include ':' by using rsplit
+                key, value = line.rsplit(':', 1)
                 info[key] = get_value(value)
             else:
                 # if the line isn't splittable, append it to the "__raw__" key
