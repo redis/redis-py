@@ -1848,14 +1848,17 @@ class StrictRedis(object):
         """
         return self.execute_command('XDEL', name, *ids)
 
-    def xgroup_create(self, name, groupname, id):
+    def xgroup_create(self, name, groupname, id='$', mkstream=False):
         """
         Create a new consumer group associated with a stream.
         name: name of the stream.
         groupname: name of the consumer group.
         id: ID of the last item in the stream to consider already delivered.
         """
-        return self.execute_command('XGROUP CREATE', name, groupname, id)
+        pieces = ['XGROUP CREATE', name, groupname, id]
+        if mkstream:
+            pieces.append('MKSTREAM')
+        return self.execute_command(*pieces)
 
     def xgroup_delconsumer(self, name, groupname, consumername):
         """

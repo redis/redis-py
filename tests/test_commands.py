@@ -1750,6 +1750,28 @@ class TestRedisCommands(object):
         assert r.xinfo_groups(stream) == expected
 
     @skip_if_server_version_lt('5.0.0')
+    def test_xgroup_create_mkstream(self, r):
+        # tests xgroup_create and xinfo_groups
+        stream = 'stream'
+        group = 'group'
+
+        # an error is raised if a group is created on a stream that
+        # doesn't already exist
+        with pytest.raises(exceptions.ResponseError):
+            r.xgroup_create(stream, group, 0)
+
+        # however, with mkstream=True, the underlying stream is created
+        # automatically
+        assert r.xgroup_create(stream, group, 0, mkstream=True)
+        expected = [{
+            'name': b(group),
+            'consumers': 0,
+            'pending': 0,
+            'last-delivered-id': b('0-0')
+        }]
+        assert r.xinfo_groups(stream) == expected
+
+    @skip_if_server_version_lt('5.0.0')
     def test_xgroup_delconsumer(self, r):
         stream = 'stream'
         group = 'group'
