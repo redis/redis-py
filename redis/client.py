@@ -532,15 +532,23 @@ class StrictRedis(object):
     @classmethod
     def from_url(cls, url, db=None, **kwargs):
         """
-        Return a Redis client object configured from the given URL, which must
-        use either `the ``redis://`` scheme
-        <https://www.iana.org/assignments/uri-schemes/prov/redis>`_ for RESP
-        connections or the ``unix://`` scheme for Unix domain sockets.
+        Return a Redis client object configured from the given URL
 
         For example::
 
             redis://[:password]@localhost:6379/0
+            rediss://[:password]@localhost:6379/0
             unix://[:password]@/path/to/socket.sock?db=0
+
+        Three URL schemes are supported:
+
+        - ```redis://``
+          <http://www.iana.org/assignments/uri-schemes/prov/redis>`_ creates a
+          normal TCP socket connection
+        - ```rediss://``
+          <http://www.iana.org/assignments/uri-schemes/prov/rediss>`_ creates a
+          SSL wrapped TCP socket connection
+        - ``unix://`` creates a Unix Domain Socket connection
 
         There are several ways to specify a database number. The parse function
         will return the first specified option:
