@@ -439,7 +439,7 @@ class StrictRedis(object):
         string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
         string_keys_to_dict(
             'FLUSHALL FLUSHDB LSET LTRIM MSET PFMERGE RENAME '
-            'SAVE SELECT SHUTDOWN SLAVEOF WATCH UNWATCH',
+            'SAVE SELECT SHUTDOWN SLAVEOF SWAPDB WATCH UNWATCH',
             bool_ok
         ),
         string_keys_to_dict('BLPOP BRPOP', lambda r: r and tuple(r) or None),
@@ -816,6 +816,10 @@ class StrictRedis(object):
     def flushdb(self):
         "Delete all keys in the current database"
         return self.execute_command('FLUSHDB')
+
+    def swapdb(self, first, second):
+        "Swap two databases"
+        return self.execute_command('SWAPDB', first, second)
 
     def info(self, section=None):
         """
