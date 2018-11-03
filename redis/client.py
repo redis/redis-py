@@ -28,6 +28,18 @@ from redis.exceptions import (
 SYM_EMPTY = b('')
 
 
+_empty = object()
+
+
+def is_empty(cmd):
+    return len(cmd) >= 2 and cmd[1] == _empty
+
+
+COMMAND_EMPTY_RETURN_VALUE = {
+    'MGET': []
+}
+
+
 def list_or_args(keys, args):
     # returns a single list combining keys and args
     try:
@@ -742,6 +754,8 @@ class StrictRedis(object):
         "Execute a command and return a parsed response"
         pool = self.connection_pool
         command_name = args[0]
+        if is_empty(args):
+            return COMMAND_EMPTY_RETURN_VALUE[command_name]
         connection = pool.get_connection(command_name, **options)
         try:
             connection.send_command(*args)
@@ -1116,6 +1130,8 @@ class StrictRedis(object):
         Returns a list of values ordered identically to ``keys``
         """
         args = list_or_args(keys, args)
+        if not args:
+            args = [_empty]
         return self.execute_command('MGET', *args)
 
     def mset(self, *args, **kwargs):
@@ -3169,6 +3185,8 @@ class BasePipeline(object):
         MULTI is called.
         """
         command_name = args[0]
+        if is_empty(args):
+            return COMMAND_EMPTY_RETURN_VALUE[command_name]
         conn = self.connection
         # if this is the first call, we need a connection
         if not conn:
@@ -3209,7 +3227,8 @@ class BasePipeline(object):
         return self
 
     def _execute_transaction(self, connection, commands, raise_on_error):
-        cmds = chain([(('MULTI', ), {})], commands, [(('EXEC', ), {})])
+        non_empty_cmds = [cmd for cmd in commands if not is_empty(cmd[0])]
+        cmds = chain([(('MULTI', ), {})], non_empty_cmds, [(('EXEC', ), {})])
         all_cmds = connection.pack_commands([args for args, _ in cmds])
         connection.send_packed_command(all_cmds)
         errors = []
@@ -3223,8 +3242,8 @@ class BasePipeline(object):
         except ResponseError:
             errors.append((0, sys.exc_info()[1]))
 
-        # and all the other commands
-        for i, command in enumerate(commands):
+        # and all the other non_empty_cmds
+        for i, command in enumerate(non_empty_cmds):
             try:
                 self.parse_response(connection, '_')
             except ResponseError:
@@ -3249,18 +3268,23 @@ class BasePipeline(object):
         for i, e in errors:
             response.insert(i, e)
 
-        if len(response) != len(commands):
+        if len(response) != len(non_empty_cmds):
             self.connection.disconnect()
             raise ResponseError("Wrong number of response items from "
                                 "pipeline execution")
 
         # find any errors in the response and raise if necessary
         if raise_on_error:
-            self.raise_first_error(commands, response)
+            self.raise_first_error(non_empty_cmds, response)
 
         # We have to run response callbacks manually
         data = []
-        for r, cmd in izip(response, commands):
+        response_iter = iter(response)
+        for cmd in commands:
+            if not is_empty(cmd[0]):
+                r = next(response_iter)
+            else:
+                r = COMMAND_EMPTY_RETURN_VALUE[cmd[0][0]]
             if not isinstance(r, Exception):
                 args, options = cmd
                 command_name = args[0]
@@ -3271,14 +3295,19 @@ class BasePipeline(object):
 
     def _execute_pipeline(self, connection, commands, raise_on_error):
         # build up all commands into a single request to increase network perf
-        all_cmds = connection.pack_commands([args for args, _ in commands])
+        non_empty_cmds = [cmd for cmd in commands if not is_empty(cmd[0])]
+        all_cmds = connection.pack_commands(
+            [args for args, _ in non_empty_cmds])
         connection.send_packed_command(all_cmds)
 
         response = []
         for args, options in commands:
             try:
-                response.append(
-                    self.parse_response(connection, args[0], **options))
+                if not is_empty(args):
+                    response.append(
+                        self.parse_response(connection, args[0], **options))
+                else:
+                    response.append(COMMAND_EMPTY_RETURN_VALUE[args[0]])
             except ResponseError:
                 response.append(sys.exc_info()[1])
 

@@ -427,6 +427,7 @@ class TestRedisCommands(object):
         assert set(r.keys(pattern='test*')) == keys
 
     def test_mget(self, r):
+        assert r.mget([]) == []
         assert r.mget(['a', 'b']) == [None, None]
         r['a'] = '1'
         r['b'] = '2'

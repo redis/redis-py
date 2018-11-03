@@ -10,6 +10,7 @@ class TestPipeline(object):
         with r.pipeline() as pipe:
             pipe.set('a', 'a1').get('a').zadd('z', z1=1).zadd('z', z2=4)
             pipe.zincrby('z', 'z1').zrange('z', 0, 5, withscores=True)
+            pipe.mget([])
             assert pipe.execute() == \
                 [
                     True,
@@ -18,6 +19,7 @@ class TestPipeline(object):
                     True,
                     2.0,
                     [(b('z1'), 2.0), (b('z2'), 4)],
+                    [],
                 ]
 
     def test_pipeline_length(self, r):
@@ -38,8 +40,8 @@ class TestPipeline(object):
 
     def test_pipeline_no_transaction(self, r):
         with r.pipeline(transaction=False) as pipe:
-            pipe.set('a', 'a1').set('b', 'b1').set('c', 'c1')
-            assert pipe.execute() == [True, True, True]
+            pipe.set('a', 'a1').set('b', 'b1').set('c', 'c1').mget([])
+            assert pipe.execute() == [True, True, True, []]
             assert r['a'] == b('a1')
             assert r['b'] == b('b1')
             assert r['c'] == b('c1')
