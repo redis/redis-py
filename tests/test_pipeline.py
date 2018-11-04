@@ -114,6 +114,20 @@ class TestPipeline(object):
             assert pipe.set('z', 'zzz').execute() == [True]
             assert r['z'] == b('zzz')
 
+    def test_command_with_on_error_option_returns_default_value(self, r):
+        """
+        Commands with custom ON_ERROR functionality return their default
+        values in the pipeline no matter the raise_on_error preference
+        """
+        for error_switch in (True, False):
+            with r.pipeline() as pipe:
+                pipe.set('a', 1).mget([]).set('c', 3)
+                result = pipe.execute(raise_on_error=error_switch)
+
+                assert result[0]
+                assert result[1] == []
+                assert result[2]
+
     def test_parse_error_raised(self, r):
         with r.pipeline() as pipe:
             # the zrem is invalid because we don't pass any keys to it

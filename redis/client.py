@@ -26,6 +26,7 @@ from redis.exceptions import (
 )
 
 SYM_EMPTY = b('')
+EMPTY_ERROR = 'EMPTY_ERROR'
 
 
 def list_or_args(keys, args):
@@ -757,7 +758,12 @@ class StrictRedis(object):
 
     def parse_response(self, connection, command_name, **options):
         "Parses a response from the Redis server"
-        response = connection.read_response()
+        try:
+            response = connection.read_response()
+        except ResponseError:
+            if EMPTY_ERROR in options:
+                return options[EMPTY_ERROR]
+            raise
         if command_name in self.response_callbacks:
             return self.response_callbacks[command_name](response, **options)
         return response
@@ -1120,7 +1126,10 @@ class StrictRedis(object):
         Returns a list of values ordered identically to ``keys``
         """
         args = list_or_args(keys, args)
-        return self.execute_command('MGET', *args)
+        options = {}
+        if not args:
+            options[EMPTY_ERROR] = []
+        return self.execute_command('MGET', *args, **options)
 
     def mset(self, *args, **kwargs):
         """
@@ -3214,7 +3223,8 @@ class BasePipeline(object):
 
     def _execute_transaction(self, connection, commands, raise_on_error):
         cmds = chain([(('MULTI', ), {})], commands, [(('EXEC', ), {})])
-        all_cmds = connection.pack_commands([args for args, _ in cmds])
+        all_cmds = connection.pack_commands([args for args, options in cmds
+                                             if EMPTY_ERROR not in options])
         connection.send_packed_command(all_cmds)
         errors = []
 
@@ -3229,12 +3239,15 @@ class BasePipeline(object):
 
         # and all the other commands
         for i, command in enumerate(commands):
-            try:
-                self.parse_response(connection, '_')
-            except ResponseError:
-                ex = sys.exc_info()[1]
-                self.annotate_exception(ex, i + 1, command[0])
-                errors.append((i, ex))
+            if EMPTY_ERROR in command[1]:
+                errors.append((i, command[1][EMPTY_ERROR]))
+            else:
+                try:
+                    self.parse_response(connection, '_')
+                except ResponseError:
+                    ex = sys.exc_info()[1]
+                    self.annotate_exception(ex, i + 1, command[0])
+                    errors.append((i, ex))
 
         # parse the EXEC.
         try:
