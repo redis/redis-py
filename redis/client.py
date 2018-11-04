@@ -717,17 +717,16 @@ class StrictRedis(object):
         "Sets the current connection name"
         return self.execute_command('CLIENT SETNAME', name)
 
-    def client_unblock(self, client_id, reason=None):
+    def client_unblock(self, client_id, error=False):
         """
-        Unblocks a connection by its client id
-
-        The ``reason`` argument, if set to ``'error'``, unblocks the client
-        with a special error message. When set to ``'timeout'`` or if not set,
-        the client is unblocked using the regular timeout mechanism.
+        Unblocks a connection by its client id.
+        If ``error`` is True, unblocks the client with a special error message.
+        If ``error`` is False (default), the client is unblocked using the
+        regular timeout mechanism.
         """
         args = ['CLIENT UNBLOCK', int(client_id)]
-        if reason is not None and isinstance(reason, str):
-            args.append(reason)
+        if error:
+            args.append(Token.get_token('ERROR'))
         return self.execute_command(*args)
 
     def config_get(self, pattern="*"):

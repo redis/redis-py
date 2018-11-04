@@ -67,10 +67,8 @@ class TestRedisCommands(object):
     def test_client_unblock(self, r):
         myid = r.client_id()
         assert not r.client_unblock(myid)
-        assert not r.client_unblock(myid, reason='TIMEOUT')
-        assert not r.client_unblock(myid, reason='ERROR')
-        with pytest.raises(exceptions.ResponseError):
-            r.client_unblock(myid, reason='foobar')
+        assert not r.client_unblock(myid, error=True)
+        assert not r.client_unblock(myid, error=False)
 
     @skip_if_server_version_lt('2.6.9')
     def test_client_getname(self, r):
