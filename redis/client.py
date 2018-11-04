@@ -415,7 +415,7 @@ class StrictRedis(object):
     """
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict(
-            'AUTH EXISTS EXPIRE EXPIREAT HEXISTS HMSET MOVE MSETNX PERSIST '
+            'AUTH EXPIRE EXPIREAT HEXISTS HMSET MOVE MSETNX PERSIST '
             'PSETEX RENAMENX SISMEMBER SMOVE SETEX SETNX',
             bool
         ),
@@ -430,6 +430,12 @@ class StrictRedis(object):
         string_keys_to_dict(
             'INCRBYFLOAT HINCRBYFLOAT',
             float
+        ),
+        string_keys_to_dict(
+            # redis-server >= 3.0.3 can count how many keys exists
+            'EXISTS',
+            lambda r, **options: bool(r) if options.get('boolean', False) \
+            else int(r)
         ),
         string_keys_to_dict(
             # these return OK, or int if redis-server is >=1.3.4
@@ -1030,9 +1036,13 @@ class StrictRedis(object):
         """
         return self.execute_command('DUMP', name)
 
-    def exists(self, name):
+    def exists(self, keys, *args):
         "Returns a boolean indicating whether key ``name`` exists"
-        return self.execute_command('EXISTS', name)
+        options = {}
+        new_args = list_or_args(keys, args)
+        if not args and len(new_args) == 1:
+            options['boolean'] = True
+        return self.execute_command('EXISTS', *new_args, **options)
     __contains__ = exists
 
     def expire(self, name, time):

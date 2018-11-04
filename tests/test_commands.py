@@ -314,6 +314,7 @@ class TestRedisCommands(object):
         assert not r.exists('a')
         r['a'] = 'foo'
         assert r.exists('a')
+        assert r.exists('a', 'a') == 2
 
     def test_exists_contains(self, r):
         assert 'a' not in r
