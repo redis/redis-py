@@ -94,6 +94,13 @@ class TestRedisCommands(object):
         # we don't know which client ours will be
         assert 'redis_py_test' in [c['name'] for c in clients]
 
+    @skip_if_server_version_lt('2.9.50')
+    def test_client_pause(self, r):
+        assert r.client_pause(1)
+        assert r.client_pause(timeout=1)
+        with pytest.raises(exceptions.RedisError):
+            r.client_pause(timeout='not an integer')
+
     def test_config_get(self, r):
         data = r.config_get()
         assert 'maxmemory' in data

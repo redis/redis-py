@@ -464,7 +464,11 @@ class StrictRedis(object):
             'CLIENT KILL': bool_ok,
             'CLIENT LIST': parse_client_list,
             'CLIENT SETNAME': bool_ok,
+<<<<<<< HEAD
             'CLIENT UNBLOCK': lambda r: r and int(r) == 1 or False,
+=======
+            'CLIENT PAUSE': bool_ok,
+>>>>>>> 7c3a128... Implements CLIENT PAUSE
             'CLUSTER ADDSLOTS': bool_ok,
             'CLUSTER COUNT-FAILURE-REPORTS': lambda x: int(x),
             'CLUSTER COUNTKEYSINSLOT': lambda x: int(x),
@@ -812,6 +816,15 @@ class StrictRedis(object):
         if error:
             args.append(Token.get_token('ERROR'))
         return self.execute_command(*args)
+
+    def client_pause(self, timeout):
+        """
+        Suspend all the Redis clients for the specified amount of time
+        :param timeout: milliseconds to pause clients
+        """
+        if not isinstance(timeout, (int, long)):
+            raise RedisError("CLIENT PAUSE timeout must be an integer")
+        return self.execute_command('CLIENT PAUSE', str(timeout))
 
     def config_get(self, pattern="*"):
         "Return a dictionary of configuration based on the ``pattern``"
