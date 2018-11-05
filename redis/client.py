@@ -26,7 +26,7 @@ from redis.exceptions import (
 )
 
 SYM_EMPTY = b('')
-EMPTY_ERROR = 'EMPTY_ERROR'
+EMPTY_RESPONSE = 'EMPTY_RESPONSE'
 
 
 def list_or_args(keys, args):
@@ -761,8 +761,8 @@ class StrictRedis(object):
         try:
             response = connection.read_response()
         except ResponseError:
-            if EMPTY_ERROR in options:
-                return options[EMPTY_ERROR]
+            if EMPTY_RESPONSE in options:
+                return options[EMPTY_RESPONSE]
             raise
         if command_name in self.response_callbacks:
             return self.response_callbacks[command_name](response, **options)
@@ -1128,7 +1128,7 @@ class StrictRedis(object):
         args = list_or_args(keys, args)
         options = {}
         if not args:
-            options[EMPTY_ERROR] = []
+            options[EMPTY_RESPONSE] = []
         return self.execute_command('MGET', *args, **options)
 
     def mset(self, *args, **kwargs):
@@ -3224,7 +3224,7 @@ class BasePipeline(object):
     def _execute_transaction(self, connection, commands, raise_on_error):
         cmds = chain([(('MULTI', ), {})], commands, [(('EXEC', ), {})])
         all_cmds = connection.pack_commands([args for args, options in cmds
-                                             if EMPTY_ERROR not in options])
+                                             if EMPTY_RESPONSE not in options])
         connection.send_packed_command(all_cmds)
         errors = []
 
@@ -3239,8 +3239,8 @@ class BasePipeline(object):
 
         # and all the other commands
         for i, command in enumerate(commands):
-            if EMPTY_ERROR in command[1]:
-                errors.append((i, command[1][EMPTY_ERROR]))
+            if EMPTY_RESPONSE in command[1]:
+                errors.append((i, command[1][EMPTY_RESPONSE]))
             else:
                 try:
                     self.parse_response(connection, '_')
