@@ -68,6 +68,14 @@ class TestRedisCommands(object):
         assert 'addr' in clients[0]
 
     @skip_if_server_version_lt('5.0.0')
+    def test_client_list_type(self, r):
+        with pytest.raises(exceptions.RedisError):
+            r.client_list(_type='not a client type')
+        for client_type in ['normal', 'master', 'replica', 'pubsub']:
+            clients = r.client_list(_type=client_type)
+            assert isinstance(clients, list)
+
+    @skip_if_server_version_lt('5.0.0')
     def test_client_id(self, r):
         assert r.client_id() > 0
 

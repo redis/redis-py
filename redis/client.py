@@ -464,11 +464,8 @@ class StrictRedis(object):
             'CLIENT KILL': bool_ok,
             'CLIENT LIST': parse_client_list,
             'CLIENT SETNAME': bool_ok,
-<<<<<<< HEAD
             'CLIENT UNBLOCK': lambda r: r and int(r) == 1 or False,
-=======
             'CLIENT PAUSE': bool_ok,
->>>>>>> 7c3a128... Implements CLIENT PAUSE
             'CLUSTER ADDSLOTS': bool_ok,
             'CLUSTER COUNT-FAILURE-REPORTS': lambda x: int(x),
             'CLUSTER COUNTKEYSINSLOT': lambda x: int(x),
@@ -789,8 +786,20 @@ class StrictRedis(object):
         "Disconnects the client at ``address`` (ip:port)"
         return self.execute_command('CLIENT KILL', address)
 
-    def client_list(self):
+    def client_list(self, _type=None):
+        """
+        Returns a list of currently connected clients.
+        If type of client specified, only that type will be returned.
+        :param _type: optional. one of the client types (normal, master,
+         replica, pubsub)
+        """
         "Returns a list of currently connected clients"
+        if _type is not None:
+            if _type not in ['normal', 'master', 'replica', 'pubsub']:
+                raise RedisError("CLIENT LIST _type must be one of ('normal',"
+                                 " 'master', 'replica', 'pubsub')")
+            return self.execute_command('CLIENT LIST', Token.get_token('TYPE'),
+                                        _type)
         return self.execute_command('CLIENT LIST')
 
     def client_getname(self):
