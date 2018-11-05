@@ -2692,6 +2692,10 @@ class StrictRedis(object):
 
         return self.execute_command(command, *pieces, **kwargs)
 
+    # BITFIELD COMMAND
+    def bitfield(self, name=None):
+        return BitField(self, name)
+
 
 class Redis(StrictRedis):
     """
@@ -2775,6 +2779,115 @@ class Redis(StrictRedis):
             pieces.append(pair[1])
             pieces.append(pair[0])
         return self.execute_command('ZADD', name, *pieces)
+
+
+class BitField(object):
+    """
+    BitField provides ...
+    """
+
+    def __init__(self, client=None, name=None):
+        self.__body = list()
+        self.client = client
+        self.name = name
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.reset()
+
+    def __del__(self):
+        try:
+            self.reset()
+        except Exception:
+            pass
+
+    @staticmethod
+    def __offset(positional, offset):
+        return '{}{}'.format((positional and '#' or ''), int(offset))
+
+    @staticmethod
+    def __type(signed, width):
+        return '{}{}'.format((signed and 'i' or 'u'), int(width))
+
+    @property
+    def client(self):
+        return self.__client
+
+    @client.setter
+    def client(self, client):
+        if client is not None and not isinstance(client, StrictRedis):
+            raise TypeError
+        self.__client = client
+
+    @property
+    def name(self):
+        return self.__name
+
+    @name.setter
+    def name(self, name):
+        if name is None:
+            self.__name = name
+        else:
+            self.__name = str(name)
+
+    def reset(self):
+        self.__body = list()
+        self.client = None
+        self.name = None
+
+    def get(self, width, offset, signed=False, positional=False):
+        self.__body.append('GET')
+        self.__body.append(self.__type(signed, width))
+        self.__body.append(self.__offset(positional, offset))
+        return self
+
+    def incrby(self, width, offset, value, signed=False, positional=False):
+        self.__body.append('INCRBY')
+        self.__body.append(self.__type(signed, width))
+        self.__body.append(self.__offset(positional, offset))
+        self.__body.append(int(value))
+        return self
+
+    def overflow(self, wrap=False, sat=False, fail=False):
+        if not (wrap ^ sat ^ fail):
+            raise TypeError
+        self.__body.append('OVERFLOW')
+        if sat:
+            self.__body.append('SAT')
+        elif fail:
+            self.__body.append('FAIL')
+        else:
+            self.__body.append('WRAP')
+        return self
+
+    def set(self, width, offset, value, signed=False, positional=False):
+        self.__body.append('SET')
+        self.__body.append(self.__type(signed, width))
+        self.__body.append(self.__offset(positional, offset))
+        self.__body.append(int(value))
+        return self
+
+    def execute(self, client=None, name=None):
+        if client is None:
+            client = self.client
+        if client is None or not isinstance(client, StrictRedis):
+            raise TypeError
+
+        if name is None:
+            name = self.name
+        if name is None:
+            raise TypeError
+
+        body = self.__body
+        if not body:
+            return []
+
+        pieces = ['BITFIELD', name]
+        pieces += body
+
+        return client.execute_command(*pieces)
 
 
 class PubSub(object):

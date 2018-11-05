@@ -1649,6 +1649,13 @@ class TestRedisCommands(object):
              ['place1', 0.0, 3471609698139488,
                  (2.1909382939338684, 41.433790281840835)]]
 
+    # BITFIELD COMMAND
+    @skip_if_server_version_lt('3.2.0')
+    def test_bitfield(self, r):
+        # TBD
+        pass
+
+    # STREAM COMMANDS
     @skip_if_server_version_lt('5.0.0')
     def test_xack(self, r):
         stream = 'stream'

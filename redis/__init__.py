@@ -1,4 +1,4 @@
-from redis.client import Redis, StrictRedis
+from redis.client import Redis, StrictRedis, BitField
 from redis.connection import (
     BlockingConnectionPool,
     ConnectionPool,
@@ -30,5 +30,5 @@ __all__ = [
     'Connection', 'SSLConnection', 'UnixDomainSocketConnection', 'from_url',
     'AuthenticationError', 'BusyLoadingError', 'ConnectionError', 'DataError',
     'InvalidResponse', 'PubSubError', 'ReadOnlyError', 'RedisError',
-    'ResponseError', 'TimeoutError', 'WatchError'
+    'ResponseError', 'TimeoutError', 'WatchError', 'BitField',
 ]
