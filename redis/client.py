@@ -1879,7 +1879,7 @@ class StrictRedis(object):
         """
         pieces = ['XGROUP CREATE', name, groupname, id]
         if mkstream:
-            pieces.append('MKSTREAM')
+            pieces.append(Token.get_token('MKSTREAM'))
         return self.execute_command(*pieces)
 
     def xgroup_delconsumer(self, name, groupname, consumername):
