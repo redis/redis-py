@@ -461,9 +461,11 @@ class StrictRedis(object):
         string_keys_to_dict('BGREWRITEAOF BGSAVE', lambda r: True),
         {
             'CLIENT GETNAME': lambda r: r and nativestr(r),
+            'CLIENT ID': int,
             'CLIENT KILL': bool_ok,
             'CLIENT LIST': parse_client_list,
             'CLIENT SETNAME': bool_ok,
+            'CLIENT UNBLOCK': lambda r: r and int(r) == 1 or False,
             'CLUSTER ADDSLOTS': bool_ok,
             'CLUSTER COUNT-FAILURE-REPORTS': lambda x: int(x),
             'CLUSTER COUNTKEYSINSLOT': lambda x: int(x),
@@ -792,9 +794,25 @@ class StrictRedis(object):
         "Returns the current connection name"
         return self.execute_command('CLIENT GETNAME')
 
+    def client_id(self):
+        "Returns the current connection id"
+        return self.execute_command('CLIENT ID')
+
     def client_setname(self, name):
         "Sets the current connection name"
         return self.execute_command('CLIENT SETNAME', name)
+
+    def client_unblock(self, client_id, error=False):
+        """
+        Unblocks a connection by its client id.
+        If ``error`` is True, unblocks the client with a special error message.
+        If ``error`` is False (default), the client is unblocked using the
+        regular timeout mechanism.
+        """
+        args = ['CLIENT UNBLOCK', int(client_id)]
+        if error:
+            args.append(Token.get_token('ERROR'))
+        return self.execute_command(*args)
 
     def config_get(self, pattern="*"):
         "Return a dictionary of configuration based on the ``pattern``"

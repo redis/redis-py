@@ -67,6 +67,17 @@ class TestRedisCommands(object):
         assert isinstance(clients[0], dict)
         assert 'addr' in clients[0]
 
+    @skip_if_server_version_lt('5.0.0')
+    def test_client_id(self, r):
+        assert r.client_id() > 0
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_client_unblock(self, r):
+        myid = r.client_id()
+        assert not r.client_unblock(myid)
+        assert not r.client_unblock(myid, error=True)
+        assert not r.client_unblock(myid, error=False)
+
     @skip_if_server_version_lt('2.6.9')
     def test_client_getname(self, r):
         assert r.client_getname() is None
