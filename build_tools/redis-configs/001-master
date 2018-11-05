@@ -5,4 +5,4 @@ daemonize yes
 unixsocket /tmp/redis_master.sock
 unixsocketperm 777
 dbfilename master.rdb
-dir /home/vagrant/redis/backups
+dir /var/lib/redis/backups

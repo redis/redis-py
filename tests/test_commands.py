@@ -2,11 +2,12 @@ from __future__ import with_statement
 import binascii
 import datetime
 import pytest
+import re
 import redis
 import time
 
 from redis._compat import (unichr, u, b, ascii_letters, iteritems, iterkeys,
-                           itervalues)
+                           itervalues, long)
 from redis.client import parse_info
 from redis import exceptions
 
@@ -32,6 +33,13 @@ def redis_server_time(client):
     seconds, milliseconds = client.time()
     timestamp = float('%s.%s' % (seconds, milliseconds))
     return datetime.datetime.fromtimestamp(timestamp)
+
+
+def get_stream_message(client, stream, message_id):
+    "Fetch a stream message and format it as a (message_id, fields) pair"
+    response = client.xrange(stream, min=message_id, max=message_id)
+    assert len(response) == 1
+    return response[0]
 
 
 # RESPONSE CALLBACKS
@@ -81,11 +89,10 @@ class TestRedisCommands(object):
 
     @skip_if_server_version_lt('2.6.9')
     def test_client_list_after_client_setname(self, r):
-        r.client_setname('cl=i=ent')
+        r.client_setname('redis_py_test')
         clients = r.client_list()
-        assert isinstance(clients[0], dict)
-        assert 'name' in clients[0]
-        assert clients[0]['name'] == 'cl=i=ent'
+        # we don't know which client ours will be
+        assert 'redis_py_test' in [c['name'] for c in clients]
 
     def test_config_get(self, r):
         data = r.config_get()
@@ -431,6 +438,7 @@ class TestRedisCommands(object):
         assert set(r.keys(pattern='test*')) == keys
 
     def test_mget(self, r):
+        assert r.mget([]) == []
         assert r.mget(['a', 'b']) == [None, None]
         r['a'] = '1'
         r['b'] = '2'
@@ -979,6 +987,48 @@ class TestRedisCommands(object):
         assert r.zinterstore('d', {'a': 1, 'b': 2, 'c': 3}) == 2
         assert r.zrange('d', 0, -1, withscores=True) == \
             [(b('a3'), 20), (b('a1'), 23)]
+
+    @skip_if_server_version_lt('4.9.0')
+    def test_zpopmax(self, r):
+        r.zadd('a', a1=1, a2=2, a3=3)
+        assert r.zpopmax('a') == [(b('a3'), 3)]
+
+        # with count
+        assert r.zpopmax('a', count=2) == \
+            [(b('a2'), 2), (b('a1'), 1)]
+
+    @skip_if_server_version_lt('4.9.0')
+    def test_zpopmin(self, r):
+        r.zadd('a', a1=1, a2=2, a3=3)
+        assert r.zpopmin('a') == [(b('a1'), 1)]
+
+        # with count
+        assert r.zpopmin('a', count=2) == \
+            [(b('a2'), 2), (b('a3'), 3)]
+
+    @skip_if_server_version_lt('4.9.0')
+    def test_bzpopmax(self, r):
+        r.zadd('a', a1=1, a2=2)
+        r.zadd('b', b1=10, b2=20)
+        assert r.bzpopmax(['b', 'a'], timeout=1) == (b('b'), b('b2'), 20)
+        assert r.bzpopmax(['b', 'a'], timeout=1) == (b('b'), b('b1'), 10)
+        assert r.bzpopmax(['b', 'a'], timeout=1) == (b('a'), b('a2'), 2)
+        assert r.bzpopmax(['b', 'a'], timeout=1) == (b('a'), b('a1'), 1)
+        assert r.bzpopmax(['b', 'a'], timeout=1) is None
+        r.zadd('c', c1=100)
+        assert r.bzpopmax('c', timeout=1) == (b('c'), b('c1'), 100)
+
+    @skip_if_server_version_lt('4.9.0')
+    def test_bzpopmin(self, r):
+        r.zadd('a', a1=1, a2=2)
+        r.zadd('b', b1=10, b2=20)
+        assert r.bzpopmin(['b', 'a'], timeout=1) == (b('b'), b('b1'), 10)
+        assert r.bzpopmin(['b', 'a'], timeout=1) == (b('b'), b('b2'), 20)
+        assert r.bzpopmin(['b', 'a'], timeout=1) == (b('a'), b('a1'), 1)
+        assert r.bzpopmin(['b', 'a'], timeout=1) == (b('a'), b('a2'), 2)
+        assert r.bzpopmin(['b', 'a'], timeout=1) is None
+        r.zadd('c', c1=100)
+        assert r.bzpopmin('c', timeout=1) == (b('c'), b('c1'), 100)
 
     def test_zrange(self, r):
         r.zadd('a', a1=1, a2=2, a3=3)
@@ -1611,9 +1661,447 @@ class TestRedisCommands(object):
              ['place1', 0.0, 3471609698139488,
                  (2.1909382939338684, 41.433790281840835)]]
 
+    @skip_if_server_version_lt('5.0.0')
+    def test_xack(self, r):
+        stream = 'stream'
+        group = 'group'
+        consumer = 'consumer'
+        # xack on a stream that doesn't exist
+        assert r.xack(stream, group, '0-0') == 0
+
+        m1 = r.xadd(stream, {'one': 'one'})
+        m2 = r.xadd(stream, {'two': 'two'})
+        m3 = r.xadd(stream, {'three': 'three'})
+
+        # xack on a group that doesn't exist
+        assert r.xack(stream, group, m1) == 0
+
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: 0})
+        # xack returns the number of ack'd elements
+        assert r.xack(stream, group, m1) == 1
+        assert r.xack(stream, group, m2, m3) == 2
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xadd(self, r):
+        stream = 'stream'
+        message_id = r.xadd(stream, {'foo': 'bar'})
+        assert re.match(br'[0-9]+\-[0-9]+', message_id)
+
+        # explicit message id
+        message_id = b('9999999999999999999-0')
+        assert message_id == r.xadd(stream, {'foo': 'bar'}, id=message_id)
+
+        # with maxlen, the list evicts the first message
+        r.xadd(stream, {'foo': 'bar'}, maxlen=2, approximate=False)
+        assert r.xlen(stream) == 2
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xclaim(self, r):
+        stream = 'stream'
+        group = 'group'
+        consumer1 = 'consumer1'
+        consumer2 = 'consumer2'
+
+        message_id = r.xadd(stream, {'john': 'wick'})
+        message = get_stream_message(r, stream, message_id)
+        r.xgroup_create(stream, group, 0)
+
+        # trying to claim a message that isn't already pending doesn't
+        # do anything
+        response = r.xclaim(stream, group, consumer2,
+                            min_idle_time=0, message_ids=(message_id,))
+        assert response == []
+
+        # read the group as consumer1 to initially claim the messages
+        r.xreadgroup(group, consumer1, streams={stream: 0})
+
+        # claim the message as consumer2
+        response = r.xclaim(stream, group, consumer2,
+                            min_idle_time=0, message_ids=(message_id,))
+        assert response[0] == message
+
+        # reclaim the message as consumer1, but use the justid argument
+        # which only returns message ids
+        assert r.xclaim(stream, group, consumer1,
+                        min_idle_time=0, message_ids=(message_id,),
+                        justid=True) == [message_id]
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xdel(self, r):
+        stream = 'stream'
+
+        # deleting from an empty stream doesn't do anything
+        assert r.xdel(stream, 1) == 0
+
+        m1 = r.xadd(stream, {'foo': 'bar'})
+        m2 = r.xadd(stream, {'foo': 'bar'})
+        m3 = r.xadd(stream, {'foo': 'bar'})
+
+        # xdel returns the number of deleted elements
+        assert r.xdel(stream, m1) == 1
+        assert r.xdel(stream, m2, m3) == 2
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xgroup_create(self, r):
+        # tests xgroup_create and xinfo_groups
+        stream = 'stream'
+        group = 'group'
+        r.xadd(stream, {'foo': 'bar'})
+
+        # no group is setup yet, no info to obtain
+        assert r.xinfo_groups(stream) == []
+
+        assert r.xgroup_create(stream, group, 0)
+        expected = [{
+            'name': b(group),
+            'consumers': 0,
+            'pending': 0,
+            'last-delivered-id': b('0-0')
+        }]
+        assert r.xinfo_groups(stream) == expected
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xgroup_create_mkstream(self, r):
+        # tests xgroup_create and xinfo_groups
+        stream = 'stream'
+        group = 'group'
+
+        # an error is raised if a group is created on a stream that
+        # doesn't already exist
+        with pytest.raises(exceptions.ResponseError):
+            r.xgroup_create(stream, group, 0)
+
+        # however, with mkstream=True, the underlying stream is created
+        # automatically
+        assert r.xgroup_create(stream, group, 0, mkstream=True)
+        expected = [{
+            'name': b(group),
+            'consumers': 0,
+            'pending': 0,
+            'last-delivered-id': b('0-0')
+        }]
+        assert r.xinfo_groups(stream) == expected
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xgroup_delconsumer(self, r):
+        stream = 'stream'
+        group = 'group'
+        consumer = 'consumer'
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        r.xgroup_create(stream, group, 0)
+
+        # a consumer that hasn't yet read any messages doesn't do anything
+        assert r.xgroup_delconsumer(stream, group, consumer) == 0
+
+        # read all messages from the group
+        r.xreadgroup(group, consumer, streams={stream: 0})
+
+        # deleting the consumer should return 2 pending messages
+        assert r.xgroup_delconsumer(stream, group, consumer) == 2
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xgroup_destroy(self, r):
+        stream = 'stream'
+        group = 'group'
+        r.xadd(stream, {'foo': 'bar'})
+
+        # destroying a nonexistent group returns False
+        assert not r.xgroup_destroy(stream, group)
+
+        r.xgroup_create(stream, group, 0)
+        assert r.xgroup_destroy(stream, group)
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xgroup_setid(self, r):
+        stream = 'stream'
+        group = 'group'
+        message_id = r.xadd(stream, {'foo': 'bar'})
+
+        r.xgroup_create(stream, group, 0)
+        # advance the last_delivered_id to the message_id
+        r.xgroup_setid(stream, group, message_id)
+        expected = [{
+            'name': b(group),
+            'consumers': 0,
+            'pending': 0,
+            'last-delivered-id': message_id
+        }]
+        assert r.xinfo_groups(stream) == expected
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xinfo_consumers(self, r):
+        stream = 'stream'
+        group = 'group'
+        consumer1 = 'consumer1'
+        consumer2 = 'consumer2'
+        r.xadd(stream, {'foo': 'bar'})
+
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer1, streams={stream: 0})
+        r.xreadgroup(group, consumer2, streams={stream: 0})
+        info = r.xinfo_consumers(stream, group)
+        assert len(info) == 2
+        expected = [
+            {'name': b(consumer1), 'pending': 1},
+            {'name': b(consumer2), 'pending': 0},
+        ]
+
+        # we can't determine the idle time, so just make sure it's an int
+        assert isinstance(info[0].pop('idle'), (int, long))
+        assert isinstance(info[1].pop('idle'), (int, long))
+        assert info == expected
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xinfo_stream(self, r):
+        stream = 'stream'
+        m1 = r.xadd(stream, {'foo': 'bar'})
+        m2 = r.xadd(stream, {'foo': 'bar'})
+        info = r.xinfo_stream(stream)
+
+        assert info['length'] == 2
+        assert info['first-entry'] == get_stream_message(r, stream, m1)
+        assert info['last-entry'] == get_stream_message(r, stream, m2)
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xlen(self, r):
+        stream = 'stream'
+        assert r.xlen(stream) == 0
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        assert r.xlen(stream) == 2
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xpending(self, r):
+        stream = 'stream'
+        group = 'group'
+        consumer1 = 'consumer1'
+        consumer2 = 'consumer2'
+        m1 = r.xadd(stream, {'foo': 'bar'})
+        m2 = r.xadd(stream, {'foo': 'bar'})
+        r.xgroup_create(stream, group, 0)
+
+        # xpending on a group that has no consumers yet
+        expected = {
+            'pending': 0,
+            'min': None,
+            'max': None,
+            'consumers': []
+        }
+        assert r.xpending(stream, group) == expected
+
+        # read 1 message from the group with each consumer
+        r.xreadgroup(group, consumer1, streams={stream: 0}, count=1)
+        r.xreadgroup(group, consumer2, streams={stream: m1}, count=1)
+
+        expected = {
+            'pending': 2,
+            'min': m1,
+            'max': m2,
+            'consumers': [
+                {'name': b(consumer1), 'pending': 1},
+                {'name': b(consumer2), 'pending': 1},
+            ]
+        }
+        assert r.xpending(stream, group) == expected
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xpending_range(self, r):
+        stream = 'stream'
+        group = 'group'
+        consumer1 = 'consumer1'
+        consumer2 = 'consumer2'
+        m1 = r.xadd(stream, {'foo': 'bar'})
+        m2 = r.xadd(stream, {'foo': 'bar'})
+        r.xgroup_create(stream, group, 0)
+
+        # xpending range on a group that has no consumers yet
+        assert r.xpending_range(stream, group) == []
+
+        # read 1 message from the group with each consumer
+        r.xreadgroup(group, consumer1, streams={stream: 0}, count=1)
+        r.xreadgroup(group, consumer2, streams={stream: m1}, count=1)
+
+        response = r.xpending_range(stream, group)
+        assert len(response) == 2
+        assert response[0]['message_id'] == m1
+        assert response[0]['consumer'] == b(consumer1)
+        assert response[1]['message_id'] == m2
+        assert response[1]['consumer'] == b(consumer2)
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xrange(self, r):
+        stream = 'stream'
+        m1 = r.xadd(stream, {'foo': 'bar'})
+        m2 = r.xadd(stream, {'foo': 'bar'})
+        m3 = r.xadd(stream, {'foo': 'bar'})
+        m4 = r.xadd(stream, {'foo': 'bar'})
+
+        def get_ids(results):
+            return [result[0] for result in results]
+
+        results = r.xrange(stream, min=m1)
+        assert get_ids(results) == [m1, m2, m3, m4]
+
+        results = r.xrange(stream, min=m2, max=m3)
+        assert get_ids(results) == [m2, m3]
+
+        results = r.xrange(stream, max=m3)
+        assert get_ids(results) == [m1, m2, m3]
+
+        results = r.xrange(stream, max=m2, count=1)
+        assert get_ids(results) == [m1]
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xread(self, r):
+        stream = 'stream'
+        m1 = r.xadd(stream, {'foo': 'bar'})
+        m2 = r.xadd(stream, {'bing': 'baz'})
+
+        expected = [
+            [
+                stream,
+                [
+                    get_stream_message(r, stream, m1),
+                    get_stream_message(r, stream, m2),
+                ]
+            ]
+        ]
+        # xread starting at 0 returns both messages
+        assert r.xread(streams={stream: 0}) == expected
+
+        expected = [
+            [
+                stream,
+                [
+                    get_stream_message(r, stream, m1),
+                ]
+            ]
+        ]
+        # xread starting at 0 and count=1 returns only the first message
+        assert r.xread(streams={stream: 0}, count=1) == expected
+
+        expected = [
+            [
+                stream,
+                [
+                    get_stream_message(r, stream, m2),
+                ]
+            ]
+        ]
+        # xread starting at m1 returns only the second message
+        assert r.xread(streams={stream: m1}) == expected
+
+        # xread starting at the last message returns an empty list
+        assert r.xread(streams={stream: m2}) == []
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xreadgroup(self, r):
+        stream = 'stream'
+        group = 'group'
+        consumer = 'consumer'
+        m1 = r.xadd(stream, {'foo': 'bar'})
+        m2 = r.xadd(stream, {'bing': 'baz'})
+        r.xgroup_create(stream, group, 0)
+
+        expected = [
+            [
+                stream,
+                [
+                    get_stream_message(r, stream, m1),
+                    get_stream_message(r, stream, m2),
+                ]
+            ]
+        ]
+        # xread starting at 0 returns both messages
+        assert r.xreadgroup(group, consumer, streams={stream: 0}) == expected
+
+        r.xgroup_destroy(stream, group)
+        r.xgroup_create(stream, group, 0)
+
+        expected = [
+            [
+                stream,
+                [
+                    get_stream_message(r, stream, m1),
+                ]
+            ]
+        ]
+        # xread starting at 0 and count=1 returns only the first message
+        assert r.xreadgroup(group, consumer, streams={stream: 0}, count=1) == \
+            expected
+
+        r.xgroup_destroy(stream, group)
+        r.xgroup_create(stream, group, 0)
+
+        expected = [
+            [
+                stream,
+                [
+                    get_stream_message(r, stream, m2),
+                ]
+            ]
+        ]
+        # xread starting at m1 returns only the second message
+        assert r.xreadgroup(group, consumer, streams={stream: m1}) == expected
+
+        r.xgroup_destroy(stream, group)
+        r.xgroup_create(stream, group, 0)
+
+        # xread starting at the last message returns an empty message list
+        expected = [
+            [
+                stream,
+                []
+            ]
+        ]
+        assert r.xreadgroup(group, consumer, streams={stream: m2}) == expected
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xrevrange(self, r):
+        stream = 'stream'
+        m1 = r.xadd(stream, {'foo': 'bar'})
+        m2 = r.xadd(stream, {'foo': 'bar'})
+        m3 = r.xadd(stream, {'foo': 'bar'})
+        m4 = r.xadd(stream, {'foo': 'bar'})
+
+        def get_ids(results):
+            return [result[0] for result in results]
+
+        results = r.xrevrange(stream, max=m4)
+        assert get_ids(results) == [m4, m3, m2, m1]
+
+        results = r.xrevrange(stream, max=m3, min=m2)
+        assert get_ids(results) == [m3, m2]
+
+        results = r.xrevrange(stream, min=m3)
+        assert get_ids(results) == [m4, m3]
+
+        results = r.xrevrange(stream, min=m2, count=1)
+        assert get_ids(results) == [m4]
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_xtrim(self, r):
+        stream = 'stream'
+
+        # trimming an empty key doesn't do anything
+        assert r.xtrim(stream, 1000) == 0
+
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+
+        # trimming an amount large than the number of messages
+        # doesn't do anything
+        assert r.xtrim(stream, 5, approximate=False) == 0
+
+        # 1 message is trimmed
+        assert r.xtrim(stream, 3, approximate=False) == 1
+
 
 class TestStrictCommands(object):
-
     def test_strict_zadd(self, sr):
         sr.zadd('a', 1.0, 'a1', 2.0, 'a2', a3=3.0)
         assert sr.zrange('a', 0, -1, withscores=True) == \

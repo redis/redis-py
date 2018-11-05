@@ -4,7 +4,7 @@ import sys
 
 try:
     InterruptedError = InterruptedError
-except:
+except NameError:
     InterruptedError = OSError
 
 # For Python older than 3.5, retry EINTR.
@@ -13,7 +13,6 @@ if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and
     # Adapted from https://bugs.python.org/review/23863/patch/14532/54418
     import socket
     import time
-    import errno
 
     from select import select as _select
 

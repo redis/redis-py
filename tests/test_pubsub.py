@@ -6,7 +6,7 @@ import redis
 from redis.exceptions import ConnectionError
 from redis._compat import basestring, u, unichr, b
 
-from .conftest import r as _redis_client
+from .conftest import _get_client
 from .conftest import skip_if_server_version_lt
 
 
@@ -316,7 +316,7 @@ class TestPubSubAutoDecoding(object):
 
     @pytest.fixture()
     def r(self, request):
-        return _redis_client(request=request, decode_responses=True)
+        return _get_client(redis.Redis, request=request, decode_responses=True)
 
     def test_channel_subscribe_unsubscribe(self, r):
         p = r.pubsub()
