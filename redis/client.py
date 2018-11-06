@@ -1358,6 +1358,10 @@ class StrictRedis(object):
         warnings.warn(
             DeprecationWarning('Call UNWATCH from a Pipeline object'))
 
+    def unlink(self, *names):
+        "Unlink one or more keys specified by ``names``"
+        return self.execute_command('UNLINK', *names)
+
     # LIST COMMANDS
     def blpop(self, keys, timeout=0):
         """
