@@ -1,10 +1,10 @@
 language: python
 cache: pip
 python:
-  - "3.6"
-  - "3.5"
-  - "3.4"
-  - "2.7"
+  - 3.6
+  - 3.5
+  - 3.4
+  - 2.7
 before_install:
   - wget http://download.redis.io/releases/redis-5.0.0.tar.gz && mkdir redis_install && tar -xvzf redis-5.0.0.tar.gz -C redis_install && cd redis_install/redis-5.0.0 && make && src/redis-server --daemonize yes && cd ../..
   - redis-cli info
@@ -18,7 +18,17 @@ install:
 script: "if [[ $TEST_PYCODESTYLE == '1' ]]; then pycodestyle --repeat --show-source --exclude=.venv,.tox,dist,docs,build,*.egg,redis_install .; else python setup.py test; fi"
 matrix:
   include:
-    - python: "2.7"
+    - python: 2.7
       env: TEST_PYCODESTYLE=1
-    - python: "3.6"
+    - python: 3.6
       env: TEST_PYCODESTYLE=1
+    # python 3.7 has to be specified manually in the matrix
+    # https://github.com/travis-ci/travis-ci/issues/9815
+    - python: 3.7
+      dist: xenial
+      sudo: true
+      env: TEST_HIREDIS=0
+    - python: 3.7
+      dist: xenial
+      sudo: true
+      env: TEST_HIREDIS=1
