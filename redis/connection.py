@@ -1,6 +1,7 @@
-from __future__ import with_statement
+from __future__ import unicode_literals
 from distutils.version import StrictVersion
 from itertools import chain
+import io
 import os
 import socket
 import sys
@@ -13,8 +14,8 @@ try:
 except ImportError:
     ssl_available = False
 
-from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
-                           BytesIO, nativestr, basestring, iteritems,
+from redis._compat import (xrange, imap, byte_to_chr, unicode, bytes, long,
+                           nativestr, basestring, iteritems,
                            LifoQueue, Empty, Full, urlparse, parse_qs,
                            recv, recv_into, select, unquote)
 from redis.exceptions import (
@@ -45,16 +46,14 @@ if HIREDIS_AVAILABLE:
         warnings.warn(msg)
 
     HIREDIS_USE_BYTE_BUFFER = True
-    # only use byte buffer if hiredis supports it and the Python version
-    # is >= 2.7
-    if not HIREDIS_SUPPORTS_BYTE_BUFFER or (
-            sys.version_info[0] == 2 and sys.version_info[1] < 7):
+    # only use byte buffer if hiredis supports it
+    if not HIREDIS_SUPPORTS_BYTE_BUFFER:
         HIREDIS_USE_BYTE_BUFFER = False
 
-SYM_STAR = b('*')
-SYM_DOLLAR = b('$')
-SYM_CRLF = b('\r\n')
-SYM_EMPTY = b('')
+SYM_STAR = b'*'
+SYM_DOLLAR = b'$'
+SYM_CRLF = b'\r\n'
+SYM_EMPTY = b''
 
 SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
 
@@ -85,7 +84,7 @@ class Token(object):
         if isinstance(value, Token):
             value = value.value
         self.value = value
-        self.encoded_value = b(value)
+        self.encoded_value = value.encode()
 
     def __repr__(self):
         return self.value
@@ -109,9 +108,9 @@ class Encoder(object):
         elif isinstance(value, bytes):
             return value
         elif isinstance(value, (int, long)):
-            value = b(str(value))
+            value = str(value).encode()
         elif isinstance(value, float):
-            value = b(repr(value))
+            value = repr(value).encode()
         elif not isinstance(value, basestring):
             # an object we don't know how to deal with. default to unicode()
             value = unicode(value)
@@ -153,7 +152,7 @@ class SocketBuffer(object):
     def __init__(self, socket, socket_read_size):
         self._sock = socket
         self.socket_read_size = socket_read_size
-        self._buffer = BytesIO()
+        self._buffer = io.BytesIO()
         # number of bytes written to the buffer from the socket
         self.bytes_written = 0
         # number of bytes read from the buffer
@@ -640,26 +639,26 @@ class Connection(object):
         # to prevent them from being encoded.
         command = args[0]
         if ' ' in command:
-            args = tuple([Token.get_token(s)
-                          for s in command.split()]) + args[1:]
+            args = tuple(Token.get_token(s)
+                         for s in command.split()) + args[1:]
         else:
             args = (Token.get_token(command),) + args[1:]
 
-        buff = SYM_EMPTY.join(
-            (SYM_STAR, b(str(len(args))), SYM_CRLF))
+        buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
 
         for arg in imap(self.encoder.encode, args):
             # to avoid large string mallocs, chunk the command into the
             # output list if we're sending large values
             if len(buff) > 6000 or len(arg) > 6000:
                 buff = SYM_EMPTY.join(
-                    (buff, SYM_DOLLAR, b(str(len(arg))), SYM_CRLF))
+                    (buff, SYM_DOLLAR, str(len(arg)).encode(), SYM_CRLF))
                 output.append(buff)
                 output.append(arg)
                 buff = SYM_CRLF
             else:
-                buff = SYM_EMPTY.join((buff, SYM_DOLLAR, b(str(len(arg))),
-                                       SYM_CRLF, arg, SYM_CRLF))
+                buff = SYM_EMPTY.join(
+                    (buff, SYM_DOLLAR, str(len(arg)).encode(),
+                     SYM_CRLF, arg, SYM_CRLF))
         output.append(buff)
         return output
 
@@ -832,23 +831,10 @@ class ConnectionPool(object):
         querystring arguments always win.
 
         """
-        url_string = url
         url = urlparse(url)
-        qs = ''
-
-        # in python2.6, custom URL schemes don't recognize querystring values
-        # they're left as part of the url.path.
-        if '?' in url.path and not url.query:
-            # chop the querystring including the ? off the end of the url
-            # and reparse it.
-            qs = url.path.split('?', 1)[1]
-            url = urlparse(url_string[:-(len(qs) + 1)])
-        else:
-            qs = url.query
-
         url_options = {}
 
-        for name, value in iteritems(parse_qs(qs)):
+        for name, value in iteritems(parse_qs(url.query)):
             if value and len(value) > 0:
                 parser = URL_QUERY_ARGUMENT_PARSERS.get(name)
                 if parser:

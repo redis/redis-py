@@ -1,4 +1,4 @@
-from __future__ import with_statement
+from __future__ import unicode_literals
 from itertools import chain
 import datetime
 import sys
@@ -7,9 +7,8 @@ import time
 import threading
 import time as mod_time
 import hashlib
-from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
-                           itervalues, izip, long, nativestr, unicode,
-                           safe_unicode)
+from redis._compat import (basestring, bytes, imap, iteritems, iterkeys,
+                           itervalues, izip, long, nativestr, safe_unicode)
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
                               SSLConnection, Token)
 from redis.lock import Lock, LuaLock
@@ -25,7 +24,7 @@ from redis.exceptions import (
     WatchError,
 )
 
-SYM_EMPTY = b('')
+SYM_EMPTY = b''
 EMPTY_RESPONSE = 'EMPTY_RESPONSE'
 
 
@@ -72,7 +71,7 @@ def parse_debug_object(response):
     # prefixed with a name
     response = nativestr(response)
     response = 'type:' + response
-    response = dict([kv.split(':') for kv in response.split()])
+    response = dict(kv.split(':') for kv in response.split())
 
     # parse some expected int values from the string response
     # note: this cmd isn't spec'd so these may not appear in all redis versions
@@ -305,7 +304,7 @@ def parse_client_list(response, **options):
     clients = []
     for c in nativestr(response).splitlines():
         # Values might contain '='
-        clients.append(dict([pair.split('=', 1) for pair in c.split(' ')]))
+        clients.append(dict(pair.split('=', 1) for pair in c.split(' ')))
     return clients
 
 
@@ -336,12 +335,12 @@ def parse_slowlog_get(response, **options):
         'id': item[0],
         'start_time': int(item[1]),
         'duration': int(item[2]),
-        'command': b(' ').join(item[3])
+        'command': b' '.join(item[3])
     } for item in response]
 
 
 def parse_cluster_info(response, **options):
-    return dict([line.split(':') for line in response.splitlines() if line])
+    return dict(line.split(':') for line in response.splitlines() if line)
 
 
 def _parse_node_line(line):
@@ -366,7 +365,7 @@ def parse_cluster_nodes(response, **options):
     raw_lines = response
     if isinstance(response, basestring):
         raw_lines = response.splitlines()
-    return dict([_parse_node_line(line) for line in raw_lines])
+    return dict(_parse_node_line(line) for line in raw_lines)
 
 
 def parse_georadius_generic(response, **options):
@@ -1065,7 +1064,7 @@ class StrictRedis(object):
         can be represented by an integer or a Python timedelta object.
         """
         if isinstance(time, datetime.timedelta):
-            time = time.seconds + time.days * 24 * 3600
+            time = int(time.total_seconds())
         return self.execute_command('EXPIRE', name, time)
 
     def expireat(self, name, when):
@@ -1194,8 +1193,7 @@ class StrictRedis(object):
         object.
         """
         if isinstance(time, datetime.timedelta):
-            ms = int(time.microseconds / 1000)
-            time = (time.seconds + time.days * 24 * 3600) * 1000 + ms
+            time = int(time.total_seconds() * 1000)
         return self.execute_command('PEXPIRE', name, time)
 
     def pexpireat(self, name, when):
@@ -1216,8 +1214,7 @@ class StrictRedis(object):
         timedelta object
         """
         if isinstance(time_ms, datetime.timedelta):
-            ms = int(time_ms.microseconds / 1000)
-            time_ms = (time_ms.seconds + time_ms.days * 24 * 3600) * 1000 + ms
+            time_ms = int(time_ms.total_seconds() * 1000)
         return self.execute_command('PSETEX', name, time_ms, value)
 
     def pttl(self, name):
@@ -1266,13 +1263,12 @@ class StrictRedis(object):
         if ex is not None:
             pieces.append('EX')
             if isinstance(ex, datetime.timedelta):
-                ex = ex.seconds + ex.days * 24 * 3600
+                ex = int(ex.total_seconds())
             pieces.append(ex)
         if px is not None:
             pieces.append('PX')
             if isinstance(px, datetime.timedelta):
-                ms = int(px.microseconds / 1000)
-                px = (px.seconds + px.days * 24 * 3600) * 1000 + ms
+                px = int(px.total_seconds() * 1000)
             pieces.append(px)
 
         if nx:
@@ -1299,7 +1295,7 @@ class StrictRedis(object):
         timedelta object.
         """
         if isinstance(time, datetime.timedelta):
-            time = time.seconds + time.days * 24 * 3600
+            time = int(time.total_seconds())
         return self.execute_command('SETEX', name, time, value)
 
     def setnx(self, name, value):
@@ -2774,7 +2770,7 @@ class Redis(StrictRedis):
         timedelta object.
         """
         if isinstance(time, datetime.timedelta):
-            time = time.seconds + time.days * 24 * 3600
+            time = int(time.total_seconds())
         return self.execute_command('SETEX', name, time, value)
 
     def lrem(self, name, value, num=0):
@@ -2937,7 +2933,7 @@ class PubSub(object):
         """
         encode = self.encoder.encode
         decode = self.encoder.decode
-        return dict([(decode(encode(k)), v) for k, v in iteritems(data)])
+        return {decode(encode(k)): v for k, v in iteritems(data)}
 
     def psubscribe(self, *args, **kwargs):
         """
@@ -3127,7 +3123,7 @@ class BasePipeline(object):
     on a key of a different datatype.
     """
 
-    UNWATCH_COMMANDS = set(('DISCARD', 'EXEC', 'UNWATCH'))
+    UNWATCH_COMMANDS = {'DISCARD', 'EXEC', 'UNWATCH'}
 
     def __init__(self, connection_pool, response_callbacks, transaction,
                  shard_hint):
@@ -3332,8 +3328,8 @@ class BasePipeline(object):
                 raise r
 
     def annotate_exception(self, exception, number, command):
-        cmd = safe_unicode(' ').join(imap(safe_unicode, command))
-        msg = unicode('Command # %d (%s) of pipeline caused error: %s') % (
+        cmd = ' '.join(imap(safe_unicode, command))
+        msg = 'Command # %d (%s) of pipeline caused error: %s' % (
             number, cmd, safe_unicode(exception.args[0]))
         exception.args = (msg,) + exception.args[1:]
 

@@ -29,10 +29,11 @@ class StringJoiningConnection(Connection):
     def pack_command(self, *args):
         "Pack a series of arguments into a value Redis command"
         args_output = SYM_EMPTY.join([
-            SYM_EMPTY.join((SYM_DOLLAR, b(str(len(k))), SYM_CRLF, k, SYM_CRLF))
+            SYM_EMPTY.join(
+                (SYM_DOLLAR, str(len(k)).encode(), SYM_CRLF, k, SYM_CRLF))
             for k in imap(self.encoder.encode, args)])
         output = SYM_EMPTY.join(
-            (SYM_STAR, b(str(len(args))), SYM_CRLF, args_output))
+            (SYM_STAR, str(len(args)).encode(), SYM_CRLF, args_output))
         return output
 
 
@@ -61,17 +62,17 @@ class ListJoiningConnection(Connection):
     def pack_command(self, *args):
         output = []
         buff = SYM_EMPTY.join(
-            (SYM_STAR, b(str(len(args))), SYM_CRLF))
+            (SYM_STAR, str(len(args)).encode(), SYM_CRLF))
 
         for k in imap(self.encoder.encode, args):
             if len(buff) > 6000 or len(k) > 6000:
                 buff = SYM_EMPTY.join(
-                    (buff, SYM_DOLLAR, b(str(len(k))), SYM_CRLF))
+                    (buff, SYM_DOLLAR, str(len(k)).encode(), SYM_CRLF))
                 output.append(buff)
                 output.append(k)
                 buff = SYM_CRLF
             else:
-                buff = SYM_EMPTY.join((buff, SYM_DOLLAR, b(str(len(k))),
+                buff = SYM_EMPTY.join((buff, SYM_DOLLAR, str(len(k)).encode(),
                                        SYM_CRLF, k, SYM_CRLF))
         output.append(buff)
         return output

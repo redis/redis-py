@@ -3,7 +3,6 @@ import time as mod_time
 import uuid
 from redis.exceptions import LockError, WatchError
 from redis.utils import dummy
-from redis._compat import b
 
 
 class Lock(object):
@@ -99,7 +98,7 @@ class Lock(object):
         wait trying to acquire the lock.
         """
         sleep = self.sleep
-        token = b(uuid.uuid1().hex)
+        token = uuid.uuid1().hex.encode()
         if blocking is None:
             blocking = self.blocking
         if blocking_timeout is None:

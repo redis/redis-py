@@ -4,9 +4,7 @@ python:
   - "3.6"
   - "3.5"
   - "3.4"
-  - "3.3"
   - "2.7"
-  - "2.6"
 before_install:
   - wget http://download.redis.io/releases/redis-5.0.0.tar.gz && mkdir redis_install && tar -xvzf redis-5.0.0.tar.gz -C redis_install && cd redis_install/redis-5.0.0 && make && src/redis-server --daemonize yes && cd ../..
   - redis-cli info
