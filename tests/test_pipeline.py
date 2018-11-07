@@ -252,3 +252,20 @@ class TestPipeline(object):
             assert unicode(ex.value).startswith(expected)
 
         assert r[key] == b'1'
+
+    def test_pipeline_with_bitfield(self, r):
+        with r.pipeline() as pipe:
+            pipe.set('a', '1')
+            bf = pipe.bitfield('b')
+            pipe2 = (bf
+                     .set('u8', 8, 255)
+                     .get('u8', 0)
+                     .get('u4', 8)  # 1111
+                     .get('u4', 12)  # 1111
+                     .get('u4', 13)  # 1110
+                     .execute())
+            pipe.get('a')
+            response = pipe.execute()
+
+            assert pipe == pipe2
+            assert response == [True, [0, 0, 15, 15, 14], b'1']
