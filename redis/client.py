@@ -1005,6 +1005,13 @@ class StrictRedis(object):
             raise RedisError("Both start and end must be specified")
         return self.execute_command('BITCOUNT', *params)
 
+    def bitfield(self, key):
+        """
+        Return a BitFieldOperation instance to conveniently construct one or
+        more bitfield operations on ``key``.
+        """
+        return BitFieldOperation(self, key)
+
     def bitop(self, operation, dest, *keys):
         """
         Perform a bitwise operation using ``operation`` between ``keys`` and
@@ -3448,3 +3455,80 @@ class Script(object):
             # Overwrite the sha just in case there was a discrepancy.
             self.sha = client.script_load(self.script)
             return client.evalsha(self.sha, len(keys), *args)
+
+
+class BitFieldOperation(object):
+    """
+    Command builder for BITFIELD commands.
+    """
+    def __init__(self, client, key):
+        self.client = client
+        self.key = key
+        self.operations = []
+        self._last_overflow = None  # Default is "WRAP".
+
+    def incrby(self, fmt, offset, increment, overflow=None):
+        """
+        Increment a bitfield by a given amount.
+        :param fmt: format-string for the bitfield being updated, e.g. 'u8'
+            for an unsigned 8-bit integer.
+        :param int offset: offset (in number of bits). If prefixed with a
+            '#', this is an offset multiplier, e.g. given the arguments
+            fmt='i8', offset='#2', the offset will be 16.
+        :param int increment: value to increment the bitfield by.
+        :param str overflow: overflow algorithm. Defaults to WRAP, but other
+            acceptable values are SAT and FAIL. See the Redis docs for
+            descriptions of these algorithms.
+        :returns: a :py:class:`BitFieldOperation` instance.
+        """
+        if overflow is not None and overflow != self._last_overflow:
+            self._last_overflow = overflow
+            self.operations.append(('OVERFLOW', overflow))
+
+        self.operations.append(('INCRBY', fmt, offset, increment))
+        return self
+
+    def get(self, fmt, offset):
+        """
+        Get the value of a given bitfield.
+        :param fmt: format-string for the bitfield being read, e.g. 'u8' for
+            an unsigned 8-bit integer.
+        :param int offset: offset (in number of bits). If prefixed with a
+            '#', this is an offset multiplier, e.g. given the arguments
+            fmt='i8', offset='#2', the offset will be 16.
+        :returns: a :py:class:`BitFieldOperation` instance.
+        """
+        self.operations.append(('GET', fmt, offset))
+        return self
+
+    def set(self, fmt, offset, value):
+        """
+        Set the value of a given bitfield.
+        :param fmt: format-string for the bitfield being read, e.g. 'u8' for
+            an unsigned 8-bit integer.
+        :param int offset: offset (in number of bits). If prefixed with a
+            '#', this is an offset multiplier, e.g. given the arguments
+            fmt='i8', offset='#2', the offset will be 16.
+        :param int value: value to set at the given position.
+        :returns: a :py:class:`BitFieldOperation` instance.
+        """
+        self.operations.append(('SET', fmt, offset, value))
+        return self
+
+    @property
+    def command(self):
+        cmd = ['BITFIELD', self.key]
+        for ops in self.operations:
+            cmd.extend(ops)
+        return cmd
+
+    def execute(self):
+        """
+        Execute the operation(s) in a single BITFIELD command. The return value
+        is a list of values corresponding to each operation. If the client
+        used to create this instance was a pipeline, the list of values
+        will be present within the pipeline's execute.
+        """
+        command = self.command
+        self.operations = []
+        return self.client.execute_command(*command)

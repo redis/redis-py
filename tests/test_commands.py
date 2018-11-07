@@ -2115,6 +2115,41 @@ class TestRedisCommands(object):
         # 1 message is trimmed
         assert r.xtrim(stream, 3, approximate=False) == 1
 
+    def test_bitfield_operations(self, r):
+        bf = r.bitfield('a')
+        resp = (bf
+                .set('u8', 8, 255)
+                .get('u8', 0)
+                .get('u4', 8)  # 1111
+                .get('u4', 12)  # 1111
+                .get('u4', 13)  # 1110
+                .execute())
+        assert resp == [0, 0, 15, 15, 14]
+
+        resp = (bf
+                .set('u8', 4, 1)  # 00ff -> 001f (returns old val, 0x0f)
+                .get('u16', 0)  # 001f (00011111)
+                .set('u16', 0, 0)  # 001f -> 0000
+                .execute())
+        assert resp == [15, 31, 31]
+
+        resp = (bf
+                .incrby('u8', 8, 254)
+                .get('u16', 0)
+                .execute())
+        assert resp == [254, 254]
+
+        # Verify overflow protection works:
+        resp = (bf
+                .incrby('u8', 8, 2, 'FAIL')
+                .incrby('u8', 8, 1)
+                .incrby('u8', 8, 1)  # Still "FAIL".
+                .get('u16', 0)
+                .execute())
+        assert resp == [None, 255, None, 255]
+
+        assert r.get('a') == b'\x00\xff'
+
 
 class TestStrictCommands(object):
     def test_strict_zadd(self, sr):
