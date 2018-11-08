@@ -2115,6 +2115,68 @@ class TestRedisCommands(object):
         # 1 message is trimmed
         assert r.xtrim(stream, 3, approximate=False) == 1
 
+    def test_bitfield_operations(self, r):
+        # comments show affected bits
+        bf = r.bitfield('a')
+        resp = (bf
+                .set('u8', 8, 255)     # 00000000 11111111
+                .get('u8', 0)          # 00000000
+                .get('u4', 8)                   # 1111
+                .get('u4', 12)                      # 1111
+                .get('u4', 13)                       # 111 0
+                .execute())
+        assert resp == [0, 0, 15, 15, 14]
+
+        # .set() returns the previous value...
+        resp = (bf
+                .set('u8', 4, 1)           # 0000 0001
+                .get('u16', 0)         # 00000000 00011111
+                .set('u16', 0, 0)      # 00000000 00000000
+                .execute())
+        assert resp == [15, 31, 31]
+
+        # incrby adds to the value
+        resp = (bf
+                .incrby('u8', 8, 254)  # 00000000 11111110
+                .incrby('u8', 8, 1)    # 00000000 11111111
+                .get('u16', 0)         # 00000000 11111111
+                .execute())
+        assert resp == [254, 255, 255]
+
+        # Verify overflow protection works as a method:
+        r.delete('a')
+        resp = (bf
+                .set('u8', 8, 254)     # 00000000 11111110
+                .overflow('fail')
+                .incrby('u8', 8, 2)    # incrby 2 would overflow, None returned
+                .incrby('u8', 8, 1)    # 00000000 11111111
+                .incrby('u8', 8, 1)    # incrby 1 would overflow, None returned
+                .get('u16', 0)         # 00000000 11111111
+                .execute())
+        assert resp == [0, None, 255, None, 255]
+
+        # Verify overflow protection works as arg to incrby:
+        r.delete('a')
+        resp = (bf
+                .set('u8', 8, 255)           # 00000000 11111111
+                .incrby('u8', 8, 1)          # 00000000 00000000  wrap default
+                .set('u8', 8, 255)           # 00000000 11111111
+                .incrby('u8', 8, 1, 'FAIL')  # 00000000 11111111  fail
+                .incrby('u8', 8, 1)          # 00000000 11111111  still fail
+                .get('u16', 0)               # 00000000 11111111
+                .execute())
+        assert resp == [0, 0, 0, None, None, 255]
+
+        # test default default_overflow
+        r.delete('a')
+        bf = r.bitfield('a', default_overflow='FAIL')
+        resp = (bf
+                .set('u8', 8, 255)     # 00000000 11111111
+                .incrby('u8', 8, 1)    # 00000000 11111111  fail default
+                .get('u16', 0)         # 00000000 11111111
+                .execute())
+        assert resp == [0, None, 255]
+
 
 class TestStrictCommands(object):
     def test_strict_zadd(self, sr):
