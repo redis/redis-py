@@ -2121,15 +2121,15 @@ class TestRedisCommands(object):
         resp = (bf
                 .set('u8', 8, 255)     # 00000000 11111111
                 .get('u8', 0)          # 00000000
-                .get('u4', 8)          #          1111
-                .get('u4', 12)         #              1111
-                .get('u4', 13)         #               111 0
+                .get('u4', 8)                   # 1111
+                .get('u4', 12)                      # 1111
+                .get('u4', 13)                       # 111 0
                 .execute())
         assert resp == [0, 0, 15, 15, 14]
 
         # .set() returns the previous value...
         resp = (bf
-                .set('u8', 4, 1)       #     0000 0001
+                .set('u8', 4, 1)           # 0000 0001
                 .get('u16', 0)         # 00000000 00011111
                 .set('u16', 0, 0)      # 00000000 00000000
                 .execute())
