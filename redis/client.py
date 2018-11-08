@@ -841,13 +841,29 @@ class StrictRedis(object):
         "Echo the string back from the server"
         return self.execute_command('ECHO', value)
 
-    def flushall(self):
-        "Delete all keys in all databases on the current host"
-        return self.execute_command('FLUSHALL')
+    def flushall(self, sync=True):
+        """
+        Delete all keys in all databases on the current host.
 
-    def flushdb(self):
-        "Delete all keys in the current database"
-        return self.execute_command('FLUSHDB')
+        ``sync`` indicates whether the operation is executed
+        synchronously by the server.
+        """
+        args = []
+        if not sync:
+            args.append(Token.get_token('ASYNC'))
+        return self.execute_command('FLUSHALL', *args)
+
+    def flushdb(self, sync=True):
+        """
+        Delete all keys in the current database.
+
+        ``sync`` indicates whether the operation is executed
+        synchronously by the server.
+        """
+        args = []
+        if not sync:
+            args.append(Token.get_token('ASYNC'))
+        return self.execute_command('FLUSHDB', *args)
 
     def swapdb(self, first, second):
         "Swap two databases"
