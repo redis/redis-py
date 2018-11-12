@@ -16,17 +16,24 @@ Installation
 redis-py requires a running Redis server. See `Redis's quickstart
 <https://redis.io/topics/quickstart>`_ for installation instructions.
 
+redis-py can be installed using `pip` similar to other Python packages. Do not use `sudo`
+with `pip`. It is usually good to work in a
+`virtualenv <https://virtualenv.pypa.io/en/latest/>`_ or
+`venv <https://docs.python.org/3/library/venv.html>`_ to avoid conflicts with other package
+managers and Python projects. For a quick introduction see
+`Python Virtual Environments in Five Minutes <https://bit.ly/py-env>`_.
+
 To install redis-py, simply:
 
 .. code-block:: bash
 
-    $ sudo pip install redis
+    $ pip install redis
 
 or from source:
 
 .. code-block:: bash
 
-    $ sudo python setup.py install
+    $ python setup.py install
 
 
 Getting Started
