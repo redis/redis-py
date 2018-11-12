@@ -20,13 +20,13 @@ To install redis-py, simply:
 
 .. code-block:: bash
 
-    $ sudo pip install redis
+    $ pip install redis
 
 or from source:
 
 .. code-block:: bash
 
-    $ sudo python setup.py install
+    $ python setup.py install
 
 
 Getting Started
