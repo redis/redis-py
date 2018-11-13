@@ -3054,6 +3054,13 @@ class PubSub(object):
             return self.handle_message(response, ignore_subscribe_messages)
         return None
 
+    def ping(self, message=None):
+        """
+        Ping the Redis server
+        """
+        message = '' if message is None else message
+        return self.execute_command('PING', message)
+
     def handle_message(self, response, ignore_subscribe_messages=False):
         """
         Parses a pub/sub message. If the channel or pattern was subscribed to
@@ -3067,6 +3074,13 @@ class PubSub(object):
                 'pattern': response[1],
                 'channel': response[2],
                 'data': response[3]
+            }
+        elif message_type == 'pong':
+            message = {
+                'type': message_type,
+                'pattern': None,
+                'channel': None,
+                'data': response[1]
             }
         else:
             message = {
@@ -3098,7 +3112,7 @@ class PubSub(object):
             if handler:
                 handler(message)
                 return None
-        else:
+        elif message_type != 'pong':
             # this is a subscribe/unsubscribe message. ignore if we don't
             # want them
             if ignore_subscribe_messages or self.ignore_subscribe_messages:
