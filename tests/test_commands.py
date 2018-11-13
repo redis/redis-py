@@ -481,26 +481,11 @@ class TestRedisCommands(object):
         for k, v in iteritems(d):
             assert r[k] == v
 
-    def test_mset_kwargs(self, r):
-        d = {'a': b'1', 'b': b'2', 'c': b'3'}
-        assert r.mset(**d)
-        for k, v in iteritems(d):
-            assert r[k] == v
-
     def test_msetnx(self, r):
         d = {'a': b'1', 'b': b'2', 'c': b'3'}
         assert r.msetnx(d)
         d2 = {'a': b'x', 'd': b'4'}
         assert not r.msetnx(d2)
-        for k, v in iteritems(d):
-            assert r[k] == v
-        assert r.get('d') is None
-
-    def test_msetnx_kwargs(self, r):
-        d = {'a': b'1', 'b': b'2', 'c': b'3'}
-        assert r.msetnx(**d)
-        d2 = {'a': b'x', 'd': b'4'}
-        assert not r.msetnx(**d2)
         for k, v in iteritems(d):
             assert r[k] == v
         assert r.get('d') is None
@@ -2200,7 +2185,8 @@ class TestRedisCommands(object):
 
 class TestStrictCommands(object):
     def test_strict_zadd(self, sr):
-        sr.zadd('a', 1.0, 'a1', 2.0, 'a2', a3=3.0)
+        mapping = {'a1': 1.0, 'a2': 2.0, 'a3': 3.0}
+        sr.zadd('a', mapping)
         assert sr.zrange('a', 0, -1, withscores=True) == \
             [(b'a1', 1.0), (b'a2', 2.0), (b'a3', 3.0)]
 

@@ -1249,33 +1249,26 @@ class StrictRedis(object):
             options[EMPTY_RESPONSE] = []
         return self.execute_command('MGET', *args, **options)
 
-    def mset(self, *args, **kwargs):
+    def mset(self, mapping):
         """
-        Sets key/values based on a mapping. Mapping can be supplied as a single
-        dictionary argument or as kwargs.
+        Sets key/values based on a mapping. Mapping is a dictionary of
+        key/value pairs. Both keys and values should be strings or types that
+        can be cast to a string via str().
         """
-        if args:
-            if len(args) != 1 or not isinstance(args[0], dict):
-                raise RedisError('MSET requires **kwargs or a single dict arg')
-            kwargs.update(args[0])
         items = []
-        for pair in iteritems(kwargs):
+        for pair in iteritems(mapping):
             items.extend(pair)
         return self.execute_command('MSET', *items)
 
-    def msetnx(self, *args, **kwargs):
+    def msetnx(self, mapping):
         """
         Sets key/values based on a mapping if none of the keys are already set.
-        Mapping can be supplied as a single dictionary argument or as kwargs.
+        Mapping is a dictionary of key/value pairs. Both keys and values
+        should be strings or types that can be cast to a string via str().
         Returns a boolean indicating if the operation was successful.
         """
-        if args:
-            if len(args) != 1 or not isinstance(args[0], dict):
-                raise RedisError('MSETNX requires **kwargs or a single '
-                                 'dict arg')
-            kwargs.update(args[0])
         items = []
-        for pair in iteritems(kwargs):
+        for pair in iteritems(mapping):
             items.extend(pair)
         return self.execute_command('MSETNX', *items)
 
@@ -2209,24 +2202,15 @@ class StrictRedis(object):
         return self.execute_command('XTRIM', name, *pieces)
 
     # SORTED SET COMMANDS
-    def zadd(self, name, *args, **kwargs):
+    def zadd(self, name, mapping):
         """
-        Set any number of score, element-name pairs to the key ``name``. Pairs
-        can be specified in two ways:
-
-        As *args, in the form of: score1, name1, score2, name2, ...
-        or as **kwargs, in the form of: name1=score1, name2=score2, ...
-
-        The following example would add four values to the 'my-key' key:
-        redis.zadd('my-key', 1.1, 'name1', 2.2, 'name2', name3=3.3, name4=4.4)
+        Set any number of element-name, score pairs to the key ``name``. Pairs
+        are specified as a dict of element-names keys to score values.
         """
+        if not mapping:
+            raise RedisError("ZADD requires at least one element/score pair")
         pieces = []
-        if args:
-            if len(args) % 2 != 0:
-                raise RedisError("ZADD requires an equal number of "
-                                 "values and scores")
-            pieces.extend(args)
-        for pair in iteritems(kwargs):
+        for pair in iteritems(mapping):
             pieces.append(pair[1])
             pieces.append(pair[0])
         return self.execute_command('ZADD', name, *pieces)
