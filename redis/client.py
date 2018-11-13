@@ -915,13 +915,13 @@ class StrictRedis(object):
             raise RedisError('MIGRATE requires at least one key')
         pieces = []
         if copy:
-            pieces.append('COPY')
+            pieces.append(Token.get_token('COPY'))
         if replace:
-            pieces.append('REPLACE')
+            pieces.append(Token.get_token('REPLACE'))
         if auth:
-            pieces.append('AUTH')
+            pieces.append(Token.get_token('AUTH'))
             pieces.append(auth)
-        pieces.append('KEYS')
+        pieces.append(Token.get_token('KEYS'))
         pieces.extend(keys)
         return self.execute_command('MIGRATE', host, port, '', destination_db,
                                     timeout, *pieces)
