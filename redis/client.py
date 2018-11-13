@@ -795,7 +795,7 @@ class StrictRedis(object):
         """
         "Returns a list of currently connected clients"
         if _type is not None:
-            if _type not in ['normal', 'master', 'replica', 'pubsub']:
+            if str(_type).lower() not in ['normal', 'master', 'replica', 'pubsub']:
                 raise RedisError("CLIENT LIST _type must be one of ('normal',"
                                  " 'master', 'replica', 'pubsub')")
             return self.execute_command('CLIENT LIST', Token.get_token('TYPE'),
