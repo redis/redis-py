@@ -2177,6 +2177,11 @@ class TestRedisCommands(object):
                 .execute())
         assert resp == [0, None, 255]
 
+    @skip_if_server_version_lt('4.0.0')
+    def test_memory_usage(self, r):
+        r.set('foo', 'bar')
+        assert isinstance(r.memory_usage('foo'), int)
+
 
 class TestStrictCommands(object):
     def test_strict_zadd(self, sr):

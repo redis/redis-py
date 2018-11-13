@@ -495,6 +495,8 @@ class StrictRedis(object):
             'HSCAN': parse_hscan,
             'INFO': parse_info,
             'LASTSAVE': timestamp_to_datetime,
+            'MEMORY PURGE': bool_ok,
+            'MEMORY USAGE': int_or_none,
             'OBJECT': parse_object,
             'PING': lambda r: nativestr(r) == 'PONG',
             'PUBSUB NUMSUB': parse_pubsub_numsub,
@@ -894,6 +896,24 @@ class StrictRedis(object):
     def object(self, infotype, key):
         "Return the encoding, idletime, or refcount about the key"
         return self.execute_command('OBJECT', infotype, key, infotype=infotype)
+
+    def memory_usage(self, key, samples=None):
+        """
+        Return the total memory usage for key, its value and associated
+        administrative overheads.
+
+        For nested data structures, ``samples`` is the number of elements to
+        sample. If left unspecified, the server's default is 5. Use 0 to sample
+        all elements.
+        """
+        args = []
+        if isinstance(samples, int):
+            args.extend([Token.get_token('SAMPLES'), samples])
+        return self.execute_command('MEMORY USAGE', key, *args)
+
+    def memory_purge(self):
+        "Attempts to purge dirty pages for reclamation by allocator"
+        return self.execute_command('MEMORY PURGE')
 
     def ping(self):
         "Ping the Redis server"
