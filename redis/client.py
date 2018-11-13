@@ -916,6 +916,41 @@ class StrictRedis(object):
         """
         return self.execute_command('LASTSAVE')
 
+    def migrate(self, host, port, keys, destination_db, timeout,
+                copy=False, replace=False, auth=None):
+        """
+        Migrate 1 or more keys from the current Redis server to a different
+        server specified by the ``host``, ``port`` and ``destination_db``.
+
+        The ``timeout``, specified in milliseconds, indicates the maximum
+        time the connection between the two servers can be idle before the
+        command is interrupted.
+
+        If ``copy`` is True, the specified ``keys`` are NOT deleted from
+        the source server.
+
+        If ``replace`` is True, this operation will overwrite the keys
+        on the destination server if they exist.
+
+        If ``auth`` is specified, authenticate to the destination server with
+        the password provided.
+        """
+        keys = list_or_args(keys, [])
+        if not keys:
+            raise RedisError('MIGRATE requires at least one key')
+        pieces = []
+        if copy:
+            pieces.append(Token.get_token('COPY'))
+        if replace:
+            pieces.append(Token.get_token('REPLACE'))
+        if auth:
+            pieces.append(Token.get_token('AUTH'))
+            pieces.append(auth)
+        pieces.append(Token.get_token('KEYS'))
+        pieces.extend(keys)
+        return self.execute_command('MIGRATE', host, port, '', destination_db,
+                                    timeout, *pieces)
+
     def object(self, infotype, key):
         "Return the encoding, idletime, or refcount about the key"
         return self.execute_command('OBJECT', infotype, key, infotype=infotype)
