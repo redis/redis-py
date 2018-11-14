@@ -24,13 +24,6 @@ class TestEncoding(object):
         r.rpush('a', *result)
         assert r.lrange('a', 0, -1) == result
 
-    def test_object_value(self, r):
-        unicode_string = unichr(3456) + 'abcd' + unichr(3421)
-        r['unicode-string'] = Exception(unicode_string)
-        cached_val = r['unicode-string']
-        assert isinstance(cached_val, unicode)
-        assert unicode_string == cached_val
-
 
 class TestCommandsAndTokensArentEncoded(object):
     @pytest.fixture()
@@ -39,3 +32,24 @@ class TestCommandsAndTokensArentEncoded(object):
 
     def test_basic_command(self, r):
         r.set('hello', 'world')
+
+
+class TestInvalidUserInput(object):
+    def test_boolean_fails(self, r):
+        with pytest.raises(redis.DataError):
+            r.set('a', True)
+
+    def test_none_fails(self, r):
+        with pytest.raises(redis.DataError):
+            r.set('a', None)
+
+    def test_user_type_fails(self, r):
+        class Foo(object):
+            def __str__(self):
+                return 'Foo'
+
+            def __unicode__(self):
+                return 'Foo'
+
+        with pytest.raises(redis.DataError):
+            r.set('a', Foo())
