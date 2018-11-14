@@ -112,8 +112,11 @@ class Encoder(object):
             # special case bool since it is a subclass of int
             raise DataError("Invalid input of type: 'bool'. Convert to a "
                             "byte, string or number first.")
-        elif isinstance(value, (int, long, float)):
+        elif isinstance(value, float):
             value = repr(value).encode()
+        elif isinstance(value, (int, long)):
+            # python 2 repr() on longs is '123L', so use str() instead
+            value = str(value).encode()
         elif not isinstance(value, basestring):
             # a value we don't know how to deal with. throw an error
             typename = type(value).__name__
