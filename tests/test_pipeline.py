@@ -12,7 +12,7 @@ class TestPipeline(object):
                  .get('a')
                  .zadd('z', {'z1': 1})
                  .zadd('z', {'z2': 4})
-                 .zincrby('z', 'z1')
+                 .zincrby('z', 1, 'z1')
                  .zrange('z', 0, 5, withscores=True))
             assert pipe.execute() == \
                 [
