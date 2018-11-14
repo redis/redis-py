@@ -799,8 +799,8 @@ class Redis(object):
         if _type is not None:
             client_types = ('normal', 'master', 'replica', 'pubsub')
             if str(_type).lower() not in client_types:
-                raise RedisError("CLIENT LIST _type must be one of %r" % (
-                                 client_types,))
+                raise DataError("CLIENT LIST _type must be one of %r" % (
+                                client_types,))
             return self.execute_command('CLIENT LIST', Token.get_token('TYPE'),
                                         _type)
         return self.execute_command('CLIENT LIST')
@@ -835,7 +835,7 @@ class Redis(object):
         :param timeout: milliseconds to pause clients
         """
         if not isinstance(timeout, (int, long)):
-            raise RedisError("CLIENT PAUSE timeout must be an integer")
+            raise DataError("CLIENT PAUSE timeout must be an integer")
         return self.execute_command('CLIENT PAUSE', str(timeout))
 
     def config_get(self, pattern="*"):
@@ -937,7 +937,7 @@ class Redis(object):
         """
         keys = list_or_args(keys, [])
         if not keys:
-            raise RedisError('MIGRATE requires at least one key')
+            raise DataError('MIGRATE requires at least one key')
         pieces = []
         if copy:
             pieces.append(Token.get_token('COPY'))
@@ -1096,7 +1096,7 @@ class Redis(object):
             params.append(end)
         elif (start is not None and end is None) or \
                 (end is not None and start is None):
-            raise RedisError("Both start and end must be specified")
+            raise DataError("Both start and end must be specified")
         return self.execute_command('BITCOUNT', *params)
 
     def bitfield(self, key, default_overflow=None):
@@ -1121,7 +1121,7 @@ class Redis(object):
         means to look at the first three bytes.
         """
         if bit not in (0, 1):
-            raise RedisError('bit must be 0 or 1')
+            raise DataError('bit must be 0 or 1')
         params = [key, bit]
 
         start is not None and params.append(start)
@@ -1129,8 +1129,8 @@ class Redis(object):
         if start is not None and end is not None:
             params.append(end)
         elif start is None and end is not None:
-            raise RedisError("start argument is not set, "
-                             "when end is specified")
+            raise DataError("start argument is not set, "
+                            "when end is specified")
         return self.execute_command('BITPOS', *params)
 
     def decr(self, name, amount=1):
@@ -1624,7 +1624,7 @@ class Redis(object):
         """
         if (start is not None and num is None) or \
                 (num is not None and start is None):
-            raise RedisError("``start`` and ``num`` must both be specified")
+            raise DataError("``start`` and ``num`` must both be specified")
 
         pieces = [name]
         if by is not None:
@@ -1902,14 +1902,14 @@ class Redis(object):
         pieces = []
         if maxlen is not None:
             if not isinstance(maxlen, (int, long)) or maxlen < 1:
-                raise RedisError('XADD maxlen must be a positive integer')
+                raise DataError('XADD maxlen must be a positive integer')
             pieces.append(Token.get_token('MAXLEN'))
             if approximate:
                 pieces.append(Token.get_token('~'))
             pieces.append(str(maxlen))
         pieces.append(id)
         if not isinstance(fields, dict) or len(fields) == 0:
-            raise RedisError('XADD fields must be a non-empty dict')
+            raise DataError('XADD fields must be a non-empty dict')
         for pair in iteritems(fields):
             pieces.extend(pair)
         return self.execute_command('XADD', name, *pieces)
@@ -1940,11 +1940,11 @@ class Redis(object):
          of messages successfully claimed, without returning the actual message
         """
         if not isinstance(min_idle_time, (int, long)) or min_idle_time < 0:
-            raise RedisError("XCLAIM min_idle_time must be a non negative "
-                             "integer")
+            raise DataError("XCLAIM min_idle_time must be a non negative "
+                            "integer")
         if not isinstance(message_ids, (list, tuple)) or not message_ids:
-            raise RedisError("XCLAIM message_ids must be a non empty list or "
-                             "tuple of message IDs to claim")
+            raise DataError("XCLAIM message_ids must be a non empty list or "
+                            "tuple of message IDs to claim")
 
         kwargs = {}
         pieces = [name, groupname, consumername, str(min_idle_time)]
@@ -1952,24 +1952,24 @@ class Redis(object):
 
         if idle is not None:
             if not isinstance(idle, (int, long)):
-                raise RedisError("XCLAIM idle must be an integer")
+                raise DataError("XCLAIM idle must be an integer")
             pieces.extend((Token.get_token('IDLE'), str(idle)))
         if time is not None:
             if not isinstance(time, (int, long)):
-                raise RedisError("XCLAIM time must be an integer")
+                raise DataError("XCLAIM time must be an integer")
             pieces.extend((Token.get_token('TIME'), str(time)))
         if retrycount is not None:
             if not isinstance(retrycount, (int, long)):
-                raise RedisError("XCLAIM retrycount must be an integer")
+                raise DataError("XCLAIM retrycount must be an integer")
             pieces.extend((Token.get_token('RETRYCOUNT'), str(retrycount)))
 
         if force:
             if not isinstance(force, bool):
-                raise RedisError("XCLAIM force must be a boolean")
+                raise DataError("XCLAIM force must be a boolean")
             pieces.append(Token.get_token('FORCE'))
         if justid:
             if not isinstance(justid, bool):
-                raise RedisError("XCLAIM justid must be a boolean")
+                raise DataError("XCLAIM justid must be a boolean")
             pieces.append(Token.get_token('JUSTID'))
             kwargs['parse_justid'] = True
         return self.execute_command('XCLAIM', *pieces, **kwargs)
@@ -2076,16 +2076,16 @@ class Redis(object):
         pieces = [name, groupname]
         if min is not None or max is not None or count is not None:
             if min is None or max is None or count is None:
-                raise RedisError("XPENDING must be provided with min, max "
-                                 "and count parameters, or none of them. ")
+                raise DataError("XPENDING must be provided with min, max "
+                                "and count parameters, or none of them. ")
             if not isinstance(count, (int, long)) or count < -1:
-                raise RedisError("XPENDING count must be a integer >= -1")
+                raise DataError("XPENDING count must be a integer >= -1")
             pieces.extend((min, max, str(count)))
         if consumername is not None:
             if min is None or max is None or count is None:
-                raise RedisError("if XPENDING is provided with consumername,"
-                                 " it must be provided with min, max and"
-                                 " count parameters")
+                raise DataError("if XPENDING is provided with consumername,"
+                                " it must be provided with min, max and"
+                                " count parameters")
             pieces.append(consumername)
         return self.execute_command('XPENDING', *pieces, parse_detail=True)
 
@@ -2103,7 +2103,7 @@ class Redis(object):
         pieces = [min, max]
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
-                raise RedisError('XRANGE count must be a positive integer')
+                raise DataError('XRANGE count must be a positive integer')
             pieces.append(Token.get_token('COUNT'))
             pieces.append(str(count))
 
@@ -2121,16 +2121,16 @@ class Redis(object):
         pieces = []
         if block is not None:
             if not isinstance(block, (int, long)) or block < 0:
-                raise RedisError('XREAD block must be a non-negative integer')
+                raise DataError('XREAD block must be a non-negative integer')
             pieces.append(Token.get_token('BLOCK'))
             pieces.append(str(block))
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
-                raise RedisError('XREAD count must be a positive integer')
+                raise DataError('XREAD count must be a positive integer')
             pieces.append(Token.get_token('COUNT'))
             pieces.append(str(count))
         if not isinstance(streams, dict) or len(streams) == 0:
-            raise RedisError('XREAD streams must be a non empty dict')
+            raise DataError('XREAD streams must be a non empty dict')
         pieces.append(Token.get_token('STREAMS'))
         keys, values = izip(*iteritems(streams))
         pieces.extend(keys)
@@ -2152,17 +2152,17 @@ class Redis(object):
         pieces = [Token.get_token('GROUP'), groupname, consumername]
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
-                raise RedisError("XREADGROUP count must be a positive integer")
+                raise DataError("XREADGROUP count must be a positive integer")
             pieces.append(Token.get_token("COUNT"))
             pieces.append(str(count))
         if block is not None:
             if not isinstance(block, (int, long)) or block < 0:
-                raise RedisError("XREADGROUP block must be a non-negative "
-                                 "integer")
+                raise DataError("XREADGROUP block must be a non-negative "
+                                "integer")
             pieces.append(Token.get_token("BLOCK"))
             pieces.append(str(block))
         if not isinstance(streams, dict) or len(streams) == 0:
-            raise RedisError('XREADGROUP streams must be a non empty dict')
+            raise DataError('XREADGROUP streams must be a non empty dict')
         pieces.append(Token.get_token('STREAMS'))
         pieces.extend(streams.keys())
         pieces.extend(streams.values())
@@ -2182,7 +2182,7 @@ class Redis(object):
         pieces = [max, min]
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
-                raise RedisError('XREVRANGE count must be a positive integer')
+                raise DataError('XREVRANGE count must be a positive integer')
             pieces.append(Token.get_token('COUNT'))
             pieces.append(str(count))
 
@@ -2208,7 +2208,7 @@ class Redis(object):
         are specified as a dict of element-names keys to score values.
         """
         if not mapping:
-            raise RedisError("ZADD requires at least one element/score pair")
+            raise DataError("ZADD requires at least one element/score pair")
         pieces = []
         for pair in iteritems(mapping):
             pieces.append(pair[1])
@@ -2344,7 +2344,7 @@ class Redis(object):
         """
         if (start is not None and num is None) or \
                 (num is not None and start is None):
-            raise RedisError("``start`` and ``num`` must both be specified")
+            raise DataError("``start`` and ``num`` must both be specified")
         pieces = ['ZRANGEBYLEX', name, min, max]
         if start is not None and num is not None:
             pieces.extend([Token.get_token('LIMIT'), start, num])
@@ -2360,7 +2360,7 @@ class Redis(object):
         """
         if (start is not None and num is None) or \
                 (num is not None and start is None):
-            raise RedisError("``start`` and ``num`` must both be specified")
+            raise DataError("``start`` and ``num`` must both be specified")
         pieces = ['ZREVRANGEBYLEX', name, max, min]
         if start is not None and num is not None:
             pieces.extend([Token.get_token('LIMIT'), start, num])
@@ -2382,7 +2382,7 @@ class Redis(object):
         """
         if (start is not None and num is None) or \
                 (num is not None and start is None):
-            raise RedisError("``start`` and ``num`` must both be specified")
+            raise DataError("``start`` and ``num`` must both be specified")
         pieces = ['ZRANGEBYSCORE', name, min, max]
         if start is not None and num is not None:
             pieces.extend([Token.get_token('LIMIT'), start, num])
@@ -2468,7 +2468,7 @@ class Redis(object):
         """
         if (start is not None and num is None) or \
                 (num is not None and start is None):
-            raise RedisError("``start`` and ``num`` must both be specified")
+            raise DataError("``start`` and ``num`` must both be specified")
         pieces = ['ZREVRANGEBYSCORE', name, max, min]
         if start is not None and num is not None:
             pieces.extend([Token.get_token('LIMIT'), start, num])
@@ -2697,8 +2697,8 @@ class Redis(object):
         the triad longitude, latitude and name.
         """
         if len(values) % 3 != 0:
-            raise RedisError("GEOADD requires places with lon, lat and name"
-                             " values")
+            raise DataError("GEOADD requires places with lon, lat and name"
+                            " values")
         return self.execute_command('GEOADD', name, *values)
 
     def geodist(self, name, place1, place2, unit=None):
@@ -2710,7 +2710,7 @@ class Redis(object):
         """
         pieces = [name, place1, place2]
         if unit and unit not in ('m', 'km', 'mi', 'ft'):
-            raise RedisError("GEODIST invalid unit")
+            raise DataError("GEODIST invalid unit")
         elif unit:
             pieces.append(unit)
         return self.execute_command('GEODIST', *pieces)
@@ -2787,7 +2787,7 @@ class Redis(object):
     def _georadiusgeneric(self, command, *args, **kwargs):
         pieces = list(args)
         if kwargs['unit'] and kwargs['unit'] not in ('m', 'km', 'mi', 'ft'):
-            raise RedisError("GEORADIUS invalid unit")
+            raise DataError("GEORADIUS invalid unit")
         elif kwargs['unit']:
             pieces.append(kwargs['unit'])
         else:
@@ -2801,13 +2801,13 @@ class Redis(object):
             pieces.extend([Token('COUNT'), kwargs['count']])
 
         if kwargs['sort'] and kwargs['sort'] not in ('ASC', 'DESC'):
-            raise RedisError("GEORADIUS invalid sort")
+            raise DataError("GEORADIUS invalid sort")
         elif kwargs['sort']:
             pieces.append(Token(kwargs['sort']))
 
         if kwargs['store'] and kwargs['store_dist']:
-            raise RedisError("GEORADIUS store and store_dist cant be set"
-                             " together")
+            raise DataError("GEORADIUS store and store_dist cant be set"
+                            " together")
 
         if kwargs['store']:
             pieces.extend([Token('STORE'), kwargs['store']])
