@@ -823,9 +823,11 @@ class StrictRedis(object):
         return self.execute_command('SENTINEL SLAVES', service_name)
 
     def shutdown(self, save=False, nosave=False):
-        """Shutdown the Redis server.  If Redis has persistence configured, data will be flushed before shutdown.  If
-        the "save" option is set, a data flush will be attempted even if there is no persistence configured.  If the
-        "nosave" option is set, no data flush will be attempted.  The "save" and "nosave" options cannot both be set.
+        """Shutdown the Redis server.  If Redis has persistence configured,
+        data will be flushed before shutdown.  If the "save" option is set,
+        a data flush will be attempted even if there is no persistence
+        configured.  If the "nosave" option is set, no data flush will be
+        attempted.  The "save" and "nosave" options cannot both be set.
         """
         if save and nosave:
             raise RedisError('SHUTDOWN save and nosave cannot both be set')
