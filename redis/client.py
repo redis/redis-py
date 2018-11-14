@@ -822,12 +822,19 @@ class StrictRedis(object):
         "Returns a list of slaves for ``service_name``"
         return self.execute_command('SENTINEL SLAVES', service_name)
 
-    def shutdown(self, save=True):
-        "Shutdown the server"
+    def shutdown(self, save=False, nosave=False):
+        """Shutdown the Redis server.  If Redis has persistence configured, data will be flushed before shutdown.  If
+        the "save" option is set, a data flush will be attempted even if there is no persistence configured.  If the
+        "nosave" option is set, no data flush will be attempted.  The "save" and "nosave" options cannot both be set.
+        """
+        if save and nosave:
+            raise RedisError('SHUTDOWN save and nosave cannot both be set')
+        args = ['SHUTDOWN']
+        if save:
+            args.append('SAVE')
+        if nosave:
+            args.append('NOSAVE')
         try:
-            args = ['SHUTDOWN']
-            if not save:
-                args.append('NOSAVE')
             self.execute_command(*args)
         except ConnectionError:
             # a ConnectionError here is expected
