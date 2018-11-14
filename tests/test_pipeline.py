@@ -8,8 +8,12 @@ from redis._compat import unichr, unicode
 class TestPipeline(object):
     def test_pipeline(self, r):
         with r.pipeline() as pipe:
-            pipe.set('a', 'a1').get('a').zadd('z', z1=1).zadd('z', z2=4)
-            pipe.zincrby('z', 'z1').zrange('z', 0, 5, withscores=True)
+            (pipe.set('a', 'a1')
+                 .get('a')
+                 .zadd('z', {'z1': 1})
+                 .zadd('z', {'z2': 4})
+                 .zincrby('z', 'z1')
+                 .zrange('z', 0, 5, withscores=True))
             assert pipe.execute() == \
                 [
                     True,

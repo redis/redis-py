@@ -56,10 +56,10 @@ class SentinelTestCluster(object):
 @pytest.fixture()
 def cluster(request):
     def teardown():
-        redis.sentinel.StrictRedis = saved_StrictRedis
+        redis.sentinel.Redis = saved_Redis
     cluster = SentinelTestCluster()
-    saved_StrictRedis = redis.sentinel.StrictRedis
-    redis.sentinel.StrictRedis = cluster.client
+    saved_Redis = redis.sentinel.Redis
+    redis.sentinel.Redis = cluster.client
     request.addfinalizer(teardown)
     return cluster
 

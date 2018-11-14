@@ -31,7 +31,7 @@ def parse_args():
 
 def run():
     args = parse_args()
-    r = redis.StrictRedis()
+    r = redis.Redis()
     r.flushall()
     set_str(conn=r, num=args.n, pipeline_size=args.P, data_size=args.s)
     set_int(conn=r, num=args.n, pipeline_size=args.P, data_size=args.s)

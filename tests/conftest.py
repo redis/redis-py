@@ -47,11 +47,6 @@ def r(request, **kwargs):
     return _get_client(redis.Redis, request, **kwargs)
 
 
-@pytest.fixture()
-def sr(request, **kwargs):
-    return _get_client(redis.StrictRedis, request, **kwargs)
-
-
 def _gen_cluster_mock_resp(r, response):
     mock_connection_pool = Mock()
     connection = Mock()

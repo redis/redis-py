@@ -403,7 +403,7 @@ def parse_pubsub_numsub(response, **options):
     return list(zip(response[0::2], response[1::2]))
 
 
-class StrictRedis(object):
+class Redis(object):
     """
     Implementation of the Redis protocol.
 
@@ -647,7 +647,7 @@ class StrictRedis(object):
         atomic, pipelines are useful for reducing the back-and-forth overhead
         between the client and server.
         """
-        return StrictPipeline(
+        return Pipeline(
             self.connection_pool,
             self.response_callbacks,
             transaction,
@@ -2818,88 +2818,7 @@ class StrictRedis(object):
         return self.execute_command(command, *pieces, **kwargs)
 
 
-class Redis(StrictRedis):
-    """
-    Provides backwards compatibility with older versions of redis-py that
-    changed arguments to some commands to be more Pythonic, sane, or by
-    accident.
-    """
-
-    # Overridden callbacks
-    RESPONSE_CALLBACKS = dict_merge(
-        StrictRedis.RESPONSE_CALLBACKS,
-        {
-            'TTL': lambda r: r >= 0 and r or None,
-            'PTTL': lambda r: r >= 0 and r or None,
-        }
-    )
-
-    def pipeline(self, transaction=True, shard_hint=None):
-        """
-        Return a new pipeline object that can queue multiple commands for
-        later execution. ``transaction`` indicates whether all commands
-        should be executed atomically. Apart from making a group of operations
-        atomic, pipelines are useful for reducing the back-and-forth overhead
-        between the client and server.
-        """
-        return Pipeline(
-            self.connection_pool,
-            self.response_callbacks,
-            transaction,
-            shard_hint)
-
-    def setex(self, name, value, time):
-        """
-        Set the value of key ``name`` to ``value`` that expires in ``time``
-        seconds. ``time`` can be represented by an integer or a Python
-        timedelta object.
-        """
-        if isinstance(time, datetime.timedelta):
-            time = int(time.total_seconds())
-        return self.execute_command('SETEX', name, time, value)
-
-    def lrem(self, name, value, num=0):
-        """
-        Remove the first ``num`` occurrences of elements equal to ``value``
-        from the list stored at ``name``.
-
-        The ``num`` argument influences the operation in the following ways:
-            num > 0: Remove elements equal to value moving from head to tail.
-            num < 0: Remove elements equal to value moving from tail to head.
-            num = 0: Remove all elements equal to value.
-        """
-        return self.execute_command('LREM', name, num, value)
-
-    def zadd(self, name, *args, **kwargs):
-        """
-        NOTE: The order of arguments differs from that of the official ZADD
-        command. For backwards compatability, this method accepts arguments
-        in the form of name1, score1, name2, score2, while the official Redis
-        documents expects score1, name1, score2, name2.
-
-        If you're looking to use the standard syntax, consider using the
-        StrictRedis class. See the API Reference section of the docs for more
-        information.
-
-        Set any number of element-name, score pairs to the key ``name``. Pairs
-        can be specified in two ways:
-
-        As *args, in the form of: name1, score1, name2, score2, ...
-        or as **kwargs, in the form of: name1=score1, name2=score2, ...
-
-        The following example would add four values to the 'my-key' key:
-        redis.zadd('my-key', 'name1', 1.1, 'name2', 2.2, name3=3.3, name4=4.4)
-        """
-        pieces = []
-        if args:
-            if len(args) % 2 != 0:
-                raise RedisError("ZADD requires an equal number of "
-                                 "values and scores")
-            pieces.extend(reversed(args))
-        for pair in iteritems(kwargs):
-            pieces.append(pair[1])
-            pieces.append(pair[0])
-        return self.execute_command('ZADD', name, *pieces)
+StrictRedis = Redis
 
 
 class PubSub(object):
@@ -3203,7 +3122,7 @@ class PubSubWorkerThread(threading.Thread):
         self.pubsub.punsubscribe()
 
 
-class BasePipeline(object):
+class Pipeline(Redis):
     """
     Pipelines provide a way to transmit multiple commands to the Redis server
     in one transmission.  This is convenient for batch processing, such as
@@ -3433,7 +3352,7 @@ class BasePipeline(object):
         exception.args = (msg,) + exception.args[1:]
 
     def parse_response(self, connection, command_name, **options):
-        result = StrictRedis.parse_response(
+        result = Redis.parse_response(
             self, connection, command_name, **options)
         if command_name in self.UNWATCH_COMMANDS:
             self.watching = False
@@ -3505,16 +3424,6 @@ class BasePipeline(object):
         return self.watching and self.execute_command('UNWATCH') or True
 
 
-class StrictPipeline(BasePipeline, StrictRedis):
-    "Pipeline for the StrictRedis class"
-    pass
-
-
-class Pipeline(BasePipeline, Redis):
-    "Pipeline for the Redis class"
-    pass
-
-
 class Script(object):
     "An executable Lua script object returned by ``register_script``"
 
@@ -3536,7 +3445,7 @@ class Script(object):
             client = self.registered_client
         args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
-        if isinstance(client, BasePipeline):
+        if isinstance(client, Pipeline):
             # Make sure the pipeline can register the script before executing.
             client.scripts.add(self)
         try:
