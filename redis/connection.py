@@ -759,6 +759,7 @@ class UnixDomainSocketConnection(Connection):
             'db': self.db,
         }
         self._connect_callbacks = []
+        self._buffer_cutoff = 6000
 
     def _connect(self):
         "Create a Unix domain socket connection"
