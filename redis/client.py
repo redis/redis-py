@@ -1468,10 +1468,7 @@ class Redis(object):
         """
         if timeout is None:
             timeout = 0
-        if isinstance(keys, basestring):
-            keys = [keys]
-        else:
-            keys = list(keys)
+        keys = list_or_args(keys, None)
         keys.append(timeout)
         return self.execute_command('BLPOP', *keys)
 
@@ -1488,10 +1485,7 @@ class Redis(object):
         """
         if timeout is None:
             timeout = 0
-        if isinstance(keys, basestring):
-            keys = [keys]
-        else:
-            keys = list(keys)
+        keys = list_or_args(keys, None)
         keys.append(timeout)
         return self.execute_command('BRPOP', *keys)
 
@@ -1641,7 +1635,7 @@ class Redis(object):
             # Otherwise assume it's an interable and we want to get multiple
             # values. We can't just iterate blindly because strings are
             # iterable.
-            if isinstance(get, basestring):
+            if isinstance(get, (bytes, basestring)):
                 pieces.append(Token.get_token('GET'))
                 pieces.append(get)
             else:
@@ -1657,7 +1651,7 @@ class Redis(object):
             pieces.append(store)
 
         if groups:
-            if not get or isinstance(get, basestring) or len(get) < 2:
+            if not get or isinstance(get, (bytes, basestring)) or len(get) < 2:
                 raise DataError('when using "groups" the "get" argument '
                                 'must be specified and contain at least '
                                 'two keys')
@@ -2282,10 +2276,7 @@ class Redis(object):
         """
         if timeout is None:
             timeout = 0
-        if isinstance(keys, basestring):
-            keys = [keys]
-        else:
-            keys = list(keys)
+        keys = list_or_args(keys, None)
         keys.append(timeout)
         return self.execute_command('BZPOPMAX', *keys)
 
@@ -2302,10 +2293,7 @@ class Redis(object):
         """
         if timeout is None:
             timeout = 0
-        if isinstance(keys, basestring):
-            keys = [keys]
-        else:
-            keys = list(keys)
+        keys = list_or_args(keys, None)
         keys.append(timeout)
         return self.execute_command('BZPOPMIN', *keys)
 
