@@ -1154,6 +1154,16 @@ class Redis(object):
         """
         return self.execute_command('DECRBY', name, amount)
 
+    def decrby(self, name, amount=1):
+        """
+        Decrements the value of ``key`` by ``amount``.  If no key exists,
+        the value will be initialized as 0 - ``amount``
+        """
+
+        # An alias for ``decr()``, because it is already implemented
+        # as DECRBY redis command.
+        return self.decr(name, amount)
+
     def delete(self, *names):
         "Delete one or more keys specified by ``names``"
         return self.execute_command('DEL', *names)
