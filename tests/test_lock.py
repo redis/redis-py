@@ -56,6 +56,12 @@ class TestLock(object):
             assert r.get('foo') == lock.local.token
         assert r.get('foo') is None
 
+    def test_context_manager_raises_when_locked_not_acquired(self, r):
+        r.set('foo', 'bar')
+        with pytest.raises(LockError):
+            with self.get_lock(r, 'foo', blocking_timeout=0.1):
+                pass
+
     def test_high_sleep_raises_error(self, r):
         "If sleep is higher than timeout, it should raise an error"
         with pytest.raises(LockError):

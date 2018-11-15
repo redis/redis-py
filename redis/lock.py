@@ -125,8 +125,9 @@ class Lock(object):
     def __enter__(self):
         # force blocking, as otherwise the user would have to check whether
         # the lock was actually acquired or not.
-        self.acquire(blocking=True)
-        return self
+        if self.acquire(blocking=True):
+            return self
+        raise LockError("Unable to acquire lock within the time specified")
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.release()
