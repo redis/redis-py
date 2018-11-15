@@ -1023,7 +1023,7 @@ class Redis(object):
         attempted.  The "save" and "nosave" options cannot both be set.
         """
         if save and nosave:
-            raise RedisError('SHUTDOWN save and nosave cannot both be set')
+            raise DataError('SHUTDOWN save and nosave cannot both be set')
         args = ['SHUTDOWN']
         if save:
             args.append('SAVE')
