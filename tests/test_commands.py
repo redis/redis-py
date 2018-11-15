@@ -979,6 +979,40 @@ class TestRedisCommands(object):
         assert r.zrange('a', 0, -1, withscores=True) == \
             [(b'a1', 1.0), (b'a2', 2.0), (b'a3', 3.0)]
 
+        # error cases
+        with pytest.raises(exceptions.DataError):
+            r.zadd('a', {})
+
+        # cannot use both nx and xx options
+        with pytest.raises(exceptions.DataError):
+            r.zadd('a', mapping, nx=True, xx=True)
+
+        # cannot use the incr options with more than one value
+        with pytest.raises(exceptions.DataError):
+            r.zadd('a', mapping, incr=True)
+
+    def test_zadd_nx(self, r):
+        assert r.zadd('a', {'a1': 1}) == 1
+        assert r.zadd('a', {'a1': 99, 'a2': 2}, nx=True) == 1
+        assert r.zrange('a', 0, -1, withscores=True) == \
+            [(b'a1', 1.0), (b'a2', 2.0)]
+
+    def test_zadd_xx(self, r):
+        assert r.zadd('a', {'a1': 1}) == 1
+        assert r.zadd('a', {'a1': 99, 'a2': 2}, xx=True) == 0
+        assert r.zrange('a', 0, -1, withscores=True) == \
+            [(b'a1', 99.0)]
+
+    def test_zadd_ch(self, r):
+        assert r.zadd('a', {'a1': 1}) == 1
+        assert r.zadd('a', {'a1': 99, 'a2': 2}, ch=True) == 2
+        assert r.zrange('a', 0, -1, withscores=True) == \
+            [(b'a2', 2.0), (b'a1', 99.0)]
+
+    def test_zadd_incr(self, r):
+        assert r.zadd('a', {'a1': 1}) == 1
+        assert r.zadd('a', {'a1': 4.5}, incr=True) == 5.5
+
     def test_zcard(self, r):
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
         assert r.zcard('a') == 3
