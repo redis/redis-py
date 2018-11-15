@@ -18,6 +18,14 @@ class TestLock(object):
         lock.release()
         assert r.get('foo') is None
 
+    def test_locked(self, r):
+        lock = self.get_lock(r, 'foo')
+        assert lock.locked() is False
+        lock.acquire(blocking=False)
+        assert lock.locked() is True
+        lock.release()
+        assert lock.locked() is False
+
     def test_competing_locks(self, r):
         lock1 = self.get_lock(r, 'foo')
         lock2 = self.get_lock(r, 'foo')
