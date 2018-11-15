@@ -701,8 +701,8 @@ class Connection(object):
 class SSLConnection(Connection):
     description_format = "SSLConnection<host=%(host)s,port=%(port)s,db=%(db)s>"
 
-    def __init__(self, ssl_keyfile=None, ssl_certfile=None, ssl_cert_reqs=None,
-                 ssl_ca_certs=None, **kwargs):
+    def __init__(self, ssl_keyfile=None, ssl_certfile=None,
+                 ssl_cert_reqs='required', ssl_ca_certs=None, **kwargs):
         if not ssl_available:
             raise RedisError("Python wasn't built with SSL support")
 
