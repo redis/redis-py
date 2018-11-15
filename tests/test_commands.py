@@ -1520,6 +1520,11 @@ class TestRedisCommands(object):
         assert r.lrange('sorted', 0, 10) == \
             [b'vodka', b'milk', b'gin', b'apple juice']
 
+    def test_sort_issue_924(self, r):
+        # Tests for issue https://github.com/andymccurdy/redis-py/issues/924
+        r.execute_command('SADD', 'issue#924', 1)
+        r.execute_command('SORT', 'issue#924')
+
     def test_cluster_addslots(self, mock_cluster_resp_ok):
         assert mock_cluster_resp_ok.cluster('ADDSLOTS', 1) is True
 
