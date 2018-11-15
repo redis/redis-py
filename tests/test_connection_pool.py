@@ -299,7 +299,7 @@ class TestConnectionPoolURLParsing(object):
         assert isinstance(pool, redis.BlockingConnectionPool)
 
     def test_client_creates_connection_pool(self):
-        r = redis.StrictRedis.from_url('redis://myhost')
+        r = redis.Redis.from_url('redis://myhost')
         assert r.connection_pool.connection_class == redis.Connection
         assert r.connection_pool.connection_kwargs == {
             'host': 'myhost',

@@ -11,7 +11,7 @@ from redis._compat import (basestring, bytes, imap, iteritems, iterkeys,
                            itervalues, izip, long, nativestr, safe_unicode)
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
                               SSLConnection, Token)
-from redis.lock import Lock, LuaLock
+from redis.lock import Lock
 from redis.exceptions import (
     ConnectionError,
     DataError,
@@ -29,13 +29,15 @@ EMPTY_RESPONSE = 'EMPTY_RESPONSE'
 
 
 def list_or_args(keys, args):
-    # returns a single list combining keys and args
+    # returns a single new list combining keys and args
     try:
         iter(keys)
         # a string or bytes instance can be iterated, but indicates
         # keys wasn't passed as a list
         if isinstance(keys, (basestring, bytes)):
             keys = [keys]
+        else:
+            keys = list(keys)
     except TypeError:
         keys = [keys]
     if args:
@@ -403,7 +405,7 @@ def parse_pubsub_numsub(response, **options):
     return list(zip(response[0::2], response[1::2]))
 
 
-class StrictRedis(object):
+class Redis(object):
     """
     Implementation of the Redis protocol.
 
@@ -628,7 +630,6 @@ class StrictRedis(object):
                     })
             connection_pool = ConnectionPool(**kwargs)
         self.connection_pool = connection_pool
-        self._use_lua_lock = None
 
         self.response_callbacks = self.__class__.RESPONSE_CALLBACKS.copy()
 
@@ -647,7 +648,7 @@ class StrictRedis(object):
         atomic, pipelines are useful for reducing the back-and-forth overhead
         between the client and server.
         """
-        return StrictPipeline(
+        return Pipeline(
             self.connection_pool,
             self.response_callbacks,
             transaction,
@@ -721,15 +722,7 @@ class StrictRedis(object):
         is that these cases aren't common and as such default to using
         thread local storage.        """
         if lock_class is None:
-            if self._use_lua_lock is None:
-                # the first time .lock() is called, determine if we can use
-                # Lua by attempting to register the necessary scripts
-                try:
-                    LuaLock.register_scripts(self)
-                    self._use_lua_lock = True
-                except ResponseError:
-                    self._use_lua_lock = False
-            lock_class = self._use_lua_lock and LuaLock or Lock
+            lock_class = Lock
         return lock_class(self, name, timeout=timeout, sleep=sleep,
                           blocking_timeout=blocking_timeout,
                           thread_local=thread_local)
@@ -799,8 +792,8 @@ class StrictRedis(object):
         if _type is not None:
             client_types = ('normal', 'master', 'replica', 'pubsub')
             if str(_type).lower() not in client_types:
-                raise RedisError("CLIENT LIST _type must be one of %r" % (
-                                 client_types,))
+                raise DataError("CLIENT LIST _type must be one of %r" % (
+                                client_types,))
             return self.execute_command('CLIENT LIST', Token.get_token('TYPE'),
                                         _type)
         return self.execute_command('CLIENT LIST')
@@ -835,7 +828,7 @@ class StrictRedis(object):
         :param timeout: milliseconds to pause clients
         """
         if not isinstance(timeout, (int, long)):
-            raise RedisError("CLIENT PAUSE timeout must be an integer")
+            raise DataError("CLIENT PAUSE timeout must be an integer")
         return self.execute_command('CLIENT PAUSE', str(timeout))
 
     def config_get(self, pattern="*"):
@@ -937,7 +930,7 @@ class StrictRedis(object):
         """
         keys = list_or_args(keys, [])
         if not keys:
-            raise RedisError('MIGRATE requires at least one key')
+            raise DataError('MIGRATE requires at least one key')
         pieces = []
         if copy:
             pieces.append(Token.get_token('COPY'))
@@ -1108,7 +1101,7 @@ class StrictRedis(object):
             params.append(end)
         elif (start is not None and end is None) or \
                 (end is not None and start is None):
-            raise RedisError("Both start and end must be specified")
+            raise DataError("Both start and end must be specified")
         return self.execute_command('BITCOUNT', *params)
 
     def bitfield(self, key, default_overflow=None):
@@ -1133,7 +1126,7 @@ class StrictRedis(object):
         means to look at the first three bytes.
         """
         if bit not in (0, 1):
-            raise RedisError('bit must be 0 or 1')
+            raise DataError('bit must be 0 or 1')
         params = [key, bit]
 
         start is not None and params.append(start)
@@ -1141,8 +1134,8 @@ class StrictRedis(object):
         if start is not None and end is not None:
             params.append(end)
         elif start is None and end is not None:
-            raise RedisError("start argument is not set, "
-                             "when end is specified")
+            raise DataError("start argument is not set, "
+                            "when end is specified")
         return self.execute_command('BITPOS', *params)
 
     def decr(self, name, amount=1):
@@ -1261,33 +1254,26 @@ class StrictRedis(object):
             options[EMPTY_RESPONSE] = []
         return self.execute_command('MGET', *args, **options)
 
-    def mset(self, *args, **kwargs):
+    def mset(self, mapping):
         """
-        Sets key/values based on a mapping. Mapping can be supplied as a single
-        dictionary argument or as kwargs.
+        Sets key/values based on a mapping. Mapping is a dictionary of
+        key/value pairs. Both keys and values should be strings or types that
+        can be cast to a string via str().
         """
-        if args:
-            if len(args) != 1 or not isinstance(args[0], dict):
-                raise RedisError('MSET requires **kwargs or a single dict arg')
-            kwargs.update(args[0])
         items = []
-        for pair in iteritems(kwargs):
+        for pair in iteritems(mapping):
             items.extend(pair)
         return self.execute_command('MSET', *items)
 
-    def msetnx(self, *args, **kwargs):
+    def msetnx(self, mapping):
         """
         Sets key/values based on a mapping if none of the keys are already set.
-        Mapping can be supplied as a single dictionary argument or as kwargs.
+        Mapping is a dictionary of key/value pairs. Both keys and values
+        should be strings or types that can be cast to a string via str().
         Returns a boolean indicating if the operation was successful.
         """
-        if args:
-            if len(args) != 1 or not isinstance(args[0], dict):
-                raise RedisError('MSETNX requires **kwargs or a single '
-                                 'dict arg')
-            kwargs.update(args[0])
         items = []
-        for pair in iteritems(kwargs):
+        for pair in iteritems(mapping):
             items.extend(pair)
         return self.execute_command('MSETNX', *items)
 
@@ -1485,10 +1471,7 @@ class StrictRedis(object):
         """
         if timeout is None:
             timeout = 0
-        if isinstance(keys, basestring):
-            keys = [keys]
-        else:
-            keys = list(keys)
+        keys = list_or_args(keys, None)
         keys.append(timeout)
         return self.execute_command('BLPOP', *keys)
 
@@ -1505,10 +1488,7 @@ class StrictRedis(object):
         """
         if timeout is None:
             timeout = 0
-        if isinstance(keys, basestring):
-            keys = [keys]
-        else:
-            keys = list(keys)
+        keys = list_or_args(keys, None)
         keys.append(timeout)
         return self.execute_command('BRPOP', *keys)
 
@@ -1643,7 +1623,7 @@ class StrictRedis(object):
         """
         if (start is not None and num is None) or \
                 (num is not None and start is None):
-            raise RedisError("``start`` and ``num`` must both be specified")
+            raise DataError("``start`` and ``num`` must both be specified")
 
         pieces = [name]
         if by is not None:
@@ -1658,7 +1638,7 @@ class StrictRedis(object):
             # Otherwise assume it's an interable and we want to get multiple
             # values. We can't just iterate blindly because strings are
             # iterable.
-            if isinstance(get, basestring):
+            if isinstance(get, (bytes, basestring)):
                 pieces.append(Token.get_token('GET'))
                 pieces.append(get)
             else:
@@ -1674,7 +1654,7 @@ class StrictRedis(object):
             pieces.append(store)
 
         if groups:
-            if not get or isinstance(get, basestring) or len(get) < 2:
+            if not get or isinstance(get, (bytes, basestring)) or len(get) < 2:
                 raise DataError('when using "groups" the "get" argument '
                                 'must be specified and contain at least '
                                 'two keys')
@@ -1921,14 +1901,14 @@ class StrictRedis(object):
         pieces = []
         if maxlen is not None:
             if not isinstance(maxlen, (int, long)) or maxlen < 1:
-                raise RedisError('XADD maxlen must be a positive integer')
+                raise DataError('XADD maxlen must be a positive integer')
             pieces.append(Token.get_token('MAXLEN'))
             if approximate:
                 pieces.append(Token.get_token('~'))
             pieces.append(str(maxlen))
         pieces.append(id)
         if not isinstance(fields, dict) or len(fields) == 0:
-            raise RedisError('XADD fields must be a non-empty dict')
+            raise DataError('XADD fields must be a non-empty dict')
         for pair in iteritems(fields):
             pieces.extend(pair)
         return self.execute_command('XADD', name, *pieces)
@@ -1959,11 +1939,11 @@ class StrictRedis(object):
          of messages successfully claimed, without returning the actual message
         """
         if not isinstance(min_idle_time, (int, long)) or min_idle_time < 0:
-            raise RedisError("XCLAIM min_idle_time must be a non negative "
-                             "integer")
+            raise DataError("XCLAIM min_idle_time must be a non negative "
+                            "integer")
         if not isinstance(message_ids, (list, tuple)) or not message_ids:
-            raise RedisError("XCLAIM message_ids must be a non empty list or "
-                             "tuple of message IDs to claim")
+            raise DataError("XCLAIM message_ids must be a non empty list or "
+                            "tuple of message IDs to claim")
 
         kwargs = {}
         pieces = [name, groupname, consumername, str(min_idle_time)]
@@ -1971,24 +1951,24 @@ class StrictRedis(object):
 
         if idle is not None:
             if not isinstance(idle, (int, long)):
-                raise RedisError("XCLAIM idle must be an integer")
+                raise DataError("XCLAIM idle must be an integer")
             pieces.extend((Token.get_token('IDLE'), str(idle)))
         if time is not None:
             if not isinstance(time, (int, long)):
-                raise RedisError("XCLAIM time must be an integer")
+                raise DataError("XCLAIM time must be an integer")
             pieces.extend((Token.get_token('TIME'), str(time)))
         if retrycount is not None:
             if not isinstance(retrycount, (int, long)):
-                raise RedisError("XCLAIM retrycount must be an integer")
+                raise DataError("XCLAIM retrycount must be an integer")
             pieces.extend((Token.get_token('RETRYCOUNT'), str(retrycount)))
 
         if force:
             if not isinstance(force, bool):
-                raise RedisError("XCLAIM force must be a boolean")
+                raise DataError("XCLAIM force must be a boolean")
             pieces.append(Token.get_token('FORCE'))
         if justid:
             if not isinstance(justid, bool):
-                raise RedisError("XCLAIM justid must be a boolean")
+                raise DataError("XCLAIM justid must be a boolean")
             pieces.append(Token.get_token('JUSTID'))
             kwargs['parse_justid'] = True
         return self.execute_command('XCLAIM', *pieces, **kwargs)
@@ -2095,16 +2075,16 @@ class StrictRedis(object):
         pieces = [name, groupname]
         if min is not None or max is not None or count is not None:
             if min is None or max is None or count is None:
-                raise RedisError("XPENDING must be provided with min, max "
-                                 "and count parameters, or none of them. ")
+                raise DataError("XPENDING must be provided with min, max "
+                                "and count parameters, or none of them. ")
             if not isinstance(count, (int, long)) or count < -1:
-                raise RedisError("XPENDING count must be a integer >= -1")
+                raise DataError("XPENDING count must be a integer >= -1")
             pieces.extend((min, max, str(count)))
         if consumername is not None:
             if min is None or max is None or count is None:
-                raise RedisError("if XPENDING is provided with consumername,"
-                                 " it must be provided with min, max and"
-                                 " count parameters")
+                raise DataError("if XPENDING is provided with consumername,"
+                                " it must be provided with min, max and"
+                                " count parameters")
             pieces.append(consumername)
         return self.execute_command('XPENDING', *pieces, parse_detail=True)
 
@@ -2122,7 +2102,7 @@ class StrictRedis(object):
         pieces = [min, max]
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
-                raise RedisError('XRANGE count must be a positive integer')
+                raise DataError('XRANGE count must be a positive integer')
             pieces.append(Token.get_token('COUNT'))
             pieces.append(str(count))
 
@@ -2140,16 +2120,16 @@ class StrictRedis(object):
         pieces = []
         if block is not None:
             if not isinstance(block, (int, long)) or block < 0:
-                raise RedisError('XREAD block must be a non-negative integer')
+                raise DataError('XREAD block must be a non-negative integer')
             pieces.append(Token.get_token('BLOCK'))
             pieces.append(str(block))
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
-                raise RedisError('XREAD count must be a positive integer')
+                raise DataError('XREAD count must be a positive integer')
             pieces.append(Token.get_token('COUNT'))
             pieces.append(str(count))
         if not isinstance(streams, dict) or len(streams) == 0:
-            raise RedisError('XREAD streams must be a non empty dict')
+            raise DataError('XREAD streams must be a non empty dict')
         pieces.append(Token.get_token('STREAMS'))
         keys, values = izip(*iteritems(streams))
         pieces.extend(keys)
@@ -2171,17 +2151,17 @@ class StrictRedis(object):
         pieces = [Token.get_token('GROUP'), groupname, consumername]
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
-                raise RedisError("XREADGROUP count must be a positive integer")
+                raise DataError("XREADGROUP count must be a positive integer")
             pieces.append(Token.get_token("COUNT"))
             pieces.append(str(count))
         if block is not None:
             if not isinstance(block, (int, long)) or block < 0:
-                raise RedisError("XREADGROUP block must be a non-negative "
-                                 "integer")
+                raise DataError("XREADGROUP block must be a non-negative "
+                                "integer")
             pieces.append(Token.get_token("BLOCK"))
             pieces.append(str(block))
         if not isinstance(streams, dict) or len(streams) == 0:
-            raise RedisError('XREADGROUP streams must be a non empty dict')
+            raise DataError('XREADGROUP streams must be a non empty dict')
         pieces.append(Token.get_token('STREAMS'))
         pieces.extend(streams.keys())
         pieces.extend(streams.values())
@@ -2201,7 +2181,7 @@ class StrictRedis(object):
         pieces = [max, min]
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
-                raise RedisError('XREVRANGE count must be a positive integer')
+                raise DataError('XREVRANGE count must be a positive integer')
             pieces.append(Token.get_token('COUNT'))
             pieces.append(str(count))
 
@@ -2221,24 +2201,15 @@ class StrictRedis(object):
         return self.execute_command('XTRIM', name, *pieces)
 
     # SORTED SET COMMANDS
-    def zadd(self, name, *args, **kwargs):
+    def zadd(self, name, mapping):
         """
-        Set any number of score, element-name pairs to the key ``name``. Pairs
-        can be specified in two ways:
-
-        As *args, in the form of: score1, name1, score2, name2, ...
-        or as **kwargs, in the form of: name1=score1, name2=score2, ...
-
-        The following example would add four values to the 'my-key' key:
-        redis.zadd('my-key', 1.1, 'name1', 2.2, 'name2', name3=3.3, name4=4.4)
+        Set any number of element-name, score pairs to the key ``name``. Pairs
+        are specified as a dict of element-names keys to score values.
         """
+        if not mapping:
+            raise DataError("ZADD requires at least one element/score pair")
         pieces = []
-        if args:
-            if len(args) % 2 != 0:
-                raise RedisError("ZADD requires an equal number of "
-                                 "values and scores")
-            pieces.extend(args)
-        for pair in iteritems(kwargs):
+        for pair in iteritems(mapping):
             pieces.append(pair[1])
             pieces.append(pair[0])
         return self.execute_command('ZADD', name, *pieces)
@@ -2254,7 +2225,7 @@ class StrictRedis(object):
         """
         return self.execute_command('ZCOUNT', name, min, max)
 
-    def zincrby(self, name, value, amount=1):
+    def zincrby(self, name, amount, value):
         "Increment the score of ``value`` in sorted set ``name`` by ``amount``"
         return self.execute_command('ZINCRBY', name, amount, value)
 
@@ -2308,10 +2279,7 @@ class StrictRedis(object):
         """
         if timeout is None:
             timeout = 0
-        if isinstance(keys, basestring):
-            keys = [keys]
-        else:
-            keys = list(keys)
+        keys = list_or_args(keys, None)
         keys.append(timeout)
         return self.execute_command('BZPOPMAX', *keys)
 
@@ -2328,10 +2296,7 @@ class StrictRedis(object):
         """
         if timeout is None:
             timeout = 0
-        if isinstance(keys, basestring):
-            keys = [keys]
-        else:
-            keys = list(keys)
+        keys = list_or_args(keys, None)
         keys.append(timeout)
         return self.execute_command('BZPOPMIN', *keys)
 
@@ -2372,7 +2337,7 @@ class StrictRedis(object):
         """
         if (start is not None and num is None) or \
                 (num is not None and start is None):
-            raise RedisError("``start`` and ``num`` must both be specified")
+            raise DataError("``start`` and ``num`` must both be specified")
         pieces = ['ZRANGEBYLEX', name, min, max]
         if start is not None and num is not None:
             pieces.extend([Token.get_token('LIMIT'), start, num])
@@ -2388,7 +2353,7 @@ class StrictRedis(object):
         """
         if (start is not None and num is None) or \
                 (num is not None and start is None):
-            raise RedisError("``start`` and ``num`` must both be specified")
+            raise DataError("``start`` and ``num`` must both be specified")
         pieces = ['ZREVRANGEBYLEX', name, max, min]
         if start is not None and num is not None:
             pieces.extend([Token.get_token('LIMIT'), start, num])
@@ -2410,7 +2375,7 @@ class StrictRedis(object):
         """
         if (start is not None and num is None) or \
                 (num is not None and start is None):
-            raise RedisError("``start`` and ``num`` must both be specified")
+            raise DataError("``start`` and ``num`` must both be specified")
         pieces = ['ZRANGEBYSCORE', name, min, max]
         if start is not None and num is not None:
             pieces.extend([Token.get_token('LIMIT'), start, num])
@@ -2496,7 +2461,7 @@ class StrictRedis(object):
         """
         if (start is not None and num is None) or \
                 (num is not None and start is None):
-            raise RedisError("``start`` and ``num`` must both be specified")
+            raise DataError("``start`` and ``num`` must both be specified")
         pieces = ['ZREVRANGEBYSCORE', name, max, min]
         if start is not None and num is not None:
             pieces.extend([Token.get_token('LIMIT'), start, num])
@@ -2725,8 +2690,8 @@ class StrictRedis(object):
         the triad longitude, latitude and name.
         """
         if len(values) % 3 != 0:
-            raise RedisError("GEOADD requires places with lon, lat and name"
-                             " values")
+            raise DataError("GEOADD requires places with lon, lat and name"
+                            " values")
         return self.execute_command('GEOADD', name, *values)
 
     def geodist(self, name, place1, place2, unit=None):
@@ -2738,7 +2703,7 @@ class StrictRedis(object):
         """
         pieces = [name, place1, place2]
         if unit and unit not in ('m', 'km', 'mi', 'ft'):
-            raise RedisError("GEODIST invalid unit")
+            raise DataError("GEODIST invalid unit")
         elif unit:
             pieces.append(unit)
         return self.execute_command('GEODIST', *pieces)
@@ -2815,7 +2780,7 @@ class StrictRedis(object):
     def _georadiusgeneric(self, command, *args, **kwargs):
         pieces = list(args)
         if kwargs['unit'] and kwargs['unit'] not in ('m', 'km', 'mi', 'ft'):
-            raise RedisError("GEORADIUS invalid unit")
+            raise DataError("GEORADIUS invalid unit")
         elif kwargs['unit']:
             pieces.append(kwargs['unit'])
         else:
@@ -2829,13 +2794,13 @@ class StrictRedis(object):
             pieces.extend([Token('COUNT'), kwargs['count']])
 
         if kwargs['sort'] and kwargs['sort'] not in ('ASC', 'DESC'):
-            raise RedisError("GEORADIUS invalid sort")
+            raise DataError("GEORADIUS invalid sort")
         elif kwargs['sort']:
             pieces.append(Token(kwargs['sort']))
 
         if kwargs['store'] and kwargs['store_dist']:
-            raise RedisError("GEORADIUS store and store_dist cant be set"
-                             " together")
+            raise DataError("GEORADIUS store and store_dist cant be set"
+                            " together")
 
         if kwargs['store']:
             pieces.extend([Token('STORE'), kwargs['store']])
@@ -2846,88 +2811,7 @@ class StrictRedis(object):
         return self.execute_command(command, *pieces, **kwargs)
 
 
-class Redis(StrictRedis):
-    """
-    Provides backwards compatibility with older versions of redis-py that
-    changed arguments to some commands to be more Pythonic, sane, or by
-    accident.
-    """
-
-    # Overridden callbacks
-    RESPONSE_CALLBACKS = dict_merge(
-        StrictRedis.RESPONSE_CALLBACKS,
-        {
-            'TTL': lambda r: r >= 0 and r or None,
-            'PTTL': lambda r: r >= 0 and r or None,
-        }
-    )
-
-    def pipeline(self, transaction=True, shard_hint=None):
-        """
-        Return a new pipeline object that can queue multiple commands for
-        later execution. ``transaction`` indicates whether all commands
-        should be executed atomically. Apart from making a group of operations
-        atomic, pipelines are useful for reducing the back-and-forth overhead
-        between the client and server.
-        """
-        return Pipeline(
-            self.connection_pool,
-            self.response_callbacks,
-            transaction,
-            shard_hint)
-
-    def setex(self, name, value, time):
-        """
-        Set the value of key ``name`` to ``value`` that expires in ``time``
-        seconds. ``time`` can be represented by an integer or a Python
-        timedelta object.
-        """
-        if isinstance(time, datetime.timedelta):
-            time = int(time.total_seconds())
-        return self.execute_command('SETEX', name, time, value)
-
-    def lrem(self, name, value, num=0):
-        """
-        Remove the first ``num`` occurrences of elements equal to ``value``
-        from the list stored at ``name``.
-
-        The ``num`` argument influences the operation in the following ways:
-            num > 0: Remove elements equal to value moving from head to tail.
-            num < 0: Remove elements equal to value moving from tail to head.
-            num = 0: Remove all elements equal to value.
-        """
-        return self.execute_command('LREM', name, num, value)
-
-    def zadd(self, name, *args, **kwargs):
-        """
-        NOTE: The order of arguments differs from that of the official ZADD
-        command. For backwards compatability, this method accepts arguments
-        in the form of name1, score1, name2, score2, while the official Redis
-        documents expects score1, name1, score2, name2.
-
-        If you're looking to use the standard syntax, consider using the
-        StrictRedis class. See the API Reference section of the docs for more
-        information.
-
-        Set any number of element-name, score pairs to the key ``name``. Pairs
-        can be specified in two ways:
-
-        As *args, in the form of: name1, score1, name2, score2, ...
-        or as **kwargs, in the form of: name1=score1, name2=score2, ...
-
-        The following example would add four values to the 'my-key' key:
-        redis.zadd('my-key', 'name1', 1.1, 'name2', 2.2, name3=3.3, name4=4.4)
-        """
-        pieces = []
-        if args:
-            if len(args) % 2 != 0:
-                raise RedisError("ZADD requires an equal number of "
-                                 "values and scores")
-            pieces.extend(reversed(args))
-        for pair in iteritems(kwargs):
-            pieces.append(pair[1])
-            pieces.append(pair[0])
-        return self.execute_command('ZADD', name, *pieces)
+StrictRedis = Redis
 
 
 class PubSub(object):
@@ -3231,7 +3115,7 @@ class PubSubWorkerThread(threading.Thread):
         self.pubsub.punsubscribe()
 
 
-class BasePipeline(object):
+class Pipeline(Redis):
     """
     Pipelines provide a way to transmit multiple commands to the Redis server
     in one transmission.  This is convenient for batch processing, such as
@@ -3461,7 +3345,7 @@ class BasePipeline(object):
         exception.args = (msg,) + exception.args[1:]
 
     def parse_response(self, connection, command_name, **options):
-        result = StrictRedis.parse_response(
+        result = Redis.parse_response(
             self, connection, command_name, **options)
         if command_name in self.UNWATCH_COMMANDS:
             self.watching = False
@@ -3533,16 +3417,6 @@ class BasePipeline(object):
         return self.watching and self.execute_command('UNWATCH') or True
 
 
-class StrictPipeline(BasePipeline, StrictRedis):
-    "Pipeline for the StrictRedis class"
-    pass
-
-
-class Pipeline(BasePipeline, Redis):
-    "Pipeline for the Redis class"
-    pass
-
-
 class Script(object):
     "An executable Lua script object returned by ``register_script``"
 
@@ -3564,7 +3438,7 @@ class Script(object):
             client = self.registered_client
         args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
-        if isinstance(client, BasePipeline):
+        if isinstance(client, Pipeline):
             # Make sure the pipeline can register the script before executing.
             client.scripts.add(self)
         try:

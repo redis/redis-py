@@ -19,6 +19,7 @@ from redis._compat import (xrange, imap, byte_to_chr, unicode, bytes, long,
                            LifoQueue, Empty, Full, urlparse, parse_qs,
                            recv, recv_into, select, unquote)
 from redis.exceptions import (
+    DataError,
     RedisError,
     ConnectionError,
     TimeoutError,
@@ -107,13 +108,20 @@ class Encoder(object):
             return value.encoded_value
         elif isinstance(value, bytes):
             return value
-        elif isinstance(value, (int, long)):
-            value = str(value).encode()
+        elif isinstance(value, bool):
+            # special case bool since it is a subclass of int
+            raise DataError("Invalid input of type: 'bool'. Convert to a "
+                            "byte, string or number first.")
         elif isinstance(value, float):
             value = repr(value).encode()
+        elif isinstance(value, (int, long)):
+            # python 2 repr() on longs is '123L', so use str() instead
+            value = str(value).encode()
         elif not isinstance(value, basestring):
-            # an object we don't know how to deal with. default to unicode()
-            value = unicode(value)
+            # a value we don't know how to deal with. throw an error
+            typename = type(value).__name__
+            raise DataError("Invalid input of type: '%s'. Convert to a "
+                            "byte, string or number first." % typename)
         if isinstance(value, unicode):
             value = value.encode(self.encoding, self.encoding_errors)
         return value

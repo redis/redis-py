@@ -42,7 +42,7 @@ Getting Started
 .. code-block:: pycon
 
     >>> import redis
-    >>> r = redis.StrictRedis(host='localhost', port=6379, db=0)
+    >>> r = redis.Redis(host='localhost', port=6379, db=0)
     >>> r.set('foo', 'bar')
     True
     >>> r.get('foo')
@@ -53,7 +53,7 @@ Python 2. The user is responsible for decoding to Python 3 strings or Python 2
 unicode objects.
 
 If **all** string responses from a client should be decoded, the user can
-specify `decode_responses=True` to `StrictRedis.__init__`. In this case, any
+specify `decode_responses=True` to `Redis.__init__`. In this case, any
 Redis command that returns a string type will be decoded with the `encoding`
 specified.
 
@@ -62,7 +62,7 @@ API Reference
 
 The `official Redis command documentation <https://redis.io/commands>`_ does a
 great job of explaining each command in detail. redis-py exposes two client
-classes that implement these commands. The StrictRedis class attempts to adhere
+classes that implement these commands. The Redis class attempts to adhere
 to the official command syntax. There are a few exceptions:
 
 * **SELECT**: Not implemented. See the explanation in the Thread Safety section
@@ -88,7 +88,7 @@ to the official command syntax. There are a few exceptions:
   to keep track of the cursor while iterating. Use the
   scan_iter/sscan_iter/hscan_iter/zscan_iter methods for this behavior.
 
-In addition to the changes above, the Redis class, a subclass of StrictRedis,
+In addition to the changes above, the Redis class, a subclass of Redis,
 overrides several other commands to provide backwards compatibility with older
 versions of redis-py:
 
@@ -339,7 +339,7 @@ for new messages. Creating a `PubSub` object is easy.
 
 .. code-block:: pycon
 
-    >>> r = redis.StrictRedis(...)
+    >>> r = redis.Redis(...)
     >>> p = r.pubsub()
 
 Once a `PubSub` instance is created, channels and patterns can be subscribed
@@ -560,7 +560,7 @@ it with the multiplier value and returns the result.
 
 .. code-block:: pycon
 
-    >>> r = redis.StrictRedis()
+    >>> r = redis.Redis()
     >>> lua = """
     ... local value = redis.call('GET', KEYS[1])
     ... value = tonumber(value)
@@ -595,7 +595,7 @@ that points to a completely different Redis server.
 
 .. code-block:: pycon
 
-    >>> r2 = redis.StrictRedis('redis2.example.com')
+    >>> r2 = redis.Redis('redis2.example.com')
     >>> r2.set('foo', 3)
     >>> multiply(keys=['foo'], args=[5], client=r2)
     15
@@ -648,7 +648,7 @@ operations).
     >>> slave.get('foo')
     'bar'
 
-The master and slave objects are normal StrictRedis instances with their
+The master and slave objects are normal Redis instances with their
 connection pool bound to the Sentinel instance. When a Sentinel backed client
 attempts to establish a connection, it first queries the Sentinel servers to
 determine an appropriate host to connect to. If no server is found,

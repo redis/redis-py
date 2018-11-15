@@ -21,7 +21,7 @@ class Benchmark(object):
             }
             defaults.update(kwargs)
             pool = redis.ConnectionPool(**kwargs)
-            self._client = redis.StrictRedis(connection_pool=pool)
+            self._client = redis.Redis(connection_pool=pool)
         return self._client
 
     def setup(self, **kwargs):
