@@ -1,3 +1,11 @@
+* 3.0.1
+    * Fixed regression with UnixDomainSocketConnection caused by 3.0.0.
+      Thanks Jyrki Muukkonen
+    * Fixed an issue with the new asynchronous flag on flushdb and flushall.
+      Thanks rogeryen
+    * Updated Lock.locked() method to indicate whether *any* process has
+      acquired the lock, not just the current one. This is in line with
+      the behavior of threading.Lock. Thanks Alan Justino da Silva
 * 3.0.0
   BACKWARDS INCOMPATIBLE CHANGES
     * When using a Lock as a context manager and the lock fails to be acquired
