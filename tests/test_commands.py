@@ -301,6 +301,11 @@ class TestRedisCommands(object):
         assert r.decr('a', amount=5) == -7
         assert r['a'] == b'-7'
 
+    def test_decrby(self, r):
+        assert r.decrby('a', amount=2) == -2
+        assert r.decrby('a', amount=3) == -5
+        assert r['a'] == b'-5'
+
     def test_delete(self, r):
         assert r.delete('a') == 0
         r['a'] = 'foo'
