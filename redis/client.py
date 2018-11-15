@@ -876,7 +876,7 @@ class Redis(object):
         executed asynchronously by the server.
         """
         args = []
-        if not asynchronous:
+        if asynchronous:
             args.append(Token.get_token('ASYNC'))
         return self.execute_command('FLUSHALL', *args)
 
@@ -888,7 +888,7 @@ class Redis(object):
         executed asynchronously by the server.
         """
         args = []
-        if not asynchronous:
+        if asynchronous:
             args.append(Token.get_token('ASYNC'))
         return self.execute_command('FLUSHDB', *args)
 
