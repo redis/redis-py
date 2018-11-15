@@ -423,15 +423,15 @@ class Redis(object):
     """
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict(
-            'AUTH EXISTS EXPIRE EXPIREAT HEXISTS HMSET MOVE MSETNX PERSIST '
+            'AUTH EXPIRE EXPIREAT HEXISTS HMSET MOVE MSETNX PERSIST '
             'PSETEX RENAMENX SISMEMBER SMOVE SETEX SETNX',
             bool
         ),
         string_keys_to_dict(
-            'BITCOUNT BITPOS DECRBY DEL GEOADD GETBIT HDEL HLEN HSTRLEN '
-            'INCRBY LINSERT LLEN LPUSHX PFADD PFCOUNT RPUSHX SADD SCARD '
-            'SDIFFSTORE SETBIT SETRANGE SINTERSTORE SREM STRLEN SUNIONSTORE '
-            'UNLINK XACK XDEL XLEN XTRIM ZCARD ZLEXCOUNT ZREM '
+            'BITCOUNT BITPOS DECRBY DEL EXISTS GEOADD GETBIT HDEL HLEN '
+            'HSTRLEN INCRBY LINSERT LLEN LPUSHX PFADD PFCOUNT RPUSHX SADD '
+            'SCARD SDIFFSTORE SETBIT SETRANGE SINTERSTORE SREM STRLEN '
+            'SUNIONSTORE UNLINK XACK XDEL XLEN XTRIM ZCARD ZLEXCOUNT ZREM '
             'ZREMRANGEBYLEX ZREMRANGEBYRANK ZREMRANGEBYSCORE',
             int
         ),
@@ -1166,9 +1166,9 @@ class Redis(object):
         """
         return self.execute_command('DUMP', name)
 
-    def exists(self, name):
-        "Returns a boolean indicating whether key ``name`` exists"
-        return self.execute_command('EXISTS', name)
+    def exists(self, *names):
+        "Returns the number of ``names`` that exist"
+        return self.execute_command('EXISTS', *names)
     __contains__ = exists
 
     def expire(self, name, time):
