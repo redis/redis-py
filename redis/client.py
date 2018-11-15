@@ -11,7 +11,7 @@ from redis._compat import (basestring, bytes, imap, iteritems, iterkeys,
                            itervalues, izip, long, nativestr, safe_unicode)
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
                               SSLConnection, Token)
-from redis.lock import Lock, LuaLock
+from redis.lock import Lock
 from redis.exceptions import (
     ConnectionError,
     DataError,
@@ -630,7 +630,6 @@ class Redis(object):
                     })
             connection_pool = ConnectionPool(**kwargs)
         self.connection_pool = connection_pool
-        self._use_lua_lock = None
 
         self.response_callbacks = self.__class__.RESPONSE_CALLBACKS.copy()
 
@@ -723,15 +722,7 @@ class Redis(object):
         is that these cases aren't common and as such default to using
         thread local storage.        """
         if lock_class is None:
-            if self._use_lua_lock is None:
-                # the first time .lock() is called, determine if we can use
-                # Lua by attempting to register the necessary scripts
-                try:
-                    LuaLock.register_scripts(self)
-                    self._use_lua_lock = True
-                except ResponseError:
-                    self._use_lua_lock = False
-            lock_class = self._use_lua_lock and LuaLock or Lock
+            lock_class = Lock
         return lock_class(self, name, timeout=timeout, sleep=sleep,
                           blocking_timeout=blocking_timeout,
                           thread_local=thread_local)

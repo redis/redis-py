@@ -1,15 +1,13 @@
 import pytest
 import time
 
-from redis.exceptions import LockError, ResponseError
-from redis.lock import Lock, LuaLock
+from redis.exceptions import LockError
+from redis.lock import Lock
 
 
 class TestLock(object):
-    lock_class = Lock
-
     def get_lock(self, redis, *args, **kwargs):
-        kwargs['lock_class'] = self.lock_class
+        kwargs['lock_class'] = Lock
         return redis.lock(*args, **kwargs)
 
     def test_lock(self, r):
@@ -114,53 +112,11 @@ class TestLock(object):
             lock.extend(10)
 
 
-class TestLuaLock(TestLock):
-    lock_class = LuaLock
-
-
 class TestLockClassSelection(object):
     def test_lock_class_argument(self, r):
-        lock = r.lock('foo', lock_class=Lock)
-        assert type(lock) == Lock
-        lock = r.lock('foo', lock_class=LuaLock)
-        assert type(lock) == LuaLock
+        class MyLock(object):
+            def __init__(self, *args, **kwargs):
 
-    def test_cached_lualock_flag(self, r):
-        try:
-            r._use_lua_lock = True
-            lock = r.lock('foo')
-            assert type(lock) == LuaLock
-        finally:
-            r._use_lua_lock = None
-
-    def test_cached_lock_flag(self, r):
-        try:
-            r._use_lua_lock = False
-            lock = r.lock('foo')
-            assert type(lock) == Lock
-        finally:
-            r._use_lua_lock = None
-
-    def test_lua_compatible_server(self, r, monkeypatch):
-        @classmethod
-        def mock_register(cls, redis):
-            return
-        monkeypatch.setattr(LuaLock, 'register_scripts', mock_register)
-        try:
-            lock = r.lock('foo')
-            assert type(lock) == LuaLock
-            assert r._use_lua_lock is True
-        finally:
-            r._use_lua_lock = None
-
-    def test_lua_unavailable(self, r, monkeypatch):
-        @classmethod
-        def mock_register(cls, redis):
-            raise ResponseError()
-        monkeypatch.setattr(LuaLock, 'register_scripts', mock_register)
-        try:
-            lock = r.lock('foo')
-            assert type(lock) == Lock
-            assert r._use_lua_lock is False
-        finally:
-            r._use_lua_lock = None
+                pass
+        lock = r.lock('foo', lock_class=MyLock)
+        assert type(lock) == MyLock
