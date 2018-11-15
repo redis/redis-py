@@ -110,7 +110,9 @@ styles caused issues when Redis introduced optional flags to ZADD. Relying on
 the argument names in the method signature.
 
 To resolve this, redis-py 3.0 has changed these three commands to all accept
-a single positional argument named mapping that is expected to be a dict.
+a single positional argument named mapping that is expected to be a dict. For
+MSET and MSETNX, the dict is a mapping of key-names -> values. For ZADD, the
+dict is a mapping of element-names -> score.
 
 MSET, MSETNX and ZADD now look like:
 
