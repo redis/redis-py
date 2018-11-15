@@ -1601,6 +1601,12 @@ class TestRedisCommands(object):
         assert r.geodist('barcelona', 'place1', 'place2', 'km') == 3.0674
 
     @skip_if_server_version_lt('3.2.0')
+    def test_geodist_missing_one_member(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1')
+        r.geoadd('barcelona', *values)
+        assert r.geodist('barcelona', 'place1', 'missing_member', 'km') is None
+
+    @skip_if_server_version_lt('3.2.0')
     def test_geodist_invalid_units(self, r):
         with pytest.raises(exceptions.RedisError):
             assert r.geodist('x', 'y', 'z', 'inches')
