@@ -103,11 +103,11 @@ MSET, MSETNX and ZADD
 ^^^^^^^^^^^^^^^^^^^^^
 
 These commands all accept a mapping of key/value pairs. In redis-py 2.X
-this mapping could be specified as \*args or as \**kwargs. Both of these styles
-caused issues when Redis introduced optional flags to ZADD. Relying on \*args
-caused issues with the optional argument order, especially in Python 2.7.
-Relying on \**kwargs caused potential collision issues of user keys with the
-argument names in the method signature.
+this mapping could be specified as ``*args`` or as ``**kwargs``. Both of these
+styles caused issues when Redis introduced optional flags to ZADD. Relying on
+``*args`` caused issues with the optional argument order, especially in Python
+2.7. Relying on ``**kwargs`` caused potential collision issues of user keys with
+the argument names in the method signature.
 
 To resolve this, redis-py 3.0 has changed these three commands to all accept
 a single positional argument named mapping that is expected to be a dict.
