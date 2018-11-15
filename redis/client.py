@@ -29,13 +29,15 @@ EMPTY_RESPONSE = 'EMPTY_RESPONSE'
 
 
 def list_or_args(keys, args):
-    # returns a single list combining keys and args
+    # returns a single new list combining keys and args
     try:
         iter(keys)
         # a string or bytes instance can be iterated, but indicates
         # keys wasn't passed as a list
         if isinstance(keys, (basestring, bytes)):
             keys = [keys]
+        else:
+            keys = list(keys)
     except TypeError:
         keys = [keys]
     if args:
