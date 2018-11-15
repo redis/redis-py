@@ -57,19 +57,146 @@ specify `decode_responses=True` to `Redis.__init__`. In this case, any
 Redis command that returns a string type will be decoded with the `encoding`
 specified.
 
+
+Upgrading from redis-py 2.X to 3.0
+----------------------------------
+
+redis-py 3.0 introduces many new features but required a number of backwards
+incompatible changes to be made in the process. This section attempts to
+provide an upgrade path for users migrating from 2.X to 3.0.
+
+
+Python Version Support
+^^^^^^^^^^^^^^^^^^^^^^
+
+redis-py 3.0 now supports Python 2.7 and Python 3.4+. Python 2.6 and 3.3
+support has been dropped.
+
+
+Client Classes: Redis and StrictRedis
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+redis-py 3.0 drops support for the legacy "Redis" client class. "StrictRedis"
+has been renamed to "Redis" and an alias named "StrictRedis" is provided so
+that users previously using "StrictRedis" can continue to run unchanged.
+
+The 2.X "Redis" class provided alternative implementations of a few commands.
+This confused users (rightfully so) and caused a number of support issues. To
+make things easier going forward, it was decided to drop support for these
+alternate implementations and instead focus on a single client class.
+
+2.X users that are already using StrictRedis don't have to change the class
+name. StrictRedis will continue to work for the forseeable future.
+
+2.X users that are using the Redis class will have to make changes if they
+use any of the following commands:
+
+* SETEX: The argument order has changed. The new order is (name, time, value).
+* LREM: The argument order has changed. The new order is (name, num, value).
+* TTL and PTTL: The return value is now always an int and matches the
+  official Redis command (>0 indicates the timeout, -1 indicates that the key
+  exists but that it has no expire time set, -2 indicates that the key does
+  not exist)
+
+
+MSET, MSETNX and ZADD
+^^^^^^^^^^^^^^^^^^^^^
+
+These commands all accept a mapping of key/value pairs. In redis-py 2.X
+this mapping could be specified as *args or as **kwargs. Both of these styles
+caused issues when Redis introduced optional flags to ZADD. Relying on *args
+caused issues with the optional argument order, especially in Python 2.7.
+Relying on **kwargs caused potential collision issues of user keys with the
+argument names in the method signature.
+
+To resolve this, redis-py 3.0 has changed these three commands to all accept
+a single positional argument named mapping that is expected to be a dict.
+
+MSET, MSETNX and ZADD now look like:
+
+.. code-block:: pycon
+
+    def mset(self, mapping):
+    def msetnx(self, mapping):
+    def zadd(self, name, mapping, nx=False, xx=False, ch=False, incr=False):
+
+All 2.X users that use these commands must modify their code to supply
+keys and values as a dict to these commands.
+
+
+ZINCRBY
+^^^^^^^
+
+redis-py 2.X accidentily modified the argument order of ZINCRBY, swapping the
+order of value and amount. ZINCRBY now looks like:
+
+.. code-block:: pycon
+
+  def zincrby(self, name, amount, value):
+
+All 2.X users that rely on ZINCRBY must swap the order of amount and value
+for the command to continue to work as intended.
+
+
+Encoding of User Input
+^^^^^^^^^^^^^^^^^^^^^^
+
+redis-py 3.0 only accepts user data as bytes, strings or numbers (ints, longs
+and floats). Attempting to specify a key or a value as any other type will
+raise a DataError exception.
+
+redis-py 2.X attempted to coerce any type of input into a string. While
+occasionally convenient, this caused all sorts of hidden errors when users
+passed boolean values (which were coerced to 'True' or 'False'), a None
+value (which was coerced to 'None') or other values, such as user defined
+types.
+
+All 2.X users should make sure that the keys and values they pass into
+redis-py are either bytes, strings or numbers.
+
+
+Locks
+^^^^^
+
+redis-py 3.0 drops support for the pipeline-based Lock and now only supports
+the Lua-based lock. In doing so, LuaLock has been renamed to Lock. This also
+means that redis-py Lock objects require Redis server 2.6 or greater.
+
+2.X users that were explicitly referring to "LuaLock" will have to now refer
+to "Lock" instead.
+
+
+Locks as Context Managers
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+redis-py 3.0 now raises a LockError when using a lock as a context manager and
+the lock cannot be acquired within the specified timeout. This is more of a
+bug fix than a backwards incompatible change. However, given an error is now
+raised where none was before, this might alarm some users.
+
+2.X users should make sure they're wrapping their lock code in a try/catch
+like this:
+
+.. code-block:: pycon
+
+    try:
+        with r.lock('my-lock-key', blocking_timeout=5) as lock:
+            # code you want executed only after the lock has been acquired
+    except LockError:
+        # the lock wasn't acquired
+
+
 API Reference
 -------------
 
 The `official Redis command documentation <https://redis.io/commands>`_ does a
-great job of explaining each command in detail. redis-py exposes two client
-classes that implement these commands. The Redis class attempts to adhere
+great job of explaining each command in detail. redis-py attempts to adhere
 to the official command syntax. There are a few exceptions:
 
 * **SELECT**: Not implemented. See the explanation in the Thread Safety section
   below.
 * **DEL**: 'del' is a reserved keyword in the Python syntax. Therefore redis-py
   uses 'delete' instead.
-* **CONFIG GET|SET**: These are implemented separately as config_get or config_set.
 * **MULTI/EXEC**: These are implemented as part of the Pipeline class. The
   pipeline is wrapped with the MULTI and EXEC statements by default when it
   is executed, which can be disabled by specifying transaction=False.
@@ -87,18 +214,6 @@ to the official command syntax. There are a few exceptions:
   iterator method. These are purely for convenience so the user doesn't have
   to keep track of the cursor while iterating. Use the
   scan_iter/sscan_iter/hscan_iter/zscan_iter methods for this behavior.
-
-In addition to the changes above, the Redis class, a subclass of Redis,
-overrides several other commands to provide backwards compatibility with older
-versions of redis-py:
-
-* **LREM**: Order of 'num' and 'value' arguments reversed such that 'num' can
-  provide a default value of zero.
-* **ZADD**: Redis specifies the 'score' argument before 'value'. These were swapped
-  accidentally when being implemented and not discovered until after people
-  were already using it. The Redis class expects \*args in the form of:
-  `name1, score1, name2, score2, ...`
-* **SETEX**: Order of 'time' and 'value' arguments reversed.
 
 
 More Detail
