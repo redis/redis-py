@@ -103,10 +103,10 @@ MSET, MSETNX and ZADD
 ^^^^^^^^^^^^^^^^^^^^^
 
 These commands all accept a mapping of key/value pairs. In redis-py 2.X
-this mapping could be specified as *args or as **kwargs. Both of these styles
-caused issues when Redis introduced optional flags to ZADD. Relying on *args
+this mapping could be specified as \*args or as \**kwargs. Both of these styles
+caused issues when Redis introduced optional flags to ZADD. Relying on \*args
 caused issues with the optional argument order, especially in Python 2.7.
-Relying on **kwargs caused potential collision issues of user keys with the
+Relying on \**kwargs caused potential collision issues of user keys with the
 argument names in the method signature.
 
 To resolve this, redis-py 3.0 has changed these three commands to all accept
@@ -132,7 +132,7 @@ order of value and amount. ZINCRBY now looks like:
 
 .. code-block:: pycon
 
-  def zincrby(self, name, amount, value):
+    def zincrby(self, name, amount, value):
 
 All 2.X users that rely on ZINCRBY must swap the order of amount and value
 for the command to continue to work as intended.
