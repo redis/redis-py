@@ -1,8 +1,7 @@
-from __future__ import with_statement
+from __future__ import unicode_literals
 import pytest
 
 from redis import exceptions
-from redis._compat import b
 
 
 multiply_script = """
@@ -79,7 +78,7 @@ class TestScripting(object):
         multiply(keys=['a'], args=[3], client=pipe)
         assert r.script_exists(multiply.sha) == [False]
         # [SET worked, GET 'a', result of multiple script]
-        assert pipe.execute() == [True, b('2'), 6]
+        assert pipe.execute() == [True, b'2', 6]
         # The script should have been loaded by pipe.execute()
         assert r.script_exists(multiply.sha) == [True]
         # The precalculated sha should have been the correct one
@@ -94,7 +93,7 @@ class TestScripting(object):
         multiply(keys=['a'], args=[3], client=pipe)
         assert r.script_exists(multiply.sha) == [False]
         # [SET worked, GET 'a', result of multiple script]
-        assert pipe.execute() == [True, b('2'), 6]
+        assert pipe.execute() == [True, b'2', 6]
         assert r.script_exists(multiply.sha) == [True]
 
     def test_eval_msgpack_pipeline_error_in_lua(self, r):

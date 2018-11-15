@@ -1,6 +1,9 @@
+* UNRELEASED
+    * Removed support for EOL Python 2.6 and 3.3.
 * 2.10.6
     * Various performance improvements. Thanks cjsimpson
-    * Fixed a bug with SRANDMEMBER where
+    * Fixed a bug with SRANDMEMBER where the behavior for `number=0` did
+      not match the spec. Thanks Alex Wang
     * Added HSTRLEN command. Thanks Alexander Putilin
     * Added the TOUCH command. Thanks Anis Jonischkeit
     * Remove unnecessary calls to the server when registering Lua scripts.
@@ -190,7 +193,7 @@
       for the report.
     * Connections now call socket.shutdown() prior to socket.close() to
       ensure communication ends immediately per the note at
-      http://docs.python.org/2/library/socket.html#socket.socket.close
+      https://docs.python.org/2/library/socket.html#socket.socket.close
       Thanks to David Martin for pointing this out.
     * Lock checks are now based on floats rather than ints. Thanks
       Vitja Makarov.
@@ -224,11 +227,11 @@
     * Prevent DISCARD from being called if MULTI wasn't also called. Thanks
       Pete Aykroyd.
     * SREM now returns an integer indicating the number of items removed from
-      the set. Thanks http://github.com/ronniekk.
+      the set. Thanks https://github.com/ronniekk.
     * Fixed a bug with BGSAVE and BGREWRITEAOF response callbacks with Python3.
       Thanks Nathan Wan.
     * Added CLIENT GETNAME and CLIENT SETNAME commands.
-      Thanks http://github.com/bitterb.
+      Thanks https://github.com/bitterb.
     * It's now possible to use len() on a pipeline instance to determine the
       number of commands that will be executed. Thanks Jon Parise.
     * Fixed a bug in INFO's parse routine with floating point numbers. Thanks

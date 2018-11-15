@@ -1,4 +1,3 @@
-from __future__ import with_statement
 import os
 import pytest
 import redis
@@ -240,7 +239,7 @@ class TestConnectionPoolURLParsing(object):
     def test_extra_typed_querystring_options(self):
         pool = redis.ConnectionPool.from_url(
             'redis://localhost/2?socket_timeout=20&socket_connect_timeout=10'
-            '&socket_keepalive=&retry_on_timeout=Yes'
+            '&socket_keepalive=&retry_on_timeout=Yes&max_connections=10'
         )
 
         assert pool.connection_class == redis.Connection
@@ -253,6 +252,7 @@ class TestConnectionPoolURLParsing(object):
             'retry_on_timeout': True,
             'password': None,
         }
+        assert pool.max_connections == 10
 
     def test_boolean_parsing(self):
         for expected, value in (
@@ -299,7 +299,7 @@ class TestConnectionPoolURLParsing(object):
         assert isinstance(pool, redis.BlockingConnectionPool)
 
     def test_client_creates_connection_pool(self):
-        r = redis.StrictRedis.from_url('redis://myhost')
+        r = redis.Redis.from_url('redis://myhost')
         assert r.connection_pool.connection_class == redis.Connection
         assert r.connection_pool.connection_kwargs == {
             'host': 'myhost',

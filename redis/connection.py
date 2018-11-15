@@ -1,6 +1,7 @@
-from __future__ import with_statement
+from __future__ import unicode_literals
 from distutils.version import StrictVersion
 from itertools import chain
+import io
 import os
 import socket
 import sys
@@ -13,11 +14,12 @@ try:
 except ImportError:
     ssl_available = False
 
-from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
-                           BytesIO, nativestr, basestring, iteritems,
+from redis._compat import (xrange, imap, byte_to_chr, unicode, bytes, long,
+                           nativestr, basestring, iteritems,
                            LifoQueue, Empty, Full, urlparse, parse_qs,
                            recv, recv_into, select, unquote)
 from redis.exceptions import (
+    DataError,
     RedisError,
     ConnectionError,
     TimeoutError,
@@ -45,16 +47,14 @@ if HIREDIS_AVAILABLE:
         warnings.warn(msg)
 
     HIREDIS_USE_BYTE_BUFFER = True
-    # only use byte buffer if hiredis supports it and the Python version
-    # is >= 2.7
-    if not HIREDIS_SUPPORTS_BYTE_BUFFER or (
-            sys.version_info[0] == 2 and sys.version_info[1] < 7):
+    # only use byte buffer if hiredis supports it
+    if not HIREDIS_SUPPORTS_BYTE_BUFFER:
         HIREDIS_USE_BYTE_BUFFER = False
 
-SYM_STAR = b('*')
-SYM_DOLLAR = b('$')
-SYM_CRLF = b('\r\n')
-SYM_EMPTY = b('')
+SYM_STAR = b'*'
+SYM_DOLLAR = b'$'
+SYM_CRLF = b'\r\n'
+SYM_EMPTY = b''
 
 SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
 
@@ -85,7 +85,7 @@ class Token(object):
         if isinstance(value, Token):
             value = value.value
         self.value = value
-        self.encoded_value = b(value)
+        self.encoded_value = value.encode()
 
     def __repr__(self):
         return self.value
@@ -108,13 +108,20 @@ class Encoder(object):
             return value.encoded_value
         elif isinstance(value, bytes):
             return value
-        elif isinstance(value, (int, long)):
-            value = b(str(value))
+        elif isinstance(value, bool):
+            # special case bool since it is a subclass of int
+            raise DataError("Invalid input of type: 'bool'. Convert to a "
+                            "byte, string or number first.")
         elif isinstance(value, float):
-            value = b(repr(value))
+            value = repr(value).encode()
+        elif isinstance(value, (int, long)):
+            # python 2 repr() on longs is '123L', so use str() instead
+            value = str(value).encode()
         elif not isinstance(value, basestring):
-            # an object we don't know how to deal with. default to unicode()
-            value = unicode(value)
+            # a value we don't know how to deal with. throw an error
+            typename = type(value).__name__
+            raise DataError("Invalid input of type: '%s'. Convert to a "
+                            "byte, string or number first." % typename)
         if isinstance(value, unicode):
             value = value.encode(self.encoding, self.encoding_errors)
         return value
@@ -153,7 +160,7 @@ class SocketBuffer(object):
     def __init__(self, socket, socket_read_size):
         self._sock = socket
         self.socket_read_size = socket_read_size
-        self._buffer = BytesIO()
+        self._buffer = io.BytesIO()
         # number of bytes written to the buffer from the socket
         self.bytes_written = 0
         # number of bytes read from the buffer
@@ -236,7 +243,7 @@ class SocketBuffer(object):
         try:
             self.purge()
             self._buffer.close()
-        except:
+        except Exception:
             # issue #633 suggests the purge/close somehow raised a
             # BadFileDescriptor error. Perhaps the client ran out of
             # memory or something else? It's probably OK to ignore
@@ -461,6 +468,7 @@ class Connection(object):
             'db': self.db,
         }
         self._connect_callbacks = []
+        self._buffer_cutoff = 6000
 
     def __repr__(self):
         return self.description_format % self._description_args
@@ -602,9 +610,9 @@ class Connection(object):
                 errmsg = e.args[1]
             raise ConnectionError("Error %s while writing to socket. %s." %
                                   (errno, errmsg))
-        except:
+        except Exception as e:
             self.disconnect()
-            raise
+            raise e
 
     def send_command(self, *args):
         "Pack and send a command to the Redis server"
@@ -623,9 +631,9 @@ class Connection(object):
         "Read the response from a previously sent command"
         try:
             response = self._parser.read_response()
-        except:
+        except Exception as e:
             self.disconnect()
-            raise
+            raise e
         if isinstance(response, ResponseError):
             raise response
         return response
@@ -640,26 +648,27 @@ class Connection(object):
         # to prevent them from being encoded.
         command = args[0]
         if ' ' in command:
-            args = tuple([Token.get_token(s)
-                          for s in command.split()]) + args[1:]
+            args = tuple(Token.get_token(s)
+                         for s in command.split()) + args[1:]
         else:
             args = (Token.get_token(command),) + args[1:]
 
-        buff = SYM_EMPTY.join(
-            (SYM_STAR, b(str(len(args))), SYM_CRLF))
+        buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
 
+        buffer_cutoff = self._buffer_cutoff
         for arg in imap(self.encoder.encode, args):
             # to avoid large string mallocs, chunk the command into the
             # output list if we're sending large values
-            if len(buff) > 6000 or len(arg) > 6000:
+            if len(buff) > buffer_cutoff or len(arg) > buffer_cutoff:
                 buff = SYM_EMPTY.join(
-                    (buff, SYM_DOLLAR, b(str(len(arg))), SYM_CRLF))
+                    (buff, SYM_DOLLAR, str(len(arg)).encode(), SYM_CRLF))
                 output.append(buff)
                 output.append(arg)
                 buff = SYM_CRLF
             else:
-                buff = SYM_EMPTY.join((buff, SYM_DOLLAR, b(str(len(arg))),
-                                       SYM_CRLF, arg, SYM_CRLF))
+                buff = SYM_EMPTY.join(
+                    (buff, SYM_DOLLAR, str(len(arg)).encode(),
+                     SYM_CRLF, arg, SYM_CRLF))
         output.append(buff)
         return output
 
@@ -668,16 +677,21 @@ class Connection(object):
         output = []
         pieces = []
         buffer_length = 0
+        buffer_cutoff = self._buffer_cutoff
 
         for cmd in commands:
             for chunk in self.pack_command(*cmd):
-                pieces.append(chunk)
-                buffer_length += len(chunk)
+                chunklen = len(chunk)
+                if buffer_length > buffer_cutoff or chunklen > buffer_cutoff:
+                    output.append(SYM_EMPTY.join(pieces))
+                    buffer_length = 0
+                    pieces = []
 
-            if buffer_length > 6000:
-                output.append(SYM_EMPTY.join(pieces))
-                buffer_length = 0
-                pieces = []
+                if chunklen > self._buffer_cutoff:
+                    output.append(chunk)
+                else:
+                    pieces.append(chunk)
+                    buffer_length += chunklen
 
         if pieces:
             output.append(SYM_EMPTY.join(pieces))
@@ -687,8 +701,8 @@ class Connection(object):
 class SSLConnection(Connection):
     description_format = "SSLConnection<host=%(host)s,port=%(port)s,db=%(db)s>"
 
-    def __init__(self, ssl_keyfile=None, ssl_certfile=None, ssl_cert_reqs=None,
-                 ssl_ca_certs=None, **kwargs):
+    def __init__(self, ssl_keyfile=None, ssl_certfile=None,
+                 ssl_cert_reqs='required', ssl_ca_certs=None, **kwargs):
         if not ssl_available:
             raise RedisError("Python wasn't built with SSL support")
 
@@ -779,7 +793,8 @@ URL_QUERY_ARGUMENT_PARSERS = {
     'socket_timeout': float,
     'socket_connect_timeout': float,
     'socket_keepalive': to_bool,
-    'retry_on_timeout': to_bool
+    'retry_on_timeout': to_bool,
+    'max_connections': int,
 }
 
 
@@ -799,11 +814,11 @@ class ConnectionPool(object):
         Three URL schemes are supported:
 
         - ```redis://``
-          <http://www.iana.org/assignments/uri-schemes/prov/redis>`_ creates a
+          <https://www.iana.org/assignments/uri-schemes/prov/redis>`_ creates a
           normal TCP socket connection
         - ```rediss://``
-          <http://www.iana.org/assignments/uri-schemes/prov/rediss>`_ creates a
-          SSL wrapped TCP socket connection
+          <https://www.iana.org/assignments/uri-schemes/prov/rediss>`_ creates
+          a SSL wrapped TCP socket connection
         - ``unix://`` creates a Unix Domain Socket connection
 
         There are several ways to specify a database number. The parse function
@@ -829,24 +844,12 @@ class ConnectionPool(object):
         True/False, Yes/No values to indicate state. Invalid types cause a
         ``UserWarning`` to be raised. In the case of conflicting arguments,
         querystring arguments always win.
+
         """
-        url_string = url
         url = urlparse(url)
-        qs = ''
-
-        # in python2.6, custom URL schemes don't recognize querystring values
-        # they're left as part of the url.path.
-        if '?' in url.path and not url.query:
-            # chop the querystring including the ? off the end of the url
-            # and reparse it.
-            qs = url.path.split('?', 1)[1]
-            url = urlparse(url_string[:-(len(qs) + 1)])
-        else:
-            qs = url.query
-
         url_options = {}
 
-        for name, value in iteritems(parse_qs(qs)):
+        for name, value in iteritems(parse_qs(url.query)):
             if value and len(value) > 0:
                 parser = URL_QUERY_ARGUMENT_PARSERS.get(name)
                 if parser:

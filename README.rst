@@ -4,31 +4,36 @@ redis-py
 The Python interface to the Redis key-value store.
 
 .. image:: https://secure.travis-ci.org/andymccurdy/redis-py.png?branch=master
-        :target: http://travis-ci.org/andymccurdy/redis-py
+        :target: https://travis-ci.org/andymccurdy/redis-py
+.. image:: https://readthedocs.org/projects/redis-py/badge/?version=latest&style=flat
+        :target: https://redis-py.readthedocs.io/en/latest/
+.. image:: https://badge.fury.io/py/redis.svg
+        :target: https://pypi.org/project/redis/
 
 Installation
 ------------
 
 redis-py requires a running Redis server. See `Redis's quickstart
-<http://redis.io/topics/quickstart>`_ for installation instructions.
+<https://redis.io/topics/quickstart>`_ for installation instructions.
+
+redis-py can be installed using `pip` similar to other Python packages. Do not use `sudo`
+with `pip`. It is usually good to work in a
+`virtualenv <https://virtualenv.pypa.io/en/latest/>`_ or
+`venv <https://docs.python.org/3/library/venv.html>`_ to avoid conflicts with other package
+managers and Python projects. For a quick introduction see
+`Python Virtual Environments in Five Minutes <https://bit.ly/py-env>`_.
 
 To install redis-py, simply:
 
 .. code-block:: bash
 
-    $ sudo pip install redis
-
-or alternatively (you really should be using pip though):
-
-.. code-block:: bash
-
-    $ sudo easy_install redis
+    $ pip install redis
 
 or from source:
 
 .. code-block:: bash
 
-    $ sudo python setup.py install
+    $ python setup.py install
 
 
 Getting Started
@@ -37,7 +42,7 @@ Getting Started
 .. code-block:: pycon
 
     >>> import redis
-    >>> r = redis.StrictRedis(host='localhost', port=6379, db=0)
+    >>> r = redis.Redis(host='localhost', port=6379, db=0)
     >>> r.set('foo', 'bar')
     True
     >>> r.get('foo')
@@ -48,16 +53,16 @@ Python 2. The user is responsible for decoding to Python 3 strings or Python 2
 unicode objects.
 
 If **all** string responses from a client should be decoded, the user can
-specify `decode_responses=True` to `StrictRedis.__init__`. In this case, any
+specify `decode_responses=True` to `Redis.__init__`. In this case, any
 Redis command that returns a string type will be decoded with the `encoding`
 specified.
 
 API Reference
 -------------
 
-The `official Redis command documentation <http://redis.io/commands>`_ does a
+The `official Redis command documentation <https://redis.io/commands>`_ does a
 great job of explaining each command in detail. redis-py exposes two client
-classes that implement these commands. The StrictRedis class attempts to adhere
+classes that implement these commands. The Redis class attempts to adhere
 to the official command syntax. There are a few exceptions:
 
 * **SELECT**: Not implemented. See the explanation in the Thread Safety section
@@ -83,7 +88,7 @@ to the official command syntax. There are a few exceptions:
   to keep track of the cursor while iterating. Use the
   scan_iter/sscan_iter/hscan_iter/zscan_iter methods for this behavior.
 
-In addition to the changes above, the Redis class, a subclass of StrictRedis,
+In addition to the changes above, the Redis class, a subclass of Redis,
 overrides several other commands to provide backwards compatibility with older
 versions of redis-py:
 
@@ -158,18 +163,11 @@ kind enough to create Python bindings. Using Hiredis can provide up to a
 performance increase is most noticeable when retrieving many pieces of data,
 such as from LRANGE or SMEMBERS operations.
 
-Hiredis is available on PyPI, and can be installed via pip or easy_install
-just like redis-py.
+Hiredis is available on PyPI, and can be installed via pip just like redis-py.
 
 .. code-block:: bash
 
     $ pip install hiredis
-
-or
-
-.. code-block:: bash
-
-    $ easy_install hiredis
 
 Response Callbacks
 ^^^^^^^^^^^^^^^^^^
@@ -272,7 +270,7 @@ could do something like this:
 .. code-block:: pycon
 
     >>> with r.pipeline() as pipe:
-    ...     while 1:
+    ...     while True:
     ...         try:
     ...             # put a WATCH on the key that holds our sequence value
     ...             pipe.watch('OUR-SEQUENCE-KEY')
@@ -305,7 +303,7 @@ explicitly calling reset():
 .. code-block:: pycon
 
     >>> pipe = r.pipeline()
-    >>> while 1:
+    >>> while True:
     ...     try:
     ...         pipe.watch('OUR-SEQUENCE-KEY')
     ...         ...
@@ -341,7 +339,7 @@ for new messages. Creating a `PubSub` object is easy.
 
 .. code-block:: pycon
 
-    >>> r = redis.StrictRedis(...)
+    >>> r = redis.Redis(...)
     >>> p = r.pubsub()
 
 Once a `PubSub` instance is created, channels and patterns can be subscribed
@@ -562,7 +560,7 @@ it with the multiplier value and returns the result.
 
 .. code-block:: pycon
 
-    >>> r = redis.StrictRedis()
+    >>> r = redis.Redis()
     >>> lua = """
     ... local value = redis.call('GET', KEYS[1])
     ... value = tonumber(value)
@@ -597,7 +595,7 @@ that points to a completely different Redis server.
 
 .. code-block:: pycon
 
-    >>> r2 = redis.StrictRedis('redis2.example.com')
+    >>> r2 = redis.Redis('redis2.example.com')
     >>> r2.set('foo', 3)
     >>> multiply(keys=['foo'], args=[5], client=r2)
     15
@@ -622,7 +620,7 @@ execution.
 Sentinel support
 ^^^^^^^^^^^^^^^^
 
-redis-py can be used together with `Redis Sentinel <http://redis.io/topics/sentinel>`_
+redis-py can be used together with `Redis Sentinel <https://redis.io/topics/sentinel>`_
 to discover Redis nodes. You need to have at least one Sentinel daemon running
 in order to use redis-py's Sentinel support.
 
@@ -650,7 +648,7 @@ operations).
     >>> slave.get('foo')
     'bar'
 
-The master and slave objects are normal StrictRedis instances with their
+The master and slave objects are normal Redis instances with their
 connection pool bound to the Sentinel instance. When a Sentinel backed client
 attempts to establish a connection, it first queries the Sentinel servers to
 determine an appropriate host to connect to. If no server is found,
@@ -663,7 +661,7 @@ If no slaves can be connected to, a connection will be established with the
 master.
 
 See `Guidelines for Redis clients with support for Redis Sentinel
-<http://redis.io/topics/sentinel-clients>`_ to learn more about Redis Sentinel.
+<https://redis.io/topics/sentinel-clients>`_ to learn more about Redis Sentinel.
 
 Scan Iterators
 ^^^^^^^^^^^^^^
@@ -687,7 +685,7 @@ Author
 ^^^^^^
 
 redis-py is developed and maintained by Andy McCurdy (sedrik@gmail.com).
-It can be found here: http://github.com/andymccurdy/redis-py
+It can be found here: https://github.com/andymccurdy/redis-py
 
 Special thanks to:
 

@@ -8,7 +8,6 @@ if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and
     # Adapted from https://bugs.python.org/review/23863/patch/14532/54418
     import socket
     import time
-    import errno
 
     from select import select as _select, error as select_error
 
@@ -80,10 +79,6 @@ if sys.version_info[0] < 3:
     from itertools import imap, izip
     from string import letters as ascii_letters
     from Queue import Queue
-    try:
-        from cStringIO import StringIO as BytesIO
-    except ImportError:
-        from StringIO import StringIO as BytesIO
 
     # special unicode handling for python2 to avoid UnicodeDecodeError
     def safe_unicode(obj, *args):
@@ -107,12 +102,6 @@ if sys.version_info[0] < 3:
     def nativestr(x):
         return x if isinstance(x, str) else x.encode('utf-8', 'replace')
 
-    def u(x):
-        return x.decode()
-
-    def b(x):
-        return x
-
     def next(x):
         return x.next()
 
@@ -127,7 +116,6 @@ if sys.version_info[0] < 3:
     long = long
 else:
     from urllib.parse import parse_qs, unquote, urlparse
-    from io import BytesIO
     from string import ascii_letters
     from queue import Queue
 
@@ -146,12 +134,6 @@ else:
     def nativestr(x):
         return x if isinstance(x, str) else x.decode('utf-8', 'replace')
 
-    def u(x):
-        return x
-
-    def b(x):
-        return x.encode('latin-1') if not isinstance(x, bytes) else x
-
     next = next
     unichr = chr
     imap = map
@@ -165,27 +147,5 @@ else:
 
 try:  # Python 3
     from queue import LifoQueue, Empty, Full
-except ImportError:
-    from Queue import Empty, Full
-    try:  # Python 2.6 - 2.7
-        from Queue import LifoQueue
-    except ImportError:  # Python 2.5
-        from Queue import Queue
-        # From the Python 2.7 lib. Python 2.5 already extracted the core
-        # methods to aid implementating different queue organisations.
-
-        class LifoQueue(Queue):
-            "Override queue methods to implement a last-in first-out queue."
-
-            def _init(self, maxsize):
-                self.maxsize = maxsize
-                self.queue = []
-
-            def _qsize(self, len=len):
-                return len(self.queue)
-
-            def _put(self, item):
-                self.queue.append(item)
-
-            def _get(self):
-                return self.queue.pop()
+except ImportError:  # Python 2
+    from Queue import LifoQueue, Empty, Full
