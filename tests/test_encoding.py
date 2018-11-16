@@ -6,6 +6,17 @@ from redis._compat import unichr, unicode
 from .conftest import _get_client
 
 
+class CustomKey(object):
+    prefix = ':'
+
+    def __init__(self, key):
+        super(CustomKey, self).__init__()
+        self.key = self.prefix + key
+
+    def to_bytes(self):
+        return self.key
+
+
 class TestEncoding(object):
     @pytest.fixture()
     def r(self, request):
@@ -23,6 +34,10 @@ class TestEncoding(object):
         result = [unicode_string, unicode_string, unicode_string]
         r.rpush('a', *result)
         assert r.lrange('a', 0, -1) == result
+
+    def test_custom_object_encoding(self, r):
+        r.set(CustomKey('a'), 'a')
+        assert r.get(':a') == 'a'
 
 
 class TestCommandsAndTokensArentEncoded(object):
