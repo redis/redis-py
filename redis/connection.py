@@ -117,6 +117,9 @@ class Encoder(object):
         elif isinstance(value, (int, long)):
             # python 2 repr() on longs is '123L', so use str() instead
             value = str(value).encode()
+        elif hasattr(value, 'to_bytes'):
+            # Provide hook for custom objects to convert themselves to bytes.
+            value = self.encode(value.to_bytes())
         elif not isinstance(value, basestring):
             # a value we don't know how to deal with. throw an error
             typename = type(value).__name__
