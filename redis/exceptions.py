@@ -21,6 +21,34 @@ class BusyLoadingError(ConnectionError):
     pass
 
 
+class WrongTypeError(ConnectionError):
+    pass
+
+
+class BusyError(ConnectionError):
+    pass
+
+
+class MasterDownError(ConnectionError):
+    pass
+
+
+class MisConfError(ConnectionError):
+    pass
+
+
+class OomError(ConnectionError):
+    pass
+
+
+class NoReplicasError(ConnectionError):
+    pass
+
+
+class BusyKeyError(ConnectionError):
+    pass
+
+
 class InvalidResponse(RedisError):
     pass
 

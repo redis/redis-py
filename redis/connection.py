@@ -29,7 +29,14 @@ from redis.exceptions import (
     AuthenticationError,
     NoScriptError,
     ExecAbortError,
-    ReadOnlyError
+    ReadOnlyError,
+    WrongTypeError,
+    BusyError,
+    MasterDownError,
+    MisConfError,
+    OomError,
+    NoReplicasError,
+    BusyKeyError
 )
 from redis.utils import HIREDIS_AVAILABLE
 if HIREDIS_AVAILABLE:
@@ -142,6 +149,13 @@ class BaseParser(object):
         'LOADING': BusyLoadingError,
         'NOSCRIPT': NoScriptError,
         'READONLY': ReadOnlyError,
+        'WRONGTYPE': WrongTypeError,
+        'BUSY': BusyError,
+        'MASTERDOWN': MasterDownError,
+        'MISCONF': MisConfError,
+        'OOM': OomError,
+        'NOREPLICAS': NoReplicasError,
+        'BUSYKEY': BusyKeyError,
     }
 
     def parse_error(self, response):
