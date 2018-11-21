@@ -378,6 +378,17 @@ def parse_cluster_nodes(response, **options):
     return dict(_parse_node_line(line) for line in raw_lines)
 
 
+def text_or_binary(response):
+    """
+    Return the response as text data if possible (decoded as utf-8), otherwise
+    return it unmodified.
+    """
+    try:
+        return response.decode('utf-8')
+    except UnicodeDecodeError:
+        return response
+
+
 def parse_georadius_generic(response, **options):
     if options['store'] or options['store_dist']:
         # `store` and `store_diff` cant be combined
@@ -392,7 +403,7 @@ def parse_georadius_generic(response, **options):
     if not options['withdist'] and not options['withcoord']\
             and not options['withhash']:
         # just a bunch of places
-        return [nativestr(r) for r in response_list]
+        return [text_or_binary(r) for r in response_list]
 
     cast = {
         'withdist': float,
@@ -402,7 +413,7 @@ def parse_georadius_generic(response, **options):
 
     # zip all output results with each casting functino to get
     # the properly native Python value.
-    f = [nativestr]
+    f = [text_or_binary]
     f += [cast[o] for o in ['withdist', 'withhash', 'withcoord'] if options[o]]
     return [
         list(map(lambda fv: fv[0](fv[1]), zip(f, r))) for r in response_list
