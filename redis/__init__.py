@@ -10,6 +10,13 @@ from redis.utils import from_url
 from redis.exceptions import (
     AuthenticationError,
     BusyLoadingError,
+    WrongTypeError,
+    BusyError,
+    MasterDownError,
+    MisConfError,
+    OomError,
+    NoReplicasError,
+    BusyKeyError,
     ConnectionError,
     DataError,
     InvalidResponse,
@@ -35,7 +42,9 @@ VERSION = tuple(map(int_or_str, __version__.split('.')))
 __all__ = [
     'Redis', 'StrictRedis', 'ConnectionPool', 'BlockingConnectionPool',
     'Connection', 'SSLConnection', 'UnixDomainSocketConnection', 'from_url',
-    'AuthenticationError', 'BusyLoadingError', 'ConnectionError', 'DataError',
+    'AuthenticationError', 'BusyLoadingError', 'WrongTypeError', 'BusyError',
+    'MasterDownError', 'MisConfError', 'OomError', 'NoReplicasError',
+    'BusyKeyError', 'ConnectionError', 'DataError',
     'InvalidResponse', 'PubSubError', 'ReadOnlyError', 'RedisError',
     'ResponseError', 'TimeoutError', 'WatchError'
 ]

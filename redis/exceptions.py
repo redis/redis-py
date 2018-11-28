@@ -29,6 +29,34 @@ class ResponseError(RedisError):
     pass
 
 
+class WrongTypeError(ResponseError):
+    pass
+
+
+class BusyError(ResponseError):
+    pass
+
+
+class MasterDownError(ResponseError):
+    pass
+
+
+class MisConfError(ResponseError):
+    pass
+
+
+class OomError(ResponseError):
+    pass
+
+
+class NoReplicasError(ResponseError):
+    pass
+
+
+class BusyKeyError(ResponseError):
+    pass
+
+
 class DataError(RedisError):
     pass
 
