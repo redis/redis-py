@@ -1653,10 +1653,11 @@ class TestRedisCommands(object):
     @skip_if_server_version_lt('3.2.0')
     def test_georadius(self, r):
         values = (2.1909389952632, 41.433791470673, 'place1') +\
-                 (2.1873744593677, 41.406342043777, 'place2')
+                 (2.1873744593677, 41.406342043777, b'\x80place2')
 
         r.geoadd('barcelona', *values)
-        assert r.georadius('barcelona', 2.191, 41.433, 1000) == ['place1']
+        assert r.georadius('barcelona', 2.191, 41.433, 1000) == [b'place1']
+        assert r.georadius('barcelona', 2.187, 41.406, 1000) == [b'\x80place2']
 
     @skip_if_server_version_lt('3.2.0')
     def test_georadius_no_values(self, r):
@@ -1673,7 +1674,7 @@ class TestRedisCommands(object):
 
         r.geoadd('barcelona', *values)
         assert r.georadius('barcelona', 2.191, 41.433, 1, unit='km') ==\
-            ['place1']
+            [b'place1']
 
     @skip_if_server_version_lt('3.2.0')
     def test_georadius_with(self, r):
@@ -1686,17 +1687,17 @@ class TestRedisCommands(object):
         # function.
         assert r.georadius('barcelona', 2.191, 41.433, 1, unit='km',
                            withdist=True, withcoord=True, withhash=True) ==\
-            [['place1', 0.0881, 3471609698139488,
+            [[b'place1', 0.0881, 3471609698139488,
               (2.19093829393386841, 41.43379028184083523)]]
 
         assert r.georadius('barcelona', 2.191, 41.433, 1, unit='km',
                            withdist=True, withcoord=True) ==\
-            [['place1', 0.0881,
+            [[b'place1', 0.0881,
               (2.19093829393386841, 41.43379028184083523)]]
 
         assert r.georadius('barcelona', 2.191, 41.433, 1, unit='km',
                            withhash=True, withcoord=True) ==\
-            [['place1', 3471609698139488,
+            [[b'place1', 3471609698139488,
               (2.19093829393386841, 41.43379028184083523)]]
 
         # test no values.
@@ -1710,7 +1711,7 @@ class TestRedisCommands(object):
 
         r.geoadd('barcelona', *values)
         assert r.georadius('barcelona', 2.191, 41.433, 3000, count=1) ==\
-            ['place1']
+            [b'place1']
 
     @skip_if_server_version_lt('3.2.0')
     def test_georadius_sort(self, r):
@@ -1719,9 +1720,9 @@ class TestRedisCommands(object):
 
         r.geoadd('barcelona', *values)
         assert r.georadius('barcelona', 2.191, 41.433, 3000, sort='ASC') ==\
-            ['place1', 'place2']
+            [b'place1', b'place2']
         assert r.georadius('barcelona', 2.191, 41.433, 3000, sort='DESC') ==\
-            ['place2', 'place1']
+            [b'place2', b'place1']
 
     @skip_if_server_version_lt('3.2.0')
     def test_georadius_store(self, r):
@@ -1746,19 +1747,19 @@ class TestRedisCommands(object):
     @skip_if_server_version_lt('3.2.0')
     def test_georadiusmember(self, r):
         values = (2.1909389952632, 41.433791470673, 'place1') +\
-                 (2.1873744593677, 41.406342043777, 'place2')
+                 (2.1873744593677, 41.406342043777, b'\x80place2')
 
         r.geoadd('barcelona', *values)
         assert r.georadiusbymember('barcelona', 'place1', 4000) ==\
-            ['place2', 'place1']
-        assert r.georadiusbymember('barcelona', 'place1', 10) == ['place1']
+            [b'\x80place2', b'place1']
+        assert r.georadiusbymember('barcelona', 'place1', 10) == [b'place1']
 
         assert r.georadiusbymember('barcelona', 'place1', 4000,
                                    withdist=True, withcoord=True,
                                    withhash=True) ==\
-            [['place2', 3067.4157, 3471609625421029,
+            [[b'\x80place2', 3067.4157, 3471609625421029,
                 (2.187376320362091, 41.40634178640635)],
-             ['place1', 0.0, 3471609698139488,
+             [b'place1', 0.0, 3471609698139488,
                  (2.1909382939338684, 41.433790281840835)]]
 
     @skip_if_server_version_lt('5.0.0')
