@@ -35,6 +35,9 @@
     * ZADD now requires all element names/scores be specified in a single
       dictionary argument named mapping. This was required to allow the NX,
       XX, CH and INCR options to be specified.
+    * ssl_cert_reqs now has a default value of 'required' by default. This
+      should make connecting to a remote Redis server over SSL more secure.
+      Thanks u2mejc
     * Removed support for EOL Python 2.6 and 3.3. Thanks jdufresne
   OTHER CHANGES
     * Added missing DECRBY command. Thanks derek-dchu
@@ -76,9 +79,6 @@
     * Added a ping() method to pubsub objects. Thanks krishan-carbon
     * Fixed a bug with keys in the INFO dict that contained ':' symbols.
       Thanks mzalimeni
-    * ssl_cert_reqs now has a default value of 'required' by default. This
-      should make connecting to a remote Redis server over SSL more secure.
-      Thanks u2mejc
     * Fixed the select system call retry compatibility with Python 2.x.
       Thanks lddubeau
     * max_connections is now a valid querystring argument for creating
