@@ -99,6 +99,23 @@ use any of the following commands:
   not exist)
 
 
+SSL Connections
+^^^^^^^^^^^^^^^
+
+redis-py 3.0 changes the default value of the `ssl_cert_reqs` option from
+`None` to `'required'`. See
+`Issue 1016 <https://github.com/andymccurdy/redis-py/issues/1016>`_. This
+change enforces hostname validation when accepting a cert from a remote SSL
+terminator. If the terminator doesn't properly set the hostname on the cert
+this will cause redis-py 3.0 to raise a ConnectionError.
+
+This check can be disabled by setting `ssl_cert_reqs` to `None`. Note that
+doing so removes the security check. Do so at your own risk.
+
+It has been reported that SSL certs received from AWS ElastiCache do not have
+proper hostnames and turning off hostname verification is currently required.
+
+
 MSET, MSETNX and ZADD
 ^^^^^^^^^^^^^^^^^^^^^
 
