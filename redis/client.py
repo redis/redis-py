@@ -3497,6 +3497,8 @@ class Script(object):
         try:
             return client.evalsha(self.sha, len(keys), *args)
         except NoScriptError:
+            # Do not need to load script manually,
+            # "eval" would cache it automatically.
             return client.eval(self.script, len(keys), *args)
 
 
