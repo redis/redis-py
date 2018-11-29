@@ -3497,11 +3497,7 @@ class Script(object):
         try:
             return client.evalsha(self.sha, len(keys), *args)
         except NoScriptError:
-            # Maybe the client is pointed to a differnet server than the client
-            # that created this instance?
-            # Overwrite the sha just in case there was a discrepancy.
-            self.sha = client.script_load(self.script)
-            return client.evalsha(self.sha, len(keys), *args)
+            return client.eval(self.script, len(keys), *args)
 
 
 class BitFieldOperation(object):
