@@ -1,7 +1,7 @@
 import pytest
 import time
 
-from redis.exceptions import LockError, LockErrorNotOwned
+from redis.exceptions import LockError, LockNotOwnedError
 from redis.lock import Lock
 
 
@@ -85,7 +85,7 @@ class TestLock(object):
         lock.acquire(blocking=False)
         # manually change the token
         r.set('foo', 'a')
-        with pytest.raises(LockErrorNotOwned):
+        with pytest.raises(LockNotOwnedError):
             lock.release()
         # even though we errored, the token is still cleared
         assert lock.local.token is None
@@ -122,7 +122,7 @@ class TestLock(object):
         lock = self.get_lock(r, 'foo', timeout=10)
         assert lock.acquire(blocking=False)
         r.set('foo', 'a')
-        with pytest.raises(LockErrorNotOwned):
+        with pytest.raises(LockNotOwnedError):
             lock.extend(10)
 
 

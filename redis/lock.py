@@ -1,7 +1,7 @@
 import threading
 import time as mod_time
 import uuid
-from redis.exceptions import LockError, LockErrorNotOwned
+from redis.exceptions import LockError, LockNotOwnedError
 from redis.utils import dummy
 
 
@@ -190,7 +190,7 @@ class Lock(object):
         if not bool(self.lua_release(keys=[self.name],
                                      args=[expected_token],
                                      client=self.redis)):
-            raise LockErrorNotOwned("Cannot release a lock"
+            raise LockNotOwnedError("Cannot release a lock"
                                     " that's no longer owned")
 
     def extend(self, additional_time):
@@ -211,6 +211,6 @@ class Lock(object):
         if not bool(self.lua_extend(keys=[self.name],
                                     args=[self.local.token, additional_time],
                                     client=self.redis)):
-            raise LockErrorNotOwned("Cannot extend a lock that's"
+            raise LockNotOwnedError("Cannot extend a lock that's"
                                     " no longer owned")
         return True

@@ -60,6 +60,6 @@ class LockError(RedisError, ValueError):
     pass
 
 
-class LockErrorNotOwned(LockError):
-    "Error related to lock that may have been owned being lost."
+class LockNotOwnedError(LockError):
+    "Error trying to extend or release a lock that is (no longer) owned"
     pass

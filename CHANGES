@@ -1,3 +1,10 @@
+* 3.0.2 (in development)
+    * Added a LockNotOwnedError that is raised when trying to extend or
+      release a lock that is no longer owned. This is a subclass of LockError
+      so previous code should continue to work as expected. Thanks Joshua
+      Harlow
+    * Fixed a bug in GEORADIUS that forced decoding of places without
+      respecting the decode_responses option. Thanks Bo Bayles
 * 3.0.1
     * Fixed regression with UnixDomainSocketConnection caused by 3.0.0.
       Thanks Jyrki Muukkonen
