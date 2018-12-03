@@ -58,3 +58,8 @@ class LockError(RedisError, ValueError):
     # NOTE: For backwards compatability, this class derives from ValueError.
     # This was originally chosen to behave like threading.Lock.
     pass
+
+
+class LockErrorNotOwned(LockError):
+    "Error related to lock that may have been owned being lost."
+    pass
