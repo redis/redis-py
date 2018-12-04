@@ -797,8 +797,6 @@ class Redis(object):
         (filter, value, filter, value,...) or
         [filter, value, filter, value,...]
         """
-        if len(filter_options) == 1 and isinstance(filter_options[0], basestring):
-            return self.client_kill(filter_options[0])
         if not isinstance(filter_options, (list, tuple)) or not filter_options:
             raise DataError("CLIENT KILL <filter> <value> ... ... <filter> <value>" +
                             "must be a non empty list or "
