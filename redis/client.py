@@ -808,13 +808,12 @@ class Redis(object):
         client_types = ('normal', 'master', 'slave', 'pubsub')
         yes_no = ('yes', 'no')
         for index in range(0, len(filter_options), 2):
-            option = filter_options[index]
-            value = filter_options[index + 1]
-            key = str(option).lower()
+            key = str(filter_options[index]).lower()
+            value = str(filter_options[index + 1]).lower()
             if key not in filter_types:
                 raise DataError("CLIENT KILL <filter> must be one of %r" % (
                     filter_types,))
-            if key == 'type' and option not in client_types:
+            if key == 'type' and value not in client_types:
                 raise DataError("CLIENT KILL TYPE <value> must be one of %r" % (
                     client_types,))
             if key == 'skipme' and value not in yes_no:
