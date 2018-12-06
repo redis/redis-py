@@ -48,11 +48,10 @@ def r(request, **kwargs):
 
 
 @pytest.fixture()
-def r3(request, **kwargs):
+def r2(request, **kwargs):
     return [
         _get_client(redis.Redis, request, **kwargs),
         _get_client(redis.Redis, request, **kwargs),
-        _get_client(redis.Redis, request, **kwargs)
     ]
 
 

@@ -413,6 +413,12 @@ def parse_pubsub_numsub(response, **options):
     return list(zip(response[0::2], response[1::2]))
 
 
+def parse_client_kill(response, **options):
+    if isinstance(response, (long, int)):
+        return int(response)
+    return nativestr(response) == 'OK'
+
+
 class Redis(object):
     """
     Implementation of the Redis protocol.
@@ -471,7 +477,7 @@ class Redis(object):
         {
             'CLIENT GETNAME': lambda r: r and nativestr(r),
             'CLIENT ID': int,
-            'CLIENT KILL': lambda r: int or nativestr(r) == 'OK',
+            'CLIENT KILL': parse_client_kill,
             'CLIENT LIST': parse_client_list,
             'CLIENT SETNAME': bool_ok,
             'CLIENT UNBLOCK': lambda r: r and int(r) == 1 or False,
@@ -790,37 +796,40 @@ class Redis(object):
         "Disconnects the client at ``address`` (ip:port)"
         return self.execute_command('CLIENT KILL', address)
 
-    def client_kill_filter(self, *filter_options):
+    def client_kill_filter(self, _id=None, _type=None, addr=None, skipme=None):
         """
         Disconnects the client using a variety of filter options
-        :param filter_options: a tuple or list of filter options with
-        the following format:
-        (filter, value, filter, value,...) or
-        [filter, value, filter, value,...]
+        :param _id: Allows to kill a client by its unique ID field
+        :param _type: Kill by type. Where type is one of normal,
+        master, slave and pubsub
+        :param addr: This is exactly the same as the client_kill
+        :param skipme: If yes, then he client calling the command
+        will not get killed.
+        No will have the effect of also killing the client calling the command.
         """
-        if not isinstance(filter_options, (list, tuple)) or not filter_options:
+        filter_options = ()
+        if _type is not None:
+            client_types = ('normal', 'master', 'slave', 'pubsub')
+            if str(_type).lower() not in client_types:
+                raise DataError("CLIENT KILL type must be one of %r" % (
+                                client_types,))
+            filter_options = filter_options + (Token.get_token('TYPE'), _type)
+        if skipme is not None:
+            yes_no = ('yes', 'no')
+            if str(skipme).lower() not in yes_no:
+                raise DataError("CLIENT KILL skipme yes/no must be one of %r"
+                                % (yes_no,))
+            filter_options = filter_options + (Token.get_token('SKIPME'),
+                                               skipme)
+        if _id is not None:
+            filter_options = filter_options + (Token.get_token('ID'),
+                                               _id)
+        if addr is not None:
+            filter_options = filter_options + (Token.get_token('ADDR'),
+                                               addr)
+        if len(filter_options) == 0:
             raise DataError("CLIENT KILL <filter> <value> ... ... <filter> "
-                            "<value> "
-                            "must be a non empty list or "
-                            "tuple to execute")
-        if len(filter_options) % 2 != 0:
-            raise DataError("CLIENT KILL <filter> <value> requires a filter "
-                            "and a value pair. Got %r" % (filter_options,))
-        filter_types = ('addr', 'id', 'type', 'skipme')
-        client_types = ('normal', 'master', 'slave', 'pubsub')
-        yes_no = ('yes', 'no')
-        for index in range(0, len(filter_options), 2):
-            key = str(filter_options[index]).lower()
-            value = str(filter_options[index + 1]).lower()
-            if key not in filter_types:
-                raise DataError("CLIENT KILL <filter> must be one of %r" % (
-                    filter_types,))
-            if key == 'type' and value not in client_types:
-                raise DataError("CLIENT KILL TYPE <value> "
-                                "must be one of %r" % (client_types,))
-            if key == 'skipme' and value not in yes_no:
-                raise DataError("CLIENT KILL SKIPME <value> "
-                                "must be one of %r" % (yes_no,))
+                            "<value> must specify at least one filter")
         return self.execute_command('CLIENT KILL', *filter_options)
 
     def client_list(self, _type=None):
