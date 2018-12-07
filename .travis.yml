@@ -1,6 +1,9 @@
+dist: xenial
+sudo: false
 language: python
 cache: pip
 python:
+  - 3.7
   - 3.6
   - 3.5
   - 3.4
@@ -20,15 +23,5 @@ matrix:
   include:
     - python: 2.7
       env: TEST_PYCODESTYLE=1
-    - python: 3.6
+    - python: 3.7
       env: TEST_PYCODESTYLE=1
-    # python 3.7 has to be specified manually in the matrix
-    # https://github.com/travis-ci/travis-ci/issues/9815
-    - python: 3.7
-      dist: xenial
-      sudo: true
-      env: TEST_HIREDIS=0
-    - python: 3.7
-      dist: xenial
-      sudo: true
-      env: TEST_HIREDIS=1
