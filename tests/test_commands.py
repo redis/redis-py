@@ -127,6 +127,27 @@ class TestRedisCommands(object):
         with pytest.raises(exceptions.DataError):
             r.client_kill_filter(_type="caster")
 
+    @skip_if_server_version_lt('2.8.12')
+    def test_client_kill_filter(self, r, r2):
+        r.client_setname('redis-py-c1')
+        r2[0].client_setname('redis-py-c2')
+        r2[1].client_setname('redis-py-c3')
+        test_clients = [client for client in r.client_list()
+                        if client.get('name')
+                        in ['redis-py-c1', 'redis-py-c2', 'redis-py-c3']]
+        assert len(test_clients) == 3
+
+        resp = r.client_kill_filter(_id=test_clients[1].get('id'))
+        assert isinstance(resp, int) and resp == 1
+
+        resp = r.client_kill_filter(addr=test_clients[2].get('addr'))
+        assert isinstance(resp, int) and resp == 1
+
+        test_clients = [client for client in r.client_list()
+                        if client.get('name')
+                        in ['redis-py-c1', 'redis-py-c2', 'redis-py-c3']]
+        assert len(test_clients) == 1
+
     @skip_if_server_version_lt('2.6.9')
     def test_client_list_after_client_setname(self, r):
         r.client_setname('redis_py_test')
