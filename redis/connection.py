@@ -1120,3 +1120,54 @@ class BlockingConnectionPool(ConnectionPool):
         "Disconnects all connections in the pool."
         for connection in self._connections:
             connection.disconnect()
+
+
+class OverflowConnectionPool(ConnectionPool):
+    """
+    Thread-safe non-blocking connection pool::
+
+        >>> from redis.client import Redis
+        >>> client = Redis(connection_pool=OverflowConnectionPool(
+                max_connections=10))
+
+    When max_connections are hit, new connections are created outside of the
+    connection pool.
+    """
+    def get_connection(self, command_name, *keys, **options):
+        "Get a connection from the pool"
+        self._checkpid()
+        try:
+            connection = self._available_connections.pop()
+        except IndexError:
+            connection = self.make_connection()
+
+        if connection is None:
+            # create connection outside of pool
+            connection = self.connection_class(**self.connection_kwargs)
+            warnings.warn(RuntimeWarning(
+                "Connection created outside of pool: %r" % connection
+            ))
+            return connection
+
+        self._in_use_connections.add(connection)
+        return connection
+
+    def make_connection(self):
+        "Create a new connection"
+        if self._created_connections >= self.max_connections:
+            return None
+        self._created_connections += 1
+        return self.connection_class(**self.connection_kwargs)
+
+    def release(self, connection):
+        "Releases the connection back to the pool"
+        self._checkpid()
+        if connection.pid != self.pid:
+            return
+
+        try:
+            self._in_use_connections.remove(connection)
+        except ValueError:
+            return  # conn was outside of pool
+
+            self._available_connections.append(connection)

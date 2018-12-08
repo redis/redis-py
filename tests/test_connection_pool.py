@@ -141,6 +141,58 @@ class TestBlockingConnectionPool(object):
         assert repr(pool) == expected
 
 
+class TestOverflowConnectionPool(object):
+    def get_pool(self, connection_kwargs=None, max_connections=None,
+                 connection_class=DummyConnection):
+        connection_kwargs = connection_kwargs or {}
+        pool = redis.OverflowConnectionPool(
+            connection_class=connection_class,
+            max_connections=max_connections,
+            **connection_kwargs)
+        return pool
+
+    def test_connection_creation(self):
+        connection_kwargs = {'foo': 'bar', 'biz': 'baz'}
+        pool = self.get_pool(connection_kwargs=connection_kwargs)
+        connection = pool.get_connection('_')
+        assert isinstance(connection, DummyConnection)
+        assert connection.kwargs == connection_kwargs
+
+    def test_multiple_connections(self):
+        pool = self.get_pool()
+        c1 = pool.get_connection('_')
+        c2 = pool.get_connection('_')
+        assert c1 != c2
+
+    def test_max_connections(self):
+        pool = self.get_pool(max_connections=2)
+        pool.get_connection('_')
+        pool.get_connection('_')
+        c1 = pool.get_connection('_')  # conn outside of pool
+        assert c1 not in pool._in_use_connections
+
+    def test_reuse_previously_released_connection(self):
+        pool = self.get_pool()
+        c1 = pool.get_connection('_')
+        pool.release(c1)
+        c2 = pool.get_connection('_')
+        assert c1 == c2
+
+    def test_repr_contains_db_info_tcp(self):
+        connection_kwargs = {'host': 'localhost', 'port': 6379, 'db': 1}
+        pool = self.get_pool(connection_kwargs=connection_kwargs,
+                             connection_class=redis.Connection)
+        expected = 'ConnectionPool<Connection<host=localhost,port=6379,db=1>>'
+        assert repr(pool) == expected
+
+    def test_repr_contains_db_info_unix(self):
+        connection_kwargs = {'path': '/abc', 'db': 1}
+        pool = self.get_pool(connection_kwargs=connection_kwargs,
+                             connection_class=redis.UnixDomainSocketConnection)
+        expected = 'ConnectionPool<UnixDomainSocketConnection<path=/abc,db=1>>'
+        assert repr(pool) == expected
+
+
 class TestConnectionPoolURLParsing(object):
     def test_defaults(self):
         pool = redis.ConnectionPool.from_url('redis://localhost')
