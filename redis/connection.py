@@ -1167,7 +1167,7 @@ class OverflowConnectionPool(ConnectionPool):
 
         try:
             self._in_use_connections.remove(connection)
-        except ValueError:
+        except KeyError:
             return  # conn was outside of pool
 
-            self._available_connections.append(connection)
+        self._available_connections.append(connection)

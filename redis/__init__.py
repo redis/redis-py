@@ -1,6 +1,7 @@
 from redis.client import Redis, StrictRedis
 from redis.connection import (
     BlockingConnectionPool,
+    OverflowConnectionPool,
     ConnectionPool,
     Connection,
     SSLConnection,
@@ -34,8 +35,9 @@ VERSION = tuple(map(int_or_str, __version__.split('.')))
 
 __all__ = [
     'Redis', 'StrictRedis', 'ConnectionPool', 'BlockingConnectionPool',
-    'Connection', 'SSLConnection', 'UnixDomainSocketConnection', 'from_url',
-    'AuthenticationError', 'BusyLoadingError', 'ConnectionError', 'DataError',
-    'InvalidResponse', 'PubSubError', 'ReadOnlyError', 'RedisError',
-    'ResponseError', 'TimeoutError', 'WatchError'
+    'OverflowConnectionPool', 'Connection', 'SSLConnection',
+    'UnixDomainSocketConnection', 'from_url', 'AuthenticationError',
+    'BusyLoadingError', 'ConnectionError', 'DataError', 'InvalidResponse',
+    'PubSubError', 'ReadOnlyError', 'RedisError', 'ResponseError',
+    'TimeoutError', 'WatchError'
 ]

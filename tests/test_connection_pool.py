@@ -168,7 +168,7 @@ class TestOverflowConnectionPool(object):
         pool = self.get_pool(max_connections=2)
         pool.get_connection('_')
         pool.get_connection('_')
-        c1 = pool.get_connection('_')  # conn outside of pool
+        c1 = pool.get_connection('_')  # overflow conn
         assert c1 not in pool._in_use_connections
 
     def test_reuse_previously_released_connection(self):
@@ -178,18 +178,27 @@ class TestOverflowConnectionPool(object):
         c2 = pool.get_connection('_')
         assert c1 == c2
 
+    def test_reuse_previously_released_connection_after_overflow(self):
+        pool = self.get_pool(max_connections=1)
+        c1 = pool.get_connection('_')
+        c2 = pool.get_connection('_')  # overflow conn
+        pool.release(c1)
+        pool.release(c2)
+        c3 = pool.get_connection('_')
+        assert c1 == c3
+
     def test_repr_contains_db_info_tcp(self):
         connection_kwargs = {'host': 'localhost', 'port': 6379, 'db': 1}
         pool = self.get_pool(connection_kwargs=connection_kwargs,
                              connection_class=redis.Connection)
-        expected = 'ConnectionPool<Connection<host=localhost,port=6379,db=1>>'
+        expected = 'OverflowConnectionPool<Connection<host=localhost,port=6379,db=1>>'
         assert repr(pool) == expected
 
     def test_repr_contains_db_info_unix(self):
         connection_kwargs = {'path': '/abc', 'db': 1}
         pool = self.get_pool(connection_kwargs=connection_kwargs,
                              connection_class=redis.UnixDomainSocketConnection)
-        expected = 'ConnectionPool<UnixDomainSocketConnection<path=/abc,db=1>>'
+        expected = 'OverflowConnectionPool<UnixDomainSocketConnection<path=/abc,db=1>>'
         assert repr(pool) == expected
 
 
