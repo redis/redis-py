@@ -220,7 +220,8 @@ class TestPubSubSubscribeUnsubscribe(object):
         kwargs = make_subscribe_test_data(r.pubsub(), 'pattern')
         self._test_sub_unsub_resub(**kwargs)
 
-    def _test_sub_unsub_resub(self, p, sub_type, unsub_type, sub_func, unsub_func, keys):
+    def _test_sub_unsub_resub(self, p, sub_type, unsub_type, sub_func,
+                              unsub_func, keys):
         # https://github.com/andymccurdy/redis-py/issues/764
         key = keys[0]
         sub_func(key)
@@ -240,7 +241,8 @@ class TestPubSubSubscribeUnsubscribe(object):
         kwargs = make_subscribe_test_data(r.pubsub(), 'pattern')
         self._test_sub_unsub_all_resub(**kwargs)
 
-    def _test_sub_unsub_all_resub(self, p, sub_type, unsub_type, sub_func, unsub_func, keys):
+    def _test_sub_unsub_all_resub(self, p, sub_type, unsub_type, sub_func,
+                                  unsub_func, keys):
         # https://github.com/andymccurdy/redis-py/issues/764
         key = keys[0]
         sub_func(key)
