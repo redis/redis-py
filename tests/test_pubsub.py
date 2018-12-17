@@ -212,6 +212,48 @@ class TestPubSubSubscribeUnsubscribe(object):
             assert message is None
         assert p.subscribed is False
 
+    def test_sub_unsub_resub_channels(self, r):
+        kwargs = make_subscribe_test_data(r.pubsub(), 'channel')
+        self._test_sub_unsub_resub(**kwargs)
+
+    def test_sub_unsub_resub_patterns(self, r):
+        kwargs = make_subscribe_test_data(r.pubsub(), 'pattern')
+        self._test_sub_unsub_resub(**kwargs)
+
+    def _test_sub_unsub_resub(self, p, sub_type, unsub_type, sub_func,
+                              unsub_func, keys):
+        # https://github.com/andymccurdy/redis-py/issues/764
+        key = keys[0]
+        sub_func(key)
+        unsub_func(key)
+        sub_func(key)
+        assert p.subscribed is True
+        assert wait_for_message(p) == make_message(sub_type, key, 1)
+        assert wait_for_message(p) == make_message(unsub_type, key, 0)
+        assert wait_for_message(p) == make_message(sub_type, key, 1)
+        assert p.subscribed is True
+
+    def test_sub_unsub_all_resub_channels(self, r):
+        kwargs = make_subscribe_test_data(r.pubsub(), 'channel')
+        self._test_sub_unsub_all_resub(**kwargs)
+
+    def test_sub_unsub_all_resub_patterns(self, r):
+        kwargs = make_subscribe_test_data(r.pubsub(), 'pattern')
+        self._test_sub_unsub_all_resub(**kwargs)
+
+    def _test_sub_unsub_all_resub(self, p, sub_type, unsub_type, sub_func,
+                                  unsub_func, keys):
+        # https://github.com/andymccurdy/redis-py/issues/764
+        key = keys[0]
+        sub_func(key)
+        unsub_func()
+        sub_func(key)
+        assert p.subscribed is True
+        assert wait_for_message(p) == make_message(sub_type, key, 1)
+        assert wait_for_message(p) == make_message(unsub_type, key, 0)
+        assert wait_for_message(p) == make_message(sub_type, key, 1)
+        assert p.subscribed is True
+
 
 class TestPubSubMessages(object):
     def setup_method(self, method):
