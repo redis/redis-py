@@ -798,39 +798,37 @@ class Redis(object):
 
     def client_kill_filter(self, _id=None, _type=None, addr=None, skipme=None):
         """
-        Disconnects the client using a variety of filter options
-        :param _id: Allows to kill a client by its unique ID field
-        :param _type: Kill by type. Where type is one of normal,
-        master, slave and pubsub
-        :param addr: This is exactly the same as the client_kill
-        :param skipme: If yes, then he client calling the command
-        will not get killed.
-        No will have the effect of also killing the client calling the command.
+        Disconnects client(s) using a variety of filter options
+        :param id: Kills a client by its unique ID field
+        :param type: Kills a client by type where type is one of 'normal',
+        'master', 'slave' or 'pubsub'
+        :param addr: Kills a client by its 'address:port'
+        :param skipme: If True, then the client calling the command
+        will not get killed even if it is identified by one of the filter
+        options. If skipme is not provided, the server defaults to skipme=True
         """
-        filter_options = ()
+        args = []
         if _type is not None:
             client_types = ('normal', 'master', 'slave', 'pubsub')
             if str(_type).lower() not in client_types:
                 raise DataError("CLIENT KILL type must be one of %r" % (
                                 client_types,))
-            filter_options = filter_options + (Token.get_token('TYPE'), _type)
+            args.extend((Token.get_token('TYPE'), _type))
         if skipme is not None:
-            yes_no = ('yes', 'no')
-            if str(skipme).lower() not in yes_no:
-                raise DataError("CLIENT KILL skipme yes/no must be one of %r"
-                                % (yes_no,))
-            filter_options = filter_options + (Token.get_token('SKIPME'),
-                                               skipme)
+            if not isinstance(skipme, bool):
+                raise DataError("CLIENT KILL skipme must be a bool")
+            if skipme:
+                args.extend((Token.get_token('SKIPME'), Token.get_token('YES'))
+            else:
+                args.extend((Token.get_token('SKIPME'), Token.get_token('NO'))
         if _id is not None:
-            filter_options = filter_options + (Token.get_token('ID'),
-                                               _id)
+            args.extend((Token.get_token('ID'), _id))
         if addr is not None:
-            filter_options = filter_options + (Token.get_token('ADDR'),
-                                               addr)
-        if len(filter_options) == 0:
+            args.extend((Token.get_token('ADDR'), addr))
+        if not args:
             raise DataError("CLIENT KILL <filter> <value> ... ... <filter> "
                             "<value> must specify at least one filter")
-        return self.execute_command('CLIENT KILL', *filter_options)
+        return self.execute_command('CLIENT KILL', *args)
 
     def client_list(self, _type=None):
         """
