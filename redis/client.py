@@ -818,9 +818,11 @@ class Redis(object):
             if not isinstance(skipme, bool):
                 raise DataError("CLIENT KILL skipme must be a bool")
             if skipme:
-                args.extend((Token.get_token('SKIPME'), Token.get_token('YES')))
+                args.extend((Token.get_token('SKIPME'),
+                             Token.get_token('YES')))
             else:
-                args.extend((Token.get_token('SKIPME'), Token.get_token('NO')))
+                args.extend((Token.get_token('SKIPME'),
+                             Token.get_token('NO')))
         if _id is not None:
             args.extend((Token.get_token('ID'), _id))
         if addr is not None:
