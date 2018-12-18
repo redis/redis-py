@@ -116,8 +116,12 @@ def parse_info(response):
     for line in response.splitlines():
         if line and not line.startswith('#'):
             if line.find(':') != -1:
-                # support keys that include ':' by using rsplit
-                key, value = line.rsplit(':', 1)
+                # Split, the info fields keys and values.
+                # Note that the value may contain ':'. but the 'host:'
+                # pseudo-command is the only case where the key contains ':'
+                key, value = line.split(':', 1)
+                if key == 'cmdstat_host':
+                    key, value = line.rsplit(':', 1)
                 info[key] = get_value(value)
             else:
                 # if the line isn't splittable, append it to the "__raw__" key
