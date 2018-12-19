@@ -129,7 +129,11 @@ class Encoder(object):
     def decode(self, value, force=False):
         "Return a unicode string from the byte representation"
         if (self.decode_responses or force) and isinstance(value, bytes):
-            value = value.decode(self.encoding, self.encoding_errors)
+            try:
+                value = value.decode(self.encoding, self.encoding_errors)
+            except ValueError:
+                # Ignore encoding and return bytes
+                pass
         return value
 
 

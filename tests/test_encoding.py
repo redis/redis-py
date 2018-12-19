@@ -1,4 +1,6 @@
 from __future__ import unicode_literals
+
+import pickle
 import pytest
 import redis
 
@@ -23,6 +25,19 @@ class TestEncoding(object):
         result = [unicode_string, unicode_string, unicode_string]
         r.rpush('a', *result)
         assert r.lrange('a', 0, -1) == result
+
+
+class TestDecoding(object):
+    @pytest.fixture()
+    def r(self, request):
+        rdb = redis.StrictRedis
+        return _get_client(rdb, request=request, decode_responses=True)
+
+    def test_byte_stream_decoding(self, r):
+        expected = pickle.dumps(dict(hello='world'))
+        r.set('pickled-data', expected)
+        actual = r.get('pickled-data')
+        assert actual == expected
 
 
 class TestCommandsAndTokensArentEncoded(object):
