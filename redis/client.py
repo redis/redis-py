@@ -2123,18 +2123,15 @@ class Redis(object):
         """
         return self.execute_command('XPENDING', name, groupname)
 
-    def xpending_range(self, name, groupname, min='-', max='+', count=-1,
+    def xpending_range(self, name, groupname, min, max, count,
                        consumername=None):
         """
         Returns information about pending messages, in a range.
         name: name of the stream.
         groupname: name of the consumer group.
-        start: first stream ID. defaults to '-',
-               meaning the earliest available.
-        finish: last stream ID. defaults to '+',
-                meaning the latest available.
-        count: if set, only return this many items, beginning with the
-               earliest available.
+        min: minimum stream ID.
+        max: maximum stream ID.
+        count: number of messages to return
         consumername: name of a consumer to filter by (optional).
         """
         pieces = [name, groupname]
