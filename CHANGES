@@ -1,4 +1,7 @@
 * 3.1.0 (in development)
+    * Added a reacquire method to Lock objects. reaquire attempts to renew
+      the lock such that the timeout is extended to the same value taht the
+      lock was initially acquired with. Thanks Ihor Kalnytskyi. #1014
     * Stream names found within XREAD and XREADGROUP responses now properly
       respect the decode_responses flag.
     * XPENDING_RANGE now requires the user the specify the min, max and
