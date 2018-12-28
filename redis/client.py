@@ -307,6 +307,8 @@ def bool_ok(response):
 
 
 def parse_zadd(response, **options):
+    if response is None:
+        return None
     if options.get('as_score'):
         return float(response)
     return int(response)

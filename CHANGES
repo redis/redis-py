@@ -1,4 +1,7 @@
 * 3.0.2 (in development)
+    * ZADD now returns None when xx=True and incr=True and an element
+      is specified that doesn't exist in the sorted set. This matches
+      what the server returns in this case. #1084
     * Added client_kill_filter that accepts various filters to identify
       and kill clients. Thanks Theofanis Despoudis. #1098
     * Fixed a race condition that occurred when unsubscribing and

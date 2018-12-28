@@ -1073,6 +1073,12 @@ class TestRedisCommands(object):
         assert r.zadd('a', {'a1': 1}) == 1
         assert r.zadd('a', {'a1': 4.5}, incr=True) == 5.5
 
+    def test_zadd_incr_with_xx(self, r):
+        # this asks zadd to incr 'a1' only if it exists, but it clearly
+        # doesn't. Redis returns a null value in this case and so should
+        # redis-py
+        assert r.zadd('a', {'a1': 1}, xx=True, incr=True) is None
+
     def test_zcard(self, r):
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
         assert r.zcard('a') == 3
