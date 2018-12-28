@@ -276,7 +276,7 @@ def parse_xinfo_stream(response):
 def parse_xread(response):
     if response is None:
         return []
-    return [[nativestr(r[0]), parse_stream_list(r[1])] for r in response]
+    return [[r[0], parse_stream_list(r[1])] for r in response]
 
 
 def parse_xpending(response, **options):

@@ -1,4 +1,6 @@
-* 3.0.2 (in development)
+* 3.1.0 (in development)
+    * Stream names found within XREAD and XREADGROUP responses now properly
+      respect the decode_responses flag.
     * XPENDING_RANGE now requires the user the specify the min, max and
       count arguments. Newer versions of Redis prevent ount from being
       infinite so it's left to the user to specify these values explicitly.

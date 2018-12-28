@@ -2124,7 +2124,7 @@ class TestRedisCommands(object):
 
         expected = [
             [
-                stream,
+                stream.encode(),
                 [
                     get_stream_message(r, stream, m1),
                     get_stream_message(r, stream, m2),
@@ -2136,7 +2136,7 @@ class TestRedisCommands(object):
 
         expected = [
             [
-                stream,
+                stream.encode(),
                 [
                     get_stream_message(r, stream, m1),
                 ]
@@ -2147,7 +2147,7 @@ class TestRedisCommands(object):
 
         expected = [
             [
-                stream,
+                stream.encode(),
                 [
                     get_stream_message(r, stream, m2),
                 ]
@@ -2170,7 +2170,7 @@ class TestRedisCommands(object):
 
         expected = [
             [
-                stream,
+                stream.encode(),
                 [
                     get_stream_message(r, stream, m1),
                     get_stream_message(r, stream, m2),
@@ -2185,7 +2185,7 @@ class TestRedisCommands(object):
 
         expected = [
             [
-                stream,
+                stream.encode(),
                 [
                     get_stream_message(r, stream, m1),
                 ]
