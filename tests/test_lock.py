@@ -125,6 +125,34 @@ class TestLock(object):
         with pytest.raises(LockNotOwnedError):
             lock.extend(10)
 
+    def test_reacquire_lock(self, r):
+        lock = self.get_lock(r, 'foo', timeout=10)
+        assert lock.acquire(blocking=False)
+        assert r.pexpire('foo', 5000)
+        assert r.pttl('foo') <= 5000
+        assert lock.reacquire()
+        assert 8000 < r.pttl('foo') <= 10000
+        lock.release()
+
+    def test_reacquiring_unlocked_lock_raises_error(self, r):
+        lock = self.get_lock(r, 'foo', timeout=10)
+        with pytest.raises(LockError):
+            lock.reacquire()
+
+    def test_reacquiring_lock_with_no_timeout_raises_error(self, r):
+        lock = self.get_lock(r, 'foo')
+        assert lock.acquire(blocking=False)
+        with pytest.raises(LockError):
+            lock.reacquire()
+        lock.release()
+
+    def test_reacquiring_lock_no_longer_owned_raises_error(self, r):
+        lock = self.get_lock(r, 'foo', timeout=10)
+        assert lock.acquire(blocking=False)
+        r.set('foo', 'a')
+        with pytest.raises(LockNotOwnedError):
+            lock.reacquire()
+
 
 class TestLockClassSelection(object):
     def test_lock_class_argument(self, r):
