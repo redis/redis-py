@@ -112,7 +112,6 @@ if sys.version_info[0] < 3:
     xrange = xrange
     basestring = basestring
     unicode = unicode
-    bytes = str
     long = long
 else:
     from urllib.parse import parse_qs, unquote, urlparse
@@ -142,7 +141,6 @@ else:
     basestring = str
     unicode = str
     safe_unicode = str
-    bytes = bytes
     long = int
 
 try:  # Python 3

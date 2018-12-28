@@ -14,7 +14,7 @@ try:
 except ImportError:
     ssl_available = False
 
-from redis._compat import (xrange, imap, byte_to_chr, unicode, bytes, long,
+from redis._compat import (xrange, imap, byte_to_chr, unicode, long,
                            nativestr, basestring, iteritems,
                            LifoQueue, Empty, Full, urlparse, parse_qs,
                            recv, recv_into, select, unquote)

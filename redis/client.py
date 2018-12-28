@@ -7,7 +7,7 @@ import time
 import threading
 import time as mod_time
 import hashlib
-from redis._compat import (basestring, bytes, imap, iteritems, iterkeys,
+from redis._compat import (basestring, imap, iteritems, iterkeys,
                            itervalues, izip, long, nativestr, safe_unicode)
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
                               SSLConnection, Token)
