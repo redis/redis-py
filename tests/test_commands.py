@@ -1837,7 +1837,7 @@ class TestRedisCommands(object):
         assert r.xack(stream, group, m1) == 0
 
         r.xgroup_create(stream, group, 0)
-        r.xreadgroup(group, consumer, streams={stream: 0})
+        r.xreadgroup(group, consumer, streams={stream: '>'})
         # xack returns the number of ack'd elements
         assert r.xack(stream, group, m1) == 1
         assert r.xack(stream, group, m2, m3) == 2
@@ -1874,7 +1874,7 @@ class TestRedisCommands(object):
         assert response == []
 
         # read the group as consumer1 to initially claim the messages
-        r.xreadgroup(group, consumer1, streams={stream: 0})
+        r.xreadgroup(group, consumer1, streams={stream: '>'})
 
         # claim the message as consumer2
         response = r.xclaim(stream, group, consumer2,
@@ -1956,7 +1956,7 @@ class TestRedisCommands(object):
         assert r.xgroup_delconsumer(stream, group, consumer) == 0
 
         # read all messages from the group
-        r.xreadgroup(group, consumer, streams={stream: 0})
+        r.xreadgroup(group, consumer, streams={stream: '>'})
 
         # deleting the consumer should return 2 pending messages
         assert r.xgroup_delconsumer(stream, group, consumer) == 2
@@ -1997,15 +1997,17 @@ class TestRedisCommands(object):
         consumer1 = 'consumer1'
         consumer2 = 'consumer2'
         r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
 
         r.xgroup_create(stream, group, 0)
-        r.xreadgroup(group, consumer1, streams={stream: 0})
-        r.xreadgroup(group, consumer2, streams={stream: 0})
+        r.xreadgroup(group, consumer1, streams={stream: '>'}, count=1)
+        r.xreadgroup(group, consumer2, streams={stream: '>'})
         info = r.xinfo_consumers(stream, group)
         assert len(info) == 2
         expected = [
             {'name': consumer1.encode(), 'pending': 1},
-            {'name': consumer2.encode(), 'pending': 0},
+            {'name': consumer2.encode(), 'pending': 2},
         ]
 
         # we can't determine the idle time, so just make sure it's an int
@@ -2052,8 +2054,8 @@ class TestRedisCommands(object):
         assert r.xpending(stream, group) == expected
 
         # read 1 message from the group with each consumer
-        r.xreadgroup(group, consumer1, streams={stream: 0}, count=1)
-        r.xreadgroup(group, consumer2, streams={stream: m1}, count=1)
+        r.xreadgroup(group, consumer1, streams={stream: '>'}, count=1)
+        r.xreadgroup(group, consumer2, streams={stream: '>'}, count=1)
 
         expected = {
             'pending': 2,
@@ -2077,13 +2079,14 @@ class TestRedisCommands(object):
         r.xgroup_create(stream, group, 0)
 
         # xpending range on a group that has no consumers yet
-        assert r.xpending_range(stream, group) == []
+        assert r.xpending_range(stream, group, min='-', max='+', count=5) == []
 
         # read 1 message from the group with each consumer
-        r.xreadgroup(group, consumer1, streams={stream: 0}, count=1)
-        r.xreadgroup(group, consumer2, streams={stream: m1}, count=1)
+        r.xreadgroup(group, consumer1, streams={stream: '>'}, count=1)
+        r.xreadgroup(group, consumer2, streams={stream: '>'}, count=1)
 
-        response = r.xpending_range(stream, group)
+        response = r.xpending_range(stream, group,
+                                    min='-', max='+', count=5)
         assert len(response) == 2
         assert response[0]['message_id'] == m1
         assert response[0]['consumer'] == consumer1.encode()
@@ -2175,7 +2178,7 @@ class TestRedisCommands(object):
             ]
         ]
         # xread starting at 0 returns both messages
-        assert r.xreadgroup(group, consumer, streams={stream: 0}) == expected
+        assert r.xreadgroup(group, consumer, streams={stream: '>'}) == expected
 
         r.xgroup_destroy(stream, group)
         r.xgroup_create(stream, group, 0)
@@ -2188,35 +2191,19 @@ class TestRedisCommands(object):
                 ]
             ]
         ]
-        # xread starting at 0 and count=1 returns only the first message
-        assert r.xreadgroup(group, consumer, streams={stream: 0}, count=1) == \
-            expected
+        # xread with count=1 returns only the first message
+        assert r.xreadgroup(group, consumer,
+                            streams={stream: '>'}, count=1) == expected
 
         r.xgroup_destroy(stream, group)
-        r.xgroup_create(stream, group, 0)
 
-        expected = [
-            [
-                stream,
-                [
-                    get_stream_message(r, stream, m2),
-                ]
-            ]
-        ]
-        # xread starting at m1 returns only the second message
-        assert r.xreadgroup(group, consumer, streams={stream: m1}) == expected
+        # create the group using $ as the last id meaning subsequent reads
+        # will only find messages added after this
+        r.xgroup_create(stream, group, '$')
 
-        r.xgroup_destroy(stream, group)
-        r.xgroup_create(stream, group, 0)
-
-        # xread starting at the last message returns an empty message list
-        expected = [
-            [
-                stream,
-                []
-            ]
-        ]
-        assert r.xreadgroup(group, consumer, streams={stream: m2}) == expected
+        expected = []
+        # xread starting after the last message returns an empty message list
+        assert r.xreadgroup(group, consumer, streams={stream: '>'}) == expected
 
     @skip_if_server_version_lt('5.0.0')
     def test_xrevrange(self, r):
