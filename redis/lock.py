@@ -193,11 +193,17 @@ class Lock(object):
             return True
         return False
 
-    def locked(self):
+    def locked(self, current=False):
         """
         Returns True if this key is locked by any process, otherwise False.
+
+        ``current`` specifies if the lock check needs to be this lock
         """
-        return self.local.token is not None and self.redis.get(self.name) == self.local.token
+        value = self.redis.get(self.name)
+        if current:
+            return self.local.token is not None and value == self.local.token
+        else:
+            return value is not None
 
     def release(self):
         "Releases the already acquired lock"
