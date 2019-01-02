@@ -42,7 +42,8 @@ class TestLock(object):
         assert lock.locked() is False
         assert lock2.locked() is False
         lock2.acquire(blocking=False)
-        assert lock.locked() is False
+        assert lock.locked() is True
+        assert lock.locked(True) is False
         assert lock2.locked() is True
         lock2.release()
         assert lock.locked() is False
