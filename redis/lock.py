@@ -149,7 +149,7 @@ class Lock(object):
     def __exit__(self, exc_type, exc_value, traceback):
         self.release()
 
-    def acquire(self, blocking=None, blocking_timeout=None):
+    def acquire(self, blocking=None, blocking_timeout=None, token=None):
         """
         Use Redis to hold a shared, distributed lock named ``name``.
         Returns True once the lock is acquired.
@@ -159,9 +159,13 @@ class Lock(object):
 
         ``blocking_timeout`` specifies the maximum number of seconds to
         wait trying to acquire the lock.
+
+        ``token`` specifies the value of the key used. Should have a unique
+        component to it when acquiring a lock with the same name.
         """
         sleep = self.sleep
-        token = uuid.uuid1().hex.encode()
+        if token is None:
+            token = uuid.uuid1().hex.encode()
         if blocking is None:
             blocking = self.blocking
         if blocking_timeout is None:

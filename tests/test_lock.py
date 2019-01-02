@@ -18,6 +18,16 @@ class TestLock(object):
         lock.release()
         assert r.get('foo') is None
 
+    def test_lock_token(self, r):
+        lock = self.get_lock(r, 'foo')
+        assert lock.acquire(blocking=False, token='test')
+        assert r.get('foo') == b'test'
+        assert lock.local.token == 'test'
+        assert r.ttl('foo') == -1
+        lock.release()
+        assert r.get('foo') is None
+        assert lock.local.token is None
+
     def test_locked(self, r):
         lock = self.get_lock(r, 'foo')
         assert lock.locked() is False
