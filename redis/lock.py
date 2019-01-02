@@ -193,7 +193,7 @@ class Lock(object):
         """
         Returns True if this key is locked by any process, otherwise False.
         """
-        return self.redis.get(self.name) is not None
+        return self.local.token is not None and self.redis.get(self.name) == self.local.token
 
     def release(self):
         "Releases the already acquired lock"

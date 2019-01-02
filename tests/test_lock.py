@@ -26,6 +26,18 @@ class TestLock(object):
         lock.release()
         assert lock.locked() is False
 
+        # Original lock should always return false for locked(), especially
+        # when a new lock is acquired
+        lock2 = self.get_lock(r, 'foo')
+        assert lock.locked() is False
+        assert lock2.locked() is False
+        lock2.acquire(blocking=False)
+        assert lock.locked() is False
+        assert lock2.locked() is True
+        lock2.release()
+        assert lock.locked() is False
+        assert lock2.locked() is False
+
     def test_competing_locks(self, r):
         lock1 = self.get_lock(r, 'foo')
         lock2 = self.get_lock(r, 'foo')
