@@ -628,6 +628,12 @@ class StrictRedis(object):
                      token is *not* stored in thread local storage, then
                      thread-1 would see the token value as "xyz" and would be
                      able to successfully release the thread-2's lock.
+                     
+        ``blocking`` indicates whether calling ``acquire`` should block until
+        the lock has been acquired or to fail immediately, causing ``acquire``
+        to return False and the lock not being acquired. Defaults to True.
+        Note this value can be overridden by passing a ``blocking``
+        argument to ``acquire``.
 
         In some use cases it's necessary to disable thread local storage. For
         example, if you have code where one thread acquires a lock and passes
