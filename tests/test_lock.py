@@ -2,10 +2,16 @@ import pytest
 import time
 
 from redis.exceptions import LockError, LockNotOwnedError
+from redis.client import Redis
 from redis.lock import Lock
+from .conftest import _get_client
 
 
 class TestLock(object):
+    @pytest.fixture()
+    def r_decoded(self, request):
+        return _get_client(Redis, request=request, decode_responses=True)
+
     def get_lock(self, redis, *args, **kwargs):
         kwargs['lock_class'] = Lock
         return redis.lock(*args, **kwargs)
@@ -18,6 +24,16 @@ class TestLock(object):
         lock.release()
         assert r.get('foo') is None
 
+    def test_lock_token(self, r):
+        lock = self.get_lock(r, 'foo')
+        assert lock.acquire(blocking=False, token='test')
+        assert r.get('foo') == b'test'
+        assert lock.local.token == b'test'
+        assert r.ttl('foo') == -1
+        lock.release()
+        assert r.get('foo') is None
+        assert lock.local.token is None
+
     def test_locked(self, r):
         lock = self.get_lock(r, 'foo')
         assert lock.locked() is False
@@ -25,6 +41,30 @@ class TestLock(object):
         assert lock.locked() is True
         lock.release()
         assert lock.locked() is False
+
+    def _test_owned(self, client):
+        lock = self.get_lock(client, 'foo')
+        assert lock.owned() is False
+        lock.acquire(blocking=False)
+        assert lock.owned() is True
+        lock.release()
+        assert lock.owned() is False
+
+        lock2 = self.get_lock(client, 'foo')
+        assert lock.owned() is False
+        assert lock2.owned() is False
+        lock2.acquire(blocking=False)
+        assert lock.owned() is False
+        assert lock2.owned() is True
+        lock2.release()
+        assert lock.owned() is False
+        assert lock2.owned() is False
+
+    def test_owned(self, r):
+        self._test_owned(r)
+
+    def test_owned_with_decoded_responses(self, r_decoded):
+        self._test_owned(r_decoded)
 
     def test_competing_locks(self, r):
         lock1 = self.get_lock(r, 'foo')

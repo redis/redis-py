@@ -1,4 +1,10 @@
 * 3.1.0 (in development)
+    * Added an owned method to Lock objects. owned returns a boolean
+      indicating whether the current lock instance still owns the lock.
+      Thanks Dave Johansen. #1112
+    * Allow lock.acquire() to accept an optional token argument. If
+      provided, the token argument is used as the unique value used to claim
+      the lock. Thankd Dave Johansen. #1112
     * Added a reacquire method to Lock objects. reaquire attempts to renew
       the lock such that the timeout is extended to the same value that the
       lock was initially acquired with. Thanks Ihor Kalnytskyi. #1014

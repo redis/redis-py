@@ -149,7 +149,7 @@ class Lock(object):
     def __exit__(self, exc_type, exc_value, traceback):
         self.release()
 
-    def acquire(self, blocking=None, blocking_timeout=None):
+    def acquire(self, blocking=None, blocking_timeout=None, token=None):
         """
         Use Redis to hold a shared, distributed lock named ``name``.
         Returns True once the lock is acquired.
@@ -159,9 +159,18 @@ class Lock(object):
 
         ``blocking_timeout`` specifies the maximum number of seconds to
         wait trying to acquire the lock.
+
+        ``token`` specifies the token value to be used. If provided, token
+        must be a bytes object or a string that can be encoded to a bytes
+        object with the default encoding. If a token isn't specified, a UUID
+        will be generated.
         """
         sleep = self.sleep
-        token = uuid.uuid1().hex.encode()
+        if token is None:
+            token = uuid.uuid1().hex.encode()
+        else:
+            encoder = self.redis.connection_pool.get_encoder()
+            token = encoder.encode(token)
         if blocking is None:
             blocking = self.blocking
         if blocking_timeout is None:
@@ -194,6 +203,19 @@ class Lock(object):
         Returns True if this key is locked by any process, otherwise False.
         """
         return self.redis.get(self.name) is not None
+
+    def owned(self):
+        """
+        Returns True if this key is locked by this lock, otherwise False.
+        """
+        stored_token = self.redis.get(self.name)
+        # need to always compare bytes to bytes
+        # TODO: this can be simplified when the context manager is finished
+        if stored_token and not isinstance(stored_token, bytes):
+            encoder = self.redis.connection_pool.get_encoder()
+            stored_token = encoder.encode(stored_token)
+        return self.local.token is not None and \
+            stored_token == self.local.token
 
     def release(self):
         "Releases the already acquired lock"
