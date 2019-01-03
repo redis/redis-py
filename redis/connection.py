@@ -276,9 +276,7 @@ class PythonParser(BaseParser):
 
     def on_disconnect(self):
         "Called when the socket disconnects"
-        if self._sock is not None:
-            self._sock.close()
-            self._sock = None
+        self._sock = None
         if self._buffer is not None:
             self._buffer.close()
             self._buffer = None
