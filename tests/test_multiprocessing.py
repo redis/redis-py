@@ -3,6 +3,7 @@ import multiprocessing
 import contextlib
 
 from redis.connection import Connection, ConnectionPool
+from redis.exceptions import ConnectionError
 
 
 @contextlib.contextmanager
@@ -33,8 +34,9 @@ class TestMultiprocessing(object):
         assert proc.exitcode is 0
 
         # Check that connection is still alive after fork process has exited.
-        conn.send_command('ping')
-        assert conn.read_response() == b'PONG'
+        with pytest.raises(ConnectionError):
+            assert conn.send_command('ping') is None
+            assert conn.read_response() == b'PONG'
 
     def test_close_connection_in_main(self):
         conn = Connection()
@@ -54,7 +56,7 @@ class TestMultiprocessing(object):
         ev.set()
 
         proc.join(3)
-        assert proc.exitcode is 0
+        assert proc.exitcode is 1
 
     @pytest.mark.parametrize('max_connections', [1, 2, None])
     def test_pool(self, max_connections):
@@ -81,8 +83,9 @@ class TestMultiprocessing(object):
         # Check that connection is still alive after fork process has exited.
         conn = pool.get_connection('ping')
         with exit_callback(pool.release, conn):
-            conn.send_command('ping')
-            assert conn.read_response() == b'PONG'
+            with pytest.raises(ConnectionError):
+                assert conn.send_command('ping') is None
+                assert conn.read_response() == b'PONG'
 
     @pytest.mark.parametrize('max_connections', [1, 2, None])
     def test_close_pool_in_main(self, max_connections):
