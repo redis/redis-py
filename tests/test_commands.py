@@ -8,7 +8,7 @@ import time
 
 from redis._compat import (unichr, ascii_letters, iteritems, iterkeys,
                            itervalues, long)
-from redis.client import parse_info
+from redis.client import parse_info, bool_ok
 from redis import exceptions
 
 from .conftest import skip_if_server_version_lt, skip_if_server_version_gte
@@ -1638,6 +1638,19 @@ class TestRedisCommands(object):
     def test_cluster_slaves(self, mock_cluster_resp_slaves):
         assert isinstance(mock_cluster_resp_slaves.cluster(
             'slaves', 'nodeid'), dict)
+
+    @skip_if_server_version_lt('3.0.0')
+    def test_readwrite(self, r):
+        assert bool_ok(r.readwrite())
+
+    @skip_if_server_version_lt('3.0.0')
+    def test_readonly_invalid_cluster_state(self, r):
+        with pytest.raises(exceptions.RedisError):
+            r.readonly()
+
+    @skip_if_server_version_lt('3.0.0')
+    def test_readonly(self, mock_cluster_resp_ok):
+        assert mock_cluster_resp_ok.readonly() is True
 
     # GEO COMMANDS
     @skip_if_server_version_lt('3.2.0')
