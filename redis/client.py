@@ -499,8 +499,8 @@ class Redis(object):
         string_keys_to_dict('SORT', sort_return_tuples),
         string_keys_to_dict('ZSCORE ZINCRBY GEODIST', float_or_none),
         string_keys_to_dict(
-            'FLUSHALL FLUSHDB LSET LTRIM MSET PFMERGE RENAME '
-            'SAVE SELECT SHUTDOWN SLAVEOF SWAPDB WATCH UNWATCH',
+            'FLUSHALL FLUSHDB LSET LTRIM MSET PFMERGE READONLY READWRITE '
+            'RENAME SAVE SELECT SHUTDOWN SLAVEOF SWAPDB WATCH UNWATCH ',
             bool_ok
         ),
         string_keys_to_dict('BLPOP BRPOP', lambda r: r and tuple(r) or None),
@@ -927,6 +927,14 @@ class Redis(object):
         if not isinstance(timeout, (int, long)):
             raise DataError("CLIENT PAUSE timeout must be an integer")
         return self.execute_command('CLIENT PAUSE', str(timeout))
+
+    def readwrite(self):
+        "Disables read queries for a connection to a Redis Cluster slave node"
+        return self.execute_command('READWRITE')
+
+    def readonly(self):
+        "Enables read queries for a connection to a Redis Cluster replica node"
+        return self.execute_command('READONLY')
 
     def config_get(self, pattern="*"):
         "Return a dictionary of configuration based on the ``pattern``"

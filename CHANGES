@@ -16,6 +16,7 @@
       AuthenticationError is now a subclass of ConnectionError, which will
       cause the connection to be disconnected and cleaned up appropriately.
       #923
+    * Add READONLY and READWRITE commands. Thanks @theodesp. #1114
 * 3.2.1
     * Fix SentinelConnectionPool to work in multiprocess/forked environments.
 * 3.2.0
