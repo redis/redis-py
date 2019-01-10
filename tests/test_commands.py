@@ -2205,6 +2205,22 @@ class TestRedisCommands(object):
         # xread starting after the last message returns an empty message list
         assert r.xreadgroup(group, consumer, streams={stream: '>'}) == expected
 
+        r.xgroup_destroy(stream, group)
+        r.xgroup_create(stream, group, '0')
+        # delete all the messages in the stream
+        expected = [
+            [
+                stream.encode(),
+                [
+                    (m1, {}),
+                    (m2, {}),
+                ]
+            ]
+        ]
+        r.xreadgroup(group, consumer, streams={stream: '>'})
+        r.xtrim(stream, 0)
+        assert r.xreadgroup(group, consumer, streams={stream: '0'}) == expected
+
     @skip_if_server_version_lt('5.0.0')
     def test_xrevrange(self, r):
         stream = 'stream'

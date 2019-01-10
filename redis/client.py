@@ -191,6 +191,8 @@ def parse_sentinel_get_master(response):
 
 def pairs_to_dict(response, decode_keys=False):
     "Create a dict given a list of key/value pairs"
+    if response is None:
+        return {}
     if decode_keys:
         # the iter form is faster, but I don't know how to make that work
         # with a nativestr() map
