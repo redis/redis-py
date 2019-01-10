@@ -2205,6 +2205,16 @@ class TestRedisCommands(object):
         # xread starting after the last message returns an empty message list
         assert r.xreadgroup(group, consumer, streams={stream: '>'}) == expected
 
+        r.xgroup_destroy(stream, group)
+
+        # xreadgroup with noack does not have any items in the PEL
+        r.xgroup_create(stream, group, '0')
+        assert len(r.xreadgroup(group, consumer, streams={stream: '>'},
+                                noack=True)[0][1]) == 2
+        # now there should be nothing pending
+        assert len(r.xreadgroup(group, consumer,
+                                streams={stream: '0'})[0][1]) == 0
+
     @skip_if_server_version_lt('5.0.0')
     def test_xrevrange(self, r):
         stream = 'stream'

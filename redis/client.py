@@ -2199,7 +2199,7 @@ class Redis(object):
         return self.execute_command('XREAD', *pieces)
 
     def xreadgroup(self, groupname, consumername, streams, count=None,
-                   block=None):
+                   block=None, noack=False):
         """
         Read from a stream via a consumer group.
         groupname: name of the consumer group.
@@ -2209,6 +2209,7 @@ class Redis(object):
         count: if set, only return this many items, beginning with the
                earliest available.
         block: number of milliseconds to wait, if nothing already present.
+        noack: do not add messages to the PEL
         """
         pieces = [Token.get_token('GROUP'), groupname, consumername]
         if count is not None:
@@ -2222,6 +2223,8 @@ class Redis(object):
                                 "integer")
             pieces.append(Token.get_token("BLOCK"))
             pieces.append(str(block))
+        if noack:
+            pieces.append(Token.get_token("NOACK"))
         if not isinstance(streams, dict) or len(streams) == 0:
             raise DataError('XREADGROUP streams must be a non empty dict')
         pieces.append(Token.get_token('STREAMS'))
