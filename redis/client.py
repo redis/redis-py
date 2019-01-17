@@ -425,6 +425,19 @@ def parse_client_kill(response, **options):
     return nativestr(response) == 'OK'
 
 
+def parse_client_reply(response, **options):
+    if isinstance(response, (long, int)):
+        return int(response)
+    return nativestr(response) == 'OK'
+
+
+class ClientReplyModes:
+    ON = 'on'
+    OFF = 'off'
+    SKIP = 'skip'
+    SKIP_NEXT = 'skip_next'
+
+
 class Redis(object):
     """
     Implementation of the Redis protocol.
@@ -485,6 +498,7 @@ class Redis(object):
             'CLIENT ID': int,
             'CLIENT KILL': parse_client_kill,
             'CLIENT LIST': parse_client_list,
+            'CLIENT REPLY': parse_client_reply,
             'CLIENT SETNAME': bool_ok,
             'CLIENT UNBLOCK': lambda r: r and int(r) == 1 or False,
             'CLIENT PAUSE': bool_ok,
@@ -556,6 +570,43 @@ class Redis(object):
             'ZSCAN': parse_zscan,
         }
     )
+
+    current_client_reply_mode = ClientReplyModes.ON
+
+    def get_current_client_reply_mode(self):
+        return self.current_client_reply_mode
+
+    def set_current_client_reply_mode(self, new_value):
+        self.current_client_reply_mode = new_value
+
+    def is_fire_and_forget(self):
+        current_mode = self.get_current_client_reply_mode()
+        if current_mode == ClientReplyModes.OFF:
+            return True
+
+        if current_mode == ClientReplyModes.ON:
+            return False
+
+        if current_mode == ClientReplyModes.SKIP:
+            self.set_current_client_reply_mode(ClientReplyModes.SKIP_NEXT)
+            return True
+
+        if current_mode == ClientReplyModes.SKIP_NEXT:
+            self.set_current_client_reply_mode(ClientReplyModes.ON)
+            return True
+
+        return False
+
+    def apply_client_reply(self, *args):
+        command_name = args[0]
+        if command_name == 'CLIENT REPLY':
+            client_reply_option = args[1]
+            if client_reply_option == 'skip':
+                self.set_current_client_reply_mode(ClientReplyModes.SKIP)
+            elif client_reply_option == 'off':
+                self.set_current_client_reply_mode(ClientReplyModes.OFF)
+            elif client_reply_option == 'on':
+                self.set_current_client_reply_mode(ClientReplyModes.ON)
 
     @classmethod
     def from_url(cls, url, db=None, **kwargs):
@@ -763,6 +814,7 @@ class Redis(object):
         command_name = args[0]
         connection = pool.get_connection(command_name, **options)
         try:
+            self.apply_client_reply(*args)
             connection.send_command(*args)
             return self.parse_response(connection, command_name, **options)
         except (ConnectionError, TimeoutError) as e:
@@ -777,7 +829,10 @@ class Redis(object):
     def parse_response(self, connection, command_name, **options):
         "Parses a response from the Redis server"
         try:
-            response = connection.read_response()
+            if self.is_fire_and_forget():
+                return None
+            else:
+                response = connection.read_response()
         except ResponseError:
             if EMPTY_RESPONSE in options:
                 return options[EMPTY_RESPONSE]
@@ -887,6 +942,24 @@ class Redis(object):
         if not isinstance(timeout, (int, long)):
             raise DataError("CLIENT PAUSE timeout must be an integer")
         return self.execute_command('CLIENT PAUSE', str(timeout))
+
+    def client_reply(self, _type=None):
+        """
+        Controls whether server will wait for a reply after sending command.
+        ON means standard request-reply behavior, waiting for reply.
+        OFF means fire-and-forget behavior, request sent without waiting for reply.
+        SKIP means apply fire-and-forget behavior only on the next command.
+        :param _type: optional. one of the client types (on, off,
+         skip)
+        """
+        "Controls whether the server will reply the client's commands"
+        if _type is not None:
+            client_types = ('on', 'off', 'skip')
+
+            if str(_type).lower() not in client_types:
+                raise DataError("CLIENT REPLY _type must be one of %r" %
+                                (client_types,))
+            return self.execute_command('CLIENT REPLY', str(_type))
 
     def config_get(self, pattern="*"):
         "Return a dictionary of configuration based on the ``pattern``"

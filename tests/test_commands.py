@@ -162,6 +162,32 @@ class TestRedisCommands(object):
         with pytest.raises(exceptions.RedisError):
             r.client_pause(timeout='not an integer')
 
+    @skip_if_server_version_lt('3.2.0')
+    def test_client_reply_on(self, r):
+        r.client_reply('on')
+        assert r.ping()
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_client_reply_skip(self, r):
+        # calling CLIENT REPLY SKIP does not reply
+        assert r.client_reply('skip') is None
+        # with SKIP now in effect, the next call does not reply
+        assert r.client_setname('redis_py_test') is None
+        # but the call after that DOES reply
+        assert r.client_setname('redis_py_test')
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_client_reply_off(self, r):
+        # calling CLIENT REPLY OFF does not reply
+        assert r.client_reply('off') is None
+        # with OFF in effect, subsequent calls do not reply
+        assert r.client_setname('redis_py_test_foo') is None
+        assert r.client_setname('redis_py_test_bar') is None
+        # set CLIENT REPLY ON to confirm last call went to server
+        r.client_reply('on')
+        # the next call DOES reply with the last value we set
+        assert r.client_getname() == 'redis_py_test_bar'
+
     def test_config_get(self, r):
         data = r.config_get()
         assert 'maxmemory' in data
