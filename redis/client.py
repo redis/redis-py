@@ -947,7 +947,7 @@ class Redis(object):
         """
         Controls whether server will wait for a reply after sending command.
         ON means standard request-reply behavior, waiting for reply.
-        OFF means fire-and-forget behavior, request sent without waiting for reply.
+        OFF means fire-and-forget behavior, request sent not waiting for reply.
         SKIP means apply fire-and-forget behavior only on the next command.
         :param _type: optional. one of the client types (on, off,
          skip)
