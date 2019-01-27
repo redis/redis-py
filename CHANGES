@@ -1,4 +1,6 @@
 * 3.1.0 (in development)
+    * Fixed an issue with retry_on_timeout logic that caused some TimedOut
+      errors to be retried. Thanks Aaron Yang. #1022/#1023
     * Added support for SNI for SSL. Thanks @oridistor and Roey Prat. #1087
     * Fixed ConnectionPool repr for pools with no connections. Thanks
       Cody Scott. #1043/#995
