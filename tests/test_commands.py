@@ -1686,8 +1686,8 @@ class TestRedisCommands(object):
                  (2.1873744593677, 41.406342043777, 'place2')
 
         r.geoadd('barcelona', *values)
-        assert r.geohash('barcelona', 'place1', 'place2') ==\
-            ['sp3e9yg3kd0', 'sp3e9cbc3t0']
+        assert r.geohash('barcelona', 'place1', 'place2', 'place3') ==\
+            ['sp3e9yg3kd0', 'sp3e9cbc3t0', None]
 
     @skip_if_server_version_lt('3.2.0')
     def test_geopos(self, r):

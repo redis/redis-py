@@ -1,4 +1,6 @@
 * 3.1.0 (in development)
+    * Fixed GEOHASH to return a None value when specifying a place that
+      doesn't exist on the server. Thanks @guybe7. #1126
     * Fixed XREADGROUP to return an empty dictionary for messages that
       have been deleted but still exist in the unacknowledged queue. Thanks
       @xeizmendi. #1116
