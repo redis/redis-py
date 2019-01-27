@@ -246,6 +246,12 @@ def int_or_none(response):
     return int(response)
 
 
+def string_or_none(response):
+    if response is None:
+        return None
+    return nativestr(response)
+
+
 def parse_stream_list(response):
     if response is None:
         return None
@@ -510,7 +516,7 @@ class Redis(object):
             'CONFIG RESETSTAT': bool_ok,
             'CONFIG SET': bool_ok,
             'DEBUG OBJECT': parse_debug_object,
-            'GEOHASH': lambda r: list(map(nativestr, r)),
+            'GEOHASH': lambda r: list(map(string_or_none, r)),
             'GEOPOS': lambda r: list(map(lambda ll: (float(ll[0]),
                                          float(ll[1]))
                                          if ll is not None else None, r)),
