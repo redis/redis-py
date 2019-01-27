@@ -1,4 +1,7 @@
 * 3.1.0 (in development)
+    * Added support for SNI for SSL. Thanks @oridistor and Roey Prat. #1087
+    * Fixed ConnectionPool repr for pools with no connections. Thanks
+      Cody Scott. #1043/#995
     * Fixed GEOHASH to return a None value when specifying a place that
       doesn't exist on the server. Thanks @guybe7. #1126
     * Fixed XREADGROUP to return an empty dictionary for messages that
