@@ -26,7 +26,12 @@ def _get_client(cls, request=None, **kwargs):
     client.flushdb()
     if request:
         def teardown():
-            client.flushdb()
+            try:
+                client.flushdb()
+            except redis.ConnectionError:
+                # handle cases where a test disconnected a client
+                # just manually retry the flushdb
+                client.flushdb()
             client.connection_pool.disconnect()
         request.addfinalizer(teardown)
     return client
