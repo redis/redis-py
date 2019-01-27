@@ -885,7 +885,7 @@ class ConnectionPool(object):
             path = url.path
             hostname = url.hostname
 
-        # We only support redis:// and unix:// schemes.
+        # We only support redis://, rediss:// and unix:// schemes.
         if url.scheme == 'unix':
             url_options.update({
                 'password': password,
@@ -893,7 +893,7 @@ class ConnectionPool(object):
                 'connection_class': UnixDomainSocketConnection,
             })
 
-        else:
+        elif url.scheme in ('redis', 'rediss'):
             url_options.update({
                 'host': hostname,
                 'port': int(url.port or 6379),
@@ -910,6 +910,10 @@ class ConnectionPool(object):
 
             if url.scheme == 'rediss':
                 url_options['connection_class'] = SSLConnection
+        else:
+            valid_schemes = ', '.join(('redis://', 'rediss://', 'unix://'))
+            raise ValueError('Redis URL must specify one of the following'
+                             'schemes (%s)' % valid_schemes)
 
         # last shot at the db value
         url_options['db'] = int(url_options.get('db', db or 0))

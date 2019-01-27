@@ -308,6 +308,10 @@ class TestConnectionPoolURLParsing(object):
             'password': None,
         }
 
+    def test_invalid_scheme_raises_error(self):
+        with pytest.raises(ValueError):
+            redis.ConnectionPool.from_url('localhost')
+
 
 class TestConnectionPoolUnixSocketURLParsing(object):
     def test_defaults(self):
