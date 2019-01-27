@@ -2213,7 +2213,7 @@ class TestRedisCommands(object):
         # now there should be nothing pending
         assert len(r.xreadgroup(group, consumer,
                                 streams={stream: '0'})[0][1]) == 0
-        
+
         r.xgroup_destroy(stream, group)
         r.xgroup_create(stream, group, '0')
         # delete all the messages in the stream

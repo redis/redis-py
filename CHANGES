@@ -1,4 +1,7 @@
 * 3.1.0 (in development)
+    * Fixed XREADGROUP to return an empty dictionary for messages that
+      have been deleted but still exist in the unacknowledged queue. Thanks
+      @xeizmendi. #1116
     * Added an owned method to Lock objects. owned returns a boolean
       indicating whether the current lock instance still owns the lock.
       Thanks Dave Johansen. #1112
