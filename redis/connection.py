@@ -729,11 +729,24 @@ class SSLConnection(Connection):
     def _connect(self):
         "Wrap the socket with SSL support"
         sock = super(SSLConnection, self)._connect()
-        sock = ssl.wrap_socket(sock,
-                               cert_reqs=self.cert_reqs,
-                               keyfile=self.keyfile,
-                               certfile=self.certfile,
-                               ca_certs=self.ca_certs)
+        if hasattr(ssl, "create_default_context"):
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = self.cert_reqs
+            if self.certfile and self.keyfile:
+                context.load_cert_chain(certfile=self.certfile,
+                                        keyfile=self.keyfile)
+            if self.ca_certs:
+                context.load_verify_locations(self.ca_certs)
+            sock = context.wrap_socket(sock, server_hostname=self.host)
+        else:
+            # In case this code runs in a version which is older than 2.7.9,
+            # we want to fall back to old code
+            sock = ssl.wrap_socket(sock,
+                                   cert_reqs=self.cert_reqs,
+                                   keyfile=self.keyfile,
+                                   certfile=self.certfile,
+                                   ca_certs=self.ca_certs)
         return sock
 
 
