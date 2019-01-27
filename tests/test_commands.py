@@ -11,7 +11,8 @@ from redis._compat import (unichr, ascii_letters, iteritems, iterkeys,
 from redis.client import parse_info
 from redis import exceptions
 
-from .conftest import skip_if_server_version_lt, skip_if_server_version_gte
+from .conftest import (skip_if_server_version_lt, skip_if_server_version_gte,
+                       skip_unless_arch_bits)
 
 
 @pytest.fixture()
@@ -1689,6 +1690,7 @@ class TestRedisCommands(object):
         assert r.geohash('barcelona', 'place1', 'place2', 'place3') ==\
             ['sp3e9yg3kd0', 'sp3e9cbc3t0', None]
 
+    @skip_unless_arch_bits(64)
     @skip_if_server_version_lt('3.2.0')
     def test_geopos(self, r):
         values = (2.1909389952632, 41.433791470673, 'place1') +\
@@ -1735,6 +1737,7 @@ class TestRedisCommands(object):
         assert r.georadius('barcelona', 2.191, 41.433, 1, unit='km') ==\
             [b'place1']
 
+    @skip_unless_arch_bits(64)
     @skip_if_server_version_lt('3.2.0')
     def test_georadius_with(self, r):
         values = (2.1909389952632, 41.433791470673, 'place1') +\
@@ -1792,6 +1795,7 @@ class TestRedisCommands(object):
         r.georadius('barcelona', 2.191, 41.433, 1000, store='places_barcelona')
         assert r.zrange('places_barcelona', 0, -1) == [b'place1']
 
+    @skip_unless_arch_bits(64)
     @skip_if_server_version_lt('3.2.0')
     def test_georadius_store_dist(self, r):
         values = (2.1909389952632, 41.433791470673, 'place1') +\
@@ -1803,6 +1807,7 @@ class TestRedisCommands(object):
         # instead of save the geo score, the distance is saved.
         assert r.zscore('places_barcelona', 'place1') == 88.05060698409301
 
+    @skip_unless_arch_bits(64)
     @skip_if_server_version_lt('3.2.0')
     def test_georadiusmember(self, r):
         values = (2.1909389952632, 41.433791470673, 'place1') +\
