@@ -1,4 +1,4 @@
-* 3.1.0 (in development)
+* 3.1.0
     * Connection URLs must have one of the following schemes:
       redis://, rediss://, unix://. Thanks @jdupl123. #961/#969
     * Fixed an issue with retry_on_timeout logic that caused some TimeoutErrors
