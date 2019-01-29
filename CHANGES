@@ -1,6 +1,141 @@
+* 3.1.0 (in development)
+    * Connection URLs must have one of the following schemes:
+      redis://, rediss://, unix://. Thanks @jdupl123. #961/#969
+    * Fixed an issue with retry_on_timeout logic that caused some TimeoutErrors
+      to be retried. Thanks Aaron Yang. #1022/#1023
+    * Added support for SNI for SSL. Thanks @oridistor and Roey Prat. #1087
+    * Fixed ConnectionPool repr for pools with no connections. Thanks
+      Cody Scott. #1043/#995
+    * Fixed GEOHASH to return a None value when specifying a place that
+      doesn't exist on the server. Thanks @guybe7. #1126
+    * Fixed XREADGROUP to return an empty dictionary for messages that
+      have been deleted but still exist in the unacknowledged queue. Thanks
+      @xeizmendi. #1116
+    * Added an owned method to Lock objects. owned returns a boolean
+      indicating whether the current lock instance still owns the lock.
+      Thanks Dave Johansen. #1112
+    * Allow lock.acquire() to accept an optional token argument. If
+      provided, the token argument is used as the unique value used to claim
+      the lock. Thankd Dave Johansen. #1112
+    * Added a reacquire method to Lock objects. reaquire attempts to renew
+      the lock such that the timeout is extended to the same value that the
+      lock was initially acquired with. Thanks Ihor Kalnytskyi. #1014
+    * Stream names found within XREAD and XREADGROUP responses now properly
+      respect the decode_responses flag.
+    * XPENDING_RANGE now requires the user the specify the min, max and
+      count arguments. Newer versions of Redis prevent ount from being
+      infinite so it's left to the user to specify these values explicitly.
+    * ZADD now returns None when xx=True and incr=True and an element
+      is specified that doesn't exist in the sorted set. This matches
+      what the server returns in this case. #1084
+    * Added client_kill_filter that accepts various filters to identify
+      and kill clients. Thanks Theofanis Despoudis. #1098
+    * Fixed a race condition that occurred when unsubscribing and
+      resubscribing to the same channel or pattern in rapid succession.
+      Thanks Marcin Raczyński. #764
+    * Added a LockNotOwnedError that is raised when trying to extend or
+      release a lock that is no longer owned. This is a subclass of LockError
+      so previous code should continue to work as expected. Thanks Joshua
+      Harlow. #1095
+    * Fixed a bug in GEORADIUS that forced decoding of places without
+      respecting the decode_responses option. Thanks Bo Bayles. #1082
+* 3.0.1
+    * Fixed regression with UnixDomainSocketConnection caused by 3.0.0.
+      Thanks Jyrki Muukkonen
+    * Fixed an issue with the new asynchronous flag on flushdb and flushall.
+      Thanks rogeryen
+    * Updated Lock.locked() method to indicate whether *any* process has
+      acquired the lock, not just the current one. This is in line with
+      the behavior of threading.Lock. Thanks Alan Justino da Silva
+* 3.0.0
+  BACKWARDS INCOMPATIBLE CHANGES
+    * When using a Lock as a context manager and the lock fails to be acquired
+      a LockError is now raised. This prevents the code block inside the
+      context manager from being executed if the lock could not be acquired.
+    * Renamed LuaLock to Lock.
+    * Removed the pipeline based Lock implementation in favor of the LuaLock
+      implementation.
+    * Only bytes, strings and numbers (ints, longs and floats) are acceptable
+      for keys and values. Previously redis-py attempted to cast other types
+      to str() and store the result. This caused must confusion and frustration
+      when passing boolean values (cast to 'True' and 'False') or None values
+      (cast to 'None'). It is now the user's responsibility to cast all
+      key names and values to bytes, strings or numbers before passing the
+      value to redis-py.
+    * The StrictRedis class has been renamed to Redis. StrictRedis will
+      continue to exist as an alias of Redis for the forseeable future.
+    * The legacy Redis client class has been removed. It caused much confusion
+      to users.
+    * ZINCRBY arguments 'value' and 'amount' have swapped order to match the
+      the Redis server. The new argument order is: keyname, amount, value.
+    * MGET no longer raises an error if zero keys are passed in. Instead an
+      empty list is returned.
+    * MSET and MSETNX now require all keys/values to be specified in a single
+      dictionary argument named mapping. This was changed to allow for future
+      options to these commands in the future.
+    * ZADD now requires all element names/scores be specified in a single
+      dictionary argument named mapping. This was required to allow the NX,
+      XX, CH and INCR options to be specified.
+    * ssl_cert_reqs now has a default value of 'required' by default. This
+      should make connecting to a remote Redis server over SSL more secure.
+      Thanks u2mejc
+    * Removed support for EOL Python 2.6 and 3.3. Thanks jdufresne
+  OTHER CHANGES
+    * Added missing DECRBY command. Thanks derek-dchu
+    * CLUSTER INFO and CLUSTER NODES respones are now properly decoded to
+      strings.
+    * Added a 'locked()' method to Lock objects. This method returns True
+      if the lock has been acquired and owned by the current process,
+      otherwise False.
+    * EXISTS now supports multiple keys. It's return value is now the number
+      of keys in the list that exist.
+    * Ensure all commands can accept key names as bytes. This fixes issues
+      with BLPOP, BRPOP and SORT.
+    * All errors resulting from bad user input are raised as DataError
+      exceptions. DataError is a subclass of RedisError so this should be
+      transparent to anyone previously catching these.
+    * Added support for NX, XX, CH and INCR options to ZADD
+    * Added support for the MIGRATE command
+    * Added support for the MEMORY USAGE and MEMORY PURGE commands. Thanks
+      Itamar Haber
+    * Added support for the 'asynchronous' argument to FLUSHDB and FLUSHALL
+      commands. Thanks Itamar Haber
+    * Added support for the BITFIELD command. Thanks Charles Leifer and
+      Itamar Haber
+    * Improved performance on pipeline requests with large chunks of data.
+      Thanks tzickel
+    * Fixed test suite to not fail if another client is connected to the
+      server the tests are running against.
+    * Added support for SWAPDB. Thanks Itamar Haber
+    * Added support for all STREAM commands. Thanks Roey Prat and Itamar Haber
+    * SHUTDOWN now accepts the 'save' and 'nosave' arguments. Thanks
+      dwilliams-kenzan
+    * Added support for ZPOPMAX, ZPOPMIN, BZPOPMAX, BZPOPMIN. Thanks
+      Itamar Haber
+    * Added support for the 'type' argument in CLIENT LIST. Thanks Roey Prat
+    * Added support for CLIENT PAUSE. Thanks Roey Prat
+    * Added support for CLIENT ID and CLIENT UNBLOCK. Thanks Itamar Haber
+    * GEODIST now returns a None value when referencing a place that does
+      not exist. Thanks qingping209
+    * Added a ping() method to pubsub objects. Thanks krishan-carbon
+    * Fixed a bug with keys in the INFO dict that contained ':' symbols.
+      Thanks mzalimeni
+    * Fixed the select system call retry compatibility with Python 2.x.
+      Thanks lddubeau
+    * max_connections is now a valid querystring argument for creating
+      connection pools from URLs. Thanks mmaslowskicc
+    * Added the UNLINK command. Thanks yozel
+    * Added socket_type option to Connection for configurability.
+      Thanks garlicnation
+    * Lock.do_acquire now atomically sets acquires the lock and sets the
+      expire value via set(nx=True, px=timeout). Thanks 23doors
+    * Added 'count' argument to SPOP. Thanks AlirezaSadeghi
+    * Fixed an issue parsing client_list respones that contained an '='.
+      Thanks swilly22
 * 2.10.6
     * Various performance improvements. Thanks cjsimpson
-    * Fixed a bug with SRANDMEMBER where
+    * Fixed a bug with SRANDMEMBER where the behavior for `number=0` did
+      not match the spec. Thanks Alex Wang
     * Added HSTRLEN command. Thanks Alexander Putilin
     * Added the TOUCH command. Thanks Anis Jonischkeit
     * Remove unnecessary calls to the server when registering Lua scripts.
@@ -190,7 +325,7 @@
       for the report.
     * Connections now call socket.shutdown() prior to socket.close() to
       ensure communication ends immediately per the note at
-      http://docs.python.org/2/library/socket.html#socket.socket.close
+      https://docs.python.org/2/library/socket.html#socket.socket.close
       Thanks to David Martin for pointing this out.
     * Lock checks are now based on floats rather than ints. Thanks
       Vitja Makarov.
@@ -224,11 +359,11 @@
     * Prevent DISCARD from being called if MULTI wasn't also called. Thanks
       Pete Aykroyd.
     * SREM now returns an integer indicating the number of items removed from
-      the set. Thanks http://github.com/ronniekk.
+      the set. Thanks https://github.com/ronniekk.
     * Fixed a bug with BGSAVE and BGREWRITEAOF response callbacks with Python3.
       Thanks Nathan Wan.
     * Added CLIENT GETNAME and CLIENT SETNAME commands.
-      Thanks http://github.com/bitterb.
+      Thanks https://github.com/bitterb.
     * It's now possible to use len() on a pipeline instance to determine the
       number of commands that will be executed. Thanks Jon Parise.
     * Fixed a bug in INFO's parse routine with floating point numbers. Thanks

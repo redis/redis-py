@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-source /home/vagrant/redis-py/vagrant/redis_vars.sh
+source /home/vagrant/redis-py/build_tools/redis_vars.sh
 
 pushd /home/vagrant
 

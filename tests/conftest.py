@@ -5,18 +5,18 @@ from mock import Mock
 from distutils.version import StrictVersion
 
 
-_REDIS_VERSIONS = {}
+_REDIS_INFO = {}
 
 
-def get_version(**kwargs):
+def get_info(**kwargs):
     params = {'host': 'localhost', 'port': 6379, 'db': 9}
     params.update(kwargs)
     key = '%s:%s' % (params['host'], params['port'])
-    if key not in _REDIS_VERSIONS:
+    if key not in _REDIS_INFO:
         client = redis.Redis(**params)
-        _REDIS_VERSIONS[key] = client.info()['redis_version']
+        _REDIS_INFO[key] = client.info()
         client.connection_pool.disconnect()
-    return _REDIS_VERSIONS[key]
+    return _REDIS_INFO[key]
 
 
 def _get_client(cls, request=None, **kwargs):
@@ -26,20 +26,32 @@ def _get_client(cls, request=None, **kwargs):
     client.flushdb()
     if request:
         def teardown():
-            client.flushdb()
+            try:
+                client.flushdb()
+            except redis.ConnectionError:
+                # handle cases where a test disconnected a client
+                # just manually retry the flushdb
+                client.flushdb()
             client.connection_pool.disconnect()
         request.addfinalizer(teardown)
     return client
 
 
 def skip_if_server_version_lt(min_version):
-    check = StrictVersion(get_version()) < StrictVersion(min_version)
+    redis_version = get_info()['redis_version']
+    check = StrictVersion(redis_version) < StrictVersion(min_version)
     return pytest.mark.skipif(check, reason="")
 
 
 def skip_if_server_version_gte(min_version):
-    check = StrictVersion(get_version()) >= StrictVersion(min_version)
+    redis_version = get_info()['redis_version']
+    check = StrictVersion(redis_version) >= StrictVersion(min_version)
     return pytest.mark.skipif(check, reason="")
+
+
+def skip_unless_arch_bits(arch_bits):
+    return pytest.mark.skipif(get_info()['arch_bits'] != arch_bits,
+                              reason="server is not {}-bit".format(arch_bits))
 
 
 @pytest.fixture()
@@ -48,8 +60,11 @@ def r(request, **kwargs):
 
 
 @pytest.fixture()
-def sr(request, **kwargs):
-    return _get_client(redis.StrictRedis, request, **kwargs)
+def r2(request, **kwargs):
+    return [
+        _get_client(redis.Redis, request, **kwargs),
+        _get_client(redis.Redis, request, **kwargs),
+    ]
 
 
 def _gen_cluster_mock_resp(r, response):

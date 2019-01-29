@@ -1,23 +1,27 @@
-from __future__ import with_statement
+from __future__ import unicode_literals
 import pytest
 
 import redis
-from redis._compat import b, u, unichr, unicode
+from redis._compat import unichr, unicode
 
 
 class TestPipeline(object):
     def test_pipeline(self, r):
         with r.pipeline() as pipe:
-            pipe.set('a', 'a1').get('a').zadd('z', z1=1).zadd('z', z2=4)
-            pipe.zincrby('z', 'z1').zrange('z', 0, 5, withscores=True)
+            (pipe.set('a', 'a1')
+                 .get('a')
+                 .zadd('z', {'z1': 1})
+                 .zadd('z', {'z2': 4})
+                 .zincrby('z', 1, 'z1')
+                 .zrange('z', 0, 5, withscores=True))
             assert pipe.execute() == \
                 [
                     True,
-                    b('a1'),
+                    b'a1',
                     True,
                     True,
                     2.0,
-                    [(b('z1'), 2.0), (b('z2'), 4)],
+                    [(b'z1', 2.0), (b'z2', 4)],
                 ]
 
     def test_pipeline_length(self, r):
@@ -40,9 +44,9 @@ class TestPipeline(object):
         with r.pipeline(transaction=False) as pipe:
             pipe.set('a', 'a1').set('b', 'b1').set('c', 'c1')
             assert pipe.execute() == [True, True, True]
-            assert r['a'] == b('a1')
-            assert r['b'] == b('b1')
-            assert r['c'] == b('c1')
+            assert r['a'] == b'a1'
+            assert r['b'] == b'b1'
+            assert r['c'] == b'c1'
 
     def test_pipeline_no_transaction_watch(self, r):
         r['a'] = 0
@@ -70,7 +74,7 @@ class TestPipeline(object):
             with pytest.raises(redis.WatchError):
                 pipe.execute()
 
-            assert r['a'] == b('bad')
+            assert r['a'] == b'bad'
 
     def test_exec_error_in_response(self, r):
         """
@@ -83,23 +87,23 @@ class TestPipeline(object):
             result = pipe.execute(raise_on_error=False)
 
             assert result[0]
-            assert r['a'] == b('1')
+            assert r['a'] == b'1'
             assert result[1]
-            assert r['b'] == b('2')
+            assert r['b'] == b'2'
 
             # we can't lpush to a key that's a string value, so this should
             # be a ResponseError exception
             assert isinstance(result[2], redis.ResponseError)
-            assert r['c'] == b('a')
+            assert r['c'] == b'a'
 
             # since this isn't a transaction, the other commands after the
             # error are still executed
             assert result[3]
-            assert r['d'] == b('4')
+            assert r['d'] == b'4'
 
             # make sure the pipe was restored to a working state
             assert pipe.set('z', 'zzz').execute() == [True]
-            assert r['z'] == b('zzz')
+            assert r['z'] == b'zzz'
 
     def test_exec_error_raised(self, r):
         r['c'] = 'a'
@@ -112,7 +116,35 @@ class TestPipeline(object):
 
             # make sure the pipe was restored to a working state
             assert pipe.set('z', 'zzz').execute() == [True]
-            assert r['z'] == b('zzz')
+            assert r['z'] == b'zzz'
+
+    def test_transaction_with_empty_error_command(self, r):
+        """
+        Commands with custom EMPTY_ERROR functionality return their default
+        values in the pipeline no matter the raise_on_error preference
+        """
+        for error_switch in (True, False):
+            with r.pipeline() as pipe:
+                pipe.set('a', 1).mget([]).set('c', 3)
+                result = pipe.execute(raise_on_error=error_switch)
+
+                assert result[0]
+                assert result[1] == []
+                assert result[2]
+
+    def test_pipeline_with_empty_error_command(self, r):
+        """
+        Commands with custom EMPTY_ERROR functionality return their default
+        values in the pipeline no matter the raise_on_error preference
+        """
+        for error_switch in (True, False):
+            with r.pipeline(transaction=False) as pipe:
+                pipe.set('a', 1).mget([]).set('c', 3)
+                result = pipe.execute(raise_on_error=error_switch)
+
+                assert result[0]
+                assert result[1] == []
+                assert result[2]
 
     def test_parse_error_raised(self, r):
         with r.pipeline() as pipe:
@@ -126,7 +158,7 @@ class TestPipeline(object):
 
             # make sure the pipe was restored to a working state
             assert pipe.set('z', 'zzz').execute() == [True]
-            assert r['z'] == b('zzz')
+            assert r['z'] == b'zzz'
 
     def test_watch_succeed(self, r):
         r['a'] = 1
@@ -137,8 +169,8 @@ class TestPipeline(object):
             assert pipe.watching
             a_value = pipe.get('a')
             b_value = pipe.get('b')
-            assert a_value == b('1')
-            assert b_value == b('2')
+            assert a_value == b'1'
+            assert b_value == b'2'
             pipe.multi()
 
             pipe.set('c', 3)
@@ -169,7 +201,7 @@ class TestPipeline(object):
             pipe.unwatch()
             assert not pipe.watching
             pipe.get('a')
-            assert pipe.execute() == [b('1')]
+            assert pipe.execute() == [b'1']
 
     def test_transaction_callable(self, r):
         r['a'] = 1
@@ -178,9 +210,9 @@ class TestPipeline(object):
 
         def my_transaction(pipe):
             a_value = pipe.get('a')
-            assert a_value in (b('1'), b('2'))
+            assert a_value in (b'1', b'2')
             b_value = pipe.get('b')
-            assert b_value == b('2')
+            assert b_value == b'2'
 
             # silly run-once code... incr's "a" so WatchError should be raised
             # forcing this all to run again. this should incr "a" once to "2"
@@ -193,7 +225,7 @@ class TestPipeline(object):
 
         result = r.transaction(my_transaction, 'a', 'b')
         assert result == [True]
-        assert r['c'] == b('4')
+        assert r['c'] == b'4'
 
     def test_exec_error_in_no_transaction_pipeline(self, r):
         r['a'] = 1
@@ -207,10 +239,10 @@ class TestPipeline(object):
             assert unicode(ex.value).startswith('Command # 1 (LLEN a) of '
                                                 'pipeline caused error: ')
 
-        assert r['a'] == b('1')
+        assert r['a'] == b'1'
 
     def test_exec_error_in_no_transaction_pipeline_unicode_command(self, r):
-        key = unichr(3456) + u('abcd') + unichr(3421)
+        key = unichr(3456) + 'abcd' + unichr(3421)
         r[key] = 1
         with r.pipeline(transaction=False) as pipe:
             pipe.llen(key)
@@ -223,4 +255,21 @@ class TestPipeline(object):
                                'error: ') % key
             assert unicode(ex.value).startswith(expected)
 
-        assert r[key] == b('1')
+        assert r[key] == b'1'
+
+    def test_pipeline_with_bitfield(self, r):
+        with r.pipeline() as pipe:
+            pipe.set('a', '1')
+            bf = pipe.bitfield('b')
+            pipe2 = (bf
+                     .set('u8', 8, 255)
+                     .get('u8', 0)
+                     .get('u4', 8)  # 1111
+                     .get('u4', 12)  # 1111
+                     .get('u4', 13)  # 1110
+                     .execute())
+            pipe.get('a')
+            response = pipe.execute()
+
+            assert pipe == pipe2
+            assert response == [True, [0, 0, 15, 15, 14], b'1']

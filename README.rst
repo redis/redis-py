@@ -4,31 +4,36 @@ redis-py
 The Python interface to the Redis key-value store.
 
 .. image:: https://secure.travis-ci.org/andymccurdy/redis-py.png?branch=master
-        :target: http://travis-ci.org/andymccurdy/redis-py
+        :target: https://travis-ci.org/andymccurdy/redis-py
+.. image:: https://readthedocs.org/projects/redis-py/badge/?version=latest&style=flat
+        :target: https://redis-py.readthedocs.io/en/latest/
+.. image:: https://badge.fury.io/py/redis.svg
+        :target: https://pypi.org/project/redis/
 
 Installation
 ------------
 
 redis-py requires a running Redis server. See `Redis's quickstart
-<http://redis.io/topics/quickstart>`_ for installation instructions.
+<https://redis.io/topics/quickstart>`_ for installation instructions.
+
+redis-py can be installed using `pip` similar to other Python packages. Do not use `sudo`
+with `pip`. It is usually good to work in a
+`virtualenv <https://virtualenv.pypa.io/en/latest/>`_ or
+`venv <https://docs.python.org/3/library/venv.html>`_ to avoid conflicts with other package
+managers and Python projects. For a quick introduction see
+`Python Virtual Environments in Five Minutes <https://bit.ly/py-env>`_.
 
 To install redis-py, simply:
 
 .. code-block:: bash
 
-    $ sudo pip install redis
-
-or alternatively (you really should be using pip though):
-
-.. code-block:: bash
-
-    $ sudo easy_install redis
+    $ pip install redis
 
 or from source:
 
 .. code-block:: bash
 
-    $ sudo python setup.py install
+    $ python setup.py install
 
 
 Getting Started
@@ -37,7 +42,7 @@ Getting Started
 .. code-block:: pycon
 
     >>> import redis
-    >>> r = redis.StrictRedis(host='localhost', port=6379, db=0)
+    >>> r = redis.Redis(host='localhost', port=6379, db=0)
     >>> r.set('foo', 'bar')
     True
     >>> r.get('foo')
@@ -48,23 +53,169 @@ Python 2. The user is responsible for decoding to Python 3 strings or Python 2
 unicode objects.
 
 If **all** string responses from a client should be decoded, the user can
-specify `decode_responses=True` to `StrictRedis.__init__`. In this case, any
+specify `decode_responses=True` to `Redis.__init__`. In this case, any
 Redis command that returns a string type will be decoded with the `encoding`
 specified.
+
+
+Upgrading from redis-py 2.X to 3.0
+----------------------------------
+
+redis-py 3.0 introduces many new features but required a number of backwards
+incompatible changes to be made in the process. This section attempts to
+provide an upgrade path for users migrating from 2.X to 3.0.
+
+
+Python Version Support
+^^^^^^^^^^^^^^^^^^^^^^
+
+redis-py 3.0 now supports Python 2.7 and Python 3.4+. Python 2.6 and 3.3
+support has been dropped.
+
+
+Client Classes: Redis and StrictRedis
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+redis-py 3.0 drops support for the legacy "Redis" client class. "StrictRedis"
+has been renamed to "Redis" and an alias named "StrictRedis" is provided so
+that users previously using "StrictRedis" can continue to run unchanged.
+
+The 2.X "Redis" class provided alternative implementations of a few commands.
+This confused users (rightfully so) and caused a number of support issues. To
+make things easier going forward, it was decided to drop support for these
+alternate implementations and instead focus on a single client class.
+
+2.X users that are already using StrictRedis don't have to change the class
+name. StrictRedis will continue to work for the forseeable future.
+
+2.X users that are using the Redis class will have to make changes if they
+use any of the following commands:
+
+* SETEX: The argument order has changed. The new order is (name, time, value).
+* LREM: The argument order has changed. The new order is (name, num, value).
+* TTL and PTTL: The return value is now always an int and matches the
+  official Redis command (>0 indicates the timeout, -1 indicates that the key
+  exists but that it has no expire time set, -2 indicates that the key does
+  not exist)
+
+
+SSL Connections
+^^^^^^^^^^^^^^^
+
+redis-py 3.0 changes the default value of the `ssl_cert_reqs` option from
+`None` to `'required'`. See
+`Issue 1016 <https://github.com/andymccurdy/redis-py/issues/1016>`_. This
+change enforces hostname validation when accepting a cert from a remote SSL
+terminator. If the terminator doesn't properly set the hostname on the cert
+this will cause redis-py 3.0 to raise a ConnectionError.
+
+This check can be disabled by setting `ssl_cert_reqs` to `None`. Note that
+doing so removes the security check. Do so at your own risk.
+
+It has been reported that SSL certs received from AWS ElastiCache do not have
+proper hostnames and turning off hostname verification is currently required.
+
+
+MSET, MSETNX and ZADD
+^^^^^^^^^^^^^^^^^^^^^
+
+These commands all accept a mapping of key/value pairs. In redis-py 2.X
+this mapping could be specified as ``*args`` or as ``**kwargs``. Both of these
+styles caused issues when Redis introduced optional flags to ZADD. Relying on
+``*args`` caused issues with the optional argument order, especially in Python
+2.7. Relying on ``**kwargs`` caused potential collision issues of user keys with
+the argument names in the method signature.
+
+To resolve this, redis-py 3.0 has changed these three commands to all accept
+a single positional argument named mapping that is expected to be a dict. For
+MSET and MSETNX, the dict is a mapping of key-names -> values. For ZADD, the
+dict is a mapping of element-names -> score.
+
+MSET, MSETNX and ZADD now look like:
+
+.. code-block:: pycon
+
+    def mset(self, mapping):
+    def msetnx(self, mapping):
+    def zadd(self, name, mapping, nx=False, xx=False, ch=False, incr=False):
+
+All 2.X users that use these commands must modify their code to supply
+keys and values as a dict to these commands.
+
+
+ZINCRBY
+^^^^^^^
+
+redis-py 2.X accidentily modified the argument order of ZINCRBY, swapping the
+order of value and amount. ZINCRBY now looks like:
+
+.. code-block:: pycon
+
+    def zincrby(self, name, amount, value):
+
+All 2.X users that rely on ZINCRBY must swap the order of amount and value
+for the command to continue to work as intended.
+
+
+Encoding of User Input
+^^^^^^^^^^^^^^^^^^^^^^
+
+redis-py 3.0 only accepts user data as bytes, strings or numbers (ints, longs
+and floats). Attempting to specify a key or a value as any other type will
+raise a DataError exception.
+
+redis-py 2.X attempted to coerce any type of input into a string. While
+occasionally convenient, this caused all sorts of hidden errors when users
+passed boolean values (which were coerced to 'True' or 'False'), a None
+value (which was coerced to 'None') or other values, such as user defined
+types.
+
+All 2.X users should make sure that the keys and values they pass into
+redis-py are either bytes, strings or numbers.
+
+
+Locks
+^^^^^
+
+redis-py 3.0 drops support for the pipeline-based Lock and now only supports
+the Lua-based lock. In doing so, LuaLock has been renamed to Lock. This also
+means that redis-py Lock objects require Redis server 2.6 or greater.
+
+2.X users that were explicitly referring to "LuaLock" will have to now refer
+to "Lock" instead.
+
+
+Locks as Context Managers
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+redis-py 3.0 now raises a LockError when using a lock as a context manager and
+the lock cannot be acquired within the specified timeout. This is more of a
+bug fix than a backwards incompatible change. However, given an error is now
+raised where none was before, this might alarm some users.
+
+2.X users should make sure they're wrapping their lock code in a try/catch
+like this:
+
+.. code-block:: pycon
+
+    try:
+        with r.lock('my-lock-key', blocking_timeout=5) as lock:
+            # code you want executed only after the lock has been acquired
+    except LockError:
+        # the lock wasn't acquired
+
 
 API Reference
 -------------
 
-The `official Redis command documentation <http://redis.io/commands>`_ does a
-great job of explaining each command in detail. redis-py exposes two client
-classes that implement these commands. The StrictRedis class attempts to adhere
+The `official Redis command documentation <https://redis.io/commands>`_ does a
+great job of explaining each command in detail. redis-py attempts to adhere
 to the official command syntax. There are a few exceptions:
 
 * **SELECT**: Not implemented. See the explanation in the Thread Safety section
   below.
 * **DEL**: 'del' is a reserved keyword in the Python syntax. Therefore redis-py
   uses 'delete' instead.
-* **CONFIG GET|SET**: These are implemented separately as config_get or config_set.
 * **MULTI/EXEC**: These are implemented as part of the Pipeline class. The
   pipeline is wrapped with the MULTI and EXEC statements by default when it
   is executed, which can be disabled by specifying transaction=False.
@@ -82,18 +233,6 @@ to the official command syntax. There are a few exceptions:
   iterator method. These are purely for convenience so the user doesn't have
   to keep track of the cursor while iterating. Use the
   scan_iter/sscan_iter/hscan_iter/zscan_iter methods for this behavior.
-
-In addition to the changes above, the Redis class, a subclass of StrictRedis,
-overrides several other commands to provide backwards compatibility with older
-versions of redis-py:
-
-* **LREM**: Order of 'num' and 'value' arguments reversed such that 'num' can
-  provide a default value of zero.
-* **ZADD**: Redis specifies the 'score' argument before 'value'. These were swapped
-  accidentally when being implemented and not discovered until after people
-  were already using it. The Redis class expects \*args in the form of:
-  `name1, score1, name2, score2, ...`
-* **SETEX**: Order of 'time' and 'value' arguments reversed.
 
 
 More Detail
@@ -158,18 +297,11 @@ kind enough to create Python bindings. Using Hiredis can provide up to a
 performance increase is most noticeable when retrieving many pieces of data,
 such as from LRANGE or SMEMBERS operations.
 
-Hiredis is available on PyPI, and can be installed via pip or easy_install
-just like redis-py.
+Hiredis is available on PyPI, and can be installed via pip just like redis-py.
 
 .. code-block:: bash
 
     $ pip install hiredis
-
-or
-
-.. code-block:: bash
-
-    $ easy_install hiredis
 
 Response Callbacks
 ^^^^^^^^^^^^^^^^^^
@@ -272,7 +404,7 @@ could do something like this:
 .. code-block:: pycon
 
     >>> with r.pipeline() as pipe:
-    ...     while 1:
+    ...     while True:
     ...         try:
     ...             # put a WATCH on the key that holds our sequence value
     ...             pipe.watch('OUR-SEQUENCE-KEY')
@@ -305,7 +437,7 @@ explicitly calling reset():
 .. code-block:: pycon
 
     >>> pipe = r.pipeline()
-    >>> while 1:
+    >>> while True:
     ...     try:
     ...         pipe.watch('OUR-SEQUENCE-KEY')
     ...         ...
@@ -341,7 +473,7 @@ for new messages. Creating a `PubSub` object is easy.
 
 .. code-block:: pycon
 
-    >>> r = redis.StrictRedis(...)
+    >>> r = redis.Redis(...)
     >>> p = r.pubsub()
 
 Once a `PubSub` instance is created, channels and patterns can be subscribed
@@ -544,7 +676,7 @@ supported:
     1204
 
 
-LUA Scripting
+Lua Scripting
 ^^^^^^^^^^^^^
 
 redis-py supports the EVAL, EVALSHA, and SCRIPT commands. However, there are
@@ -553,16 +685,16 @@ scenarios. Therefore, redis-py exposes a Script object that makes scripting
 much easier to use.
 
 To create a Script instance, use the `register_script` function on a client
-instance passing the LUA code as the first argument. `register_script` returns
+instance passing the Lua code as the first argument. `register_script` returns
 a Script instance that you can use throughout your code.
 
-The following trivial LUA script accepts two parameters: the name of a key and
+The following trivial Lua script accepts two parameters: the name of a key and
 a multiplier value. The script fetches the value stored in the key, multiplies
 it with the multiplier value and returns the result.
 
 .. code-block:: pycon
 
-    >>> r = redis.StrictRedis()
+    >>> r = redis.Redis()
     >>> lua = """
     ... local value = redis.call('GET', KEYS[1])
     ... value = tonumber(value)
@@ -573,8 +705,8 @@ it with the multiplier value and returns the result.
 function. Script instances accept the following optional arguments:
 
 * **keys**: A list of key names that the script will access. This becomes the
-  KEYS list in LUA.
-* **args**: A list of argument values. This becomes the ARGV list in LUA.
+  KEYS list in Lua.
+* **args**: A list of argument values. This becomes the ARGV list in Lua.
 * **client**: A redis-py Client or Pipeline instance that will invoke the
   script. If client isn't specified, the client that intiially
   created the Script instance (the one that `register_script` was
@@ -589,7 +721,7 @@ Continuing the example from above:
     10
 
 The value of key 'foo' is set to 2. When multiply is invoked, the 'foo' key is
-passed to the script along with the multiplier value of 5. LUA executes the
+passed to the script along with the multiplier value of 5. Lua executes the
 script and returns the result, 10.
 
 Script instances can be executed using a different client instance, even one
@@ -597,12 +729,12 @@ that points to a completely different Redis server.
 
 .. code-block:: pycon
 
-    >>> r2 = redis.StrictRedis('redis2.example.com')
+    >>> r2 = redis.Redis('redis2.example.com')
     >>> r2.set('foo', 3)
     >>> multiply(keys=['foo'], args=[5], client=r2)
     15
 
-The Script object ensures that the LUA script is loaded into Redis's script
+The Script object ensures that the Lua script is loaded into Redis's script
 cache. In the event of a NOSCRIPT error, it will load the script and retry
 executing it.
 
@@ -622,7 +754,7 @@ execution.
 Sentinel support
 ^^^^^^^^^^^^^^^^
 
-redis-py can be used together with `Redis Sentinel <http://redis.io/topics/sentinel>`_
+redis-py can be used together with `Redis Sentinel <https://redis.io/topics/sentinel>`_
 to discover Redis nodes. You need to have at least one Sentinel daemon running
 in order to use redis-py's Sentinel support.
 
@@ -650,7 +782,7 @@ operations).
     >>> slave.get('foo')
     'bar'
 
-The master and slave objects are normal StrictRedis instances with their
+The master and slave objects are normal Redis instances with their
 connection pool bound to the Sentinel instance. When a Sentinel backed client
 attempts to establish a connection, it first queries the Sentinel servers to
 determine an appropriate host to connect to. If no server is found,
@@ -663,7 +795,7 @@ If no slaves can be connected to, a connection will be established with the
 master.
 
 See `Guidelines for Redis clients with support for Redis Sentinel
-<http://redis.io/topics/sentinel-clients>`_ to learn more about Redis Sentinel.
+<https://redis.io/topics/sentinel-clients>`_ to learn more about Redis Sentinel.
 
 Scan Iterators
 ^^^^^^^^^^^^^^
@@ -687,7 +819,7 @@ Author
 ^^^^^^
 
 redis-py is developed and maintained by Andy McCurdy (sedrik@gmail.com).
-It can be found here: http://github.com/andymccurdy/redis-py
+It can be found here: https://github.com/andymccurdy/redis-py
 
 Special thanks to:
 

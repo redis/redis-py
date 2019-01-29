@@ -2,7 +2,7 @@ import os
 import random
 import weakref
 
-from redis.client import StrictRedis
+from redis.client import Redis
 from redis.connection import ConnectionPool, Connection
 from redis.exceptions import (ConnectionError, ResponseError, ReadOnlyError,
                               TimeoutError)
@@ -171,13 +171,14 @@ class Sentinel(object):
         # if sentinel_kwargs isn't defined, use the socket_* options from
         # connection_kwargs
         if sentinel_kwargs is None:
-            sentinel_kwargs = dict([(k, v)
-                                    for k, v in iteritems(connection_kwargs)
-                                    if k.startswith('socket_')
-                                    ])
+            sentinel_kwargs = {
+                k: v
+                for k, v in iteritems(connection_kwargs)
+                if k.startswith('socket_')
+            }
         self.sentinel_kwargs = sentinel_kwargs
 
-        self.sentinels = [StrictRedis(hostname, port, **self.sentinel_kwargs)
+        self.sentinels = [Redis(hostname, port, **self.sentinel_kwargs)
                           for hostname, port in sentinels]
         self.min_other_sentinels = min_other_sentinels
         self.connection_kwargs = connection_kwargs
@@ -243,7 +244,7 @@ class Sentinel(object):
                 return slaves
         return []
 
-    def master_for(self, service_name, redis_class=StrictRedis,
+    def master_for(self, service_name, redis_class=Redis,
                    connection_pool_class=SentinelConnectionPool, **kwargs):
         """
         Returns a redis client instance for the ``service_name`` master.
@@ -254,7 +255,7 @@ class Sentinel(object):
         NOTE: If the master's address has changed, any cached connections to
         the old master are closed.
 
-        By default clients will be a redis.StrictRedis instance. Specify a
+        By default clients will be a redis.Redis instance. Specify a
         different class to the ``redis_class`` argument if you desire
         something different.
 
@@ -271,7 +272,7 @@ class Sentinel(object):
         return redis_class(connection_pool=connection_pool_class(
             service_name, self, **connection_kwargs))
 
-    def slave_for(self, service_name, redis_class=StrictRedis,
+    def slave_for(self, service_name, redis_class=Redis,
                   connection_pool_class=SentinelConnectionPool, **kwargs):
         """
         Returns redis client instance for the ``service_name`` slave(s).
@@ -279,7 +280,7 @@ class Sentinel(object):
         A SentinelConnectionPool class is used to retrive the slave's
         address before establishing a new connection.
 
-        By default clients will be a redis.StrictRedis instance. Specify a
+        By default clients will be a redis.Redis instance. Specify a
         different class to the ``redis_class`` argument if you desire
         something different.
 
