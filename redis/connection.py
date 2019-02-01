@@ -276,9 +276,7 @@ class PythonParser(BaseParser):
 
     def on_disconnect(self):
         "Called when the socket disconnects"
-        if self._sock is not None:
-            self._sock.close()
-            self._sock = None
+        self._sock = None
         if self._buffer is not None:
             self._buffer.close()
             self._buffer = None
@@ -473,12 +471,6 @@ class Connection(object):
     def __repr__(self):
         return self.description_format % self._description_args
 
-    def __del__(self):
-        try:
-            self.disconnect()
-        except Exception:
-            pass
-
     def register_connect_callback(self, callback):
         self._connect_callbacks.append(callback)
 
@@ -582,7 +574,8 @@ class Connection(object):
         if self._sock is None:
             return
         try:
-            self._sock.shutdown(socket.SHUT_RDWR)
+            if os.getpid() == self.pid:
+                self._sock.shutdown(socket.SHUT_RDWR)
             self._sock.close()
         except socket.error:
             pass
@@ -975,7 +968,6 @@ class ConnectionPool(object):
                     # another thread already did the work while we waited
                     # on the lock.
                     return
-                self.disconnect()
                 self.reset()
 
     def get_connection(self, command_name, *keys, **options):
@@ -1014,6 +1006,7 @@ class ConnectionPool(object):
 
     def disconnect(self):
         "Disconnects all connections in the pool"
+        self._checkpid()
         all_conns = chain(self._available_connections,
                           self._in_use_connections)
         for connection in all_conns:
@@ -1135,5 +1128,6 @@ class BlockingConnectionPool(ConnectionPool):
 
     def disconnect(self):
         "Disconnects all connections in the pool."
+        self._checkpid()
         for connection in self._connections:
             connection.disconnect()
