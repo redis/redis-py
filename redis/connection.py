@@ -471,6 +471,12 @@ class Connection(object):
     def __repr__(self):
         return self.description_format % self._description_args
 
+    def __del__(self):
+        try:
+            self.disconnect()
+        except Exception:
+            pass
+
     def register_connect_callback(self, callback):
         self._connect_callbacks.append(callback)
 
