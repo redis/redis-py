@@ -1,3 +1,10 @@
+* 3.1.1
+    * Significant improvements to handing connections with forked processes.
+      Parent and child processes no longer trample on each others' connections.
+      Thanks to Jay Rolette for the patch and highlighting this issue.
+      #504/#732/#784/#863
+    * PythonParser no longer closes the associated connection's socket. The
+      connection itself will close the socket. #1108/#1085
 * 3.1.0
     * Connection URLs must have one of the following schemes:
       redis://, rediss://, unix://. Thanks @jdupl123. #961/#969
