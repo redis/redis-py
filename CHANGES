@@ -1,4 +1,4 @@
-* 3.1.1
+* 3.1.1 (in development)
     * Significant improvements to handing connections with forked processes.
       Parent and child processes no longer trample on each others' connections.
       Thanks to Jay Rolette for the patch and highlighting this issue.
