@@ -527,7 +527,7 @@ class Connection(object):
                 if self.socket_keepalive:
                     sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                     for k, v in iteritems(self.socket_keepalive_options):
-                        sock.setsockopt(socket.SOL_TCP, k, v)
+                        sock.setsockopt(socket.IPPROTO_TCP, k, v)
 
                 # set the socket_connect_timeout before we connect
                 sock.settimeout(self.socket_connect_timeout)
