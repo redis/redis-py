@@ -609,9 +609,9 @@ class Connection(object):
                 errmsg = e.args[1]
             raise ConnectionError("Error %s while writing to socket. %s." %
                                   (errno, errmsg))
-        except Exception as e:
+        except:  # noqa: E722
             self.disconnect()
-            raise e
+            raise
 
     def send_command(self, *args):
         "Pack and send a command to the Redis server"
@@ -630,9 +630,9 @@ class Connection(object):
         "Read the response from a previously sent command"
         try:
             response = self._parser.read_response()
-        except Exception as e:
+        except:  # noqa: E722
             self.disconnect()
-            raise e
+            raise
         if isinstance(response, ResponseError):
             raise response
         return response
