@@ -5,6 +5,7 @@ import time
 import re
 
 from threading import Thread
+from redis.client import parse_client_list
 from redis.connection import ssl_available, to_bool
 from .conftest import skip_if_server_version_lt
 
@@ -16,10 +17,16 @@ class DummyConnection(object):
         self.kwargs = kwargs
         self.pid = os.getpid()
 
+    def connect(self):
+        pass
+
+    def is_ready_for_command(self):
+        return True
+
 
 class TestConnectionPool(object):
     def get_pool(self, connection_kwargs=None, max_connections=None,
-                 connection_class=DummyConnection):
+                 connection_class=redis.Connection):
         connection_kwargs = connection_kwargs or {}
         pool = redis.ConnectionPool(
             connection_class=connection_class,
@@ -29,7 +36,8 @@ class TestConnectionPool(object):
 
     def test_connection_creation(self):
         connection_kwargs = {'foo': 'bar', 'biz': 'baz'}
-        pool = self.get_pool(connection_kwargs=connection_kwargs)
+        pool = self.get_pool(connection_kwargs=connection_kwargs,
+                             connection_class=DummyConnection)
         connection = pool.get_connection('_')
         assert isinstance(connection, DummyConnection)
         assert connection.kwargs == connection_kwargs
@@ -67,6 +75,39 @@ class TestConnectionPool(object):
                              connection_class=redis.UnixDomainSocketConnection)
         expected = 'ConnectionPool<UnixDomainSocketConnection<path=/abc,db=1>>'
         assert repr(pool) == expected
+
+    def test_pool_provides_healthy_connections(self):
+        pool = self.get_pool(connection_class=redis.Connection,
+                             max_connections=2)
+        conn1 = pool.get_connection('_')
+        conn2 = pool.get_connection('_')
+
+        # set a unique name on the connection we'll be testing
+        conn1._same_connection_value = 'killed-client'
+        conn1.send_command('client', 'setname', 'redis-py-1')
+        assert conn1.read_response() == b'OK'
+        pool.release(conn1)
+
+        # find the well named client in the client list
+        conn2.send_command('client', 'list')
+        client_list = parse_client_list(conn2.read_response())
+        for client in client_list:
+            if client['name'] == 'redis-py-1':
+                break
+        else:
+            assert False, 'Client redis-py-1 not found in client list'
+
+        # kill the well named client
+        conn2.send_command('client', 'kill', client['addr'])
+        assert conn2.read_response() == b'OK'
+
+        # our connection should have been disconnected, but a quality
+        # connection pool would know this and only provide a healthy
+        # connection.
+        conn = pool.get_connection('_')
+        assert conn == conn1
+        conn.send_command('ping')
+        assert conn.read_response() == b'PONG'
 
 
 class TestBlockingConnectionPool(object):
@@ -399,14 +440,20 @@ class TestSSLConnectionURLParsing(object):
     @pytest.mark.skipif(not ssl_available, reason="SSL not installed")
     def test_cert_reqs_options(self):
         import ssl
-        pool = redis.ConnectionPool.from_url('rediss://?ssl_cert_reqs=none')
+
+        class DummyConnectionPool(redis.ConnectionPool):
+            def get_connection(self, *args, **kwargs):
+                return self.make_connection()
+
+        pool = DummyConnectionPool.from_url(
+            'rediss://?ssl_cert_reqs=none')
         assert pool.get_connection('_').cert_reqs == ssl.CERT_NONE
 
-        pool = redis.ConnectionPool.from_url(
+        pool = DummyConnectionPool.from_url(
             'rediss://?ssl_cert_reqs=optional')
         assert pool.get_connection('_').cert_reqs == ssl.CERT_OPTIONAL
 
-        pool = redis.ConnectionPool.from_url(
+        pool = DummyConnectionPool.from_url(
             'rediss://?ssl_cert_reqs=required')
         assert pool.get_connection('_').cert_reqs == ssl.CERT_REQUIRED
 
@@ -494,3 +541,17 @@ class TestConnection(object):
             'UnixDomainSocketConnection',
             'path=/path/to/socket,db=0',
         )
+
+    def test_can_read(self, r):
+        connection = r.connection_pool.get_connection('ping')
+        assert not connection.can_read()
+        connection.send_command('ping')
+        # wait for the server to respond
+        wait_until = time.time() + 2
+        while time.time() < wait_until:
+            if connection.can_read():
+                break
+            time.sleep(0.01)
+        assert connection.can_read()
+        assert connection.read_response() == b'PONG'
+        assert not connection.can_read()

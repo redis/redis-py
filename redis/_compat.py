@@ -9,17 +9,6 @@ if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and
     import socket
     import time
 
-    from select import select as _select, error as select_error
-
-    def select(rlist, wlist, xlist, timeout):
-        while True:
-            try:
-                return _select(rlist, wlist, xlist, timeout)
-            except select_error as e:
-                if e.args[0] == errno.EINTR:
-                    continue
-                raise
-
     # Wrapper for handling interruptable system calls.
     def _retryable_call(s, func, *args, **kwargs):
         # Some modules (SSL) use the _fileobject wrapper directly and
@@ -65,8 +54,6 @@ if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and
         return _retryable_call(sock, sock.recv_into, *args, **kwargs)
 
 else:  # Python 3.5 and above automatically retry EINTR
-    from select import select
-
     def recv(sock, *args, **kwargs):
         return sock.recv(*args, **kwargs)
 
