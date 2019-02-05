@@ -117,7 +117,7 @@ if hasattr(select, 'poll'):
         _WRITE_MASK = select.POLLOUT
 
         def __init__(self, sock):
-            super().__init__(sock)
+            super(PollSelector, self).__init__(sock)
             self.poller = select.poll()
             self.poller.register(sock, self._EVENT_MASK)
 
