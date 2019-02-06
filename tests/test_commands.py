@@ -8,7 +8,7 @@ import time
 
 from redis._compat import (unichr, ascii_letters, iteritems, iterkeys,
                            itervalues, long)
-from redis.client import parse_info, bool_ok
+from redis.client import parse_info
 from redis import exceptions
 
 from .conftest import skip_if_server_version_lt, skip_if_server_version_gte
@@ -1641,7 +1641,7 @@ class TestRedisCommands(object):
 
     @skip_if_server_version_lt('3.0.0')
     def test_readwrite(self, r):
-        assert bool_ok(r.readwrite())
+        assert r.readwrite()
 
     @skip_if_server_version_lt('3.0.0')
     def test_readonly_invalid_cluster_state(self, r):
