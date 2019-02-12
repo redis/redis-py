@@ -111,30 +111,37 @@ if hasattr(select, 'poll'):
         A poll-based selector that should work on (almost?) all versions
         of Unix
         """
-        _EVENT_MASK = (select.POLLIN | select.POLLPRI | select.POLLOUT |
-                       select.POLLERR | select.POLLHUP)
-        _READ_MASK = select.POLLIN | select.POLLPRI
-        _WRITE_MASK = select.POLLOUT
+        READ_MASK = select.POLLIN | select.POLLPRI
+        ERROR_MASK = select.POLLERR | select.POLLHUP
+        WRITE_MASK = select.POLLOUT
+
+        _READ_POLLER_MASK = READ_MASK | ERROR_MASK
+        _READY_POLLER_MASK = READ_MASK | ERROR_MASK | WRITE_MASK
 
         def __init__(self, sock):
             super(PollSelector, self).__init__(sock)
-            self.poller = select.poll()
-            self.poller.register(sock, self._EVENT_MASK)
+            self.read_poller = select.poll()
+            self.read_poller.register(sock, self._READ_POLLER_MASK)
+            self.ready_poller = select.poll()
+            self.ready_poller.register(sock, self._READY_POLLER_MASK)
 
         def close(self):
             """
             Close the selector.
             """
-            try:
-                self.poller.unregister(self.sock)
-            except (KeyError, ValueError):
-                # KeyError is raised if somehow the socket was not registered
-                # ValueError is raised if the socket's file descriptor is
-                #   negative.
-                # In either case, we can't do anything better than to remove
-                # the reference to the poller.
-                pass
-            self.poller = None
+            for poller in (self.read_poller, self.ready_poller):
+                try:
+                    self.read_poller.unregister(self.sock)
+                except (KeyError, ValueError):
+                    # KeyError is raised if somehow the socket was not
+                    #   registered
+                    # ValueError is raised if the socket's file descriptor is
+                    #   negative.
+                    # In either case, we can't do anything better than to
+                    # remove the reference to the poller.
+                    pass
+            self.read_poller = None
+            self.ready_poller = None
             self.sock = None
 
         def check_can_read(self, timeout=0):
@@ -145,16 +152,18 @@ if hasattr(select, 'poll'):
             This doesn't guarentee that the socket is still connected, just
             that there is data to read.
             """
-            events = self.poller.poll(0)
-            return bool(events and events[0][1] & self._READ_MASK)
+            timeout = int(timeout * 1000)
+            events = self.read_poller.poll(timeout)
+            return bool(events and events[0][1] & self.READ_MASK)
 
         def check_is_ready_for_command(self, timeout=0):
             """
             Return True if the socket is ready to send a command,
             otherwise False
             """
-            events = self.poller.poll(0)
-            return bool(events and events[0][1] == self._WRITE_MASK)
+            timeout = timeout * 1000
+            events = self.ready_poller.poll(timeout)
+            return bool(events and events[0][1] == self.WRITE_MASK)
 
 
 def has_selector(selector):
