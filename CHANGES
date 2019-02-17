@@ -1,4 +1,17 @@
-* 3.1.1 (in development)
+* 3.2.0
+    * Added support for `select.poll` to test whether data can be read
+      on a socket. This should allow for significantly more connections to
+      be used with pubsub. Fixes #486/#1115
+    * Attempt to guarentee that the ConnectionPool hands out healthy
+      connections. Healthy connections are those that have an established
+      socket connection to the Redis server, are ready to accept a command
+      and have no data available to read. Fixes #1127/#886
+    * Use the socket.IPPROTO_TCP constant instead of socket.SOL_TCP.
+      IPPROTO_TCP is available on more interpreters (Jython for instance).
+      Thanks @Junnplus. #1130
+    * Fixed a regression introduced in 3.0 that mishandles exceptions not
+      derived from the base Exception class. KeyboardInterrupt and
+      gevent.timeout notable. Thanks Christian Fersch. #1128/#1129
     * Significant improvements to handing connections with forked processes.
       Parent and child processes no longer trample on each others' connections.
       Thanks to Jay Rolette for the patch and highlighting this issue.
