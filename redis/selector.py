@@ -1,3 +1,4 @@
+import sys
 import errno
 import select
 from redis.exceptions import RedisError
@@ -105,6 +106,24 @@ if hasattr(select, 'select'):
             return bool(w and not r and not e)
 
 
+    class EventletSelector(SelectSelector):
+        """
+        A eventlet selector that handles a patched select
+        """
+        def check_is_ready_for_command(self, timeout):
+            """
+            Return True if the socket is ready to send a command,
+            otherwise False.
+            """
+            r, w, e = select.select([self.sock], [self.sock], [self.sock], timeout)
+            if w:
+                r, _, e = select.select([self.sock], [], [self.sock], 0)
+                if not r and not e:
+                    return True
+
+            return False
+
+
 if hasattr(select, 'poll'):
     class PollSelector(BaseSelector):
         """
@@ -183,6 +202,8 @@ def has_selector(selector):
         return False
 
 
+
+
 def DefaultSelector(sock):
     "Return the best selector for the platform"
     global _DEFAULT_SELECTOR
@@ -191,6 +212,16 @@ def DefaultSelector(sock):
             _DEFAULT_SELECTOR = PollSelector
         elif hasattr(select, 'select'):
             _DEFAULT_SELECTOR = SelectSelector
+
+            if 'eventlet' in sys.modules:
+                try:
+                    from eventlet.patcher import is_monkey_patched
+
+                    if is_monkey_patched(select):
+                        _DEFAULT_SELECTOR = EventletSelector
+
+                except ImportError:
+                    pass
         else:
             raise RedisError('Platform does not support any selectors')
     return _DEFAULT_SELECTOR(sock)
