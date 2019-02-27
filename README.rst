@@ -234,6 +234,7 @@ to the official command syntax. There are a few exceptions:
   to keep track of the cursor while iterating. Use the
   scan_iter/sscan_iter/hscan_iter/zscan_iter methods for this behavior.
 
+See also the python binding document `here <https://redis-py.readthedocs.io/en/latest/>`_.
 
 More Detail
 -----------
