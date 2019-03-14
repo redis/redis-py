@@ -1,4 +1,3 @@
-import os
 import random
 import weakref
 
@@ -124,17 +123,6 @@ class SentinelConnectionPool(ConnectionPool):
         except MasterNotFoundError:
             pass
         raise SlaveNotFoundError('No slave found for %r' % (self.service_name))
-
-    def _checkpid(self):
-        if self.pid != os.getpid():
-            self.disconnect()
-            self.reset()
-            self.__init__(self.service_name, self.sentinel_manager,
-                          is_master=self.is_master,
-                          check_connection=self.check_connection,
-                          connection_class=self.connection_class,
-                          max_connections=self.max_connections,
-                          **self.connection_kwargs)
 
 
 class Sentinel(object):
