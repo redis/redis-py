@@ -1,3 +1,5 @@
+* 3.2.1
+    * Fix SentinelConnectionPool to work in multiprocess/forked environments.
 * 3.2.0
     * Added support for `select.poll` to test whether data can be read
       on a socket. This should allow for significantly more connections to
