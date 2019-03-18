@@ -131,7 +131,7 @@ if hasattr(select, 'poll'):
             """
             for poller in (self.read_poller, self.ready_poller):
                 try:
-                    self.read_poller.unregister(self.sock)
+                    poller.unregister(self.sock)
                 except (KeyError, ValueError):
                     # KeyError is raised if somehow the socket was not
                     #   registered
