@@ -581,6 +581,8 @@ class Connection(object):
         self._parser.on_disconnect()
         if self._sock is None:
             return
+        self._selector.close()
+        self._selector = None
         try:
             if os.getpid() == self.pid:
                 self._sock.shutdown(socket.SHUT_RDWR)
