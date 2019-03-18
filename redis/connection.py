@@ -460,6 +460,7 @@ class Connection(object):
         self.retry_on_timeout = retry_on_timeout
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
+        self._selector = None
         self._parser = parser_class(socket_read_size=socket_read_size)
         self._description_args = {
             'host': self.host,
@@ -581,8 +582,9 @@ class Connection(object):
         self._parser.on_disconnect()
         if self._sock is None:
             return
-        self._selector.close()
-        self._selector = None
+        if self._selector is not None:
+            self._selector.close()
+            self._selector = None
         try:
             if os.getpid() == self.pid:
                 self._sock.shutdown(socket.SHUT_RDWR)

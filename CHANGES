@@ -1,3 +1,5 @@
+* 3.2.2 (in development)
+    * Cleanup the Connection's selector correctly. Thanks Bruce Merry. #1153
 * 3.2.1
     * Fix SentinelConnectionPool to work in multiprocess/forked environments.
 * 3.2.0
