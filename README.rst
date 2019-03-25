@@ -582,7 +582,7 @@ application.
     >>> p = r.pubsub(ignore_subscribe_messages=True)
     >>> p.subscribe('my-channel')
     >>> p.get_message()  # hides the subscribe message and returns None
-    >>> r.publish('my-channel')
+    >>> r.publish('my-channel', 'my data')
     1
     >>> p.get_message()
     {'channel': 'my-channel', 'data': 'my data', 'pattern': None, 'type': 'message'}
