@@ -45,15 +45,37 @@ def list_or_args(keys, args):
     return keys
 
 
+if sys.version_info[0] == 2:
+    _zero = datetime.timedelta(0)
+
+    class UTC(datetime.tzinfo):
+        """UTC (Python 2 compat)."""
+
+        def utcoffset(self, dt):
+            return _zero
+
+        def tzname(self, dt):
+            return "UTC"
+
+        def dst(self, dt):
+            return _zero
+
+    utc = UTC()
+    del UTC
+
+else:
+    utc = datetime.timezone.utc
+
+
 def timestamp_to_datetime(response):
-    "Converts a unix timestamp to a Python datetime object"
+    "Converts a Unix timestamp to a tz-aware Python datetime object"
     if not response:
         return None
     try:
         response = int(response)
     except ValueError:
         return None
-    return datetime.datetime.fromtimestamp(response)
+    return datetime.datetime.fromtimestamp(response, tz=utc)
 
 
 def string_keys_to_dict(key_string, callback):
