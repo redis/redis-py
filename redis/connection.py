@@ -177,26 +177,19 @@ class SocketBuffer(object):
         buf.seek(self.bytes_written)
         marker = 0
 
-        try:
-            while True:
-                data = recv(self._sock, socket_read_size)
-                # an empty string indicates the server shutdown the socket
-                if isinstance(data, bytes) and len(data) == 0:
-                    raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
-                buf.write(data)
-                data_length = len(data)
-                self.bytes_written += data_length
-                marker += data_length
+        while True:
+            data = recv(self._sock, socket_read_size)
+            # an empty string indicates the server shutdown the socket
+            if isinstance(data, bytes) and len(data) == 0:
+                raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
+            buf.write(data)
+            data_length = len(data)
+            self.bytes_written += data_length
+            marker += data_length
 
-                if length is not None and length > marker:
-                    continue
-                break
-        except socket.timeout:
-            raise TimeoutError("Timeout reading from socket")
-        except socket.error:
-            e = sys.exc_info()[1]
-            raise ConnectionError("Error while reading from socket: %s" %
-                                  (e.args,))
+            if length is not None and length > marker:
+                continue
+            break
 
     def read(self, length):
         length = length + 2  # make sure to read the \r\n terminator
@@ -391,22 +384,15 @@ class HiredisParser(BaseParser):
         response = self._reader.gets()
         socket_read_size = self.socket_read_size
         while response is False:
-            try:
-                if HIREDIS_USE_BYTE_BUFFER:
-                    bufflen = recv_into(self._sock, self._buffer)
-                    if bufflen == 0:
-                        raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
-                else:
-                    buffer = recv(self._sock, socket_read_size)
-                    # an empty string indicates the server shutdown the socket
-                    if not isinstance(buffer, bytes) or len(buffer) == 0:
-                        raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
-            except socket.timeout:
-                raise TimeoutError("Timeout reading from socket")
-            except socket.error:
-                e = sys.exc_info()[1]
-                raise ConnectionError("Error while reading from socket: %s" %
-                                      (e.args,))
+            if HIREDIS_USE_BYTE_BUFFER:
+                bufflen = recv_into(self._sock, self._buffer)
+                if bufflen == 0:
+                    raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
+            else:
+                buffer = recv(self._sock, socket_read_size)
+                # an empty string indicates the server shutdown the socket
+                if not isinstance(buffer, bytes) or len(buffer) == 0:
+                    raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
             if HIREDIS_USE_BYTE_BUFFER:
                 self._reader.feed(self._buffer, 0, bufflen)
             else:
@@ -639,6 +625,15 @@ class Connection(object):
         "Read the response from a previously sent command"
         try:
             response = self._parser.read_response()
+        except socket.timeout:
+            self.disconnect()
+            raise TimeoutError("Timeout reading from %s:%s" %
+                               (self.host, self.port))
+        except socket.error:
+            self.disconnect()
+            e = sys.exc_info()[1]
+            raise ConnectionError("Error while reading from %s:%s : %s" %
+                                  (self.host, self.port, e.args))
         except:  # noqa: E722
             self.disconnect()
             raise
