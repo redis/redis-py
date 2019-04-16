@@ -65,14 +65,30 @@ class TestConnectionPool(object):
         connection_kwargs = {'host': 'localhost', 'port': 6379, 'db': 1}
         pool = self.get_pool(connection_kwargs=connection_kwargs,
                              connection_class=redis.Connection)
-        expected = 'ConnectionPool<Connection<host=localhost,port=6379,db=1>>'
+        expected = 'ConnectionPool<Connection<host=localhost,port=6379,db=1,client_name=>>'
+        assert repr(pool) == expected
+
+    @skip_if_server_version_lt('2.6.9')
+    def test_repr_contains_db_info_tcp_wname(self):
+        connection_kwargs = {'host': 'localhost', 'port': 6379, 'db': 1, 'client_name': 'testing'}
+        pool = self.get_pool(connection_kwargs=connection_kwargs,
+                             connection_class=redis.Connection)
+        expected = 'ConnectionPool<Connection<host=localhost,port=6379,db=1,client_name=testing>>'
         assert repr(pool) == expected
 
     def test_repr_contains_db_info_unix(self):
         connection_kwargs = {'path': '/abc', 'db': 1}
         pool = self.get_pool(connection_kwargs=connection_kwargs,
                              connection_class=redis.UnixDomainSocketConnection)
-        expected = 'ConnectionPool<UnixDomainSocketConnection<path=/abc,db=1>>'
+        expected = 'ConnectionPool<UnixDomainSocketConnection<path=/abc,db=1,client_name=>>'
+        assert repr(pool) == expected
+
+    @skip_if_server_version_lt('2.6.9')
+    def test_repr_contains_db_info_unix_wname(self):
+        connection_kwargs = {'path': '/abc', 'db': 1, 'client_name': 'testing'}
+        pool = self.get_pool(connection_kwargs=connection_kwargs,
+                             connection_class=redis.UnixDomainSocketConnection)
+        expected = 'ConnectionPool<UnixDomainSocketConnection<path=/abc,db=1,client_name=testing>>'
         assert repr(pool) == expected
 
 
@@ -135,7 +151,13 @@ class TestBlockingConnectionPool(object):
 
     def test_repr_contains_db_info_tcp(self):
         pool = redis.ConnectionPool(host='localhost', port=6379, db=0)
-        expected = 'ConnectionPool<Connection<host=localhost,port=6379,db=0>>'
+        expected = 'ConnectionPool<Connection<host=localhost,port=6379,db=0,client_name=>>'
+        assert repr(pool) == expected
+
+    @skip_if_server_version_lt('2.6.9')
+    def test_repr_contains_db_info_tcp_wname(self):
+        pool = redis.ConnectionPool(host='localhost', port=6379, db=0, client_name='testing')
+        expected = 'ConnectionPool<Connection<host=localhost,port=6379,db=0,client_name=testing>>'
         assert repr(pool) == expected
 
     def test_repr_contains_db_info_unix(self):
@@ -144,7 +166,18 @@ class TestBlockingConnectionPool(object):
             path='abc',
             db=0,
         )
-        expected = 'ConnectionPool<UnixDomainSocketConnection<path=abc,db=0>>'
+        expected = 'ConnectionPool<UnixDomainSocketConnection<path=abc,db=0,client_name=>>'
+        assert repr(pool) == expected
+
+    @skip_if_server_version_lt('2.6.9')
+    def test_repr_contains_db_info_unix_wname(self):
+        pool = redis.ConnectionPool(
+            connection_class=redis.UnixDomainSocketConnection,
+            path='abc',
+            db=0,
+            client_name='testing',
+        )
+        expected = 'ConnectionPool<UnixDomainSocketConnection<path=abc,db=0,client_name=testing>>'
         assert repr(pool) == expected
 
 
@@ -495,7 +528,18 @@ class TestConnection(object):
         assert re.match('(.*)<(.*)<(.*)>>', repr(pool)).groups() == (
             'ConnectionPool',
             'Connection',
-            'host=localhost,port=6379,db=0',
+            'host=localhost,port=6379,db=0,client_name=',
+        )
+
+    @skip_if_server_version_lt('2.6.9')
+    def test_connect_from_url_tcp(self):
+        connection = redis.Redis.from_url('redis://localhost', client_name='testing')
+        pool = connection.connection_pool
+
+        assert re.match('(.*)<(.*)<(.*)>>', repr(pool)).groups() == (
+            'ConnectionPool',
+            'Connection',
+            'host=localhost,port=6379,db=0,client_name=testing',
         )
 
     def test_connect_from_url_unix(self):
@@ -505,5 +549,22 @@ class TestConnection(object):
         assert re.match('(.*)<(.*)<(.*)>>', repr(pool)).groups() == (
             'ConnectionPool',
             'UnixDomainSocketConnection',
-            'path=/path/to/socket,db=0',
+            'path=/path/to/socket,db=0,client_name=',
         )
+
+    @skip_if_server_version_lt('2.6.9')
+    def test_connect_from_url_unix(self):
+        connection = redis.Redis.from_url('unix:///path/to/socket', client_name='testing')
+        pool = connection.connection_pool
+
+        assert re.match('(.*)<(.*)<(.*)>>', repr(pool)).groups() == (
+            'ConnectionPool',
+            'UnixDomainSocketConnection',
+            'path=/path/to/socket,db=0,client_name=testing',
+        )
+
+    @skip_if_server_version_lt('2.6.9')
+    def test_name(self, r):
+        connection = redis.Redis(client_name='testing')
+
+        assert connection.client_getname() == 'testing'

@@ -425,14 +425,15 @@ else:
 
 class Connection(object):
     "Manages TCP communication to and from a Redis server"
-    description_format = "Connection<host=%(host)s,port=%(port)s,db=%(db)s>"
+    description_format = "Connection<host=%(host)s,port=%(port)s,db=%(db)s,client_name=%(client_name)s>"
 
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None, socket_connect_timeout=None,
                  socket_keepalive=False, socket_keepalive_options=None,
                  socket_type=0, retry_on_timeout=False, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
-                 parser_class=DefaultParser, socket_read_size=65536):
+                 parser_class=DefaultParser, socket_read_size=65536,
+                 client_name=''):
         self.pid = os.getpid()
         self.host = host
         self.port = int(port)
@@ -448,10 +449,12 @@ class Connection(object):
         self._sock = None
         self._selector = None
         self._parser = parser_class(socket_read_size=socket_read_size)
+        self._client_name = client_name
         self._description_args = {
             'host': self.host,
             'port': self.port,
             'db': self.db,
+            'client_name': self._client_name,
         }
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
@@ -556,6 +559,11 @@ class Connection(object):
             self.send_command('AUTH', self.password)
             if nativestr(self.read_response()) != 'OK':
                 raise AuthenticationError('Invalid Password')
+
+        if self._client_name:
+            self.send_command('CLIENT', 'SETNAME', self._client_name)
+            if nativestr(self.read_response()) != 'OK':
+                raise ConnectionError('Error setting client name')
 
         # if a database is specified, switch to it
         if self.db:
@@ -702,7 +710,7 @@ class Connection(object):
 
 
 class SSLConnection(Connection):
-    description_format = "SSLConnection<host=%(host)s,port=%(port)s,db=%(db)s>"
+    description_format = "SSL" + Connection.description_format
 
     def __init__(self, ssl_keyfile=None, ssl_certfile=None,
                  ssl_cert_reqs='required', ssl_ca_certs=None, **kwargs):
@@ -754,13 +762,14 @@ class SSLConnection(Connection):
 
 
 class UnixDomainSocketConnection(Connection):
-    description_format = "UnixDomainSocketConnection<path=%(path)s,db=%(db)s>"
+    description_format = "UnixDomainSocketConnection<path=%(path)s,db=%(db)s,client_name=%(client_name)s>"
 
     def __init__(self, path='', db=0, password=None,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  retry_on_timeout=False,
-                 parser_class=DefaultParser, socket_read_size=65536):
+                 parser_class=DefaultParser, socket_read_size=65536,
+                 client_name=''):
         self.pid = os.getpid()
         self.path = path
         self.db = db
@@ -770,9 +779,11 @@ class UnixDomainSocketConnection(Connection):
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
         self._parser = parser_class(socket_read_size=socket_read_size)
+        self._client_name = client_name
         self._description_args = {
             'path': self.path,
             'db': self.db,
+            'client_name': self._client_name,
         }
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
