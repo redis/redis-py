@@ -425,7 +425,8 @@ else:
 
 class Connection(object):
     "Manages TCP communication to and from a Redis server"
-    description_format = "Connection<host=%(host)s,port=%(port)s,db=%(db)s,client_name=%(client_name)s>"
+    description_format = "Connection<host=%(host)s,port=%(port)s,db=%(db)s," \
+                         "client_name=%(client_name)s>"
 
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None, socket_connect_timeout=None,
@@ -762,7 +763,8 @@ class SSLConnection(Connection):
 
 
 class UnixDomainSocketConnection(Connection):
-    description_format = "UnixDomainSocketConnection<path=%(path)s,db=%(db)s,client_name=%(client_name)s>"
+    description_format = "UnixDomainSocketConnection<path=%(path)s," \
+                         "db=%(db)s,client_name=%(client_name)s>"
 
     def __init__(self, path='', db=0, password=None,
                  socket_timeout=None, encoding='utf-8',
