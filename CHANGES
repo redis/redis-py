@@ -1,4 +1,6 @@
 * 3.2.2 (in development)
+    * Resolve a race condition with the PubSubWorkerThread. #1150
+    * Cleanup socket read error messages. Thanks Vic Yu. #1159
     * Cleanup the Connection's selector correctly. Thanks Bruce Merry. #1153
 * 3.2.1
     * Fix SentinelConnectionPool to work in multiprocess/forked environments.
