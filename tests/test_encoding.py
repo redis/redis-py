@@ -25,6 +25,20 @@ class TestEncoding(object):
         assert r.lrange('a', 0, -1) == result
 
 
+class TestEncodingErrors(object):
+    def test_ignore(self, request):
+        r = _get_client(redis.Redis, request=request, decode_responses=True,
+                        encoding_errors='ignore')
+        r.set('a', b'foo\xff')
+        assert r.get('a') == 'foo'
+
+    def test_replace(self, request):
+        r = _get_client(redis.Redis, request=request, decode_responses=True,
+                        encoding_errors='replace')
+        r.set('a', b'foo\xff')
+        assert r.get('a') == 'foo\ufffd'
+
+
 class TestCommandsAndTokensArentEncoded(object):
     @pytest.fixture()
     def r(self, request):
