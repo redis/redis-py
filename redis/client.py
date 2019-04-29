@@ -275,9 +275,11 @@ def parse_xclaim(response, **options):
 def parse_xinfo_stream(response):
     data = pairs_to_dict(response, decode_keys=True)
     first = data['first-entry']
-    data['first-entry'] = (first[0], pairs_to_dict(first[1]))
+    if first is not None:
+        data['first-entry'] = (first[0], pairs_to_dict(first[1]))
     last = data['last-entry']
-    data['last-entry'] = (last[0], pairs_to_dict(last[1]))
+    if last is not None:
+        data['last-entry'] = (last[0], pairs_to_dict(last[1]))
     return data
 
 
