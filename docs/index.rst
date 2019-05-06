@@ -21,3 +21,6 @@ Contents:
 
 .. automodule:: redis
    :members:
+
+.. automodule:: redis.sentinel
+   :members:
