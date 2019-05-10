@@ -815,6 +815,12 @@ that return Python iterators for convenience: `scan_iter`, `hscan_iter`,
     B 2
     C 3
 
+Cluster Mode
+^^^^^^^^^^^^
+
+redis-py does not currently support `Cluster Mode
+<https://redis.io/topics/cluster-tutorial>`_.
+
 Author
 ^^^^^^
 
