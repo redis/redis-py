@@ -68,6 +68,33 @@ def dict_merge(*dicts):
     return merged
 
 
+class CaseInsensitiveDict(dict):
+    "Case insensitive dict implementation. Assumes string keys only."
+
+    def __init__(self, data):
+        for k, v in iteritems(data):
+            self[k.upper()] = v
+
+    def __contains__(self, k):
+        return super(CaseInsensitiveDict, self).__contains__(k.upper())
+
+    def __delitem__(self, k):
+        super(CaseInsensitiveDict, self).__delitem__(k.upper())
+
+    def __getitem__(self, k):
+        return super(CaseInsensitiveDict, self).__getitem__(k.upper())
+
+    def get(self, k, default=None):
+        return super(CaseInsensitiveDict, self).get(k.upper(), default)
+
+    def __setitem__(self, k, v):
+        super(CaseInsensitiveDict, self).__setitem__(k.upper(), v)
+
+    def update(self, data):
+        data = CaseInsensitiveDict(data)
+        super(CaseInsensitiveDict, self).update(data)
+
+
 def parse_debug_object(response):
     "Parse the results of Redis's DEBUG OBJECT command into a Python dict"
     # The 'type' of the object is the first item in the response, but isn't
@@ -663,7 +690,8 @@ class Redis(object):
             connection_pool = ConnectionPool(**kwargs)
         self.connection_pool = connection_pool
 
-        self.response_callbacks = self.__class__.RESPONSE_CALLBACKS.copy()
+        self.response_callbacks = CaseInsensitiveDict(
+            self.__class__.RESPONSE_CALLBACKS)
 
     def __repr__(self):
         return "%s<%s>" % (type(self).__name__, repr(self.connection_pool))
