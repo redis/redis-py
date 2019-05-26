@@ -2934,6 +2934,9 @@ class Monitor(object):
     next_command() method returns one command from monitor
     listen() method yields commands from monitor.
     """
+    monitor_re = re.compile(r'\[(\d+) (.+):(\d+)\] (.*)')
+    command_re = re.compile(r'"(.*?)(?<!\\)"')
+
     def __init__(self, connection_pool):
         self.connection_pool = connection_pool
         self.connection = self.connection_pool.get_connection('MONITOR')
@@ -2956,12 +2959,13 @@ class Monitor(object):
         if isinstance(response, bytes):
             response = self.connection.encoder.decode(response, force=True)
         command_time, command_data = response.split(' ', 1)
-        m = re.match(r'\[(\d+) (.+):(\d+)\] (.*)', command_data)
+        m = self.monitor_re.match(command_data)
         db_id, client_address, client_port, command = m.groups()
-        command = re.match(r'"(\w*)"+', command).groups()
+        command = ' '.join(self.command_re.findall(command))
+        command = command.replace('\\"', '"')
         return {
             'time': float(command_time),
-            'db': db_id,
+            'db': int(db_id),
             'client_address': client_address,
             'client_port': client_port,
             'command': command
@@ -2969,7 +2973,7 @@ class Monitor(object):
 
     def listen(self):
         "Listen for commands coming to the server."
-        while 1:
+        while True:
             yield self.next_command()
 
 
