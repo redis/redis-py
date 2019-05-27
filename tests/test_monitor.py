@@ -1,4 +1,5 @@
 from __future__ import unicode_literals
+from redis._compat import unicode
 
 
 def wait_for_command(client, monitor, command):
@@ -28,8 +29,8 @@ class TestPipeline(object):
             response = wait_for_command(r, m, 'PING')
             assert isinstance(response['time'], float)
             assert response['db'] == 9
-            assert isinstance(response['client_address'], str)
-            assert isinstance(response['client_port'], str)
+            assert isinstance(response['client_address'], unicode)
+            assert isinstance(response['client_port'], unicode)
             assert response['command'] == 'PING'
 
     def test_command_with_quoted_key(self, r):
