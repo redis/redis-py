@@ -16,7 +16,13 @@ def wait_for_command(client, monitor, command):
 
 
 class TestPipeline(object):
-    def test_response_pieces(self, r):
+    def test_wait_command_not_found(self, r):
+        "Make sure the wait_for_command func works when command is not found"
+        with r.monitor() as m:
+            response = wait_for_command(r, m, 'nothing')
+            assert response is None
+
+    def test_response_values(self, r):
         with r.monitor() as m:
             r.ping()
             response = wait_for_command(r, m, 'PING')
@@ -32,8 +38,9 @@ class TestPipeline(object):
             response = wait_for_command(r, m, 'GET foo"bar')
             assert response['command'] == 'GET foo"bar'
 
-    def test_wait_command_not_found(self, r):
-        "Make sure the wait_for_command func works when command is not found"
+    def test_command_with_binary_data(self, r):
         with r.monitor() as m:
-            response = wait_for_command(r, m, 'nothing')
-            assert response is None
+            byte_string = b'foo\x92'
+            r.get(byte_string)
+            response = wait_for_command(r, m, 'GET foo\\x92')
+            assert response['command'] == 'GET foo\\x92'

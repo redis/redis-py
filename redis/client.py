@@ -2962,7 +2962,7 @@ class Monitor(object):
         m = self.monitor_re.match(command_data)
         db_id, client_address, client_port, command = m.groups()
         command = ' '.join(self.command_re.findall(command))
-        command = command.replace('\\"', '"')
+        command = command.replace('\\"', '"').replace('\\\\', '\\')
         return {
             'time': float(command_time),
             'db': int(db_id),
