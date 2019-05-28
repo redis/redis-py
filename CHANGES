@@ -6,6 +6,9 @@
       Thanks Roey Prat #1033
     * Internal cleanup: Removed the legacy Token class which was necessary
       with older version of Python that are no longer supported. #1066
+    * Response callbacks are now case insensitive. This allows users that
+      call Redis.execute_command() directly to pass lower-case command
+      names and still get reasonable respones. #1168
 * 3.2.1
     * Fix SentinelConnectionPool to work in multiprocess/forked environments.
 * 3.2.0
