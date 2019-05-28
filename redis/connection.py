@@ -60,41 +60,6 @@ SYM_EMPTY = b''
 SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
 
 
-class Token(object):
-    """
-    Literal strings in Redis commands, such as the command names and any
-    hard-coded arguments are wrapped in this class so we know not to apply
-    and encoding rules on them.
-    """
-
-    _cache = {}
-
-    @classmethod
-    def get_token(cls, value):
-        "Gets a cached token object or creates a new one if not already cached"
-
-        # Use try/except because after running for a short time most tokens
-        # should already be cached
-        try:
-            return cls._cache[value]
-        except KeyError:
-            token = Token(value)
-            cls._cache[value] = token
-            return token
-
-    def __init__(self, value):
-        if isinstance(value, Token):
-            value = value.value
-        self.value = value
-        self.encoded_value = value.encode()
-
-    def __repr__(self):
-        return self.value
-
-    def __str__(self):
-        return self.value
-
-
 class Encoder(object):
     "Encode strings to bytes and decode bytes to strings"
 
@@ -105,9 +70,7 @@ class Encoder(object):
 
     def encode(self, value):
         "Return a bytestring representation of the value"
-        if isinstance(value, Token):
-            return value.encoded_value
-        elif isinstance(value, bytes):
+        if isinstance(value, bytes):
             return value
         elif isinstance(value, bool):
             # special case bool since it is a subclass of int
@@ -647,14 +610,12 @@ class Connection(object):
         # the client might have included 1 or more literal arguments in
         # the command name, e.g., 'CONFIG GET'. The Redis server expects these
         # arguments to be sent separately, so split the first argument
-        # manually. All of these arguements get wrapped in the Token class
-        # to prevent them from being encoded.
-        command = args[0]
-        if ' ' in command:
-            args = tuple(Token.get_token(s)
-                         for s in command.split()) + args[1:]
-        else:
-            args = (Token.get_token(command),) + args[1:]
+        # manually. These arguments should be bytestrings so that they are
+        # not encoded.
+        if isinstance(args[0], unicode):
+            args = tuple(args[0].encode().split()) + args[1:]
+        elif b' ' in args[0]:
+            args = tuple(args[0].split()) + args[1:]
 
         buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
 

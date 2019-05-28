@@ -25,7 +25,7 @@ class TestEncoding(object):
         assert r.lrange('a', 0, -1) == result
 
 
-class TestCommandsAndTokensArentEncoded(object):
+class TestCommandsAreNotEncoded(object):
     @pytest.fixture()
     def r(self, request):
         return _get_client(redis.Redis, request=request, encoding='utf-16')
