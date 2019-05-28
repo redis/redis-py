@@ -677,16 +677,16 @@ supported:
 
 Monitor
 ^^^^^^^
-redis-py includes a `Monitor` object that that streams back every command
-processed by the Redis server. Use `listen` on the `Monitor` object to block
-until message available.
+redis-py includes a `Monitor` object that streams every command processed
+by the Redis server. Use `listen()` on the `Monitor` object to block
+until a command is received.
 
 .. code-block:: pycon
 
-    >>> r = redis.StrictRedis(...)
-    >>> with sr.monitor() as m:
-    >>>   for command in m.listen():
-    >>>     print(command)
+    >>> r = redis.Redis(...)
+    >>> with r.monitor() as m:
+    >>>     for command in m.listen():
+    >>>         print(command)
 
 Lua Scripting
 ^^^^^^^^^^^^^
