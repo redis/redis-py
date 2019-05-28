@@ -4,6 +4,8 @@
     * Cleanup the Connection's selector correctly. Thanks Bruce Merry. #1153
     * Added a Monitor object to make working with MONITOR output easy.
       Thanks Roey Prat #1033
+    * Internal cleanup: Removed the legacy Token class which was necessary
+      with older version of Python that are no longer supported. #1066
 * 3.2.1
     * Fix SentinelConnectionPool to work in multiprocess/forked environments.
 * 3.2.0
