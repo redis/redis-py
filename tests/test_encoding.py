@@ -39,7 +39,7 @@ class TestEncodingErrors(object):
         assert r.get('a') == 'foo\ufffd'
 
 
-class TestCommandsAndTokensArentEncoded(object):
+class TestCommandsAreNotEncoded(object):
     @pytest.fixture()
     def r(self, request):
         return _get_client(redis.Redis, request=request, encoding='utf-16')

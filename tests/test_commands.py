@@ -54,6 +54,9 @@ class TestResponseCallbacks(object):
         r['a'] = 'foo'
         assert r['a'] == 'static'
 
+    def test_case_insensitive_command_names(self, r):
+        assert r.response_callbacks['del'] == r.response_callbacks['DEL']
+
 
 class TestRedisCommands(object):
 

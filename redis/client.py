@@ -6,11 +6,12 @@ import warnings
 import time
 import threading
 import time as mod_time
+import re
 import hashlib
 from redis._compat import (basestring, imap, iteritems, iterkeys,
                            itervalues, izip, long, nativestr, safe_unicode)
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
-                              SSLConnection, Token)
+                              SSLConnection)
 from redis.lock import Lock
 from redis.exceptions import (
     ConnectionError,
@@ -65,6 +66,33 @@ def dict_merge(*dicts):
     for d in dicts:
         merged.update(d)
     return merged
+
+
+class CaseInsensitiveDict(dict):
+    "Case insensitive dict implementation. Assumes string keys only."
+
+    def __init__(self, data):
+        for k, v in iteritems(data):
+            self[k.upper()] = v
+
+    def __contains__(self, k):
+        return super(CaseInsensitiveDict, self).__contains__(k.upper())
+
+    def __delitem__(self, k):
+        super(CaseInsensitiveDict, self).__delitem__(k.upper())
+
+    def __getitem__(self, k):
+        return super(CaseInsensitiveDict, self).__getitem__(k.upper())
+
+    def get(self, k, default=None):
+        return super(CaseInsensitiveDict, self).get(k.upper(), default)
+
+    def __setitem__(self, k, v):
+        super(CaseInsensitiveDict, self).__setitem__(k.upper(), v)
+
+    def update(self, data):
+        data = CaseInsensitiveDict(data)
+        super(CaseInsensitiveDict, self).update(data)
 
 
 def parse_debug_object(response):
@@ -275,9 +303,11 @@ def parse_xclaim(response, **options):
 def parse_xinfo_stream(response):
     data = pairs_to_dict(response, decode_keys=True)
     first = data['first-entry']
-    data['first-entry'] = (first[0], pairs_to_dict(first[1]))
+    if first is not None:
+        data['first-entry'] = (first[0], pairs_to_dict(first[1]))
     last = data['last-entry']
-    data['last-entry'] = (last[0], pairs_to_dict(last[1]))
+    if last is not None:
+        data['last-entry'] = (last[0], pairs_to_dict(last[1]))
     return data
 
 
@@ -660,7 +690,8 @@ class Redis(object):
             connection_pool = ConnectionPool(**kwargs)
         self.connection_pool = connection_pool
 
-        self.response_callbacks = self.__class__.RESPONSE_CALLBACKS.copy()
+        self.response_callbacks = CaseInsensitiveDict(
+            self.__class__.RESPONSE_CALLBACKS)
 
     def __repr__(self):
         return "%s<%s>" % (type(self).__name__, repr(self.connection_pool))
@@ -764,6 +795,9 @@ class Redis(object):
         """
         return PubSub(self.connection_pool, **kwargs)
 
+    def monitor(self):
+        return Monitor(self.connection_pool)
+
     # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
         "Execute a command and return a parsed response"
@@ -828,20 +862,18 @@ class Redis(object):
             if str(_type).lower() not in client_types:
                 raise DataError("CLIENT KILL type must be one of %r" % (
                                 client_types,))
-            args.extend((Token.get_token('TYPE'), _type))
+            args.extend((b'TYPE', _type))
         if skipme is not None:
             if not isinstance(skipme, bool):
                 raise DataError("CLIENT KILL skipme must be a bool")
             if skipme:
-                args.extend((Token.get_token('SKIPME'),
-                             Token.get_token('YES')))
+                args.extend((b'SKIPME', b'YES'))
             else:
-                args.extend((Token.get_token('SKIPME'),
-                             Token.get_token('NO')))
+                args.extend((b'SKIPME', b'NO'))
         if _id is not None:
-            args.extend((Token.get_token('ID'), _id))
+            args.extend((b'ID', _id))
         if addr is not None:
-            args.extend((Token.get_token('ADDR'), addr))
+            args.extend((b'ADDR', addr))
         if not args:
             raise DataError("CLIENT KILL <filter> <value> ... ... <filter> "
                             "<value> must specify at least one filter")
@@ -860,8 +892,7 @@ class Redis(object):
             if str(_type).lower() not in client_types:
                 raise DataError("CLIENT LIST _type must be one of %r" % (
                                 client_types,))
-            return self.execute_command('CLIENT LIST', Token.get_token('TYPE'),
-                                        _type)
+            return self.execute_command('CLIENT LIST', b'TYPE', _type)
         return self.execute_command('CLIENT LIST')
 
     def client_getname(self):
@@ -885,7 +916,7 @@ class Redis(object):
         """
         args = ['CLIENT UNBLOCK', int(client_id)]
         if error:
-            args.append(Token.get_token('ERROR'))
+            args.append(b'ERROR')
         return self.execute_command(*args)
 
     def client_pause(self, timeout):
@@ -934,7 +965,7 @@ class Redis(object):
         """
         args = []
         if asynchronous:
-            args.append(Token.get_token('ASYNC'))
+            args.append(b'ASYNC')
         return self.execute_command('FLUSHALL', *args)
 
     def flushdb(self, asynchronous=False):
@@ -946,7 +977,7 @@ class Redis(object):
         """
         args = []
         if asynchronous:
-            args.append(Token.get_token('ASYNC'))
+            args.append(b'ASYNC')
         return self.execute_command('FLUSHDB', *args)
 
     def swapdb(self, first, second):
@@ -999,13 +1030,13 @@ class Redis(object):
             raise DataError('MIGRATE requires at least one key')
         pieces = []
         if copy:
-            pieces.append(Token.get_token('COPY'))
+            pieces.append(b'COPY')
         if replace:
-            pieces.append(Token.get_token('REPLACE'))
+            pieces.append(b'REPLACE')
         if auth:
-            pieces.append(Token.get_token('AUTH'))
+            pieces.append(b'AUTH')
             pieces.append(auth)
-        pieces.append(Token.get_token('KEYS'))
+        pieces.append(b'KEYS')
         pieces.extend(keys)
         return self.execute_command('MIGRATE', host, port, '', destination_db,
                                     timeout, *pieces)
@@ -1025,7 +1056,7 @@ class Redis(object):
         """
         args = []
         if isinstance(samples, int):
-            args.extend([Token.get_token('SAMPLES'), samples])
+            args.extend([b'SAMPLES', samples])
         return self.execute_command('MEMORY USAGE', key, *args)
 
     def memory_purge(self):
@@ -1109,8 +1140,7 @@ class Redis(object):
         instance is promoted to a master instead.
         """
         if host is None and port is None:
-            return self.execute_command('SLAVEOF', Token.get_token('NO'),
-                                        Token.get_token('ONE'))
+            return self.execute_command('SLAVEOF', b'NO', b'ONE')
         return self.execute_command('SLAVEOF', host, port)
 
     def slowlog_get(self, num=None):
@@ -1701,10 +1731,10 @@ class Redis(object):
 
         pieces = [name]
         if by is not None:
-            pieces.append(Token.get_token('BY'))
+            pieces.append(b'BY')
             pieces.append(by)
         if start is not None and num is not None:
-            pieces.append(Token.get_token('LIMIT'))
+            pieces.append(b'LIMIT')
             pieces.append(start)
             pieces.append(num)
         if get is not None:
@@ -1713,18 +1743,18 @@ class Redis(object):
             # values. We can't just iterate blindly because strings are
             # iterable.
             if isinstance(get, (bytes, basestring)):
-                pieces.append(Token.get_token('GET'))
+                pieces.append(b'GET')
                 pieces.append(get)
             else:
                 for g in get:
-                    pieces.append(Token.get_token('GET'))
+                    pieces.append(b'GET')
                     pieces.append(g)
         if desc:
-            pieces.append(Token.get_token('DESC'))
+            pieces.append(b'DESC')
         if alpha:
-            pieces.append(Token.get_token('ALPHA'))
+            pieces.append(b'ALPHA')
         if store is not None:
-            pieces.append(Token.get_token('STORE'))
+            pieces.append(b'STORE')
             pieces.append(store)
 
         if groups:
@@ -1748,9 +1778,9 @@ class Redis(object):
         """
         pieces = [cursor]
         if match is not None:
-            pieces.extend([Token.get_token('MATCH'), match])
+            pieces.extend([b'MATCH', match])
         if count is not None:
-            pieces.extend([Token.get_token('COUNT'), count])
+            pieces.extend([b'COUNT', count])
         return self.execute_command('SCAN', *pieces)
 
     def scan_iter(self, match=None, count=None):
@@ -1779,9 +1809,9 @@ class Redis(object):
         """
         pieces = [name, cursor]
         if match is not None:
-            pieces.extend([Token.get_token('MATCH'), match])
+            pieces.extend([b'MATCH', match])
         if count is not None:
-            pieces.extend([Token.get_token('COUNT'), count])
+            pieces.extend([b'COUNT', count])
         return self.execute_command('SSCAN', *pieces)
 
     def sscan_iter(self, name, match=None, count=None):
@@ -1811,9 +1841,9 @@ class Redis(object):
         """
         pieces = [name, cursor]
         if match is not None:
-            pieces.extend([Token.get_token('MATCH'), match])
+            pieces.extend([b'MATCH', match])
         if count is not None:
-            pieces.extend([Token.get_token('COUNT'), count])
+            pieces.extend([b'COUNT', count])
         return self.execute_command('HSCAN', *pieces)
 
     def hscan_iter(self, name, match=None, count=None):
@@ -1846,9 +1876,9 @@ class Redis(object):
         """
         pieces = [name, cursor]
         if match is not None:
-            pieces.extend([Token.get_token('MATCH'), match])
+            pieces.extend([b'MATCH', match])
         if count is not None:
-            pieces.extend([Token.get_token('COUNT'), count])
+            pieces.extend([b'COUNT', count])
         options = {'score_cast_func': score_cast_func}
         return self.execute_command('ZSCAN', *pieces, **options)
 
@@ -1976,9 +2006,9 @@ class Redis(object):
         if maxlen is not None:
             if not isinstance(maxlen, (int, long)) or maxlen < 1:
                 raise DataError('XADD maxlen must be a positive integer')
-            pieces.append(Token.get_token('MAXLEN'))
+            pieces.append(b'MAXLEN')
             if approximate:
-                pieces.append(Token.get_token('~'))
+                pieces.append(b'~')
             pieces.append(str(maxlen))
         pieces.append(id)
         if not isinstance(fields, dict) or len(fields) == 0:
@@ -2026,24 +2056,24 @@ class Redis(object):
         if idle is not None:
             if not isinstance(idle, (int, long)):
                 raise DataError("XCLAIM idle must be an integer")
-            pieces.extend((Token.get_token('IDLE'), str(idle)))
+            pieces.extend((b'IDLE', str(idle)))
         if time is not None:
             if not isinstance(time, (int, long)):
                 raise DataError("XCLAIM time must be an integer")
-            pieces.extend((Token.get_token('TIME'), str(time)))
+            pieces.extend((b'TIME', str(time)))
         if retrycount is not None:
             if not isinstance(retrycount, (int, long)):
                 raise DataError("XCLAIM retrycount must be an integer")
-            pieces.extend((Token.get_token('RETRYCOUNT'), str(retrycount)))
+            pieces.extend((b'RETRYCOUNT', str(retrycount)))
 
         if force:
             if not isinstance(force, bool):
                 raise DataError("XCLAIM force must be a boolean")
-            pieces.append(Token.get_token('FORCE'))
+            pieces.append(b'FORCE')
         if justid:
             if not isinstance(justid, bool):
                 raise DataError("XCLAIM justid must be a boolean")
-            pieces.append(Token.get_token('JUSTID'))
+            pieces.append(b'JUSTID')
             kwargs['parse_justid'] = True
         return self.execute_command('XCLAIM', *pieces, **kwargs)
 
@@ -2064,7 +2094,7 @@ class Redis(object):
         """
         pieces = ['XGROUP CREATE', name, groupname, id]
         if mkstream:
-            pieces.append(Token.get_token('MKSTREAM'))
+            pieces.append(b'MKSTREAM')
         return self.execute_command(*pieces)
 
     def xgroup_delconsumer(self, name, groupname, consumername):
@@ -2174,7 +2204,7 @@ class Redis(object):
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
                 raise DataError('XRANGE count must be a positive integer')
-            pieces.append(Token.get_token('COUNT'))
+            pieces.append(b'COUNT')
             pieces.append(str(count))
 
         return self.execute_command('XRANGE', name, *pieces)
@@ -2192,16 +2222,16 @@ class Redis(object):
         if block is not None:
             if not isinstance(block, (int, long)) or block < 0:
                 raise DataError('XREAD block must be a non-negative integer')
-            pieces.append(Token.get_token('BLOCK'))
+            pieces.append(b'BLOCK')
             pieces.append(str(block))
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
                 raise DataError('XREAD count must be a positive integer')
-            pieces.append(Token.get_token('COUNT'))
+            pieces.append(b'COUNT')
             pieces.append(str(count))
         if not isinstance(streams, dict) or len(streams) == 0:
             raise DataError('XREAD streams must be a non empty dict')
-        pieces.append(Token.get_token('STREAMS'))
+        pieces.append(b'STREAMS')
         keys, values = izip(*iteritems(streams))
         pieces.extend(keys)
         pieces.extend(values)
@@ -2220,23 +2250,23 @@ class Redis(object):
         block: number of milliseconds to wait, if nothing already present.
         noack: do not add messages to the PEL
         """
-        pieces = [Token.get_token('GROUP'), groupname, consumername]
+        pieces = [b'GROUP', groupname, consumername]
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
                 raise DataError("XREADGROUP count must be a positive integer")
-            pieces.append(Token.get_token("COUNT"))
+            pieces.append(b'COUNT')
             pieces.append(str(count))
         if block is not None:
             if not isinstance(block, (int, long)) or block < 0:
                 raise DataError("XREADGROUP block must be a non-negative "
                                 "integer")
-            pieces.append(Token.get_token("BLOCK"))
+            pieces.append(b'BLOCK')
             pieces.append(str(block))
         if noack:
-            pieces.append(Token.get_token("NOACK"))
+            pieces.append(b'NOACK')
         if not isinstance(streams, dict) or len(streams) == 0:
             raise DataError('XREADGROUP streams must be a non empty dict')
-        pieces.append(Token.get_token('STREAMS'))
+        pieces.append(b'STREAMS')
         pieces.extend(streams.keys())
         pieces.extend(streams.values())
         return self.execute_command('XREADGROUP', *pieces)
@@ -2256,7 +2286,7 @@ class Redis(object):
         if count is not None:
             if not isinstance(count, (int, long)) or count < 1:
                 raise DataError('XREVRANGE count must be a positive integer')
-            pieces.append(Token.get_token('COUNT'))
+            pieces.append(b'COUNT')
             pieces.append(str(count))
 
         return self.execute_command('XREVRANGE', name, *pieces)
@@ -2268,9 +2298,9 @@ class Redis(object):
         maxlen: truncate old stream messages beyond this size
         approximate: actual stream length may be slightly more than maxlen
         """
-        pieces = [Token.get_token('MAXLEN')]
+        pieces = [b'MAXLEN']
         if approximate:
-            pieces.append(Token.get_token('~'))
+            pieces.append(b'~')
         pieces.append(maxlen)
         return self.execute_command('XTRIM', name, *pieces)
 
@@ -2309,13 +2339,13 @@ class Redis(object):
         pieces = []
         options = {}
         if nx:
-            pieces.append(Token.get_token('NX'))
+            pieces.append(b'NX')
         if xx:
-            pieces.append(Token.get_token('XX'))
+            pieces.append(b'XX')
         if ch:
-            pieces.append(Token.get_token('CH'))
+            pieces.append(b'CH')
         if incr:
-            pieces.append(Token.get_token('INCR'))
+            pieces.append(b'INCR')
             options['as_score'] = True
         for pair in iteritems(mapping):
             pieces.append(pair[1])
@@ -2428,7 +2458,7 @@ class Redis(object):
                                   score_cast_func)
         pieces = ['ZRANGE', name, start, end]
         if withscores:
-            pieces.append(Token.get_token('WITHSCORES'))
+            pieces.append(b'WITHSCORES')
         options = {
             'withscores': withscores,
             'score_cast_func': score_cast_func
@@ -2448,7 +2478,7 @@ class Redis(object):
             raise DataError("``start`` and ``num`` must both be specified")
         pieces = ['ZRANGEBYLEX', name, min, max]
         if start is not None and num is not None:
-            pieces.extend([Token.get_token('LIMIT'), start, num])
+            pieces.extend([b'LIMIT', start, num])
         return self.execute_command(*pieces)
 
     def zrevrangebylex(self, name, max, min, start=None, num=None):
@@ -2464,7 +2494,7 @@ class Redis(object):
             raise DataError("``start`` and ``num`` must both be specified")
         pieces = ['ZREVRANGEBYLEX', name, max, min]
         if start is not None and num is not None:
-            pieces.extend([Token.get_token('LIMIT'), start, num])
+            pieces.extend([b'LIMIT', start, num])
         return self.execute_command(*pieces)
 
     def zrangebyscore(self, name, min, max, start=None, num=None,
@@ -2486,9 +2516,9 @@ class Redis(object):
             raise DataError("``start`` and ``num`` must both be specified")
         pieces = ['ZRANGEBYSCORE', name, min, max]
         if start is not None and num is not None:
-            pieces.extend([Token.get_token('LIMIT'), start, num])
+            pieces.extend([b'LIMIT', start, num])
         if withscores:
-            pieces.append(Token.get_token('WITHSCORES'))
+            pieces.append(b'WITHSCORES')
         options = {
             'withscores': withscores,
             'score_cast_func': score_cast_func
@@ -2546,7 +2576,7 @@ class Redis(object):
         """
         pieces = ['ZREVRANGE', name, start, end]
         if withscores:
-            pieces.append(Token.get_token('WITHSCORES'))
+            pieces.append(b'WITHSCORES')
         options = {
             'withscores': withscores,
             'score_cast_func': score_cast_func
@@ -2572,9 +2602,9 @@ class Redis(object):
             raise DataError("``start`` and ``num`` must both be specified")
         pieces = ['ZREVRANGEBYSCORE', name, max, min]
         if start is not None and num is not None:
-            pieces.extend([Token.get_token('LIMIT'), start, num])
+            pieces.extend([b'LIMIT', start, num])
         if withscores:
-            pieces.append(Token.get_token('WITHSCORES'))
+            pieces.append(b'WITHSCORES')
         options = {
             'withscores': withscores,
             'score_cast_func': score_cast_func
@@ -2608,10 +2638,10 @@ class Redis(object):
             weights = None
         pieces.extend(keys)
         if weights:
-            pieces.append(Token.get_token('WEIGHTS'))
+            pieces.append(b'WEIGHTS')
             pieces.extend(weights)
         if aggregate:
-            pieces.append(Token.get_token('AGGREGATE'))
+            pieces.append(b'AGGREGATE')
             pieces.append(aggregate)
         return self.execute_command(*pieces)
 
@@ -2894,32 +2924,87 @@ class Redis(object):
         else:
             pieces.append('m',)
 
-        for token in ('withdist', 'withcoord', 'withhash'):
-            if kwargs[token]:
-                pieces.append(Token(token.upper()))
+        for arg_name, byte_repr in (
+                ('withdist', b'WITHDIST'),
+                ('withcoord', b'WITHCOORD'),
+                ('withhash', b'WITHHASH')):
+            if kwargs[arg_name]:
+                pieces.append(byte_repr)
 
         if kwargs['count']:
-            pieces.extend([Token('COUNT'), kwargs['count']])
+            pieces.extend([b'COUNT', kwargs['count']])
 
-        if kwargs['sort'] and kwargs['sort'] not in ('ASC', 'DESC'):
-            raise DataError("GEORADIUS invalid sort")
-        elif kwargs['sort']:
-            pieces.append(Token(kwargs['sort']))
+        if kwargs['sort']:
+            if kwargs['sort'] == 'ASC':
+                pieces.append(b'ASC')
+            elif kwargs['sort'] == 'DESC':
+                pieces.append(b'DESC')
+            else:
+                raise DataError("GEORADIUS invalid sort")
 
         if kwargs['store'] and kwargs['store_dist']:
             raise DataError("GEORADIUS store and store_dist cant be set"
                             " together")
 
         if kwargs['store']:
-            pieces.extend([Token('STORE'), kwargs['store']])
+            pieces.extend([b'STORE', kwargs['store']])
 
         if kwargs['store_dist']:
-            pieces.extend([Token('STOREDIST'), kwargs['store_dist']])
+            pieces.extend([b'STOREDIST', kwargs['store_dist']])
 
         return self.execute_command(command, *pieces, **kwargs)
 
 
 StrictRedis = Redis
+
+
+class Monitor(object):
+    """
+    Monitor is useful for handling the MONITOR command to the redis server.
+    next_command() method returns one command from monitor
+    listen() method yields commands from monitor.
+    """
+    monitor_re = re.compile(r'\[(\d+) (.+):(\d+)\] (.*)')
+    command_re = re.compile(r'"(.*?)(?<!\\)"')
+
+    def __init__(self, connection_pool):
+        self.connection_pool = connection_pool
+        self.connection = self.connection_pool.get_connection('MONITOR')
+
+    def __enter__(self):
+        self.connection.send_command('MONITOR')
+        # check that monitor returns 'OK', but don't return it to user
+        response = self.connection.read_response()
+        if not bool_ok(response):
+            raise RedisError('MONITOR failed: %s' % response)
+        return self
+
+    def __exit__(self, *args):
+        self.connection.disconnect()
+        self.connection_pool.release(self.connection)
+
+    def next_command(self):
+        "Parse the response from a monitor command"
+        response = self.connection.read_response()
+        if isinstance(response, bytes):
+            response = self.connection.encoder.decode(response, force=True)
+        command_time, command_data = response.split(' ', 1)
+        m = self.monitor_re.match(command_data)
+        db_id, client_address, client_port, command = m.groups()
+        command = ' '.join(self.command_re.findall(command))
+        command = command.replace('\\"', '"').replace('\\\\', '\\')
+        return {
+            'time': float(command_time),
+            'db': int(db_id),
+            'client_address': client_address,
+            'client_port': client_port,
+            'command': command
+        }
+
+    def listen(self):
+        "Listen for commands coming to the server."
+        while True:
+            yield self.next_command()
 
 
 class PubSub(object):
