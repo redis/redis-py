@@ -9,6 +9,9 @@
     * Response callbacks are now case insensitive. This allows users that
       call Redis.execute_command() directly to pass lower-case command
       names and still get reasonable respones. #1168
+    * Added support for hiredis-py 1.0.0 encoding error support. This should
+      make the PythonParser and the HiredisParser behave identically
+      when encountering encoding errors. Thanks Brian Candler. #1161/#1162
 * 3.2.1
     * Fix SentinelConnectionPool to work in multiprocess/forked environments.
 * 3.2.0
