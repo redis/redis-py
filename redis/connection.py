@@ -41,6 +41,8 @@ if HIREDIS_AVAILABLE:
         hiredis_version >= StrictVersion('0.1.3')
     HIREDIS_SUPPORTS_BYTE_BUFFER = \
         hiredis_version >= StrictVersion('0.1.4')
+    HIREDIS_SUPPORTS_ENCODING_ERRORS = \
+        hiredis_version >= StrictVersion('1.0.0')
 
     if not HIREDIS_SUPPORTS_BYTE_BUFFER:
         msg = ("redis-py works best with hiredis >= 0.1.4. You're running "
@@ -318,6 +320,8 @@ class HiredisParser(BaseParser):
 
         if connection.encoder.decode_responses:
             kwargs['encoding'] = connection.encoder.encoding
+        if HIREDIS_SUPPORTS_ENCODING_ERRORS:
+            kwargs['errors'] = connection.encoder.encoding_errors
         self._reader = hiredis.Reader(**kwargs)
         self._next_response = False
 
