@@ -146,7 +146,7 @@ keys and values as a dict to these commands.
 ZINCRBY
 ^^^^^^^
 
-redis-py 2.X accidentily modified the argument order of ZINCRBY, swapping the
+redis-py 2.X accidentally modified the argument order of ZINCRBY, swapping the
 order of value and amount. ZINCRBY now looks like:
 
 .. code-block:: pycon
