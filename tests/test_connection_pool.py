@@ -19,8 +19,8 @@ class DummyConnection(object):
     def connect(self):
         pass
 
-    def is_ready_for_command(self):
-        return True
+    def can_read(self):
+        return False
 
 
 class TestConnectionPool(object):

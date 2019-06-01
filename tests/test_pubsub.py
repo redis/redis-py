@@ -490,3 +490,16 @@ class TestPubSubPings(object):
         assert wait_for_message(p) == make_message(type='pong', channel=None,
                                                    data='hello world',
                                                    pattern=None)
+
+
+class TestPubSubConnectionKilled(object):
+
+    @skip_if_server_version_lt('3.0.0')
+    def test_connection_error_raised_when_connection_dies(self, r):
+        p = r.pubsub(ignore_subscribe_messages=True)
+        p.subscribe('foo')
+        for client in r.client_list():
+            if client['cmd'] == 'subscribe':
+                r.client_kill_filter(_id=client['id'])
+        with pytest.raises(ConnectionError):
+            wait_for_message(p)

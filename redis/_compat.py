@@ -1,12 +1,12 @@
 """Internal module for Python 2 backwards compatibility."""
 import errno
+import socket
 import sys
 
 # For Python older than 3.5, retry EINTR.
 if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and
                                sys.version_info[1] < 5):
     # Adapted from https://bugs.python.org/review/23863/patch/14532/54418
-    import socket
     import time
 
     # Wrapper for handling interruptable system calls.
@@ -100,6 +100,7 @@ if sys.version_info[0] < 3:
     basestring = basestring
     unicode = unicode
     long = long
+    BlockingIOError = socket.error
 else:
     from urllib.parse import parse_qs, unquote, urlparse
     from string import ascii_letters
@@ -129,6 +130,7 @@ else:
     unicode = str
     safe_unicode = str
     long = int
+    BlockingIOError = BlockingIOError
 
 try:  # Python 3
     from queue import LifoQueue, Empty, Full

@@ -1,4 +1,4 @@
-* 3.2.2 (in development)
+* 3.3.0 (in development)
     * Resolve a race condition with the PubSubWorkerThread. #1150
     * Cleanup socket read error messages. Thanks Vic Yu. #1159
     * Cleanup the Connection's selector correctly. Thanks Bruce Merry. #1153
@@ -17,6 +17,9 @@
       cause the connection to be disconnected and cleaned up appropriately.
       #923
     * Add READONLY and READWRITE commands. Thanks @theodesp. #1114
+    * Remove selectors in favor of nonblocking sockets. Selectors had
+      issues in some environments including eventlet and gevent. This should
+      resolve those issues with no other side effects.
 * 3.2.1
     * Fix SentinelConnectionPool to work in multiprocess/forked environments.
 * 3.2.0
