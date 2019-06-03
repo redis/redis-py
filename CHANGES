@@ -12,6 +12,10 @@
     * Added support for hiredis-py 1.0.0 encoding error support. This should
       make the PythonParser and the HiredisParser behave identically
       when encountering encoding errors. Thanks Brian Candler. #1161/#1162
+    * All authentication errors now properly raise AuthenticationError.
+      AuthenticationError is now a subclass of ConnectionError, which will
+      cause the connection to be disconnected and cleaned up appropriately.
+      #923
 * 3.2.1
     * Fix SentinelConnectionPool to work in multiprocess/forked environments.
 * 3.2.0
