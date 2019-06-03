@@ -507,3 +507,17 @@ class TestConnection(object):
             'UnixDomainSocketConnection',
             'path=/path/to/socket,db=0',
         )
+
+    def test_connect_no_auth_supplied_when_required(self, r):
+        """
+        AuthenticationError should be raised when the server requires a
+        password but one isn't supplied.
+        """
+        with pytest.raises(redis.AuthenticationError):
+            r.execute_command('DEBUG', 'ERROR',
+                              'ERR Client sent AUTH, but no password is set')
+
+    def test_connect_invalid_password_supplied(self, r):
+        "AuthenticationError should be raised when sending the wrong password"
+        with pytest.raises(redis.AuthenticationError):
+            r.execute_command('DEBUG', 'ERROR', 'ERR invalid password')

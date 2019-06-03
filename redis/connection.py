@@ -102,12 +102,15 @@ class Encoder(object):
 class BaseParser(object):
     EXCEPTION_CLASSES = {
         'ERR': {
-            'max number of clients reached': ConnectionError
+            'max number of clients reached': ConnectionError,
+            'Client sent AUTH, but no password is set': AuthenticationError,
+            'invalid password': AuthenticationError,
         },
         'EXECABORT': ExecAbortError,
         'LOADING': BusyLoadingError,
         'NOSCRIPT': NoScriptError,
         'READONLY': ReadOnlyError,
+        'NOAUTH': AuthenticationError,
     }
 
     def parse_error(self, response):
