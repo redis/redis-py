@@ -809,8 +809,7 @@ class Redis(object):
             return self.parse_response(connection, command_name, **options)
         except (ConnectionError, TimeoutError) as e:
             connection.disconnect()
-            if not (connection.retry_on_timeout and
-                    isinstance(e, TimeoutError)):
+            if not connection.retry_on_timeout and isinstance(e, TimeoutError):
                 raise
             connection.send_command(*args)
             return self.parse_response(connection, command_name, **options)
@@ -3098,8 +3097,7 @@ class PubSub(object):
             return command(*args)
         except (ConnectionError, TimeoutError) as e:
             connection.disconnect()
-            if not (connection.retry_on_timeout and
-                    isinstance(e, TimeoutError)):
+            if not connection.retry_on_timeout and isinstance(e, TimeoutError):
                 raise
             # Connect manually here. If the Redis server is down, this will
             # fail and raise a ConnectionError as desired.
