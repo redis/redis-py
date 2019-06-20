@@ -344,6 +344,15 @@ pool) for each database.
 
 It is not safe to pass PubSub or Pipeline objects between threads.
 
+Multi-Process Safety
+^^^^^^^^^^^^^
+
+This library is not multi-process safe.
+
+Do not share objects from this library with child processes created with fork(), for example with the multiprocessing library.
+
+Instead, ensure you create a new ConnectionPool or other interface fresh each time a new process is created.
+
 Pipelines
 ^^^^^^^^^
 
