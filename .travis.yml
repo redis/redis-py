@@ -18,7 +18,10 @@ install:
   - pip install -e .
   - "if [[ $TEST_PYCODESTYLE == '1' ]]; then pip install pycodestyle; fi"
   - "if [[ $TEST_HIREDIS == '1' ]]; then pip install hiredis; fi"
-script: "if [[ $TEST_PYCODESTYLE == '1' ]]; then pycodestyle --repeat --show-source --exclude=.venv,.tox,dist,docs,build,*.egg,redis_install .; else python setup.py test; fi"
+  - "if [[ $TEST_PYCODESTYLE != '1' ]]; then pip install codecov coverage; fi"
+script: "if [[ $TEST_PYCODESTYLE == '1' ]]; then pycodestyle --repeat --show-source --exclude=.venv,.tox,dist,docs,build,*.egg,redis_install .; else coverage run setup.py test; fi"
+after_success:
+  - "if [[ $TEST_PYCODESTYLE != '1' ]]; then codecov; fi"
 matrix:
   include:
     - python: 2.7
