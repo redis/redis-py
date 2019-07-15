@@ -1909,6 +1909,31 @@ class TestRedisCommands(object):
                         justid=True) == [message_id]
 
     @skip_if_server_version_lt('5.0.0')
+    def test_xclaim_trimmed(self, r):
+        # xclaim should not raise an exception if the item is not there
+        stream = 'stream'
+        group = 'group'
+
+        r.xgroup_create(stream, group, id="$", mkstream=True)
+
+        # add a couple of new items
+        sid1 = r.xadd(stream, {"item": 0})
+        sid2 = r.xadd(stream, {"item": 0})
+
+        # read them from consumer1
+        r.xreadgroup(group, 'consumer1', {stream: ">"})
+
+        # add a 3rd and trim the stream down to 2 items
+        r.xadd(stream, {"item": 3}, maxlen=2, approximate=False)
+
+        # xclaim them from consumer2
+        # the item that is still in the stream should be returned
+        item = r.xclaim(stream, group, 'consumer2', 0, [sid1, sid2])
+        assert len(item) == 2
+        assert item[0] == (None, None)
+        assert item[1][0] == sid2
+
+    @skip_if_server_version_lt('5.0.0')
     def test_xdel(self, r):
         stream = 'stream'
 
