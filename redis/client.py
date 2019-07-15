@@ -283,7 +283,11 @@ def nativestr_or_none(response):
 def parse_stream_list(response):
     if response is None:
         return None
-    return [(r[0], pairs_to_dict(r[1])) for r in response]
+    data = []
+    for r in response:
+        if r is not None:
+            data.append((r[0], pairs_to_dict(r[1])))
+    return data
 
 
 def pairs_to_dict_with_nativestr_keys(response):
