@@ -1915,10 +1915,22 @@ class TestRedisCommands(object):
         group = 'group'
 
         r.xgroup_create(stream, group, id="$", mkstream=True)
-        sid = r.xadd(stream, {"item": 0})
+
+        # add a couple of new items
+        sid1 = r.xadd(stream, {"item": 0})
+        sid2 = r.xadd(stream, {"item": 0})
+
+        # read them from consumer1
         r.xreadgroup(group, 'consumer1', {stream: ">"})
-        r.xadd(stream, {"item": 3}, maxlen=1, approximate=False)
-        r.xclaim(stream, group, 'consumer2', 0, [sid])
+
+        # add a 3rd and trim the stream down to 2 items
+        r.xadd(stream, {"item": 3}, maxlen=2, approximate=False)
+
+        # xclaim them from consumer2
+        # the item that is still in the stream should be returned
+        item = r.xclaim(stream, group, 'consumer2', 0, [sid1, sid2])
+        assert len(item) == 1
+        assert item[0][0] == sid2
 
     @skip_if_server_version_lt('5.0.0')
     def test_xdel(self, r):
