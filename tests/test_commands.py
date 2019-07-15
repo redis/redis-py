@@ -1929,8 +1929,9 @@ class TestRedisCommands(object):
         # xclaim them from consumer2
         # the item that is still in the stream should be returned
         item = r.xclaim(stream, group, 'consumer2', 0, [sid1, sid2])
-        assert len(item) == 1
-        assert item[0][0] == sid2
+        assert len(item) == 2
+        assert item[0] is None
+        assert item[1][0] == sid2
 
     @skip_if_server_version_lt('5.0.0')
     def test_xdel(self, r):
