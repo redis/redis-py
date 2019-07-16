@@ -288,7 +288,7 @@ def parse_stream_list(response):
         if r is not None:
             data.append((r[0], pairs_to_dict(r[1])))
         else:
-            data.append(None)
+            data.append((None, None))
     return data
 
 
