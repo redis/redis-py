@@ -3,7 +3,7 @@ redis-py
 
 The Python interface to the Redis key-value store.
 
-.. image:: https://secure.travis-ci.org/andymccurdy/redis-py.png?branch=master
+.. image:: https://secure.travis-ci.org/andymccurdy/redis-py.svg?branch=master
         :target: https://travis-ci.org/andymccurdy/redis-py
 .. image:: https://readthedocs.org/projects/redis-py/badge/?version=latest&style=flat
         :target: https://redis-py.readthedocs.io/en/latest/
