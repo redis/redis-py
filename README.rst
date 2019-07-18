@@ -722,7 +722,7 @@ function. Script instances accept the following optional arguments:
   KEYS list in Lua.
 * **args**: A list of argument values. This becomes the ARGV list in Lua.
 * **client**: A redis-py Client or Pipeline instance that will invoke the
-  script. If client isn't specified, the client that intiially
+  script. If client isn't specified, the client that initially
   created the Script instance (the one that `register_script` was
   invoked from) will be used.
 

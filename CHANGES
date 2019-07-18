@@ -188,7 +188,7 @@
       Thanks Ben Greenberg
     * SET's EX and PX arguments now allow values of zero. Thanks huangqiyin
     * Added PUBSUB {CHANNELS, NUMPAT, NUMSUB} commands. Thanks Angus Pearson
-    * PubSub connections that that encounter `InterruptedError`s now
+    * PubSub connections that encounter `InterruptedError`s now
       retry automatically. Thanks Carlton Gibson and Seth M. Larson
     * LPUSH and RPUSH commands run on PyPy now correctly returns the number
       of items of the list. Thanks Jeong YunWon
