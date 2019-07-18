@@ -3298,7 +3298,7 @@ class PubSub(object):
 
         return message
 
-    def run_in_thread(self, sleep_time=0, daemon=False):
+    def run_in_thread(self, sleep_time=0, stop_event=None, daemon=False):
         for channel, handler in iteritems(self.channels):
             if handler is None:
                 raise PubSubError("Channel: '%s' has no handler registered" %
@@ -3308,17 +3308,19 @@ class PubSub(object):
                 raise PubSubError("Pattern: '%s' has no handler registered" %
                                   pattern)
 
-        thread = PubSubWorkerThread(self, sleep_time, daemon=daemon)
+        thread = PubSubWorkerThread(self, sleep_time, stop_event=stop_event,
+                                    daemon=daemon)
         thread.start()
         return thread
 
 
 class PubSubWorkerThread(threading.Thread):
-    def __init__(self, pubsub, sleep_time, daemon=False):
+    def __init__(self, pubsub, sleep_time, stop_event=None, daemon=False):
         super(PubSubWorkerThread, self).__init__()
         self.daemon = daemon
         self.pubsub = pubsub
         self.sleep_time = sleep_time
+        self.stop_event = stop_event
         self._running = False
 
     def run(self):
@@ -3330,6 +3332,8 @@ class PubSubWorkerThread(threading.Thread):
         while self._running:
             pubsub.get_message(ignore_subscribe_messages=True,
                                timeout=sleep_time)
+            if self.stop_event and self.stop_event.is_set():
+                self._running = False
         pubsub.close()
 
     def stop(self):
