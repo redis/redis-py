@@ -3298,7 +3298,7 @@ class PubSub(object):
 
         return message
 
-    def run_in_thread(self, sleep_time=0, stop_event=None, daemon=False):
+    def run_in_thread(self, sleep_time=0, daemon=False):
         for channel, handler in iteritems(self.channels):
             if handler is None:
                 raise PubSubError("Channel: '%s' has no handler registered" %
@@ -3308,40 +3308,36 @@ class PubSub(object):
                 raise PubSubError("Pattern: '%s' has no handler registered" %
                                   pattern)
 
-        thread = PubSubWorkerThread(self, sleep_time, stop_event=stop_event,
-                                    daemon=daemon)
+        thread = PubSubWorkerThread(self, sleep_time, daemon=daemon)
         thread.start()
         return thread
 
 
 class PubSubWorkerThread(threading.Thread):
-    def __init__(self, pubsub, sleep_time, stop_event=None, daemon=False):
+    def __init__(self, pubsub, sleep_time, daemon=False):
         super(PubSubWorkerThread, self).__init__()
         self.daemon = daemon
         self.pubsub = pubsub
         self.sleep_time = sleep_time
-        self.stop_event = stop_event
-        self._running = False
+        self.stop_event = None
 
     def run(self):
-        if self._running:
-            return
-        self._running = True
+        if self.stop_event:
+            return # Already running.
+        self.stop_event = Event()
         pubsub = self.pubsub
         sleep_time = self.sleep_time
-        while self._running:
+        while not self.stop_event.is_set():
             pubsub.get_message(ignore_subscribe_messages=True,
                                timeout=sleep_time)
-            if self.stop_event and self.stop_event.is_set():
-                self._running = False
         pubsub.close()
 
     def stop(self):
         # trip the flag so the run loop exits. the run loop will
         # close the pubsub connection, which disconnects the socket
         # and returns the connection to the pool.
-        self._running = False
-
+        if self.stop_event:
+            self.stop_event.set()
 
 class Pipeline(Redis):
     """
