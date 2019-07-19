@@ -3319,15 +3319,15 @@ class PubSubWorkerThread(threading.Thread):
         self.daemon = daemon
         self.pubsub = pubsub
         self.sleep_time = sleep_time
-        self.stop_event = None
+        self._running = threading.Event()
 
     def run(self):
-        if self.stop_event:
-            return # Already running.
-        self.stop_event = Event()
+        if self._running.is_set():
+            return
+        self._running.set()
         pubsub = self.pubsub
         sleep_time = self.sleep_time
-        while not self.stop_event.is_set():
+        while self._running.is_set():
             pubsub.get_message(ignore_subscribe_messages=True,
                                timeout=sleep_time)
         pubsub.close()
@@ -3336,8 +3336,7 @@ class PubSubWorkerThread(threading.Thread):
         # trip the flag so the run loop exits. the run loop will
         # close the pubsub connection, which disconnects the socket
         # and returns the connection to the pool.
-        if self.stop_event:
-            self.stop_event.set()
+        self._running.clear()
 
 class Pipeline(Redis):
     """
