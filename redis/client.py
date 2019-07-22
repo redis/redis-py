@@ -3338,6 +3338,7 @@ class PubSubWorkerThread(threading.Thread):
         # and returns the connection to the pool.
         self._running.clear()
 
+
 class Pipeline(Redis):
     """
     Pipelines provide a way to transmit multiple commands to the Redis server
