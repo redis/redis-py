@@ -648,7 +648,7 @@ class Redis(object):
                  decode_responses=False, retry_on_timeout=False,
                  ssl=False, ssl_keyfile=None, ssl_certfile=None,
                  ssl_cert_reqs='required', ssl_ca_certs=None,
-                 max_connections=None):
+                 max_connections=None, single_connection_client=False):
         if not connection_pool:
             if charset is not None:
                 warnings.warn(DeprecationWarning(
@@ -695,6 +695,9 @@ class Redis(object):
                     })
             connection_pool = ConnectionPool(**kwargs)
         self.connection_pool = connection_pool
+        self.connection = None
+        if single_connection_client:
+            self.connection = self.connection_pool.get_connection('_')
 
         self.response_callbacks = CaseInsensitiveDict(
             self.__class__.RESPONSE_CALLBACKS)
@@ -804,24 +807,43 @@ class Redis(object):
     def monitor(self):
         return Monitor(self.connection_pool)
 
+    def client(self):
+        return self.__class__(connection_pool=self.connection_pool,
+                              single_connection_client=True)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def __del__(self):
+        self.close()
+
+    def close(self):
+        conn = self.connection
+        if conn:
+            self.connection = None
+            self.connection_pool.release(conn)
+
     # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
         "Execute a command and return a parsed response"
         pool = self.connection_pool
         command_name = args[0]
-        connection = pool.get_connection(command_name, **options)
+        conn = self.connection or pool.get_connection(command_name, **options)
         try:
-            connection.send_command(*args)
-            return self.parse_response(connection, command_name, **options)
+            conn.send_command(*args)
+            return self.parse_response(conn, command_name, **options)
         except (ConnectionError, TimeoutError) as e:
-            connection.disconnect()
-            if not (connection.retry_on_timeout and
-                    isinstance(e, TimeoutError)):
+            conn.disconnect()
+            if not (conn.retry_on_timeout and isinstance(e, TimeoutError)):
                 raise
-            connection.send_command(*args)
-            return self.parse_response(connection, command_name, **options)
+            conn.send_command(*args)
+            return self.parse_response(conn, command_name, **options)
         finally:
-            pool.release(connection)
+            if not self.connection:
+                pool.release(conn)
 
     def parse_response(self, connection, command_name, **options):
         "Parses a response from the Redis server"

@@ -53,9 +53,11 @@ def skip_unless_arch_bits(arch_bits):
                               reason="server is not {}-bit".format(arch_bits))
 
 
-def _get_client(cls, request, **kwargs):
+def _get_client(cls, request, single_connection_client=True, **kwargs):
     redis_url = request.config.getoption("--redis-url")
     client = cls.from_url(redis_url, **kwargs)
+    if single_connection_client:
+        client = client.client()
     if request:
         def teardown():
             try:
@@ -64,31 +66,27 @@ def _get_client(cls, request, **kwargs):
                 # handle cases where a test disconnected a client
                 # just manually retry the flushdb
                 client.flushdb()
+            client.close()
             client.connection_pool.disconnect()
         request.addfinalizer(teardown)
     return client
 
 
 @pytest.fixture()
-def r(request, **kwargs):
-    return _get_client(redis.Redis, request, **kwargs)
+def r(request):
+    return _get_client(redis.Redis, request)
 
 
 @pytest.fixture()
-def r2(request, **kwargs):
-    return [
-        _get_client(redis.Redis, request, **kwargs),
-        _get_client(redis.Redis, request, **kwargs),
-    ]
+def r2(request):
+    "A second client for tests that need multiple"
+    return _get_client(redis.Redis, request)
 
 
 def _gen_cluster_mock_resp(r, response):
-    mock_connection_pool = Mock()
     connection = Mock()
-    response = response
     connection.read_response.return_value = response
-    mock_connection_pool.get_connection.return_value = connection
-    r.connection_pool = mock_connection_pool
+    r.connection = connection
     return r
 
 

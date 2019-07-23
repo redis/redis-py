@@ -102,20 +102,20 @@ class TestRedisCommands(object):
     @skip_if_server_version_lt('2.6.9')
     def test_client_kill(self, r, r2):
         r.client_setname('redis-py-c1')
-        r2[0].client_setname('redis-py-c2')
-        r2[1].client_setname('redis-py-c3')
-        test_clients = [client for client in r.client_list()
-                        if client.get('name')
-                        in ['redis-py-c1', 'redis-py-c2', 'redis-py-c3']]
-        assert len(test_clients) == 3
+        r2.client_setname('redis-py-c2')
+        clients = [client for client in r.client_list()
+                   if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
+        assert len(clients) == 2
 
-        resp = r.client_kill(test_clients[1].get('addr'))
-        assert isinstance(resp, bool) and resp is True
+        clients_by_name = dict([(client.get('name'), client)
+                                for client in clients])
 
-        test_clients = [client for client in r.client_list()
-                        if client.get('name')
-                        in ['redis-py-c1', 'redis-py-c2', 'redis-py-c3']]
-        assert len(test_clients) == 2
+        assert r.client_kill(clients_by_name['redis-py-c2'].get('addr')) is True
+
+        clients = [client for client in r.client_list()
+                   if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
+        assert len(clients) == 1
+        assert clients[0].get('name') == 'redis-py-c1'
 
     @skip_if_server_version_lt('2.8.12')
     def test_client_kill_filter_invalid_params(self, r):
@@ -132,25 +132,44 @@ class TestRedisCommands(object):
             r.client_kill_filter(_type="caster")
 
     @skip_if_server_version_lt('2.8.12')
-    def test_client_kill_filter(self, r, r2):
+    def test_client_kill_filter_by_id(self, r, r2):
         r.client_setname('redis-py-c1')
-        r2[0].client_setname('redis-py-c2')
-        r2[1].client_setname('redis-py-c3')
-        test_clients = [client for client in r.client_list()
-                        if client.get('name')
-                        in ['redis-py-c1', 'redis-py-c2', 'redis-py-c3']]
-        assert len(test_clients) == 3
+        r2.client_setname('redis-py-c2')
+        clients = [client for client in r.client_list()
+                   if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
+        assert len(clients) == 2
 
-        resp = r.client_kill_filter(_id=test_clients[1].get('id'))
-        assert isinstance(resp, int) and resp == 1
+        clients_by_name = dict([(client.get('name'), client)
+                                for client in clients])
 
-        resp = r.client_kill_filter(addr=test_clients[2].get('addr'))
-        assert isinstance(resp, int) and resp == 1
+        client_2_id = clients_by_name['redis-py-c2'].get('id')
+        resp = r.client_kill_filter(_id=client_2_id)
+        assert resp == 1
 
-        test_clients = [client for client in r.client_list()
-                        if client.get('name')
-                        in ['redis-py-c1', 'redis-py-c2', 'redis-py-c3']]
-        assert len(test_clients) == 1
+        clients = [client for client in r.client_list()
+                   if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
+        assert len(clients) == 1
+        assert clients[0].get('name') == 'redis-py-c1'
+
+    @skip_if_server_version_lt('2.8.12')
+    def test_client_kill_filter_by_addr(self, r, r2):
+        r.client_setname('redis-py-c1')
+        r2.client_setname('redis-py-c2')
+        clients = [client for client in r.client_list()
+                   if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
+        assert len(clients) == 2
+
+        clients_by_name = dict([(client.get('name'), client)
+                                for client in clients])
+
+        client_2_addr = clients_by_name['redis-py-c2'].get('addr')
+        resp = r.client_kill_filter(addr=client_2_addr)
+        assert resp == 1
+
+        clients = [client for client in r.client_list()
+                   if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
+        assert len(clients) == 1
+        assert clients[0].get('name') == 'redis-py-c1'
 
     @skip_if_server_version_lt('2.6.9')
     def test_client_list_after_client_setname(self, r):

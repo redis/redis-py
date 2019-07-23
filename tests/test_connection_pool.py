@@ -6,7 +6,7 @@ import re
 
 from threading import Thread
 from redis.connection import ssl_available, to_bool
-from .conftest import skip_if_server_version_lt
+from .conftest import skip_if_server_version_lt, _get_client
 
 
 class DummyConnection(object):
@@ -448,9 +448,7 @@ class TestConnection(object):
         """
         with pytest.raises(redis.BusyLoadingError):
             r.execute_command('DEBUG', 'ERROR', 'LOADING fake message')
-        pool = r.connection_pool
-        assert len(pool._available_connections) == 1
-        assert not pool._available_connections[0]._sock
+        assert not r.connection._sock
 
     @skip_if_server_version_lt('2.8.8')
     def test_busy_loading_from_pipeline_immediate_command(self, r):
@@ -521,3 +519,16 @@ class TestConnection(object):
         "AuthenticationError should be raised when sending the wrong password"
         with pytest.raises(redis.AuthenticationError):
             r.execute_command('DEBUG', 'ERROR', 'ERR invalid password')
+
+
+class TestMultiConnectionClient(object):
+    @pytest.fixture()
+    def r(self, request):
+        return _get_client(redis.Redis,
+                           request,
+                           single_connection_client=False)
+
+    def test_multi_connection_command(self, r):
+        assert not r.connection
+        assert r.set('a', '123')
+        assert r.get('a') == b'123'

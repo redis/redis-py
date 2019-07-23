@@ -22,6 +22,10 @@
       resolve those issues with no other side effects.
     * Fixed an issue with XCLAIM and previously claimed but not removed
       messages. Thanks @thomdask. #1192/#1191
+    * Allow for single connection client instances. These instances
+      are not thread safe but offer other benefits including a subtle
+      performance increase.
+
 * 3.2.1
     * Fix SentinelConnectionPool to work in multiprocess/forked environments.
 * 3.2.0
