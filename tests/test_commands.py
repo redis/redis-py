@@ -110,7 +110,8 @@ class TestRedisCommands(object):
         clients_by_name = dict([(client.get('name'), client)
                                 for client in clients])
 
-        assert r.client_kill(clients_by_name['redis-py-c2'].get('addr')) is True
+        client_addr = clients_by_name['redis-py-c2'].get('addr')
+        assert r.client_kill(client_addr) is True
 
         clients = [client for client in r.client_list()
                    if client.get('name') in ['redis-py-c1', 'redis-py-c2']]

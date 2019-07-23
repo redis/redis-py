@@ -25,7 +25,12 @@
     * Allow for single connection client instances. These instances
       are not thread safe but offer other benefits including a subtle
       performance increase.
-
+    * Added extensive health checks that keep the connections lively.
+      Passing the "health_check_interval=N" option to the Redis client class
+      or to a ConnectionPool ensures that a round trip PING/PONG is successful
+      before any command if the underlying connection has been idle for more
+      than N seconds. ConnectionErrors and TimeoutErrors are automatically
+      retried once for health checks.
 * 3.2.1
     * Fix SentinelConnectionPool to work in multiprocess/forked environments.
 * 3.2.0
