@@ -284,6 +284,45 @@ specified during initialization.
     >>> pool = redis.ConnectionPool(connection_class=YourConnectionClass,
                                     your_arg='...', ...)
 
+Connections maintain an open socket to the Redis server. Sometimes these
+sockets are interrupted or disconnected for a variety of reasons. For example,
+network appliances, load balancers and other services that sit between clients
+and servers are often configured to kill connections that remain idle for a
+given threshold.
+
+When a connection becomes disconnected, the next command issued on that
+connection will fail and redis-py will raise a ConnectionError to the caller.
+This allows each application that uses redis-py to handle errors in a way
+that's fitting for that specific application. However, constant error
+handling can be verbose and cumbersome, especially when socket disconnections
+happen frequently in many production environments.
+
+To combat this, redis-py can issue regular health checks to assess the
+liveliness of a connection just before issuing a command. Users can pass
+``health_check_interval=N`` to the Redis or ConnectionPool classes or
+as a query argument within a Redis URL. The value of ``health_check_interval``
+must be an interger. A value of ``0``, the default, disables health checks.
+Any positive integer will enable health checks. Health checks are performed
+just before a command is executed if the underlying connection has been idle
+for more than ``health_check_interval`` seconds. For example,
+``health_check_interval=30`` will ensure that a health check is run on any
+connection that has been idle for 30 or more seconds just before a command
+is executed on that connection.
+
+If your application is running in an environment that disconnects idle
+connections after 30 seconds you should set the ``heatlh_check_interval``
+option to a value less than 30.
+
+This option also works on any PubSub connection that is created from a
+client with ``health_check_interval`` enabled. PubSub users need to ensure
+that ``get_message()`` or ``listen()`` are called more frequently than
+``health_check_interval`` seconds. It is assumed that most workloads already
+do this.
+
+If your PubSub use case doesn't regularly call ``get_message()`` or
+``listen()`` frequently, you must call ``pubsub.check_health()``
+explicitly on a regularly basis.
+
 Parsers
 ^^^^^^^
 
