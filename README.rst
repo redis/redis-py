@@ -319,9 +319,9 @@ that ``get_message()`` or ``listen()`` are called more frequently than
 ``health_check_interval`` seconds. It is assumed that most workloads already
 do this.
 
-If your PubSub use case doesn't regularly call ``get_message()`` or
-``listen()`` frequently, you must call ``pubsub.check_health()``
-explicitly on a regularly basis.
+If your PubSub use case doesn't call ``get_message()`` or ``listen()``
+frequently, you should call ``pubsub.check_health()`` explicitly on a
+regularly basis.
 
 Parsers
 ^^^^^^^
