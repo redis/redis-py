@@ -31,6 +31,11 @@
       before any command if the underlying connection has been idle for more
       than N seconds. ConnectionErrors and TimeoutErrors are automatically
       retried once for health checks.
+    * Changed the PubSubWorkerThread to use a threading.Event object rather
+      than a boolean to control the thread's life cycle. Thanks Timothy
+      Rule. #1194/#1195.
+    * Fixed a bug in Pipeline error handling that would incorrectly retry
+      ConnectionErrors.
 * 3.2.1
     * Fix SentinelConnectionPool to work in multiprocess/forked environments.
 * 3.2.0

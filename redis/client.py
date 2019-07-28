@@ -3499,16 +3499,26 @@ class Pipeline(Redis):
             return self.parse_response(conn, command_name, **options)
         except (ConnectionError, TimeoutError) as e:
             conn.disconnect()
-            if not conn.retry_on_timeout and isinstance(e, TimeoutError):
+            # if we were already watching a variable, the watch is no longer
+            # valid since this connection has died. raise a WatchError, which
+            # indicates the user should retry this transaction.
+            if self.watching:
+                self.reset()
+                raise WatchError("A ConnectionError occured on while watching "
+                                 "one or more keys")
+            # if retry_on_timeout is not set, or the error is not
+            # a TimeoutError, raise it
+            if not (conn.retry_on_timeout and isinstance(e, TimeoutError)):
+                self.reset()
                 raise
-            # if we're not already watching, we can safely retry the command
+
+            # retry_on_timeout is set, this is a TimeoutError and we are not
+            # already WATCHing any variables. retry the command.
             try:
-                if not self.watching:
-                    conn.send_command(*args)
-                    return self.parse_response(conn, command_name, **options)
-            except ConnectionError:
-                # the retry failed so cleanup.
-                conn.disconnect()
+                conn.send_command(*args)
+                return self.parse_response(conn, command_name, **options)
+            except (ConnectionError, TimeoutError):
+                # a subsequent failure should simply be raised
                 self.reset()
                 raise
 
@@ -3667,18 +3677,17 @@ class Pipeline(Redis):
             return execute(conn, stack, raise_on_error)
         except (ConnectionError, TimeoutError) as e:
             conn.disconnect()
-            if not conn.retry_on_timeout and isinstance(e, TimeoutError):
-                raise
             # if we were watching a variable, the watch is no longer valid
             # since this connection has died. raise a WatchError, which
-            # indicates the user should retry his transaction. If this is more
-            # than a temporary failure, the WATCH that the user next issues
-            # will fail, propegating the real ConnectionError
+            # indicates the user should retry this transaction.
             if self.watching:
                 raise WatchError("A ConnectionError occured on while watching "
                                  "one or more keys")
-            # otherwise, it's safe to retry since the transaction isn't
-            # predicated on any state
+            # if retry_on_timeout is not set, or the error is not
+            # a TimeoutError, raise it
+            if not (conn.retry_on_timeout and isinstance(e, TimeoutError)):
+                raise
+            # retry a TimeoutError when retry_on_timeout is set
             return execute(conn, stack, raise_on_error)
         finally:
             self.reset()
