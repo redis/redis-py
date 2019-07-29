@@ -1,6 +1,5 @@
 from __future__ import unicode_literals
 from distutils.version import StrictVersion
-from errno import EWOULDBLOCK
 from itertools import chain
 from time import time
 import io
@@ -36,6 +35,8 @@ except ImportError:
     ssl_available = False
 
 if ssl_available:
+    # note that when using nonblocking sockets over ssl, the ssl module
+    # raises its own exceptions rather than the normal BlockingIOError
     blocking_exceptions = (
         BlockingIOError,
         ssl.SSLWantReadError,
@@ -184,7 +185,7 @@ class SocketBuffer(object):
             # blocking error, simply return False indicating that
             # there's no data to be read. otherwise raise the
             # original exception.
-            if raise_on_timeout or ex.errno != EWOULDBLOCK:
+            if raise_on_timeout:
                 raise
             return False
         except socket.timeout:
@@ -413,7 +414,7 @@ class HiredisParser(BaseParser):
             # blocking error, simply return False indicating that
             # there's no data to be read. otherwise raise the
             # original exception.
-            if raise_on_timeout or ex.errno != EWOULDBLOCK:
+            if raise_on_timeout:
                 raise
             return False
         except socket.timeout:
