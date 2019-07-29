@@ -10,12 +10,6 @@ import sys
 import threading
 import warnings
 
-try:
-    import ssl
-    ssl_available = True
-except ImportError:
-    ssl_available = False
-
 from redis._compat import (xrange, imap, byte_to_chr, unicode, long,
                            nativestr, basestring, iteritems,
                            LifoQueue, Empty, Full, urlparse, parse_qs,
@@ -34,6 +28,23 @@ from redis.exceptions import (
     TimeoutError,
 )
 from redis.utils import HIREDIS_AVAILABLE
+
+try:
+    import ssl
+    ssl_available = True
+except ImportError:
+    ssl_available = False
+
+if ssl_available:
+    blocking_exceptions = (
+        BlockingIOError,
+        ssl.SSLWantReadError,
+        ssl.SSLWantWriteError
+    )
+else:
+    blocking_exceptions = (BlockingIOError,)
+
+
 if HIREDIS_AVAILABLE:
     import hiredis
 
@@ -168,7 +179,7 @@ class SocketBuffer(object):
                 if length is not None and length > marker:
                     continue
                 return True
-        except BlockingIOError as ex:
+        except blocking_exceptions as ex:
             # if we're in nonblocking mode and the recv raises a
             # blocking error, simply return False indicating that
             # there's no data to be read. otherwise raise the
@@ -397,7 +408,7 @@ class HiredisParser(BaseParser):
             # data was read from the socket and added to the buffer.
             # return True to indicate that data was read.
             return True
-        except BlockingIOError as ex:
+        except blocking_exceptions as ex:
             # if we're in nonblocking mode and the recv raises a
             # blocking error, simply return False indicating that
             # there's no data to be read. otherwise raise the
