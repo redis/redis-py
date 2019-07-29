@@ -2,8 +2,11 @@ import pytest
 import multiprocessing
 import contextlib
 
+import redis
 from redis.connection import Connection, ConnectionPool
 from redis.exceptions import ConnectionError
+
+from .conftest import _get_client
 
 
 @contextlib.contextmanager
@@ -17,6 +20,15 @@ def exit_callback(callback, *args):
 class TestMultiprocessing(object):
     # Test connection sharing between forks.
     # See issue #1085 for details.
+
+    # use a multi-connection client as that's the only type that is
+    # actuall fork/process-safe
+    @pytest.fixture()
+    def r(self, request):
+        return _get_client(
+            redis.Redis,
+            request=request,
+            single_connection_client=False)
 
     def test_close_connection_in_child(self):
         """
