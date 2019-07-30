@@ -2,6 +2,7 @@ from __future__ import unicode_literals
 from distutils.version import StrictVersion
 from itertools import chain
 from time import time
+import errno
 import io
 import os
 import socket
@@ -35,7 +36,7 @@ except ImportError:
     ssl_available = False
 
 NONBLOCKING_EXCEPTION_ERROR_NUMBERS = {
-    BlockingIOError: 35,
+    BlockingIOError: errno.EWOULDBLOCK,
 }
 
 if ssl_available:
