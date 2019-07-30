@@ -34,9 +34,9 @@ try:
 except ImportError:
     ssl_available = False
 
-if ssl_available:
+if ssl_available and hasattr(ssl, 'SSLWantReadError'):
     # note that when using nonblocking sockets over ssl, the ssl module
-    # raises its own exceptions rather than the normal BlockingIOError
+    # in python > 2.7.9 raises its own exceptions rather than BlockingIOError
     blocking_exceptions = (
         BlockingIOError,
         ssl.SSLWantReadError,

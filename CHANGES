@@ -1,3 +1,6 @@
+* 3.3.3
+    * The SSL module in Python < 2.7.9 handles non-blocking sockets
+      differently than 2.7.9+. This patch accomodates older versions. #1197
 * 3.3.2
     * Further fixed a regression introduced in 3.3.0 involving SSL and
       non-blocking sockets. #1197
