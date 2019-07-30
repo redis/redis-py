@@ -1,3 +1,7 @@
+* 3.3.4
+    * More specifically identify nonblocking read errors for both SSL and
+      non-SSL connections. 3.3.1, 3.3.2 and 3.3.3 on Python 2.7 could
+      potentially mask a ConnectionError. #1197
 * 3.3.3
     * The SSL module in Python < 2.7.9 handles non-blocking sockets
       differently than 2.7.9+. This patch accommodates older versions. #1197

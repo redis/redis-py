@@ -34,17 +34,18 @@ try:
 except ImportError:
     ssl_available = False
 
-if ssl_available and hasattr(ssl, 'SSLWantReadError'):
-    # note that when using nonblocking sockets over ssl, the ssl module
-    # in python > 2.7.9 raises its own exceptions rather than BlockingIOError
-    blocking_exceptions = (
-        BlockingIOError,
-        ssl.SSLWantReadError,
-        ssl.SSLWantWriteError
-    )
-else:
-    blocking_exceptions = (BlockingIOError,)
+NONBLOCKING_EXCEPTION_ERROR_NUMBERS = {
+    BlockingIOError: 35,
+}
 
+if ssl_available:
+    if hasattr(ssl, 'SSLWantReadError'):
+        NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLWantReadError] = 2
+        NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLWantWriteError] = 2
+    else:
+        NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLError] = 2
+
+NONBLOCKING_EXCEPTIONS = tuple(NONBLOCKING_EXCEPTION_ERROR_NUMBERS.keys())
 
 if HIREDIS_AVAILABLE:
     import hiredis
@@ -180,12 +181,13 @@ class SocketBuffer(object):
                 if length is not None and length > marker:
                     continue
                 return True
-        except blocking_exceptions as ex:
+        except NONBLOCKING_EXCEPTIONS as ex:
             # if we're in nonblocking mode and the recv raises a
             # blocking error, simply return False indicating that
             # there's no data to be read. otherwise raise the
             # original exception.
-            if raise_on_timeout:
+            allowed_errno = NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ex.__class__]
+            if raise_on_timeout or ex.errno != allowed_errno:
                 raise
             return False
         except socket.timeout:
@@ -409,12 +411,13 @@ class HiredisParser(BaseParser):
             # data was read from the socket and added to the buffer.
             # return True to indicate that data was read.
             return True
-        except blocking_exceptions as ex:
+        except NONBLOCKING_EXCEPTIONS as ex:
             # if we're in nonblocking mode and the recv raises a
             # blocking error, simply return False indicating that
             # there's no data to be read. otherwise raise the
             # original exception.
-            if raise_on_timeout:
+            allowed_errno = NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ex.__class__]
+            if raise_on_timeout or ex.errno != allowed_errno:
                 raise
             return False
         except socket.timeout:
