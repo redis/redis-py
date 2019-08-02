@@ -187,14 +187,10 @@ class SocketBuffer(object):
             # blocking error, simply return False indicating that
             # there's no data to be read. otherwise raise the
             # original exception.
-            allowed_errno = NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ex.__class__]
-            if raise_on_timeout or ex.errno != allowed_errno:
-                raise
-            return False
-        except socket.timeout:
-            if raise_on_timeout:
-                raise
-            return False
+            allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
+            if not raise_on_timeout and ex.errno == allowed:
+                return False
+            raise
         finally:
             if custom_timeout:
                 sock.settimeout(self.socket_timeout)
@@ -417,14 +413,10 @@ class HiredisParser(BaseParser):
             # blocking error, simply return False indicating that
             # there's no data to be read. otherwise raise the
             # original exception.
-            allowed_errno = NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ex.__class__]
-            if raise_on_timeout or ex.errno != allowed_errno:
-                raise
-            return False
-        except socket.timeout:
-            if not raise_on_timeout:
-                raise
-            return False
+            allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
+            if not raise_on_timeout and ex.errno == allowed:
+                return False
+            raise
         finally:
             if custom_timeout:
                 sock.settimeout(self._socket_timeout)
