@@ -182,6 +182,10 @@ class SocketBuffer(object):
                 if length is not None and length > marker:
                     continue
                 return True
+        except socket.timeout:
+            if raise_on_timeout:
+                raise
+            return False
         except NONBLOCKING_EXCEPTIONS as ex:
             # if we're in nonblocking mode and the recv raises a
             # blocking error, simply return False indicating that
@@ -408,6 +412,10 @@ class HiredisParser(BaseParser):
             # data was read from the socket and added to the buffer.
             # return True to indicate that data was read.
             return True
+        except socket.timeout:
+            if raise_on_timeout:
+                raise
+            return False
         except NONBLOCKING_EXCEPTIONS as ex:
             # if we're in nonblocking mode and the recv raises a
             # blocking error, simply return False indicating that

@@ -1,3 +1,6 @@
+* 3.3.6
+    * Fixed a regression in 3.3.5 that caused PubSub.get_message() to raise
+      a socket.timeout exception when passing a timeout value. #1200
 * 3.3.5
     * Fix an issue where socket.timeout errors could be handled by the wrong
       exception handler in Python 2.7.

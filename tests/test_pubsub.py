@@ -531,3 +531,11 @@ class TestPubSubConnectionKilled(object):
                 r.client_kill_filter(_id=client['id'])
         with pytest.raises(ConnectionError):
             wait_for_message(p)
+
+
+class TestPubSubTimeouts(object):
+    def test_get_message_with_timeout_returns_none(self, r):
+        p = r.pubsub()
+        p.subscribe('foo')
+        assert wait_for_message(p) == make_message('subscribe', 'foo', 1)
+        assert p.get_message(timeout=0.01) is None
