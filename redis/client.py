@@ -3002,7 +3002,7 @@ class Monitor(object):
     next_command() method returns one command from monitor
     listen() method yields commands from monitor.
     """
-    monitor_re = re.compile(r'\[(\d+) (.+):(\d+)\] (.*)')
+    monitor_re = re.compile(r'\[(\d+) (.*)\] (.*)')
     command_re = re.compile(r'"(.*?)(?<!\\)"')
 
     def __init__(self, connection_pool):
@@ -3028,14 +3028,28 @@ class Monitor(object):
             response = self.connection.encoder.decode(response, force=True)
         command_time, command_data = response.split(' ', 1)
         m = self.monitor_re.match(command_data)
-        db_id, client_address, client_port, command = m.groups()
+        db_id, client_info, command = m.groups()
         command = ' '.join(self.command_re.findall(command))
         command = command.replace('\\"', '"').replace('\\\\', '\\')
+
+        if client_info == 'lua':
+            client_address = 'lua'
+            client_port = ''
+            client_type = 'lua'
+        elif client_info.startswith('unix'):
+            client_address = 'unix'
+            client_port = client_info[5:]
+            client_type = 'unix'
+        else:
+            # use rsplit as ipv6 addresses contain colons
+            client_address, client_port = client_info.rsplit(':', 1)
+            client_type = 'tcp'
         return {
             'time': float(command_time),
             'db': int(db_id),
             'client_address': client_address,
             'client_port': client_port,
+            'client_type': client_type,
             'command': command
         }
 

@@ -1,3 +1,6 @@
+* 3.3.8
+    * Fixed MONITOR parsing to properly parse IPv6 client addresses, unix
+      socket connections and commands issued from Lua. Thanks @kukey. #1201
 * 3.3.7
     * Fixed a regression introduced in 3.3.0 where socket.error exceptions
       (or subclasses) could potentially be raised instead of

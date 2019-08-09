@@ -29,6 +29,7 @@ class TestPipeline(object):
             response = wait_for_command(r, m, 'PING')
             assert isinstance(response['time'], float)
             assert response['db'] == 9
+            assert response['client_type'] in ('tcp', 'unix')
             assert isinstance(response['client_address'], unicode)
             assert isinstance(response['client_port'], unicode)
             assert response['command'] == 'PING'
@@ -45,3 +46,13 @@ class TestPipeline(object):
             r.get(byte_string)
             response = wait_for_command(r, m, 'GET foo\\x92')
             assert response['command'] == 'GET foo\\x92'
+
+    def test_lua_script(self, r):
+        with r.monitor() as m:
+            script = 'return redis.call("GET", "foo")'
+            assert r.eval(script, 0) is None
+            response = wait_for_command(r, m, 'GET foo')
+            assert response['command'] == 'GET foo'
+            assert response['client_type'] == 'lua'
+            assert response['client_address'] == 'lua'
+            assert response['client_port'] == ''
