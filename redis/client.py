@@ -3002,7 +3002,8 @@ class Monitor(object):
     next_command() method returns one command from monitor
     listen() method yields commands from monitor.
     """
-    monitor_re = re.compile(r'\[(\d+) (.+):(\d+)\] (.*)')
+    #monitor_re = re.compile(r'\[(\d+) (.+):(\d+)\] (.*)')
+    monitor_re = re.compile(r'\[(\d+) (.*)\] (.*)')
     command_re = re.compile(r'"(.*?)(?<!\\)"')
 
     def __init__(self, connection_pool):
@@ -3028,17 +3029,29 @@ class Monitor(object):
             response = self.connection.encoder.decode(response, force=True)
         command_time, command_data = response.split(' ', 1)
         m = self.monitor_re.match(command_data)
-        db_id, client_address, client_port, command = m.groups()
+        db_id, client_info, command = m.groups()
         command = ' '.join(self.command_re.findall(command))
         command = command.replace('\\"', '"').replace('\\\\', '\\')
-        return {
-            'time': float(command_time),
-            'db': int(db_id),
-            'client_address': client_address,
-            'client_port': client_port,
-            'command': command
-        }
+        c_info = client_info.split(':',1)
+        if(len(c_info) == 2):
+            client_address = c_info[0]
+            client_port = int(c_info[1])
+            return {
+                'time': float(command_time),
+                'db': int(db_id),
+                'client_address': client_address,
+                'client_port': client_port,
+                'command': command
+            }
+        else:
+            return {
+                'time': float(command_time),
+                'db': int(db_id),
+                'cmd_type': client_info,
+                'command': command
+            }
 
+        
     def listen(self):
         "Listen for commands coming to the server."
         while True:
