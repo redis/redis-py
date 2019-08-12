@@ -3034,7 +3034,7 @@ class Monitor(object):
         c_info = client_info.split(':', 1)
         if(len(c_info) == 2):
             client_address = c_info[0]
-            client_port = int(c_info[1])
+            client_port = c_info[1]
             return {
                 'time': float(command_time),
                 'db': int(db_id),
