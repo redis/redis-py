@@ -1,3 +1,7 @@
+* 3.3.7
+    * Fixed a regression introduced in 3.3.0 where socket.error exceptions
+      (or subclasses) could potentially be raised instead of
+      redis.exceptions.ConnectionError. #1202
 * 3.3.6
     * Fixed a regression in 3.3.5 that caused PubSub.get_message() to raise
       a socket.timeout exception when passing a timeout value. #1200

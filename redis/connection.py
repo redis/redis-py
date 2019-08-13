@@ -46,6 +46,16 @@ if ssl_available:
     else:
         NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLError] = 2
 
+# In Python 2.7 a socket.error is raised for a nonblocking read.
+# The _compat module aliases BlockingIOError to socket.error to be
+# Python 2/3 compatible.
+# However this means that all socket.error exceptions need to be handled
+# properly within these exception handlers.
+# We need to make sure socket.error is included in these handlers and
+# provide a dummy error number that will never match a real exception.
+if socket.error not in NONBLOCKING_EXCEPTION_ERROR_NUMBERS:
+    NONBLOCKING_EXCEPTION_ERROR_NUMBERS[socket.error] = -999999
+
 NONBLOCKING_EXCEPTIONS = tuple(NONBLOCKING_EXCEPTION_ERROR_NUMBERS.keys())
 
 if HIREDIS_AVAILABLE:
@@ -184,7 +194,7 @@ class SocketBuffer(object):
                 return True
         except socket.timeout:
             if raise_on_timeout:
-                raise
+                raise TimeoutError("Timeout reading from socket")
             return False
         except NONBLOCKING_EXCEPTIONS as ex:
             # if we're in nonblocking mode and the recv raises a
@@ -194,7 +204,8 @@ class SocketBuffer(object):
             allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
             if not raise_on_timeout and ex.errno == allowed:
                 return False
-            raise
+            raise ConnectionError("Error while reading from socket: %s" %
+                                  (ex.args,))
         finally:
             if custom_timeout:
                 sock.settimeout(self.socket_timeout)
@@ -414,7 +425,7 @@ class HiredisParser(BaseParser):
             return True
         except socket.timeout:
             if raise_on_timeout:
-                raise
+                raise TimeoutError("Timeout reading from socket")
             return False
         except NONBLOCKING_EXCEPTIONS as ex:
             # if we're in nonblocking mode and the recv raises a
@@ -424,7 +435,8 @@ class HiredisParser(BaseParser):
             allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
             if not raise_on_timeout and ex.errno == allowed:
                 return False
-            raise
+            raise ConnectionError("Error while reading from socket: %s" %
+                                  (ex.args,))
         finally:
             if custom_timeout:
                 sock.settimeout(self._socket_timeout)
