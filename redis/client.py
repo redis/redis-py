@@ -3209,7 +3209,10 @@ class PubSub(object):
         """
         encode = self.encoder.encode
         decode = self.encoder.decode
-        return {decode(encode(k)): v for k, v in iteritems(data)}
+        res = {}
+        for k, v in iteritems(data):
+            res[decode(encode(k))] = v
+        return res
 
     def psubscribe(self, *args, **kwargs):
         """
@@ -3425,7 +3428,7 @@ class Pipeline(Redis):
     on a key of a different datatype.
     """
 
-    UNWATCH_COMMANDS = {'DISCARD', 'EXEC', 'UNWATCH'}
+    UNWATCH_COMMANDS = set(['DISCARD', 'EXEC', 'UNWATCH'])
 
     def __init__(self, connection_pool, response_callbacks, transaction,
                  shard_hint):
