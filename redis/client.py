@@ -427,6 +427,14 @@ def parse_cluster_nodes(response, **options):
         raw_lines = response.splitlines()
     return dict(_parse_node_line(line) for line in raw_lines)
 
+def parse_cluster_nodes_list(response, **options):
+    result = {}
+    if isinstance(response, list):
+        for r in response:
+            result.update(parse_cluster_nodes(r))
+    else:
+        raise DataError("CLUSTER SLAVES response type must be a list")
+    return result
 
 def parse_georadius_generic(response, **options):
     if options['store'] or options['store_dist']:
@@ -547,7 +555,7 @@ class Redis(object):
             'CLUSTER SAVECONFIG': bool_ok,
             'CLUSTER SET-CONFIG-EPOCH': bool_ok,
             'CLUSTER SETSLOT': bool_ok,
-            'CLUSTER SLAVES': parse_cluster_nodes,
+            'CLUSTER SLAVES': parse_cluster_nodes_list,
             'CONFIG GET': parse_config_get,
             'CONFIG RESETSTAT': bool_ok,
             'CONFIG SET': bool_ok,
