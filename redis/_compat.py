@@ -3,6 +3,19 @@ import errno
 import socket
 import sys
 
+
+def sendall(sock, *args, **kwargs):
+    return sock.sendall(*args, **kwargs)
+
+
+def shutdown(sock, *args, **kwargs):
+    return sock.shutdown(*args, **kwargs)
+
+
+def ssl_wrap_socket(context, sock, *args, **kwargs):
+    return context.wrap_socket(sock, *args, **kwargs)
+
+
 # For Python older than 3.5, retry EINTR.
 if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and
                                sys.version_info[1] < 5):
@@ -59,6 +72,43 @@ else:  # Python 3.5 and above automatically retry EINTR
 
     def recv_into(sock, *args, **kwargs):
         return sock.recv_into(*args, **kwargs)
+
+if sys.version_info[0] < 3:
+    # In Python 3, the ssl module raises socket.timeout whereas it raises
+    # SSLError in Python 2. For compatibility between versions, ensure
+    # socket.timeout is raised for both.
+    import functools
+
+    try:
+        from ssl import SSLError as _SSLError
+    except ImportError:
+        class _SSLError(Exception):
+            """A replacement in case ssl.SSLError is not available."""
+            pass
+
+    _EXPECTED_SSL_TIMEOUT_MESSAGES = (
+        "The handshake operation timed out",
+        "The read operation timed out",
+        "The write operation timed out",
+    )
+
+    def _handle_ssl_timeout(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except _SSLError as e:
+                if any(x in e.args[0] for x in _EXPECTED_SSL_TIMEOUT_MESSAGES):
+                    # Raise socket.timeout for compatibility with Python 3.
+                    raise socket.timeout(*e.args)
+                raise
+        return wrapper
+
+    recv = _handle_ssl_timeout(recv)
+    recv_into = _handle_ssl_timeout(recv_into)
+    sendall = _handle_ssl_timeout(sendall)
+    shutdown = _handle_ssl_timeout(shutdown)
+    ssl_wrap_socket = _handle_ssl_timeout(ssl_wrap_socket)
 
 if sys.version_info[0] < 3:
     from urllib import unquote

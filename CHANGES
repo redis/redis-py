@@ -1,3 +1,7 @@
+* 3.3.9
+    * Mapped Python 2.7 SSLError to TimeoutError where appropriate. Timeouts
+      should now consistently raise TimeoutErrors on Python 2.7 for both
+      unsecured and secured connections. Thanks @zbristow. #1222
 * 3.3.8
     * Fixed MONITOR parsing to properly parse IPv6 client addresses, unix
       socket connections and commands issued from Lua. Thanks @kukey. #1201
