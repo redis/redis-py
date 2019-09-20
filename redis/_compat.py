@@ -61,6 +61,34 @@ else:  # Python 3.5 and above automatically retry EINTR
         return sock.recv_into(*args, **kwargs)
 
 if sys.version_info[0] < 3:
+    # In Python 3, the ssl module raises socket.timeout whereas it raises
+    # SSLError in Python 2. For compatibility between versions, ensure
+    # socket.timeout is raised for both.
+    import functools
+
+    try:
+        from ssl import SSLError as _SSLError
+    except ImportError:
+        class _SSLError(Exception):
+            """A replacement in case ssl.SSLError is not available."""
+            pass
+
+    def _handle_ssl_timeout(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except _SSLError as e:
+                if e.args[0] == "The read operation timed out":
+                    # Raise socket.timeout for compatibility with Python 3.
+                    raise socket.timeout(*e.args)
+                raise
+        return wrapper
+
+    recv = _handle_ssl_timeout(recv)
+    recv_into = _handle_ssl_timeout(recv_into)
+
+if sys.version_info[0] < 3:
     from urllib import unquote
     from urlparse import parse_qs, urlparse
     from itertools import imap, izip
