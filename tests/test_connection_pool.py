@@ -158,6 +158,7 @@ class TestConnectionPoolURLParsing(object):
             'host': 'localhost',
             'port': 6379,
             'db': 0,
+            'username': None,
             'password': None,
         }
 
@@ -168,6 +169,7 @@ class TestConnectionPoolURLParsing(object):
             'host': 'myhost',
             'port': 6379,
             'db': 0,
+            'username': None,
             'password': None,
         }
 
@@ -179,6 +181,7 @@ class TestConnectionPoolURLParsing(object):
             'host': 'my / host +=+',
             'port': 6379,
             'db': 0,
+            'username': None,
             'password': None,
         }
 
@@ -189,6 +192,33 @@ class TestConnectionPoolURLParsing(object):
             'host': 'localhost',
             'port': 6380,
             'db': 0,
+            'username': None,
+            'password': None,
+        }
+
+    @skip_if_server_version_lt('6.0.0')
+    def test_username(self):
+        pool = redis.ConnectionPool.from_url('redis://myuser:@localhost')
+        assert pool.connection_class == redis.Connection
+        assert pool.connection_kwargs == {
+            'host': 'localhost',
+            'port': 6379,
+            'db': 0,
+            'username': 'myuser',
+            'password': None,
+        }
+
+    @skip_if_server_version_lt('6.0.0')
+    def test_quoted_username(self):
+        pool = redis.ConnectionPool.from_url(
+            'redis://%2Fmyuser%2F%2B name%3D%24+:@localhost',
+            decode_components=True)
+        assert pool.connection_class == redis.Connection
+        assert pool.connection_kwargs == {
+            'host': 'localhost',
+            'port': 6379,
+            'db': 0,
+            'username': '/myuser/+ name=$+',
             'password': None,
         }
 
@@ -199,6 +229,7 @@ class TestConnectionPoolURLParsing(object):
             'host': 'localhost',
             'port': 6379,
             'db': 0,
+            'username': None,
             'password': 'mypassword',
         }
 
@@ -211,7 +242,20 @@ class TestConnectionPoolURLParsing(object):
             'host': 'localhost',
             'port': 6379,
             'db': 0,
+            'username': None,
             'password': '/mypass/+ word=$+',
+        }
+
+    @skip_if_server_version_lt('6.0.0')
+    def test_username_and_password(self):
+        pool = redis.ConnectionPool.from_url('redis://myuser:mypass@localhost')
+        assert pool.connection_class == redis.Connection
+        assert pool.connection_kwargs == {
+            'host': 'localhost',
+            'port': 6379,
+            'db': 0,
+            'username': 'myuser',
+            'password': 'mypass',
         }
 
     def test_db_as_argument(self):
@@ -221,6 +265,7 @@ class TestConnectionPoolURLParsing(object):
             'host': 'localhost',
             'port': 6379,
             'db': 1,
+            'username': None,
             'password': None,
         }
 
@@ -231,6 +276,7 @@ class TestConnectionPoolURLParsing(object):
             'host': 'localhost',
             'port': 6379,
             'db': 2,
+            'username': None,
             'password': None,
         }
 
@@ -242,6 +288,7 @@ class TestConnectionPoolURLParsing(object):
             'host': 'localhost',
             'port': 6379,
             'db': 3,
+            'username': None,
             'password': None,
         }
 
@@ -259,6 +306,7 @@ class TestConnectionPoolURLParsing(object):
             'socket_timeout': 20.0,
             'socket_connect_timeout': 10.0,
             'retry_on_timeout': True,
+            'username': None,
             'password': None,
         }
         assert pool.max_connections == 10
@@ -298,6 +346,7 @@ class TestConnectionPoolURLParsing(object):
             'host': 'localhost',
             'port': 6379,
             'db': 0,
+            'username': None,
             'password': None,
             'a': '1',
             'b': '2'
@@ -314,6 +363,7 @@ class TestConnectionPoolURLParsing(object):
             'host': 'myhost',
             'port': 6379,
             'db': 0,
+            'username': None,
             'password': None,
         }
 
@@ -329,6 +379,31 @@ class TestConnectionPoolUnixSocketURLParsing(object):
         assert pool.connection_kwargs == {
             'path': '/socket',
             'db': 0,
+            'username': None,
+            'password': None,
+        }
+
+    @skip_if_server_version_lt('6.0.0')
+    def test_username(self):
+        pool = redis.ConnectionPool.from_url('unix://myuser:@/socket')
+        assert pool.connection_class == redis.UnixDomainSocketConnection
+        assert pool.connection_kwargs == {
+            'path': '/socket',
+            'db': 0,
+            'username': 'myuser',
+            'password': None,
+        }
+
+    @skip_if_server_version_lt('6.0.0')
+    def test_quoted_username(self):
+        pool = redis.ConnectionPool.from_url(
+            'unix://%2Fmyuser%2F%2B name%3D%24+:@/socket',
+            decode_components=True)
+        assert pool.connection_class == redis.UnixDomainSocketConnection
+        assert pool.connection_kwargs == {
+            'path': '/socket',
+            'db': 0,
+            'username': '/myuser/+ name=$+',
             'password': None,
         }
 
@@ -338,6 +413,7 @@ class TestConnectionPoolUnixSocketURLParsing(object):
         assert pool.connection_kwargs == {
             'path': '/socket',
             'db': 0,
+            'username': None,
             'password': 'mypassword',
         }
 
@@ -349,6 +425,7 @@ class TestConnectionPoolUnixSocketURLParsing(object):
         assert pool.connection_kwargs == {
             'path': '/socket',
             'db': 0,
+            'username': None,
             'password': '/mypass/+ word=$+',
         }
 
@@ -360,6 +437,7 @@ class TestConnectionPoolUnixSocketURLParsing(object):
         assert pool.connection_kwargs == {
             'path': '/my/path/to/../+_+=$ocket',
             'db': 0,
+            'username': None,
             'password': 'mypassword',
         }
 
@@ -369,6 +447,7 @@ class TestConnectionPoolUnixSocketURLParsing(object):
         assert pool.connection_kwargs == {
             'path': '/socket',
             'db': 1,
+            'username': None,
             'password': None,
         }
 
@@ -378,6 +457,7 @@ class TestConnectionPoolUnixSocketURLParsing(object):
         assert pool.connection_kwargs == {
             'path': '/socket',
             'db': 2,
+            'username': None,
             'password': None,
         }
 
@@ -387,6 +467,7 @@ class TestConnectionPoolUnixSocketURLParsing(object):
         assert pool.connection_kwargs == {
             'path': '/socket',
             'db': 0,
+            'username': None,
             'password': None,
             'a': '1',
             'b': '2'
@@ -402,6 +483,7 @@ class TestSSLConnectionURLParsing(object):
             'host': 'localhost',
             'port': 6379,
             'db': 0,
+            'username': None,
             'password': None,
         }
 
