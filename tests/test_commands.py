@@ -7,7 +7,7 @@ import redis
 import time
 
 from redis._compat import (unichr, ascii_letters, iteritems, iterkeys,
-                           itervalues, long)
+                           itervalues, long, basestring)
 from redis.client import parse_info
 from redis import exceptions
 
@@ -66,6 +66,11 @@ class TestRedisCommands(object):
             r['a']
 
     # SERVER INFORMATION
+    @skip_if_server_version_lt('6.0.0')
+    def test_acl_whoami(self, r):
+        username = r.acl_whoami()
+        assert isinstance(username, basestring)
+
     def test_client_list(self, r):
         clients = r.client_list()
         assert isinstance(clients[0], dict)
