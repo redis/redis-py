@@ -528,6 +528,8 @@ class Redis(object):
         {
             'ACL CAT': lambda r: list(map(nativestr, r)),
             'ACL GENPASS': nativestr,
+            'ACL LOAD': bool_ok,
+            'ACL SAVE': bool_ok,
             'ACL USERS': lambda r: list(map(nativestr, r)),
             'ACL WHOAMI': nativestr,
             'CLIENT GETNAME': lambda r: r and nativestr(r),
@@ -888,6 +890,24 @@ class Redis(object):
     def acl_genpass(self):
         "Generate a random password value"
         return self.execute_command('ACL GENPASS')
+
+    def acl_load(self):
+        """
+        Load ACL rules from the configured ``aclfile``.
+
+        Note that the server must be configured with the ``aclfile``
+        directive to be able to load ACL rules from an aclfile.
+        """
+        return self.execute_command('ACL LOAD')
+
+    def acl_save(self):
+        """
+        Save ACL rules to the configured ``aclfile``.
+
+        Note that the server must be configured with the ``aclfile``
+        directive to be able to save ACL rules to an aclfile.
+        """
+        return self.execute_command('ACL SAVE')
 
     def acl_users(self):
         "Returns a list of all registered users on the server."
