@@ -528,6 +528,7 @@ class Redis(object):
         {
             'ACL CAT': lambda r: list(map(nativestr, r)),
             'ACL GENPASS': nativestr,
+            'ACL USERS': lambda r: list(map(nativestr, r)),
             'ACL WHOAMI': nativestr,
             'CLIENT GETNAME': lambda r: r and nativestr(r),
             'CLIENT ID': int,
@@ -887,6 +888,10 @@ class Redis(object):
     def acl_genpass(self):
         "Generate a random password value"
         return self.execute_command('ACL GENPASS')
+
+    def acl_users(self):
+        "Returns a list of all registered users on the server."
+        return self.execute_command('ACL USERS')
 
     def acl_whoami(self):
         "Get the username for the current connection"
