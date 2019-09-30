@@ -84,6 +84,12 @@ class TestRedisCommands(object):
         assert isinstance(password, basestring)
 
     @skip_if_server_version_lt('6.0.0')
+    def test_acl_users(self, r):
+        users = r.acl_users()
+        assert isinstance(users, list)
+        assert len(users) > 0
+
+    @skip_if_server_version_lt('6.0.0')
     def test_acl_whoami(self, r):
         username = r.acl_whoami()
         assert isinstance(username, basestring)
