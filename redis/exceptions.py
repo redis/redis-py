@@ -53,6 +53,10 @@ class ReadOnlyError(ResponseError):
     pass
 
 
+class NoPermissionError(ResponseError):
+    pass
+
+
 class LockError(RedisError, ValueError):
     "Errors acquiring or releasing a lock"
     # NOTE: For backwards compatability, this class derives from ValueError.
