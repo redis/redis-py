@@ -22,6 +22,7 @@ from redis.exceptions import (
     DataError,
     ExecAbortError,
     InvalidResponse,
+    NoPermissionError,
     NoScriptError,
     ReadOnlyError,
     RedisError,
@@ -139,6 +140,7 @@ class BaseParser(object):
         'NOSCRIPT': NoScriptError,
         'READONLY': ReadOnlyError,
         'NOAUTH': AuthenticationError,
+        'NOPERM': NoPermissionError,
     }
 
     def parse_error(self, response):
@@ -485,10 +487,11 @@ class Connection(object):
     "Manages TCP communication to and from a Redis server"
     description_format = "Connection<host=%(host)s,port=%(port)s,db=%(db)s>"
 
-    def __init__(self, host='localhost', port=6379, db=0, password=None,
-                 socket_timeout=None, socket_connect_timeout=None,
-                 socket_keepalive=False, socket_keepalive_options=None,
-                 socket_type=0, retry_on_timeout=False, encoding='utf-8',
+    def __init__(self, host='localhost', port=6379, db=0, username=None,
+                 password=None, socket_timeout=None,
+                 socket_connect_timeout=None, socket_keepalive=False,
+                 socket_keepalive_options=None, socket_type=0,
+                 retry_on_timeout=False, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  parser_class=DefaultParser, socket_read_size=65536,
                  health_check_interval=0):
@@ -496,6 +499,7 @@ class Connection(object):
         self.host = host
         self.port = int(port)
         self.db = db
+        self.username = username
         self.password = password
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout
@@ -610,13 +614,17 @@ class Connection(object):
         "Initialize the connection, authenticate and select a database"
         self._parser.on_connect(self)
 
-        # if a password is specified, authenticate
-        if self.password:
+        # if username and/or password are set, authenticate
+        if self.username or self.password:
+            if self.username:
+                auth_args = (self.username, self.password)
+            else:
+                auth_args = (self.password,)
             # avoid checking health here -- PING will fail if we try
             # to check the health prior to the AUTH
-            self.send_command('AUTH', self.password, check_health=False)
+            self.send_command('AUTH', *auth_args, check_health=False)
             if nativestr(self.read_response()) != 'OK':
-                raise AuthenticationError('Invalid Password')
+                raise AuthenticationError('Invalid Username or Password')
 
         # if a database is specified, switch to it
         if self.db:
@@ -832,7 +840,7 @@ class SSLConnection(Connection):
 class UnixDomainSocketConnection(Connection):
     description_format = "UnixDomainSocketConnection<path=%(path)s,db=%(db)s>"
 
-    def __init__(self, path='', db=0, password=None,
+    def __init__(self, path='', db=0, username=None, password=None,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  retry_on_timeout=False,
@@ -841,6 +849,7 @@ class UnixDomainSocketConnection(Connection):
         self.pid = os.getpid()
         self.path = path
         self.db = db
+        self.username = username
         self.password = password
         self.socket_timeout = socket_timeout
         self.retry_on_timeout = retry_on_timeout
@@ -904,9 +913,9 @@ class ConnectionPool(object):
 
         For example::
 
-            redis://[:password]@localhost:6379/0
-            rediss://[:password]@localhost:6379/0
-            unix://[:password]@/path/to/socket.sock?db=0
+            redis://[[username]:[password]]@localhost:6379/0
+            rediss://[[username]:[password]]@localhost:6379/0
+            unix://[[username]:[password]]@/path/to/socket.sock?db=0
 
         Three URL schemes are supported:
 
@@ -931,7 +940,7 @@ class ConnectionPool(object):
         percent-encoded URLs. If this argument is set to ``True`` all ``%xx``
         escapes will be replaced by their single-character equivalents after
         the URL has been parsed. This only applies to the ``hostname``,
-        ``path``, and ``password`` components.
+        ``path``, ``username`` and ``password`` components.
 
         Any additional querystring arguments and keyword arguments will be
         passed along to the ConnectionPool class's initializer. The querystring
@@ -960,17 +969,20 @@ class ConnectionPool(object):
                     url_options[name] = value[0]
 
         if decode_components:
+            username = unquote(url.username) if url.username else None
             password = unquote(url.password) if url.password else None
             path = unquote(url.path) if url.path else None
             hostname = unquote(url.hostname) if url.hostname else None
         else:
-            password = url.password
+            username = url.username or None
+            password = url.password or None
             path = url.path
             hostname = url.hostname
 
         # We only support redis://, rediss:// and unix:// schemes.
         if url.scheme == 'unix':
             url_options.update({
+                'username': username,
                 'password': password,
                 'path': path,
                 'connection_class': UnixDomainSocketConnection,
@@ -980,6 +992,7 @@ class ConnectionPool(object):
             url_options.update({
                 'host': hostname,
                 'port': int(url.port or 6379),
+                'username': username,
                 'password': password,
             })
 

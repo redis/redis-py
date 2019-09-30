@@ -609,9 +609,9 @@ class Redis(object):
 
         For example::
 
-            redis://[:password]@localhost:6379/0
-            rediss://[:password]@localhost:6379/0
-            unix://[:password]@/path/to/socket.sock?db=0
+            redis://[[username]:[password]]@localhost:6379/0
+            rediss://[[username]:[password]]@localhost:6379/0
+            unix://[[username]:[password]]@/path/to/socket.sock?db=0
 
         Three URL schemes are supported:
 
@@ -640,7 +640,7 @@ class Redis(object):
         return cls(connection_pool=connection_pool)
 
     def __init__(self, host='localhost', port=6379,
-                 db=0, password=None, socket_timeout=None,
+                 db=0, username=None, password=None, socket_timeout=None,
                  socket_connect_timeout=None,
                  socket_keepalive=None, socket_keepalive_options=None,
                  connection_pool=None, unix_socket_path=None,
@@ -663,6 +663,7 @@ class Redis(object):
 
             kwargs = {
                 'db': db,
+                'username': username,
                 'password': password,
                 'socket_timeout': socket_timeout,
                 'encoding': encoding,
