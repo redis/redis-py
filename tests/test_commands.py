@@ -67,6 +67,11 @@ class TestRedisCommands(object):
 
     # SERVER INFORMATION
     @skip_if_server_version_lt('6.0.0')
+    def test_acl_genpass(self, r):
+        password = r.acl_genpass()
+        assert isinstance(password, basestring)
+
+    @skip_if_server_version_lt('6.0.0')
     def test_acl_whoami(self, r):
         username = r.acl_whoami()
         assert isinstance(username, basestring)
