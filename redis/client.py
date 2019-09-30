@@ -526,6 +526,7 @@ class Redis(object):
         string_keys_to_dict('XREAD XREADGROUP', parse_xread),
         string_keys_to_dict('BGREWRITEAOF BGSAVE', lambda r: True),
         {
+            'ACL GENPASS': nativestr,
             'ACL WHOAMI': nativestr,
             'CLIENT GETNAME': lambda r: r and nativestr(r),
             'CLIENT ID': int,
@@ -874,6 +875,10 @@ class Redis(object):
     def acl_whoami(self):
         "Get the username for the current connection"
         return self.execute_command('ACL WHOAMI')
+
+    def acl_genpass(self):
+        "Generate a random password value"
+        return self.execute_command('ACL GENPASS')
 
     def bgrewriteaof(self):
         "Tell the Redis server to rewrite the AOF file from data in memory."
