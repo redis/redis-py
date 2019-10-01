@@ -617,7 +617,7 @@ class Connection(object):
         # if username and/or password are set, authenticate
         if self.username or self.password:
             if self.username:
-                auth_args = (self.username, self.password)
+                auth_args = (self.username, self.password or '')
             else:
                 auth_args = (self.password,)
             # avoid checking health here -- PING will fail if we try
