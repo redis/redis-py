@@ -470,6 +470,30 @@ def parse_client_kill(response, **options):
     return nativestr(response) == 'OK'
 
 
+def parse_acl_getuser(response, **options):
+    if response is None:
+        return None
+    data = pairs_to_dict(response, decode_keys=True)
+
+    # convert everything but user-defined data in 'keys' to native strings
+    data['flags'] = list(map(nativestr, data['flags']))
+    data['passwords'] = list(map(nativestr, data['passwords']))
+    data['commands'] = nativestr(data['commands'])
+
+    # split 'commands' into separate 'categories' and 'commands' lists
+    commands, categories = [], []
+    for command in data['commands'].split(' '):
+        if '@' in command:
+            categories.append(command)
+        else:
+            commands.append(command)
+
+    data['commands'] = commands
+    data['categories'] = categories
+    data['enabled'] = 'on' in data['flags']
+    return data
+
+
 class Redis(object):
     """
     Implementation of the Redis protocol.
@@ -527,9 +551,13 @@ class Redis(object):
         string_keys_to_dict('BGREWRITEAOF BGSAVE', lambda r: True),
         {
             'ACL CAT': lambda r: list(map(nativestr, r)),
+            'ACL DELUSER': int,
             'ACL GENPASS': nativestr,
+            'ACL GETUSER': parse_acl_getuser,
+            'ACL LIST': lambda r: list(map(nativestr, r)),
             'ACL LOAD': bool_ok,
             'ACL SAVE': bool_ok,
+            'ACL SETUSER': bool_ok,
             'ACL USERS': lambda r: list(map(nativestr, r)),
             'ACL WHOAMI': nativestr,
             'CLIENT GETNAME': lambda r: r and nativestr(r),
@@ -887,9 +915,25 @@ class Redis(object):
         pieces = [category] if category else []
         return self.execute_command('ACL CAT', *pieces)
 
+    def acl_deluser(self, username):
+        "Delete the ACL for the specified ``username``"
+        return self.execute_command('ACL DELUSER', username)
+
     def acl_genpass(self):
         "Generate a random password value"
         return self.execute_command('ACL GENPASS')
+
+    def acl_getuser(self, username):
+        """
+        Get the ACL details for the specified ``username``.
+
+        If ``username`` does not exist, return None
+        """
+        return self.execute_command('ACL GETUSER', username)
+
+    def acl_list(self):
+        "Return a list of all ACLs on the server"
+        return self.execute_command('ACL LIST')
 
     def acl_load(self):
         """
@@ -908,6 +952,97 @@ class Redis(object):
         directive to be able to save ACL rules to an aclfile.
         """
         return self.execute_command('ACL SAVE')
+
+    def acl_setuser(self, username, enabled=True, nopass=False, passwords=None,
+                    categories=None, commands=None, keys=None, reset=False):
+        """
+        Create or update an ACL user.
+
+        Create or update the ACL for ``username``. If the user already exists,
+        the existing ACL is completely overwritten and replaced with the
+        specified values.
+
+        ``enabled`` is a boolean indicating whether the user should be allowed
+        to authenticate or not. Defaults to ``True``.
+
+        ``nopass`` is a boolean indicating whether the can authenticate without
+        a password. This cannot be True if ``passwords`` are also specified.
+
+        ``passwords`` if specified is a list of strings that this user can
+        authenticate with. If ``passwords`` is not specified, the special
+        'nopass' flag will be used to indicate this user does not need a
+        password to authenticate.
+
+        ``categories`` if specified is a list of strings representing category
+        permissions. A string beginning with '-' indicates that the user
+        explicitly does not have access to the category. For example, '-write'
+        would deny the user access to any command in the 'write' category.
+
+        ``commands`` if specified is a list of strings representing command
+        permissions. A string beginning with '-' indicates that the user
+        explicitly does not have access to the command. For example, '-set'
+        would deny the user access to the 'set' command.
+
+        ``keys`` if specified is a list of key patterns to grant the user
+        access to. Keys patterns allow '*' to support wildcard matching. For
+        example, '*' grants access to all keys while 'cache:*' grants access
+        to all keys that are prefixed with 'cache:'.
+
+        ``reset`` is a boolean indicating whether the user should be fully
+        reset prior to applying the new ACL. Setting this to True will
+        remove all existing passwords, flags and privileges from the user and
+        then apply the specified rules. If this is False, the existing user's
+        passwords, flags and privileges will be kept and the specified rules
+        will be applied on top.
+        """
+        pieces = [username]
+        if enabled:
+            pieces.append('on')
+        else:
+            pieces.append('off')
+
+        if passwords and nopass:
+            raise DataError('Cannot set \'nopass\' and supply \'passwords\'')
+
+        if passwords:
+            # as most users will have only one password, allow passwords to be
+            # specified as a simple string or a list
+            passwords = list_or_args(passwords, [])
+            for password in passwords:
+                pieces.append('>%s' % password)
+
+        if nopass:
+            pieces.append(b'nopass')
+
+        if categories:
+            for cat in categories:
+                # normalize the category making sure it starts with +@ or -@
+                if cat.startswith('-') or cat.startswith('+'):
+                    modifier, cat = cat[0], cat[1:]
+                else:
+                    modifier = '+'
+                if not cat.startswith('@'):
+                    cat = '@%s' % cat
+                cat = '%s%s' % (modifier, cat)
+                pieces.append(cat.encode())
+
+        if commands:
+            for cmd in commands:
+                if not cmd.startswith('+') and not cmd.startswith('-'):
+                    cmd = '+%s' % cmd
+                pieces.append(cmd.encode())
+
+        if keys:
+            for key in keys:
+                if not key.startswith('~'):
+                    key = '~%s' % key
+                pieces.append(key)
+
+        if reset:
+            if not self.execute_command('ACL SETUSER', username, 'reset'):
+                # we first reset the user so we're working with a clean slate
+                raise RedisError('Failed to reset user: %s' % username)
+        return self.execute_command('ACL SETUSER', *pieces)
 
     def acl_users(self):
         "Returns a list of all registered users on the server."
