@@ -79,9 +79,99 @@ class TestRedisCommands(object):
         assert 'get' in commands
 
     @skip_if_server_version_lt('6.0.0')
+    def test_acl_deluser(self, r, request):
+        username = 'redis-py-user'
+
+        def teardown():
+            r.acl_deluser(username)
+
+        request.addfinalizer(teardown)
+
+        assert r.acl_deluser(username) == 0
+        assert r.acl_setuser(username, enabled=False, reset=True)
+        assert r.acl_deluser(username) == 1
+
+    @skip_if_server_version_lt('6.0.0')
     def test_acl_genpass(self, r):
         password = r.acl_genpass()
         assert isinstance(password, basestring)
+
+    @skip_if_server_version_lt('6.0.0')
+    def test_acl_getuser_setuser(self, r, request):
+        username = 'redis-py-user'
+
+        def teardown():
+            r.acl_deluser(username)
+        request.addfinalizer(teardown)
+
+        # test enabled=False
+        assert r.acl_setuser(username, enabled=False, reset=True)
+        assert r.acl_getuser(username) == {
+            'categories': ['-@all'],
+            'commands': [],
+            'enabled': False,
+            'flags': ['off'],
+            'keys': [],
+            'passwords': [],
+        }
+
+        # test nopass=True
+        assert r.acl_setuser(username, enabled=True, reset=True, nopass=True)
+        assert r.acl_getuser(username) == {
+            'categories': ['-@all'],
+            'commands': [],
+            'enabled': True,
+            'flags': ['on', 'nopass'],
+            'keys': [],
+            'passwords': [],
+        }
+
+        # test all args
+        assert r.acl_setuser(username, enabled=True, reset=True,
+                             passwords=['pass1', 'pass2'],
+                             categories=['set', '+hash', '+@list',
+                                         '-stream', '-geo'],
+                             commands=['set', '+mset', '-lpop'],
+                             keys=['cache:*', 'objects:*'])
+        acl = r.acl_getuser(username)
+        assert set(acl['categories']) == \
+            set(['-@all', '+@set', '+@hash', '+@list'])
+        assert set(acl['commands']) == set(['+set', '+mset', '-lpop'])
+        assert acl['enabled'] is True
+        assert acl['flags'] == ['on']
+        assert set(acl['keys']) == set([b'cache:*', b'objects:*'])
+        assert len(acl['passwords']) == 2
+
+        # test reset=False keeps existing ACL and applies new ACL on top
+        assert r.acl_setuser(username, enabled=True, reset=True,
+                             passwords=['pass1'],
+                             categories=['+@set'],
+                             commands=['+set'],
+                             keys=['cache:*'])
+        assert r.acl_setuser(username, enabled=True,
+                             passwords=['pass2'],
+                             categories=['+@hash'],
+                             commands=['+mset'],
+                             keys=['objects:*'])
+        acl = r.acl_getuser(username)
+        assert set(acl['categories']) == set(['-@all', '+@set', '+@hash'])
+        assert set(acl['commands']) == set(['+set', '+mset'])
+        assert acl['enabled'] is True
+        assert acl['flags'] == ['on']
+        assert set(acl['keys']) == set([b'cache:*', b'objects:*'])
+        assert len(acl['passwords']) == 2
+
+    @skip_if_server_version_lt('6.0.0')
+    def test_acl_list(self, r, request):
+        username = 'redis-py-user'
+
+        def teardown():
+            r.acl_deluser(username)
+        request.addfinalizer(teardown)
+
+        assert r.acl_setuser(username, enabled=False, reset=True)
+        users = r.acl_list()
+        assert 'user %s off -@all' % username in users
 
     @skip_if_server_version_lt('6.0.0')
     def test_acl_users(self, r):
