@@ -953,7 +953,7 @@ class Redis(object):
         """
         return self.execute_command('ACL SAVE')
 
-    def acl_setuser(self, username, enabled=True, nopass=False, passwords=None,
+    def acl_setuser(self, username, enabled=False, nopass=False, passwords=None,
                     categories=None, commands=None, keys=None, reset=False):
         """
         Create or update an ACL user.
@@ -963,7 +963,7 @@ class Redis(object):
         specified values.
 
         ``enabled`` is a boolean indicating whether the user should be allowed
-        to authenticate or not. Defaults to ``True``.
+        to authenticate or not. Defaults to ``False``.
 
         ``nopass`` is a boolean indicating whether the can authenticate without
         a password. This cannot be True if ``passwords`` are also specified.
@@ -974,14 +974,12 @@ class Redis(object):
         password to authenticate.
 
         ``categories`` if specified is a list of strings representing category
-        permissions. A string beginning with '-' indicates that the user
-        explicitly does not have access to the category. For example, '-write'
-        would deny the user access to any command in the 'write' category.
+        permissions. Each string must be prefixed with either a "+@" or "-@"
+        to indicate whether access to the category is allowed or denied.
 
         ``commands`` if specified is a list of strings representing command
-        permissions. A string beginning with '-' indicates that the user
-        explicitly does not have access to the command. For example, '-set'
-        would deny the user access to the 'set' command.
+        permissions. Each string must be prefixed with either a "+" or "-"
+        to indicate whether access to the command is allowed or denied.
 
         ``keys`` if specified is a list of key patterns to grant the user
         access to. Keys patterns allow '*' to support wildcard matching. For
@@ -1016,20 +1014,17 @@ class Redis(object):
 
         if categories:
             for cat in categories:
-                # normalize the category making sure it starts with +@ or -@
-                if cat.startswith('-') or cat.startswith('+'):
-                    modifier, cat = cat[0], cat[1:]
-                else:
-                    modifier = '+'
-                if not cat.startswith('@'):
-                    cat = '@%s' % cat
-                cat = '%s%s' % (modifier, cat)
+                # ensure the category starts with either a -@ or +@
+                if not cat.startswith('-@') and not cat.startswith('+@'):
+                    raise DataError('Category "%s" must be prefixed with '
+                                    '"+@" or "-@"' % cat)
                 pieces.append(cat.encode())
 
         if commands:
             for cmd in commands:
                 if not cmd.startswith('+') and not cmd.startswith('-'):
-                    cmd = '+%s' % cmd
+                    raise DataError('Command "%s" must be prefixed with '
+                                    '"+" or "-"')
                 pieces.append(cmd.encode())
 
         if keys:
