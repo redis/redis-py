@@ -129,14 +129,12 @@ class TestRedisCommands(object):
         # test all args
         assert r.acl_setuser(username, enabled=True, reset=True,
                              passwords=['pass1', 'pass2'],
-                             categories=['set', '+hash', '+@list',
-                                         '-stream', '-geo'],
-                             commands=['set', '+mset', '-lpop'],
+                             categories=['+@set', '+@hash', '-@geo'],
+                             commands=['+get', '+mget', '-hset'],
                              keys=['cache:*', 'objects:*'])
         acl = r.acl_getuser(username)
-        assert set(acl['categories']) == \
-            set(['-@all', '+@set', '+@hash', '+@list'])
-        assert set(acl['commands']) == set(['+set', '+mset', '-lpop'])
+        assert set(acl['categories']) == set(['-@all', '+@set', '+@hash'])
+        assert set(acl['commands']) == set(['+get', '+mget', '-hset'])
         assert acl['enabled'] is True
         assert acl['flags'] == ['on']
         assert set(acl['keys']) == set([b'cache:*', b'objects:*'])
@@ -172,6 +170,39 @@ class TestRedisCommands(object):
         assert r.acl_setuser(username, enabled=False, reset=True)
         users = r.acl_list()
         assert 'user %s off -@all' % username in users
+
+    @skip_if_server_version_lt('6.0.0')
+    def test_acl_setuser_categories_without_prefix_fails(self, r, request):
+        username = 'redis-py-user'
+
+        def teardown():
+            r.acl_deluser(username)
+        request.addfinalizer(teardown)
+
+        with pytest.raises(exceptions.DataError):
+            r.acl_setuser(username, categories=['list'])
+
+    @skip_if_server_version_lt('6.0.0')
+    def test_acl_setuser_commands_without_prefix_fails(self, r, request):
+        username = 'redis-py-user'
+
+        def teardown():
+            r.acl_deluser(username)
+        request.addfinalizer(teardown)
+
+        with pytest.raises(exceptions.DataError):
+            r.acl_setuser(username, commands=['get'])
+
+    @skip_if_server_version_lt('6.0.0')
+    def test_acl_setuser_passwords_and_nopass_fails(self, r, request):
+        username = 'redis-py-user'
+
+        def teardown():
+            r.acl_deluser(username)
+        request.addfinalizer(teardown)
+
+        with pytest.raises(exceptions.DataError):
+            r.acl_setuser(username, passwords='mypass', nopass=True)
 
     @skip_if_server_version_lt('6.0.0')
     def test_acl_users(self, r):
