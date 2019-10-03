@@ -128,7 +128,7 @@ class TestRedisCommands(object):
 
         # test all args
         assert r.acl_setuser(username, enabled=True, reset=True,
-                             passwords=['pass1', 'pass2'],
+                             add_passwords=['pass1', 'pass2'],
                              categories=['+@set', '+@hash', '-@geo'],
                              commands=['+get', '+mget', '-hset'],
                              keys=['cache:*', 'objects:*'])
@@ -142,12 +142,12 @@ class TestRedisCommands(object):
 
         # test reset=False keeps existing ACL and applies new ACL on top
         assert r.acl_setuser(username, enabled=True, reset=True,
-                             passwords=['pass1'],
+                             add_passwords=['pass1'],
                              categories=['+@set'],
                              commands=['+set'],
                              keys=['cache:*'])
         assert r.acl_setuser(username, enabled=True,
-                             passwords=['pass2'],
+                             add_passwords=['pass2'],
                              categories=['+@hash'],
                              commands=['+mset'],
                              keys=['objects:*'])
@@ -158,6 +158,14 @@ class TestRedisCommands(object):
         assert acl['flags'] == ['on']
         assert set(acl['keys']) == set([b'cache:*', b'objects:*'])
         assert len(acl['passwords']) == 2
+
+        # test remove_passwords
+        assert r.acl_setuser(username, enabled=True, reset=True,
+                             add_passwords=['pass1', 'pass2'])
+        assert len(r.acl_getuser(username)['passwords']) == 2
+        assert r.acl_setuser(username, enabled=True,
+                             remove_passwords=['pass2'])
+        assert len(r.acl_getuser(username)['passwords']) == 1
 
     @skip_if_server_version_lt('6.0.0')
     def test_acl_list(self, r, request):
@@ -194,7 +202,7 @@ class TestRedisCommands(object):
             r.acl_setuser(username, commands=['get'])
 
     @skip_if_server_version_lt('6.0.0')
-    def test_acl_setuser_passwords_and_nopass_fails(self, r, request):
+    def test_acl_setuser_add_passwords_and_nopass_fails(self, r, request):
         username = 'redis-py-user'
 
         def teardown():
@@ -202,7 +210,7 @@ class TestRedisCommands(object):
         request.addfinalizer(teardown)
 
         with pytest.raises(exceptions.DataError):
-            r.acl_setuser(username, passwords='mypass', nopass=True)
+            r.acl_setuser(username, add_passwords='mypass', nopass=True)
 
     @skip_if_server_version_lt('6.0.0')
     def test_acl_users(self, r):
