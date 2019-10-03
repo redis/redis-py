@@ -954,8 +954,8 @@ class Redis(object):
         return self.execute_command('ACL SAVE')
 
     def acl_setuser(self, username, enabled=False, nopass=False,
-                    passwords=None, categories=None, commands=None,
-                    keys=None, reset=False):
+                    add_passwords=None, remove_passwords=None, categories=None,
+                    commands=None, keys=None, reset=False):
         """
         Create or update an ACL user.
 
@@ -969,10 +969,15 @@ class Redis(object):
         ``nopass`` is a boolean indicating whether the can authenticate without
         a password. This cannot be True if ``passwords`` are also specified.
 
-        ``passwords`` if specified is a list of strings that this user can
-        authenticate with. If ``passwords`` is not specified, the special
-        'nopass' flag will be used to indicate this user does not need a
-        password to authenticate.
+        ``add_passwords`` if specified is a list of new passwords that this
+        user can authenticate with. For convenience, the value of
+        ``add_passwords`` can also be a simple string when adding a single
+        password. Note: Do not prefix passwords with '>'.
+
+        ``remove_passwords`` if specified is a list of passwords to remove from
+        this user. For convenience, the value of ``remove_passwords`` can also
+        be a simple string when removing a single password. Note: Do not
+        prefix passwords with '<'.
 
         ``categories`` if specified is a list of strings representing category
         permissions. Each string must be prefixed with either a "+@" or "-@"
@@ -1000,14 +1005,22 @@ class Redis(object):
         else:
             pieces.append('off')
 
-        if passwords and nopass:
-            raise DataError('Cannot set \'nopass\' and supply \'passwords\'')
+        if add_passwords and nopass:
+            raise DataError('Cannot set \'nopass\' and supply '
+                            '\'add_passwords\'')
 
-        if passwords:
-            # as most users will have only one password, allow passwords to be
-            # specified as a simple string or a list
-            passwords = list_or_args(passwords, [])
-            for password in passwords:
+        if remove_passwords:
+            # as most users will have only one password, allow remove_passwords
+            # to be specified as a simple string or a list
+            remove_passwords = list_or_args(remove_passwords, [])
+            for password in remove_passwords:
+                pieces.append('<%s' % password)
+
+        if add_passwords:
+            # as most users will have only one password, allow add_passwords
+            # to be specified as a simple string or a list
+            add_passwords = list_or_args(add_passwords, [])
+            for password in add_passwords:
                 pieces.append('>%s' % password)
 
         if nopass:
