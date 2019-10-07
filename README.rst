@@ -148,7 +148,7 @@ keys and values as a dict to these commands.
 ZINCRBY
 ^^^^^^^
 
-redis-py 2.X accidentily modified the argument order of ZINCRBY, swapping the
+redis-py 2.X accidentally modified the argument order of ZINCRBY, swapping the
 order of value and amount. ZINCRBY now looks like:
 
 .. code-block:: pycon
@@ -231,7 +231,7 @@ to the official command syntax. There are a few exceptions:
   <https://github.com/andymccurdy/redis-py/issues/151#issuecomment-1545015>`_
   for details).
 * **SCAN/SSCAN/HSCAN/ZSCAN**: The \*SCAN commands are implemented as they
-  exist in the Redis documentation. In addition, each command has an equivilant
+  exist in the Redis documentation. In addition, each command has an equivalent
   iterator method. These are purely for convenience so the user doesn't have
   to keep track of the cursor while iterating. Use the
   scan_iter/sscan_iter/hscan_iter/zscan_iter methods for this behavior.
@@ -301,7 +301,7 @@ To combat this, redis-py can issue regular health checks to assess the
 liveliness of a connection just before issuing a command. Users can pass
 ``health_check_interval=N`` to the Redis or ConnectionPool classes or
 as a query argument within a Redis URL. The value of ``health_check_interval``
-must be an interger. A value of ``0``, the default, disables health checks.
+must be an integer. A value of ``0``, the default, disables health checks.
 Any positive integer will enable health checks. Health checks are performed
 just before a command is executed if the underlying connection has been idle
 for more than ``health_check_interval`` seconds. For example,
@@ -310,7 +310,7 @@ connection that has been idle for 30 or more seconds just before a command
 is executed on that connection.
 
 If your application is running in an environment that disconnects idle
-connections after 30 seconds you should set the ``heatlh_check_interval``
+connections after 30 seconds you should set the ``health_check_interval``
 option to a value less than 30.
 
 This option also works on any PubSub connection that is created from a
