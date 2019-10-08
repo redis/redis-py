@@ -18,7 +18,16 @@ from redis.exceptions import (
     RedisError,
     ResponseError,
     TimeoutError,
-    WatchError
+    WatchError,
+    RedisTypeError,
+)
+from redis.constants import (
+    HASH,
+    LIST,
+    SET,
+    STREAM,
+    STRING,
+    ZSET
 )
 
 

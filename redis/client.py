@@ -23,6 +23,16 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
     WatchError,
+    RedisTypeError,
+)
+
+from redis.constants import (
+    HASH,
+    LIST,
+    SET,
+    STREAM,
+    STRING,
+    ZSET
 )
 
 SYM_EMPTY = b''
@@ -1805,7 +1815,7 @@ class Redis(object):
         return self.execute_command('SORT', *pieces, **options)
 
     # SCAN COMMANDS
-    def scan(self, cursor=0, match=None, count=None):
+    def scan(self, cursor=0, match=None, count=None, _type=None):
         """
         Incrementally return lists of key names. Also return a cursor
         indicating the scan position.
@@ -1819,6 +1829,18 @@ class Redis(object):
             pieces.extend([b'MATCH', match])
         if count is not None:
             pieces.extend([b'COUNT', count])
+        if _type is not None:
+            if _type in [
+                HASH,
+                LIST,
+                SET,
+                STREAM,
+                STRING,
+                ZSET
+            ]:
+                pieces.extend([b'TYPE', _type])
+            else:
+                raise RedisTypeError('Unknown type', _type)
         return self.execute_command('SCAN', *pieces)
 
     def scan_iter(self, match=None, count=None):

@@ -891,6 +891,19 @@ class TestRedisCommands(object):
         _, keys = r.scan(match='a')
         assert set(keys) == {b'a'}
 
+    @skip_if_server_version_lt('6.0.0')
+    def test_scan_type(self, r):
+        r.sadd('a-set', 1)
+        r.hset('a-hash', 'foo', 2)
+        r.lpush('a-list', 'aux', 3)
+        _, keys = r.scan(match='a*', _type=redis.SET)
+        assert set(keys) == {b'a-set'}
+    
+    @skip_if_server_version_lt('6.0.0')
+    def test_exception_scan_type(self, r):
+        with pytest.raises(exceptions.RedisTypeError):
+            r.scan(_type='foo')
+
     @skip_if_server_version_lt('2.8.0')
     def test_scan_iter(self, r):
         r.set('a', 1)
