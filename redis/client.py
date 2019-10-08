@@ -1843,7 +1843,7 @@ class Redis(object):
                 raise RedisTypeError('Unknown type', _type)
         return self.execute_command('SCAN', *pieces)
 
-    def scan_iter(self, match=None, count=None):
+    def scan_iter(self, match=None, count=None, _type=None):
         """
         Make an iterator using the SCAN command so that the client doesn't
         need to remember the cursor position.
@@ -1854,7 +1854,7 @@ class Redis(object):
         """
         cursor = '0'
         while cursor != 0:
-            cursor, data = self.scan(cursor=cursor, match=match, count=count)
+            cursor, data = self.scan(cursor=cursor, match=match, count=count, _type=_type)
             for item in data:
                 yield item
 
