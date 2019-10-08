@@ -2058,34 +2058,49 @@ class Redis(object):
         return self.execute_command('SORT', *pieces, **options)
 
     # SCAN COMMANDS
-    def scan(self, cursor=0, match=None, count=None):
+    def scan(self, cursor=0, match=None, count=None, _type=None):
         """
         Incrementally return lists of key names. Also return a cursor
         indicating the scan position.
 
         ``match`` allows for filtering the keys by pattern
 
-        ``count`` allows for hint the minimum number of returns
+        ``count`` provides a hint to Redis about the number of keys to
+            return per batch.
+
+        ``_type`` filters the returned values by a particular Redis type.
+            Stock Redis instances allow for the following types:
+            HASH, LIST, SET, STREAM, STRING, ZSET
+            Additionally, Redis modules can expose other types as well.
         """
         pieces = [cursor]
         if match is not None:
             pieces.extend([b'MATCH', match])
         if count is not None:
             pieces.extend([b'COUNT', count])
+        if _type is not None:
+            pieces.extend([b'TYPE', _type])
         return self.execute_command('SCAN', *pieces)
 
-    def scan_iter(self, match=None, count=None):
+    def scan_iter(self, match=None, count=None, _type=None):
         """
         Make an iterator using the SCAN command so that the client doesn't
         need to remember the cursor position.
 
         ``match`` allows for filtering the keys by pattern
 
-        ``count`` allows for hint the minimum number of returns
+        ``count`` provides a hint to Redis about the number of keys to
+            return per batch.
+
+        ``_type`` filters the returned values by a particular Redis type.
+            Stock Redis instances allow for the following types:
+            HASH, LIST, SET, STREAM, STRING, ZSET
+            Additionally, Redis modules can expose other types as well.
         """
         cursor = '0'
         while cursor != 0:
-            cursor, data = self.scan(cursor=cursor, match=match, count=count)
+            cursor, data = self.scan(cursor=cursor, match=match,
+                                     count=count, _type=_type)
             for item in data:
                 yield item
 

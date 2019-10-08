@@ -19,6 +19,7 @@
       specified in the SSL cert. By default 'ssl_check_hostname' is False
       for backwards compatibility. #1196
     * Slightly optimized command packing. Thanks @Deneby67. #1255
+    * Added support for the TYPE argument to SCAN. Thanks @netocp. #1220
 * 3.3.11
     * Further fix for the SSLError -> TimeoutError mapping to work
       on obscure releases of Python 2.7.
