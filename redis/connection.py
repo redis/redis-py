@@ -13,7 +13,8 @@ import warnings
 from redis._compat import (xrange, imap, byte_to_chr, unicode, long,
                            nativestr, basestring, iteritems,
                            LifoQueue, Empty, Full, urlparse, parse_qs,
-                           recv, recv_into, unquote, BlockingIOError)
+                           recv, recv_into, unquote, BlockingIOError,
+                           sendall, shutdown, ssl_wrap_socket)
 from redis.exceptions import (
     AuthenticationError,
     BusyLoadingError,
@@ -630,7 +631,7 @@ class Connection(object):
             return
         try:
             if os.getpid() == self.pid:
-                self._sock.shutdown(socket.SHUT_RDWR)
+                shutdown(self._sock, socket.SHUT_RDWR)
             self._sock.close()
         except socket.error:
             pass
@@ -662,7 +663,7 @@ class Connection(object):
             if isinstance(command, str):
                 command = [command]
             for item in command:
-                self._sock.sendall(item)
+                sendall(self._sock, item)
         except socket.timeout:
             self.disconnect()
             raise TimeoutError("Timeout writing to socket")
@@ -815,11 +816,12 @@ class SSLConnection(Connection):
                                         keyfile=self.keyfile)
             if self.ca_certs:
                 context.load_verify_locations(self.ca_certs)
-            sock = context.wrap_socket(sock, server_hostname=self.host)
+            sock = ssl_wrap_socket(context, sock, server_hostname=self.host)
         else:
             # In case this code runs in a version which is older than 2.7.9,
             # we want to fall back to old code
-            sock = ssl.wrap_socket(sock,
+            sock = ssl_wrap_socket(ssl,
+                                   sock,
                                    cert_reqs=self.cert_reqs,
                                    keyfile=self.keyfile,
                                    certfile=self.certfile,
