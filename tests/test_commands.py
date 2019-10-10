@@ -898,7 +898,7 @@ class TestRedisCommands(object):
         r.lpush('a-list', 'aux', 3)
         _, keys = r.scan(match='a*', _type=redis.SET)
         assert set(keys) == {b'a-set'}
-    
+
     @skip_if_server_version_lt('6.0.0')
     def test_exception_scan_type(self, r):
         with pytest.raises(exceptions.RedisTypeError):

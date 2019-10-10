@@ -1854,7 +1854,8 @@ class Redis(object):
         """
         cursor = '0'
         while cursor != 0:
-            cursor, data = self.scan(cursor=cursor, match=match, count=count, _type=_type)
+            cursor, data = self.scan(cursor=cursor, match=match,
+                                     count=count, _type=_type)
             for item in data:
                 yield item
 
