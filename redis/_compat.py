@@ -98,7 +98,7 @@ if sys.version_info[0] < 3:
             try:
                 return func(*args, **kwargs)
             except _SSLError as e:
-                if any(x in e.args[0] for x in _EXPECTED_SSL_TIMEOUT_MESSAGES):
+                if any(x in e.message for x in _EXPECTED_SSL_TIMEOUT_MESSAGES):
                     # Raise socket.timeout for compatibility with Python 3.
                     raise socket.timeout(*e.args)
                 raise
