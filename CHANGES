@@ -1,3 +1,6 @@
+* 3.3.11
+    * Further fix for the SSLError -> TimeoutError mapping to work
+      on obscure releases of Python 2.7.
 * 3.3.10
     * Fixed a potential error handling bug for the SSLError -> TimeoutError
       mapping introduced in 3.3.9. hanks @zbristow. #1224
