@@ -947,7 +947,7 @@ class Redis(object):
         return self.execute_command('ACL SAVE')
 
     def acl_setuser(self, username, enabled=False, nopass=False,
-                    add_passwords=None, remove_passwords=None, categories=None,
+                    add_passwords=None, remove_passwords=None, add_hashes=None, remove_hashes=None, categories=None,
                     commands=None, keys=None, reset=False):
         """
         Create or update an ACL user.
@@ -971,6 +971,15 @@ class Redis(object):
         this user. For convenience, the value of ``remove_passwords`` can also
         be a simple string when removing a single password. Note: Do not
         prefix passwords with '<'.
+
+        ``add_hashes`` if specified is a list of SHA-256 hash values of passwords
+        that this user can authenticate with. This may only be a SHA-256 hash value.
+        Note: Do not prefix password hashes with '#'.
+
+        ``remove_hashes`` If specified is a list of SHA-256 hash values of passwords to
+        remove from this user. This may be useful when you do not know the value of the
+        password you would like to remove but do have the hash.
+        Note: Do not prefix password hashes with '!'.
 
         ``categories`` if specified is a list of strings representing category
         permissions. Each string must be prefixed with either a "+@" or "-@"
@@ -1002,6 +1011,10 @@ class Redis(object):
             raise DataError('Cannot set \'nopass\' and supply '
                             '\'add_passwords\'')
 
+        if add_hashes and nopass:
+            raise DataError('Cannot set \'nopass\' and supply '
+                            '\'add_hashes\'')
+
         if remove_passwords:
             # as most users will have only one password, allow remove_passwords
             # to be specified as a simple string or a list
@@ -1015,6 +1028,20 @@ class Redis(object):
             add_passwords = list_or_args(add_passwords, [])
             for password in add_passwords:
                 pieces.append('>%s' % password)
+
+        if add_hashes:
+            # as most users will have only one password, allow add_hashes
+            # to be specified as a simple string or a list
+            add_hashes = list_or_args(add_hashes, [])
+            for hashes in add_hashes:
+                pieces.append('#%s' % hashes)
+
+        if remove_hashes:
+            # as most users will have only one password, allow remove_hashes
+            # to be specified as a simple string or a list
+            remove_hashes = list_or_args(remove_hashes, [])
+            for hashes in remove_hashes:
+                pieces.append('!%s' % hashes)
 
         if nopass:
             pieces.append(b'nopass')
