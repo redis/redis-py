@@ -948,7 +948,8 @@ class Redis(object):
 
     def acl_setuser(self, username, enabled=False, nopass=False,
                     add_passwords=None, remove_passwords=None, categories=None,
-                    commands=None, keys=None, reset=False):
+                    add_hashes=None, remove_hashes=None, commands=None,
+                    keys=None, reset=False):
         """
         Create or update an ACL user.
 
@@ -1009,20 +1010,28 @@ class Redis(object):
             # to be specified as a simple string or a list
             remove_passwords = list_or_args(remove_passwords, [])
             for password in remove_passwords:
-                if len(password) == 64:
-                    pieces.append('!%s' % password)
-                else:
-                    pieces.append('<%s' % password)
+                pieces.append('<%s' % password)
+
+        if remove_hashes:
+            # as most users will have only one password, allow remove_passwords
+            # to be specified as a simple string or a list
+            remove_hashes = list_or_args(remove_hashes, [])
+            for password in remove_hashes:
+                pieces.append('!%s' % password)
 
         if add_passwords:
             # as most users will have only one password, allow add_passwords
             # to be specified as a simple string or a list
             add_passwords = list_or_args(add_passwords, [])
             for password in add_passwords:
-                if len(password) == 64:
-                    pieces.append('#%s' % password)
-                else:
-                    pieces.append('<%s' % password)
+                pieces.append('>%s' % password)
+
+        if add_hashes:
+            # as most users will have only one password, allow remove_passwords
+            # to be specified as a simple string or a list
+            add_hashes = list_or_args(add_hashes, [])
+            for password in remove_hashes:
+                pieces.append('#%s' % password)
 
         if nopass:
             pieces.append(b'nopass')
