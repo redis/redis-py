@@ -129,6 +129,7 @@ class TestRedisCommands(object):
         # test all args
         assert r.acl_setuser(username, enabled=True, reset=True,
                              add_passwords=['pass1', 'pass2'],
+                             add_hashes=['5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', '0b14d501a594442a01c6859541bcb3e8164d183d32937b851835442f69d5c94e'],
                              categories=['+@set', '+@hash', '-@geo'],
                              commands=['+get', '+mget', '-hset'],
                              keys=['cache:*', 'objects:*'])
@@ -138,11 +139,12 @@ class TestRedisCommands(object):
         assert acl['enabled'] is True
         assert acl['flags'] == ['on']
         assert set(acl['keys']) == set([b'cache:*', b'objects:*'])
-        assert len(acl['passwords']) == 2
+        assert len(acl['passwords']) == 4
 
         # test reset=False keeps existing ACL and applies new ACL on top
         assert r.acl_setuser(username, enabled=True, reset=True,
                              add_passwords=['pass1'],
+                             add_hashes=['5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8'],
                              categories=['+@set'],
                              commands=['+set'],
                              keys=['cache:*'])
@@ -157,14 +159,16 @@ class TestRedisCommands(object):
         assert acl['enabled'] is True
         assert acl['flags'] == ['on']
         assert set(acl['keys']) == set([b'cache:*', b'objects:*'])
-        assert len(acl['passwords']) == 2
+        assert len(acl['passwords']) == 3
 
-        # test remove_passwords
+        # test remove_passwords and remove_hashes
         assert r.acl_setuser(username, enabled=True, reset=True,
-                             add_passwords=['pass1', 'pass2'])
-        assert len(r.acl_getuser(username)['passwords']) == 2
+                             add_passwords=['pass1', 'pass2'],
+                             add_hashes=['5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8'])
+        assert len(r.acl_getuser(username)['passwords']) == 3
         assert r.acl_setuser(username, enabled=True,
-                             remove_passwords=['pass2'])
+                             remove_passwords=['pass2'],
+                             remove_hashes=['5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8'])
         assert len(r.acl_getuser(username)['passwords']) == 1
 
     @skip_if_server_version_lt('6.0.0')
