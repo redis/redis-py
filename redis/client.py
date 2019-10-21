@@ -1014,7 +1014,7 @@ class Redis(object):
                 if len(password) == 64:
                     pieces.append('!%s' % password)
                 else:
-                	pieces.append('<%s' % password)
+                    pieces.append('<%s' % password)
 
         if add_passwords:
             # as most users will have only one password, allow add_passwords
@@ -1024,7 +1024,7 @@ class Redis(object):
                 if len(password) == 64:
                     pieces.append('#%s' % password)
                 else:
-                	pieces.append('>%s' % password)
+                	  pieces.append('>%s' % password)
 
         if nopass:
             pieces.append(b'nopass')
