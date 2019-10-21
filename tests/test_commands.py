@@ -166,22 +166,21 @@ class TestRedisCommands(object):
         assert r.acl_setuser(username, enabled=True,
                              remove_passwords=['pass2'])
         assert len(r.acl_getuser(username)['passwords']) == 1
-        
-        # Resets and tests hash value set properly and not hashed to something else
-        hash = '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8'
-        assert r.acl_setuser(username='jamie', enabled=True, reset=True,
-                             add_passwords=[hash])
-        assert acl['passwords'] == [hash]
+
+        # Resets and tests hash value "variable HP" set properly
+        HP = '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8'
+        assert r.acl_setuser(username, enabled=True, reset=True,
+                             add_passwords=[HP])
+        assert acl['passwords'] == [HP]
         # test remove_passwords for hash removal
         assert r.acl_setuser(username, enabled=True, reset=True,
-                             add_passwords=[hash, 'pass1'])
+                             add_passwords=[HP, 'pass1'])
         assert len(r.acl_getuser(username)['passwords']) == 2
         assert r.acl_setuser(username, enabled=True,
-                             remove_passwords=[hash])
+                             remove_passwords=[HP])
         assert len(r.acl_getuser(username)['passwords']) == 1
 
-
-    @skip_if_server_version_lt('5.9.101')
+    @skip_if_server_version_lt('6.0.0')
     def test_acl_list(self, r, request):
         username = 'redis-py-user'
 
