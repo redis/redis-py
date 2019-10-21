@@ -173,7 +173,7 @@ class TestRedisCommands(object):
                              add_passwords=[hash])
         assert acl['passwords'] == [hash]
         # test remove_passwords for hash removal
-        assert r.acl_setuser(username=, enabled=True, reset=True,
+        assert r.acl_setuser(username, enabled=True, reset=True,
                              add_passwords=[hash, 'pass1'])
         assert len(r.acl_getuser(username)['passwords']) == 2
         assert r.acl_setuser(username, enabled=True,
