@@ -167,7 +167,7 @@ class TestRedisCommands(object):
                              remove_passwords=['pass2'])
         assert len(r.acl_getuser(username)['passwords']) == 1
 
-        # Resets and tests hash value "variable HP" set properly
+        # Resets and tests hash value "variable HP" set properly.
         HP = '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8'
         assert r.acl_setuser(username, enabled=True, reset=True,
                              add_passwords=[HP])
