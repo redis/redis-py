@@ -965,12 +965,14 @@ class Redis(object):
         ``add_passwords`` if specified is a list of new passwords that this
         user can authenticate with. For convenience, the value of
         ``add_passwords`` can also be a simple string when adding a single
-        password. Note: Do not prefix passwords with '>'.
+        password. Note: Do not prefix passwords with '>' or '#'. 
+        Passwords can not be 64 characters unless in hash form.
 
         ``remove_passwords`` if specified is a list of passwords to remove from
         this user. For convenience, the value of ``remove_passwords`` can also
         be a simple string when removing a single password. Note: Do not
-        prefix passwords with '<'.
+        prefix passwords with '<' or '!'.
+        Passwords can not be 64 characters unless in hash form.
 
         ``categories`` if specified is a list of strings representing category
         permissions. Each string must be prefixed with either a "+@" or "-@"
@@ -1007,14 +1009,20 @@ class Redis(object):
             # to be specified as a simple string or a list
             remove_passwords = list_or_args(remove_passwords, [])
             for password in remove_passwords:
-                pieces.append('<%s' % password)
+                if len(password) == 64:
+                    pieces.append('!%s' % password)
+                else:
+                    pieces.append('<%s' % password)
 
         if add_passwords:
             # as most users will have only one password, allow add_passwords
             # to be specified as a simple string or a list
             add_passwords = list_or_args(add_passwords, [])
             for password in add_passwords:
-                pieces.append('>%s' % password)
+                if len(password) == 64:
+                    pieces.append('#%s' % password)
+                else:
+                    pieces.append('<%s' % password)
 
         if nopass:
             pieces.append(b'nopass')
