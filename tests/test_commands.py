@@ -178,9 +178,9 @@ class TestRedisCommands(object):
         assert r.acl_setuser(username, enabled=True,
                              remove_passwords=[HP])
         assert len(r.acl_getuser(username)['passwords']) == 1
-        
-    @skip_if_server_version_lt('6.0.0')
-    def test_acl_list(self, r, request):
+
+        @skip_if_server_version_lt('6.0.0')
+        def test_acl_list(self, r, request):
         username = 'redis-py-user'
 
         def teardown():
