@@ -1046,7 +1046,7 @@ class Redis(object):
             # as most users will have only one password, allow remove_passwords
             # to be specified as a simple string or a list
             add_hashes = list_or_args(add_hashes, [])
-            for password in remove_hashes:
+            for password in add_hashes:
                 pieces.append('#%s' % password)
 
         if nopass:
