@@ -965,14 +965,14 @@ class Redis(object):
         ``add_passwords`` if specified is a list of new passwords that this
         user can authenticate with. For convenience, the value of
         ``add_passwords`` can also be a simple string when adding a single
-        password. Note: Do not prefix passwords with '>' or '#'. 
-        Passwords can not be 64 characters unless in hash form.
+        password. Note: Do not prefix passwords with '>' or '#'. Passwords
+        can not be 64 characters unless in hash form.
 
         ``remove_passwords`` if specified is a list of passwords to remove from
         this user. For convenience, the value of ``remove_passwords`` can also
         be a simple string when removing a single password. Note: Do not
-        prefix passwords with '<' or '!'.
-        Passwords can not be 64 characters unless in hash form.
+        prefix passwords with '<' or '!'. Passwords can not be 64 characters
+        unless in hash form.
 
         ``categories`` if specified is a list of strings representing category
         permissions. Each string must be prefixed with either a "+@" or "-@"
