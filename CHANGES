@@ -1,9 +1,14 @@
+* (IN DEVELOPMENT)
+    * Allow empty pipelines to be executed if there are WATCHed keys.
+      This is a convenient way to test if any of the watched keys changed
+      without actually running any other commands. Thanks @brianmaissy.
+      #1233, #1234
 * 3.3.11
     * Further fix for the SSLError -> TimeoutError mapping to work
       on obscure releases of Python 2.7.
 * 3.3.10
     * Fixed a potential error handling bug for the SSLError -> TimeoutError
-      mapping introduced in 3.3.9. hanks @zbristow. #1224
+      mapping introduced in 3.3.9. Thanks @zbristow. #1224
 * 3.3.9
     * Mapped Python 2.7 SSLError to TimeoutError where appropriate. Timeouts
       should now consistently raise TimeoutErrors on Python 2.7 for both

@@ -191,6 +191,19 @@ class TestPipeline(object):
 
             assert not pipe.watching
 
+    def test_watch_failure_in_empty_transaction(self, r):
+        r['a'] = 1
+        r['b'] = 2
+
+        with r.pipeline() as pipe:
+            pipe.watch('a', 'b')
+            r['b'] = 3
+            pipe.multi()
+            with pytest.raises(redis.WatchError):
+                pipe.execute()
+
+            assert not pipe.watching
+
     def test_unwatch(self, r):
         r['a'] = 1
         r['b'] = 2
