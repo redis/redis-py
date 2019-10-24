@@ -3670,7 +3670,7 @@ class Pipeline(Redis):
     def execute(self, raise_on_error=True):
         "Execute all the commands in the current pipeline"
         stack = self.command_stack
-        if not stack:
+        if not stack and not self.watching:
             return []
         if self.scripts:
             self.load_scripts()
