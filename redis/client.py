@@ -1748,7 +1748,7 @@ class Redis(object):
             Use an "*" to indicate where in the key the item value is located
 
         ``get`` allows for returning items from external keys rather than the
-            sorted data itself.  Use an "*" to indicate where int he key
+            sorted data itself.  Use an "*" to indicate where in the key
             the item value is located
 
         ``desc`` allows for reversing the sort
