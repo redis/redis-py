@@ -389,11 +389,12 @@ def parse_zscan(response, **options):
 
 
 def parse_slowlog_get(response, **options):
+    space = ' ' if options.get('decode_responses', False) else b' '
     return [{
         'id': item[0],
         'start_time': int(item[1]),
         'duration': int(item[2]),
-        'command': (' ' if options.get('decode_responses', False) else b' ').join(item[3])
+        'command': space.join(item[3])
     } for item in response]
 
 
@@ -1189,7 +1190,8 @@ class Redis(object):
         args = ['SLOWLOG GET']
         if num is not None:
             args.append(num)
-        decode_responses = self.connection_pool.connection_kwargs.get('decode_responses', False)
+        decode_responses = self.connection_pool.connection_kwargs.get(
+            'decode_responses', False)
         return self.execute_command(*args, decode_responses=decode_responses)
 
     def slowlog_len(self):
