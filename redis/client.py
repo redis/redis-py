@@ -393,7 +393,7 @@ def parse_slowlog_get(response, **options):
         'id': item[0],
         'start_time': int(item[1]),
         'duration': int(item[2]),
-        'command': b' '.join(item[3])
+        'command': (' ' if options.get('decode_responses', False) else b' ').join(item[3])
     } for item in response]
 
 
@@ -1189,7 +1189,8 @@ class Redis(object):
         args = ['SLOWLOG GET']
         if num is not None:
             args.append(num)
-        return self.execute_command(*args)
+        decode_responses = self.connection_pool.connection_kwargs.get('decode_responses', False)
+        return self.execute_command(*args, decode_responses=decode_responses)
 
     def slowlog_len(self):
         "Get the number of items in the slowlog"
