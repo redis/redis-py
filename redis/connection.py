@@ -1044,6 +1044,9 @@ class ConnectionPool(object):
             repr(self.connection_class(**self.connection_kwargs)),
         )
 
+    def __eq__(self, other):
+        return self.connection_kwargs == other.connection_kwargs
+
     def reset(self):
         self.pid = os.getpid()
         self._created_connections = 0
