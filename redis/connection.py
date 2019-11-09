@@ -1045,7 +1045,10 @@ class ConnectionPool(object):
         )
 
     def __eq__(self, other):
-        return self.connection_kwargs == other.connection_kwargs
+        return (
+            isinstance(other, self.__class__)
+            and self.connection_kwargs == other.connection_kwargs
+        )
 
     def reset(self):
         self.pid = os.getpid()

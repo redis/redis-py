@@ -85,6 +85,12 @@ class TestConnectionPool(object):
                               connection_class=redis.Connection)
         assert pool1 == pool2
 
+    def test_pools_unequal_if_different_types(self):
+        connection_kwargs = {'host': 'localhost', 'port': 6379, 'db': 1}
+        pool = self.get_pool(connection_kwargs=connection_kwargs,
+                             connection_class=redis.Connection)
+        assert pool != 0
+
     def test_pools_unequal_if_different_hosts(self):
         connection_kwargs1 = {'host': 'localhost', 'port': 6379, 'db': 1}
         connection_kwargs2 = {'host': '127.0.0.1', 'port': 6379, 'db': 1}

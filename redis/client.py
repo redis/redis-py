@@ -708,7 +708,10 @@ class Redis(object):
         return "%s<%s>" % (type(self).__name__, repr(self.connection_pool))
 
     def __eq__(self, other):
-        return self.connection_pool == other.connection_pool
+        return (
+            isinstance(other, self.__class__)
+            and self.connection_pool == other.connection_pool
+        )
 
     def set_response_callback(self, command, callback):
         "Set a custom Response Callback"
