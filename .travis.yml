@@ -3,6 +3,7 @@ sudo: false
 language: python
 cache: pip
 python:
+  - 3.8
   - 3.7
   - 3.6
   - 3.5
@@ -26,5 +27,5 @@ matrix:
   include:
     - python: 2.7
       env: TEST_PYCODESTYLE=1
-    - python: 3.7
+    - python: 3.8
       env: TEST_PYCODESTYLE=1
