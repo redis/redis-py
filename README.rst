@@ -71,8 +71,7 @@ provide an upgrade path for users migrating from 2.X to 3.0.
 Python Version Support
 ^^^^^^^^^^^^^^^^^^^^^^
 
-redis-py 3.0 now supports Python 2.7 and Python 3.4+. Python 2.6 and 3.3
-support has been dropped.
+redis-py 3.0 supports Python 2.7 and Python 3.5+.
 
 
 Client Classes: Redis and StrictRedis

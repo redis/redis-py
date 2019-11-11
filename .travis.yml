@@ -7,10 +7,6 @@ matrix:
       env: TOXENV=py27-plain
     - python: 2.7
       env: TOXENV=py27-hiredis
-    - python: 3.4
-      env: TOXENV=py34-plain
-    - python: 3.4
-      env: TOXENV=py34-hiredis
     - python: 3.5
       env: TOXENV=py35-plain
     - python: 3.5
