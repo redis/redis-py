@@ -3,6 +3,7 @@
       This is a convenient way to test if any of the watched keys changed
       without actually running any other commands. Thanks @brianmaissy.
       #1233, #1234
+    * Removed support for end of life Python 3.4.
 * 3.3.11
     * Further fix for the SSLError -> TimeoutError mapping to work
       on obscure releases of Python 2.7.
