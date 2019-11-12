@@ -47,7 +47,7 @@ class TestMultiprocessing(object):
         proc = multiprocessing.Process(target=target, args=(conn,))
         proc.start()
         proc.join(3)
-        assert proc.exitcode is 0
+        assert proc.exitcode == 0
 
         # The connection was created in the parent but disconnected in the
         # child. The child called socket.close() but did not call
@@ -81,7 +81,7 @@ class TestMultiprocessing(object):
         ev.set()
 
         proc.join(3)
-        assert proc.exitcode is 0
+        assert proc.exitcode == 0
 
     @pytest.mark.parametrize('max_connections', [1, 2, None])
     def test_pool(self, max_connections):
@@ -109,7 +109,7 @@ class TestMultiprocessing(object):
         proc = multiprocessing.Process(target=target, args=(pool,))
         proc.start()
         proc.join(3)
-        assert proc.exitcode is 0
+        assert proc.exitcode == 0
 
         # Check that connection is still alive after fork process has exited
         # and disconnected the connections in its pool
@@ -148,7 +148,7 @@ class TestMultiprocessing(object):
         pool.disconnect()
         ev.set()
         proc.join(3)
-        assert proc.exitcode is 0
+        assert proc.exitcode == 0
 
     def test_redis_client(self, r):
         "A redis client created in a parent can also be used in a child"
@@ -161,6 +161,6 @@ class TestMultiprocessing(object):
         proc = multiprocessing.Process(target=target, args=(r,))
         proc.start()
         proc.join(3)
-        assert proc.exitcode is 0
+        assert proc.exitcode == 0
 
         assert r.ping() is True
