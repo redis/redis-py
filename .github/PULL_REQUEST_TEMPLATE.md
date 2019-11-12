@@ -2,7 +2,7 @@
 
 _Please make sure to review and check all of these items:_
 
-- [ ] Does `$ python setup.py test` pass with this change (including linting)?
+- [ ] Does `$ tox` pass with this change (including linting)?
 - [ ] Does travis tests pass with this change (enable it first in your forked repo and wait for the travis build to finish)?
 - [ ] Is the new or changed code fully tested?
 - [ ] Is a documentation update included (if this change modifies existing APIs, or introduces new ones)?
