@@ -1,23 +1,8 @@
 #!/usr/bin/env python
 import os
-import sys
 from setuptools import setup
-from setuptools.command.test import test as TestCommand
 
 from redis import __version__
-
-
-class PyTest(TestCommand):
-    def finalize_options(self):
-        TestCommand.finalize_options(self)
-        self.test_args = []
-        self.test_suite = True
-
-    def run_tests(self):
-        # import here, because outside the eggs aren't loaded
-        import pytest
-        errno = pytest.main(self.test_args)
-        sys.exit(errno)
 
 
 f = open(os.path.join(os.path.dirname(__file__), 'README.rst'))
@@ -44,11 +29,6 @@ setup(
             "hiredis>=0.1.3",
         ],
     },
-    tests_require=[
-        'mock',
-        'pytest>=2.7.0',
-    ],
-    cmdclass={'test': PyTest},
     classifiers=[
         'Development Status :: 5 - Production/Stable',
         'Environment :: Console',

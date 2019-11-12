@@ -1,31 +1,38 @@
-dist: xenial
-sudo: false
 language: python
 cache: pip
-python:
-  - 3.8
-  - 3.7
-  - 3.6
-  - 3.5
-  - 3.4
-  - 2.7
+matrix:
+  include:
+    - env: TOXENV=pycodestyle
+    - python: 2.7
+      env: TOXENV=py27-plain
+    - python: 2.7
+      env: TOXENV=py27-hiredis
+    - python: 3.4
+      env: TOXENV=py34-plain
+    - python: 3.4
+      env: TOXENV=py34-hiredis
+    - python: 3.5
+      env: TOXENV=py35-plain
+    - python: 3.5
+      env: TOXENV=py35-hiredis
+    - python: 3.6
+      env: TOXENV=py36-plain
+    - python: 3.6
+      env: TOXENV=py36-hiredis
+    - python: 3.7
+      env: TOXENV=py37-plain
+    - python: 3.7
+      env: TOXENV=py37-hiredis
+    - python: 3.8
+      env: TOXENV=py38-plain
+    - python: 3.8
+      env: TOXENV=py38-hiredis
 before_install:
   - wget http://download.redis.io/releases/redis-5.0.3.tar.gz && mkdir redis_install && tar -xvzf redis-5.0.3.tar.gz -C redis_install && cd redis_install/redis-5.0.3 && make && src/redis-server --daemonize yes && cd ../..
   - redis-cli info
-env:
-  - TEST_HIREDIS=0
-  - TEST_HIREDIS=1
 install:
-  - pip install -e .
-  - "if [[ $TEST_PYCODESTYLE == '1' ]]; then pip install pycodestyle; fi"
-  - "if [[ $TEST_HIREDIS == '1' ]]; then pip install hiredis; fi"
-  - "if [[ $TEST_PYCODESTYLE != '1' ]]; then pip install codecov coverage; fi"
-script: "if [[ $TEST_PYCODESTYLE == '1' ]]; then pycodestyle --repeat --show-source --exclude=.venv,.tox,dist,docs,build,*.egg,redis_install .; else coverage run setup.py test; fi"
+  - pip install codecov tox
+script:
+  - tox
 after_success:
-  - "if [[ $TEST_PYCODESTYLE != '1' ]]; then codecov; fi"
-matrix:
-  include:
-    - python: 2.7
-      env: TEST_PYCODESTYLE=1
-    - python: 3.8
-      env: TEST_PYCODESTYLE=1
+  - "if [[ $TOXENV != 'pycodestyle' ]]; then codecov; fi"
