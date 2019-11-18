@@ -1336,7 +1336,8 @@ class Redis(object):
 
     def get(self, name):
         """
-        Return the value at key ``name``, or None if the key doesn't exist
+        Return the value at key ``name``, or None if the key doesn't exist,
+        or "EMPTY_RESPONSE" string on timeout.
         """
         return self.execute_command('GET', name)
 
