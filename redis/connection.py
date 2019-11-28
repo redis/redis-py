@@ -1066,7 +1066,7 @@ class ConnectionPool(object):
                     return
                 self.reset()
 
-    def get_connection(self, command_name, *keys, **options):
+    def get_connection(self, *keys, **options):
         "Get a connection from the pool"
         self._checkpid()
         try:
@@ -1195,7 +1195,7 @@ class BlockingConnectionPool(ConnectionPool):
         self._connections.append(connection)
         return connection
 
-    def get_connection(self, command_name, *keys, **options):
+    def get_connection(self, *keys, **options):
         """
         Get a connection, blocking for ``self.timeout`` until a connection
         is available from the pool.
