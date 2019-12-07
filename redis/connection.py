@@ -656,7 +656,7 @@ class Connection(object):
         "Send an already packed command to the Redis server"
         if not self._sock:
             self.connect()
-        # guard against health check recurrsion
+        # guard against health check recursion
         if check_health:
             self.check_health()
         try:
