@@ -736,6 +736,9 @@ class Connection(object):
         buffer_cutoff = self._buffer_cutoff
 
         for arg in imap(self.encoder.encode, args):
+            # to avoid large string mallocs, chunk the command into the
+            # output list if we're sending large values
+
             len_arg = len(arg)
             if buffer_len > buffer_cutoff or len_arg > buffer_cutoff:
                 buff = SYM_EMPTY.join(
