@@ -732,20 +732,20 @@ class Connection(object):
             args = tuple(args[0].split()) + args[1:]
 
         buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
-
+        buffer_len = len(buff)
         buffer_cutoff = self._buffer_cutoff
+
         for arg in imap(self.encoder.encode, args):
-            # to avoid large string mallocs, chunk the command into the
-            # output list if we're sending large values
-            if len(buff) > buffer_cutoff or len(arg) > buffer_cutoff:
+            len_arg = len(arg)
+            if buffer_len > buffer_cutoff or len_arg > buffer_cutoff:
                 buff = SYM_EMPTY.join(
-                    (buff, SYM_DOLLAR, str(len(arg)).encode(), SYM_CRLF))
+                    (buff, SYM_DOLLAR, str(len_arg).encode(), SYM_CRLF))
                 output.append(buff)
                 output.append(arg)
                 buff = SYM_CRLF
             else:
                 buff = SYM_EMPTY.join(
-                    (buff, SYM_DOLLAR, str(len(arg)).encode(),
+                    (buff, SYM_DOLLAR, str(len_arg).encode(),
                      SYM_CRLF, arg, SYM_CRLF))
         output.append(buff)
         return output
