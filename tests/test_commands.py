@@ -66,19 +66,19 @@ class TestRedisCommands(object):
             r['a']
 
     # SERVER INFORMATION
-    @skip_if_server_version_lt('6.0.0')
+    @skip_if_server_version_lt('5.9.101')
     def test_acl_cat_no_category(self, r):
         categories = r.acl_cat()
         assert isinstance(categories, list)
         assert 'read' in categories
 
-    @skip_if_server_version_lt('6.0.0')
+    @skip_if_server_version_lt('5.9.101')
     def test_acl_cat_with_category(self, r):
         commands = r.acl_cat('read')
         assert isinstance(commands, list)
         assert 'get' in commands
 
-    @skip_if_server_version_lt('6.0.0')
+    @skip_if_server_version_lt('5.9.101')
     def test_acl_deluser(self, r, request):
         username = 'redis-py-user'
 
@@ -91,12 +91,12 @@ class TestRedisCommands(object):
         assert r.acl_setuser(username, enabled=False, reset=True)
         assert r.acl_deluser(username) == 1
 
-    @skip_if_server_version_lt('6.0.0')
+    @skip_if_server_version_lt('5.9.101')
     def test_acl_genpass(self, r):
         password = r.acl_genpass()
         assert isinstance(password, basestring)
 
-    @skip_if_server_version_lt('6.0.0')
+    @skip_if_server_version_lt('5.9.101')
     def test_acl_getuser_setuser(self, r, request):
         username = 'redis-py-user'
 
@@ -167,7 +167,7 @@ class TestRedisCommands(object):
                              remove_passwords=['pass2'])
         assert len(r.acl_getuser(username)['passwords']) == 1
 
-    @skip_if_server_version_lt('6.0.0')
+    @skip_if_server_version_lt('5.9.101')
     def test_acl_list(self, r, request):
         username = 'redis-py-user'
 
@@ -179,7 +179,7 @@ class TestRedisCommands(object):
         users = r.acl_list()
         assert 'user %s off -@all' % username in users
 
-    @skip_if_server_version_lt('6.0.0')
+    @skip_if_server_version_lt('5.9.101')
     def test_acl_setuser_categories_without_prefix_fails(self, r, request):
         username = 'redis-py-user'
 
@@ -190,7 +190,7 @@ class TestRedisCommands(object):
         with pytest.raises(exceptions.DataError):
             r.acl_setuser(username, categories=['list'])
 
-    @skip_if_server_version_lt('6.0.0')
+    @skip_if_server_version_lt('5.9.101')
     def test_acl_setuser_commands_without_prefix_fails(self, r, request):
         username = 'redis-py-user'
 
@@ -201,7 +201,7 @@ class TestRedisCommands(object):
         with pytest.raises(exceptions.DataError):
             r.acl_setuser(username, commands=['get'])
 
-    @skip_if_server_version_lt('6.0.0')
+    @skip_if_server_version_lt('5.9.101')
     def test_acl_setuser_add_passwords_and_nopass_fails(self, r, request):
         username = 'redis-py-user'
 
@@ -212,13 +212,13 @@ class TestRedisCommands(object):
         with pytest.raises(exceptions.DataError):
             r.acl_setuser(username, add_passwords='mypass', nopass=True)
 
-    @skip_if_server_version_lt('6.0.0')
+    @skip_if_server_version_lt('5.9.101')
     def test_acl_users(self, r):
         users = r.acl_users()
         assert isinstance(users, list)
         assert len(users) > 0
 
-    @skip_if_server_version_lt('6.0.0')
+    @skip_if_server_version_lt('5.9.101')
     def test_acl_whoami(self, r):
         username = r.acl_whoami()
         assert isinstance(username, basestring)
