@@ -970,26 +970,29 @@ class Redis(object):
         ``nopass`` is a boolean indicating whether the can authenticate without
         a password. This cannot be True if ``passwords`` are also specified.
 
-        ``add_passwords`` if specified is a list of new passwords that this
-        user can authenticate with. For convenience, the value of
+        ``add_passwords`` if specified is a list of new plain text passwords
+        that this user can authenticate with. For convenience, the value of
         ``add_passwords`` can also be a simple string when adding a single
-        password. Note: Do not prefix passwords with '>'.
+        password. Do not prefix passwords with '>'.
 
-        ``add_hashes`` if specified is a list of new passwords hashes that
-        a user can authenticate with. This is useful when you do not want
-        to share passwords for ACL users or want to remove cleartext
-        passwords from code. All hashes must be SHA-256 hashes and can not
-        be prefixed with '#'.
+        ``add_hashes`` if specified is a list of new hashed passwords that
+        this user can authenticate with. This is useful when you want to add a
+        password but do not want to specify the password as plain text. For
+        convenience, the value of ``add_hashes`` can also be a simple string
+        when adding a single password. All hashes must be SHA-256 hashes. Do
+        not prefix hashed passwords with '#'.
 
-        ``remove_passwords`` if specified is a list of passwords to remove from
-        this user. For convenience, the value of ``remove_passwords`` can also
-        be a simple string when removing a single password. Note: Do not
-        prefix passwords with '<'.
+        ``remove_passwords`` if specified is a list of plain text passwords
+        to remove from this user. For convenience, the value of
+        ``remove_passwords`` can also be a simple string when removing a
+        single password. Do not prefix passwords with '<'.
 
-        ``add_hashes`` if specified is a list of passwords hashes to remove
-        This is useful when you do not want to remove a password but do not
-        want to share passwords for ACL users do not know the password. All
-        hashes must be SHA-256 hashes and can not be prefixed with '!'.
+        ``remove_hashes`` if specified is a list of hashed passwords to remove
+        from this user. This is useful when you want to remove a password but
+        do not want to specify the password as plain text. For convenience, the
+        value of ``remove_hashes`` can also be a simple string when removing
+        a single password. All hashes must be SHA-256 hashes. Do not prefix
+        hashed passwords with '!'.
 
         ``categories`` if specified is a list of strings representing category
         permissions. Each string must be prefixed with either a "+@" or "-@"
@@ -1017,9 +1020,9 @@ class Redis(object):
         else:
             pieces.append('off')
 
-        if add_passwords and nopass:
+        if (add_passwords or add_hashes) and nopass:
             raise DataError('Cannot set \'nopass\' and supply '
-                            '\'add_passwords\'')
+                            '\'add_passwords\' or \'add_hashes\'')
 
         if remove_passwords:
             # as most users will have only one password, allow remove_passwords
