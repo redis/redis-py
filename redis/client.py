@@ -1067,7 +1067,7 @@ class Redis(object):
             for cmd in commands:
                 if not cmd.startswith('+') and not cmd.startswith('-'):
                     raise DataError('Command "%s" must be prefixed with '
-                                    '"+" or "-"')
+                                    '"+" or "-"' % cmd)
                 pieces.append(cmd.encode())
 
         if keys:
