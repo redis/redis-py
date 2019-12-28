@@ -954,8 +954,8 @@ class Redis(object):
         return self.execute_command('ACL SAVE')
 
     def acl_setuser(self, username, enabled=False, nopass=False,
-                    add_passwords=None, remove_passwords=None, categories=None,
-                    add_hashes=None, remove_hashes=None, commands=None,
+                    add_passwords=None, remove_passwords=None, add_hashes=None,
+                    remove_hashes=None, categories=None, commands=None,
                     keys=None, reset=False):
         """
         Create or update an ACL user.
