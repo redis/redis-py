@@ -448,6 +448,15 @@ class TestPubSubAutoDecoding(object):
                                                  new_data,
                                                  pattern=self.pattern)
 
+    def test_context_manager(self, r):
+        with r.pubsub() as pubsub:
+            pubsub.subscribe('foo')
+            assert pubsub.connection is not None
+
+        assert pubsub.connection is None
+        assert pubsub.channels == {}
+        assert pubsub.patterns == {}
+
 
 class TestPubSubRedisDown(object):
 

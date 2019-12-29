@@ -3339,6 +3339,12 @@ class PubSub(object):
             ]
         self.reset()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.reset()
+
     def __del__(self):
         try:
             # if this object went out of scope prior to shutting down
