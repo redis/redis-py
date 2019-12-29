@@ -106,7 +106,7 @@ class Encoder(object):
         elif isinstance(value, bool):
             # special case bool since it is a subclass of int
             raise DataError("Invalid input of type: 'bool'. Convert to a "
-                            "byte, string or number first.")
+                            "bytes, string, int or float first.")
         elif isinstance(value, float):
             value = repr(value).encode()
         elif isinstance(value, (int, long)):
@@ -116,7 +116,7 @@ class Encoder(object):
             # a value we don't know how to deal with. throw an error
             typename = type(value).__name__
             raise DataError("Invalid input of type: '%s'. Convert to a "
-                            "byte, string or number first." % typename)
+                            "bytes, string, int or float first." % typename)
         if isinstance(value, unicode):
             value = value.encode(self.encoding, self.encoding_errors)
         return value
