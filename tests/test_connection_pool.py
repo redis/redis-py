@@ -579,6 +579,14 @@ class TestSSLConnectionURLParsing(object):
             'rediss://?ssl_cert_reqs=required')
         assert pool.get_connection('_').cert_reqs == ssl.CERT_REQUIRED
 
+        pool = DummyConnectionPool.from_url(
+            'rediss://?ssl_check_hostname=False')
+        assert pool.get_connection('_').check_hostname is False
+
+        pool = DummyConnectionPool.from_url(
+            'rediss://?ssl_check_hostname=True')
+        assert pool.get_connection('_').check_hostname is True
+
 
 class TestConnection(object):
     def test_on_connect_error(self):

@@ -14,6 +14,10 @@
       argument. If supplied, all connections created will call CLIENT SETNAME
       as soon as the connection is opened. Thanks to @Habbie for supplying
       the basis of this chanfge. #802
+    * Added the 'ssl_check_hostname' argument to specify whether SSL
+      connections should require the server hostname to match the hostname
+      specified in the SSL cert. By default 'ssl_check_hostname' is False
+      for backwards compatibility. #1196
 * 3.3.11
     * Further fix for the SSLError -> TimeoutError mapping to work
       on obscure releases of Python 2.7.

@@ -683,6 +683,7 @@ class Redis(object):
                  decode_responses=False, retry_on_timeout=False,
                  ssl=False, ssl_keyfile=None, ssl_certfile=None,
                  ssl_cert_reqs='required', ssl_ca_certs=None,
+                 ssl_check_hostname=False,
                  max_connections=None, single_connection_client=False,
                  health_check_interval=0, client_name=None):
         if not connection_pool:
@@ -731,6 +732,7 @@ class Redis(object):
                         'ssl_certfile': ssl_certfile,
                         'ssl_cert_reqs': ssl_cert_reqs,
                         'ssl_ca_certs': ssl_ca_certs,
+                        'ssl_check_hostname': ssl_check_hostname,
                     })
             connection_pool = ConnectionPool(**kwargs)
         self.connection_pool = connection_pool

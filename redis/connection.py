@@ -799,7 +799,8 @@ class Connection(object):
 class SSLConnection(Connection):
 
     def __init__(self, ssl_keyfile=None, ssl_certfile=None,
-                 ssl_cert_reqs='required', ssl_ca_certs=None, **kwargs):
+                 ssl_cert_reqs='required', ssl_ca_certs=None,
+                 ssl_check_hostname=False, **kwargs):
         if not ssl_available:
             raise RedisError("Python wasn't built with SSL support")
 
@@ -822,13 +823,14 @@ class SSLConnection(Connection):
             ssl_cert_reqs = CERT_REQS[ssl_cert_reqs]
         self.cert_reqs = ssl_cert_reqs
         self.ca_certs = ssl_ca_certs
+        self.check_hostname = ssl_check_hostname
 
     def _connect(self):
         "Wrap the socket with SSL support"
         sock = super(SSLConnection, self)._connect()
         if hasattr(ssl, "create_default_context"):
             context = ssl.create_default_context()
-            context.check_hostname = False
+            context.check_hostname = self.check_hostname
             context.verify_mode = self.cert_reqs
             if self.certfile and self.keyfile:
                 context.load_cert_chain(certfile=self.certfile,
@@ -917,6 +919,7 @@ URL_QUERY_ARGUMENT_PARSERS = {
     'retry_on_timeout': to_bool,
     'max_connections': int,
     'health_check_interval': int,
+    'ssl_check_hostname': to_bool,
 }
 
 
