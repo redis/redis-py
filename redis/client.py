@@ -954,9 +954,9 @@ class Redis(object):
         return self.execute_command('ACL SAVE')
 
     def acl_setuser(self, username, enabled=False, nopass=False,
-                    add_passwords=None, remove_passwords=None, add_hashes=None,
-                    remove_hashes=None, categories=None, commands=None,
-                    keys=None, reset=False):
+                    passwords=None, hashed_passwords=None, categories=None,
+                    commands=None, keys=None, reset=False, reset_keys=False,
+                    reset_passwords=False):
         """
         Create or update an ACL user.
 
@@ -970,116 +970,133 @@ class Redis(object):
         ``nopass`` is a boolean indicating whether the can authenticate without
         a password. This cannot be True if ``passwords`` are also specified.
 
-        ``add_passwords`` if specified is a list of new plain text passwords
-        that this user can authenticate with. For convenience, the value of
-        ``add_passwords`` can also be a simple string when adding a single
-        password. Do not prefix passwords with '>'.
+        ``passwords`` if specified is a list of plain text passwords
+        to add to or remove from the user. Each password must be prefixed with
+        a '+' to add or a '-' to remove. For convenience, the value of
+        ``add_passwords`` can be a simple prefixed string when adding or
+        removing a single password.
 
-        ``add_hashes`` if specified is a list of new hashed passwords that
-        this user can authenticate with. This is useful when you want to add a
-        password but do not want to specify the password as plain text. For
-        convenience, the value of ``add_hashes`` can also be a simple string
-        when adding a single password. All hashes must be SHA-256 hashes. Do
-        not prefix hashed passwords with '#'.
-
-        ``remove_passwords`` if specified is a list of plain text passwords
-        to remove from this user. For convenience, the value of
-        ``remove_passwords`` can also be a simple string when removing a
-        single password. Do not prefix passwords with '<'.
-
-        ``remove_hashes`` if specified is a list of hashed passwords to remove
-        from this user. This is useful when you want to remove a password but
-        do not want to specify the password as plain text. For convenience, the
-        value of ``remove_hashes`` can also be a simple string when removing
-        a single password. All hashes must be SHA-256 hashes. Do not prefix
-        hashed passwords with '!'.
+        ``hashed_passwords`` if specified is a list of SHA-256 hashed passwords
+        to add to or remove from the user. Each hashed password must be
+        prefixed with a '+' to add or a '-' to remove. For convenience,
+        the value of ``hashed_passwords`` can be a simple prefixed string when
+        adding or removing a single password.
 
         ``categories`` if specified is a list of strings representing category
-        permissions. Each string must be prefixed with either a "+@" or "-@"
-        to indicate whether access to the category is allowed or denied.
+        permissions. Each string must be prefixed with either a '+' to add the
+        category permission or a '-' to remove the category permission.
 
         ``commands`` if specified is a list of strings representing command
-        permissions. Each string must be prefixed with either a "+" or "-"
-        to indicate whether access to the command is allowed or denied.
+        permissions. Each string must be prefixed with either a '+' to add the
+        command permission or a '-' to remove the command permission.
 
         ``keys`` if specified is a list of key patterns to grant the user
         access to. Keys patterns allow '*' to support wildcard matching. For
         example, '*' grants access to all keys while 'cache:*' grants access
-        to all keys that are prefixed with 'cache:'.
+        to all keys that are prefixed with 'cache:'. ``keys`` should not be
+        prefixed with a '~'.
 
         ``reset`` is a boolean indicating whether the user should be fully
         reset prior to applying the new ACL. Setting this to True will
         remove all existing passwords, flags and privileges from the user and
-        then apply the specified rules. If this is False, the existing user's
-        passwords, flags and privileges will be kept and the specified rules
+        then apply the specified rules. If this is False, the user's existing
+        passwords, flags and privileges will be kept and any new specified
+        rules will be applied on top.
+
+        ``reset_keys`` is a boolean indicating whether the user's key
+        permissions should be reset prior to applying any new key permissions
+        specified in ``keys``. If this is False, the user's existing
+        key permissions will be kept and any new specified key permissions
         will be applied on top.
+
+        ``reset_passwords`` is a boolean indicating whether to remove all
+        existing passwords and the 'nopass' flag from the user prior to
+        applying any new passwords specified in 'passwords' or
+        'hashed_passwords'. If this is False, the user's existing passwords
+        and 'nopass' status will be kept and any new specified passwords
+        or hashed_passwords will be applied on top.
         """
+        encoder = self.connection_pool.get_encoder()
         pieces = [username]
+
+        if reset:
+            pieces.append(b'reset')
+
+        if reset_keys:
+            pieces.append(b'resetkeys')
+
+        if reset_passwords:
+            pieces.append(b'resetpass')
+
         if enabled:
-            pieces.append('on')
+            pieces.append(b'on')
         else:
-            pieces.append('off')
+            pieces.append(b'off')
 
-        if (add_passwords or add_hashes) and nopass:
+        if (passwords or hashed_passwords) and nopass:
             raise DataError('Cannot set \'nopass\' and supply '
-                            '\'add_passwords\' or \'add_hashes\'')
+                            '\'passwords\' or \'hashed_passwords\'')
 
-        if remove_passwords:
+        if passwords:
             # as most users will have only one password, allow remove_passwords
             # to be specified as a simple string or a list
-            remove_passwords = list_or_args(remove_passwords, [])
-            for password in remove_passwords:
-                pieces.append('<%s' % password)
+            passwords = list_or_args(passwords, [])
+            for i, password in enumerate(passwords):
+                password = encoder.encode(password)
+                if password.startswith(b'+'):
+                    pieces.append(b'>%s' % password[1:])
+                elif password.startswith(b'-'):
+                    pieces.append(b'<%s' % password[1:])
+                else:
+                    raise DataError('Password %d must be prefixeed with a '
+                                    '"+" to add or a "-" to remove' % i)
 
-        if remove_hashes:
+        if hashed_passwords:
             # as most users will have only one password, allow remove_passwords
             # to be specified as a simple string or a list
-            remove_hashes = list_or_args(remove_hashes, [])
-            for password in remove_hashes:
-                pieces.append('!%s' % password)
-
-        if add_passwords:
-            # as most users will have only one password, allow add_passwords
-            # to be specified as a simple string or a list
-            add_passwords = list_or_args(add_passwords, [])
-            for password in add_passwords:
-                pieces.append('>%s' % password)
-
-        if add_hashes:
-            # as most users will have only one password, allow remove_passwords
-            # to be specified as a simple string or a list
-            add_hashes = list_or_args(add_hashes, [])
-            for password in add_hashes:
-                pieces.append('#%s' % password)
+            hashed_passwords = list_or_args(hashed_passwords, [])
+            for i, hashed_password in enumerate(hashed_passwords):
+                hashed_password = encoder.encode(hashed_password)
+                if hashed_password.startswith(b'+'):
+                    pieces.append(b'#%s' % hashed_password[1:])
+                elif hashed_password.startswith(b'-'):
+                    pieces.append(b'!%s' % hashed_password[1:])
+                else:
+                    raise DataError('Hashed %d password must be prefixeed '
+                                    'with a "+" to add or a "-" to remove' % i)
 
         if nopass:
             pieces.append(b'nopass')
 
         if categories:
-            for cat in categories:
-                # ensure the category starts with either a -@ or +@
-                if not cat.startswith('-@') and not cat.startswith('+@'):
+            for category in categories:
+                category = encoder.encode(category)
+                if category.startswith(b'+@'):
+                    pieces.append(category)
+                elif category.startswith(b'+'):
+                    pieces.append(b'+@%s' % category[1:])
+                elif category.startswith(b'-@'):
+                    pieces.append(category)
+                elif category.startswith(b'-'):
+                    pieces.append(b'-@%s' % category[1:])
+                else:
                     raise DataError('Category "%s" must be prefixed with '
-                                    '"+@" or "-@"' % cat)
-                pieces.append(cat.encode())
-
+                                    '"+" or "-"'
+                                    % encoder.decode(category, force=True))
         if commands:
             for cmd in commands:
-                if not cmd.startswith('+') and not cmd.startswith('-'):
+                cmd = encoder.encode(cmd)
+                if not cmd.startswith(b'+') and not cmd.startswith(b'-'):
                     raise DataError('Command "%s" must be prefixed with '
-                                    '"+" or "-"' % cmd)
-                pieces.append(cmd.encode())
+                                    '"+" or "-"'
+                                    % encoder.decode(cmd, force=True))
+                pieces.append(cmd)
 
         if keys:
             for key in keys:
-                if not key.startswith('~'):
-                    key = '~%s' % key
-                pieces.append(key)
+                key = encoder.encode(key)
+                pieces.append(b'~%s' % key)
 
-        if reset:
-            if not self.execute_command('ACL SETUSER', username, 'reset'):
-                # we first reset the user so we're working with a clean slate
-                raise RedisError('Failed to reset user: %s' % username)
         return self.execute_command('ACL SETUSER', *pieces)
 
     def acl_users(self):

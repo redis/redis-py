@@ -128,8 +128,8 @@ class TestRedisCommands(object):
 
         # test all args
         assert r.acl_setuser(username, enabled=True, reset=True,
-                             add_passwords=['pass1', 'pass2'],
-                             categories=['+@set', '+@hash', '-@geo'],
+                             passwords=['+pass1', '+pass2'],
+                             categories=['+set', '+@hash', '-geo'],
                              commands=['+get', '+mget', '-hset'],
                              keys=['cache:*', 'objects:*'])
         acl = r.acl_getuser(username)
@@ -142,46 +142,46 @@ class TestRedisCommands(object):
 
         # test reset=False keeps existing ACL and applies new ACL on top
         assert r.acl_setuser(username, enabled=True, reset=True,
-                             add_passwords=['pass1'],
+                             passwords=['+pass1'],
                              categories=['+@set'],
-                             commands=['+set'],
+                             commands=['+get'],
                              keys=['cache:*'])
         assert r.acl_setuser(username, enabled=True,
-                             add_passwords=['pass2'],
+                             passwords=['+pass2'],
                              categories=['+@hash'],
-                             commands=['+mset'],
+                             commands=['+mget'],
                              keys=['objects:*'])
         acl = r.acl_getuser(username)
         assert set(acl['categories']) == set(['-@all', '+@set', '+@hash'])
-        assert set(acl['commands']) == set(['+set', '+mset'])
+        assert set(acl['commands']) == set(['+get', '+mget'])
         assert acl['enabled'] is True
         assert acl['flags'] == ['on']
         assert set(acl['keys']) == set([b'cache:*', b'objects:*'])
         assert len(acl['passwords']) == 2
 
-        # test remove_passwords
+        # test removal of passwords
         assert r.acl_setuser(username, enabled=True, reset=True,
-                             add_passwords=['pass1', 'pass2'])
+                             passwords=['+pass1', '+pass2'])
         assert len(r.acl_getuser(username)['passwords']) == 2
         assert r.acl_setuser(username, enabled=True,
-                             remove_passwords=['pass2'])
+                             passwords=['-pass2'])
         assert len(r.acl_getuser(username)['passwords']) == 1
 
-        # Resets and tests that hashed values are set properly.
+        # Resets and tests that hashed passwords are set properly.
         hashed_password = ('5e884898da28047151d0e56f8dc629'
                            '2773603d0d6aabbdd62a11ef721d1542d8')
         assert r.acl_setuser(username, enabled=True, reset=True,
-                             add_hashes=[hashed_password])
+                             hashed_passwords=['+' + hashed_password])
         acl = r.acl_getuser(username)
         assert acl['passwords'] == [hashed_password]
 
-        # test remove_passwords for hash removal
+        # test removal of hashed passwords
         assert r.acl_setuser(username, enabled=True, reset=True,
-                             add_hashes=[hashed_password],
-                             add_passwords=['pass1'])
+                             hashed_passwords=['+' + hashed_password],
+                             passwords=['+pass1'])
         assert len(r.acl_getuser(username)['passwords']) == 2
         assert r.acl_setuser(username, enabled=True,
-                             remove_hashes=[hashed_password])
+                             hashed_passwords=['-' + hashed_password])
         assert len(r.acl_getuser(username)['passwords']) == 1
 
     @skip_if_server_version_lt('5.9.101')
@@ -227,7 +227,7 @@ class TestRedisCommands(object):
         request.addfinalizer(teardown)
 
         with pytest.raises(exceptions.DataError):
-            r.acl_setuser(username, add_passwords='mypass', nopass=True)
+            r.acl_setuser(username, passwords='+mypass', nopass=True)
 
     @skip_if_server_version_lt('5.9.101')
     def test_acl_users(self, r):
