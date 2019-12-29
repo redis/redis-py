@@ -6,6 +6,11 @@ from redis._compat import unichr, unicode
 
 
 class TestPipeline(object):
+    def test_pipeline_is_true(self, r):
+        "Ensure pipeline instances are not false-y"
+        with r.pipeline() as pipe:
+            assert pipe
+
     def test_pipeline(self, r):
         with r.pipeline() as pipe:
             (pipe.set('a', 'a1')
@@ -28,17 +33,14 @@ class TestPipeline(object):
         with r.pipeline() as pipe:
             # Initially empty.
             assert len(pipe) == 0
-            assert not pipe
 
             # Fill 'er up!
             pipe.set('a', 'a1').set('b', 'b1').set('c', 'c1')
             assert len(pipe) == 3
-            assert pipe
 
             # Execute calls reset(), so empty once again.
             pipe.execute()
             assert len(pipe) == 0
-            assert not pipe
 
     def test_pipeline_no_transaction(self, r):
         with r.pipeline(transaction=False) as pipe:

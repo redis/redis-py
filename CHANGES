@@ -6,6 +6,10 @@
     * Removed support for end of life Python 3.4.
     * Added support for all ACL commands in Redis 6. Thanks @IAmATeaPot418
       for helping.
+    * Pipeline instances now always evaluate to True. Prior to this change,
+      pipeline instances relied on __len__ for boolean evaluation which
+      meant that pipelines with no commands on the stack would be considered
+      False. #994
 * 3.3.11
     * Further fix for the SSLError -> TimeoutError mapping to work
       on obscure releases of Python 2.7.

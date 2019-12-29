@@ -3703,6 +3703,14 @@ class Pipeline(Redis):
     def __len__(self):
         return len(self.command_stack)
 
+    def __nonzero__(self):
+        "Pipeline instances should  always evaluate to True on Python 2.7"
+        return True
+
+    def __bool__(self):
+        "Pipeline instances should  always evaluate to True on Python 3+"
+        return True
+
     def reset(self):
         self.command_stack = []
         self.scripts = set()
