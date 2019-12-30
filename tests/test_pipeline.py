@@ -242,6 +242,14 @@ class TestPipeline(object):
         assert result == [True]
         assert r['c'] == b'4'
 
+    def test_transaction_callable_returns_value_from_callable(self, r):
+        def callback(pipe):
+            # No need to do anything here since we only want the return value
+            return 'a'
+
+        res = r.transaction(callback, 'my-key', value_from_callable=True)
+        assert res == 'a'
+
     def test_exec_error_in_no_transaction_pipeline(self, r):
         r['a'] = 1
         with r.pipeline(transaction=False) as pipe:

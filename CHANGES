@@ -13,7 +13,7 @@
     * Client instances and Connection pools now support a 'client_name'
       argument. If supplied, all connections created will call CLIENT SETNAME
       as soon as the connection is opened. Thanks to @Habbie for supplying
-      the basis of this chanfge. #802
+      the basis of this change. #802
     * Added the 'ssl_check_hostname' argument to specify whether SSL
       connections should require the server hostname to match the hostname
       specified in the SSL cert. By default 'ssl_check_hostname' is False
