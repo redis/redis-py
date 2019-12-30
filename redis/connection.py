@@ -757,15 +757,16 @@ class Connection(object):
         for arg in imap(self.encoder.encode, args):
             # to avoid large string mallocs, chunk the command into the
             # output list if we're sending large values
-            if len(buff) > buffer_cutoff or len(arg) > buffer_cutoff:
+            arg_length = len(arg)
+            if len(buff) > buffer_cutoff or arg_length > buffer_cutoff:
                 buff = SYM_EMPTY.join(
-                    (buff, SYM_DOLLAR, str(len(arg)).encode(), SYM_CRLF))
+                    (buff, SYM_DOLLAR, str(arg_length).encode(), SYM_CRLF))
                 output.append(buff)
                 output.append(arg)
                 buff = SYM_CRLF
             else:
                 buff = SYM_EMPTY.join(
-                    (buff, SYM_DOLLAR, str(len(arg)).encode(),
+                    (buff, SYM_DOLLAR, str(arg_length).encode(),
                      SYM_CRLF, arg, SYM_CRLF))
         output.append(buff)
         return output

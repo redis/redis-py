@@ -18,6 +18,7 @@
       connections should require the server hostname to match the hostname
       specified in the SSL cert. By default 'ssl_check_hostname' is False
       for backwards compatibility. #1196
+    * Slightly optimized command packing. Thanks @Deneby67. #1255
 * 3.3.11
     * Further fix for the SSLError -> TimeoutError mapping to work
       on obscure releases of Python 2.7.
