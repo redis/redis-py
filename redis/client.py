@@ -3439,8 +3439,12 @@ class PubSub(object):
 
         self.check_health()
 
-        if not block and not conn.can_read(timeout=timeout):
-            return None
+        try:
+            if not block and not conn.can_read(timeout=timeout):
+                return None
+        except ConnectionError:
+            conn.disconnect()
+            conn.connect()
         response = self._execute(conn, conn.read_response)
 
         if conn.health_check_interval and \
