@@ -2399,6 +2399,19 @@ class TestRedisCommands(object):
         # xread starting at the last message returns an empty list
         assert r.xread(streams={stream: m2}) == []
 
+        # memoryviews
+        m3 = r.xadd(stream, {'boom': memoryview(b'bop')})
+        expected = [
+            [
+                stream.encode(),
+                [
+                    get_stream_message(r, stream, m3),
+                ]
+            ]
+        ]
+
+        assert r.xread(streams={stream: m2}) == expected
+
     @skip_if_server_version_lt('5.0.0')
     def test_xreadgroup(self, r):
         stream = 'stream'

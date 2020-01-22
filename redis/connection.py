@@ -92,7 +92,7 @@ SENTINEL = object()
 
 
 class Encoder(object):
-    "Encode strings to bytes and decode bytes to strings"
+    "Encode strings to bytes-like and decode bytes-like to strings"
 
     def __init__(self, encoding, encoding_errors, decode_responses):
         self.encoding = encoding
@@ -100,8 +100,8 @@ class Encoder(object):
         self.decode_responses = decode_responses
 
     def encode(self, value):
-        "Return a bytestring representation of the value"
-        if isinstance(value, bytes):
+        "Return a bytestring or bytes-like representation of the value"
+        if isinstance(value, bytes) or isinstance(value, memoryview):
             return value
         elif isinstance(value, bool):
             # special case bool since it is a subclass of int
@@ -122,7 +122,7 @@ class Encoder(object):
         return value
 
     def decode(self, value, force=False):
-        "Return a unicode string from the byte representation"
+        "Return a unicode string from the bytes-like representation"
         if (self.decode_responses or force) and isinstance(value, bytes):
             value = value.decode(self.encoding, self.encoding_errors)
         return value
