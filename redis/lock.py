@@ -182,7 +182,8 @@ class Lock(object):
                 return True
             if not blocking:
                 return False
-            if stop_trying_at is not None and mod_time.time() + sleep > stop_trying_at:
+            next_try_at = mod_time.time() + sleep
+            if stop_trying_at is not None and next_try_at > stop_trying_at:
                 return False
             mod_time.sleep(sleep)
 
