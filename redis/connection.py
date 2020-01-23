@@ -1084,10 +1084,11 @@ class ConnectionPool(object):
         )
 
     def reset(self):
-        self.pid = os.getpid()
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()
+        # Setting the pid signals, that we have done all the work here.
+        self.pid = os.getpid()
         self._check_lock = threading.Lock()
 
     def _checkpid(self):
