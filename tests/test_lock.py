@@ -91,10 +91,13 @@ class TestLock(object):
     def test_blocking_timeout(self, r):
         lock1 = self.get_lock(r, 'foo')
         assert lock1.acquire(blocking=False)
-        lock2 = self.get_lock(r, 'foo', blocking_timeout=0.2)
+        bt = 0.2
+        sleep = 0.05
+        lock2 = self.get_lock(r, 'foo', sleep=sleep, blocking_timeout=bt)
         start = time.time()
         assert not lock2.acquire()
-        assert (time.time() - start) > 0.2
+        # The elapsed duration should be less than the total blocking_timeout
+        assert bt > (time.time() - start) > bt - sleep
         lock1.release()
 
     def test_context_manager(self, r):
@@ -110,10 +113,18 @@ class TestLock(object):
             with self.get_lock(r, 'foo', blocking_timeout=0.1):
                 pass
 
-    def test_high_sleep_raises_error(self, r):
-        "If sleep is higher than timeout, it should raise an error"
-        with pytest.raises(LockError):
-            self.get_lock(r, 'foo', timeout=1, sleep=2)
+    def test_high_sleep_small_blocking_timeout(self, r):
+        lock1 = self.get_lock(r, 'foo')
+        assert lock1.acquire(blocking=False)
+        sleep = 60
+        bt = 1
+        lock2 = self.get_lock(r, 'foo', sleep=sleep, blocking_timeout=bt)
+        start = time.time()
+        assert not lock2.acquire()
+        # the elapsed timed is less than the blocking_timeout as the lock is
+        # unattainable given the sleep/blocking_timeout configuration
+        assert bt > (time.time() - start)
+        lock1.release()
 
     def test_releasing_unlocked_lock_raises_error(self, r):
         lock = self.get_lock(r, 'foo')

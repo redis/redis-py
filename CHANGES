@@ -7,6 +7,10 @@
       would be hidden from the user. Thanks @jdufresne. #1281
     * Expanded support for connection strings specifying a username connecting
       to pre-v6 servers. #1274
+    * Optimized Lock's blocking_timeout and sleep. If the lock cannot be
+      acquired and the sleep value would cause the loop to sleep beyond
+      blocking_timeout, fail immediately. Thanks @clslgrnc. #1263
+
 * 3.4.1
     * Move the username argument in the Redis and Connection classes to the
       end of the argument list. This helps those poor souls that specify all

@@ -124,8 +124,6 @@ class Lock(object):
         self.thread_local = bool(thread_local)
         self.local = threading.local() if self.thread_local else dummy()
         self.local.token = None
-        if self.timeout and self.sleep > self.timeout:
-            raise LockError("'sleep' must be less than 'timeout'")
         self.register_scripts()
 
     def register_scripts(self):
@@ -184,7 +182,8 @@ class Lock(object):
                 return True
             if not blocking:
                 return False
-            if stop_trying_at is not None and mod_time.time() > stop_trying_at:
+            next_try_at = mod_time.time() + sleep
+            if stop_trying_at is not None and next_try_at > stop_trying_at:
                 return False
             mod_time.sleep(sleep)
 
