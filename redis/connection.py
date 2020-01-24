@@ -738,6 +738,12 @@ class Connection(object):
             raise response
         return response
 
+    def _maybe_to_bytes(self, arg):
+        if isinstance(arg, memoryview):
+            return arg.tobytes()
+        else:
+            return arg
+
     def pack_command(self, *args):
         "Pack a series of arguments into the Redis protocol"
         output = []
@@ -767,7 +773,7 @@ class Connection(object):
             else:
                 buff = SYM_EMPTY.join(
                     (buff, SYM_DOLLAR, str(arg_length).encode(),
-                     SYM_CRLF, arg, SYM_CRLF))
+                     SYM_CRLF, self._maybe_to_bytes(arg), SYM_CRLF))
         output.append(buff)
         return output
 
