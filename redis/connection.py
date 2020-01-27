@@ -18,6 +18,7 @@ from redis._compat import (xrange, imap, byte_to_chr, unicode, long,
 from redis.exceptions import (
     AuthenticationError,
     BusyLoadingError,
+    ChildDeadlockedError,
     ConnectionError,
     DataError,
     ExecAbortError,
@@ -1069,6 +1070,15 @@ class ConnectionPool(object):
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
 
+        # a lock to protect the critical section in _checkpid().
+        # this lock is acquired when the process id changes, such as
+        # after a fork. during this time, multiple threads in the child
+        # process could attempt to acquire this lock. the first thread
+        # to acquire the lock will reset the data structures and lock
+        # object of this pool. subsequent threads acquiring this lock
+        # will notice the first thread already did the work and simply
+        # release the lock.
+        self._fork_lock = threading.Lock()
         self.reset()
 
     def __repr__(self):
@@ -1085,49 +1095,96 @@ class ConnectionPool(object):
 
     def reset(self):
         self.pid = os.getpid()
+        self._lock = threading.RLock()
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()
-        self._check_lock = threading.Lock()
 
     def _checkpid(self):
+        # _checkpid() attempts to keep ConnectionPool fork-safe on modern
+        # systems. this is called by all ConnectionPool methods that
+        # manipulate the pool's state such as get_connection() and release().
+        #
+        # _checkpid() determines whether the process has forked by comparing
+        # the current process id to the process id saved on the ConnectionPool
+        # instance. if these values are the same, _checkpid() simply returns.
+        #
+        # when the process ids differ, _checkpid() assumes that the process
+        # has forked and that we're now running in the child process. the child
+        # process cannot use the parent's file descriptors (e.g., sockets).
+        # therefore, when _checkpid() sees the process id change, it calls
+        # reset() in order to reinitialize the child's ConnectionPool. this
+        # will cause the child to make all new connection objects.
+        #
+        # _checkpid() is protected by self._fork_lock to ensure that multiple
+        # threads in the child process do not call reset() multiple times.
+        #
+        # there is an extremely small chance this could fail in the following
+        # scenario:
+        #   1. process A calls _checkpid() for the first time and acquires
+        #      self._fork_lock.
+        #   2. while holding self._fork_lock, process A forks (the fork()
+        #      could happen in a different thread owned by process A)
+        #   3. process B (the forked child process) inherits the
+        #      ConnectionPool's state from the parent. that state includes
+        #      a locked _fork_lock. process B will not be notified when
+        #      process A releases the _fork_lock and will thus never be
+        #      able to acquire the _fork_lock.
+        #
+        # to mitigate this possible deadlock, _checkpid() will only wait 5
+        # seconds to acquire _fork_lock. if _fork_lock cannot be acquired in
+        # that time it is assumed that the child is deadlocked and a
+        # redis.ChildDeadlockedError error is raised.
         if self.pid != os.getpid():
-            with self._check_lock:
-                if self.pid == os.getpid():
-                    # another thread already did the work while we waited
-                    # on the lock.
-                    return
-                self.reset()
+            # python 2.7 doesn't support a timeout option to lock.acquire()
+            # we have to mimic lock timeouts ourselves.
+            timeout_at = time() + 5
+            acquired = False
+            while time() < timeout_at:
+                acquired = self._fork_lock.acquire()
+                if acquired:
+                    break
+            if not acquired:
+                raise ChildDeadlockedError
+            # reset() the instance for the new process if another thread
+            # hasn't already done so
+            try:
+                if self.pid != os.getpid():
+                    self.reset()
+            finally:
+                self._fork_lock.release()
 
     def get_connection(self, command_name, *keys, **options):
         "Get a connection from the pool"
         self._checkpid()
-        try:
-            connection = self._available_connections.pop()
-        except IndexError:
-            connection = self.make_connection()
-        self._in_use_connections.add(connection)
-        try:
-            # ensure this connection is connected to Redis
-            connection.connect()
-            # connections that the pool provides should be ready to send
-            # a command. if not, the connection was either returned to the
-            # pool before all data has been read or the socket has been
-            # closed. either way, reconnect and verify everything is good.
+        with self._lock:
             try:
-                if connection.can_read():
-                    raise ConnectionError('Connection has data')
-            except ConnectionError:
-                connection.disconnect()
+                connection = self._available_connections.pop()
+            except IndexError:
+                connection = self.make_connection()
+            self._in_use_connections.add(connection)
+            try:
+                # ensure this connection is connected to Redis
                 connection.connect()
-                if connection.can_read():
-                    raise ConnectionError('Connection not ready')
-        except:  # noqa: E722
-            # release the connection back to the pool so that we don't leak it
-            self.release(connection)
-            raise
+                # connections that the pool provides should be ready to send
+                # a command. if not, the connection was either returned to the
+                # pool before all data has been read or the socket has been
+                # closed. either way, reconnect and verify everything is good.
+                try:
+                    if connection.can_read():
+                        raise ConnectionError('Connection has data')
+                except ConnectionError:
+                    connection.disconnect()
+                    connection.connect()
+                    if connection.can_read():
+                        raise ConnectionError('Connection not ready')
+            except:  # noqa: E722
+                # release the connection back to the pool so that we don't
+                # leak it
+                self.release(connection)
+                raise
 
-        return connection
+            return connection
 
     def get_encoder(self):
         "Return an encoder based on encoding settings"
@@ -1148,18 +1205,20 @@ class ConnectionPool(object):
     def release(self, connection):
         "Releases the connection back to the pool"
         self._checkpid()
-        if connection.pid != self.pid:
-            return
-        self._in_use_connections.remove(connection)
-        self._available_connections.append(connection)
+        with self._lock:
+            if connection.pid != self.pid:
+                return
+            self._in_use_connections.remove(connection)
+            self._available_connections.append(connection)
 
     def disconnect(self):
         "Disconnects all connections in the pool"
         self._checkpid()
-        all_conns = chain(self._available_connections,
-                          self._in_use_connections)
-        for connection in all_conns:
-            connection.disconnect()
+        with self._lock:
+            all_conns = chain(self._available_connections,
+                              self._in_use_connections)
+            for connection in all_conns:
+                connection.disconnect()
 
 
 class BlockingConnectionPool(ConnectionPool):
@@ -1208,7 +1267,6 @@ class BlockingConnectionPool(ConnectionPool):
 
     def reset(self):
         self.pid = os.getpid()
-        self._check_lock = threading.Lock()
 
         # Create and fill up a thread safe queue with ``None`` values.
         self.pool = self.queue_class(self.max_connections)

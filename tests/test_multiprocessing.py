@@ -22,7 +22,7 @@ class TestMultiprocessing(object):
     # See issue #1085 for details.
 
     # use a multi-connection client as that's the only type that is
-    # actuall fork/process-safe
+    # actually fork/process-safe
     @pytest.fixture()
     def r(self, request):
         return _get_client(
