@@ -1141,7 +1141,7 @@ class ConnectionPool(object):
             timeout_at = time() + 5
             acquired = False
             while time() < timeout_at:
-                acquired = self._fork_lock.acquire(blocking=False)
+                acquired = self._fork_lock.acquire(False)
                 if acquired:
                     break
             if not acquired:
