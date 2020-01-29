@@ -2996,12 +2996,21 @@ class Redis(object):
         "Return the number of elements in hash ``name``"
         return self.execute_command('HLEN', name)
 
-    def hset(self, name, key, value):
+    def hset(self, name, key=None, value=None, **pairs):
         """
         Set ``key`` to ``value`` within hash ``name``
         Returns 1 if HSET created a new field, otherwise 0
         """
-        return self.execute_command('HSET', name, key, value)
+        if not key and not pairs:
+            raise DataError("'hset' with no key value pairs")
+        items = []
+        if key:
+            items.extend((key, value))
+        if pairs:
+            for pair in iteritems(pairs):
+                items.extend(pair)
+
+        return self.execute_command('HSET', name, *items)
 
     def hsetnx(self, name, key, value):
         """
