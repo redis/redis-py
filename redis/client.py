@@ -2998,7 +2998,8 @@ class Redis(object):
 
     def hset(self, name, key=None, value=None, **pairs):
         """
-        Set ``key`` to ``value`` within hash ``name``
+        Set ``key`` to ``value`` within hash ``name``,
+        Use kwargs to set multiple key/value paris for a hash ``name``.
         Returns 1 if HSET created a new field, otherwise 0
         """
         if not key and not pairs:
