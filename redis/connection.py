@@ -1276,8 +1276,6 @@ class BlockingConnectionPool(ConnectionPool):
             **connection_kwargs)
 
     def reset(self):
-        self.pid = os.getpid()
-
         # Create and fill up a thread safe queue with ``None`` values.
         self.pool = self.queue_class(self.max_connections)
         while True:
@@ -1289,6 +1287,17 @@ class BlockingConnectionPool(ConnectionPool):
         # Keep a list of actual connection instances so that we can
         # disconnect them later.
         self._connections = []
+
+        # this must be the last operation in this method. while reset() is
+        # called when holding _fork_lock, other threads in this process
+        # can call _checkpid() which compares self.pid and os.getpid() without
+        # holding any lock (for performance reasons). keeping this assignment
+        # as the last operation ensures that those other threads will also
+        # notice a pid difference and block waiting for the first thread to
+        # release _fork_lock. when each of these threads eventually acquire
+        # _fork_lock, they will notice that another thread already called
+        # reset() and they will immediately release _fork_lock and continue on.
+        self.pid = os.getpid()
 
     def make_connection(self):
         "Make a fresh connection."
