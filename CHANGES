@@ -20,6 +20,14 @@
       for backwards compatibility. #1196
     * Slightly optimized command packing. Thanks @Deneby67. #1255
     * Added support for the TYPE argument to SCAN. Thanks @netocp. #1220
+    * Better thread and fork safety in ConnectionPool and
+      BlockingConnectionPool. Added better locking to synchronize critical
+      sections rather than relying on CPython-specific implementation details
+      relating to atomic operations. Adjusted how the pools identify and
+      deal with a fork. Added a ChildDeadlockedError exception that is
+      raised by child processes in the very unlikely chance that a deadlock
+      is encountered. Thanks @gmbnomis, @mdellweg, @yht804421715. #1270,
+      #1138, #1178, #906, #1262
 * 3.3.11
     * Further fix for the SSLError -> TimeoutError mapping to work
       on obscure releases of Python 2.7.

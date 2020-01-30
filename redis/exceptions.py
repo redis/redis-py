@@ -67,3 +67,8 @@ class LockError(RedisError, ValueError):
 class LockNotOwnedError(LockError):
     "Error trying to extend or release a lock that is (no longer) owned"
     pass
+
+
+class ChildDeadlockedError(Exception):
+    "Error indicating that a child process is deadlocked after a fork()"
+    pass
