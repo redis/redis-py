@@ -1587,7 +1587,7 @@ class TestRedisCommands(object):
 
     # HASH COMMANDS
     def test_hget_and_hset(self, r):
-        r.hmset('a', {'1': 1, '2': 2, '3': 3})
+        r.hmset('a', mapping={'1': 1, '2': 2, '3': 3})
         assert r.hget('a', '1') == b'1'
         assert r.hget('a', '2') == b'2'
         assert r.hget('a', '3') == b'3'
@@ -1604,19 +1604,19 @@ class TestRedisCommands(object):
         assert r.hget('a', 'b') is None
 
     def test_hset_with_multi_key_values(self, r):
-        r.hset('a', **{'1': 1, '2': 2, '3': 3})
+        r.hset('a', mapping={'1': 1, '2': 2, '3': 3})
         assert r.hget('a', '1') == b'1'
         assert r.hget('a', '2') == b'2'
         assert r.hget('a', '3') == b'3'
 
-        r.hset('b', "foo", "bar", **{'1': 1, '2': 2})
+        r.hset('b', "foo", "bar", mapping={'1': 1, '2': 2})
         assert r.hget('b', '1') == b'1'
         assert r.hget('b', '2') == b'2'
         assert r.hget('b', 'foo') == b'bar'
 
-        r.hset("c", a="9", b="0")
-        assert r.hget('c', 'a') == b'9'
-        assert r.hget('c', 'b') == b'0'
+    def test_hset_without_data(self, r):
+        with pytest.raises(exceptions.DataError):
+            r.hset("x")
 
     def test_hdel(self, r):
         r.hmset('a', {'1': 1, '2': 2, '3': 3})
