@@ -17,6 +17,7 @@ from redis._compat import (xrange, imap, byte_to_chr, unicode, long,
                            sendall, shutdown, ssl_wrap_socket)
 from redis.exceptions import (
     AuthenticationError,
+    AuthenticationWrongNumberOfArgsError,
     BusyLoadingError,
     ChildDeadlockedError,
     ConnectionError,
@@ -135,6 +136,8 @@ class BaseParser(object):
             'max number of clients reached': ConnectionError,
             'Client sent AUTH, but no password is set': AuthenticationError,
             'invalid password': AuthenticationError,
+            'wrong number of arguments for \'auth\' command':
+                AuthenticationWrongNumberOfArgsError,
         },
         'EXECABORT': ExecAbortError,
         'LOADING': BusyLoadingError,
@@ -630,7 +633,18 @@ class Connection(object):
             # avoid checking health here -- PING will fail if we try
             # to check the health prior to the AUTH
             self.send_command('AUTH', *auth_args, check_health=False)
-            if nativestr(self.read_response()) != 'OK':
+
+            try:
+                auth_response = self.read_response()
+            except AuthenticationWrongNumberOfArgsError:
+                # a username and password were specified but the Redis
+                # server seems to be < 6.0.0 which expects a single password
+                # arg. retry auth with just the password.
+                # https://github.com/andymccurdy/redis-py/issues/1274
+                self.send_command('AUTH', self.password, check_health=False)
+                auth_response = self.read_response()
+
+            if nativestr(auth_response) != 'OK':
                 raise AuthenticationError('Invalid Username or Password')
 
         # if a client_name is given, set it

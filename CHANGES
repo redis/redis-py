@@ -1,3 +1,12 @@
+* 3.4.1 (in development)
+    * Prior to ACL support, redis-py ignored the username component of
+      Connection URLs. With ACL support, usernames are no longer ignored and
+      are used to authenticate against an ACL rule. Some cloud vendors with
+      managed Redis instances (like Heroku) provide connection URLs with a
+      username component pre-ACL that is not intended to be used. Sending that
+      username to Redis servers < 6.0.0 results in an error. Attempt to detect
+      this condition and retry the AUTH command with only the password such
+      that authentication continues to work for these users. #1274
 * 3.4.0
     * Allow empty pipelines to be executed if there are WATCHed keys.
       This is a convenient way to test if any of the watched keys changed
