@@ -1,4 +1,7 @@
 * 3.4.1 (in development)
+    * Move the username argument in the Redis and Connection classes to the
+      end of the argument list. This helps those poor souls that specify all
+      their connection options as non-keyword arguments. #1276
     * Prior to ACL support, redis-py ignored the username component of
       Connection URLs. With ACL support, usernames are no longer ignored and
       are used to authenticate against an ACL rule. Some cloud vendors with

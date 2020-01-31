@@ -674,7 +674,7 @@ class Redis(object):
         return cls(connection_pool=connection_pool)
 
     def __init__(self, host='localhost', port=6379,
-                 db=0, username=None, password=None, socket_timeout=None,
+                 db=0, password=None, socket_timeout=None,
                  socket_connect_timeout=None,
                  socket_keepalive=None, socket_keepalive_options=None,
                  connection_pool=None, unix_socket_path=None,
@@ -685,7 +685,7 @@ class Redis(object):
                  ssl_cert_reqs='required', ssl_ca_certs=None,
                  ssl_check_hostname=False,
                  max_connections=None, single_connection_client=False,
-                 health_check_interval=0, client_name=None):
+                 health_check_interval=0, client_name=None, username=None):
         if not connection_pool:
             if charset is not None:
                 warnings.warn(DeprecationWarning(

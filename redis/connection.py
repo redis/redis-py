@@ -490,14 +490,13 @@ else:
 class Connection(object):
     "Manages TCP communication to and from a Redis server"
 
-    def __init__(self, host='localhost', port=6379, db=0, username=None,
-                 password=None, socket_timeout=None,
-                 socket_connect_timeout=None, socket_keepalive=False,
-                 socket_keepalive_options=None, socket_type=0,
-                 retry_on_timeout=False, encoding='utf-8',
+    def __init__(self, host='localhost', port=6379, db=0, password=None,
+                 socket_timeout=None, socket_connect_timeout=None,
+                 socket_keepalive=False, socket_keepalive_options=None,
+                 socket_type=0, retry_on_timeout=False, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  parser_class=DefaultParser, socket_read_size=65536,
-                 health_check_interval=0, client_name=None):
+                 health_check_interval=0, client_name=None, username=None):
         self.pid = os.getpid()
         self.host = host
         self.port = int(port)
