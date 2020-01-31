@@ -1,4 +1,4 @@
-* (IN DEVELOPMENT)
+* 3.4.0
     * Allow empty pipelines to be executed if there are WATCHed keys.
       This is a convenient way to test if any of the watched keys changed
       without actually running any other commands. Thanks @brianmaissy.
