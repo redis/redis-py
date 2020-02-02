@@ -1,4 +1,4 @@
-* 3.4.1 (in development)
+* 3.4.1
     * Move the username argument in the Redis and Connection classes to the
       end of the argument list. This helps those poor souls that specify all
       their connection options as non-keyword arguments. #1276
@@ -10,6 +10,10 @@
       username to Redis servers < 6.0.0 results in an error. Attempt to detect
       this condition and retry the AUTH command with only the password such
       that authentication continues to work for these users. #1274
+    * Removed the __eq__ hooks to Redis and ConnectionPool that were added
+      in 3.4.0. This ended up being a bad idea as two separate connection
+      pools be considered equal yet manage a completely separate set of
+      connections.
 * 3.4.0
     * Allow empty pipelines to be executed if there are WATCHed keys.
       This is a convenient way to test if any of the watched keys changed
@@ -40,6 +44,8 @@
       raised by child processes in the very unlikely chance that a deadlock
       is encountered. Thanks @gmbnomis, @mdellweg, @yht804421715. #1270,
       #1138, #1178, #906, #1262
+    * Added __eq__ hooks to the Redis and ConnectionPool classes.
+      Thanks @brainix. #1240
 * 3.3.11
     * Further fix for the SSLError -> TimeoutError mapping to work
       on obscure releases of Python 2.7.
