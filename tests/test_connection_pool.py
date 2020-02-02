@@ -88,47 +88,6 @@ class TestConnectionPool(object):
                     'path=/abc,db=1,client_name=test-client>>')
         assert repr(pool) == expected
 
-    def test_pool_equality(self):
-        connection_kwargs = {'host': 'localhost', 'port': 6379, 'db': 1}
-        pool1 = self.get_pool(connection_kwargs=connection_kwargs,
-                              connection_class=redis.Connection)
-        pool2 = self.get_pool(connection_kwargs=connection_kwargs,
-                              connection_class=redis.Connection)
-        assert pool1 == pool2
-
-    def test_pools_unequal_if_different_types(self):
-        connection_kwargs = {'host': 'localhost', 'port': 6379, 'db': 1}
-        pool = self.get_pool(connection_kwargs=connection_kwargs,
-                             connection_class=redis.Connection)
-        assert pool != 0
-
-    def test_pools_unequal_if_different_hosts(self):
-        connection_kwargs1 = {'host': 'localhost', 'port': 6379, 'db': 1}
-        connection_kwargs2 = {'host': '127.0.0.1', 'port': 6379, 'db': 1}
-        pool1 = self.get_pool(connection_kwargs=connection_kwargs1,
-                              connection_class=redis.Connection)
-        pool2 = self.get_pool(connection_kwargs=connection_kwargs2,
-                              connection_class=redis.Connection)
-        assert pool1 != pool2
-
-    def test_pools_unequal_if_different_ports(self):
-        connection_kwargs1 = {'host': 'localhost', 'port': 6379, 'db': 1}
-        connection_kwargs2 = {'host': 'localhost', 'port': 6380, 'db': 1}
-        pool1 = self.get_pool(connection_kwargs=connection_kwargs1,
-                              connection_class=redis.Connection)
-        pool2 = self.get_pool(connection_kwargs=connection_kwargs2,
-                              connection_class=redis.Connection)
-        assert pool1 != pool2
-
-    def test_pools_unequal_if_different_dbs(self):
-        connection_kwargs1 = {'host': 'localhost', 'port': 6379, 'db': 1}
-        connection_kwargs2 = {'host': 'localhost', 'port': 6379, 'db': 2}
-        pool1 = self.get_pool(connection_kwargs=connection_kwargs1,
-                              connection_class=redis.Connection)
-        pool2 = self.get_pool(connection_kwargs=connection_kwargs2,
-                              connection_class=redis.Connection)
-        assert pool1 != pool2
-
 
 class TestBlockingConnectionPool(object):
     def get_pool(self, connection_kwargs=None, max_connections=10, timeout=20):

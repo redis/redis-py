@@ -1100,12 +1100,6 @@ class ConnectionPool(object):
             repr(self.connection_class(**self.connection_kwargs)),
         )
 
-    def __eq__(self, other):
-        return (
-            isinstance(other, self.__class__)
-            and self.connection_kwargs == other.connection_kwargs
-        )
-
     def reset(self):
         self._lock = threading.RLock()
         self._created_connections = 0
