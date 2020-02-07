@@ -2999,7 +2999,8 @@ class Redis(object):
     def hset(self, name, key=None, value=None, mapping=None):
         """
         Set ``key`` to ``value`` within hash ``name``,
-        Use kwargs to set multiple key/value pairs for a hash ``name``.
+        Use ``mappings`` keyword args to set multiple key/value pairs
+        for a hash ``name``.
         Returns the number of fields that were added.
         """
         if not key and not mapping:
