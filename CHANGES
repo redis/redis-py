@@ -14,6 +14,8 @@
       in 3.4.0. This ended up being a bad idea as two separate connection
       pools be considered equal yet manage a completely separate set of
       connections.
+    * HSET command now can accept multiple pairs. HMSET has been marked as 
+      deprecated now. Thanks to @laixintao #1271
 * 3.4.0
     * Allow empty pipelines to be executed if there are WATCHed keys.
       This is a convenient way to test if any of the watched keys changed
