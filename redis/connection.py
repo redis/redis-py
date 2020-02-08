@@ -679,7 +679,7 @@ class Connection(object):
                 if nativestr(self.read_response()) != 'PONG':
                     raise ConnectionError(
                         'Bad response from PING health check')
-            except (ConnectionError, TimeoutError) as ex:
+            except (ConnectionError, TimeoutError):
                 self.disconnect()
                 self.send_command('PING', check_health=False)
                 if nativestr(self.read_response()) != 'PONG':
