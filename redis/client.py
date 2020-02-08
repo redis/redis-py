@@ -3026,7 +3026,12 @@ class Redis(object):
         Set key to value within hash ``name`` for each corresponding
         key and value from the ``mapping`` dict.
         """
-        warnings.warn(DeprecationWarning('Use hset'))
+        warnings.warn(
+            '%s.hmset() is deprecated. Use %s.hset() instead.'
+            % (self.__class__.__name__, self.__class__.__name__),
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if not mapping:
             raise DataError("'hmset' with 'mapping' of length 0")
         items = []
