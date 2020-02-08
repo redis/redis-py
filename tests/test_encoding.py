@@ -11,12 +11,33 @@ class TestEncoding(object):
     def r(self, request):
         return _get_client(redis.Redis, request=request, decode_responses=True)
 
-    def test_simple_encoding(self, r):
+    @pytest.fixture()
+    def r_no_decode(self, request):
+        return _get_client(redis.Redis, request=request, decode_responses=False)
+
+    def test_simple_encoding(self, r, r_no_decode):
         unicode_string = unichr(3456) + 'abcd' + unichr(3421)
         r['unicode-string'] = unicode_string
         cached_val = r['unicode-string']
         assert isinstance(cached_val, unicode)
         assert unicode_string == cached_val
+        r_no_decode['unicode-string'] = unicode_string.encode('utf-8')
+        cached_val = r_no_decode['unicode-string']
+        assert isinstance(cached_val, bytes)
+        assert unicode_string == cached_val.decode('utf-8')
+
+    def test_memoryview_encoding(self, r, r_no_decode):
+        unicode_string = unichr(3456) + 'abcd' + unichr(3421)
+        unicode_string_view = memoryview(unicode_string.encode('utf-8'))
+        r['unicode-string-memoryview'] = unicode_string_view
+        cached_val = r['unicode-string-memoryview']
+        assert isinstance(cached_val, unicode)
+        assert unicode_string == cached_val
+        r_no_decode['unicode-string-memoryview'] = unicode_string_view
+        cached_val = r_no_decode['unicode-string-memoryview']
+        # The cached value won't be a memoryview because it's a copy from Redis
+        assert isinstance(cached_val, bytes)
+        assert unicode_string == cached_val.decode('utf-8')
 
     def test_list_encoding(self, r):
         unicode_string = unichr(3456) + 'abcd' + unichr(3421)

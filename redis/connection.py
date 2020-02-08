@@ -94,7 +94,7 @@ SENTINEL = object()
 
 
 class Encoder(object):
-    "Encode strings to bytes and decode bytes to strings"
+    "Encode strings to bytes-like and decode bytes-like to strings"
 
     def __init__(self, encoding, encoding_errors, decode_responses):
         self.encoding = encoding
@@ -102,8 +102,8 @@ class Encoder(object):
         self.decode_responses = decode_responses
 
     def encode(self, value):
-        "Return a bytestring representation of the value"
-        if isinstance(value, bytes):
+        "Return a bytestring or bytes-like representation of the value"
+        if isinstance(value, bytes) or isinstance(value, memoryview):
             return value
         elif isinstance(value, bool):
             # special case bool since it is a subclass of int
@@ -124,9 +124,12 @@ class Encoder(object):
         return value
 
     def decode(self, value, force=False):
-        "Return a unicode string from the byte representation"
-        if (self.decode_responses or force) and isinstance(value, bytes):
-            value = value.decode(self.encoding, self.encoding_errors)
+        "Return a unicode string from the bytes-like representation"
+        if (self.decode_responses or force):
+            if isinstance(value, memoryview):
+                value = value.tobytes()
+            if isinstance(value, bytes):
+                value = value.decode(self.encoding, self.encoding_errors)
         return value
 
 
@@ -770,9 +773,11 @@ class Connection(object):
         buffer_cutoff = self._buffer_cutoff
         for arg in imap(self.encoder.encode, args):
             # to avoid large string mallocs, chunk the command into the
-            # output list if we're sending large values
+            # output list if we're sending large values or memoryviews
             arg_length = len(arg)
-            if len(buff) > buffer_cutoff or arg_length > buffer_cutoff:
+            if len(buff) > buffer_cutoff \
+                or arg_length > buffer_cutoff \
+                or isinstance(arg, memoryview):
                 buff = SYM_EMPTY.join(
                     (buff, SYM_DOLLAR, str(arg_length).encode(), SYM_CRLF))
                 output.append(buff)
@@ -795,7 +800,9 @@ class Connection(object):
         for cmd in commands:
             for chunk in self.pack_command(*cmd):
                 chunklen = len(chunk)
-                if buffer_length > buffer_cutoff or chunklen > buffer_cutoff:
+                if buffer_length > buffer_cutoff \
+                    or chunklen > buffer_cutoff \
+                    or isinstance(chunk, memoryview):
                     output.append(SYM_EMPTY.join(pieces))
                     buffer_length = 0
                     pieces = []
