@@ -3,6 +3,7 @@ import pytest
 import redis
 
 from redis._compat import unichr, unicode
+from redis.connection import Connection
 from .conftest import _get_client
 
 
@@ -59,6 +60,11 @@ class TestEncodingErrors(object):
         r.set('a', b'foo\xff')
         assert r.get('a') == 'foo\ufffd'
 
+class TestMemoryviewsAreNotPacked(object):
+    c = Connection()
+    arg = memoryview(b'some_arg')
+    cmd = c.pack_command('SOME_COMMAND', arg)
+    assert cmd[1] is arg
 
 class TestCommandsAreNotEncoded(object):
     @pytest.fixture()
