@@ -1,3 +1,10 @@
+* (in development)
+    * Removed exception trapping from __del__ methods. redis-py objects that
+      hold various resources implement __del__ cleanup methods to release
+      those resources when the object goes out of scope. This provides a
+      fallback for when these objects aren't explicitly closed by user code.
+      Prior to this change any errors encountered in closing these resources
+      would be hidden from the user. Thanks @jdufresne. #1281
 * 3.4.1
     * Move the username argument in the Redis and Connection classes to the
       end of the argument list. This helps those poor souls that specify all
@@ -14,7 +21,7 @@
       in 3.4.0. This ended up being a bad idea as two separate connection
       pools be considered equal yet manage a completely separate set of
       connections.
-    * HSET command now can accept multiple pairs. HMSET has been marked as 
+    * HSET command now can accept multiple pairs. HMSET has been marked as
       deprecated now. Thanks to @laixintao #1271
 * 3.4.0
     * Allow empty pipelines to be executed if there are WATCHed keys.
