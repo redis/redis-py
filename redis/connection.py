@@ -775,9 +775,8 @@ class Connection(object):
             # to avoid large string mallocs, chunk the command into the
             # output list if we're sending large values or memoryviews
             arg_length = len(arg)
-            if len(buff) > buffer_cutoff \
-                or arg_length > buffer_cutoff \
-                or isinstance(arg, memoryview):
+            if (len(buff) > buffer_cutoff or arg_length > buffer_cutoff
+                    or isinstance(arg, memoryview)):
                 buff = SYM_EMPTY.join(
                     (buff, SYM_DOLLAR, str(arg_length).encode(), SYM_CRLF))
                 output.append(buff)
@@ -800,9 +799,8 @@ class Connection(object):
         for cmd in commands:
             for chunk in self.pack_command(*cmd):
                 chunklen = len(chunk)
-                if buffer_length > buffer_cutoff \
-                    or chunklen > buffer_cutoff \
-                    or isinstance(chunk, memoryview):
+                if (buffer_length > buffer_cutoff or chunklen > buffer_cutoff
+                        or isinstance(chunk, memoryview)):
                     output.append(SYM_EMPTY.join(pieces))
                     buffer_length = 0
                     pieces = []

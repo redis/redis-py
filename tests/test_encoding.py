@@ -14,7 +14,11 @@ class TestEncoding(object):
 
     @pytest.fixture()
     def r_no_decode(self, request):
-        return _get_client(redis.Redis, request=request, decode_responses=False)
+        return _get_client(
+            redis.Redis,
+            request=request,
+            decode_responses=False,
+        )
 
     def test_simple_encoding(self, r, r_no_decode):
         unicode_string = unichr(3456) + 'abcd' + unichr(3421)
@@ -60,11 +64,13 @@ class TestEncodingErrors(object):
         r.set('a', b'foo\xff')
         assert r.get('a') == 'foo\ufffd'
 
+
 class TestMemoryviewsAreNotPacked(object):
     c = Connection()
     arg = memoryview(b'some_arg')
     cmd = c.pack_command('SOME_COMMAND', arg)
     assert cmd[1] is arg
+
 
 class TestCommandsAreNotEncoded(object):
     @pytest.fixture()
