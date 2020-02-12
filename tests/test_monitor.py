@@ -1,7 +1,6 @@
 from __future__ import unicode_literals
 from redis._compat import unicode
-from .conftest import (skip_if_server_version_lt, skip_if_server_version_gte,
-                       skip_unless_arch_bits)
+from .conftest import skip_if_server_version_lt
 
 
 def wait_for_command(client, monitor, command):
