@@ -5,6 +5,8 @@
       fallback for when these objects aren't explicitly closed by user code.
       Prior to this change any errors encountered in closing these resources
       would be hidden from the user. Thanks @jdufresne. #1281
+    * Expanded support for connection strings specifying a username connecting
+      to pre-v6 servers. #1274
 * 3.4.1
     * Move the username argument in the Redis and Connection classes to the
       end of the argument list. This helps those poor souls that specify all

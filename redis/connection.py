@@ -136,7 +136,13 @@ class BaseParser(object):
             'max number of clients reached': ConnectionError,
             'Client sent AUTH, but no password is set': AuthenticationError,
             'invalid password': AuthenticationError,
+            # some Redis server versions report invalid command syntax
+            # in lowercase
             'wrong number of arguments for \'auth\' command':
+                AuthenticationWrongNumberOfArgsError,
+            # some Redis server versions report invalid command syntax
+            # in uppercase
+            'wrong number of arguments for \'AUTH\' command':
                 AuthenticationWrongNumberOfArgsError,
         },
         'EXECABORT': ExecAbortError,
