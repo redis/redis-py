@@ -74,13 +74,15 @@ def _get_client(cls, request, single_connection_client=True, **kwargs):
 
 @pytest.fixture()
 def r(request):
-    return _get_client(redis.Redis, request)
+    with _get_client(redis.Redis, request) as client:
+        yield client
 
 
 @pytest.fixture()
 def r2(request):
     "A second client for tests that need multiple"
-    return _get_client(redis.Redis, request)
+    with _get_client(redis.Redis, request) as client:
+        yield client
 
 
 def _gen_cluster_mock_resp(r, response):
