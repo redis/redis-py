@@ -44,24 +44,24 @@ class TestConnectionPool(object):
         assert connection.kwargs == connection_kwargs
 
     def test_multiple_connections(self):
-        pool = self.get_pool()
-        c1 = pool.get_connection('_')
-        c2 = pool.get_connection('_')
-        assert c1 != c2
+        with self.get_pool() as pool:
+            c1 = pool.get_connection('_')
+            c2 = pool.get_connection('_')
+            assert c1 != c2
 
     def test_max_connections(self):
-        pool = self.get_pool(max_connections=2)
-        pool.get_connection('_')
-        pool.get_connection('_')
-        with pytest.raises(redis.ConnectionError):
+        with self.get_pool(max_connections=2) as pool:
             pool.get_connection('_')
+            pool.get_connection('_')
+            with pytest.raises(redis.ConnectionError):
+                pool.get_connection('_')
 
     def test_reuse_previously_released_connection(self):
-        pool = self.get_pool()
-        c1 = pool.get_connection('_')
-        pool.release(c1)
-        c2 = pool.get_connection('_')
-        assert c1 == c2
+        with self.get_pool() as pool:
+            c1 = pool.get_connection('_')
+            pool.release(c1)
+            c2 = pool.get_connection('_')
+            assert c1 == c2
 
     def test_repr_contains_db_info_tcp(self):
         connection_kwargs = {

@@ -154,13 +154,14 @@ def test_discover_slaves(cluster, sentinel):
 
 
 def test_master_for(cluster, sentinel):
-    master = sentinel.master_for('mymaster', db=9)
-    assert master.ping()
-    assert master.connection_pool.master_address == ('127.0.0.1', 6379)
+    with sentinel.master_for('mymaster', db=9) as master:
+        assert master.ping()
+        assert master.connection_pool.master_address == ('127.0.0.1', 6379)
 
     # Use internal connection check
-    master = sentinel.master_for('mymaster', db=9, check_connection=True)
-    assert master.ping()
+    with sentinel.master_for('mymaster', db=9,
+                             check_connection=True) as master:
+        assert master.ping()
 
 
 def test_slave_for(cluster, sentinel):
@@ -168,8 +169,8 @@ def test_slave_for(cluster, sentinel):
         {'ip': '127.0.0.1', 'port': 6379,
          'is_odown': False, 'is_sdown': False},
     ]
-    slave = sentinel.slave_for('mymaster', db=9)
-    assert slave.ping()
+    with sentinel.slave_for('mymaster', db=9) as slave:
+        assert slave.ping()
 
 
 def test_slave_for_slave_not_found_error(cluster, sentinel):

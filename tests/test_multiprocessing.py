@@ -35,26 +35,26 @@ class TestMultiprocessing(object):
         A connection owned by a parent and closed by a child doesn't
         destroy the file descriptors so a parent can still use it.
         """
-        conn = Connection()
-        conn.send_command('ping')
-        assert conn.read_response() == b'PONG'
-
-        def target(conn):
+        with Connection() as conn:
             conn.send_command('ping')
             assert conn.read_response() == b'PONG'
-            conn.disconnect()
 
-        proc = multiprocessing.Process(target=target, args=(conn,))
-        proc.start()
-        proc.join(3)
-        assert proc.exitcode == 0
+            def target(conn):
+                conn.send_command('ping')
+                assert conn.read_response() == b'PONG'
+                conn.disconnect()
 
-        # The connection was created in the parent but disconnected in the
-        # child. The child called socket.close() but did not call
-        # socket.shutdown() because it wasn't the "owning" process.
-        # Therefore the connection still works in the parent.
-        conn.send_command('ping')
-        assert conn.read_response() == b'PONG'
+            proc = multiprocessing.Process(target=target, args=(conn,))
+            proc.start()
+            proc.join(3)
+            assert proc.exitcode == 0
+
+            # The connection was created in the parent but disconnected in the
+            # child. The child called socket.close() but did not call
+            # socket.shutdown() because it wasn't the "owning" process.
+            # Therefore the connection still works in the parent.
+            conn.send_command('ping')
+            assert conn.read_response() == b'PONG'
 
     def test_close_connection_in_parent(self):
         """
@@ -89,34 +89,33 @@ class TestMultiprocessing(object):
         A child will create its own connections when using a pool created
         by a parent.
         """
-        pool = ConnectionPool.from_url('redis://localhost',
-                                       max_connections=max_connections)
+        with ConnectionPool.from_url('redis://localhost',
+                                     max_connections=max_connections) as pool:
+            conn = pool.get_connection('ping')
+            main_conn_pid = conn.pid
+            with exit_callback(pool.release, conn):
+                conn.send_command('ping')
+                assert conn.read_response() == b'PONG'
 
-        conn = pool.get_connection('ping')
-        main_conn_pid = conn.pid
-        with exit_callback(pool.release, conn):
-            conn.send_command('ping')
-            assert conn.read_response() == b'PONG'
+            def target(pool):
+                with exit_callback(pool.disconnect):
+                    conn = pool.get_connection('ping')
+                    assert conn.pid != main_conn_pid
+                    with exit_callback(pool.release, conn):
+                        assert conn.send_command('ping') is None
+                        assert conn.read_response() == b'PONG'
 
-        def target(pool):
-            with exit_callback(pool.disconnect):
-                conn = pool.get_connection('ping')
-                assert conn.pid != main_conn_pid
-                with exit_callback(pool.release, conn):
-                    assert conn.send_command('ping') is None
-                    assert conn.read_response() == b'PONG'
+            proc = multiprocessing.Process(target=target, args=(pool,))
+            proc.start()
+            proc.join(3)
+            assert proc.exitcode == 0
 
-        proc = multiprocessing.Process(target=target, args=(pool,))
-        proc.start()
-        proc.join(3)
-        assert proc.exitcode == 0
-
-        # Check that connection is still alive after fork process has exited
-        # and disconnected the connections in its pool
-        conn = pool.get_connection('ping')
-        with exit_callback(pool.release, conn):
-            assert conn.send_command('ping') is None
-            assert conn.read_response() == b'PONG'
+            # Check that connection is still alive after fork process has
+            # exited and disconnected the connections in its pool
+            conn = pool.get_connection('ping')
+            with exit_callback(pool.release, conn):
+                assert conn.send_command('ping') is None
+                assert conn.read_response() == b'PONG'
 
     @pytest.mark.parametrize('max_connections', [1, 2, None])
     def test_close_pool_in_main(self, max_connections):

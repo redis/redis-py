@@ -881,9 +881,7 @@ class Redis(object):
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
-
-    def __del__(self):
-        self.close()
+        self.connection_pool.disconnect()
 
     def close(self):
         conn = self.connection
@@ -3410,12 +3408,6 @@ class PubSub(object):
     def __exit__(self, exc_type, exc_value, traceback):
         self.reset()
 
-    def __del__(self):
-        # if this object went out of scope prior to shutting down
-        # subscriptions, close the connection manually before
-        # returning it to the connection pool
-        self.reset()
-
     def reset(self):
         if self.connection:
             self.connection.disconnect()
@@ -3760,9 +3752,6 @@ class Pipeline(Redis):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.reset()
-
-    def __del__(self):
         self.reset()
 
     def __len__(self):

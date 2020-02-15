@@ -296,9 +296,6 @@ class PythonParser(BaseParser):
         self._sock = None
         self._buffer = None
 
-    def __del__(self):
-        self.on_disconnect()
-
     def on_connect(self, connection):
         "Called when the socket connects"
         self._sock = connection._sock
@@ -374,9 +371,6 @@ class HiredisParser(BaseParser):
 
         if HIREDIS_USE_BYTE_BUFFER:
             self._buffer = bytearray(socket_read_size)
-
-    def __del__(self):
-        self.on_disconnect()
 
     def on_connect(self, connection):
         self._sock = connection._sock
@@ -534,9 +528,6 @@ class Connection(object):
         if self.client_name:
             pieces.append(('client_name', self.client_name))
         return pieces
-
-    def __del__(self):
-        self.disconnect()
 
     def register_connect_callback(self, callback):
         self._connect_callbacks.append(callback)
@@ -811,6 +802,12 @@ class Connection(object):
         if pieces:
             output.append(SYM_EMPTY.join(pieces))
         return output
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.disconnect()
 
 
 class SSLConnection(Connection):
@@ -1238,6 +1235,12 @@ class ConnectionPool(object):
                               self._in_use_connections)
             for connection in all_conns:
                 connection.disconnect()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.disconnect()
 
 
 class BlockingConnectionPool(ConnectionPool):
