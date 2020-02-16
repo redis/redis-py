@@ -75,8 +75,12 @@ class TestEncodingErrors(object):
 class TestMemoryviewsAreNotPacked(object):
     c = Connection()
     arg = memoryview(b'some_arg')
-    cmd = c.pack_command('SOME_COMMAND', arg)
+    arg_list = ['SOME_COMMAND', arg]
+    cmd = c.pack_command(*arg_list)
     assert cmd[1] is arg
+    cmds = c.pack_commands([arg_list, arg_list])
+    assert cmds[1] is arg
+    assert cmds[3] is arg
 
 
 class TestCommandsAreNotEncoded(object):

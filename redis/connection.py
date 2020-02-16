@@ -805,7 +805,7 @@ class Connection(object):
                     buffer_length = 0
                     pieces = []
 
-                if chunklen > self._buffer_cutoff:
+                if chunklen > buffer_cutoff or isinstance(chunk, memoryview):
                     output.append(chunk)
                 else:
                     pieces.append(chunk)
