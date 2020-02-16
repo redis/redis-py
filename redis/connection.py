@@ -103,7 +103,7 @@ class Encoder(object):
 
     def encode(self, value):
         "Return a bytestring or bytes-like representation of the value"
-        if isinstance(value, bytes) or isinstance(value, memoryview):
+        if isinstance(value, (bytes, memoryview)):
             return value
         elif isinstance(value, bool):
             # special case bool since it is a subclass of int
@@ -125,7 +125,7 @@ class Encoder(object):
 
     def decode(self, value, force=False):
         "Return a unicode string from the bytes-like representation"
-        if (self.decode_responses or force):
+        if self.decode_responses or force:
             if isinstance(value, memoryview):
                 value = value.tobytes()
             if isinstance(value, bytes):
