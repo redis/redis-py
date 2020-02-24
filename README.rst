@@ -505,6 +505,9 @@ which is much easier to read:
     >>> r.transaction(client_side_incr, 'OUR-SEQUENCE-KEY')
     [True]
 
+Be sure to call `pipe.multi()` in the callable passed to `Redis.transaction`
+prior to any write commands.
+
 Publish / Subscribe
 ^^^^^^^^^^^^^^^^^^^
 
