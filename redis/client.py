@@ -158,6 +158,19 @@ def parse_info(response):
     return info
 
 
+def parse_memory_stats(response, **kwargs):
+    "Parse the results of MEMORY STATS"
+    stats = pairs_to_dict(response,
+                          decode_keys=True,
+                          decode_string_values=True)
+    for key, value in iteritems(stats):
+        if key.startswith('db.'):
+            stats[key] = pairs_to_dict(value,
+                                       decode_keys=True,
+                                       decode_string_values=True)
+    return stats
+
+
 SENTINEL_STATE_TYPES = {
     'can-failover-its-master': int,
     'config-epoch': int,
@@ -217,14 +230,24 @@ def parse_sentinel_get_master(response):
     return response and (response[0], int(response[1])) or None
 
 
-def pairs_to_dict(response, decode_keys=False):
+def nativestr_if_bytes(value):
+    return nativestr(value) if isinstance(value, bytes) else value
+
+
+def pairs_to_dict(response, decode_keys=False, decode_string_values=False):
     "Create a dict given a list of key/value pairs"
     if response is None:
         return {}
-    if decode_keys:
+    if decode_keys or decode_string_values:
         # the iter form is faster, but I don't know how to make that work
         # with a nativestr() map
-        return dict(izip(imap(nativestr, response[::2]), response[1::2]))
+        keys = response[::2]
+        if decode_keys:
+            keys = imap(nativestr, keys)
+        values = response[1::2]
+        if decode_string_values:
+            values = imap(nativestr_if_bytes, values)
+        return dict(izip(keys, values))
     else:
         it = iter(response)
         return dict(izip(it, it))
@@ -598,6 +621,7 @@ class Redis(object):
             'INFO': parse_info,
             'LASTSAVE': timestamp_to_datetime,
             'MEMORY PURGE': bool_ok,
+            'MEMORY STATS': parse_memory_stats,
             'MEMORY USAGE': int_or_none,
             'OBJECT': parse_object,
             'PING': lambda r: nativestr(r) == 'PONG',
@@ -1327,6 +1351,10 @@ class Redis(object):
     def object(self, infotype, key):
         "Return the encoding, idletime, or refcount about the key"
         return self.execute_command('OBJECT', infotype, key, infotype=infotype)
+
+    def memory_stats(self):
+        "Return a dictionary of memory stats"
+        return self.execute_command('MEMORY STATS')
 
     def memory_usage(self, key, samples=None):
         """

@@ -2600,6 +2600,17 @@ class TestRedisCommands(object):
         assert resp == [0, None, 255]
 
     @skip_if_server_version_lt('4.0.0')
+    def test_memory_stats(self, r):
+        # put a key into the current db to make sure that "db.<current-db>"
+        # has data
+        r.set('foo', 'bar')
+        stats = r.memory_stats()
+        assert isinstance(stats, dict)
+        for key, value in iteritems(stats):
+            if key.startswith('db.'):
+                assert isinstance(value, dict)
+
+    @skip_if_server_version_lt('4.0.0')
     def test_memory_usage(self, r):
         r.set('foo', 'bar')
         assert isinstance(r.memory_usage('foo'), int)
