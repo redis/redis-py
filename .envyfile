@@ -1,9 +1,18 @@
 environment:
-  base:
-    image: python:3.6
   system-packages:
-    - recipe: python-dev
+    - recipe: python3.6
+    - recipe: python3-pip
+    - recipe: software-properties-common
   setup-steps:
+    - name: python-versions
+      label: "Installing old python versions"
+      type: script
+      as_user: false
+      run:
+        - "add-apt-repository ppa:deadsnakes/ppa -y"
+        - "apt install python2.7 python3.5 python3.7 python3.8 -y"
+        - "ln -s /usr/bin/pip3 /usr/bin/pip"
+        - "ln -s /usr/bin/python3 /usr/bin/python"
     - name: python-deps
       label: "Installing python dependencies"
       type: script
@@ -18,8 +27,8 @@ actions:
   - name: test
     script: 'tox -e py36 -- --redis-host=redis --cluster-master-host=master'
     help: 'Run the tests with python3.6'
-  - name: testall
-    script: 'tox'
+  - name: test-all
+    script: 'tox -- --redis-host=redis --cluster-master-host=master'
     help: 'Run the tests across all supported python versions (slow)'
   - name: lint
     script: 'tox -e pycodestyle'
