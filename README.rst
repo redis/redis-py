@@ -37,6 +37,9 @@ or from source:
 
     $ python setup.py install
 
+If you'd like to try out redis-py with an interactive session, you can use
+`envy <https://envy-project.github.io/index.html>`_! Just run `envy up` to create your environment, and `envy console`
+will drop you into an interactive session with a redis server.
 
 Getting Started
 ---------------
@@ -869,6 +872,12 @@ that return Python iterators for convenience: `scan_iter`, `hscan_iter`,
     A 1
     B 2
     C 3
+
+Contributing
+^^^^^^^^^^^
+
+This project supports `envy <https://envy-project.github.io/index.html>`_, a tool
+to isolate and manage your dev environment. Setup is as easy as `envy up`!
 
 Author
 ^^^^^^
