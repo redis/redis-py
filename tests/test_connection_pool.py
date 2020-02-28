@@ -35,45 +35,56 @@ class TestConnectionPool(object):
             **connection_kwargs)
         return pool
 
-    def test_connection_creation(self):
-        connection_kwargs = {'foo': 'bar', 'biz': 'baz'}
+    def test_connection_creation(self, redis_host, redis_port):
+        connection_kwargs = {
+            'host': redis_host,
+            'port': redis_port,
+            'foo': 'bar',
+            'biz': 'baz'
+        }
         pool = self.get_pool(connection_kwargs=connection_kwargs,
                              connection_class=DummyConnection)
         connection = pool.get_connection('_')
         assert isinstance(connection, DummyConnection)
         assert connection.kwargs == connection_kwargs
 
-    def test_multiple_connections(self):
-        pool = self.get_pool()
+    def test_multiple_connections(self, redis_host, redis_port):
+        connection_kwargs = {'host': redis_host, 'port': redis_port}
+        pool = self.get_pool(connection_kwargs=connection_kwargs)
         c1 = pool.get_connection('_')
         c2 = pool.get_connection('_')
         assert c1 != c2
 
-    def test_max_connections(self):
-        pool = self.get_pool(max_connections=2)
+    def test_max_connections(self, redis_host, redis_port):
+        connection_kwargs = {'host': redis_host, 'port': redis_port}
+        pool = self.get_pool(connection_kwargs=connection_kwargs,
+                             max_connections=2)
         pool.get_connection('_')
         pool.get_connection('_')
         with pytest.raises(redis.ConnectionError):
             pool.get_connection('_')
 
-    def test_reuse_previously_released_connection(self):
-        pool = self.get_pool()
+    def test_reuse_previously_released_connection(self,
+                                                  redis_host, redis_port):
+        connection_kwargs = {'host': redis_host, 'port': redis_port}
+        pool = self.get_pool(connection_kwargs=connection_kwargs)
         c1 = pool.get_connection('_')
         pool.release(c1)
         c2 = pool.get_connection('_')
         assert c1 == c2
 
-    def test_repr_contains_db_info_tcp(self):
+    def test_repr_contains_db_info_tcp(self, redis_host, redis_port):
         connection_kwargs = {
-            'host': 'localhost',
-            'port': 6379,
+            'host': redis_host,
+            'port': redis_port,
             'db': 1,
             'client_name': 'test-client'
         }
         pool = self.get_pool(connection_kwargs=connection_kwargs,
                              connection_class=redis.Connection)
         expected = ('ConnectionPool<Connection<'
-                    'host=localhost,port=6379,db=1,client_name=test-client>>')
+                    'host={},port={},db=1,client_name=test-client>>'
+                    .format(redis_host, redis_port))
         assert repr(pool) == expected
 
     def test_repr_contains_db_info_unix(self):
@@ -146,15 +157,16 @@ class TestBlockingConnectionPool(object):
         c2 = pool.get_connection('_')
         assert c1 == c2
 
-    def test_repr_contains_db_info_tcp(self):
+    def test_repr_contains_db_info_tcp(self, redis_host, redis_port):
         pool = redis.ConnectionPool(
-            host='localhost',
-            port=6379,
+            host=redis_host,
+            port=redis_port,
             db=0,
             client_name='test-client'
         )
         expected = ('ConnectionPool<Connection<'
-                    'host=localhost,port=6379,db=0,client_name=test-client>>')
+                    'host={},port={},db=0,client_name=test-client>>'
+                    .format(redis_host, redis_port))
         assert repr(pool) == expected
 
     def test_repr_contains_db_info_unix(self):
@@ -609,14 +621,15 @@ class TestConnection(object):
         with pytest.raises(redis.ReadOnlyError):
             r.execute_command('DEBUG', 'ERROR', 'READONLY blah blah')
 
-    def test_connect_from_url_tcp(self):
-        connection = redis.Redis.from_url('redis://localhost')
+    def test_connect_from_url_tcp(self, redis_host, redis_port):
+        url = 'redis://{}:{}'.format(redis_host, redis_port)
+        connection = redis.Redis.from_url(url)
         pool = connection.connection_pool
 
         assert re.match('(.*)<(.*)<(.*)>>', repr(pool)).groups() == (
             'ConnectionPool',
             'Connection',
-            'host=localhost,port=6379,db=0',
+            'host={},port={},db=0'.format(redis_host, redis_port),
         )
 
     def test_connect_from_url_unix(self):

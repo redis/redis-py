@@ -6,14 +6,35 @@ from distutils.version import StrictVersion
 
 
 REDIS_INFO = {}
-default_redis_url = "redis://localhost:6379/9"
+default_redis_host = "localhost"
+default_redis_port = "6379"
+default_cluster_master_host = "127.0.0.1"
+default_cluster_master_port = "6379"
 
 
 def pytest_addoption(parser):
-    parser.addoption('--redis-url', default=default_redis_url,
+    parser.addoption('--redis-host', default=default_redis_host,
                      action="store",
-                     help="Redis connection string,"
+                     help="Redis hostname,"
                           " defaults to `%(default)s`")
+    parser.addoption('--redis-port', default=default_redis_port,
+                     action="store",
+                     help="Redis port,"
+                          " defaults to `%(default)s`")
+    parser.addoption('--cluster-master-host',
+                     default=default_cluster_master_host,
+                     action="store",
+                     help="Hostname of cluster master,"
+                          " defaults to `%(default)s`")
+    parser.addoption('--cluster-master-port',
+                     default=default_cluster_master_port,
+                     action="store",
+                     help="Port of cluster master,"
+                          " defaults to `%(default)s`")
+
+
+def _build_redis_url(redis_host, redis_port):
+    return "redis://{}:{}/9".format(redis_host, redis_port)
 
 
 def _get_info(redis_url):
@@ -24,7 +45,9 @@ def _get_info(redis_url):
 
 
 def pytest_sessionstart(session):
-    redis_url = session.config.getoption("--redis-url")
+    redis_host = session.config.getoption("--redis-host")
+    redis_port = session.config.getoption("--redis-port")
+    redis_url = _build_redis_url(redis_host, redis_port)
     info = _get_info(redis_url)
     version = info["redis_version"]
     arch_bits = info["arch_bits"]
@@ -54,7 +77,9 @@ def skip_unless_arch_bits(arch_bits):
 
 
 def _get_client(cls, request, single_connection_client=True, **kwargs):
-    redis_url = request.config.getoption("--redis-url")
+    redis_host = request.config.getoption("--redis-host")
+    redis_port = request.config.getoption("--redis-port")
+    redis_url = _build_redis_url(redis_host, redis_port)
     client = cls.from_url(redis_url, **kwargs)
     if single_connection_client:
         client = client.client()
@@ -83,6 +108,16 @@ def r2(request):
     "A second client for tests that need multiple"
     with _get_client(redis.Redis, request) as client:
         yield client
+
+
+@pytest.fixture()
+def redis_host(request):
+    return request.config.getoption("--redis-host")
+
+
+@pytest.fixture()
+def redis_port(request):
+    return request.config.getoption("--redis-port")
 
 
 def _gen_cluster_mock_resp(r, response):
