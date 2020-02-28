@@ -1,0 +1,30 @@
+environment:
+  base:
+    image: python:3.6
+  system-packages:
+    - recipe: python-dev
+  setup-steps:
+    - name: python-deps
+      label: "Installing python dependencies"
+      type: script
+      as_user: false
+      run:
+        - "pip install --upgrade pip"
+        - "pip install tox"
+actions:
+  - name: console
+    script: 'echo "Connect to redis at redis:6379" && python'
+    help: 'Start an interactive prompt that will allow you to experiment with redis'
+  - name: test
+    script: 'tox -e py36'
+    help: 'Run the tests with python3.6'
+  - name: testall
+    script: 'tox'
+    help: 'Run the tests across all supported python versions (slow)'
+  - name: lint
+    script: 'tox -e pycodestyle'
+    help: 'Run the linter'
+services:
+  compose-file: docker-compose.yml
+network:
+  name: redis-py

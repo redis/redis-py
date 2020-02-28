@@ -1,0 +1,21 @@
+version: "3.5"
+services:
+  redis:
+    image: redis
+    ports:
+      - "6379:6379"
+  master:
+    image: redis
+    expose:
+      - "6379"
+  slave1:
+    image: redis
+    expose:
+      - "6379"
+  slave2:
+    image: redis
+    expose:
+      - "6379"
+networks:
+  default:
+    name: redis-py
