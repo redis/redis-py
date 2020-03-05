@@ -18,6 +18,9 @@
       deprecated now. Thanks to @laixintao #1271
     * Don't manually DISCARD when encountering an ExecAbortError.
       Thanks @nickgaya, #1300/#1301
+    * Reset the watched state of pipelines after calling exec. This saves
+      a roundtrip to the server by not having to call UNWATCH within
+      Pipeline.reset(). Thanks @nickgaya, #1299/#1302
 * 3.4.1
     * Move the username argument in the Redis and Connection classes to the
       end of the argument list. This helps those poor souls that specify all
