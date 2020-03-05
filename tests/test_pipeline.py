@@ -172,6 +172,21 @@ class TestPipeline(object):
             assert pipe.set('z', 'zzz').execute() == [True]
             assert r['z'] == b'zzz'
 
+    def test_parse_error_raised_transaction(self, r):
+        with r.pipeline() as pipe:
+            pipe.multi()
+            # the zrem is invalid because we don't pass any keys to it
+            pipe.set('a', 1).zrem('b').set('b', 2)
+            with pytest.raises(redis.ResponseError) as ex:
+                pipe.execute()
+
+            assert unicode(ex.value).startswith('Command # 2 (ZREM b) of '
+                                                'pipeline caused error: ')
+
+            # make sure the pipe was restored to a working state
+            assert pipe.set('z', 'zzz').execute() == [True]
+            assert r['z'] == b'zzz'
+
     def test_watch_succeed(self, r):
         r['a'] = 1
         r['b'] = 2

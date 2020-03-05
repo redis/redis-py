@@ -3898,8 +3898,6 @@ class Pipeline(Redis):
         try:
             response = self.parse_response(connection, '_')
         except ExecAbortError:
-            if self.explicit_transaction:
-                self.immediate_execute_command('DISCARD')
             if errors:
                 raise errors[0][1]
             raise sys.exc_info()[1]
