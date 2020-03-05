@@ -3,6 +3,8 @@ import pytest
 
 import redis
 from redis._compat import unichr, unicode
+from .conftest import skip_if_server_version_lt
+from .test_monitor import wait_for_command
 
 
 class TestPipeline(object):
@@ -227,6 +229,27 @@ class TestPipeline(object):
             assert not pipe.watching
             pipe.get('a')
             assert pipe.execute() == [b'1']
+
+    @skip_if_server_version_lt('5.0.0')
+    def test_watch_exec_no_unwatch(self, r):
+        r['a'] = 1
+        r['b'] = 2
+
+        with r.monitor() as m:
+            with r.pipeline() as pipe:
+                pipe.watch('a', 'b')
+                assert pipe.watching
+                a_value = pipe.get('a')
+                b_value = pipe.get('b')
+                assert a_value == b'1'
+                assert b_value == b'2'
+                pipe.multi()
+                pipe.set('c', 3)
+                assert pipe.execute() == [True]
+                assert not pipe.watching
+
+            unwatch_command = wait_for_command(r, m, 'UNWATCH')
+            assert unwatch_command is None, "should not send UNWATCH"
 
     def test_transaction_callable(self, r):
         r['a'] = 1

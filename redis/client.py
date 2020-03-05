@@ -3904,6 +3904,9 @@ class Pipeline(Redis):
                 raise errors[0][1]
             raise sys.exc_info()[1]
 
+        # EXEC clears any watched keys
+        self.watching = False
+
         if response is None:
             raise WatchError("Watched variable changed.")
 

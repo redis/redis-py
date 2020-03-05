@@ -17,7 +17,7 @@ def wait_for_command(client, monitor, command):
             return None
 
 
-class TestPipeline(object):
+class TestMonitor(object):
     @skip_if_server_version_lt('5.0.0')
     def test_wait_command_not_found(self, r):
         "Make sure the wait_for_command func works when command is not found"
