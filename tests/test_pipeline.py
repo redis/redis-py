@@ -3,8 +3,7 @@ import pytest
 
 import redis
 from redis._compat import unichr, unicode
-from .conftest import skip_if_server_version_lt
-from .test_monitor import wait_for_command
+from .conftest import wait_for_command
 
 
 class TestPipeline(object):
@@ -230,7 +229,6 @@ class TestPipeline(object):
             pipe.get('a')
             assert pipe.execute() == [b'1']
 
-    @skip_if_server_version_lt('5.0.0')
     def test_watch_exec_no_unwatch(self, r):
         r['a'] = 1
         r['b'] = 2
