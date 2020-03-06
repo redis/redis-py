@@ -249,6 +249,20 @@ class TestPipeline(object):
             unwatch_command = wait_for_command(r, m, 'UNWATCH')
             assert unwatch_command is None, "should not send UNWATCH"
 
+    def test_watch_reset_unwatch(self, r):
+        r['a'] = 1
+
+        with r.monitor() as m:
+            with r.pipeline() as pipe:
+                pipe.watch('a')
+                assert pipe.watching
+                pipe.reset()
+                assert not pipe.watching
+
+            unwatch_command = wait_for_command(r, m, 'UNWATCH')
+            assert unwatch_command is not None
+            assert unwatch_command['command'] == 'UNWATCH'
+
     def test_transaction_callable(self, r):
         r['a'] = 1
         r['b'] = 2
