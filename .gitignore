@@ -10,3 +10,4 @@ vagrant/.vagrant
 .cache
 .eggs
 .idea
+.coverage
