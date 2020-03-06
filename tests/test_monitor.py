@@ -1,6 +1,6 @@
 from __future__ import unicode_literals
 from redis._compat import unicode
-from .conftest import  wait_for_command
+from .conftest import wait_for_command
 
 
 class TestMonitor(object):
