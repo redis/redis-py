@@ -259,27 +259,27 @@ class Lock(object):
         ):
             raise LockNotOwnedError("Cannot release a lock" " that's no longer owned")
 
-    def extend(self, additional_time, with_remaining=True):
+    def extend(self, additional_time, keep_remaining=True):
         """
         Adds more time to an already acquired lock.
 
         ``additional_time`` can be specified as an integer or a float, both
         representing the number of seconds to add.
 
-        ``with_remaining`` indicates weather to keep the current left ttl.
+        ``keep_remaining`` indicates weather to keep the current left ttl.
         E.g. If current ``ttl name`` is 2, ``extend(name, 10)`` will result
-        ``ttl name = 12``, and ``extend(name, 10, with_remaining=False)`` will
+        ``ttl name = 12``, and ``extend(name, 10, keep_remaining=False)`` will
         result ``ttl name=10``.
         """
         if self.local.token is None:
             raise LockError("Cannot extend an unlocked lock")
         if self.timeout is None:
             raise LockError("Cannot extend a lock with no timeout")
-        return self.do_extend(additional_time, with_remaining)
+        return self.do_extend(additional_time, keep_remaining)
 
-    def do_extend(self, additional_time, with_remaining):
+    def do_extend(self, additional_time, keep_remaining):
         additional_time = int(additional_time * 1000)
-        if with_remaining:
+        if keep_remaining:
             lua_extend_script = self.lua_extend
         else:
             lua_extend_script = self.lua_extend_to
