@@ -867,6 +867,15 @@ class TestRedisCommands(object):
         assert r.set('a', '1', xx=True, px=10000)
         assert 0 < r.ttl('a') <= 10
 
+    @skip_if_server_version_lt('5.9.0')  # 6.0-rc1
+    def test_set_keepttl(self, r):
+        r['a'] = 'val'
+        assert r.set('a', '1', xx=True, px=10000)
+        assert 0 < r.ttl('a') <= 10
+        r.set('a', '2', keepttl=True)
+        assert r.get('a') == b'2'
+        assert 0 < r.ttl('a') <= 10
+
     def test_setex(self, r):
         assert r.setex('a', 60, '1')
         assert r['a'] == b'1'
