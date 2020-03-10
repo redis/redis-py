@@ -1761,7 +1761,8 @@ class Redis(object):
             params.append('REPLACE')
         return self.execute_command('RESTORE', *params)
 
-    def set(self, name, value, ex=None, px=None, nx=False, xx=False):
+    def set(self, name, value,
+            ex=None, px=None, nx=False, xx=False, keepttl=False):
         """
         Set the value at key ``name`` to ``value``
 
@@ -1774,6 +1775,9 @@ class Redis(object):
 
         ``xx`` if set to True, set the value at key ``name`` to ``value`` only
             if it already exists.
+
+        ``keepttl`` retain the time to live associated with the key. (Avaiable
+        since 6.0)
         """
         pieces = [name, value]
         if ex is not None:
@@ -1791,6 +1795,10 @@ class Redis(object):
             pieces.append('NX')
         if xx:
             pieces.append('XX')
+
+        if keepttl:
+            pieces.append('KEEPTTL')
+
         return self.execute_command('SET', *pieces)
 
     def __setitem__(self, name, value):
