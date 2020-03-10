@@ -149,6 +149,14 @@ class TestLock(object):
         assert 16000 < r.pttl('foo') <= 20000
         lock.release()
 
+    def test_extend_lock_replace_ttl(self, r):
+        lock = self.get_lock(r, 'foo', timeout=10)
+        assert lock.acquire(blocking=False)
+        assert 8000 < r.pttl('foo') <= 10000
+        assert lock.extend(10, replace_ttl=True)
+        assert 8000 < r.pttl('foo') <= 10000
+        lock.release()
+
     def test_extend_lock_float(self, r):
         lock = self.get_lock(r, 'foo', timeout=10.0)
         assert lock.acquire(blocking=False)
