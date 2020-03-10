@@ -10,6 +10,7 @@
     * Optimized Lock's blocking_timeout and sleep. If the lock cannot be
       acquired and the sleep value would cause the loop to sleep beyond
       blocking_timeout, fail immediately. Thanks @clslgrnc. #1263
+    * SET command support KEEPTTL option, for redis 6.0
     * Added support for passing Python memoryviews to Redis command args that
       expect strings or bytes. The memoryview instance is sent directly to
       the socket such that there are zero copies made of the underlying data

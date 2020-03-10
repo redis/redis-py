@@ -867,7 +867,7 @@ class TestRedisCommands(object):
         assert r.set('a', '1', xx=True, px=10000)
         assert 0 < r.ttl('a') <= 10
 
-    @skip_if_server_version_lt('5.9.102')  # 6.0-rc1
+    @skip_if_server_version_lt('5.9.0')  # 6.0-rc1
     def test_set_keepttl(self, r):
         r['a'] = 'val'
         assert r.set('a', '1', xx=True, px=10000)
