@@ -7,6 +7,12 @@ from mock import Mock
 from distutils.version import StrictVersion
 
 
+# redis 6 release candidates report a version number of 5.9.x. Use this
+# constant for skip_if decorators as a placeholder until 6.0.0 is officially
+# released
+REDIS_6_VERSION = '5.9.0'
+
+
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/9"
 
