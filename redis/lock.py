@@ -34,6 +34,7 @@ class Lock(object):
     # KEYS[1] - lock name
     # ARGS[1] - token
     # ARGS[2] - additional milliseconds
+    # ARGS[3] - weather to keep existing ttl
     # return 1 if the locks time was extended, otherwise 0
     LUA_EXTEND_SCRIPT = """
         local token = redis.call('get', KEYS[1])
@@ -47,27 +48,12 @@ class Lock(object):
         if expiration < 0 then
             return 0
         end
-        redis.call('pexpire', KEYS[1], expiration + ARGV[2])
-        return 1
-    """
 
-    # KEYS[1] - lock name
-    # ARGS[1] - token
-    # ARGS[2] - additional milliseconds
-    # return 1 if the locks time was extended, otherwise 0
-    LUA_EXTEND_TO_SCRIPT = """
-        local token = redis.call('get', KEYS[1])
-        if not token or token ~= ARGV[1] then
-            return 0
+        local newttl = ARGV[2]
+        if ARGV[3] == "yes" then
+            newttl = ARGV[2] + newttl
         end
-        local expiration = redis.call('pttl', KEYS[1])
-        if not expiration then
-            expiration = 0
-        end
-        if expiration < 0 then
-            return 0
-        end
-        redis.call('pexpire', KEYS[1], ARGV[2])
+        redis.call('pexpire', KEYS[1], newttl)
         return 1
     """
 
@@ -154,9 +140,6 @@ class Lock(object):
             cls.lua_release = client.register_script(cls.LUA_RELEASE_SCRIPT)
         if cls.lua_extend is None:
             cls.lua_extend = client.register_script(cls.LUA_EXTEND_SCRIPT)
-        if cls.lua_extend_to is None:
-            cls.lua_extend_to = \
-                client.register_script(cls.LUA_EXTEND_TO_SCRIPT)
         if cls.lua_reacquire is None:
             cls.lua_reacquire = \
                 client.register_script(cls.LUA_REACQUIRE_SCRIPT)
@@ -275,15 +258,17 @@ class Lock(object):
 
     def do_extend(self, additional_time, keep_remaining):
         additional_time = int(additional_time * 1000)
+        # Only false and nil in lua consider as false, but there is no boolean
+        # type in redis so we can only send a string as argv[3] to redis
         if keep_remaining:
-            lua_extend_script = self.lua_extend
+            add_to_existing_ttl_arg = "yes"
         else:
-            lua_extend_script = self.lua_extend_to
+            add_to_existing_ttl_arg = "no"
 
         if not bool(
-            lua_extend_script(
+            self.lua_extend(
                 keys=[self.name],
-                args=[self.local.token, additional_time],
+                args=[self.local.token, additional_time, add_to_existing_ttl_arg],
                 client=self.redis,
             )
         ):
