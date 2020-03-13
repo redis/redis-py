@@ -16,7 +16,6 @@ class Lock(object):
 
     lua_release = None
     lua_extend = None
-    lua_extend_to = None
     lua_reacquire = None
 
     # KEYS[1] - lock name
@@ -238,29 +237,29 @@ class Lock(object):
             raise LockNotOwnedError("Cannot release a lock"
                                     " that's no longer owned")
 
-    def extend(self, additional_time, keep_remaining=True):
+    def extend(self, additional_time, add_to_existing_ttl=True):
         """
         Adds more time to an already acquired lock.
 
         ``additional_time`` can be specified as an integer or a float, both
         representing the number of seconds to add.
 
-        ``keep_remaining`` indicates weather to keep the current left ttl.
+        ``add_to_existing_ttl`` indicates weather to keep the current left ttl.
         E.g. If current ``ttl name`` is 2, ``extend(name, 10)`` will result
-        ``ttl name = 12``, and ``extend(name, 10, keep_remaining=False)`` will
-        result ``ttl name=10``.
+        ``ttl name = 12``, and ``extend(name, 10, add_to_existing_ttl=False)``
+        will result ``ttl name=10``.
         """
         if self.local.token is None:
             raise LockError("Cannot extend an unlocked lock")
         if self.timeout is None:
             raise LockError("Cannot extend a lock with no timeout")
-        return self.do_extend(additional_time, keep_remaining)
+        return self.do_extend(additional_time, add_to_existing_ttl)
 
-    def do_extend(self, additional_time, keep_remaining):
+    def do_extend(self, additional_time, add_to_existing_ttl):
         additional_time = int(additional_time * 1000)
         # Only false and nil in lua consider as false, but there is no boolean
         # type in redis so we can only send a string as argv[3] to redis
-        if keep_remaining:
+        if add_to_existing_ttl:
             add_to_existing_ttl_arg = "yes"
         else:
             add_to_existing_ttl_arg = "no"
@@ -268,7 +267,11 @@ class Lock(object):
         if not bool(
             self.lua_extend(
                 keys=[self.name],
-                args=[self.local.token, additional_time, add_to_existing_ttl_arg],
+                args=[
+                    self.local.token,
+                    additional_time,
+                    add_to_existing_ttl_arg
+                ],
                 client=self.redis,
             )
         ):

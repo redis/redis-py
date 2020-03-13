@@ -153,7 +153,7 @@ class TestLock(object):
         lock = self.get_lock(r, 'foo', timeout=10)
         assert lock.acquire(blocking=False)
         assert 8000 < r.pttl('foo') <= 10000
-        assert lock.extend(10, keep_remaining=False)
+        assert lock.extend(10, add_to_existing_ttl=False)
         assert 8000 < r.pttl('foo') <= 10000
         lock.release()
 

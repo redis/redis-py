@@ -22,8 +22,8 @@
       a roundtrip to the server by not having to call UNWATCH within
       Pipeline.reset(). Thanks @nickgaya, #1299/#1302
     * Add the KEEPTTL option for the SET command. Thanks @laixintao #1304/#1280
-    * Lock.extend now has a new option: keep_remaining, default to False, which
-      is identical with the old Lock.extend; When set to True, extend will set
+    * Lock.extend now has a new option: add_to_existing_ttl, default to True, which
+      is identical with the old Lock.extend; When set to False, extend will set
       lock's ttl exactly the additional time.
 * 3.4.1
     * Move the username argument in the Redis and Connection classes to the
