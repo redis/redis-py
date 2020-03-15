@@ -196,6 +196,28 @@ class TestRedisCommands(object):
         assert 'user %s off -@all' % username in users
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
+    def test_acl_log(self, r, request):
+        username = 'redis-py-user'
+
+        def teardown():
+            r.acl_deluser(username)
+        request.addfinalizer(teardown)
+
+        r.acl_setuser(username, enabled=True, reset=True,
+                      commands=['+get', '+set'],
+                      keys=['cache:*'])
+        # Valid operation and key
+        r.set("cache:0", 1)
+        r.get("cache:0")
+        # Invalid key
+        r.get("violated_cache:0")
+        # Invalid operation
+        r.hset("cache:0", "hkey", "hval")
+        assert len(r.acl_log()) == 2
+        assert len(r.acl_log(count=1)) == 1
+        assert r.acl_log(reset=True)
+
+    @skip_if_server_version_lt(REDIS_6_VERSION)
     def test_acl_setuser_categories_without_prefix_fails(self, r, request):
         username = 'redis-py-user'
 

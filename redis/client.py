@@ -517,6 +517,43 @@ def parse_acl_getuser(response, **options):
     return data
 
 
+def parse_acl_log(response, **options):
+    if response is None:
+        return None
+    if isinstance(response, list):
+        data = []
+        for log in response:
+            log_data = pairs_to_dict(log, True, True)
+            client_info = log_data.get('client-info', '')
+            log_data["client-info"] = parse_client_info(client_info)
+
+            # float() is lossy comparing to the "double" in C
+            log_data["age-seconds"] = float(log_data["age-seconds"])
+            data.append(log_data)
+    else:
+        data = bool_ok(response)
+    return data
+
+
+def parse_client_info(value):
+    """
+    Parsing client-info in ACL Log in following format.
+    "key1=value1 key2=value2 key3=value3"
+    """
+    client_info = {}
+    infos = value.split(" ")
+    for info in infos:
+        key, value = info.split("=")
+        client_info[key] = value
+
+    # Those fields are definded as int in networking.c
+    for int_key in {"id", "age", "idle", "db", "sub", "psub",
+                    "multi", "qbuf", "qbuf-free", "obl",
+                    "oll", "omem"}:
+        client_info[int_key] = int(client_info[int_key])
+    return client_info
+
+
 class Redis(object):
     """
     Implementation of the Redis protocol.
@@ -579,6 +616,7 @@ class Redis(object):
             'ACL GETUSER': parse_acl_getuser,
             'ACL LIST': lambda r: list(map(nativestr, r)),
             'ACL LOAD': bool_ok,
+            'ACL LOG': parse_acl_log,
             'ACL SAVE': bool_ok,
             'ACL SETUSER': bool_ok,
             'ACL USERS': lambda r: list(map(nativestr, r)),
@@ -955,6 +993,31 @@ class Redis(object):
     def acl_list(self):
         "Return a list of all ACLs on the server"
         return self.execute_command('ACL LIST')
+
+    def acl_log(self, count=None, reset=None):
+        """
+        Check the last "count" ACL Logs.
+        Reset ACL logs if "reset" is set to True.
+
+        Note that only one of two arguments can be use at the same time.
+        """
+        if count is not None and reset is not None:
+            raise DataError('Cannot use \'count\' and \'reset\' '
+                            'at the same time')
+        args = []
+        if count is not None:
+            if not isinstance(count, int):
+                raise DataError('ACL LOG count must be an '
+                                'integer')
+            args.append(count)
+
+        if reset is not None:
+            if not isinstance(reset, bool):
+                raise DataError('ACL LOG reset must be an '
+                                'boolean')
+            args.append(b'RESET')
+
+        return self.execute_command('ACL LOG', *args)
 
     def acl_load(self):
         """
