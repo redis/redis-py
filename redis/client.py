@@ -996,8 +996,11 @@ class Redis(object):
 
     def acl_log(self, count=None, reset=None):
         """
-        Check the last "count" ACL Logs.
+        Get ACL logs.
+        Return a list of ACL log whose length is "count"
+
         Reset ACL logs if "reset" is set to True.
+        Return a boolean if logs cleaned correctly.
 
         Note that only one of two arguments can be use at the same time.
         """
