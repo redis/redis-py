@@ -201,18 +201,29 @@ class TestRedisCommands(object):
 
         def teardown():
             r.acl_deluser(username)
-        request.addfinalizer(teardown)
 
+        request.addfinalizer(teardown)
         r.acl_setuser(username, enabled=True, reset=True,
-                      commands=['+get', '+set'],
-                      keys=['cache:*'])
+                      commands=['+get', '+set', '+select'],
+                      keys=['cache:*'], nopass=True)
+        r.acl_log(reset=True)
+
+        r_test = redis.Redis(host='localhost', port=6379, db=9,
+                             username=username)
         # Valid operation and key
-        r.set("cache:0", 1)
-        r.get("cache:0")
+        r_test.set("cache:0", 1)
+        r_test.get("cache:0")
         # Invalid key
-        r.get("violated_cache:0")
+        try:
+            r_test.get("violated_cache:0")
+        except exceptions.NoPermissionError:
+            pass
         # Invalid operation
-        r.hset("cache:0", "hkey", "hval")
+        try:
+            r_test.hset("cache:0", "hkey", "hval")
+        except exceptions.NoPermissionError:
+            pass
+
         assert len(r.acl_log()) == 2
         assert len(r.acl_log(count=1)) == 1
         assert r.acl_log(reset=True)
