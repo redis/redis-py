@@ -26,6 +26,7 @@
       default), Lock.extend() adds the `additional_time` to the lock's existing
       TTL. When replace_ttl=True, the lock's existing TTL is replaced with
       the value of `additional_time`.
+    * Add testing and support for PyPy.
 * 3.4.1
     * Move the username argument in the Redis and Connection classes to the
       end of the argument list. This helps those poor souls that specify all
