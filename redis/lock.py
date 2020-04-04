@@ -2,7 +2,6 @@ import threading
 import time as mod_time
 import uuid
 from redis.exceptions import LockError, LockNotOwnedError
-from redis.utils import dummy
 
 
 class Lock(object):
@@ -129,7 +128,7 @@ class Lock(object):
         self.blocking = blocking
         self.blocking_timeout = blocking_timeout
         self.thread_local = bool(thread_local)
-        self.local = threading.local() if self.thread_local else dummy()
+        self.local = threading.local() if self.thread_local else object()
         self.local.token = None
         self.register_scripts()
 
