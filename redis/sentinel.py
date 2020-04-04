@@ -135,7 +135,7 @@ class Sentinel(object):
     >>> master.set('foo', 'bar')
     >>> slave = sentinel.slave_for('mymaster', socket_timeout=0.1)
     >>> slave.get('foo')
-    'bar'
+    b'bar'
 
     ``sentinels`` is a list of sentinel nodes. Each node is represented by
     a pair (hostname, port).

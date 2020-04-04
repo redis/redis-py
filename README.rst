@@ -48,7 +48,7 @@ Getting Started
     >>> r.set('foo', 'bar')
     True
     >>> r.get('foo')
-    'bar'
+    b'bar'
 
 By default, all responses are returned as `bytes` in Python 3 and `str` in
 Python 2. The user is responsible for decoding to Python 3 strings or Python 2
@@ -406,7 +406,7 @@ Pipelines are quite simple to use:
     >>> # the EXECUTE call sends all buffered commands to the server, returning
     >>> # a list of responses, one for each command.
     >>> pipe.execute()
-    [True, 'baz']
+    [True, b'baz']
 
 For ease of use, all commands being buffered into the pipeline return the
 pipeline object itself. Therefore calls can be chained like:
@@ -534,11 +534,11 @@ instance.
 .. code-block:: python
 
     >>> p.get_message()
-    {'pattern': None, 'type': 'subscribe', 'channel': 'my-second-channel', 'data': 1L}
+    {'pattern': None, 'type': 'subscribe', 'channel': b'my-second-channel', 'data': 1}
     >>> p.get_message()
-    {'pattern': None, 'type': 'subscribe', 'channel': 'my-first-channel', 'data': 2L}
+    {'pattern': None, 'type': 'subscribe', 'channel': b'my-first-channel', 'data': 2}
     >>> p.get_message()
-    {'pattern': None, 'type': 'psubscribe', 'channel': 'my-*', 'data': 3L}
+    {'pattern': None, 'type': 'psubscribe', 'channel': b'my-*', 'data': 3}
 
 Every message read from a `PubSub` instance will be a dictionary with the
 following keys.
@@ -565,9 +565,9 @@ Let's send a message now.
     >>> r.publish('my-first-channel', 'some data')
     2
     >>> p.get_message()
-    {'channel': 'my-first-channel', 'data': 'some data', 'pattern': None, 'type': 'message'}
+    {'channel': b'my-first-channel', 'data': b'some data', 'pattern': None, 'type': 'message'}
     >>> p.get_message()
-    {'channel': 'my-first-channel', 'data': 'some data', 'pattern': 'my-*', 'type': 'pmessage'}
+    {'channel': b'my-first-channel', 'data': b'some data', 'pattern': b'my-*', 'type': 'pmessage'}
 
 Unsubscribing works just like subscribing. If no arguments are passed to
 [p]unsubscribe, all channels or patterns will be unsubscribed from.
@@ -577,11 +577,11 @@ Unsubscribing works just like subscribing. If no arguments are passed to
     >>> p.unsubscribe()
     >>> p.punsubscribe('my-*')
     >>> p.get_message()
-    {'channel': 'my-second-channel', 'data': 2L, 'pattern': None, 'type': 'unsubscribe'}
+    {'channel': b'my-second-channel', 'data': 2, 'pattern': None, 'type': 'unsubscribe'}
     >>> p.get_message()
-    {'channel': 'my-first-channel', 'data': 1L, 'pattern': None, 'type': 'unsubscribe'}
+    {'channel': b'my-first-channel', 'data': 1, 'pattern': None, 'type': 'unsubscribe'}
     >>> p.get_message()
-    {'channel': 'my-*', 'data': 0L, 'pattern': None, 'type': 'punsubscribe'}
+    {'channel': b'my-*', 'data': 0, 'pattern': None, 'type': 'punsubscribe'}
 
 redis-py also allows you to register callback functions to handle published
 messages. Message handlers take a single argument, the message, which is a
@@ -597,11 +597,11 @@ handled.
 .. code-block:: python
 
     >>> def my_handler(message):
-    ...     print 'MY HANDLER: ', message['data']
+    ...     print('MY HANDLER: ', message['data'])
     >>> p.subscribe(**{'my-channel': my_handler})
     # read the subscribe confirmation message
     >>> p.get_message()
-    {'pattern': None, 'type': 'subscribe', 'channel': 'my-channel', 'data': 1L}
+    {'pattern': None, 'type': 'subscribe', 'channel': b'my-channel', 'data': 1}
     >>> r.publish('my-channel', 'awesome data')
     1
     # for the message handler to work, we need tell the instance to read data.
@@ -611,7 +611,7 @@ handled.
     MY HANDLER:  awesome data
     # note here that the my_handler callback printed the string above.
     # `message` is None because the message was handled by our handler.
-    >>> print message
+    >>> print(message)
     None
 
 If your application is not interested in the (sometimes noisy)
@@ -628,7 +628,7 @@ application.
     >>> r.publish('my-channel', 'my data')
     1
     >>> p.get_message()
-    {'channel': 'my-channel', 'data': 'my data', 'pattern': None, 'type': 'message'}
+    {'channel': b'my-channel', 'data': b'my data', 'pattern': None, 'type': 'message'}
 
 There are three different strategies for reading messages.
 
@@ -710,11 +710,11 @@ supported:
 .. code-block:: python
 
     >>> r.pubsub_channels()
-    ['foo', 'bar']
+    [b'foo', b'bar']
     >>> r.pubsub_numsub('foo', 'bar')
-    [('foo', 9001), ('bar', 42)]
+    [(b'foo', 9001), (b'bar', 42)]
     >>> r.pubsub_numsub('baz')
-    [('baz', 0)]
+    [(b'baz', 0)]
     >>> r.pubsub_numpat()
     1204
 
@@ -835,7 +835,7 @@ operations).
     >>> slave = sentinel.slave_for('mymaster', socket_timeout=0.1)
     >>> master.set('foo', 'bar')
     >>> slave.get('foo')
-    'bar'
+    b'bar'
 
 The master and slave objects are normal Redis instances with their
 connection pool bound to the Sentinel instance. When a Sentinel backed client
@@ -865,7 +865,7 @@ that return Python iterators for convenience: `scan_iter`, `hscan_iter`,
     >>> for key, value in (('A', '1'), ('B', '2'), ('C', '3')):
     ...     r.set(key, value)
     >>> for key in r.scan_iter():
-    ...     print key, r.get(key)
+    ...     print(key, r.get(key))
     A 1
     B 2
     C 3
