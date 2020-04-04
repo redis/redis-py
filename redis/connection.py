@@ -552,8 +552,7 @@ class Connection(object):
             sock = self._connect()
         except socket.timeout:
             raise TimeoutError("Timeout connecting to server")
-        except socket.error:
-            e = sys.exc_info()[1]
+        except socket.error as e:
             raise ConnectionError(self._error_message(e))
 
         self._sock = sock
@@ -701,8 +700,7 @@ class Connection(object):
         except socket.timeout:
             self.disconnect()
             raise TimeoutError("Timeout writing to socket")
-        except socket.error:
-            e = sys.exc_info()[1]
+        except socket.error as e:
             self.disconnect()
             if len(e.args) == 1:
                 errno, errmsg = 'UNKNOWN', e.args[0]
@@ -711,7 +709,7 @@ class Connection(object):
                 errmsg = e.args[1]
             raise ConnectionError("Error %s while writing to socket. %s." %
                                   (errno, errmsg))
-        except:  # noqa: E722
+        except BaseException:
             self.disconnect()
             raise
 
@@ -736,12 +734,11 @@ class Connection(object):
             self.disconnect()
             raise TimeoutError("Timeout reading from %s:%s" %
                                (self.host, self.port))
-        except socket.error:
+        except socket.error as e:
             self.disconnect()
-            e = sys.exc_info()[1]
             raise ConnectionError("Error while reading from %s:%s : %s" %
                                   (self.host, self.port, e.args))
-        except:  # noqa: E722
+        except BaseException:
             self.disconnect()
             raise
 
@@ -1197,7 +1194,7 @@ class ConnectionPool(object):
                     connection.connect()
                     if connection.can_read():
                         raise ConnectionError('Connection not ready')
-            except:  # noqa: E722
+            except BaseException:
                 # release the connection back to the pool so that we don't
                 # leak it
                 self.release(connection)
@@ -1359,7 +1356,7 @@ class BlockingConnectionPool(ConnectionPool):
                 connection.connect()
                 if connection.can_read():
                     raise ConnectionError('Connection not ready')
-        except:  # noqa: E722
+        except BaseException:
             # release the connection back to the pool so that we don't leak it
             self.release(connection)
             raise

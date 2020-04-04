@@ -3887,8 +3887,8 @@ class Pipeline(Redis):
         # the socket
         try:
             self.parse_response(connection, '_')
-        except ResponseError:
-            errors.append((0, sys.exc_info()[1]))
+        except ResponseError as e:
+            errors.append((0, e))
 
         # and all the other commands
         for i, command in enumerate(commands):
@@ -3897,10 +3897,9 @@ class Pipeline(Redis):
             else:
                 try:
                     self.parse_response(connection, '_')
-                except ResponseError:
-                    ex = sys.exc_info()[1]
-                    self.annotate_exception(ex, i + 1, command[0])
-                    errors.append((i, ex))
+                except ResponseError as e:
+                    self.annotate_exception(e, i + 1, command[0])
+                    errors.append((i, e))
 
         # parse the EXEC.
         try:
@@ -3908,7 +3907,7 @@ class Pipeline(Redis):
         except ExecAbortError:
             if errors:
                 raise errors[0][1]
-            raise sys.exc_info()[1]
+            raise
 
         # EXEC clears any watched keys
         self.watching = False
@@ -3950,8 +3949,8 @@ class Pipeline(Redis):
             try:
                 response.append(
                     self.parse_response(connection, args[0], **options))
-            except ResponseError:
-                response.append(sys.exc_info()[1])
+            except ResponseError as e:
+                response.append(e)
 
         if raise_on_error:
             self.raise_first_error(commands, response)

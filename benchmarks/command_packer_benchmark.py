@@ -13,8 +13,7 @@ class StringJoiningConnection(Connection):
             self.connect()
         try:
             self._sock.sendall(command)
-        except socket.error:
-            e = sys.exc_info()[1]
+        except socket.error as e:
             self.disconnect()
             if len(e.args) == 1:
                 _errno, errmsg = 'UNKNOWN', e.args[0]
@@ -22,9 +21,9 @@ class StringJoiningConnection(Connection):
                 _errno, errmsg = e.args
             raise ConnectionError("Error %s while writing to socket. %s." %
                                   (_errno, errmsg))
-        except Exception as e:
+        except Exception:
             self.disconnect()
-            raise e
+            raise
 
     def pack_command(self, *args):
         "Pack a series of arguments into a value Redis command"
@@ -46,8 +45,7 @@ class ListJoiningConnection(Connection):
                 command = [command]
             for item in command:
                 self._sock.sendall(item)
-        except socket.error:
-            e = sys.exc_info()[1]
+        except socket.error as e:
             self.disconnect()
             if len(e.args) == 1:
                 _errno, errmsg = 'UNKNOWN', e.args[0]
@@ -55,9 +53,9 @@ class ListJoiningConnection(Connection):
                 _errno, errmsg = e.args
             raise ConnectionError("Error %s while writing to socket. %s." %
                                   (_errno, errmsg))
-        except Exception as e:
+        except Exception:
             self.disconnect()
-            raise e
+            raise
 
     def pack_command(self, *args):
         output = []
