@@ -26,8 +26,13 @@ def pipeline(redis_obj):
     p.execute()
 
 
-class dummy(object):
-    """
-    Instances of this class can be used as an attribute container.
-    """
-    pass
+def str_if_bytes(value):
+    return (
+        value.decode('utf-8', errors='replace')
+        if isinstance(value, bytes)
+        else value
+    )
+
+
+def safe_str(value):
+    return str(str_if_bytes(value))

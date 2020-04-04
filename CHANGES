@@ -47,6 +47,7 @@
       TTL. When replace_ttl=True, the lock's existing TTL is replaced with
       the value of `additional_time`.
     * Add testing and support for PyPy.
+    * Removed support for end of life Python 2.7.
 * 3.4.1
     * Move the username argument in the Redis and Connection classes to the
       end of the argument list. This helps those poor souls that specify all

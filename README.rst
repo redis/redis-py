@@ -87,7 +87,7 @@ provide an upgrade path for users migrating from 2.X to 3.0.
 Python Version Support
 ^^^^^^^^^^^^^^^^^^^^^^
 
-redis-py 3.0 supports Python 2.7 and Python 3.5+.
+redis-py supports Python 3.5+.
 
 
 Client Classes: Redis and StrictRedis

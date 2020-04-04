@@ -1,11 +1,11 @@
 import threading
 import time as mod_time
 import uuid
+from types import SimpleNamespace
 from redis.exceptions import LockError, LockNotOwnedError
-from redis.utils import dummy
 
 
-class Lock(object):
+class Lock:
     """
     A shared, distributed Lock. Using Redis for locking allows the Lock
     to be shared across processes and/or machines.
@@ -129,7 +129,11 @@ class Lock(object):
         self.blocking = blocking
         self.blocking_timeout = blocking_timeout
         self.thread_local = bool(thread_local)
-        self.local = threading.local() if self.thread_local else dummy()
+        self.local = (
+            threading.local()
+            if self.thread_local
+            else SimpleNamespace()
+        )
         self.local.token = None
         self.register_scripts()
 

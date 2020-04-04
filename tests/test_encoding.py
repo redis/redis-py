@@ -1,13 +1,11 @@
-from __future__ import unicode_literals
 import pytest
 import redis
 
-from redis._compat import unichr, unicode
 from redis.connection import Connection
 from .conftest import _get_client
 
 
-class TestEncoding(object):
+class TestEncoding:
     @pytest.fixture()
     def r(self, request):
         return _get_client(redis.Redis, request=request, decode_responses=True)
@@ -21,21 +19,21 @@ class TestEncoding(object):
         )
 
     def test_simple_encoding(self, r_no_decode):
-        unicode_string = unichr(3456) + 'abcd' + unichr(3421)
+        unicode_string = chr(3456) + 'abcd' + chr(3421)
         r_no_decode['unicode-string'] = unicode_string.encode('utf-8')
         cached_val = r_no_decode['unicode-string']
         assert isinstance(cached_val, bytes)
         assert unicode_string == cached_val.decode('utf-8')
 
     def test_simple_encoding_and_decoding(self, r):
-        unicode_string = unichr(3456) + 'abcd' + unichr(3421)
+        unicode_string = chr(3456) + 'abcd' + chr(3421)
         r['unicode-string'] = unicode_string
         cached_val = r['unicode-string']
-        assert isinstance(cached_val, unicode)
+        assert isinstance(cached_val, str)
         assert unicode_string == cached_val
 
     def test_memoryview_encoding(self, r_no_decode):
-        unicode_string = unichr(3456) + 'abcd' + unichr(3421)
+        unicode_string = chr(3456) + 'abcd' + chr(3421)
         unicode_string_view = memoryview(unicode_string.encode('utf-8'))
         r_no_decode['unicode-string-memoryview'] = unicode_string_view
         cached_val = r_no_decode['unicode-string-memoryview']
@@ -44,21 +42,21 @@ class TestEncoding(object):
         assert unicode_string == cached_val.decode('utf-8')
 
     def test_memoryview_encoding_and_decoding(self, r):
-        unicode_string = unichr(3456) + 'abcd' + unichr(3421)
+        unicode_string = chr(3456) + 'abcd' + chr(3421)
         unicode_string_view = memoryview(unicode_string.encode('utf-8'))
         r['unicode-string-memoryview'] = unicode_string_view
         cached_val = r['unicode-string-memoryview']
-        assert isinstance(cached_val, unicode)
+        assert isinstance(cached_val, str)
         assert unicode_string == cached_val
 
     def test_list_encoding(self, r):
-        unicode_string = unichr(3456) + 'abcd' + unichr(3421)
+        unicode_string = chr(3456) + 'abcd' + chr(3421)
         result = [unicode_string, unicode_string, unicode_string]
         r.rpush('a', *result)
         assert r.lrange('a', 0, -1) == result
 
 
-class TestEncodingErrors(object):
+class TestEncodingErrors:
     def test_ignore(self, request):
         r = _get_client(redis.Redis, request=request, decode_responses=True,
                         encoding_errors='ignore')
@@ -72,7 +70,7 @@ class TestEncodingErrors(object):
         assert r.get('a') == 'foo\ufffd'
 
 
-class TestMemoryviewsAreNotPacked(object):
+class TestMemoryviewsAreNotPacked:
     def test_memoryviews_are_not_packed(self):
         c = Connection()
         arg = memoryview(b'some_arg')
@@ -84,7 +82,7 @@ class TestMemoryviewsAreNotPacked(object):
         assert cmds[3] is arg
 
 
-class TestCommandsAreNotEncoded(object):
+class TestCommandsAreNotEncoded:
     @pytest.fixture()
     def r(self, request):
         return _get_client(redis.Redis, request=request, encoding='utf-16')
@@ -93,7 +91,7 @@ class TestCommandsAreNotEncoded(object):
         r.set('hello', 'world')
 
 
-class TestInvalidUserInput(object):
+class TestInvalidUserInput:
     def test_boolean_fails(self, r):
         with pytest.raises(redis.DataError):
             r.set('a', True)
@@ -103,11 +101,8 @@ class TestInvalidUserInput(object):
             r.set('a', None)
 
     def test_user_type_fails(self, r):
-        class Foo(object):
+        class Foo:
             def __str__(self):
-                return 'Foo'
-
-            def __unicode__(self):
                 return 'Foo'
 
         with pytest.raises(redis.DataError):

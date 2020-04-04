@@ -1,11 +1,9 @@
-import random
-
 import pytest
+import random
 import redis
-from mock import Mock
-
-from redis._compat import urlparse
 from distutils.version import StrictVersion
+from unittest.mock import Mock
+from urllib.parse import urlparse
 
 
 # redis 6 release candidates report a version number of 5.9.x. Use this

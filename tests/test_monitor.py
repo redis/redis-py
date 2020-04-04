@@ -1,9 +1,7 @@
-from __future__ import unicode_literals
-from redis._compat import unicode
 from .conftest import wait_for_command
 
 
-class TestMonitor(object):
+class TestMonitor:
     def test_wait_command_not_found(self, r):
         "Make sure the wait_for_command func works when command is not found"
         with r.monitor() as m:
@@ -17,8 +15,8 @@ class TestMonitor(object):
             assert isinstance(response['time'], float)
             assert response['db'] == 9
             assert response['client_type'] in ('tcp', 'unix')
-            assert isinstance(response['client_address'], unicode)
-            assert isinstance(response['client_port'], unicode)
+            assert isinstance(response['client_address'], str)
+            assert isinstance(response['client_port'], str)
             assert response['command'] == 'PING'
 
     def test_command_with_quoted_key(self, r):

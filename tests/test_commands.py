@@ -1,13 +1,11 @@
-from __future__ import unicode_literals
 import binascii
 import datetime
 import pytest
 import re
 import redis
 import time
+from string import ascii_letters
 
-from redis._compat import (unichr, ascii_letters, iteritems, iterkeys,
-                           itervalues, long, basestring)
 from redis.client import parse_info
 from redis import exceptions
 
@@ -44,7 +42,7 @@ def get_stream_message(client, stream, message_id):
 
 
 # RESPONSE CALLBACKS
-class TestResponseCallbacks(object):
+class TestResponseCallbacks:
     "Tests for the response callback system"
 
     def test_response_callbacks(self, r):
@@ -58,7 +56,7 @@ class TestResponseCallbacks(object):
         assert r.response_callbacks['del'] == r.response_callbacks['DEL']
 
 
-class TestRedisCommands(object):
+class TestRedisCommands:
     def test_command_on_invalid_key_type(self, r):
         r.lpush('a', '1')
         with pytest.raises(redis.ResponseError):
@@ -93,7 +91,7 @@ class TestRedisCommands(object):
     @skip_if_server_version_lt(REDIS_6_VERSION)
     def test_acl_genpass(self, r):
         password = r.acl_genpass()
-        assert isinstance(password, basestring)
+        assert isinstance(password, str)
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
     def test_acl_getuser_setuser(self, r, request):
@@ -237,7 +235,7 @@ class TestRedisCommands(object):
     @skip_if_server_version_lt(REDIS_6_VERSION)
     def test_acl_whoami(self, r):
         username = r.acl_whoami()
-        assert isinstance(username, basestring)
+        assert isinstance(username, str)
 
     def test_client_list(self, r):
         clients = r.client_list()
@@ -411,7 +409,7 @@ class TestRedisCommands(object):
 
     def test_slowlog_get(self, r, slowlog):
         assert r.slowlog_reset()
-        unicode_string = unichr(3456) + 'abcd' + unichr(3421)
+        unicode_string = chr(3456) + 'abcd' + chr(3421)
         r.get(unicode_string)
         slowlog = r.slowlog_get()
         assert isinstance(slowlog, list)
@@ -646,7 +644,7 @@ class TestRedisCommands(object):
         assert r.get('a') is None
         byte_string = b'value'
         integer = 5
-        unicode_string = unichr(3456) + 'abcd' + unichr(3421)
+        unicode_string = chr(3456) + 'abcd' + chr(3421)
         assert r.set('byte_string', byte_string)
         assert r.set('integer', 5)
         assert r.set('unicode_string', unicode_string)
@@ -733,7 +731,7 @@ class TestRedisCommands(object):
     def test_mset(self, r):
         d = {'a': b'1', 'b': b'2', 'c': b'3'}
         assert r.mset(d)
-        for k, v in iteritems(d):
+        for k, v in d.items():
             assert r[k] == v
 
     def test_msetnx(self, r):
@@ -741,7 +739,7 @@ class TestRedisCommands(object):
         assert r.msetnx(d)
         d2 = {'a': b'x', 'd': b'4'}
         assert not r.msetnx(d2)
-        for k, v in iteritems(d):
+        for k, v in d.items():
             assert r[k] == v
         assert r.get('d') is None
 
@@ -1692,7 +1690,7 @@ class TestRedisCommands(object):
     def test_hkeys(self, r):
         h = {b'a1': b'1', b'a2': b'2', b'a3': b'3'}
         r.hset('a', mapping=h)
-        local_keys = list(iterkeys(h))
+        local_keys = list(h.keys())
         remote_keys = r.hkeys('a')
         assert (sorted(local_keys) == sorted(remote_keys))
 
@@ -1722,7 +1720,7 @@ class TestRedisCommands(object):
     def test_hvals(self, r):
         h = {b'a1': b'1', b'a2': b'2', b'a3': b'3'}
         r.hset('a', mapping=h)
-        local_vals = list(itervalues(h))
+        local_vals = list(h.values())
         remote_vals = r.hvals('a')
         assert sorted(local_vals) == sorted(remote_vals)
 
@@ -2320,8 +2318,8 @@ class TestRedisCommands(object):
         ]
 
         # we can't determine the idle time, so just make sure it's an int
-        assert isinstance(info[0].pop('idle'), (int, long))
-        assert isinstance(info[1].pop('idle'), (int, long))
+        assert isinstance(info[0].pop('idle'), int)
+        assert isinstance(info[1].pop('idle'), int)
         assert info == expected
 
     @skip_if_server_version_lt('5.0.0')
@@ -2650,7 +2648,7 @@ class TestRedisCommands(object):
         r.set('foo', 'bar')
         stats = r.memory_stats()
         assert isinstance(stats, dict)
-        for key, value in iteritems(stats):
+        for key, value in stats.items():
             if key.startswith('db.'):
                 assert isinstance(value, dict)
 
@@ -2665,7 +2663,7 @@ class TestRedisCommands(object):
         assert not r.module_list()
 
 
-class TestBinarySave(object):
+class TestBinarySave:
 
     def test_binary_get_set(self, r):
         assert r.set(' foo bar ', '123')
@@ -2691,14 +2689,14 @@ class TestBinarySave(object):
             b'foo\tbar\x07': [b'7', b'8', b'9'],
         }
         # fill in lists
-        for key, value in iteritems(mapping):
+        for key, value in mapping.items():
             r.rpush(key, *value)
 
         # check that KEYS returns all the keys as they are
-        assert sorted(r.keys('*')) == sorted(iterkeys(mapping))
+        assert sorted(r.keys('*')) == sorted(mapping.keys())
 
         # check that it is possible to get list content by key name
-        for key, value in iteritems(mapping):
+        for key, value in mapping.items():
             assert r.lrange(key, 0, -1) == value
 
     def test_22_info(self, r):

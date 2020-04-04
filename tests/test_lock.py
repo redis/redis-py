@@ -7,7 +7,7 @@ from redis.lock import Lock
 from .conftest import _get_client
 
 
-class TestLock(object):
+class TestLock:
     @pytest.fixture()
     def r_decoded(self, request):
         return _get_client(Redis, request=request, decode_responses=True)
@@ -220,9 +220,9 @@ class TestLock(object):
             lock.reacquire()
 
 
-class TestLockClassSelection(object):
+class TestLockClassSelection:
     def test_lock_class_argument(self, r):
-        class MyLock(object):
+        class MyLock:
             def __init__(self, *args, **kwargs):
 
                 pass

@@ -1,9 +1,9 @@
 import os
-import mock
 import pytest
 import re
 import redis
 import time
+from unittest import mock
 
 from threading import Thread
 from redis.connection import ssl_available, to_bool
@@ -11,7 +11,7 @@ from .conftest import skip_if_server_version_lt, _get_client, REDIS_6_VERSION
 from .test_pubsub import wait_for_message
 
 
-class DummyConnection(object):
+class DummyConnection:
     description_format = "DummyConnection<>"
 
     def __init__(self, **kwargs):
@@ -25,7 +25,7 @@ class DummyConnection(object):
         return False
 
 
-class TestConnectionPool(object):
+class TestConnectionPool:
     def get_pool(self, connection_kwargs=None, max_connections=None,
                  connection_class=redis.Connection):
         connection_kwargs = connection_kwargs or {}
@@ -93,7 +93,7 @@ class TestConnectionPool(object):
         assert repr(pool) == expected
 
 
-class TestBlockingConnectionPool(object):
+class TestBlockingConnectionPool:
     def get_pool(self, connection_kwargs=None, max_connections=10, timeout=20):
         connection_kwargs = connection_kwargs or {}
         pool = redis.BlockingConnectionPool(connection_class=DummyConnection,
@@ -179,7 +179,7 @@ class TestBlockingConnectionPool(object):
         assert repr(pool) == expected
 
 
-class TestConnectionPoolURLParsing(object):
+class TestConnectionPoolURLParsing:
     def test_defaults(self):
         pool = redis.ConnectionPool.from_url('redis://localhost')
         assert pool.connection_class == redis.Connection
@@ -411,7 +411,7 @@ class TestConnectionPoolURLParsing(object):
         )
 
 
-class TestConnectionPoolUnixSocketURLParsing(object):
+class TestConnectionPoolUnixSocketURLParsing:
     def test_defaults(self):
         pool = redis.ConnectionPool.from_url('unix:///socket')
         assert pool.connection_class == redis.UnixDomainSocketConnection
@@ -519,7 +519,7 @@ class TestConnectionPoolUnixSocketURLParsing(object):
         }
 
 
-class TestSSLConnectionURLParsing(object):
+class TestSSLConnectionURLParsing:
     @pytest.mark.skipif(not ssl_available, reason="SSL not installed")
     def test_defaults(self):
         pool = redis.ConnectionPool.from_url('rediss://localhost')
@@ -561,7 +561,7 @@ class TestSSLConnectionURLParsing(object):
         assert pool.get_connection('_').check_hostname is True
 
 
-class TestConnection(object):
+class TestConnection:
     def test_on_connect_error(self):
         """
         An error in Connection.on_connect should disconnect from the server
@@ -658,7 +658,7 @@ class TestConnection(object):
             r.execute_command('DEBUG', 'ERROR', 'ERR invalid password')
 
 
-class TestMultiConnectionClient(object):
+class TestMultiConnectionClient:
     @pytest.fixture()
     def r(self, request):
         return _get_client(redis.Redis,
@@ -671,7 +671,7 @@ class TestMultiConnectionClient(object):
         assert r.get('a') == b'123'
 
 
-class TestHealthCheck(object):
+class TestHealthCheck:
     interval = 60
 
     @pytest.fixture()

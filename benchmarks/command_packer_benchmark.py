@@ -1,7 +1,6 @@
 import socket
 from redis.connection import (Connection, SYM_STAR, SYM_DOLLAR, SYM_EMPTY,
                               SYM_CRLF)
-from redis._compat import imap
 from base import Benchmark
 
 
@@ -29,7 +28,7 @@ class StringJoiningConnection(Connection):
         args_output = SYM_EMPTY.join([
             SYM_EMPTY.join(
                 (SYM_DOLLAR, str(len(k)).encode(), SYM_CRLF, k, SYM_CRLF))
-            for k in imap(self.encoder.encode, args)])
+            for k in map(self.encoder.encode, args)])
         output = SYM_EMPTY.join(
             (SYM_STAR, str(len(args)).encode(), SYM_CRLF, args_output))
         return output
@@ -61,7 +60,7 @@ class ListJoiningConnection(Connection):
         buff = SYM_EMPTY.join(
             (SYM_STAR, str(len(args)).encode(), SYM_CRLF))
 
-        for k in imap(self.encoder.encode, args):
+        for k in map(self.encoder.encode, args):
             if len(buff) > 6000 or len(k) > 6000:
                 buff = SYM_EMPTY.join(
                     (buff, SYM_DOLLAR, str(len(k)).encode(), SYM_CRLF))

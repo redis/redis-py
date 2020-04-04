@@ -1,4 +1,3 @@
-from __future__ import unicode_literals
 import pytest
 
 from redis import exceptions
@@ -21,7 +20,7 @@ return "hello " .. name
 """
 
 
-class TestScripting(object):
+class TestScripting:
     @pytest.fixture(autouse=True)
     def reset_scripts(self, r):
         r.script_flush()
