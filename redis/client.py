@@ -3841,8 +3841,8 @@ class Pipeline(Redis):
             # indicates the user should retry this transaction.
             if self.watching:
                 self.reset()
-                raise WatchError("A ConnectionError occured on while watching "
-                                 "one or more keys")
+                raise WatchError("A ConnectionError occurred on while "
+                                 "watching one or more keys")
             # if retry_on_timeout is not set, or the error is not
             # a TimeoutError, raise it
             if not (conn.retry_on_timeout and isinstance(e, TimeoutError)):
@@ -4019,8 +4019,8 @@ class Pipeline(Redis):
             # since this connection has died. raise a WatchError, which
             # indicates the user should retry this transaction.
             if self.watching:
-                raise WatchError("A ConnectionError occured on while watching "
-                                 "one or more keys")
+                raise WatchError("A ConnectionError occurred on while "
+                                 "watching one or more keys")
             # if retry_on_timeout is not set, or the error is not
             # a TimeoutError, raise it
             if not (conn.retry_on_timeout and isinstance(e, TimeoutError)):
