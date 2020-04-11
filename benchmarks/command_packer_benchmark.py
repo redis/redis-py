@@ -7,7 +7,7 @@ from base import Benchmark
 
 
 class StringJoiningConnection(Connection):
-    def send_packed_command(self, command):
+    def send_packed_command(self, command, check_health=True):
         "Send an already packed command to the Redis server"
         if not self._sock:
             self.connect()
@@ -38,7 +38,7 @@ class StringJoiningConnection(Connection):
 
 
 class ListJoiningConnection(Connection):
-    def send_packed_command(self, command):
+    def send_packed_command(self, command, check_health=True):
         if not self._sock:
             self.connect()
         try:
