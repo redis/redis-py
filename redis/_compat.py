@@ -143,9 +143,6 @@ if sys.version_info[0] < 3:
     def next(x):
         return x.next()
 
-    def byte_to_chr(x):
-        return x
-
     unichr = unichr
     xrange = xrange
     basestring = basestring
@@ -165,9 +162,6 @@ else:
 
     def itervalues(x):
         return iter(x.values())
-
-    def byte_to_chr(x):
-        return chr(x)
 
     def nativestr(x):
         return x if isinstance(x, str) else x.decode('utf-8', 'replace')
