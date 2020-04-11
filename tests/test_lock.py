@@ -26,6 +26,13 @@ class TestLock(object):
 
     def test_lock_token(self, r):
         lock = self.get_lock(r, 'foo')
+        self._test_lock_token(r, lock)
+
+    def test_lock_token_thread_local_false(self, r):
+        lock = self.get_lock(r, 'foo', thread_local=False)
+        self._test_lock_token(r, lock)
+
+    def _test_lock_token(self, r, lock):
         assert lock.acquire(blocking=False, token='test')
         assert r.get('foo') == b'test'
         assert lock.local.token == b'test'
