@@ -166,6 +166,11 @@ else:
     def nativestr(x):
         return x if isinstance(x, str) else x.decode('utf-8', 'replace')
 
+    def safe_unicode(value):
+        if isinstance(value, bytes):
+            value = value.decode('utf-8', 'replace')
+        return str(value)
+
     next = next
     unichr = chr
     imap = map
@@ -173,7 +178,6 @@ else:
     xrange = range
     basestring = str
     unicode = str
-    safe_unicode = str
     long = int
     BlockingIOError = BlockingIOError
 
