@@ -1,4 +1,5 @@
 """Internal module for Python 2 backwards compatibility."""
+# flake8: noqa
 import errno
 import socket
 import sys

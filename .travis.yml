@@ -2,7 +2,7 @@ language: python
 cache: pip
 matrix:
   include:
-    - env: TOXENV=pycodestyle
+    - env: TOXENV=flake8
     - python: 2.7
       env: TOXENV=py27-plain
     - python: 2.7
@@ -39,4 +39,4 @@ install:
 script:
   - tox
 after_success:
-  - "if [[ $TOXENV != 'pycodestyle' ]]; then codecov; fi"
+  - "if [[ $TOXENV != 'flake8' ]]; then codecov; fi"
