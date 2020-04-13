@@ -10,7 +10,7 @@ import sys
 import threading
 import warnings
 
-from redis._compat import (xrange, imap, byte_to_chr, unicode, long,
+from redis._compat import (xrange, imap, unicode, long,
                            nativestr, basestring, iteritems,
                            LifoQueue, Empty, Full, urlparse, parse_qs,
                            recv, recv_into, unquote, BlockingIOError,
@@ -319,18 +319,17 @@ class PythonParser(BaseParser):
         return self._buffer and self._buffer.can_read(timeout)
 
     def read_response(self):
-        response = self._buffer.readline()
-        if not response:
+        raw = self._buffer.readline()
+        if not raw:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
-        byte, response = byte_to_chr(response[0]), response[1:]
+        byte, response = raw[:1], raw[1:]
 
-        if byte not in ('-', '+', ':', '$', '*'):
-            raise InvalidResponse("Protocol Error: %s, %s" %
-                                  (str(byte), str(response)))
+        if byte not in (b'-', b'+', b':', b'$', b'*'):
+            raise InvalidResponse("Protocol Error: %r" % raw)
 
         # server returned an error
-        if byte == '-':
+        if byte == b'-':
             response = nativestr(response)
             error = self.parse_error(response)
             # if the error is a ConnectionError, raise immediately so the user
@@ -343,19 +342,19 @@ class PythonParser(BaseParser):
             # necessary, so just return the exception instance here.
             return error
         # single value
-        elif byte == '+':
+        elif byte == b'+':
             pass
         # int value
-        elif byte == ':':
+        elif byte == b':':
             response = long(response)
         # bulk response
-        elif byte == '$':
+        elif byte == b'$':
             length = int(response)
             if length == -1:
                 return None
             response = self._buffer.read(length)
         # multi-bulk response
-        elif byte == '*':
+        elif byte == b'*':
             length = int(response)
             if length == -1:
                 return None
