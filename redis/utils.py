@@ -2,7 +2,7 @@ from contextlib import contextmanager
 
 
 try:
-    import hiredis
+    import hiredis  # noqa
     HIREDIS_AVAILABLE = True
 except ImportError:
     HIREDIS_AVAILABLE = False
