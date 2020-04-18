@@ -3306,6 +3306,28 @@ class Redis(object):
 
         return self.execute_command(command, *pieces, **kwargs)
 
+    def expiremember(self, key, subkey, delay, unit=None):
+        """
+        Set timeout on a subkey. This feature only available on KeyDB
+        https://docs.keydb.dev/docs/commands/#expiremember
+        :param key: key added by `SADD key [subkeys]`
+        :param subkey: subkey on the set
+        :param delay: timeout
+        :param unit: `s` or `ms`
+        :return: 0 if the timeout was set, otherwise 0
+        """
+        args = [key, subkey, delay]
+        if not isinstance(delay, (int, long)):
+            raise ValueError("`delay` must be an integer")
+
+        if unit is not None and unit not in ['s', 'ms']:
+            raise ValueError("`unit` must be s or ms")
+
+        if unit:
+            args.append(unit)
+
+        return self.execute_command('EXPIREMEMBER', *args)
+
 
 StrictRedis = Redis
 
