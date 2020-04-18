@@ -3119,28 +3119,28 @@ class Redis(object):
     def cluster(self, cluster_arg, *args):
         return self.execute_command('CLUSTER %s' % cluster_arg.upper(), *args)
 
-    def eval(self, script, numkeys, *keys_and_args):
+    def eval(self, script, keys_num, *keys_and_args):
         """
-        Execute the Lua ``script``, specifying the ``numkeys`` the script
+        Execute the Lua ``script``, specifying the ``keys_num`` the script
         will touch and the key names and argument values in ``keys_and_args``.
         Returns the result of the script.
 
         In practice, use the object returned by ``register_script``. This
         function exists purely for Redis API completion.
         """
-        return self.execute_command('EVAL', script, numkeys, *keys_and_args)
+        return self.execute_command('EVAL', script, keys_num, *keys_and_args)
 
-    def evalsha(self, sha, numkeys, *keys_and_args):
+    def evalsha(self, sha, keys_num, *keys_and_args):
         """
         Use the ``sha`` to execute a Lua script already registered via EVAL
-        or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
+        or SCRIPT LOAD. Specify the ``keys_num`` the script will touch and the
         key names and argument values in ``keys_and_args``. Returns the result
         of the script.
 
         In practice, use the object returned by ``register_script``. This
         function exists purely for Redis API completion.
         """
-        return self.execute_command('EVALSHA', sha, numkeys, *keys_and_args)
+        return self.execute_command('EVALSHA', sha, keys_num, *keys_and_args)
 
     def script_exists(self, *args):
         """
