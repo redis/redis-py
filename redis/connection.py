@@ -1039,7 +1039,7 @@ class ConnectionPool(object):
                 url_options['connection_class'] = SSLConnection
         else:
             valid_schemes = ', '.join(('redis://', 'rediss://', 'unix://'))
-            raise ValueError('Redis URL must specify one of the following'
+            raise ValueError('Redis URL must specify one of the following '
                              'schemes (%s)' % valid_schemes)
 
         # last shot at the db value
