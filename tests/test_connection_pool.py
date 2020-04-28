@@ -393,8 +393,12 @@ class TestConnectionPoolURLParsing(object):
         }
 
     def test_invalid_scheme_raises_error(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError) as cm:
             redis.ConnectionPool.from_url('localhost')
+        assert str(cm.value) == (
+            'Redis URL must specify one of the following schemes '
+            '(redis://, rediss://, unix://)'
+        )
 
 
 class TestConnectionPoolUnixSocketURLParsing(object):
