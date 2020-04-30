@@ -12,6 +12,16 @@ The Python interface to the Redis key-value store.
 .. image:: https://codecov.io/gh/andymccurdy/redis-py/branch/master/graph/badge.svg
   :target: https://codecov.io/gh/andymccurdy/redis-py
 
+
+Python 2 Compatibility Note
+---------------------------
+
+redis-py 3.5.x will be the last version of redis-py that supports Python 2.
+The 3.5.x line will continue to get bug fixes and security patches that
+support Python 2 until August 1, 2020. redis-py 4.0 will be the next major
+version and will require Python 3.5+.
+
+
 Installation
 ------------
 
