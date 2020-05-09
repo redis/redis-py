@@ -1,3 +1,6 @@
+* 3.5.1 (May 9, 2020)
+    * Fix for HSET argument validation to allow any non-None key. Thanks
+      @AleksMat, #1337, #1341
 * 3.5.0 (April 29, 2020)
     * Removed exception trapping from __del__ methods. redis-py objects that
       hold various resources implement __del__ cleanup methods to release

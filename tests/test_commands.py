@@ -1612,6 +1612,10 @@ class TestRedisCommands(object):
         # key inside of hash that doesn't exist returns null value
         assert r.hget('a', 'b') is None
 
+        # keys with bool(key) == False
+        assert r.hset('a', 0, 10) == 1
+        assert r.hset('a', '', 10) == 1
+
     def test_hset_with_multi_key_values(self, r):
         r.hset('a', mapping={'1': 1, '2': 2, '3': 3})
         assert r.hget('a', '1') == b'1'

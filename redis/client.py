@@ -3034,14 +3034,14 @@ class Redis(object):
     def hset(self, name, key=None, value=None, mapping=None):
         """
         Set ``key`` to ``value`` within hash ``name``,
-        Use ``mappings`` keyword args to set multiple key/value pairs
-        for a hash ``name``.
+        ``mapping`` accepts a dict of key/value pairs that that will be
+        added to hash ``name``.
         Returns the number of fields that were added.
         """
-        if not key and not mapping:
+        if key is None and not mapping:
             raise DataError("'hset' with no key value pairs")
         items = []
-        if key:
+        if key is not None:
             items.extend((key, value))
         if mapping:
             for pair in mapping.items():
