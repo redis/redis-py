@@ -1612,7 +1612,7 @@ class TestRedisCommands(object):
         # key inside of hash that doesn't exist returns null value
         assert r.hget('a', 'b') is None
 
-        # keys with bool(key) == 0
+        # keys with bool(key) == False
         assert r.hset('a', 0, 10) == 1
         assert r.hset('a', '', 10) == 1
 
