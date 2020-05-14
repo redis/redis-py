@@ -1098,7 +1098,7 @@ class ConnectionPool(object):
         )
 
     def reset(self):
-        self._lock = threading.RLock()
+        self._lock = threading.Lock()
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()
@@ -1177,28 +1177,29 @@ class ConnectionPool(object):
             except IndexError:
                 connection = self.make_connection()
             self._in_use_connections.add(connection)
-            try:
-                # ensure this connection is connected to Redis
-                connection.connect()
-                # connections that the pool provides should be ready to send
-                # a command. if not, the connection was either returned to the
-                # pool before all data has been read or the socket has been
-                # closed. either way, reconnect and verify everything is good.
-                try:
-                    if connection.can_read():
-                        raise ConnectionError('Connection has data')
-                except ConnectionError:
-                    connection.disconnect()
-                    connection.connect()
-                    if connection.can_read():
-                        raise ConnectionError('Connection not ready')
-            except BaseException:
-                # release the connection back to the pool so that we don't
-                # leak it
-                self.release(connection)
-                raise
 
-            return connection
+        try:
+            # ensure this connection is connected to Redis
+            connection.connect()
+            # connections that the pool provides should be ready to send
+            # a command. if not, the connection was either returned to the
+            # pool before all data has been read or the socket has been
+            # closed. either way, reconnect and verify everything is good.
+            try:
+                if connection.can_read():
+                    raise ConnectionError('Connection has data')
+            except ConnectionError:
+                connection.disconnect()
+                connection.connect()
+                if connection.can_read():
+                    raise ConnectionError('Connection not ready')
+        except BaseException:
+            # release the connection back to the pool so that we don't
+            # leak it
+            self.release(connection)
+            raise
+
+        return connection
 
     def get_encoder(self):
         "Return an encoder based on encoding settings"

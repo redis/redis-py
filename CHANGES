@@ -1,3 +1,7 @@
+* 3.5.2 (May 14, 2020)
+    * Tune the locking in ConnectionPool.get_connection so that the lock is
+      not held while waiting for the socket to establish and validate the
+      TCP connection.
 * 3.5.1 (May 9, 2020)
     * Fix for HSET argument validation to allow any non-None key. Thanks
       @AleksMat, #1337, #1341
