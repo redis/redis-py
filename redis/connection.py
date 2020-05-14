@@ -1,11 +1,36 @@
-from __future__ import with_statement
+from __future__ import unicode_literals
 from distutils.version import StrictVersion
 from itertools import chain
+from time import time
+import errno
+import io
 import os
 import socket
-import sys
 import threading
 import warnings
+
+from redis._compat import (xrange, imap, unicode, long,
+                           nativestr, basestring, iteritems,
+                           LifoQueue, Empty, Full, urlparse, parse_qs,
+                           recv, recv_into, unquote, BlockingIOError,
+                           sendall, shutdown, ssl_wrap_socket)
+from redis.exceptions import (
+    AuthenticationError,
+    AuthenticationWrongNumberOfArgsError,
+    BusyLoadingError,
+    ChildDeadlockedError,
+    ConnectionError,
+    DataError,
+    ExecAbortError,
+    InvalidResponse,
+    NoPermissionError,
+    NoScriptError,
+    ReadOnlyError,
+    RedisError,
+    ResponseError,
+    TimeoutError,
+)
+from redis.utils import HIREDIS_AVAILABLE
 
 try:
     import ssl
@@ -13,23 +38,29 @@ try:
 except ImportError:
     ssl_available = False
 
-from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
-                           BytesIO, nativestr, basestring, iteritems,
-                           LifoQueue, Empty, Full, urlparse, parse_qs,
-                           recv, recv_into, select, unquote)
-from redis.exceptions import (
-    RedisError,
-    ConnectionError,
-    TimeoutError,
-    BusyLoadingError,
-    ResponseError,
-    InvalidResponse,
-    AuthenticationError,
-    NoScriptError,
-    ExecAbortError,
-    ReadOnlyError
-)
-from redis.utils import HIREDIS_AVAILABLE
+NONBLOCKING_EXCEPTION_ERROR_NUMBERS = {
+    BlockingIOError: errno.EWOULDBLOCK,
+}
+
+if ssl_available:
+    if hasattr(ssl, 'SSLWantReadError'):
+        NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLWantReadError] = 2
+        NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLWantWriteError] = 2
+    else:
+        NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLError] = 2
+
+# In Python 2.7 a socket.error is raised for a nonblocking read.
+# The _compat module aliases BlockingIOError to socket.error to be
+# Python 2/3 compatible.
+# However this means that all socket.error exceptions need to be handled
+# properly within these exception handlers.
+# We need to make sure socket.error is included in these handlers and
+# provide a dummy error number that will never match a real exception.
+if socket.error not in NONBLOCKING_EXCEPTION_ERROR_NUMBERS:
+    NONBLOCKING_EXCEPTION_ERROR_NUMBERS[socket.error] = -999999
+
+NONBLOCKING_EXCEPTIONS = tuple(NONBLOCKING_EXCEPTION_ERROR_NUMBERS.keys())
+
 if HIREDIS_AVAILABLE:
     import hiredis
 
@@ -38,6 +69,8 @@ if HIREDIS_AVAILABLE:
         hiredis_version >= StrictVersion('0.1.3')
     HIREDIS_SUPPORTS_BYTE_BUFFER = \
         hiredis_version >= StrictVersion('0.1.4')
+    HIREDIS_SUPPORTS_ENCODING_ERRORS = \
+        hiredis_version >= StrictVersion('1.0.0')
 
     if not HIREDIS_SUPPORTS_BYTE_BUFFER:
         msg = ("redis-py works best with hiredis >= 0.1.4. You're running "
@@ -45,57 +78,22 @@ if HIREDIS_AVAILABLE:
         warnings.warn(msg)
 
     HIREDIS_USE_BYTE_BUFFER = True
-    # only use byte buffer if hiredis supports it and the Python version
-    # is >= 2.7
-    if not HIREDIS_SUPPORTS_BYTE_BUFFER or (
-            sys.version_info[0] == 2 and sys.version_info[1] < 7):
+    # only use byte buffer if hiredis supports it
+    if not HIREDIS_SUPPORTS_BYTE_BUFFER:
         HIREDIS_USE_BYTE_BUFFER = False
 
-SYM_STAR = b('*')
-SYM_DOLLAR = b('$')
-SYM_CRLF = b('\r\n')
-SYM_EMPTY = b('')
+SYM_STAR = b'*'
+SYM_DOLLAR = b'$'
+SYM_CRLF = b'\r\n'
+SYM_EMPTY = b''
 
 SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
 
-
-class Token(object):
-    """
-    Literal strings in Redis commands, such as the command names and any
-    hard-coded arguments are wrapped in this class so we know not to apply
-    and encoding rules on them.
-    """
-
-    _cache = {}
-
-    @classmethod
-    def get_token(cls, value):
-        "Gets a cached token object or creates a new one if not already cached"
-
-        # Use try/except because after running for a short time most tokens
-        # should already be cached
-        try:
-            return cls._cache[value]
-        except KeyError:
-            token = Token(value)
-            cls._cache[value] = token
-            return token
-
-    def __init__(self, value):
-        if isinstance(value, Token):
-            value = value.value
-        self.value = value
-        self.encoded_value = b(value)
-
-    def __repr__(self):
-        return self.value
-
-    def __str__(self):
-        return self.value
+SENTINEL = object()
 
 
 class Encoder(object):
-    "Encode strings to bytes and decode bytes to strings"
+    "Encode strings to bytes-like and decode bytes-like to strings"
 
     def __init__(self, encoding, encoding_errors, decode_responses):
         self.encoding = encoding
@@ -103,38 +101,58 @@ class Encoder(object):
         self.decode_responses = decode_responses
 
     def encode(self, value):
-        "Return a bytestring representation of the value"
-        if isinstance(value, Token):
-            return value.encoded_value
-        elif isinstance(value, bytes):
+        "Return a bytestring or bytes-like representation of the value"
+        if isinstance(value, (bytes, memoryview)):
             return value
-        elif isinstance(value, (int, long)):
-            value = b(str(value))
+        elif isinstance(value, bool):
+            # special case bool since it is a subclass of int
+            raise DataError("Invalid input of type: 'bool'. Convert to a "
+                            "bytes, string, int or float first.")
         elif isinstance(value, float):
-            value = b(repr(value))
+            value = repr(value).encode()
+        elif isinstance(value, (int, long)):
+            # python 2 repr() on longs is '123L', so use str() instead
+            value = str(value).encode()
         elif not isinstance(value, basestring):
-            # an object we don't know how to deal with. default to unicode()
-            value = unicode(value)
+            # a value we don't know how to deal with. throw an error
+            typename = type(value).__name__
+            raise DataError("Invalid input of type: '%s'. Convert to a "
+                            "bytes, string, int or float first." % typename)
         if isinstance(value, unicode):
             value = value.encode(self.encoding, self.encoding_errors)
         return value
 
     def decode(self, value, force=False):
-        "Return a unicode string from the byte representation"
-        if (self.decode_responses or force) and isinstance(value, bytes):
-            value = value.decode(self.encoding, self.encoding_errors)
+        "Return a unicode string from the bytes-like representation"
+        if self.decode_responses or force:
+            if isinstance(value, memoryview):
+                value = value.tobytes()
+            if isinstance(value, bytes):
+                value = value.decode(self.encoding, self.encoding_errors)
         return value
 
 
 class BaseParser(object):
     EXCEPTION_CLASSES = {
         'ERR': {
-            'max number of clients reached': ConnectionError
+            'max number of clients reached': ConnectionError,
+            'Client sent AUTH, but no password is set': AuthenticationError,
+            'invalid password': AuthenticationError,
+            # some Redis server versions report invalid command syntax
+            # in lowercase
+            'wrong number of arguments for \'auth\' command':
+                AuthenticationWrongNumberOfArgsError,
+            # some Redis server versions report invalid command syntax
+            # in uppercase
+            'wrong number of arguments for \'AUTH\' command':
+                AuthenticationWrongNumberOfArgsError,
         },
         'EXECABORT': ExecAbortError,
         'LOADING': BusyLoadingError,
         'NOSCRIPT': NoScriptError,
         'READONLY': ReadOnlyError,
+        'NOAUTH': AuthenticationError,
+        'NOPERM': NoPermissionError,
     }
 
     def parse_error(self, response):
@@ -150,10 +168,11 @@ class BaseParser(object):
 
 
 class SocketBuffer(object):
-    def __init__(self, socket, socket_read_size):
+    def __init__(self, socket, socket_read_size, socket_timeout):
         self._sock = socket
         self.socket_read_size = socket_read_size
-        self._buffer = BytesIO()
+        self.socket_timeout = socket_timeout
+        self._buffer = io.BytesIO()
         # number of bytes written to the buffer from the socket
         self.bytes_written = 0
         # number of bytes read from the buffer
@@ -163,18 +182,23 @@ class SocketBuffer(object):
     def length(self):
         return self.bytes_written - self.bytes_read
 
-    def _read_from_socket(self, length=None):
+    def _read_from_socket(self, length=None, timeout=SENTINEL,
+                          raise_on_timeout=True):
+        sock = self._sock
         socket_read_size = self.socket_read_size
         buf = self._buffer
         buf.seek(self.bytes_written)
         marker = 0
+        custom_timeout = timeout is not SENTINEL
 
         try:
+            if custom_timeout:
+                sock.settimeout(timeout)
             while True:
                 data = recv(self._sock, socket_read_size)
                 # an empty string indicates the server shutdown the socket
                 if isinstance(data, bytes) and len(data) == 0:
-                    raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
+                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
                 buf.write(data)
                 data_length = len(data)
                 self.bytes_written += data_length
@@ -182,13 +206,29 @@ class SocketBuffer(object):
 
                 if length is not None and length > marker:
                     continue
-                break
+                return True
         except socket.timeout:
-            raise TimeoutError("Timeout reading from socket")
-        except socket.error:
-            e = sys.exc_info()[1]
+            if raise_on_timeout:
+                raise TimeoutError("Timeout reading from socket")
+            return False
+        except NONBLOCKING_EXCEPTIONS as ex:
+            # if we're in nonblocking mode and the recv raises a
+            # blocking error, simply return False indicating that
+            # there's no data to be read. otherwise raise the
+            # original exception.
+            allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
+            if not raise_on_timeout and ex.errno == allowed:
+                return False
             raise ConnectionError("Error while reading from socket: %s" %
-                                  (e.args,))
+                                  (ex.args,))
+        finally:
+            if custom_timeout:
+                sock.settimeout(self.socket_timeout)
+
+    def can_read(self, timeout):
+        return bool(self.length) or \
+            self._read_from_socket(timeout=timeout,
+                                   raise_on_timeout=False)
 
     def read(self, length):
         length = length + 2  # make sure to read the \r\n terminator
@@ -236,7 +276,7 @@ class SocketBuffer(object):
         try:
             self.purge()
             self._buffer.close()
-        except:
+        except Exception:
             # issue #633 suggests the purge/close somehow raised a
             # BadFileDescriptor error. Perhaps the client ran out of
             # memory or something else? It's probably OK to ignore
@@ -256,43 +296,39 @@ class PythonParser(BaseParser):
         self._buffer = None
 
     def __del__(self):
-        try:
-            self.on_disconnect()
-        except Exception:
-            pass
+        self.on_disconnect()
 
     def on_connect(self, connection):
         "Called when the socket connects"
         self._sock = connection._sock
-        self._buffer = SocketBuffer(self._sock, self.socket_read_size)
+        self._buffer = SocketBuffer(self._sock,
+                                    self.socket_read_size,
+                                    connection.socket_timeout)
         self.encoder = connection.encoder
 
     def on_disconnect(self):
         "Called when the socket disconnects"
-        if self._sock is not None:
-            self._sock.close()
-            self._sock = None
+        self._sock = None
         if self._buffer is not None:
             self._buffer.close()
             self._buffer = None
         self.encoder = None
 
-    def can_read(self):
-        return self._buffer and bool(self._buffer.length)
+    def can_read(self, timeout):
+        return self._buffer and self._buffer.can_read(timeout)
 
     def read_response(self):
-        response = self._buffer.readline()
-        if not response:
+        raw = self._buffer.readline()
+        if not raw:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
-        byte, response = byte_to_chr(response[0]), response[1:]
+        byte, response = raw[:1], raw[1:]
 
-        if byte not in ('-', '+', ':', '$', '*'):
-            raise InvalidResponse("Protocol Error: %s, %s" %
-                                  (str(byte), str(response)))
+        if byte not in (b'-', b'+', b':', b'$', b'*'):
+            raise InvalidResponse("Protocol Error: %r" % raw)
 
         # server returned an error
-        if byte == '-':
+        if byte == b'-':
             response = nativestr(response)
             error = self.parse_error(response)
             # if the error is a ConnectionError, raise immediately so the user
@@ -305,19 +341,19 @@ class PythonParser(BaseParser):
             # necessary, so just return the exception instance here.
             return error
         # single value
-        elif byte == '+':
+        elif byte == b'+':
             pass
         # int value
-        elif byte == ':':
+        elif byte == b':':
             response = long(response)
         # bulk response
-        elif byte == '$':
+        elif byte == b'$':
             length = int(response)
             if length == -1:
                 return None
             response = self._buffer.read(length)
         # multi-bulk response
-        elif byte == '*':
+        elif byte == b'*':
             length = int(response)
             if length == -1:
                 return None
@@ -338,13 +374,11 @@ class HiredisParser(BaseParser):
             self._buffer = bytearray(socket_read_size)
 
     def __del__(self):
-        try:
-            self.on_disconnect()
-        except Exception:
-            pass
+        self.on_disconnect()
 
     def on_connect(self, connection):
         self._sock = connection._sock
+        self._socket_timeout = connection.socket_timeout
         kwargs = {
             'protocolError': InvalidResponse,
             'replyError': self.parse_error,
@@ -356,6 +390,8 @@ class HiredisParser(BaseParser):
 
         if connection.encoder.decode_responses:
             kwargs['encoding'] = connection.encoder.encoding
+        if HIREDIS_SUPPORTS_ENCODING_ERRORS:
+            kwargs['errors'] = connection.encoder.encoding_errors
         self._reader = hiredis.Reader(**kwargs)
         self._next_response = False
 
@@ -364,13 +400,54 @@ class HiredisParser(BaseParser):
         self._reader = None
         self._next_response = False
 
-    def can_read(self):
+    def can_read(self, timeout):
         if not self._reader:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
         if self._next_response is False:
             self._next_response = self._reader.gets()
-        return self._next_response is not False
+            if self._next_response is False:
+                return self.read_from_socket(timeout=timeout,
+                                             raise_on_timeout=False)
+        return True
+
+    def read_from_socket(self, timeout=SENTINEL, raise_on_timeout=True):
+        sock = self._sock
+        custom_timeout = timeout is not SENTINEL
+        try:
+            if custom_timeout:
+                sock.settimeout(timeout)
+            if HIREDIS_USE_BYTE_BUFFER:
+                bufflen = recv_into(self._sock, self._buffer)
+                if bufflen == 0:
+                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+                self._reader.feed(self._buffer, 0, bufflen)
+            else:
+                buffer = recv(self._sock, self.socket_read_size)
+                # an empty string indicates the server shutdown the socket
+                if not isinstance(buffer, bytes) or len(buffer) == 0:
+                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+                self._reader.feed(buffer)
+            # data was read from the socket and added to the buffer.
+            # return True to indicate that data was read.
+            return True
+        except socket.timeout:
+            if raise_on_timeout:
+                raise TimeoutError("Timeout reading from socket")
+            return False
+        except NONBLOCKING_EXCEPTIONS as ex:
+            # if we're in nonblocking mode and the recv raises a
+            # blocking error, simply return False indicating that
+            # there's no data to be read. otherwise raise the
+            # original exception.
+            allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
+            if not raise_on_timeout and ex.errno == allowed:
+                return False
+            raise ConnectionError("Error while reading from socket: %s" %
+                                  (ex.args,))
+        finally:
+            if custom_timeout:
+                sock.settimeout(self._socket_timeout)
 
     def read_response(self):
         if not self._reader:
@@ -383,28 +460,8 @@ class HiredisParser(BaseParser):
             return response
 
         response = self._reader.gets()
-        socket_read_size = self.socket_read_size
         while response is False:
-            try:
-                if HIREDIS_USE_BYTE_BUFFER:
-                    bufflen = recv_into(self._sock, self._buffer)
-                    if bufflen == 0:
-                        raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
-                else:
-                    buffer = recv(self._sock, socket_read_size)
-                    # an empty string indicates the server shutdown the socket
-                    if not isinstance(buffer, bytes) or len(buffer) == 0:
-                        raise socket.error(SERVER_CLOSED_CONNECTION_ERROR)
-            except socket.timeout:
-                raise TimeoutError("Timeout reading from socket")
-            except socket.error:
-                e = sys.exc_info()[1]
-                raise ConnectionError("Error while reading from socket: %s" %
-                                      (e.args,))
-            if HIREDIS_USE_BYTE_BUFFER:
-                self._reader.feed(self._buffer, 0, bufflen)
-            else:
-                self._reader.feed(buffer)
+            self.read_from_socket()
             response = self._reader.gets()
         # if an older version of hiredis is installed, we need to attempt
         # to convert ResponseErrors to their appropriate types.
@@ -433,42 +490,51 @@ else:
 
 class Connection(object):
     "Manages TCP communication to and from a Redis server"
-    description_format = "Connection<host=%(host)s,port=%(port)s,db=%(db)s>"
 
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None, socket_connect_timeout=None,
                  socket_keepalive=False, socket_keepalive_options=None,
-                 retry_on_timeout=False, encoding='utf-8',
+                 socket_type=0, retry_on_timeout=False, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
-                 parser_class=DefaultParser, socket_read_size=65536):
+                 parser_class=DefaultParser, socket_read_size=65536,
+                 health_check_interval=0, client_name=None, username=None):
         self.pid = os.getpid()
         self.host = host
         self.port = int(port)
         self.db = db
+        self.username = username
+        self.client_name = client_name
         self.password = password
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout
         self.socket_keepalive = socket_keepalive
         self.socket_keepalive_options = socket_keepalive_options or {}
+        self.socket_type = socket_type
         self.retry_on_timeout = retry_on_timeout
+        self.health_check_interval = health_check_interval
+        self.next_health_check = 0
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
         self._parser = parser_class(socket_read_size=socket_read_size)
-        self._description_args = {
-            'host': self.host,
-            'port': self.port,
-            'db': self.db,
-        }
         self._connect_callbacks = []
+        self._buffer_cutoff = 6000
 
     def __repr__(self):
-        return self.description_format % self._description_args
+        repr_args = ','.join(['%s=%s' % (k, v) for k, v in self.repr_pieces()])
+        return '%s<%s>' % (self.__class__.__name__, repr_args)
+
+    def repr_pieces(self):
+        pieces = [
+            ('host', self.host),
+            ('port', self.port),
+            ('db', self.db)
+        ]
+        if self.client_name:
+            pieces.append(('client_name', self.client_name))
+        return pieces
 
     def __del__(self):
-        try:
-            self.disconnect()
-        except Exception:
-            pass
+        self.disconnect()
 
     def register_connect_callback(self, callback):
         self._connect_callbacks.append(callback)
@@ -484,8 +550,7 @@ class Connection(object):
             sock = self._connect()
         except socket.timeout:
             raise TimeoutError("Timeout connecting to server")
-        except socket.error:
-            e = sys.exc_info()[1]
+        except socket.error as e:
             raise ConnectionError(self._error_message(e))
 
         self._sock = sock
@@ -507,7 +572,7 @@ class Connection(object):
         # ipv4/ipv6, but we want to set options prior to calling
         # socket.connect()
         err = None
-        for res in socket.getaddrinfo(self.host, self.port, socket.AF_INET,
+        for res in socket.getaddrinfo(self.host, self.port, self.socket_type,
                                       socket.SOCK_STREAM):
             family, socktype, proto, canonname, socket_address = res
             sock = None
@@ -520,7 +585,7 @@ class Connection(object):
                 if self.socket_keepalive:
                     sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                     for k, v in iteritems(self.socket_keepalive_options):
-                        sock.setsockopt(socket.SOL_TCP, k, v)
+                        sock.setsockopt(socket.IPPROTO_TCP, k, v)
 
                 # set the socket_connect_timeout before we connect
                 sock.settimeout(self.socket_connect_timeout)
@@ -555,11 +620,34 @@ class Connection(object):
         "Initialize the connection, authenticate and select a database"
         self._parser.on_connect(self)
 
-        # if a password is specified, authenticate
-        if self.password:
-            self.send_command('AUTH', self.password)
+        # if username and/or password are set, authenticate
+        if self.username or self.password:
+            if self.username:
+                auth_args = (self.username, self.password or '')
+            else:
+                auth_args = (self.password,)
+            # avoid checking health here -- PING will fail if we try
+            # to check the health prior to the AUTH
+            self.send_command('AUTH', *auth_args, check_health=False)
+
+            try:
+                auth_response = self.read_response()
+            except AuthenticationWrongNumberOfArgsError:
+                # a username and password were specified but the Redis
+                # server seems to be < 6.0.0 which expects a single password
+                # arg. retry auth with just the password.
+                # https://github.com/andymccurdy/redis-py/issues/1274
+                self.send_command('AUTH', self.password, check_health=False)
+                auth_response = self.read_response()
+
+            if nativestr(auth_response) != 'OK':
+                raise AuthenticationError('Invalid Username or Password')
+
+        # if a client_name is given, set it
+        if self.client_name:
+            self.send_command('CLIENT', 'SETNAME', self.client_name)
             if nativestr(self.read_response()) != 'OK':
-                raise AuthenticationError('Invalid Password')
+                raise ConnectionError('Error setting client name')
 
         # if a database is specified, switch to it
         if self.db:
@@ -573,26 +661,44 @@ class Connection(object):
         if self._sock is None:
             return
         try:
-            self._sock.shutdown(socket.SHUT_RDWR)
+            if os.getpid() == self.pid:
+                shutdown(self._sock, socket.SHUT_RDWR)
             self._sock.close()
         except socket.error:
             pass
         self._sock = None
 
-    def send_packed_command(self, command):
+    def check_health(self):
+        "Check the health of the connection with a PING/PONG"
+        if self.health_check_interval and time() > self.next_health_check:
+            try:
+                self.send_command('PING', check_health=False)
+                if nativestr(self.read_response()) != 'PONG':
+                    raise ConnectionError(
+                        'Bad response from PING health check')
+            except (ConnectionError, TimeoutError):
+                self.disconnect()
+                self.send_command('PING', check_health=False)
+                if nativestr(self.read_response()) != 'PONG':
+                    raise ConnectionError(
+                        'Bad response from PING health check')
+
+    def send_packed_command(self, command, check_health=True):
         "Send an already packed command to the Redis server"
         if not self._sock:
             self.connect()
+        # guard against health check recursion
+        if check_health:
+            self.check_health()
         try:
             if isinstance(command, str):
                 command = [command]
             for item in command:
-                self._sock.sendall(item)
+                sendall(self._sock, item)
         except socket.timeout:
             self.disconnect()
             raise TimeoutError("Timeout writing to socket")
-        except socket.error:
-            e = sys.exc_info()[1]
+        except socket.error as e:
             self.disconnect()
             if len(e.args) == 1:
                 errno, errmsg = 'UNKNOWN', e.args[0]
@@ -601,13 +707,14 @@ class Connection(object):
                 errmsg = e.args[1]
             raise ConnectionError("Error %s while writing to socket. %s." %
                                   (errno, errmsg))
-        except:
+        except BaseException:
             self.disconnect()
             raise
 
-    def send_command(self, *args):
+    def send_command(self, *args, **kwargs):
         "Pack and send a command to the Redis server"
-        self.send_packed_command(self.pack_command(*args))
+        self.send_packed_command(self.pack_command(*args),
+                                 check_health=kwargs.get('check_health', True))
 
     def can_read(self, timeout=0):
         "Poll the socket to see if there's data that can be read."
@@ -615,16 +722,27 @@ class Connection(object):
         if not sock:
             self.connect()
             sock = self._sock
-        return self._parser.can_read() or \
-            bool(select([sock], [], [], timeout)[0])
+        return self._parser.can_read(timeout)
 
     def read_response(self):
         "Read the response from a previously sent command"
         try:
             response = self._parser.read_response()
-        except:
+        except socket.timeout:
+            self.disconnect()
+            raise TimeoutError("Timeout reading from %s:%s" %
+                               (self.host, self.port))
+        except socket.error as e:
+            self.disconnect()
+            raise ConnectionError("Error while reading from %s:%s : %s" %
+                                  (self.host, self.port, e.args))
+        except BaseException:
             self.disconnect()
             raise
+
+        if self.health_check_interval:
+            self.next_health_check = time() + self.health_check_interval
+
         if isinstance(response, ResponseError):
             raise response
         return response
@@ -635,30 +753,31 @@ class Connection(object):
         # the client might have included 1 or more literal arguments in
         # the command name, e.g., 'CONFIG GET'. The Redis server expects these
         # arguments to be sent separately, so split the first argument
-        # manually. All of these arguements get wrapped in the Token class
-        # to prevent them from being encoded.
-        command = args[0]
-        if ' ' in command:
-            args = tuple([Token.get_token(s)
-                          for s in command.split()]) + args[1:]
-        else:
-            args = (Token.get_token(command),) + args[1:]
+        # manually. These arguments should be bytestrings so that they are
+        # not encoded.
+        if isinstance(args[0], unicode):
+            args = tuple(args[0].encode().split()) + args[1:]
+        elif b' ' in args[0]:
+            args = tuple(args[0].split()) + args[1:]
 
-        buff = SYM_EMPTY.join(
-            (SYM_STAR, b(str(len(args))), SYM_CRLF))
+        buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
 
+        buffer_cutoff = self._buffer_cutoff
         for arg in imap(self.encoder.encode, args):
             # to avoid large string mallocs, chunk the command into the
-            # output list if we're sending large values
-            if len(buff) > 6000 or len(arg) > 6000:
+            # output list if we're sending large values or memoryviews
+            arg_length = len(arg)
+            if (len(buff) > buffer_cutoff or arg_length > buffer_cutoff
+                    or isinstance(arg, memoryview)):
                 buff = SYM_EMPTY.join(
-                    (buff, SYM_DOLLAR, b(str(len(arg))), SYM_CRLF))
+                    (buff, SYM_DOLLAR, str(arg_length).encode(), SYM_CRLF))
                 output.append(buff)
                 output.append(arg)
                 buff = SYM_CRLF
             else:
-                buff = SYM_EMPTY.join((buff, SYM_DOLLAR, b(str(len(arg))),
-                                       SYM_CRLF, arg, SYM_CRLF))
+                buff = SYM_EMPTY.join(
+                    (buff, SYM_DOLLAR, str(arg_length).encode(),
+                     SYM_CRLF, arg, SYM_CRLF))
         output.append(buff)
         return output
 
@@ -667,16 +786,22 @@ class Connection(object):
         output = []
         pieces = []
         buffer_length = 0
+        buffer_cutoff = self._buffer_cutoff
 
         for cmd in commands:
             for chunk in self.pack_command(*cmd):
-                pieces.append(chunk)
-                buffer_length += len(chunk)
+                chunklen = len(chunk)
+                if (buffer_length > buffer_cutoff or chunklen > buffer_cutoff
+                        or isinstance(chunk, memoryview)):
+                    output.append(SYM_EMPTY.join(pieces))
+                    buffer_length = 0
+                    pieces = []
 
-            if buffer_length > 6000:
-                output.append(SYM_EMPTY.join(pieces))
-                buffer_length = 0
-                pieces = []
+                if chunklen > buffer_cutoff or isinstance(chunk, memoryview):
+                    output.append(chunk)
+                else:
+                    pieces.append(chunk)
+                    buffer_length += chunklen
 
         if pieces:
             output.append(SYM_EMPTY.join(pieces))
@@ -684,10 +809,10 @@ class Connection(object):
 
 
 class SSLConnection(Connection):
-    description_format = "SSLConnection<host=%(host)s,port=%(port)s,db=%(db)s>"
 
-    def __init__(self, ssl_keyfile=None, ssl_certfile=None, ssl_cert_reqs=None,
-                 ssl_ca_certs=None, **kwargs):
+    def __init__(self, ssl_keyfile=None, ssl_certfile=None,
+                 ssl_cert_reqs='required', ssl_ca_certs=None,
+                 ssl_check_hostname=False, **kwargs):
         if not ssl_available:
             raise RedisError("Python wasn't built with SSL support")
 
@@ -710,40 +835,65 @@ class SSLConnection(Connection):
             ssl_cert_reqs = CERT_REQS[ssl_cert_reqs]
         self.cert_reqs = ssl_cert_reqs
         self.ca_certs = ssl_ca_certs
+        self.check_hostname = ssl_check_hostname
 
     def _connect(self):
         "Wrap the socket with SSL support"
         sock = super(SSLConnection, self)._connect()
-        sock = ssl.wrap_socket(sock,
-                               cert_reqs=self.cert_reqs,
-                               keyfile=self.keyfile,
-                               certfile=self.certfile,
-                               ca_certs=self.ca_certs)
+        if hasattr(ssl, "create_default_context"):
+            context = ssl.create_default_context()
+            context.check_hostname = self.check_hostname
+            context.verify_mode = self.cert_reqs
+            if self.certfile and self.keyfile:
+                context.load_cert_chain(certfile=self.certfile,
+                                        keyfile=self.keyfile)
+            if self.ca_certs:
+                context.load_verify_locations(self.ca_certs)
+            sock = ssl_wrap_socket(context, sock, server_hostname=self.host)
+        else:
+            # In case this code runs in a version which is older than 2.7.9,
+            # we want to fall back to old code
+            sock = ssl_wrap_socket(ssl,
+                                   sock,
+                                   cert_reqs=self.cert_reqs,
+                                   keyfile=self.keyfile,
+                                   certfile=self.certfile,
+                                   ca_certs=self.ca_certs)
         return sock
 
 
 class UnixDomainSocketConnection(Connection):
-    description_format = "UnixDomainSocketConnection<path=%(path)s,db=%(db)s>"
 
-    def __init__(self, path='', db=0, password=None,
+    def __init__(self, path='', db=0, username=None, password=None,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  retry_on_timeout=False,
-                 parser_class=DefaultParser, socket_read_size=65536):
+                 parser_class=DefaultParser, socket_read_size=65536,
+                 health_check_interval=0, client_name=None):
         self.pid = os.getpid()
         self.path = path
         self.db = db
+        self.username = username
+        self.client_name = client_name
         self.password = password
         self.socket_timeout = socket_timeout
         self.retry_on_timeout = retry_on_timeout
+        self.health_check_interval = health_check_interval
+        self.next_health_check = 0
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
         self._parser = parser_class(socket_read_size=socket_read_size)
-        self._description_args = {
-            'path': self.path,
-            'db': self.db,
-        }
         self._connect_callbacks = []
+        self._buffer_cutoff = 6000
+
+    def repr_pieces(self):
+        pieces = [
+            ('path', self.path),
+            ('db', self.db),
+        ]
+        if self.client_name:
+            pieces.append(('client_name', self.client_name))
+        return pieces
 
     def _connect(self):
         "Create a Unix domain socket connection"
@@ -778,7 +928,10 @@ URL_QUERY_ARGUMENT_PARSERS = {
     'socket_timeout': float,
     'socket_connect_timeout': float,
     'socket_keepalive': to_bool,
-    'retry_on_timeout': to_bool
+    'retry_on_timeout': to_bool,
+    'max_connections': int,
+    'health_check_interval': int,
+    'ssl_check_hostname': to_bool,
 }
 
 
@@ -791,18 +944,18 @@ class ConnectionPool(object):
 
         For example::
 
-            redis://[:password]@localhost:6379/0
-            rediss://[:password]@localhost:6379/0
-            unix://[:password]@/path/to/socket.sock?db=0
+            redis://[[username]:[password]]@localhost:6379/0
+            rediss://[[username]:[password]]@localhost:6379/0
+            unix://[[username]:[password]]@/path/to/socket.sock?db=0
 
         Three URL schemes are supported:
 
         - ```redis://``
-          <http://www.iana.org/assignments/uri-schemes/prov/redis>`_ creates a
+          <https://www.iana.org/assignments/uri-schemes/prov/redis>`_ creates a
           normal TCP socket connection
         - ```rediss://``
-          <http://www.iana.org/assignments/uri-schemes/prov/rediss>`_ creates a
-          SSL wrapped TCP socket connection
+          <https://www.iana.org/assignments/uri-schemes/prov/rediss>`_ creates
+          a SSL wrapped TCP socket connection
         - ``unix://`` creates a Unix Domain Socket connection
 
         There are several ways to specify a database number. The parse function
@@ -818,7 +971,7 @@ class ConnectionPool(object):
         percent-encoded URLs. If this argument is set to ``True`` all ``%xx``
         escapes will be replaced by their single-character equivalents after
         the URL has been parsed. This only applies to the ``hostname``,
-        ``path``, and ``password`` components.
+        ``path``, ``username`` and ``password`` components.
 
         Any additional querystring arguments and keyword arguments will be
         passed along to the ConnectionPool class's initializer. The querystring
@@ -828,24 +981,12 @@ class ConnectionPool(object):
         True/False, Yes/No values to indicate state. Invalid types cause a
         ``UserWarning`` to be raised. In the case of conflicting arguments,
         querystring arguments always win.
+
         """
-        url_string = url
         url = urlparse(url)
-        qs = ''
-
-        # in python2.6, custom URL schemes don't recognize querystring values
-        # they're left as part of the url.path.
-        if '?' in url.path and not url.query:
-            # chop the querystring including the ? off the end of the url
-            # and reparse it.
-            qs = url.path.split('?', 1)[1]
-            url = urlparse(url_string[:-(len(qs) + 1)])
-        else:
-            qs = url.query
-
         url_options = {}
 
-        for name, value in iteritems(parse_qs(qs)):
+        for name, value in iteritems(parse_qs(url.query)):
             if value and len(value) > 0:
                 parser = URL_QUERY_ARGUMENT_PARSERS.get(name)
                 if parser:
@@ -859,26 +1000,30 @@ class ConnectionPool(object):
                     url_options[name] = value[0]
 
         if decode_components:
+            username = unquote(url.username) if url.username else None
             password = unquote(url.password) if url.password else None
             path = unquote(url.path) if url.path else None
             hostname = unquote(url.hostname) if url.hostname else None
         else:
-            password = url.password
+            username = url.username or None
+            password = url.password or None
             path = url.path
             hostname = url.hostname
 
-        # We only support redis:// and unix:// schemes.
+        # We only support redis://, rediss:// and unix:// schemes.
         if url.scheme == 'unix':
             url_options.update({
+                'username': username,
                 'password': password,
                 'path': path,
                 'connection_class': UnixDomainSocketConnection,
             })
 
-        else:
+        elif url.scheme in ('redis', 'rediss'):
             url_options.update({
                 'host': hostname,
                 'port': int(url.port or 6379),
+                'username': username,
                 'password': password,
             })
 
@@ -892,6 +1037,10 @@ class ConnectionPool(object):
 
             if url.scheme == 'rediss':
                 url_options['connection_class'] = SSLConnection
+        else:
+            valid_schemes = ', '.join(('redis://', 'rediss://', 'unix://'))
+            raise ValueError('Redis URL must specify one of the following '
+                             'schemes (%s)' % valid_schemes)
 
         # last shot at the db value
         url_options['db'] = int(url_options.get('db', db or 0))
@@ -931,40 +1080,125 @@ class ConnectionPool(object):
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
 
+        # a lock to protect the critical section in _checkpid().
+        # this lock is acquired when the process id changes, such as
+        # after a fork. during this time, multiple threads in the child
+        # process could attempt to acquire this lock. the first thread
+        # to acquire the lock will reset the data structures and lock
+        # object of this pool. subsequent threads acquiring this lock
+        # will notice the first thread already did the work and simply
+        # release the lock.
+        self._fork_lock = threading.Lock()
         self.reset()
 
     def __repr__(self):
         return "%s<%s>" % (
             type(self).__name__,
-            self.connection_class.description_format % self.connection_kwargs,
+            repr(self.connection_class(**self.connection_kwargs)),
         )
 
     def reset(self):
-        self.pid = os.getpid()
+        self._lock = threading.RLock()
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()
-        self._check_lock = threading.Lock()
+
+        # this must be the last operation in this method. while reset() is
+        # called when holding _fork_lock, other threads in this process
+        # can call _checkpid() which compares self.pid and os.getpid() without
+        # holding any lock (for performance reasons). keeping this assignment
+        # as the last operation ensures that those other threads will also
+        # notice a pid difference and block waiting for the first thread to
+        # release _fork_lock. when each of these threads eventually acquire
+        # _fork_lock, they will notice that another thread already called
+        # reset() and they will immediately release _fork_lock and continue on.
+        self.pid = os.getpid()
 
     def _checkpid(self):
+        # _checkpid() attempts to keep ConnectionPool fork-safe on modern
+        # systems. this is called by all ConnectionPool methods that
+        # manipulate the pool's state such as get_connection() and release().
+        #
+        # _checkpid() determines whether the process has forked by comparing
+        # the current process id to the process id saved on the ConnectionPool
+        # instance. if these values are the same, _checkpid() simply returns.
+        #
+        # when the process ids differ, _checkpid() assumes that the process
+        # has forked and that we're now running in the child process. the child
+        # process cannot use the parent's file descriptors (e.g., sockets).
+        # therefore, when _checkpid() sees the process id change, it calls
+        # reset() in order to reinitialize the child's ConnectionPool. this
+        # will cause the child to make all new connection objects.
+        #
+        # _checkpid() is protected by self._fork_lock to ensure that multiple
+        # threads in the child process do not call reset() multiple times.
+        #
+        # there is an extremely small chance this could fail in the following
+        # scenario:
+        #   1. process A calls _checkpid() for the first time and acquires
+        #      self._fork_lock.
+        #   2. while holding self._fork_lock, process A forks (the fork()
+        #      could happen in a different thread owned by process A)
+        #   3. process B (the forked child process) inherits the
+        #      ConnectionPool's state from the parent. that state includes
+        #      a locked _fork_lock. process B will not be notified when
+        #      process A releases the _fork_lock and will thus never be
+        #      able to acquire the _fork_lock.
+        #
+        # to mitigate this possible deadlock, _checkpid() will only wait 5
+        # seconds to acquire _fork_lock. if _fork_lock cannot be acquired in
+        # that time it is assumed that the child is deadlocked and a
+        # redis.ChildDeadlockedError error is raised.
         if self.pid != os.getpid():
-            with self._check_lock:
-                if self.pid == os.getpid():
-                    # another thread already did the work while we waited
-                    # on the lock.
-                    return
-                self.disconnect()
-                self.reset()
+            # python 2.7 doesn't support a timeout option to lock.acquire()
+            # we have to mimic lock timeouts ourselves.
+            timeout_at = time() + 5
+            acquired = False
+            while time() < timeout_at:
+                acquired = self._fork_lock.acquire(False)
+                if acquired:
+                    break
+            if not acquired:
+                raise ChildDeadlockedError
+            # reset() the instance for the new process if another thread
+            # hasn't already done so
+            try:
+                if self.pid != os.getpid():
+                    self.reset()
+            finally:
+                self._fork_lock.release()
 
     def get_connection(self, command_name, *keys, **options):
         "Get a connection from the pool"
         self._checkpid()
-        try:
-            connection = self._available_connections.pop()
-        except IndexError:
-            connection = self.make_connection()
-        self._in_use_connections.add(connection)
-        return connection
+        with self._lock:
+            try:
+                connection = self._available_connections.pop()
+            except IndexError:
+                connection = self.make_connection()
+            self._in_use_connections.add(connection)
+            try:
+                # ensure this connection is connected to Redis
+                connection.connect()
+                # connections that the pool provides should be ready to send
+                # a command. if not, the connection was either returned to the
+                # pool before all data has been read or the socket has been
+                # closed. either way, reconnect and verify everything is good.
+                try:
+                    if connection.can_read():
+                        raise ConnectionError('Connection has data')
+                except ConnectionError:
+                    connection.disconnect()
+                    connection.connect()
+                    if connection.can_read():
+                        raise ConnectionError('Connection not ready')
+            except BaseException:
+                # release the connection back to the pool so that we don't
+                # leak it
+                self.release(connection)
+                raise
+
+            return connection
 
     def get_encoder(self):
         "Return an encoder based on encoding settings"
@@ -985,17 +1219,20 @@ class ConnectionPool(object):
     def release(self, connection):
         "Releases the connection back to the pool"
         self._checkpid()
-        if connection.pid != self.pid:
-            return
-        self._in_use_connections.remove(connection)
-        self._available_connections.append(connection)
+        with self._lock:
+            if connection.pid != self.pid:
+                return
+            self._in_use_connections.remove(connection)
+            self._available_connections.append(connection)
 
     def disconnect(self):
         "Disconnects all connections in the pool"
-        all_conns = chain(self._available_connections,
-                          self._in_use_connections)
-        for connection in all_conns:
-            connection.disconnect()
+        self._checkpid()
+        with self._lock:
+            all_conns = chain(self._available_connections,
+                              self._in_use_connections)
+            for connection in all_conns:
+                connection.disconnect()
 
 
 class BlockingConnectionPool(ConnectionPool):
@@ -1043,9 +1280,6 @@ class BlockingConnectionPool(ConnectionPool):
             **connection_kwargs)
 
     def reset(self):
-        self.pid = os.getpid()
-        self._check_lock = threading.Lock()
-
         # Create and fill up a thread safe queue with ``None`` values.
         self.pool = self.queue_class(self.max_connections)
         while True:
@@ -1057,6 +1291,17 @@ class BlockingConnectionPool(ConnectionPool):
         # Keep a list of actual connection instances so that we can
         # disconnect them later.
         self._connections = []
+
+        # this must be the last operation in this method. while reset() is
+        # called when holding _fork_lock, other threads in this process
+        # can call _checkpid() which compares self.pid and os.getpid() without
+        # holding any lock (for performance reasons). keeping this assignment
+        # as the last operation ensures that those other threads will also
+        # notice a pid difference and block waiting for the first thread to
+        # release _fork_lock. when each of these threads eventually acquire
+        # _fork_lock, they will notice that another thread already called
+        # reset() and they will immediately release _fork_lock and continue on.
+        self.pid = os.getpid()
 
     def make_connection(self):
         "Make a fresh connection."
@@ -1094,6 +1339,26 @@ class BlockingConnectionPool(ConnectionPool):
         if connection is None:
             connection = self.make_connection()
 
+        try:
+            # ensure this connection is connected to Redis
+            connection.connect()
+            # connections that the pool provides should be ready to send
+            # a command. if not, the connection was either returned to the
+            # pool before all data has been read or the socket has been
+            # closed. either way, reconnect and verify everything is good.
+            try:
+                if connection.can_read():
+                    raise ConnectionError('Connection has data')
+            except ConnectionError:
+                connection.disconnect()
+                connection.connect()
+                if connection.can_read():
+                    raise ConnectionError('Connection not ready')
+        except BaseException:
+            # release the connection back to the pool so that we don't leak it
+            self.release(connection)
+            raise
+
         return connection
 
     def release(self, connection):
@@ -1113,5 +1378,6 @@ class BlockingConnectionPool(ConnectionPool):
 
     def disconnect(self):
         "Disconnects all connections in the pool."
+        self._checkpid()
         for connection in self._connections:
             connection.disconnect()

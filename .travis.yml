@@ -1,24 +1,42 @@
 language: python
-python:
-  - "3.6"
-  - "3.5"
-  - "3.4"
-  - "3.3"
-  - "2.7"
-  - "2.6"
-services:
-  - redis-server
-env:
-  - TEST_HIREDIS=0
-  - TEST_HIREDIS=1
-install:
-  - pip install -e .
-  - "if [[ $TEST_PEP8 == '1' ]]; then pip install pep8; fi"
-  - "if [[ $TEST_HIREDIS == '1' ]]; then pip install hiredis; fi"
-script: "if [[ $TEST_PEP8 == '1' ]]; then pep8 --repeat --show-source --exclude=.venv,.tox,dist,docs,build,*.egg .; else python setup.py test; fi"
+cache: pip
 matrix:
   include:
-    - python: "2.7"
-      env: TEST_PEP8=1
-    - python: "3.6"
-      env: TEST_PEP8=1
+    - env: TOXENV=flake8
+    - python: 2.7
+      env: TOXENV=py27-plain
+    - python: 2.7
+      env: TOXENV=py27-hiredis
+    - python: 3.5
+      env: TOXENV=py35-plain
+    - python: 3.5
+      env: TOXENV=py35-hiredis
+    - python: 3.6
+      env: TOXENV=py36-plain
+    - python: 3.6
+      env: TOXENV=py36-hiredis
+    - python: 3.7
+      env: TOXENV=py37-plain
+    - python: 3.7
+      env: TOXENV=py37-hiredis
+    - python: 3.8
+      env: TOXENV=py38-plain
+    - python: 3.8
+      env: TOXENV=py38-hiredis
+    - python: pypy
+      env: TOXENV=pypy-plain
+    - python: pypy
+      env: TOXENV=pypy-hiredis
+    - python: pypy3
+      env: TOXENV=pypy3-plain
+    - python: pypy3
+      env: TOXENV=pypy3-hiredis
+before_install:
+  - wget https://github.com/antirez/redis/archive/6.0-rc1.tar.gz && mkdir redis_install && tar -xvzf 6.0-rc1.tar.gz -C redis_install && cd redis_install/redis-6.0-rc1 && make && src/redis-server --daemonize yes && cd ../..
+  - redis-cli info
+install:
+  - pip install codecov tox
+script:
+  - tox
+after_success:
+  - "if [[ $TOXENV != 'flake8' ]]; then codecov; fi"

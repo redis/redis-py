@@ -1,3 +1,5 @@
+import random
+
 import pytest
 import redis
 from mock import Mock
@@ -5,60 +7,96 @@ from mock import Mock
 from distutils.version import StrictVersion
 
 
-_REDIS_VERSIONS = {}
+# redis 6 release candidates report a version number of 5.9.x. Use this
+# constant for skip_if decorators as a placeholder until 6.0.0 is officially
+# released
+REDIS_6_VERSION = '5.9.0'
 
 
-def get_version(**kwargs):
-    params = {'host': 'localhost', 'port': 6379, 'db': 9}
-    params.update(kwargs)
-    key = '%s:%s' % (params['host'], params['port'])
-    if key not in _REDIS_VERSIONS:
-        client = redis.Redis(**params)
-        _REDIS_VERSIONS[key] = client.info()['redis_version']
-        client.connection_pool.disconnect()
-    return _REDIS_VERSIONS[key]
+REDIS_INFO = {}
+default_redis_url = "redis://localhost:6379/9"
 
 
-def _get_client(cls, request=None, **kwargs):
-    params = {'host': 'localhost', 'port': 6379, 'db': 9}
-    params.update(kwargs)
-    client = cls(**params)
-    client.flushdb()
+def pytest_addoption(parser):
+    parser.addoption('--redis-url', default=default_redis_url,
+                     action="store",
+                     help="Redis connection string,"
+                          " defaults to `%(default)s`")
+
+
+def _get_info(redis_url):
+    client = redis.Redis.from_url(redis_url)
+    info = client.info()
+    client.connection_pool.disconnect()
+    return info
+
+
+def pytest_sessionstart(session):
+    redis_url = session.config.getoption("--redis-url")
+    info = _get_info(redis_url)
+    version = info["redis_version"]
+    arch_bits = info["arch_bits"]
+    REDIS_INFO["version"] = version
+    REDIS_INFO["arch_bits"] = arch_bits
+
+
+def skip_if_server_version_lt(min_version):
+    redis_version = REDIS_INFO["version"]
+    check = StrictVersion(redis_version) < StrictVersion(min_version)
+    return pytest.mark.skipif(
+        check,
+        reason="Redis version required >= {}".format(min_version))
+
+
+def skip_if_server_version_gte(min_version):
+    redis_version = REDIS_INFO["version"]
+    check = StrictVersion(redis_version) >= StrictVersion(min_version)
+    return pytest.mark.skipif(
+        check,
+        reason="Redis version required < {}".format(min_version))
+
+
+def skip_unless_arch_bits(arch_bits):
+    return pytest.mark.skipif(REDIS_INFO["arch_bits"] != arch_bits,
+                              reason="server is not {}-bit".format(arch_bits))
+
+
+def _get_client(cls, request, single_connection_client=True, **kwargs):
+    redis_url = request.config.getoption("--redis-url")
+    client = cls.from_url(redis_url, **kwargs)
+    if single_connection_client:
+        client = client.client()
     if request:
         def teardown():
-            client.flushdb()
+            try:
+                client.flushdb()
+            except redis.ConnectionError:
+                # handle cases where a test disconnected a client
+                # just manually retry the flushdb
+                client.flushdb()
+            client.close()
             client.connection_pool.disconnect()
         request.addfinalizer(teardown)
     return client
 
 
-def skip_if_server_version_lt(min_version):
-    check = StrictVersion(get_version()) < StrictVersion(min_version)
-    return pytest.mark.skipif(check, reason="")
-
-
-def skip_if_server_version_gte(min_version):
-    check = StrictVersion(get_version()) >= StrictVersion(min_version)
-    return pytest.mark.skipif(check, reason="")
+@pytest.fixture()
+def r(request):
+    with _get_client(redis.Redis, request) as client:
+        yield client
 
 
 @pytest.fixture()
-def r(request, **kwargs):
-    return _get_client(redis.Redis, request, **kwargs)
-
-
-@pytest.fixture()
-def sr(request, **kwargs):
-    return _get_client(redis.StrictRedis, request, **kwargs)
+def r2(request):
+    "A second client for tests that need multiple"
+    with _get_client(redis.Redis, request) as client:
+        yield client
 
 
 def _gen_cluster_mock_resp(r, response):
-    mock_connection_pool = Mock()
     connection = Mock()
-    response = response
     connection.read_response.return_value = response
-    mock_connection_pool.get_connection.return_value = connection
-    r.connection_pool = mock_connection_pool
+    r.connection = connection
     return r
 
 
@@ -116,3 +154,22 @@ def mock_cluster_resp_slaves(request, **kwargs):
                 "slave 19efe5a631f3296fdf21a5441680f893e8cc96ec 0 "
                 "1447836789290 3 connected']")
     return _gen_cluster_mock_resp(r, response)
+
+
+def wait_for_command(client, monitor, command):
+    # issue a command with a key name that's local to this process.
+    # if we find a command with our key before the command we're waiting
+    # for, something went wrong
+    redis_version = REDIS_INFO["version"]
+    if StrictVersion(redis_version) >= StrictVersion('5.0.0'):
+        id_str = str(client.client_id())
+    else:
+        id_str = '%08x' % random.randrange(2**32)
+    key = '__REDIS-PY-%s__' % id_str
+    client.get(key)
+    while True:
+        monitor_response = monitor.next_command()
+        if command in monitor_response['command']:
+            return monitor_response
+        if key in monitor_response['command']:
+            return None

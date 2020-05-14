@@ -31,7 +31,7 @@ def parse_args():
 
 def run():
     args = parse_args()
-    r = redis.StrictRedis()
+    r = redis.Redis()
     r.flushall()
     set_str(conn=r, num=args.n, pipeline_size=args.P, data_size=args.s)
     set_int(conn=r, num=args.n, pipeline_size=args.P, data_size=args.s)
@@ -54,7 +54,7 @@ def timer(func):
             count = kwargs['num']
         else:
             count = args[1]
-        print('{0} - {1} Requests'.format(func.__name__, count))
+        print('{} - {} Requests'.format(func.__name__, count))
         print('Duration  = {}'.format(duration))
         print('Rate = {}'.format(count/duration))
         print('')
@@ -194,6 +194,7 @@ def hmset(conn, num, pipeline_size, data_size):
 
     if pipeline_size > 1:
         conn.execute()
+
 
 if __name__ == '__main__':
     run()
