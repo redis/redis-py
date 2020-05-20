@@ -3410,10 +3410,13 @@ class PubSub(object):
         self.reset()
 
     def __del__(self):
-        # if this object went out of scope prior to shutting down
-        # subscriptions, close the connection manually before
-        # returning it to the connection pool
-        self.reset()
+        try:
+            # if this object went out of scope prior to shutting down
+            # subscriptions, close the connection manually before
+            # returning it to the connection pool
+            self.reset()
+        except Exception:
+            pass
 
     def reset(self):
         if self.connection:
@@ -3762,7 +3765,10 @@ class Pipeline(Redis):
         self.reset()
 
     def __del__(self):
-        self.reset()
+        try:
+            self.reset()
+        except Exception:
+            pass
 
     def __len__(self):
         return len(self.command_stack)

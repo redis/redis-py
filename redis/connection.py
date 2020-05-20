@@ -296,7 +296,10 @@ class PythonParser(BaseParser):
         self._buffer = None
 
     def __del__(self):
-        self.on_disconnect()
+        try:
+            self.on_disconnect()
+        except Exception:
+            pass
 
     def on_connect(self, connection):
         "Called when the socket connects"
@@ -374,7 +377,10 @@ class HiredisParser(BaseParser):
             self._buffer = bytearray(socket_read_size)
 
     def __del__(self):
-        self.on_disconnect()
+        try:
+            self.on_disconnect()
+        except Exception:
+            pass
 
     def on_connect(self, connection):
         self._sock = connection._sock
@@ -534,7 +540,10 @@ class Connection(object):
         return pieces
 
     def __del__(self):
-        self.disconnect()
+        try:
+            self.disconnect()
+        except Exception:
+            pass
 
     def register_connect_callback(self, callback):
         self._connect_callbacks.append(callback)
