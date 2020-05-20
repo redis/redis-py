@@ -2,6 +2,8 @@
     * Restore try/except clauses to __del__ methods. These will be removed
       in 4.0 when more explicit resource management if enforced. #1339
     * Update the master_address when Sentinels promote a new master. #847
+    * Update SentinelConnectionPool to not forcefully disconnect other in-use
+      connections which can negatively affect threaded applications. #1345
 * 3.5.2 (May 14, 2020)
     * Tune the locking in ConnectionPool.get_connection so that the lock is
       not held while waiting for the socket to establish and validate the
