@@ -1,8 +1,214 @@
+import contextlib
 import threading
 import time as mod_time
 import uuid
+
+from importlib_resources import files
+
 from redis.exceptions import LockError, LockNotOwnedError
 from redis.utils import dummy
+
+try:
+    # This should exist on py3.3+
+    # See: https://www.python.org/dev/peps/pep-0418/
+    now = mod_time.monotonic
+except ImportError:
+    now = mod_time.time
+
+
+def exponential_back_off_delay(attempts, last_delay, max_delay=None,
+                               initial_delay=0.1, mult_factor=2):
+    if attempts == 0 or last_delay is None:
+        delay_secs = initial_delay
+    else:
+        delay_secs = last_delay * mult_factor
+    if max_delay is None:
+        return max(0, delay_secs)
+    else:
+        return max(0, min(delay_secs, max_delay))
+
+
+class ReaderWriterLock(object):
+    """
+    A shared, distributed reader/writer Lock. Using Redis for
+    locking allows the ReaderWriterLock
+    to be shared across processes and/or machines.
+
+    It's left to the user to resolve deadlock issues and make sure
+    multiple clients play nicely together.
+    """
+    LUA_PACK = "redis.lua"
+    LUA_SCRIPTS = {
+        'acquire_write_lock': 'acquire_write_lock.lua',
+        'release_write_lock': 'release_write_lock.lua',
+        'acquire_read_lock': 'acquire_read_lock.lua',
+        'release_read_lock': 'release_read_lock.lua',
+    }
+
+    def __init__(self, redis, name, timeout=None, thread_local=True):
+        self.redis = redis
+        self.name = name
+        self.timeout = timeout
+        self.thread_local = bool(thread_local)
+        self.local = threading.local() if self.thread_local else dummy()
+        if not self.thread_local:
+            self.local.token = str(uuid.uuid4())
+        else:
+            self.local.token = None
+        self._scripts = {}
+        self.register_scripts()
+
+    def register_scripts(self):
+        for n, fn in self.LUA_SCRIPTS.items():
+            n_path = files(self.LUA_PACK).joinpath(fn)
+            self._scripts[n] = self.redis.register_script(n_path.read_text())
+
+    def _get_token(self):
+        token = self.local.token
+        if not token:
+            token = str(uuid.uuid4())
+            self.local.token = token
+        return token
+
+    def _try_get_write_lock(self):
+        script = self._scripts["acquire_write_lock"]
+        token = self._get_token()
+        res = int(script(keys=[self.name], args=[token, self.timeout]))
+        if res == -1:
+            raise LockAcquireError("Something went wrong"
+                                   " acquiring write lock with"
+                                   " key '%s' (value setting with"
+                                   " timeout %s failed)" % (self.name,
+                                                            self.timeout))
+        return bool(res)
+
+    def _try_release_write_lock(self):
+        script = self._scripts["release_write_lock"]
+        token = self._get_token()
+        res = int(script(keys=[self.name], args=[token]))
+        if res == -1:
+            raise LockReleaseError("Key data at '%s' was not deleted"
+                                   " correctly" % (self.name))
+        if res == 0:
+            raise LockReleaseError("Key data at '%s' no longer"
+                                   " exists" % (self.name))
+        if res == 2:
+            raise LockReleaseError("Key data at '%s' switched to"
+                                   " reader lock while holding a"
+                                   " writer lock" % (self.name))
+        if res == 3:
+            raise LockReleaseError("Key writer lock owner at '%s' is"
+                                   " no longer expected"
+                                   " token '%s'" % (self.name, token))
+        # Catch all to trap anything not success.
+        if res != 1:
+            raise LockReleaseError("Unexpected return %s when"
+                                   " releasing write"
+                                   " lock on '%s'" % (res, self.name))
+
+    def _try_get_read_lock(self):
+        script = self._scripts["acquire_read_lock"]
+        token = self._get_token()
+        res = int(script(keys=[self.name], args=[token, self.timeout]))
+        if res == -1:
+            raise LockAcquireError("Something went wrong"
+                                   " acquiring read lock with"
+                                   " key '%s' (value setting with"
+                                   " ttl %s failed)" % (self.name,
+                                                        self.timeout))
+        return bool(res)
+
+    def _try_release_read_lock(self):
+        script = self._scripts["release_read_lock"]
+        token = self._get_token()
+        res = int(script(keys=[self.name], args=[token, self.timeout]))
+        if res == -2:
+            raise LockReleaseError("Key data at '%s' was not"
+                                   " set correctly" % (self.name))
+        if res == -1:
+            raise LockReleaseError("Key data at '%s' was not"
+                                   " deleted correctly" % (self.name))
+        if res == 0:
+            raise LockReleaseError("Key data at '%s' no longer"
+                                   " exists" % (self.name))
+        if res == 1:
+            raise LockReleaseError("Key data at '%s' switched to"
+                                   " writer lock while holding"
+                                   " a reader lock" % (self.name))
+        if res == 2:
+            raise LockReleaseError("Reader token '%s' no longer"
+                                   " exists (or never existed)"
+                                   " in key data at '%s'" % (token,
+                                                             self.name))
+        # Catch all to trap anything not success.
+        if res not in (3, 4):
+            raise LockReleaseError("Unexpected return %s when"
+                                   " releasing read lock"
+                                   " on '%s'" % (res, self.name))
+
+    @contextlib.contextmanager
+    def read_locked(self, timeout=None, delay_func=None):
+        if delay_func is None:
+            delay_func = exponential_back_off_delay
+        attempts = 0
+        last_delay_secs = None
+        stop_trying_at = None
+        started_at = None
+        if timeout is not None:
+            started_at = now()
+            stop_trying_at = started_at + timeout
+        while True:
+            if stop_trying_at is not None and now() >= stop_trying_at:
+                elapsed = now() - started_at
+                raise LockAcquireTimeoutError("Read lock not acquired"
+                                              " after %s seconds" % (elapsed))
+            if not self._try_get_read_lock():
+                leftover = None
+                if stop_trying_at is not None:
+                    leftover = max(0, stop_trying_at - now())
+                delay_secs = delay_func(attempts,
+                                        last_delay_secs, max_delay=leftover)
+                attempts += 1
+                mod_time.sleep(delay_secs)
+                last_delay_secs = delay_secs
+            else:
+                break
+        try:
+            yield
+        finally:
+            self._try_release_read_lock()
+
+    @contextlib.contextmanager
+    def write_locked(self, timeout=None, delay_func=None):
+        if delay_func is None:
+            delay_func = exponential_back_off_delay
+        attempts = 0
+        last_delay_secs = None
+        stop_trying_at = None
+        started_at = None
+        if timeout is not None:
+            started_at = now()
+            stop_trying_at = started_at + timeout
+        while True:
+            if stop_trying_at is not None and now() >= stop_trying_at:
+                elapsed = now() - started_at
+                raise LockAcquireTimeoutError("Write lock not acquired"
+                                              " after %s seconds" % (elapsed))
+            if not self._try_get_write_lock():
+                leftover = None
+                if stop_trying_at is not None:
+                    leftover = max(0, stop_trying_at - now())
+                delay_secs = delay_func(attempts,
+                                        last_delay_secs, max_delay=leftover)
+                attempts += 1
+                mod_time.sleep(delay_secs)
+                last_delay_secs = delay_secs
+            else:
+                break
+        try:
+            yield
+        finally:
+            self._try_release_write_lock()
 
 
 class Lock(object):
