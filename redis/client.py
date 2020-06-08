@@ -3344,7 +3344,10 @@ class Monitor(object):
         m = self.monitor_re.match(command_data)
         db_id, client_info, command = m.groups()
         command = ' '.join(self.command_re.findall(command))
-        command = command.replace('\\"', '"').replace('\\\\', '\\')
+        # Redis escapes double quotes because each piece of the command
+        # string is surrounded by double quotes. We don't have that
+        # requirement so remove the escaping and leave the quote.
+        command = command.replace('\\"', '"')
 
         if client_info == 'lua':
             client_address = 'lua'
