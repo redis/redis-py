@@ -1052,6 +1052,36 @@ class TestRedisCommands(object):
         assert r.rpush('a', '3', '4') == 4
         assert r.lrange('a', 0, -1) == [b'1', b'2', b'3', b'4']
 
+    def test_lpos(self, r):
+        assert r.rpush('a', 'a', 'b', 'c', '1', '2', '3', 'c', 'c') == 8
+        assert r.lpos('a', 'a') == 0
+        assert r.lpos('a', 'c') == 2
+
+        assert r.lpos('a', 'c', first=1) == 2
+        assert r.lpos('a', 'c', first=2) == 6
+        assert r.lpos('a', 'c', first=4) is None
+        assert r.lpos('a', 'c', first=-1) == 7
+        assert r.lpos('a', 'c', first=-2) == 6
+
+        assert r.lpos('a', 'c', count=0) == [2, 6, 7]
+        assert r.lpos('a', 'c', count=1) == [2]
+        assert r.lpos('a', 'c', count=2) == [2, 6]
+        assert r.lpos('a', 'c', count=100) == [2, 6, 7]
+
+        assert r.lpos('a', 'c', count=0, first=2) == [6, 7]
+        assert r.lpos('a', 'c', count=2, first=-1) == [7, 6]
+
+        assert r.lpos('axxx', 'c', count=0, first=2) == []
+
+        assert r.lpos('a', 'x', count=2, first=-1) == []
+        assert r.lpos('a', 'x', first=-1) is None
+
+        assert r.lpos('a', 'a', count=0, maxlen=1) == [0]
+        assert r.lpos('a', 'c', count=0, maxlen=1) == []
+        assert r.lpos('a', 'c', count=0, maxlen=3) == [2]
+        assert r.lpos('a', 'c', count=0, maxlen=3, first=-1) == [7, 6]
+        assert r.lpos('a', 'c', count=0, maxlen=7, first=2) == [6]
+
     def test_rpushx(self, r):
         assert r.rpushx('a', 'b') == 0
         assert r.lrange('a', 0, -1) == []

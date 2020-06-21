@@ -2030,6 +2030,39 @@ class Redis(object):
         "Push ``value`` onto the tail of the list ``name`` if ``name`` exists"
         return self.execute_command('RPUSHX', name, value)
 
+    def lpos(self, name, value, first=None, count=None, maxlen=None):
+        """
+        Get position of ``value`` withn the list ``name``
+
+         ``first`` "rank" is the position of the match, so if it is 1, the
+         first match is returned, if it is 2 the second match is returned and
+         so forth.  It is 1 by default. If negative has the same meaning but
+         the search is performed starting from the end of the list.
+
+         If ``count`` is given, instead of returning the single element, a list
+         of all the matching elements up to "num-matches" are returned.
+         ``count`` can be combiled with ``count`` in order to returning only
+         the element starting from the Nth. If ``count`` is zero, all the
+         matching elements are returned.
+
+         ``maxlen`` tells the command to scan a max of len elements. If zero
+         (the default), all the elements in the list are scanned if needed.
+
+         The returned elements indexes are always referring to what ``lindex``
+         would return. So first element from head is 0, and so forth.
+        """
+        pieces = [name, value]
+        if first is not None:
+            pieces.extend(['FIRST', first])
+
+        if count is not None:
+            pieces.extend(['COUNT', count])
+
+        if maxlen is not None:
+            pieces.extend(['MAXLEN', maxlen])
+
+        return self.execute_command('LPOS', *pieces)
+
     def sort(self, name, start=None, num=None, by=None, get=None,
              desc=False, alpha=False, store=None, groups=False):
         """
