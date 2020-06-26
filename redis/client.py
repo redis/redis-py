@@ -993,7 +993,7 @@ class Redis(object):
         ``passwords`` if specified is a list of plain text passwords
         to add to or remove from the user. Each password must be prefixed with
         a '+' to add or a '-' to remove. For convenience, the value of
-        ``add_passwords`` can be a simple prefixed string when adding or
+        ``passwords`` can be a simple prefixed string when adding or
         removing a single password.
 
         ``hashed_passwords`` if specified is a list of SHA-256 hashed passwords
