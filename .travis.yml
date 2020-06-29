@@ -32,7 +32,7 @@ matrix:
     - python: pypy3
       env: TOXENV=pypy3-hiredis
 before_install:
-  - wget https://github.com/antirez/redis/archive/6.0-rc1.tar.gz && mkdir redis_install && tar -xvzf 6.0-rc1.tar.gz -C redis_install && cd redis_install/redis-6.0-rc1 && make && src/redis-server --daemonize yes && cd ../..
+  - wget https://github.com/antirez/redis/archive/6.0.5.tar.gz && mkdir redis_install && tar -xvzf 6.0.5.tar.gz -C redis_install && cd redis_install/redis-6.0.5 && make && src/redis-server --daemonize yes && cd ../..
   - redis-cli info
 install:
   - pip install codecov tox
