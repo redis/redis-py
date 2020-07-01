@@ -22,7 +22,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
     WatchError,
-    ModuleError
+    ModuleError,
 )
 
 SYM_EMPTY = b''
@@ -665,7 +665,8 @@ class Redis(object):
             'ZSCAN': parse_zscan,
             'MODULE LOAD': parse_module_result,
             'MODULE UNLOAD': parse_module_result,
-            'MODULE LIST': lambda r: [pairs_to_dict(l) for l in r]
+            'MODULE LIST': lambda response: [pairs_to_dict(module)
+                                             for module in response],
         }
     )
 

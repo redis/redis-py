@@ -29,7 +29,7 @@ from redis.exceptions import (
     RedisError,
     ResponseError,
     TimeoutError,
-    ModuleError
+    ModuleError,
 )
 from redis.utils import HIREDIS_AVAILABLE
 
@@ -158,7 +158,7 @@ class BaseParser(object):
             MODULE_LOAD_ERROR: ModuleError,
             MODULE_EXPORTS_DATA_TYPES_ERROR: ModuleError,
             NO_SUCH_MODULE_ERROR: ModuleError,
-            MODULE_UNLOAD_NOT_POSSIBLE_ERROR: ModuleError
+            MODULE_UNLOAD_NOT_POSSIBLE_ERROR: ModuleError,
         },
         'EXECABORT': ExecAbortError,
         'LOADING': BusyLoadingError,
