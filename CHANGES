@@ -459,7 +459,7 @@
     * Fixed a bug where some encodings (like utf-16) were unusable on Python 3
       as command names and literals would get encoded.
     * Added an SSLConnection class that allows for secure connections through
-      stunnel or other means. Construct and SSL connection with the sll=True
+      stunnel or other means. Construct an SSL connection with the ssl=True
       option on client classes, using the rediss:// scheme from an URL, or
       by passing the SSLConnection class to a connection pool's
       connection_class argument. Thanks https://github.com/oranagra.
