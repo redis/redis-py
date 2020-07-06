@@ -1645,6 +1645,10 @@ class TestRedisCommands(object):
         # key inside of hash that doesn't exist returns null value
         assert r.hget('a', 'b') is None
 
+        # keys with bool(key) == False
+        assert r.hset('a', 0, 10) == 1
+        assert r.hset('a', '', 10) == 1
+
     def test_hset_with_multi_key_values(self, r):
         r.hset('a', mapping={'1': 1, '2': 2, '3': 3})
         assert r.hget('a', '1') == b'1'
@@ -2689,7 +2693,7 @@ class TestBinarySave(object):
             r.rpush(key, *value)
 
         # check that KEYS returns all the keys as they are
-        assert sorted(r.keys('*')) == sorted(list(iterkeys(mapping)))
+        assert sorted(r.keys('*')) == sorted(iterkeys(mapping))
 
         # check that it is possible to get list content by key name
         for key, value in iteritems(mapping):

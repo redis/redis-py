@@ -1,7 +1,6 @@
 from __future__ import unicode_literals
 from itertools import chain
 import datetime
-import sys
 import warnings
 import time
 import threading
@@ -1060,7 +1059,7 @@ class Redis(object):
         ``passwords`` if specified is a list of plain text passwords
         to add to or remove from the user. Each password must be prefixed with
         a '+' to add or a '-' to remove. For convenience, the value of
-        ``add_passwords`` can be a simple prefixed string when adding or
+        ``passwords`` can be a simple prefixed string when adding or
         removing a single password.
 
         ``hashed_passwords`` if specified is a list of SHA-256 hashed passwords
@@ -3101,14 +3100,14 @@ class Redis(object):
     def hset(self, name, key=None, value=None, mapping=None):
         """
         Set ``key`` to ``value`` within hash ``name``,
-        Use ``mappings`` keyword args to set multiple key/value pairs
-        for a hash ``name``.
+        ``mapping`` accepts a dict of key/value pairs that that will be
+        added to hash ``name``.
         Returns the number of fields that were added.
         """
-        if not key and not mapping:
+        if key is None and not mapping:
             raise DataError("'hset' with no key value pairs")
         items = []
-        if key:
+        if key is not None:
             items.extend((key, value))
         if mapping:
             for pair in mapping.items():
@@ -3411,7 +3410,10 @@ class Monitor(object):
         m = self.monitor_re.match(command_data)
         db_id, client_info, command = m.groups()
         command = ' '.join(self.command_re.findall(command))
-        command = command.replace('\\"', '"').replace('\\\\', '\\')
+        # Redis escapes double quotes because each piece of the command
+        # string is surrounded by double quotes. We don't have that
+        # requirement so remove the escaping and leave the quote.
+        command = command.replace('\\"', '"')
 
         if client_info == 'lua':
             client_address = 'lua'
@@ -3477,10 +3479,13 @@ class PubSub(object):
         self.reset()
 
     def __del__(self):
-        # if this object went out of scope prior to shutting down
-        # subscriptions, close the connection manually before
-        # returning it to the connection pool
-        self.reset()
+        try:
+            # if this object went out of scope prior to shutting down
+            # subscriptions, close the connection manually before
+            # returning it to the connection pool
+            self.reset()
+        except Exception:
+            pass
 
     def reset(self):
         if self.connection:
@@ -3829,7 +3834,10 @@ class Pipeline(Redis):
         self.reset()
 
     def __del__(self):
-        self.reset()
+        try:
+            self.reset()
+        except Exception:
+            pass
 
     def __len__(self):
         return len(self.command_stack)
@@ -3907,8 +3915,8 @@ class Pipeline(Redis):
             # indicates the user should retry this transaction.
             if self.watching:
                 self.reset()
-                raise WatchError("A ConnectionError occured on while watching "
-                                 "one or more keys")
+                raise WatchError("A ConnectionError occurred on while "
+                                 "watching one or more keys")
             # if retry_on_timeout is not set, or the error is not
             # a TimeoutError, raise it
             if not (conn.retry_on_timeout and isinstance(e, TimeoutError)):
@@ -3953,8 +3961,8 @@ class Pipeline(Redis):
         # the socket
         try:
             self.parse_response(connection, '_')
-        except ResponseError:
-            errors.append((0, sys.exc_info()[1]))
+        except ResponseError as e:
+            errors.append((0, e))
 
         # and all the other commands
         for i, command in enumerate(commands):
@@ -3963,10 +3971,9 @@ class Pipeline(Redis):
             else:
                 try:
                     self.parse_response(connection, '_')
-                except ResponseError:
-                    ex = sys.exc_info()[1]
-                    self.annotate_exception(ex, i + 1, command[0])
-                    errors.append((i, ex))
+                except ResponseError as e:
+                    self.annotate_exception(e, i + 1, command[0])
+                    errors.append((i, e))
 
         # parse the EXEC.
         try:
@@ -3974,7 +3981,7 @@ class Pipeline(Redis):
         except ExecAbortError:
             if errors:
                 raise errors[0][1]
-            raise sys.exc_info()[1]
+            raise
 
         # EXEC clears any watched keys
         self.watching = False
@@ -4016,8 +4023,8 @@ class Pipeline(Redis):
             try:
                 response.append(
                     self.parse_response(connection, args[0], **options))
-            except ResponseError:
-                response.append(sys.exc_info()[1])
+            except ResponseError as e:
+                response.append(e)
 
         if raise_on_error:
             self.raise_first_error(commands, response)
@@ -4085,8 +4092,8 @@ class Pipeline(Redis):
             # since this connection has died. raise a WatchError, which
             # indicates the user should retry this transaction.
             if self.watching:
-                raise WatchError("A ConnectionError occured on while watching "
-                                 "one or more keys")
+                raise WatchError("A ConnectionError occurred on while "
+                                 "watching one or more keys")
             # if retry_on_timeout is not set, or the error is not
             # a TimeoutError, raise it
             if not (conn.retry_on_timeout and isinstance(e, TimeoutError)):

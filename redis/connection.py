@@ -6,11 +6,10 @@ import errno
 import io
 import os
 import socket
-import sys
 import threading
 import warnings
 
-from redis._compat import (xrange, imap, byte_to_chr, unicode, long,
+from redis._compat import (xrange, imap, unicode, long,
                            nativestr, basestring, iteritems,
                            LifoQueue, Empty, Full, urlparse, parse_qs,
                            recv, recv_into, unquote, BlockingIOError,
@@ -297,7 +296,10 @@ class PythonParser(BaseParser):
         self._buffer = None
 
     def __del__(self):
-        self.on_disconnect()
+        try:
+            self.on_disconnect()
+        except Exception:
+            pass
 
     def on_connect(self, connection):
         "Called when the socket connects"
@@ -319,18 +321,17 @@ class PythonParser(BaseParser):
         return self._buffer and self._buffer.can_read(timeout)
 
     def read_response(self):
-        response = self._buffer.readline()
-        if not response:
+        raw = self._buffer.readline()
+        if not raw:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
-        byte, response = byte_to_chr(response[0]), response[1:]
+        byte, response = raw[:1], raw[1:]
 
-        if byte not in ('-', '+', ':', '$', '*'):
-            raise InvalidResponse("Protocol Error: %s, %s" %
-                                  (str(byte), str(response)))
+        if byte not in (b'-', b'+', b':', b'$', b'*'):
+            raise InvalidResponse("Protocol Error: %r" % raw)
 
         # server returned an error
-        if byte == '-':
+        if byte == b'-':
             response = nativestr(response)
             error = self.parse_error(response)
             # if the error is a ConnectionError, raise immediately so the user
@@ -343,19 +344,19 @@ class PythonParser(BaseParser):
             # necessary, so just return the exception instance here.
             return error
         # single value
-        elif byte == '+':
+        elif byte == b'+':
             pass
         # int value
-        elif byte == ':':
+        elif byte == b':':
             response = long(response)
         # bulk response
-        elif byte == '$':
+        elif byte == b'$':
             length = int(response)
             if length == -1:
                 return None
             response = self._buffer.read(length)
         # multi-bulk response
-        elif byte == '*':
+        elif byte == b'*':
             length = int(response)
             if length == -1:
                 return None
@@ -376,7 +377,10 @@ class HiredisParser(BaseParser):
             self._buffer = bytearray(socket_read_size)
 
     def __del__(self):
-        self.on_disconnect()
+        try:
+            self.on_disconnect()
+        except Exception:
+            pass
 
     def on_connect(self, connection):
         self._sock = connection._sock
@@ -536,7 +540,10 @@ class Connection(object):
         return pieces
 
     def __del__(self):
-        self.disconnect()
+        try:
+            self.disconnect()
+        except Exception:
+            pass
 
     def register_connect_callback(self, callback):
         self._connect_callbacks.append(callback)
@@ -552,8 +559,7 @@ class Connection(object):
             sock = self._connect()
         except socket.timeout:
             raise TimeoutError("Timeout connecting to server")
-        except socket.error:
-            e = sys.exc_info()[1]
+        except socket.error as e:
             raise ConnectionError(self._error_message(e))
 
         self._sock = sock
@@ -701,8 +707,7 @@ class Connection(object):
         except socket.timeout:
             self.disconnect()
             raise TimeoutError("Timeout writing to socket")
-        except socket.error:
-            e = sys.exc_info()[1]
+        except socket.error as e:
             self.disconnect()
             if len(e.args) == 1:
                 errno, errmsg = 'UNKNOWN', e.args[0]
@@ -711,7 +716,7 @@ class Connection(object):
                 errmsg = e.args[1]
             raise ConnectionError("Error %s while writing to socket. %s." %
                                   (errno, errmsg))
-        except:  # noqa: E722
+        except BaseException:
             self.disconnect()
             raise
 
@@ -736,12 +741,11 @@ class Connection(object):
             self.disconnect()
             raise TimeoutError("Timeout reading from %s:%s" %
                                (self.host, self.port))
-        except socket.error:
+        except socket.error as e:
             self.disconnect()
-            e = sys.exc_info()[1]
             raise ConnectionError("Error while reading from %s:%s : %s" %
                                   (self.host, self.port, e.args))
-        except:  # noqa: E722
+        except BaseException:
             self.disconnect()
             raise
 
@@ -1044,7 +1048,7 @@ class ConnectionPool(object):
                 url_options['connection_class'] = SSLConnection
         else:
             valid_schemes = ', '.join(('redis://', 'rediss://', 'unix://'))
-            raise ValueError('Redis URL must specify one of the following'
+            raise ValueError('Redis URL must specify one of the following '
                              'schemes (%s)' % valid_schemes)
 
         # last shot at the db value
@@ -1103,7 +1107,7 @@ class ConnectionPool(object):
         )
 
     def reset(self):
-        self._lock = threading.RLock()
+        self._lock = threading.Lock()
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()
@@ -1182,28 +1186,29 @@ class ConnectionPool(object):
             except IndexError:
                 connection = self.make_connection()
             self._in_use_connections.add(connection)
-            try:
-                # ensure this connection is connected to Redis
-                connection.connect()
-                # connections that the pool provides should be ready to send
-                # a command. if not, the connection was either returned to the
-                # pool before all data has been read or the socket has been
-                # closed. either way, reconnect and verify everything is good.
-                try:
-                    if connection.can_read():
-                        raise ConnectionError('Connection has data')
-                except ConnectionError:
-                    connection.disconnect()
-                    connection.connect()
-                    if connection.can_read():
-                        raise ConnectionError('Connection not ready')
-            except:  # noqa: E722
-                # release the connection back to the pool so that we don't
-                # leak it
-                self.release(connection)
-                raise
 
-            return connection
+        try:
+            # ensure this connection is connected to Redis
+            connection.connect()
+            # connections that the pool provides should be ready to send
+            # a command. if not, the connection was either returned to the
+            # pool before all data has been read or the socket has been
+            # closed. either way, reconnect and verify everything is good.
+            try:
+                if connection.can_read():
+                    raise ConnectionError('Connection has data')
+            except ConnectionError:
+                connection.disconnect()
+                connection.connect()
+                if connection.can_read():
+                    raise ConnectionError('Connection not ready')
+        except BaseException:
+            # release the connection back to the pool so that we don't
+            # leak it
+            self.release(connection)
+            raise
+
+        return connection
 
     def get_encoder(self):
         "Return an encoder based on encoding settings"
@@ -1225,18 +1230,43 @@ class ConnectionPool(object):
         "Releases the connection back to the pool"
         self._checkpid()
         with self._lock:
-            if connection.pid != self.pid:
-                return
-            self._in_use_connections.remove(connection)
-            self._available_connections.append(connection)
+            try:
+                self._in_use_connections.remove(connection)
+            except KeyError:
+                # Gracefully fail when a connection is returned to this pool
+                # that the pool doesn't actually own
+                pass
 
-    def disconnect(self):
-        "Disconnects all connections in the pool"
+            if self.owns_connection(connection):
+                self._available_connections.append(connection)
+            else:
+                # pool doesn't own this connection. do not add it back
+                # to the pool and decrement the count so that another
+                # connection can take its place if needed
+                self._created_connections -= 1
+                connection.disconnect()
+                return
+
+    def owns_connection(self, connection):
+        return connection.pid == self.pid
+
+    def disconnect(self, inuse_connections=True):
+        """
+        Disconnects connections in the pool
+
+        If ``inuse_connections`` is True, disconnect connections that are
+        current in use, potentially by other threads. Otherwise only disconnect
+        connections that are idle in the pool.
+        """
         self._checkpid()
         with self._lock:
-            all_conns = chain(self._available_connections,
-                              self._in_use_connections)
-            for connection in all_conns:
+            if inuse_connections:
+                connections = chain(self._available_connections,
+                                    self._in_use_connections)
+            else:
+                connections = self._available_connections
+
+            for connection in connections:
                 connection.disconnect()
 
 
@@ -1359,7 +1389,7 @@ class BlockingConnectionPool(ConnectionPool):
                 connection.connect()
                 if connection.can_read():
                     raise ConnectionError('Connection not ready')
-        except:  # noqa: E722
+        except BaseException:
             # release the connection back to the pool so that we don't leak it
             self.release(connection)
             raise
@@ -1370,7 +1400,13 @@ class BlockingConnectionPool(ConnectionPool):
         "Releases the connection back to the pool."
         # Make sure we haven't changed process.
         self._checkpid()
-        if connection.pid != self.pid:
+        if not self.owns_connection(connection):
+            # pool doesn't own this connection. do not add it back
+            # to the pool. instead add a None value which is a placeholder
+            # that will cause the pool to recreate the connection if
+            # its needed.
+            connection.disconnect()
+            self.pool.put_nowait(None)
             return
 
         # Put the connection back into the pool.

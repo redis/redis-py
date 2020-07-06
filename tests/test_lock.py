@@ -26,6 +26,13 @@ class TestLock(object):
 
     def test_lock_token(self, r):
         lock = self.get_lock(r, 'foo')
+        self._test_lock_token(r, lock)
+
+    def test_lock_token_thread_local_false(self, r):
+        lock = self.get_lock(r, 'foo', thread_local=False)
+        self._test_lock_token(r, lock)
+
+    def _test_lock_token(self, r, lock):
         assert lock.acquire(blocking=False, token='test')
         assert r.get('foo') == b'test'
         assert lock.local.token == b'test'
@@ -147,6 +154,14 @@ class TestLock(object):
         assert 8000 < r.pttl('foo') <= 10000
         assert lock.extend(10)
         assert 16000 < r.pttl('foo') <= 20000
+        lock.release()
+
+    def test_extend_lock_replace_ttl(self, r):
+        lock = self.get_lock(r, 'foo', timeout=10)
+        assert lock.acquire(blocking=False)
+        assert 8000 < r.pttl('foo') <= 10000
+        assert lock.extend(10, replace_ttl=True)
+        assert 8000 < r.pttl('foo') <= 10000
         lock.release()
 
     def test_extend_lock_float(self, r):

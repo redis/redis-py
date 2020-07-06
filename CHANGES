@@ -1,4 +1,17 @@
-* (in development)
+* 3.5.3 (June 1, 2020)
+    * Restore try/except clauses to __del__ methods. These will be removed
+      in 4.0 when more explicit resource management if enforced. #1339
+    * Update the master_address when Sentinels promote a new master. #847
+    * Update SentinelConnectionPool to not forcefully disconnect other in-use
+      connections which can negatively affect threaded applications. #1345
+* 3.5.2 (May 14, 2020)
+    * Tune the locking in ConnectionPool.get_connection so that the lock is
+      not held while waiting for the socket to establish and validate the
+      TCP connection.
+* 3.5.1 (May 9, 2020)
+    * Fix for HSET argument validation to allow any non-None key. Thanks
+      @AleksMat, #1337, #1341
+* 3.5.0 (April 29, 2020)
     * Removed exception trapping from __del__ methods. redis-py objects that
       hold various resources implement __del__ cleanup methods to release
       those resources when the object goes out of scope. This provides a
@@ -21,7 +34,14 @@
     * Reset the watched state of pipelines after calling exec. This saves
       a roundtrip to the server by not having to call UNWATCH within
       Pipeline.reset(). Thanks @nickgaya, #1299/#1302
-    * Add the KEEPTTL option for the SET command. Thanks @laixintao #1304/#1280
+    * Added the KEEPTTL option for the SET command. Thanks
+      @laixintao #1304/#1280
+    * Added the MEMORY STATS command. #1268
+    * Lock.extend() now has a new option, `replace_ttl`. When False (the
+      default), Lock.extend() adds the `additional_time` to the lock's existing
+      TTL. When replace_ttl=True, the lock's existing TTL is replaced with
+      the value of `additional_time`.
+    * Add testing and support for PyPy.
 * 3.4.1
     * Move the username argument in the Redis and Connection classes to the
       end of the argument list. This helps those poor souls that specify all

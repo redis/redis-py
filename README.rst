@@ -5,12 +5,22 @@ The Python interface to the Redis key-value store.
 
 .. image:: https://secure.travis-ci.org/andymccurdy/redis-py.svg?branch=master
         :target: https://travis-ci.org/andymccurdy/redis-py
-.. image:: https://readthedocs.org/projects/redis-py/badge/?version=latest&style=flat
-        :target: https://redis-py.readthedocs.io/en/latest/
+.. image:: https://readthedocs.org/projects/redis-py/badge/?version=stable&style=flat
+        :target: https://redis-py.readthedocs.io/en/stable/
 .. image:: https://badge.fury.io/py/redis.svg
         :target: https://pypi.org/project/redis/
 .. image:: https://codecov.io/gh/andymccurdy/redis-py/branch/master/graph/badge.svg
   :target: https://codecov.io/gh/andymccurdy/redis-py
+
+
+Python 2 Compatibility Note
+---------------------------
+
+redis-py 3.5.x will be the last version of redis-py that supports Python 2.
+The 3.5.x line will continue to get bug fixes and security patches that
+support Python 2 until August 1, 2020. redis-py 4.0 will be the next major
+version and will require Python 3.5+.
+
 
 Installation
 ------------
@@ -41,14 +51,14 @@ or from source:
 Getting Started
 ---------------
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> import redis
     >>> r = redis.Redis(host='localhost', port=6379, db=0)
     >>> r.set('foo', 'bar')
     True
     >>> r.get('foo')
-    'bar'
+    b'bar'
 
 By default, all responses are returned as `bytes` in Python 3 and `str` in
 Python 2. The user is responsible for decoding to Python 3 strings or Python 2
@@ -250,7 +260,7 @@ connection_pool argument of the Redis class. You may choose to do this in order
 to implement client side sharding or have fine-grain control of how
 connections are managed.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> pool = redis.ConnectionPool(host='localhost', port=6379, db=0)
     >>> r = redis.Redis(connection_pool=pool)
@@ -267,7 +277,7 @@ argument, which is a string to the unix domain socket file. Additionally, make
 sure the unixsocket parameter is defined in your redis.conf file. It's
 commented out by default.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> r = redis.Redis(unix_socket_path='/tmp/redis.sock')
 
@@ -278,7 +288,7 @@ a connection pool, passing your class to the connection_class argument.
 Other keyword parameters you pass to the pool will be passed to the class
 specified during initialization.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> pool = redis.ConnectionPool(connection_class=YourConnectionClass,
                                     your_arg='...', ...)
@@ -394,7 +404,7 @@ number of back-and-forth TCP packets between the client and server.
 
 Pipelines are quite simple to use:
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> r = redis.Redis(...)
     >>> r.set('bing', 'baz')
@@ -406,12 +416,12 @@ Pipelines are quite simple to use:
     >>> # the EXECUTE call sends all buffered commands to the server, returning
     >>> # a list of responses, one for each command.
     >>> pipe.execute()
-    [True, 'baz']
+    [True, b'baz']
 
 For ease of use, all commands being buffered into the pipeline return the
 pipeline object itself. Therefore calls can be chained like:
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> pipe.set('foo', 'bar').sadd('faz', 'baz').incr('auto_number').execute()
     [True, True, 6]
@@ -421,7 +431,7 @@ atomically as a group. This happens by default. If you want to disable the
 atomic nature of a pipeline but still want to buffer commands, you can turn
 off transactions.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> pipe = r.pipeline(transaction=False)
 
@@ -441,7 +451,7 @@ execution of that transaction, the entire transaction will be canceled and a
 WatchError will be raised. To implement our own client-side INCR command, we
 could do something like this:
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> with r.pipeline() as pipe:
     ...     while True:
@@ -474,7 +484,7 @@ Pipeline is used as a context manager (as in the example above) reset()
 will be called automatically. Of course you can do this the manual way by
 explicitly calling reset():
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> pipe = r.pipeline()
     >>> while True:
@@ -494,7 +504,7 @@ should expect a single parameter, a pipeline object, and any number of keys to
 be WATCHed. Our client-side INCR command above can be written like this,
 which is much easier to read:
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> def client_side_incr(pipe):
     ...     current_value = pipe.get('OUR-SEQUENCE-KEY')
@@ -514,7 +524,7 @@ Publish / Subscribe
 redis-py includes a `PubSub` object that subscribes to channels and listens
 for new messages. Creating a `PubSub` object is easy.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> r = redis.Redis(...)
     >>> p = r.pubsub()
@@ -522,7 +532,7 @@ for new messages. Creating a `PubSub` object is easy.
 Once a `PubSub` instance is created, channels and patterns can be subscribed
 to.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> p.subscribe('my-first-channel', 'my-second-channel', ...)
     >>> p.psubscribe('my-*', ...)
@@ -531,14 +541,14 @@ The `PubSub` instance is now subscribed to those channels/patterns. The
 subscription confirmations can be seen by reading messages from the `PubSub`
 instance.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> p.get_message()
-    {'pattern': None, 'type': 'subscribe', 'channel': 'my-second-channel', 'data': 1L}
+    {'pattern': None, 'type': 'subscribe', 'channel': b'my-second-channel', 'data': 1}
     >>> p.get_message()
-    {'pattern': None, 'type': 'subscribe', 'channel': 'my-first-channel', 'data': 2L}
+    {'pattern': None, 'type': 'subscribe', 'channel': b'my-first-channel', 'data': 2}
     >>> p.get_message()
-    {'pattern': None, 'type': 'psubscribe', 'channel': 'my-*', 'data': 3L}
+    {'pattern': None, 'type': 'psubscribe', 'channel': b'my-*', 'data': 3}
 
 Every message read from a `PubSub` instance will be a dictionary with the
 following keys.
@@ -556,7 +566,7 @@ following keys.
 
 Let's send a message now.
 
-.. code-block:: python
+.. code-block:: pycon
 
     # the publish method returns the number matching channel and pattern
     # subscriptions. 'my-first-channel' matches both the 'my-first-channel'
@@ -565,23 +575,23 @@ Let's send a message now.
     >>> r.publish('my-first-channel', 'some data')
     2
     >>> p.get_message()
-    {'channel': 'my-first-channel', 'data': 'some data', 'pattern': None, 'type': 'message'}
+    {'channel': b'my-first-channel', 'data': b'some data', 'pattern': None, 'type': 'message'}
     >>> p.get_message()
-    {'channel': 'my-first-channel', 'data': 'some data', 'pattern': 'my-*', 'type': 'pmessage'}
+    {'channel': b'my-first-channel', 'data': b'some data', 'pattern': b'my-*', 'type': 'pmessage'}
 
 Unsubscribing works just like subscribing. If no arguments are passed to
 [p]unsubscribe, all channels or patterns will be unsubscribed from.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> p.unsubscribe()
     >>> p.punsubscribe('my-*')
     >>> p.get_message()
-    {'channel': 'my-second-channel', 'data': 2L, 'pattern': None, 'type': 'unsubscribe'}
+    {'channel': b'my-second-channel', 'data': 2, 'pattern': None, 'type': 'unsubscribe'}
     >>> p.get_message()
-    {'channel': 'my-first-channel', 'data': 1L, 'pattern': None, 'type': 'unsubscribe'}
+    {'channel': b'my-first-channel', 'data': 1, 'pattern': None, 'type': 'unsubscribe'}
     >>> p.get_message()
-    {'channel': 'my-*', 'data': 0L, 'pattern': None, 'type': 'punsubscribe'}
+    {'channel': b'my-*', 'data': 0, 'pattern': None, 'type': 'punsubscribe'}
 
 redis-py also allows you to register callback functions to handle published
 messages. Message handlers take a single argument, the message, which is a
@@ -594,14 +604,14 @@ message dictionary is created and passed to the message handler. In this case,
 a `None` value is returned from get_message() since the message was already
 handled.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> def my_handler(message):
-    ...     print 'MY HANDLER: ', message['data']
+    ...     print('MY HANDLER: ', message['data'])
     >>> p.subscribe(**{'my-channel': my_handler})
     # read the subscribe confirmation message
     >>> p.get_message()
-    {'pattern': None, 'type': 'subscribe', 'channel': 'my-channel', 'data': 1L}
+    {'pattern': None, 'type': 'subscribe', 'channel': b'my-channel', 'data': 1}
     >>> r.publish('my-channel', 'awesome data')
     1
     # for the message handler to work, we need tell the instance to read data.
@@ -611,7 +621,7 @@ handled.
     MY HANDLER:  awesome data
     # note here that the my_handler callback printed the string above.
     # `message` is None because the message was handled by our handler.
-    >>> print message
+    >>> print(message)
     None
 
 If your application is not interested in the (sometimes noisy)
@@ -620,7 +630,7 @@ subscribe/unsubscribe confirmation messages, you can ignore them by passing
 subscribe/unsubscribe messages to be read, but they won't bubble up to your
 application.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> p = r.pubsub(ignore_subscribe_messages=True)
     >>> p.subscribe('my-channel')
@@ -628,7 +638,7 @@ application.
     >>> r.publish('my-channel', 'my data')
     1
     >>> p.get_message()
-    {'channel': 'my-channel', 'data': 'my data', 'pattern': None, 'type': 'message'}
+    {'channel': b'my-channel', 'data': b'my data', 'pattern': None, 'type': 'message'}
 
 There are three different strategies for reading messages.
 
@@ -640,7 +650,7 @@ there's no data to be read, `get_message()` will immediately return None. This
 makes it trivial to integrate into an existing event loop inside your
 application.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> while True:
     >>>     message = p.get_message()
@@ -653,7 +663,7 @@ is a generator that blocks until a message is available. If your application
 doesn't need to do anything else but receive and act on messages received from
 redis, listen() is an easy way to get up an running.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> for message in p.listen():
     ...     # do something with the message
@@ -673,7 +683,7 @@ messages that aren't automatically handled with registered message handlers.
 Therefore, redis-py prevents you from calling `run_in_thread()` if you're
 subscribed to patterns or channels that don't have message handlers attached.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> p.subscribe(**{'my-channel': my_handler})
     >>> thread = p.run_in_thread(sleep_time=0.001)
@@ -697,7 +707,7 @@ reconnecting. Messages that were published while the client was disconnected
 cannot be delivered. When you're finished with a PubSub object, call its
 `.close()` method to shutdown the connection.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> p = r.pubsub()
     >>> ...
@@ -707,14 +717,14 @@ cannot be delivered. When you're finished with a PubSub object, call its
 The PUBSUB set of subcommands CHANNELS, NUMSUB and NUMPAT are also
 supported:
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> r.pubsub_channels()
-    ['foo', 'bar']
+    [b'foo', b'bar']
     >>> r.pubsub_numsub('foo', 'bar')
-    [('foo', 9001), ('bar', 42)]
+    [(b'foo', 9001), (b'bar', 42)]
     >>> r.pubsub_numsub('baz')
-    [('baz', 0)]
+    [(b'baz', 0)]
     >>> r.pubsub_numpat()
     1204
 
@@ -724,7 +734,7 @@ redis-py includes a `Monitor` object that streams every command processed
 by the Redis server. Use `listen()` on the `Monitor` object to block
 until a command is received.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> r = redis.Redis(...)
     >>> with r.monitor() as m:
@@ -747,7 +757,7 @@ The following trivial Lua script accepts two parameters: the name of a key and
 a multiplier value. The script fetches the value stored in the key, multiplies
 it with the multiplier value and returns the result.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> r = redis.Redis()
     >>> lua = """
@@ -769,7 +779,7 @@ function. Script instances accept the following optional arguments:
 
 Continuing the example from above:
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> r.set('foo', 2)
     >>> multiply(keys=['foo'], args=[5])
@@ -782,7 +792,7 @@ script and returns the result, 10.
 Script instances can be executed using a different client instance, even one
 that points to a completely different Redis server.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> r2 = redis.Redis('redis2.example.com')
     >>> r2.set('foo', 3)
@@ -798,7 +808,7 @@ passed as the client argument when calling the script. Care is taken to ensure
 that the script is registered in Redis's script cache just prior to pipeline
 execution.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> pipe = r.pipeline()
     >>> pipe.set('foo', 5)
@@ -816,7 +826,7 @@ in order to use redis-py's Sentinel support.
 Connecting redis-py to the Sentinel instance(s) is easy. You can use a
 Sentinel connection to discover the master and slaves network addresses:
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> from redis.sentinel import Sentinel
     >>> sentinel = Sentinel([('localhost', 26379)], socket_timeout=0.1)
@@ -829,13 +839,13 @@ You can also create Redis client connections from a Sentinel instance. You can
 connect to either the master (for write operations) or a slave (for read-only
 operations).
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> master = sentinel.master_for('mymaster', socket_timeout=0.1)
     >>> slave = sentinel.slave_for('mymaster', socket_timeout=0.1)
     >>> master.set('foo', 'bar')
     >>> slave.get('foo')
-    'bar'
+    b'bar'
 
 The master and slave objects are normal Redis instances with their
 connection pool bound to the Sentinel instance. When a Sentinel backed client
@@ -860,12 +870,12 @@ these commands are fully supported, redis-py also exposes the following methods
 that return Python iterators for convenience: `scan_iter`, `hscan_iter`,
 `sscan_iter` and `zscan_iter`.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> for key, value in (('A', '1'), ('B', '2'), ('C', '3')):
     ...     r.set(key, value)
     >>> for key in r.scan_iter():
-    ...     print key, r.get(key)
+    ...     print(key, r.get(key))
     A 1
     B 2
     C 3

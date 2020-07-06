@@ -95,15 +95,22 @@ class SentinelConnectionPool(ConnectionPool):
         self.master_address = None
         self.slave_rr_counter = None
 
+    def owns_connection(self, connection):
+        check = not self.is_master or \
+                (self.is_master and
+                 self.master_address == (connection.host, connection.port))
+        parent = super(SentinelConnectionPool, self)
+        return check and parent.owns_connection(connection)
+
     def get_master_address(self):
         master_address = self.sentinel_manager.discover_master(
             self.service_name)
         if self.is_master:
-            if self.master_address is None:
+            if self.master_address != master_address:
                 self.master_address = master_address
-            elif master_address != self.master_address:
-                # Master address changed, disconnect all clients in this pool
-                self.disconnect()
+                # disconnect any idle connections so that they reconnect
+                # to the new master the next time that they are used.
+                self.disconnect(inuse_connections=False)
         return master_address
 
     def rotate_slaves(self):
@@ -135,7 +142,7 @@ class Sentinel(object):
     >>> master.set('foo', 'bar')
     >>> slave = sentinel.slave_for('mymaster', socket_timeout=0.1)
     >>> slave.get('foo')
-    'bar'
+    b'bar'
 
     ``sentinels`` is a list of sentinel nodes. Each node is represented by
     a pair (hostname, port).

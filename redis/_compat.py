@@ -1,4 +1,5 @@
 """Internal module for Python 2 backwards compatibility."""
+# flake8: noqa
 import errno
 import socket
 import sys
@@ -143,9 +144,6 @@ if sys.version_info[0] < 3:
     def next(x):
         return x.next()
 
-    def byte_to_chr(x):
-        return x
-
     unichr = unichr
     xrange = xrange
     basestring = basestring
@@ -166,11 +164,13 @@ else:
     def itervalues(x):
         return iter(x.values())
 
-    def byte_to_chr(x):
-        return chr(x)
-
     def nativestr(x):
         return x if isinstance(x, str) else x.decode('utf-8', 'replace')
+
+    def safe_unicode(value):
+        if isinstance(value, bytes):
+            value = value.decode('utf-8', 'replace')
+        return str(value)
 
     next = next
     unichr = chr
@@ -179,7 +179,6 @@ else:
     xrange = range
     basestring = str
     unicode = str
-    safe_unicode = str
     long = int
     BlockingIOError = BlockingIOError
 

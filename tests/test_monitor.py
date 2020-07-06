@@ -34,6 +34,13 @@ class TestMonitor(object):
             response = wait_for_command(r, m, 'GET foo\\x92')
             assert response['command'] == 'GET foo\\x92'
 
+    def test_command_with_escaped_data(self, r):
+        with r.monitor() as m:
+            byte_string = b'foo\\x92'
+            r.get(byte_string)
+            response = wait_for_command(r, m, 'GET foo\\\\x92')
+            assert response['command'] == 'GET foo\\\\x92'
+
     def test_lua_script(self, r):
         with r.monitor() as m:
             script = 'return redis.call("GET", "foo")'
