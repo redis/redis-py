@@ -1,13 +1,27 @@
 version: "3.8"
 
 services:
-  redis-py:
-    build: ./
+  master:
+    build: docker/master
     ports:
       - "6379:6379"
+
+  slave:
+    build: docker/slave
+    ports:
       - "6380:6380"
+
+  sentinel_1:
+    build: docker/sentinel_1
+    ports:
       - "26379:26379"
+
+  sentinel_2:
+    build: docker/sentinel_2
+    ports:
       - "26380:26380"
+
+  sentinel_3:
+    build: docker/sentinel_3
+    ports:
       - "26381:26381"
-    volumes:
-       - .:/mnt/redis-py
