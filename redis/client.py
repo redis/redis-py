@@ -993,19 +993,12 @@ class Redis(object):
         "Return a list of all ACLs on the server"
         return self.execute_command('ACL LIST')
 
-    def acl_log(self, count=None, reset=None):
+    def acl_log(self, count=None):
         """
-        ACL LOG [<count> | RESET]
         Get ACL logs as a list.
-        Note that only one of two arguments can be used at the same time.
         :param int count: Get logs[0:count].
-        :param boolean reset: Reset the ACL logs.
-        :rtype: List if both count and reset are not set or only count is set.
-        :rtype: Boolean if reset is set to True.
+        :rtype: List.
         """
-        if count is not None and reset is not None:
-            raise DataError('Cannot use \'count\' and \'reset\' '
-                            'at the same time')
         args = []
         if count is not None:
             if not isinstance(count, int):
@@ -1013,12 +1006,14 @@ class Redis(object):
                                 'integer')
             args.append(count)
 
-        if reset is not None:
-            if not isinstance(reset, bool):
-                raise DataError('ACL LOG reset must be an '
-                                'boolean')
-            args.append(b'RESET')
+        return self.execute_command('ACL LOG', *args)
 
+    def acl_log_reset(self):
+        """
+        Reset ACL logs.
+        :rtype: Boolean.
+        """
+        args = [b'RESET']
         return self.execute_command('ACL LOG', *args)
 
     def acl_load(self):

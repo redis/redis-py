@@ -206,7 +206,7 @@ class TestRedisCommands(object):
         r.acl_setuser(username, enabled=True, reset=True,
                       commands=['+get', '+set', '+select'],
                       keys=['cache:*'], nopass=True)
-        r.acl_log(reset=True)
+        r.acl_log_reset()
 
         r_test = redis.Redis(host='localhost', port=6379, db=9,
                              username=username)
@@ -226,7 +226,7 @@ class TestRedisCommands(object):
 
         assert len(r.acl_log()) == 2
         assert len(r.acl_log(count=1)) == 1
-        assert r.acl_log(reset=True)
+        assert r.acl_log_reset()
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
     def test_acl_setuser_categories_without_prefix_fails(self, r, request):
