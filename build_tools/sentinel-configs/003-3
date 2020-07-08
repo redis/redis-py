@@ -1,6 +1,7 @@
 pidfile /var/run/sentinel-3.pid
 port 26381
 daemonize yes
+logfile /var/log/redis-sentinel-3
 
 # short timeout for sentinel tests
 sentinel down-after-milliseconds mymaster 500

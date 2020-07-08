@@ -6,3 +6,4 @@ unixsocket /tmp/redis_master.sock
 unixsocketperm 777
 dbfilename master.rdb
 dir /var/lib/redis/backups
+logfile /var/log/redis-master

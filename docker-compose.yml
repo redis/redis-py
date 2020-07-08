@@ -1,0 +1,13 @@
+version: "3.8"
+
+services:
+  redis-py:
+    build: ./
+    ports:
+      - "6379:6379"
+      - "6380:6380"
+      - "26379:26379"
+      - "26380:26380"
+      - "26381:26381"
+    volumes:
+       - .:/mnt/redis-py
