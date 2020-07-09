@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 
-source /build_tools/redis_vars.sh
+source /home/vagrant/redis-py/build_tools/redis_vars.sh
 
-pushd /tmp
+pushd /home/vagrant
+
+uninstall_all_sentinel_instances
+uninstall_all_redis_instances
 
 # create a clean directory for redis
 rm -rf $REDIS_DIR
