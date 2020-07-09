@@ -9,4 +9,5 @@ dev:
 	docker-compose up -d
 
 test: dev
-	docker-compose run test tox --redis-url="redis://master:6379/9"
+	find . -name "*.pyc" -exec rm -f {} \;
+	docker-compose run test tox -- --redis-url="redis://master:6379/9" --redis-master-host=master

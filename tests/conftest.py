@@ -24,7 +24,7 @@ def pytest_addoption(parser):
                      action="store",
                      help="Redis connection string,"
                           " defaults to `%(default)s`")
-    parser.addoption('--master-host', default=DEFAULT_REDIS_MASTER_HOST,
+    parser.addoption('--redis-master-host', default=DEFAULT_REDIS_MASTER_HOST,
                      action="store",
                      help="Redis master hostname,"
                           " defaults to `%(default)s`")
@@ -161,6 +161,11 @@ def mock_cluster_resp_slaves(request, **kwargs):
                 "slave 19efe5a631f3296fdf21a5441680f893e8cc96ec 0 "
                 "1447836789290 3 connected']")
     return _gen_cluster_mock_resp(r, response)
+
+
+@pytest.fixture(scope="module")
+def master_host(request):
+    yield request.config.getoption("--redis-master-host")
 
 
 def wait_for_command(client, monitor, command):
