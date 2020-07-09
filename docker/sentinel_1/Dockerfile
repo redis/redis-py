@@ -1,4 +1,4 @@
-FROM redis:6.0.5-buster
+FROM redis-py-base:latest
 
 COPY redis.conf /etc/conf/redis/redis.conf
 

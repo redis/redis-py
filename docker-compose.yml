@@ -25,3 +25,9 @@ services:
     build: docker/sentinel_3
     ports:
       - "26381:26381"
+
+  test:
+    image: fkrull/multi-python:latest
+    working_dir: /redis-py
+    volumes:
+      - .:/redis-py
