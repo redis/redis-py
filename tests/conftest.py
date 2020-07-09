@@ -18,7 +18,6 @@ DEFAULT_REDIS_URL = "redis://localhost:6379/9"
 DEFAULT_REDIS_MASTER_HOST = "localhost"
 
 
-
 def pytest_addoption(parser):
     parser.addoption('--redis-url', default=DEFAULT_REDIS_URL,
                      action="store",
@@ -28,7 +27,6 @@ def pytest_addoption(parser):
                      action="store",
                      help="Redis master hostname,"
                           " defaults to `%(default)s`")
-
 
 
 def _get_info(redis_url):

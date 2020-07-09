@@ -129,7 +129,7 @@ class TestBlockingConnectionPool(object):
         # we should have waited at least 0.1 seconds
         assert time.time() - start >= 0.1
 
-    def test_connection_pool_blocks_until_another_connection_released(self, master_host):
+    def test_connection_pool_blocks_until_another_connection_released(self, master_host):  # noqa: E501
         """
         When out of connections, block until another connection is released
         to the pool
