@@ -2,7 +2,6 @@
 
 build:
 	docker build -t redis-py-base docker/base
-	docker-compose down
 	docker-compose build
 
 dev:
