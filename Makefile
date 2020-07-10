@@ -10,4 +10,4 @@ dev:
 
 test: dev
 	find . -name "*.pyc" -exec rm -f {} \;
-	docker-compose run test tox -- --redis-url="redis://master:6379/9" --redis-master-host=master
+	docker-compose run test tox -- --redis-url=redis://master:6379/9

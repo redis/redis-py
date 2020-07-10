@@ -4,6 +4,7 @@ import pytest
 import redis
 from mock import Mock
 
+from redis._compat import urlparse
 from distutils.version import StrictVersion
 
 
@@ -14,18 +15,13 @@ REDIS_6_VERSION = '5.9.0'
 
 
 REDIS_INFO = {}
-DEFAULT_REDIS_URL = "redis://localhost:6379/9"
-DEFAULT_REDIS_MASTER_HOST = "localhost"
+default_redis_url = "redis://localhost:6379/9"
 
 
 def pytest_addoption(parser):
-    parser.addoption('--redis-url', default=DEFAULT_REDIS_URL,
+    parser.addoption('--redis-url', default=default_redis_url,
                      action="store",
                      help="Redis connection string,"
-                          " defaults to `%(default)s`")
-    parser.addoption('--redis-master-host', default=DEFAULT_REDIS_MASTER_HOST,
-                     action="store",
-                     help="Redis master hostname,"
                           " defaults to `%(default)s`")
 
 
@@ -161,9 +157,11 @@ def mock_cluster_resp_slaves(request, **kwargs):
     return _gen_cluster_mock_resp(r, response)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def master_host(request):
-    yield request.config.getoption("--redis-master-host")
+    url = request.config.getoption("--redis-url")
+    parts = urlparse(url)
+    yield parts.hostname
 
 
 def wait_for_command(client, monitor, command):
