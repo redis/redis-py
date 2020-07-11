@@ -210,22 +210,24 @@ class TestRedisCommands(object):
 
         r_test = redis.Redis(host='localhost', port=6379, db=9,
                              username=username)
-        # Valid operation and key
-        r_test.set("cache:0", 1)
-        r_test.get("cache:0")
-        # Invalid key
-        try:
-            r_test.get("violated_cache:0")
-        except exceptions.NoPermissionError:
-            pass
-        # Invalid operation
-        try:
-            r_test.hset("cache:0", "hkey", "hval")
-        except exceptions.NoPermissionError:
-            pass
 
+        # Valid operation and key
+        r_test.set('cache:0', 1)
+        r_test.get('cache:0')
+
+        # Invalid key
+        with pytest.raises(exceptions.NoPermissionError):
+            r_test.get('violated_cache:0')
+
+        # Invalid operation
+        with pytest.raises(exceptions.NoPermissionError):
+            r_test.hset('cache:0', 'hkey', 'hval')
+
+        assert isinstance(r.acl_log(), list)
         assert len(r.acl_log()) == 2
         assert len(r.acl_log(count=1)) == 1
+        assert isinstance(r.acl_log()[0], dict)
+        assert 'client-info' in r.acl_log(count=1)[0]
         assert r.acl_log_reset()
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
