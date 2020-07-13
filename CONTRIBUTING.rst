@@ -6,27 +6,21 @@ Introduction
 
 First off, thank you for considering contributing to redis-py. We value community contributions!
 
-What Kinds of Contributions We Need
------------------------------------
+Contributions We Need
+----------------------
 
 You may already know what you want to contribute -- a fix for a bug you encountered, or a new feature your team wants to use.
 
 If you don't know what to contribute, keep an open mind! Improving documentation, bug triaging, or writing tutorials are all examples of helpful contributions that mean less work for you.
 
-Contributions We are Not Looking For
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Please, don't use the issue tracker for support questions. Check whether the #redis-py IRC channel on Freenode can help with your issue. If your problem is not strictly #redis-py specific, #redis is generally more active. Stack Overflow is also worth considering.
-
 Your First Contribution
 -----------------------
-Unsure where to begin contributing to Atom? You can start by looking through help-wanted issues: https://github.com/andymccurdy/redis-py/issues?q=is%3Aopen+is%3Aissue+label%3ahelp-wanted
+Unsure where to begin contributing? You can start by looking through help-wanted issues: https://github.com/andymccurdy/redis-py/issues?q=is%3Aopen+is%3Aissue+label%3ahelp-wanted
 
 Never contributed to open source before? Here are a couple of friendly tutorials:
 
 - http://makeapullrequest.com/
 - http://www.firsttimersonly.com/
-- https://github.com/andymccurdy/redis-py/issues?q=is%3Aopen+is%3Aissue+label%3ahelp-wanted
 
 Getting Started
 ---------------
@@ -64,8 +58,6 @@ When filing an issue, make sure to answer these five questions:
 3. What did you do?
 4. What did you expect to see?
 5. What did you see instead?
-
-General questions should go to the redis-py mailing list instead of the issue tracker.
 
 How to Suggest a Feature or Enhancement
 ---------------------------------------
