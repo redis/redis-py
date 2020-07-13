@@ -29,6 +29,7 @@ from redis.exceptions import (
     RedisError,
     ResponseError,
     TimeoutError,
+    ModuleError,
 )
 from redis.utils import HIREDIS_AVAILABLE
 
@@ -90,6 +91,14 @@ SYM_EMPTY = b''
 SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
 
 SENTINEL = object()
+MODULE_LOAD_ERROR = 'Error loading the extension. ' \
+                    'Please check the server logs.'
+NO_SUCH_MODULE_ERROR = 'Error unloading module: no such module with that name'
+MODULE_UNLOAD_NOT_POSSIBLE_ERROR = 'Error unloading module: operation not ' \
+                                   'possible.'
+MODULE_EXPORTS_DATA_TYPES_ERROR = "Error unloading module: the module " \
+                                  "exports one or more module-side data " \
+                                  "types, can't unload"
 
 
 class Encoder(object):
@@ -146,6 +155,10 @@ class BaseParser(object):
             # in uppercase
             'wrong number of arguments for \'AUTH\' command':
                 AuthenticationWrongNumberOfArgsError,
+            MODULE_LOAD_ERROR: ModuleError,
+            MODULE_EXPORTS_DATA_TYPES_ERROR: ModuleError,
+            NO_SUCH_MODULE_ERROR: ModuleError,
+            MODULE_UNLOAD_NOT_POSSIBLE_ERROR: ModuleError,
         },
         'EXECABORT': ExecAbortError,
         'LOADING': BusyLoadingError,

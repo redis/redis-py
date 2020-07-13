@@ -2629,6 +2629,11 @@ class TestRedisCommands(object):
         r.set('foo', 'bar')
         assert isinstance(r.memory_usage('foo'), int)
 
+    @skip_if_server_version_lt('4.0.0')
+    def test_module_list(self, r):
+        assert isinstance(r.module_list(), list)
+        assert not r.module_list()
+
 
 class TestBinarySave(object):
 
