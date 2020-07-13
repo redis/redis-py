@@ -29,9 +29,9 @@ Here's how to get started with your code contribution:
 
 1. Create your own fork of redis-py
 2. When you've checked out the fork locally, build the docker containers: `make build`
-2. Do the changes in your fork
-3. Make sure the tests pass by running: `make test`
-4. If you like the change and think the project could use it, send a pull request
+3. Do the changes in your fork
+4. Make sure the tests pass by running: `make test`
+5. If you like the change and think the project could use it, send a pull request
 
 Troubleshooting
 ^^^^^^^^^^^^^^^
