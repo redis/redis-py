@@ -28,15 +28,15 @@ Getting Started
 Here's how to get started with your code contribution:
 
 1. Create your own fork of redis-py
-2. When you've checked out the fork locally, build the docker containers: `make build`
+2. When you've checked out the fork locally, build the docker containers: ``make build``
 3. Do the changes in your fork
-4. Make sure the tests pass by running: `make test`
+4. Make sure the tests pass by running: ``make test``
 5. If you like the change and think the project could use it, send a pull request
 
 Troubleshooting
 ^^^^^^^^^^^^^^^
 
-If you get any errors when running `make build` or `make test`, make sure that you
+If you get any errors when running ``make build`` or ``make test``, make sure that you
 are using supported versions of Docker and docker-compose.
 
 The included Dockerfiles and docker-compose.yml file work with the following
