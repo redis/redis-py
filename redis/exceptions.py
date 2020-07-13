@@ -63,7 +63,7 @@ class ModuleError(ResponseError):
 
 class LockError(RedisError, ValueError):
     "Errors acquiring or releasing a lock"
-    # NOTE: For backwards compatability, this class derives from ValueError.
+    # NOTE: For backwards compatibility, this class derives from ValueError.
     # This was originally chosen to behave like threading.Lock.
     pass
 
