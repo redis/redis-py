@@ -1,12 +1,14 @@
 .PHONY: build dev test
 
-build:
+base:
 	docker build -t redis-py-base docker/base
-	docker-compose build
 
-dev:
-	docker-compose up -d
+dev: base
+	docker-compose up -d --build
 
 test: dev
-	find . -name "*.pyc" -exec rm -f {} \;
-	docker-compose run test tox -- --redis-url=redis://master:6379/9
+	docker-compose run test util/wait-for-it.sh master:6379 -- tox -- --redis-url=redis://master:6379/9
+
+clean:
+	docker-compose stop
+	docker-compose rm

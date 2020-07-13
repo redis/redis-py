@@ -8,26 +8,36 @@ services:
 
   slave:
     build: docker/slave
+    depends_on:
+      - "master"
     ports:
       - "6380:6380"
 
   sentinel_1:
     build: docker/sentinel_1
+    depends_on:
+      - "slave"
     ports:
       - "26379:26379"
 
   sentinel_2:
     build: docker/sentinel_2
+    depends_on:
+      - "slave"
     ports:
       - "26380:26380"
 
   sentinel_3:
     build: docker/sentinel_3
+    depends_on:
+      - "slave"
     ports:
       - "26381:26381"
 
   test:
-    image: fkrull/multi-python:latest
+    build: docker/test
     working_dir: /redis-py
+    depends_on:
+      - "sentinel_3"
     volumes:
       - .:/redis-py
