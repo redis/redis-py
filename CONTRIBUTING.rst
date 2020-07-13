@@ -33,6 +33,18 @@ Here's how to get started with your code contribution:
 3. Make sure the tests pass by running: `make test`
 4. If you like the change and think the project could use it, send a pull request
 
+Troubleshooting
+^^^^^^^^^^^^^^^
+
+If you get any errors when running `make build` or `make test`, make sure that you
+are using supported versions of Docker and docker-compose.
+
+The included Dockerfiles and docker-compose.yml file work with the following
+versions of Docker and docker-compose:
+
+* Docker 19.03.12
+* docker-compose 1.26.2
+
 How to Report a Bug
 -------------------
 
