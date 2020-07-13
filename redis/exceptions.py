@@ -57,7 +57,7 @@ class NoPermissionError(ResponseError):
     pass
 
 
-class ModuleError(RedisError):
+class ModuleError(ResponseError):
     pass
 
 
