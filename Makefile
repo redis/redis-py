@@ -1,4 +1,4 @@
-.PHONY: base
+.PHONY: build dev test
 
 build:
 	docker build -t redis-py-base docker/base
