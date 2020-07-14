@@ -13,4 +13,3 @@ test: dev
 clean:
 	docker-compose stop
 	docker-compose rm
-	rm -rf .tox
