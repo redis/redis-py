@@ -22,6 +22,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
     WatchError,
+    ModuleError,
 )
 
 SYM_EMPTY = b''
@@ -553,6 +554,12 @@ def parse_client_info(value):
     return client_info
 
 
+def parse_module_result(response):
+    if isinstance(response, ModuleError):
+        raise response
+    return True
+
+
 class Redis(object):
     """
     Implementation of the Redis protocol.
@@ -694,6 +701,10 @@ class Redis(object):
             'XPENDING': parse_xpending,
             'ZADD': parse_zadd,
             'ZSCAN': parse_zscan,
+            'MODULE LOAD': parse_module_result,
+            'MODULE UNLOAD': parse_module_result,
+            'MODULE LIST': lambda response: [pairs_to_dict(module)
+                                             for module in response],
         }
     )
 
@@ -3366,6 +3377,28 @@ class Redis(object):
             pieces.extend([b'STOREDIST', kwargs['store_dist']])
 
         return self.execute_command(command, *pieces, **kwargs)
+
+    # MODULE COMMANDS
+    def module_load(self, path):
+        """
+        Loads the module from ``path``.
+        Raises ``ModuleError`` if a module is not found at ``path``.
+        """
+        return self.execute_command('MODULE LOAD', path)
+
+    def module_unload(self, name):
+        """
+        Unloads the module ``name``.
+        Raises ``ModuleError`` if ``name`` is not in loaded modules.
+        """
+        return self.execute_command('MODULE UNLOAD', name)
+
+    def module_list(self):
+        """
+        Returns a list of dictionaries containing the name and version of
+        all loaded modules.
+        """
+        return self.execute_command('MODULE LIST')
 
 
 StrictRedis = Redis
