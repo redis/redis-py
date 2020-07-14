@@ -8,7 +8,8 @@ dev: base
 
 test: dev
 	docker-compose run test find . -type f -name '*.py[co]' -delete -o -type d -name __pycache__ -delete
-	docker-compose run test util/wait-for-it.sh master:6379 -- tox -- --redis-url=redis://master:6379/9
+	docker-compose run test util/wait-for-it.sh master:6379 -- tox -e py3-plain -- --redis-url=redis://master:6379/9
+	docker-compose run test rm -rf .tox
 
 clean:
 	docker-compose stop
