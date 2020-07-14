@@ -143,8 +143,8 @@ class TestBlockingConnectionPool(object):
             time.sleep(0.1)
             pool.release(c1)
 
-        Thread(target=target).start()
         start = time.time()
+        Thread(target=target).start()
         pool.get_connection('_')
         assert time.time() - start >= 0.1
 
