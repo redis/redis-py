@@ -35,9 +35,7 @@ services:
       - "26381:26381"
 
   test:
-    build: docker/test
+    build: .
     working_dir: /redis-py
     depends_on:
       - "sentinel_3"
-    volumes:
-      - .:/redis-py
