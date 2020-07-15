@@ -1,7 +1,7 @@
 FROM redis-py-base:latest
 
-COPY redis.conf /etc/conf/redis/redis.conf
+COPY redis.conf /usr/local/etc/redis/redis.conf
 
 EXPOSE 26380
 
-CMD redis-server
+CMD [ "redis-sentinel", "/usr/local/etc/redis/redis.conf" ]
