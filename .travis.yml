@@ -1,3 +1,6 @@
+language: python
+cache: pip
+
 env:
   - DOCKER_COMPOSE_VERSION=1.26.2
 
@@ -10,5 +13,11 @@ before_install:
 services:
   - docker
 
+install:
+  - pip install codecov
+
 script:
   - make test
+
+after_success:
+  - codecov
