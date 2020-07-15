@@ -56,27 +56,27 @@ Following are a few tips that can help you work with the Docker-based developmen
 
 To get a bash shell inside of a container:
 
-``docker-compose run <service> /bin/bash``
+``$ docker-compose run <service> /bin/bash``
  
-**Note**: The term "service" refers to the "services" defined in the `docker-compose.yml` file: "master", "slave", "sentinel_1", "sentinel_2", "sentinel_3", "tests".
+**Note**: The term "service" refers to the "services" defined in the ``docker-compose.yml`` file: "master", "slave", "sentinel_1", "sentinel_2", "sentinel_3", "test".
 
 Containers run a minimal Debian image that probably lacks tools you want to use. To install packages, first get a bash session (see previous tip) and then run:
 
-``apt update && apt install <package>``
+``$ apt update && apt install <package>``
 
 You can see the combined logging output of all containers like this:
 
-``docker-compose logs``
+``$ docker-compose logs``
 
 The command `make test` runs all tests in all tested Python environments. To run the tests in a single environment, like Python 3.6, use a command like this:
 
-``docker-compose run test tox -e py36 -- --redis-url=redis://master:6379/9``
+``$ docker-compose run test tox -e py36 -- --redis-url=redis://master:6379/9``
 
 Here, the flag ``-e py36`` runs tests against the Python 3.6 tox environment. And note from the example that whenever you run tests like this, instead of using `make test`, you need to pass `-- --redis-url=redis://master:6379/9``. This points the tests at the "master" container.
 
 Our test suite uses ``pytest``. You can run a specific test suite against a specific Python version like this:
 
-``docker-compose run test tox -e py36 -- --redis-url=redis://master:6379/9 tests/test_commands.py``
+``$ docker-compose run test tox -e py36 -- --redis-url=redis://master:6379/9 tests/test_commands.py``
 
 Troubleshooting
 ^^^^^^^^^^^^^^^
