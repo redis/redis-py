@@ -11,7 +11,7 @@ Contributions We Need
 
 You may already know what you want to contribute -- a fix for a bug you encountered, or a new feature your team wants to use.
 
-If you don't know what to contribute, keep an open mind! Improving documentation, bug triaging, or writing tutorials are all examples of helpful contributions that mean less work for you.
+If you don't know what to contribute, keep an open mind! Improving documentation, bug triaging, and writing tutorials are all examples of helpful contributions that mean less work for you.
 
 Your First Contribution
 -----------------------
@@ -30,20 +30,24 @@ Here's how to get started with your code contribution:
 1. Create your own fork of redis-py
 2. Do the changes in your fork
 3. If you need a development environment, run ``make dev``
-4. While developing, make sure the tests pass: ``make test``
+4. While developing, make sure the tests pass by running ``make test``
 5. If you like the change and think the project could use it, send a pull request
 
 The Development Environment
 ---------------------------
 
-Running `make dev` will create a Docker-based development environment that starts the following containers:
+Running ``make dev`` will create a Docker-based development environment that starts the following containers:
 
-* A master node
-* A slave node
-* Three sentinel nodes
+* A master Redis node
+* A slave Redis node
+* Three sentinel Redis nodes
 * A test container
 
-The slave is a replica of the master node, while the sentinels monitor it.
+The slave is a replica of the master node, using the `leader-follower replication <https://redis.io/topics/replication>`_ feature.
+
+The sentinels monitor the master node in a `sentinel high-availability configuration <https://redis.io/topics/sentinel>`_.
+
+Meanwhile, the `test` container hosts the code from your checkout of `redis-py` and allows running tests against many Python versions.
 
 Docker Tips
 ^^^^^^^^^^^
