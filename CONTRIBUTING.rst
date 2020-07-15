@@ -28,15 +28,53 @@ Getting Started
 Here's how to get started with your code contribution:
 
 1. Create your own fork of redis-py
-2. When you've checked out the fork locally, build the docker containers: ``make build``
-3. Do the changes in your fork
-4. Make sure the tests pass by running: ``make test``
+2. Do the changes in your fork
+3. If you need a development environment, run ``make dev``
+4. While developing, make sure the tests pass: ``make test``
 5. If you like the change and think the project could use it, send a pull request
+
+The Development Environment
+---------------------------
+
+Running `make dev` will create a Docker-based development environment that starts the following containers:
+
+* A master node
+* A slave node
+* Three sentinel nodes
+* A test container
+
+The slave is a replica of the master node, while the sentinels monitor it.
+
+Docker Tips
+^^^^^^^^^^^
+
+There are a few tips that can help you work with this environment:
+
+To get a bash shell inside of a container:
+
+``docker-compose run sentinel_1 /bin/bash``
+
+Containers run a minimal Debian image that probably lacks tools you want to use. To install packages, first get a bash session (see previous tip) and then run:
+
+``apt update && apt install <package>``
+
+You can see the combined logging output of all containers like this:
+
+``docker-compose logs``
+
+The command `make test` runs all tests in all tested Python environments. To run the tests in a single environment, like Python 3.6, use a command like this:
+
+``docker-compose run test tox -e py36 -- --redis-url=redis://master:6379/9``
+
+Here, the flag ``-e py36`` runs tests against the Python 3.6 tox environment. And note from the example that whenever you run tests like this, instead of using `make test`, you need to pass `-- --redis-url=redis://master:6379/9``. This points the tests at the "master" container.
+
+Our test suite uses ``pytest``. You can run a specific test suite against a specific Python version like this:
+
+``docker-compose run test tox -e py36 -- --redis-url=redis://master:6379/9 tests/test_commands.py``
 
 Troubleshooting
 ^^^^^^^^^^^^^^^
-
-If you get any errors when running ``make build`` or ``make test``, make sure that you
+If you get any errors when running ``make dev`` or ``make test``, make sure that you
 are using supported versions of Docker and docker-compose.
 
 The included Dockerfiles and docker-compose.yml file work with the following
