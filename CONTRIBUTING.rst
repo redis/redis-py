@@ -15,7 +15,7 @@ If you don't know what to contribute, keep an open mind! Improving documentation
 
 Your First Contribution
 -----------------------
-Unsure where to begin contributing? You can start by looking through help-wanted issues: https://github.com/andymccurdy/redis-py/issues?q=is%3Aopen+is%3Aissue+label%3ahelp-wanted
+Unsure where to begin contributing? You can start by looking through `help-wanted issues <https://github.com/andymccurdy/redis-py/issues?q=is%3Aopen+is%3Aissue+label%3ahelp-wanted>`_.
 
 Never contributed to open source before? Here are a couple of friendly tutorials:
 
@@ -47,7 +47,7 @@ The slave is a replica of the master node, using the `leader-follower replicatio
 
 The sentinels monitor the master node in a `sentinel high-availability configuration <https://redis.io/topics/sentinel>`_.
 
-Meanwhile, the `test` container hosts the code from your checkout of `redis-py` and allows running tests against many Python versions.
+Meanwhile, the `test` container hosts the code from your checkout of ``redis-py`` and allows running tests against many Python versions.
 
 Docker Tips
 ^^^^^^^^^^^
