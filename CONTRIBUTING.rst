@@ -56,7 +56,9 @@ Following are a few tips that can help you work with the Docker-based developmen
 
 To get a bash shell inside of a container:
 
-``docker-compose run sentinel_1 /bin/bash``
+``docker-compose run <service> /bin/bash``
+ 
+**Note**: The term "service" refers to the "services" defined in the `docker-compose.yml` file: "master", "slave", "sentinel_1", "sentinel_2", "sentinel_3", "tests".
 
 Containers run a minimal Debian image that probably lacks tools you want to use. To install packages, first get a bash session (see previous tip) and then run:
 
