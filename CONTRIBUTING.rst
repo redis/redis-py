@@ -72,7 +72,7 @@ The command `make test` runs all tests in all tested Python environments. To run
 
 ``$ docker-compose run test tox -e py36 -- --redis-url=redis://master:6379/9``
 
-Here, the flag ``-e py36`` runs tests against the Python 3.6 tox environment. And note from the example that whenever you run tests like this, instead of using `make test`, you need to pass `-- --redis-url=redis://master:6379/9``. This points the tests at the "master" container.
+Here, the flag ``-e py36`` runs tests against the Python 3.6 tox environment. And note from the example that whenever you run tests like this, instead of using `make test`, you need to pass ``-- --redis-url=redis://master:6379/9``. This points the tests at the "master" container.
 
 Our test suite uses ``pytest``. You can run a specific test suite against a specific Python version like this:
 
