@@ -52,7 +52,7 @@ Meanwhile, the `test` container hosts the code from your checkout of ``redis-py`
 Docker Tips
 ^^^^^^^^^^^
 
-There are a few tips that can help you work with this environment:
+Following are a few tips that can help you work with the Docker-based development environment.
 
 To get a bash shell inside of a container:
 
