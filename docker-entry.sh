@@ -9,7 +9,7 @@ REDIS_MASTER="${REDIS_MASTER_HOST}":"${REDIS_MASTER_PORT}"
 echo "Testing against Redis Server: ${REDIS_MASTER}"
 
 #debug
-echo "travis job id: ${TRAVIS_JOB_ID}"
+env
 exit 0
 
 # use the wait-for-it util to ensure the server is running before invoking Tox
