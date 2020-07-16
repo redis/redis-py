@@ -14,4 +14,4 @@ script:
   - make test
 
 after_success:
-  - docker-compose run test codecov
+  - docker-compose run -e CODECOV_TOKEN=$CODECOV_TOKEN test codecov
