@@ -8,11 +8,6 @@ set -eu
 REDIS_MASTER="${REDIS_MASTER_HOST}":"${REDIS_MASTER_PORT}"
 echo "Testing against Redis Server: ${REDIS_MASTER}"
 
-#debug
-env
-codecov
-exit 0
-
 # use the wait-for-it util to ensure the server is running before invoking Tox
 util/wait-for-it.sh ${REDIS_MASTER} -- tox -- --redis-url=redis://"${REDIS_MASTER}"/9
 
