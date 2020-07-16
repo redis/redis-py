@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # This is the entrypoint for "make test". It invokes Tox. If running
 # within the CI environment, it also runs codecov
