@@ -36,6 +36,8 @@ services:
 
   test:
     build: .
-    working_dir: /redis-py
     depends_on:
       - "sentinel_3"
+    environment:
+      REDIS_MASTER_HOST: master
+      REDIS_MASTER_PORT: "6379"
