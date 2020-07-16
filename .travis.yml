@@ -11,4 +11,4 @@ services:
   - docker
 
 script:
-  - echo `bash <(curl -s https://codecov.io/env)`
+  - make test
