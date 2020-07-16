@@ -39,5 +39,28 @@ services:
     depends_on:
       - "sentinel_3"
     environment:
-      REDIS_MASTER_HOST: master
-      REDIS_MASTER_PORT: "6379"
+      - REDIS_MASTER_HOST=master
+      - REDIS_MASTER_PORT=6379
+      - CI_BUILD_ID
+      - CI_BUILD_URL
+      - CI_JOB_ID
+      - CODECOV_ENV
+      - CODECOV_SLUG
+      - CODECOV_TOKEN
+      - CODECOV_URL
+      - SHIPPABLE
+      - TRAVIS
+      - TRAVIS_BRANCH
+      - TRAVIS_COMMIT
+      - TRAVIS_JOB_ID
+      - TRAVIS_JOB_NUMBER
+      - TRAVIS_OS_NAME
+      - TRAVIS_PULL_REQUEST
+      - TRAVIS_REPO_SLUG
+      - TRAVIS_TAG
+      - VCS_BRANCH_NAME
+      - VCS_COMMIT_ID
+      - VCS_PULL_REQUEST
+      - VCS_SLUG
+      - VCS_TAG
+

@@ -7,7 +7,7 @@ dev:	base
 		docker-compose up -d --build
 
 test:	dev
-		docker-compose run --rm -e TRAVIS test /redis-py/docker-entry.sh
+		docker-compose run --rm test /redis-py/docker-entry.sh
 
 clean:
 		docker-compose stop
