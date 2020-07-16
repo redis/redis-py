@@ -41,6 +41,7 @@ services:
     environment:
       REDIS_MASTER_HOST: master
       REDIS_MASTER_PORT: 6379
+      CI:
       CI_BUILD_ID:
       CI_BUILD_URL:
       CI_JOB_ID:

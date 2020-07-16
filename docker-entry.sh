@@ -10,6 +10,7 @@ echo "Testing against Redis Server: ${REDIS_MASTER}"
 
 #debug
 env
+codecov
 exit 0
 
 # use the wait-for-it util to ensure the server is running before invoking Tox
