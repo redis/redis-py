@@ -13,5 +13,5 @@ util/wait-for-it.sh ${REDIS_MASTER} -- tox -- --redis-url=redis://"${REDIS_MASTE
 
 # if the TRAVIS env var is defined, invoke "codecov"
 if [ ! -z ${TRAVIS-} ]; then
-    codecov
+    tox -e codecov
 fi
