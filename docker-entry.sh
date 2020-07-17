@@ -10,6 +10,7 @@ echo "Testing against Redis Server: ${REDIS_MASTER}"
 
 # use the wait-for-it util to ensure the server is running before invoking Tox
 util/wait-for-it.sh ${REDIS_MASTER} -- tox -- --redis-url=redis://"${REDIS_MASTER}"/9
+tox -e covreport
 
 # if the TRAVIS env var is defined, invoke "codecov"
 if [ ! -z ${TRAVIS-} ]; then
