@@ -4,6 +4,7 @@ import pytest
 import redis
 from mock import Mock
 
+from redis._compat import urlparse
 from distutils.version import StrictVersion
 
 
@@ -154,6 +155,13 @@ def mock_cluster_resp_slaves(request, **kwargs):
                 "slave 19efe5a631f3296fdf21a5441680f893e8cc96ec 0 "
                 "1447836789290 3 connected']")
     return _gen_cluster_mock_resp(r, response)
+
+
+@pytest.fixture(scope="session")
+def master_host(request):
+    url = request.config.getoption("--redis-url")
+    parts = urlparse(url)
+    yield parts.hostname
 
 
 def wait_for_command(client, monitor, command):

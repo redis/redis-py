@@ -47,6 +47,12 @@ or from source:
 
     $ python setup.py install
 
+Contributing
+------------
+
+Want to contribute a feature, bug report, or report an issue? Check out our `guide to
+contributing <https://github.com/andymccurdy/redis-py/blob/master/CONTRIBUTING.rst>`_.
+
 
 Getting Started
 ---------------

@@ -433,12 +433,10 @@ class TestRedisCommands(object):
     def test_slowlog_get_limit(self, r, slowlog):
         assert r.slowlog_reset()
         r.get('foo')
-        r.get('bar')
         slowlog = r.slowlog_get(1)
         assert isinstance(slowlog, list)
-        commands = [log['command'] for log in slowlog]
-        assert b'GET foo' not in commands
-        assert b'GET bar' in commands
+        # only one command, based on the number we passed to slowlog_get()
+        assert len(slowlog) == 1
 
     def test_slowlog_length(self, r, slowlog):
         r.get('foo')
