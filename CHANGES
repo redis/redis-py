@@ -1,3 +1,6 @@
+* (in development)
+    * Provide a development and testing environment via docker. Thanks
+      @abrookins. #1365
 * 3.5.3 (June 1, 2020)
     * Restore try/except clauses to __del__ methods. These will be removed
       in 4.0 when more explicit resource management if enforced. #1339
