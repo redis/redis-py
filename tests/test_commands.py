@@ -1052,6 +1052,7 @@ class TestRedisCommands(object):
         assert r.rpush('a', '3', '4') == 4
         assert r.lrange('a', 0, -1) == [b'1', b'2', b'3', b'4']
 
+    @skip_if_server_version_lt('6.0.6')
     def test_lpos(self, r):
         assert r.rpush('a', 'a', 'b', 'c', '1', '2', '3', 'c', 'c') == 8
         assert r.lpos('a', 'a') == 0
