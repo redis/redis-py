@@ -958,7 +958,18 @@ URL_QUERY_ARGUMENT_PARSERS = {
 
 
 class ConnectionPool(object):
-    "Generic connection pool"
+    """
+    Create a connection pool. ``If max_connections`` is set, then this
+    object raises :py:class:`~redis.ConnectionError` when the pool's
+    limit is reached.
+
+    By default, TCP connections are created unless ``connection_class``
+    is specified. Use :py:class:`~redis.UnixDomainSocketConnection` for
+    unix sockets.
+
+    Any additional keyword arguments are passed to the constructor of
+    ``connection_class``.
+    """
     @classmethod
     def from_url(cls, url, db=None, decode_components=False, **kwargs):
         """
@@ -972,10 +983,10 @@ class ConnectionPool(object):
 
         Three URL schemes are supported:
 
-        - ```redis://``
+        - `redis://
           <https://www.iana.org/assignments/uri-schemes/prov/redis>`_ creates a
           normal TCP socket connection
-        - ```rediss://``
+        - `rediss://
           <https://www.iana.org/assignments/uri-schemes/prov/rediss>`_ creates
           a SSL wrapped TCP socket connection
         - ``unix://`` creates a Unix Domain Socket connection
@@ -1084,16 +1095,6 @@ class ConnectionPool(object):
 
     def __init__(self, connection_class=Connection, max_connections=None,
                  **connection_kwargs):
-        """
-        Create a connection pool. If max_connections is set, then this
-        object raises redis.ConnectionError when the pool's limit is reached.
-
-        By default, TCP connections are created unless connection_class is
-        specified. Use redis.UnixDomainSocketConnection for unix sockets.
-
-        Any additional keyword arguments are passed to the constructor of
-        connection_class.
-        """
         max_connections = max_connections or 2 ** 31
         if not isinstance(max_connections, (int, long)) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
@@ -1291,14 +1292,14 @@ class BlockingConnectionPool(ConnectionPool):
         >>> client = Redis(connection_pool=BlockingConnectionPool())
 
     It performs the same function as the default
-    ``:py:class: ~redis.connection.ConnectionPool`` implementation, in that,
+    :py:class:`~redis.ConnectionPool` implementation, in that,
     it maintains a pool of reusable connections that can be shared by
     multiple redis clients (safely across threads if required).
 
     The difference is that, in the event that a client tries to get a
     connection from the pool when all of connections are in use, rather than
-    raising a ``:py:class: ~redis.exceptions.ConnectionError`` (as the default
-    ``:py:class: ~redis.connection.ConnectionPool`` implementation does), it
+    raising a :py:class:`~redis.ConnectionError` (as the default
+    :py:class:`~redis.ConnectionPool` implementation does), it
     makes the client wait ("blocks") for a specified number of seconds until
     a connection becomes available.
 
@@ -1309,11 +1310,11 @@ class BlockingConnectionPool(ConnectionPool):
     Use ``timeout`` to tell it either how many seconds to wait for a connection
     to become available, or to block forever:
 
-        # Block forever.
+        >>> # Block forever.
         >>> pool = BlockingConnectionPool(timeout=None)
 
-        # Raise a ``ConnectionError`` after five seconds if a connection is
-        # not available.
+        >>> # Raise a ``ConnectionError`` after five seconds if a connection is
+        >>> # not available.
         >>> pool = BlockingConnectionPool(timeout=5)
     """
     def __init__(self, max_connections=50, timeout=20,
