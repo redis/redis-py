@@ -126,6 +126,12 @@ def mock_cluster_resp_info(request, **kwargs):
 
 
 @pytest.fixture()
+def mock_cluster_resp_readonly(request, **kwargs):
+    r = _get_client(redis.Redis, request, **kwargs)
+    return _gen_cluster_mock_resp(r, 'READONLY')
+
+
+@pytest.fixture()
 def mock_cluster_resp_nodes(request, **kwargs):
     r = _get_client(redis.Redis, request, **kwargs)
     response = ('c8253bae761cb1ecb2b61857d85dfe455a0fec8b 172.17.0.7:7006 '

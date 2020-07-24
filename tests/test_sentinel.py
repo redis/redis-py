@@ -1,8 +1,9 @@
 import socket
+from mock import Mock
 
 import pytest
 
-from redis import exceptions
+from redis import exceptions, ConnectionPool
 from redis.sentinel import (Sentinel, SentinelConnectionPool,
                             MasterNotFoundError, SlaveNotFoundError)
 from redis._compat import next
@@ -14,10 +15,19 @@ def master_ip(master_host):
     yield socket.gethostbyname(master_host)
 
 
+class MockReadonlySocketBuffer(object):
+    def readline(self):
+        return b"-READONLY"
+
+    def close(self):
+        pass
+
+
 class SentinelTestClient(object):
     def __init__(self, cluster, id):
         self.cluster = cluster
         self.id = id
+        self.connection_pool = ConnectionPool(host=id[0], port=id[1])
 
     def sentinel_masters(self):
         self.cluster.connection_error_if_down(self)
@@ -64,6 +74,7 @@ class SentinelTestCluster(object):
 def cluster(request, master_ip):
     def teardown():
         redis.sentinel.Redis = saved_Redis
+
     cluster = SentinelTestCluster(ip=master_ip)
     saved_Redis = redis.sentinel.Redis
     redis.sentinel.Redis = cluster.client
@@ -199,3 +210,47 @@ def test_slave_round_robin(cluster, sentinel, master_ip):
     assert next(rotator) == (master_ip, 6379)
     with pytest.raises(SlaveNotFoundError):
         next(rotator)
+
+
+def test_managed_connection_repr(sentinel):
+    pool = SentinelConnectionPool('mymaster', sentinel)
+    conn = pool.make_connection()
+    assert str(conn) == 'SentinelManagedConnection<service=mymaster,host=localhost,port=6379>'
+
+
+def test_managed_connection_failed_connection():
+    sentinel = Sentinel([('foo', 99999), ('bar', 99991)])
+    pool = SentinelConnectionPool('mymaster', sentinel)
+    conn = pool.make_connection()
+
+    with pytest.raises(exceptions.ConnectionError):
+        conn.connect()
+
+
+def test_master_readonly_connection_error(cluster, sentinel):
+    pool = SentinelConnectionPool('mymaster', sentinel)
+    conn = pool.make_connection()
+    conn._parser._buffer = MockReadonlySocketBuffer()
+
+    with pytest.raises(exceptions.ConnectionError):
+        conn.read_response()
+
+
+def test_slave_readonly_error(cluster, sentinel):
+    pool = SentinelConnectionPool('mymaster', sentinel, is_master=False)
+    conn = pool.make_connection()
+    conn._parser._buffer = MockReadonlySocketBuffer()
+
+    with pytest.raises(exceptions.ReadOnlyError):
+        conn.read_response()
+
+
+def test_sentinel_repr(sentinel):
+    sentinel = Sentinel([('foo', 99999), ('bar', 99991)])
+    assert str(sentinel) == "Sentinel<sentinels=[foo:99999,bar:99991]>"
+
+
+def test_sentinel_connection_pool_repr():
+    sentinel = Sentinel([('foo', 99999), ('bar', 99991)])
+    pool = SentinelConnectionPool('mymaster', sentinel)
+    assert str(pool) == "SentinelConnectionPool<service=mymaster(master)"
