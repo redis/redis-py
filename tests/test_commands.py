@@ -208,7 +208,7 @@ class TestRedisCommands(object):
                       keys=['cache:*'], nopass=True)
         r.acl_log_reset()
 
-        r_test = redis.Redis(host='localhost', port=6379, db=9,
+        r_test = redis.Redis(host='master', port=6379, db=9,
                              username=username)
 
         # Valid operation and key
