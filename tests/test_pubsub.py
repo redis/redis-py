@@ -475,11 +475,8 @@ class TestPubSubSubcommands(object):
         p.subscribe('foo', 'bar', 'baz', 'quux')
         for i in range(4):
             assert wait_for_message(p)['type'] == 'subscribe'
-        channels = sorted(r.pubsub_channels())
-        # assert channels == [b'bar', b'baz', b'foo', b'quux']
-        if channels != [b'bar', b'baz', b'foo', b'quux']:
-            import pdb
-            pdb.set_trace()
+        expected = [b'bar', b'baz', b'foo', b'quux']
+        assert all([channel in r.pubsub_channels() for channel in expected])
 
     @skip_if_server_version_lt('2.8.0')
     def test_pubsub_numsub(self, r):
