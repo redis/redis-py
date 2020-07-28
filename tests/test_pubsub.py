@@ -555,13 +555,17 @@ class TestPubSubWorkerThread(object):
         self.message = message
 
     def test_run_in_thread(self, r):
-        message = None
         p = r.pubsub()
         p.subscribe(foo=self.message_handler)
         thread = p.run_in_thread()
 
         assert r.publish('foo', 'test message') == 1
-        assert wait_for_message(p) is None
+
+        now = time.time()
+        timeout = now + 1
+        while now < timeout and self.message is None:
+            time.sleep(0.1)
+
         assert self.message == make_message('message', 'foo', 'test message')
 
         thread.stop()

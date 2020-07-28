@@ -1,6 +1,5 @@
 import socket
 
-import mock
 import pytest
 
 from redis import exceptions, ConnectionPool
@@ -281,4 +280,3 @@ def test_sentinel_live_discover_master(live_sentinel, master_ip):
 
 def test_sentinel_live_discover_slave(live_sentinel, slave_ip):
     assert live_sentinel.discover_slaves('redis-py-test') == [(slave_ip, 6380)]
-

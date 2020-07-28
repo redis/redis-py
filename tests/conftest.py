@@ -25,7 +25,7 @@ def pytest_addoption(parser):
                           " defaults to `%(default)s`")
     parser.addoption('--docker', default=False, action="store_true",
                      help="Whether or not this is a Docker test run,"
-                           " defaults to `%(default)s`")
+                          " defaults to `%(default)s`")
 
 
 def _get_info(redis_url):
@@ -171,7 +171,6 @@ def master_host(request):
     url = request.config.getoption("--redis-url")
     parts = urlparse(url)
     yield parts.hostname
-
 
 
 @pytest.fixture(scope="session")
