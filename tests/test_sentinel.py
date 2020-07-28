@@ -1,5 +1,4 @@
 import socket
-from mock import Mock
 
 import pytest
 
@@ -7,6 +6,7 @@ from redis import exceptions, ConnectionPool
 from redis.sentinel import (Sentinel, SentinelConnectionPool,
                             MasterNotFoundError, SlaveNotFoundError)
 from redis._compat import next
+from redis.utils import HIREDIS_AVAILABLE
 import redis.sentinel
 
 
@@ -215,7 +215,8 @@ def test_slave_round_robin(cluster, sentinel, master_ip):
 def test_managed_connection_repr(sentinel):
     pool = SentinelConnectionPool('mymaster', sentinel)
     conn = pool.make_connection()
-    assert str(conn) == 'SentinelManagedConnection<service=mymaster,host=localhost,port=6379>'
+    assert str(conn) == 'SentinelManagedConnection' \
+                        '<service=mymaster,host=localhost,port=6379>'
 
 
 def test_managed_connection_failed_connection():
@@ -227,6 +228,7 @@ def test_managed_connection_failed_connection():
         conn.connect()
 
 
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason='PythonParser only')
 def test_master_readonly_connection_error(cluster, sentinel):
     pool = SentinelConnectionPool('mymaster', sentinel)
     conn = pool.make_connection()
@@ -236,6 +238,7 @@ def test_master_readonly_connection_error(cluster, sentinel):
         conn.read_response()
 
 
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason='PythonParser only')
 def test_slave_readonly_error(cluster, sentinel):
     pool = SentinelConnectionPool('mymaster', sentinel, is_master=False)
     conn = pool.make_connection()

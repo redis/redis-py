@@ -1,6 +1,5 @@
-from urllib.parse import urlparse
-
 from redis import utils
+from redis._compat import urlparse
 
 
 def test_from_url(request):
