@@ -545,3 +545,23 @@ class TestPubSubTimeouts(object):
         p.subscribe('foo')
         assert wait_for_message(p) == make_message('subscribe', 'foo', 1)
         assert p.get_message(timeout=0.01) is None
+
+
+class TestPubSubWorkerThread(object):
+    def setup_method(self, method):
+        self.message = None
+
+    def message_handler(self, message):
+        self.message = message
+
+    def test_run_in_thread(self, r):
+        message = None
+        p = r.pubsub()
+        p.subscribe(foo=self.message_handler)
+        thread = p.run_in_thread()
+
+        assert r.publish('foo', 'test message') == 1
+        assert wait_for_message(p) is None
+        assert self.message == make_message('message', 'foo', 'test message')
+
+        thread.stop()

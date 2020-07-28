@@ -1,5 +1,6 @@
 import socket
 
+import mock
 import pytest
 
 from redis import exceptions, ConnectionPool
@@ -13,6 +14,11 @@ import redis.sentinel
 @pytest.fixture(scope="module")
 def master_ip(master_host):
     yield socket.gethostbyname(master_host)
+
+
+@pytest.fixture(scope="module")
+def slave_ip(slave_host):
+    yield socket.gethostbyname(slave_host)
 
 
 class MockReadonlySocketBuffer(object):
@@ -85,6 +91,16 @@ def cluster(request, master_ip):
 @pytest.fixture()
 def sentinel(request, cluster):
     return Sentinel([('foo', 26379), ('bar', 26379)])
+
+
+@pytest.fixture()
+def live_sentinel(is_docker):
+    if is_docker:
+        hosts = ['sentinel_1', 'sentinel_2', 'sentinel_3']
+    else:
+        hosts = ['localhost'] * 3
+    ports = [26379, 26380, 26381]
+    return Sentinel(zip(hosts, ports))
 
 
 def test_discover_master(sentinel, master_ip):
@@ -257,3 +273,12 @@ def test_sentinel_connection_pool_repr():
     sentinel = Sentinel([('foo', 99999), ('bar', 99991)])
     pool = SentinelConnectionPool('mymaster', sentinel)
     assert str(pool) == "SentinelConnectionPool<service=mymaster(master)"
+
+
+def test_sentinel_live_discover_master(live_sentinel, master_ip):
+    assert live_sentinel.discover_master('redis-py-test') == (master_ip, 6379)
+
+
+def test_sentinel_live_discover_slave(live_sentinel, slave_ip):
+    assert live_sentinel.discover_slaves('redis-py-test') == [(slave_ip, 6380)]
+

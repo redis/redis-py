@@ -345,6 +345,38 @@ class TestRedisCommands(object):
         assert len(clients) == 1
         assert clients[0].get('name') == 'redis-py-c1'
 
+    @skip_if_server_version_lt('2.8.12')
+    def test_client_kill_filter_skipme_true(self, r):
+
+        r.client_setname('redis-py-c1')
+        clients = [client for client in r.client_list()]
+        clients_by_name = dict([(client.get('name'), client)
+                                for client in clients])
+        assert 'redis-py-c1' in clients_by_name
+
+        client_id = clients_by_name['redis-py-c1'].get('id')
+        resp = r.client_kill_filter(_id=client_id, skipme=True)
+        assert resp >= 0
+
+        clients = [client.get('name') for client in r.client_list()]
+        assert 'redis-py-c1' in clients
+
+    @skip_if_server_version_lt('2.8.12')
+    def test_client_kill_filter_skipme_false(self, r, r2):
+        r.client_setname('redis-py-c1')
+        clients = [client for client in r.client_list()]
+        clients_by_name = dict([(client.get('name'), client)
+                                for client in clients])
+        assert 'redis-py-c1' in clients_by_name
+
+        client_id = clients_by_name['redis-py-c1'].get('id')
+        resp = r.client_kill_filter(_id=client_id, skipme=False)
+        assert resp >= 1
+
+        # This client should have been killed!
+        with pytest.raises(exceptions.ConnectionError):
+            r.ping()
+
     @skip_if_server_version_lt('2.6.9')
     def test_client_list_after_client_setname(self, r):
         r.client_setname('redis_py_test')

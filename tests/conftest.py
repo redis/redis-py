@@ -23,6 +23,9 @@ def pytest_addoption(parser):
                      action="store",
                      help="Redis connection string,"
                           " defaults to `%(default)s`")
+    parser.addoption('--docker', default=False, action="store_true",
+                     help="Whether or not this is a Docker test run,"
+                           " defaults to `%(default)s`")
 
 
 def _get_info(redis_url):
@@ -168,6 +171,22 @@ def master_host(request):
     url = request.config.getoption("--redis-url")
     parts = urlparse(url)
     yield parts.hostname
+
+
+
+@pytest.fixture(scope="session")
+def slave_host(is_docker, request):
+    if is_docker:
+        yield "slave"
+    else:
+        url = request.config.getoption("--redis-url")
+        parts = urlparse(url)
+        yield parts.hostname
+
+
+@pytest.fixture(scope="session")
+def is_docker(request):
+    yield request.config.getoption("docker")
 
 
 def wait_for_command(client, monitor, command):
