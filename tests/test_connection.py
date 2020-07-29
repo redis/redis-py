@@ -1,6 +1,7 @@
 import mock
 import pytest
 
+from redis.connection import ssl_available
 from redis.exceptions import InvalidResponse
 from redis.utils import HIREDIS_AVAILABLE
 
@@ -13,3 +14,8 @@ def test_invalid_response(r):
         with pytest.raises(InvalidResponse) as cm:
             parser.read_response()
     assert str(cm.value) == 'Protocol Error: %r' % raw
+
+
+@pytest.mark.skipif(not ssl_available, reason="SSL not installed")
+def test_ssl_connection(r_ssl):
+    assert r_ssl.ping() is True

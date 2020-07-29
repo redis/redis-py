@@ -41,6 +41,7 @@ services:
     environment:
       REDIS_MASTER_HOST: master
       REDIS_MASTER_PORT: 6379
+      REDIS_MASTER_SSL_PORT: 16379
       CI:
       CI_BUILD_ID:
       CI_BUILD_URL:

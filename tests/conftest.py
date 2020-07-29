@@ -26,7 +26,9 @@ def pytest_addoption(parser):
     parser.addoption('--docker', default=False, action="store_true",
                      help="Whether or not this is a Docker test run,"
                           " defaults to `%(default)s`")
-
+    parser.addoption('--ssl-port', default=6379, action="store_true",
+                     help="The port that Redis is listening to for TLS,"
+                          " connections. defaults to `%(default)s`")
 
 def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
@@ -65,8 +67,9 @@ def skip_unless_arch_bits(arch_bits):
                               reason="server is not {}-bit".format(arch_bits))
 
 
-def _get_client(cls, request, single_connection_client=True, **kwargs):
-    redis_url = request.config.getoption("--redis-url")
+def _get_client(cls, request, url=None, single_connection_client=True, **kwargs):
+    if url is None:
+        redis_url = request.config.getoption("--redis-url")
     client = cls.from_url(redis_url, **kwargs)
     if single_connection_client:
         client = client.client()
@@ -86,6 +89,13 @@ def _get_client(cls, request, single_connection_client=True, **kwargs):
 
 @pytest.fixture()
 def r(request):
+    with _get_client(redis.Redis, request) as client:
+        yield client
+
+
+@pytest.fixture()
+def r_ssl(request, master_host, ssl_port):
+    url = "rediss://%s:%s/%s" % (master_host, ssl_port, database_number)
     with _get_client(redis.Redis, request) as client:
         yield client
 
@@ -171,6 +181,18 @@ def master_host(request):
     url = request.config.getoption("--redis-url")
     parts = urlparse(url)
     yield parts.hostname
+
+
+@pytest.fixture(scope="session")
+def database_number(request):
+    url = request.config.getoption("--redis-url")
+    parts = urlparse(url)
+    yield parts.path.split('/')
+
+
+@pytest.fixture(scope="session")
+def ssl_port(request):
+    yield request.config.getoption("--ssl-port")
 
 
 @pytest.fixture(scope="session")
