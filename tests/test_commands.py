@@ -377,6 +377,8 @@ class TestRedisCommands(object):
         with pytest.raises(exceptions.ConnectionError):
             r.ping()
 
+        r.close()
+
     @skip_if_server_version_lt('2.6.9')
     def test_client_list_after_client_setname(self, r):
         r.client_setname('redis_py_test')
