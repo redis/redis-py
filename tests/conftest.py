@@ -30,6 +30,7 @@ def pytest_addoption(parser):
                      help="The port that Redis is listening to for TLS,"
                           " connections. defaults to `%(default)s`")
 
+
 def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
     info = client.info()
@@ -67,8 +68,9 @@ def skip_unless_arch_bits(arch_bits):
                               reason="server is not {}-bit".format(arch_bits))
 
 
-def _get_client(cls, request, url=None, single_connection_client=True, **kwargs):
-    if url is None:
+def _get_client(cls, request, redis_url=None, single_connection_client=True,
+                **kwargs):
+    if redis_url is None:
         redis_url = request.config.getoption("--redis-url")
     client = cls.from_url(redis_url, **kwargs)
     if single_connection_client:
@@ -96,7 +98,7 @@ def r(request):
 @pytest.fixture()
 def r_ssl(request, master_host, ssl_port):
     url = "rediss://%s:%s/%s" % (master_host, ssl_port, database_number)
-    with _get_client(redis.Redis, request) as client:
+    with _get_client(redis.Redis, request, url, ssl_cert_reqs=None) as client:
         yield client
 
 
