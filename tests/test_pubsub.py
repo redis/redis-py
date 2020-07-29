@@ -569,3 +569,4 @@ class TestPubSubWorkerThread(object):
         assert self.message == make_message('message', 'foo', 'test message')
 
         thread.stop()
+        thread.join()
