@@ -26,7 +26,7 @@ def pytest_addoption(parser):
     parser.addoption('--docker', default=False, action="store_true",
                      help="Whether or not this is a Docker test run,"
                           " defaults to `%(default)s`")
-    parser.addoption('--ssl-port', default=6379, action="store_true",
+    parser.addoption('--ssl-port', default=6379, action="store",
                      help="The port that Redis is listening to for TLS,"
                           " connections. defaults to `%(default)s`")
 
