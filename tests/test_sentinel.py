@@ -274,9 +274,11 @@ def test_sentinel_connection_pool_repr():
     assert str(pool) == "SentinelConnectionPool<service=mymaster(master)"
 
 
-def test_sentinel_live_discover_master(live_sentinel, master_ip):
-    assert live_sentinel.discover_master('redis-py-test') == (master_ip, 6379)
 
+class TestLiveSentinel(object):
+    """Tests that hit a running cluster."""
+    def test_discover_master(self, live_sentinel, master_ip):
+        assert live_sentinel.discover_master('redis-py-test') == (master_ip, 6379)
 
-def test_sentinel_live_discover_slave(live_sentinel, slave_ip):
-    assert live_sentinel.discover_slaves('redis-py-test') == [(slave_ip, 6380)]
+    def test_discover_slave(self, live_sentinel, slave_ip):
+        assert live_sentinel.discover_slaves('redis-py-test') == [(slave_ip, 6380)]
