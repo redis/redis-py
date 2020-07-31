@@ -830,12 +830,12 @@ to discover Redis nodes. You need to have at least one Sentinel daemon running
 in order to use redis-py's Sentinel support.
 
 Connecting redis-py to the Sentinel instance(s) is easy. You can use a
-Sentinel connection to discover the master and slaves network addresses:
+Sentinel connection to discover the master and slaves network addresses.Also you can set weight of each instance optionally:
 
 .. code-block:: pycon
 
     >>> from redis.sentinel import Sentinel
-    >>> sentinel = Sentinel([('localhost', 26379)], socket_timeout=0.1)
+    >>> sentinel = Sentinel([('localhost', 26379, 1), ('localhost', 26380, 2)], socket_timeout=0.1)
     >>> sentinel.discover_master('mymaster')
     ('127.0.0.1', 6379)
     >>> sentinel.discover_slaves('mymaster')
