@@ -92,6 +92,14 @@ class TestConnectionPool(object):
                     'path=/abc,db=1,client_name=test-client>>')
         assert repr(pool) == expected
 
+    def test_check_pid_resets_pid_if_different(self, master_host):
+        connection_kwargs = {'host': master_host}
+        pool = self.get_pool(connection_kwargs=connection_kwargs)
+        pool.pid = 99999
+        assert pool.pid == 99999
+        pool.get_connection('_')
+        assert pool.pid == os.getpid()
+
 
 class TestBlockingConnectionPool(object):
     def get_pool(self, connection_kwargs=None, max_connections=10, timeout=20):
@@ -656,6 +664,62 @@ class TestConnection(object):
         "AuthenticationError should be raised when sending the wrong password"
         with pytest.raises(redis.AuthenticationError):
             r.execute_command('DEBUG', 'ERROR', 'ERR invalid password')
+
+    def test_immediate_execute_disconnects_on_timeout(self, r):
+        pipe = r.pipeline()
+        pipe.immediate_execute_command('PING')
+
+        with mock.patch('redis.connection.Connection.send_command') as m, \
+                mock.patch.object(
+                    pipe.connection,
+                    'disconnect',
+                    wraps=pipe.connection.disconnect) as mock_disconnect:
+            def raise_timeout(*args, **kwargs):
+                raise redis.TimeoutError
+            m.side_effect = raise_timeout
+
+            with pytest.raises(redis.TimeoutError):
+                pipe.immediate_execute_command("PING")
+
+            assert mock_disconnect.called is True
+
+    def test_immediate_execute_raises_watch_error_on_timeout(self, r):
+        pipe = r.pipeline()
+        pipe.watch('test')
+
+        with mock.patch.object(pipe.connection, 'send_command',
+                               wraps=pipe.connection.send_command) as m, \
+                mock.patch.object(pipe, 'reset') as mock_reset:
+            def raise_timeout(command, *args, **kwargs):
+                if command == 'PING':
+                    raise redis.TimeoutError
+
+            m.side_effect = raise_timeout
+
+            with pytest.raises(redis.WatchError):
+                pipe.immediate_execute_command("PING")
+
+            assert mock_reset.called is True
+
+    def test_immediate_execute_retries_on_timeout_if_desired(self, r):
+        pipe = r.pipeline()
+        pipe.immediate_execute_command('PING')  # Prime the connection
+        pipe.connection.retry_on_timeout = True
+
+        with mock.patch.object(pipe.connection, 'send_command',
+                               wraps=pipe.connection.send_command) as m:
+            def raise_timeout(command, *args, **kwargs):
+                if command == 'PING':
+                    raise redis.TimeoutError
+            m.side_effect = raise_timeout
+
+            with pytest.raises(redis.TimeoutError):
+                pipe.immediate_execute_command("PING")
+
+            # We retry a command once on a TimeoutError, but if it
+            # fails again we raise the error - so we should have tried
+            # the command a total of two times.
+            assert m.call_count == 2
 
 
 class TestMultiConnectionClient(object):
