@@ -170,6 +170,40 @@ def test_discover_slaves(cluster, sentinel):
         ('slave0', 1234), ('slave1', 1234)]
 
 
+def test_discover_slaves_with_weight(cluster, sentinel_with_weight):
+    assert sentinel_with_weight.discover_slaves('mymaster') == []
+
+    cluster.slaves = [
+        {'ip': 'slave0', 'port': 1234, 'is_odown': False, 'is_sdown': False},
+        {'ip': 'slave1', 'port': 1234, 'is_odown': False, 'is_sdown': False},
+    ]
+    assert sentinel_with_weight.discover_slaves('mymaster') == [
+        ('slave0', 1234), ('slave1', 1234)]
+
+    # slave0 -> ODOWN
+    cluster.slaves[0]['is_odown'] = True
+    assert sentinel_with_weight.discover_slaves('mymaster') == [
+        ('slave1', 1234)]
+
+    # slave1 -> SDOWN
+    cluster.slaves[1]['is_sdown'] = True
+    assert sentinel_with_weight.discover_slaves('mymaster') == []
+
+    cluster.slaves[0]['is_odown'] = False
+    cluster.slaves[1]['is_sdown'] = False
+
+    # node0 -> DOWN
+    cluster.nodes_down.add(('foo', 26379))
+    assert sentinel_with_weight.discover_slaves('mymaster') == [
+        ('slave0', 1234), ('slave1', 1234)]
+    cluster.nodes_down.clear()
+
+    # node0 -> TIMEOUT
+    cluster.nodes_timeout.add(('foo', 26379))
+    assert sentinel_with_weight.discover_slaves('mymaster') == [
+        ('slave0', 1234), ('slave1', 1234)]
+
+
 def test_master_for(cluster, sentinel, master_ip):
     master = sentinel.master_for('mymaster', db=9)
     assert master.ping()
