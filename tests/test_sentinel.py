@@ -86,6 +86,11 @@ def test_discover_master(sentinel, master_ip):
     assert address == (master_ip, 6379)
 
 
+def test_discover_master_with_weight(sentinel_with_weight, master_ip):
+    address = sentinel_with_weight.discover_master('mymaster')
+    assert address == (master_ip, 6379)
+
+
 def test_discover_master_error(sentinel):
     with pytest.raises(MasterNotFoundError):
         sentinel.discover_master('xxx')
