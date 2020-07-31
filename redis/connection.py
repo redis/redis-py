@@ -704,6 +704,8 @@ class Connection(object):
                 if nativestr(self.read_response()) != 'PONG':
                     raise ConnectionError(
                         'Bad response from PING health check')
+            else:
+                self.next_health_check = time() + self.health_check_interval
 
     def send_packed_command(self, command, check_health=True):
         "Send an already packed command to the Redis server"
@@ -761,9 +763,6 @@ class Connection(object):
         except BaseException:
             self.disconnect()
             raise
-
-        if self.health_check_interval:
-            self.next_health_check = time() + self.health_check_interval
 
         if isinstance(response, ResponseError):
             raise response

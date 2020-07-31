@@ -1,4 +1,5 @@
 import random
+import sys
 
 import pytest
 import redis
@@ -39,6 +40,10 @@ def pytest_sessionstart(session):
     arch_bits = info["arch_bits"]
     REDIS_INFO["version"] = version
     REDIS_INFO["arch_bits"] = arch_bits
+
+
+def skip_if_python_2():
+    return pytest.mark.skipif(sys.version_info < (3, 0), reason="requires Python3")
 
 
 def skip_if_server_version_lt(min_version):

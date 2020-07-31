@@ -1,3 +1,4 @@
+import contextlib
 import os
 import mock
 import pytest
@@ -7,7 +8,7 @@ import time
 
 from threading import Thread
 from redis.connection import ssl_available, to_bool
-from .conftest import skip_if_server_version_lt, _get_client, REDIS_6_VERSION
+from .conftest import skip_if_python_2, skip_if_server_version_lt, _get_client, REDIS_6_VERSION
 from .test_pubsub import wait_for_message
 
 
@@ -679,14 +680,20 @@ class TestHealthCheck(object):
         return _get_client(redis.Redis, request,
                            health_check_interval=self.interval)
 
-    def assert_interval_advanced(self, connection):
-        diff = connection.next_health_check - time.time()
-        assert self.interval > diff > (self.interval - 1)
+    @contextlib.contextmanager
+    def assert_health_check(self, connection, done):
+        orig_health_check = connection.next_health_check
+        yield
+        if done:
+            diff = connection.next_health_check - time.time()
+            assert self.interval > diff > (self.interval - 1)
+        else:
+            assert connection.next_health_check == orig_health_check
 
     def test_health_check_runs(self, r):
         r.connection.next_health_check = time.time() - 1
-        r.connection.check_health()
-        self.assert_interval_advanced(r.connection)
+        with self.assert_health_check(r.connection, True):
+            r.connection.check_health()
 
     def test_arbitrary_command_invokes_health_check(self, r):
         # invoke a command to make sure the connection is entirely setup
@@ -694,16 +701,15 @@ class TestHealthCheck(object):
         r.connection.next_health_check = time.time()
         with mock.patch.object(r.connection, 'send_command',
                                wraps=r.connection.send_command) as m:
-            r.get('foo')
+            with self.assert_health_check(r.connection, True):
+                r.get('foo')
             m.assert_called_with('PING', check_health=False)
 
-        self.assert_interval_advanced(r.connection)
-
-    def test_arbitrary_command_advances_next_health_check(self, r):
-        r.get('foo')
-        next_health_check = r.connection.next_health_check
-        r.get('foo')
-        assert next_health_check < r.connection.next_health_check
+    def test_arbitrary_command_remains_next_health_check(self, r):
+        with self.assert_health_check(r.connection, True):
+            r.get('foo')
+        with self.assert_health_check(r.connection, False):
+            r.get('foo')
 
     def test_health_check_not_invoked_within_interval(self, r):
         r.get('foo')
@@ -712,6 +718,29 @@ class TestHealthCheck(object):
             r.get('foo')
             ping_call_spec = (('PING',), {'check_health': False})
             assert ping_call_spec not in m.call_args_list
+
+    @skip_if_python_2()
+    def test_health_check_invoked_after_interval(self, request):
+        interval = 0.2
+        r = _get_client(redis.Redis, request, health_check_interval=interval)
+        with mock.patch.multiple(self.__class__, interval=interval):
+            # make sure we won't need to sleep too much
+            # increase the interval if TimeoutError raised
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                def prepare_health_check():
+                    with self.assert_health_check(r.connection, True):
+                        r.get('foo')
+                    with self.assert_health_check(r.connection, False):
+                        r.get('foo')
+
+                check = executor.submit(prepare_health_check)
+                sleep = executor.submit(time.sleep, interval)
+                check.result(interval)
+                sleep.result()
+
+            with self.assert_health_check(r.connection, True):
+                r.get('foo')
 
     def test_health_check_in_pipeline(self, r):
         with r.pipeline(transaction=False) as pipe:
@@ -740,10 +769,11 @@ class TestHealthCheck(object):
             pipe.connection.next_health_check = 0
             with mock.patch.object(pipe.connection, 'send_command',
                                    wraps=pipe.connection.send_command) as m:
-                pipe.watch('foo')
                 # the health check should be called when watching
-                m.assert_called_with('PING', check_health=False)
-                self.assert_interval_advanced(pipe.connection)
+                with self.assert_health_check(r.connection, True):
+                    pipe.watch('foo')
+                with self.assert_health_check(r.connection, False):
+                    m.assert_called_with('PING', check_health=False)
                 assert pipe.get('foo') == b'bar'
 
                 # reset the mock to clear the call list and schedule another
@@ -764,12 +794,13 @@ class TestHealthCheck(object):
         with mock.patch.object(p.connection, 'send_command',
                                wraps=p.connection.send_command) as m:
             assert not p.subscribed
-            p.subscribe('foo')
+            with self.assert_health_check(r.connection, False):
+                p.subscribe('foo')
             # the connection is not yet in pubsub mode, so the normal
             # ping/pong within connection.send_command should check
             # the health of the connection
-            m.assert_any_call('PING', check_health=False)
-            self.assert_interval_advanced(p.connection)
+            with self.assert_health_check(r.connection, True):
+                m.assert_any_call('PING', check_health=False)
 
             subscribe_message = wait_for_message(p)
             assert subscribe_message['type'] == 'subscribe'
@@ -785,9 +816,9 @@ class TestHealthCheck(object):
         with mock.patch.object(p.connection, 'send_command',
                                wraps=p.connection.send_command) as m:
             p.subscribe('foo')
-            subscribe_message = wait_for_message(p)
-            assert subscribe_message['type'] == 'subscribe'
-            self.assert_interval_advanced(p.connection)
+            with self.assert_health_check(p.connection, True):
+                subscribe_message = wait_for_message(p)
+                assert subscribe_message['type'] == 'subscribe'
             # because we weren't subscribed when sending the subscribe
             # message to 'foo', the connection's standard check_health ran
             # prior to subscribing.
@@ -805,14 +836,14 @@ class TestHealthCheck(object):
             # reset, it should still be 0
             assert p.connection.next_health_check == 0
 
-            subscribe_message = wait_for_message(p)
-            assert subscribe_message['type'] == 'subscribe'
-            assert wait_for_message(p) is None
-            # now that the connection is subscribed, the pubsub health
-            # check should have taken over and include the HEALTH_CHECK_MESSAGE
-            m.assert_any_call('PING', p.HEALTH_CHECK_MESSAGE,
-                              check_health=False)
-            self.assert_interval_advanced(p.connection)
+            with self.assert_health_check(p.connection, False):
+                subscribe_message = wait_for_message(p)
+                assert subscribe_message['type'] == 'subscribe'
+                assert wait_for_message(p) is None
+                # now that the connection is subscribed, the pubsub health
+                # check should have taken over and include the HEALTH_CHECK_MESSAGE
+                m.assert_any_call('PING', p.HEALTH_CHECK_MESSAGE,
+                                  check_health=False)
 
     def test_health_check_in_pubsub_poll(self, r):
         """
@@ -824,23 +855,22 @@ class TestHealthCheck(object):
         with mock.patch.object(p.connection, 'send_command',
                                wraps=p.connection.send_command) as m:
             p.subscribe('foo')
-            subscribe_message = wait_for_message(p)
-            assert subscribe_message['type'] == 'subscribe'
-            self.assert_interval_advanced(p.connection)
+            with self.assert_health_check(p.connection, True):
+                subscribe_message = wait_for_message(p)
+                assert subscribe_message['type'] == 'subscribe'
 
             # polling the connection before the health check interval
             # doesn't result in another health check
             m.reset_mock()
-            next_health_check = p.connection.next_health_check
-            assert wait_for_message(p) is None
-            assert p.connection.next_health_check == next_health_check
+            with self.assert_health_check(p.connection, False):
+                assert wait_for_message(p) is None
             m.assert_not_called()
 
             # reset the health check and poll again
-            # we should not receive a pong message, but the next_health_check
-            # should be advanced
+            # we should not receive a pong message, and the health_check
+            # should not be executed
             p.connection.next_health_check = 0
-            assert wait_for_message(p) is None
-            m.assert_called_with('PING', p.HEALTH_CHECK_MESSAGE,
-                                 check_health=False)
-            self.assert_interval_advanced(p.connection)
+            with self.assert_health_check(p.connection, False):
+                assert wait_for_message(p) is None
+                m.assert_called_with('PING', p.HEALTH_CHECK_MESSAGE,
+                                     check_health=False)
