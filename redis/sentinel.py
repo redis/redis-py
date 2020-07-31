@@ -148,7 +148,8 @@ class Sentinel(object):
 
     ``sentinels`` is a list of sentinel nodes. Each node is represented by
     a pair (hostname, port, weight optional).
-    >= Python3.6, if weight set, sentinel node will be discovered randomly by weight
+    >= Python3.6, if weight set, sentinel node will be discovered randomly
+    by weight
 
     ``min_other_sentinels`` defined a minimum number of peers for a sentinel.
     When querying a sentinel, if it doesn't meet this threshold, responses
@@ -164,8 +165,8 @@ class Sentinel(object):
     establishing a connection to a Redis server.
     """
 
-    def __init__(self, origin_sentinels, min_other_sentinels=0, sentinel_kwargs=None,
-                 **connection_kwargs):
+    def __init__(self, origin_sentinels, min_other_sentinels=0,
+                 sentinel_kwargs=None, **connection_kwargs):
         # if sentinel_kwargs isn't defined, use the socket_* options from
         # connection_kwargs
         if sentinel_kwargs is None:
@@ -180,8 +181,11 @@ class Sentinel(object):
         for node in origin_sentinels:
             sentinels.append((node[0], node[1]))
             self.weights.append(node[2] if len(node) >= 3 else -1)
-        # if config with weight, random_mode is true, sentinels will use random node with weight
-        self.random_mode = sys.version_info[0] == 3 and sys.version_info[1] >= 6 and sum(self.weights) != len(origin_sentinels) * -1
+        # if config with weight, random_mode is true
+        # sentinels will use random node with weight
+        self.random_mode = sys.version_info[0] == 3 \
+            and sys.version_info[1] >= 6 \
+            and sum(self.weights) != len(origin_sentinels) * -1
         self.sentinels = [Redis(hostname, port, **self.sentinel_kwargs)
                           for hostname, port in sentinels]
         self.min_other_sentinels = min_other_sentinels
@@ -227,7 +231,8 @@ class Sentinel(object):
             if state and self.check_master_state(state, service_name):
                 if not self.random_mode:
                     # Put this sentinel at the top of the list
-                    self.sentinels[0], self.sentinels[sentinel_no] = sentinel, self.sentinels[0]
+                    self.sentinels[0], self.sentinels[sentinel_no] = \
+                        sentinel, self.sentinels[0]
                 return state['ip'], state['port']
         raise MasterNotFoundError("No master found for %r" % (service_name,))
 
