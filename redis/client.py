@@ -1316,6 +1316,9 @@ class Redis(object):
         else:
             return self.execute_command('INFO', section)
 
+    def version(self):
+        return self.info('Server')['redis_version']
+
     def lastsave(self):
         """
         Return a Python datetime object representing the last time the

@@ -6,6 +6,8 @@ import re
 import redis
 import time
 
+from distutils.version import StrictVersion
+
 from redis._compat import (unichr, ascii_letters, iteritems, iterkeys,
                            itervalues, long, basestring)
 from redis.client import parse_info
@@ -395,6 +397,9 @@ class TestRedisCommands(object):
         info = r.info()
         assert isinstance(info, dict)
         assert info['db9']['keys'] == 2
+
+    def test_version(self, r):
+        assert StrictVersion(r.version())
 
     def test_lastsave(self, r):
         assert isinstance(r.lastsave(), datetime.datetime)
