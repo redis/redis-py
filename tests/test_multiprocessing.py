@@ -17,7 +17,7 @@ def exit_callback(callback, *args):
         callback(*args)
 
 
-class TestMultiprocessing(object):
+class TestMultiprocessing:
     # Test connection sharing between forks.
     # See issue #1085 for details.
 

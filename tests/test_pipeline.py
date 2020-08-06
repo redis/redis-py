@@ -1,12 +1,10 @@
-from __future__ import unicode_literals
 import pytest
 
 import redis
-from redis._compat import unichr, unicode
 from .conftest import wait_for_command
 
 
-class TestPipeline(object):
+class TestPipeline:
     def test_pipeline_is_true(self, r):
         "Ensure pipeline instances are not false-y"
         with r.pipeline() as pipe:
@@ -124,8 +122,8 @@ class TestPipeline(object):
             pipe.set('a', 1).set('b', 2).lpush('c', 3).set('d', 4)
             with pytest.raises(redis.ResponseError) as ex:
                 pipe.execute()
-            assert unicode(ex.value).startswith('Command # 3 (LPUSH c 3) of '
-                                                'pipeline caused error: ')
+            assert str(ex.value).startswith('Command # 3 (LPUSH c 3) of '
+                                            'pipeline caused error: ')
 
             # make sure the pipe was restored to a working state
             assert pipe.set('z', 'zzz').execute() == [True]
@@ -166,8 +164,8 @@ class TestPipeline(object):
             with pytest.raises(redis.ResponseError) as ex:
                 pipe.execute()
 
-            assert unicode(ex.value).startswith('Command # 2 (ZREM b) of '
-                                                'pipeline caused error: ')
+            assert str(ex.value).startswith('Command # 2 (ZREM b) of '
+                                            'pipeline caused error: ')
 
             # make sure the pipe was restored to a working state
             assert pipe.set('z', 'zzz').execute() == [True]
@@ -181,8 +179,8 @@ class TestPipeline(object):
             with pytest.raises(redis.ResponseError) as ex:
                 pipe.execute()
 
-            assert unicode(ex.value).startswith('Command # 2 (ZREM b) of '
-                                                'pipeline caused error: ')
+            assert str(ex.value).startswith('Command # 2 (ZREM b) of '
+                                            'pipeline caused error: ')
 
             # make sure the pipe was restored to a working state
             assert pipe.set('z', 'zzz').execute() == [True]
@@ -319,13 +317,13 @@ class TestPipeline(object):
             with pytest.raises(redis.ResponseError) as ex:
                 pipe.execute()
 
-            assert unicode(ex.value).startswith('Command # 1 (LLEN a) of '
-                                                'pipeline caused error: ')
+            assert str(ex.value).startswith('Command # 1 (LLEN a) of '
+                                            'pipeline caused error: ')
 
         assert r['a'] == b'1'
 
     def test_exec_error_in_no_transaction_pipeline_unicode_command(self, r):
-        key = unichr(3456) + 'abcd' + unichr(3421)
+        key = chr(3456) + 'abcd' + chr(3421)
         r[key] = 1
         with r.pipeline(transaction=False) as pipe:
             pipe.llen(key)
@@ -334,9 +332,8 @@ class TestPipeline(object):
             with pytest.raises(redis.ResponseError) as ex:
                 pipe.execute()
 
-            expected = unicode('Command # 1 (LLEN %s) of pipeline caused '
-                               'error: ') % key
-            assert unicode(ex.value).startswith(expected)
+            expected = 'Command # 1 (LLEN %s) of pipeline caused error: ' % key
+            assert str(ex.value).startswith(expected)
 
         assert r[key] == b'1'
 

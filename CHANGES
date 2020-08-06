@@ -1,4 +1,5 @@
 * (in development)
+    * Removed support for end of life Python 2.7.
     * Provide a development and testing environment via docker. Thanks
       @abrookins. #1365
     * Added support for the LPOS command available in Redis 6.0.6. Thanks

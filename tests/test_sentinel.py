@@ -5,7 +5,6 @@ import pytest
 from redis import exceptions
 from redis.sentinel import (Sentinel, SentinelConnectionPool,
                             MasterNotFoundError, SlaveNotFoundError)
-from redis._compat import next
 import redis.sentinel
 
 
@@ -14,7 +13,7 @@ def master_ip(master_host):
     yield socket.gethostbyname(master_host)
 
 
-class SentinelTestClient(object):
+class SentinelTestClient:
     def __init__(self, cluster, id):
         self.cluster = cluster
         self.id = id
@@ -32,7 +31,7 @@ class SentinelTestClient(object):
         return self.cluster.slaves
 
 
-class SentinelTestCluster(object):
+class SentinelTestCluster:
     def __init__(self, service_name='mymaster', ip='127.0.0.1', port=6379):
         self.clients = {}
         self.master = {

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-#
 # redis-py documentation build configuration file, created by
 # sphinx-quickstart on Fri Feb  8 00:47:08 2013.
 #
@@ -43,8 +41,8 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = u'redis-py'
-copyright = u'2016, Andy McCurdy'
+project = 'redis-py'
+copyright = '2016, Andy McCurdy'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -188,8 +186,8 @@ latex_elements = {
 # (source start file, target name, title, author, documentclass
 # [howto/manual]).
 latex_documents = [
-    ('index', 'redis-py.tex', u'redis-py Documentation',
-     u'Andy McCurdy', 'manual'),
+    ('index', 'redis-py.tex', 'redis-py Documentation',
+     'Andy McCurdy', 'manual'),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of
@@ -218,8 +216,8 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    ('index', 'redis-py', u'redis-py Documentation',
-     [u'Andy McCurdy'], 1)
+    ('index', 'redis-py', 'redis-py Documentation',
+     ['Andy McCurdy'], 1)
 ]
 
 # If true, show URL addresses after external links.
@@ -232,8 +230,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    ('index', 'redis-py', u'redis-py Documentation',
-     u'Andy McCurdy', 'redis-py',
+    ('index', 'redis-py', 'redis-py Documentation',
+     'Andy McCurdy', 'redis-py',
      'One line description of project.', 'Miscellaneous'),
 ]
 
@@ -246,7 +244,7 @@ texinfo_documents = [
 # How to display URL addresses: 'footnote', 'no', or 'inline'.
 #texinfo_show_urls = 'footnote'
 
-epub_title = u'redis-py'
-epub_author = u'Andy McCurdy'
-epub_publisher = u'Andy McCurdy'
-epub_copyright = u'2011, Andy McCurdy'
+epub_title = 'redis-py'
+epub_author = 'Andy McCurdy'
+epub_publisher = 'Andy McCurdy'
+epub_copyright = '2011, Andy McCurdy'
