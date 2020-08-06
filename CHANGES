@@ -1,4 +1,5 @@
 * (in development)
+    * Removed support for end of life Python 2.7.
     * Provide a development and testing environment via docker. Thanks
       @abrookins. #1365
     * Added support for the LPOS command available in Redis 6.0.6. Thanks
@@ -47,7 +48,6 @@
       TTL. When replace_ttl=True, the lock's existing TTL is replaced with
       the value of `additional_time`.
     * Add testing and support for PyPy.
-    * Removed support for end of life Python 2.7.
 * 3.4.1
     * Move the username argument in the Redis and Connection classes to the
       end of the argument list. This helps those poor souls that specify all
