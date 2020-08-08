@@ -27,19 +27,44 @@ from redis.exceptions import (
     TimeoutError,
     ModuleError,
 )
-from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
+from redis.utils import str_if_bytes
 
+# attempt to import hiredis. if it is importable and new enough, flag that
+# hiredis support is enabled
+try:
+    import hiredis
+    HIREDIS_VERSION = StrictVersion(hiredis.__version__)
+    if HIREDIS_VERSION < StrictVersion('1.1.0'):
+        HIREDIS_AVAILABLE = False
+        msg = ('redis-py requires hiredis >= 1.1.0 to enable hiredis support. '
+               'You are running hiredis version %s. Please upgrade hiredis '
+               'to enable hiredis optimizations.') % HIREDIS_VERSION
+        warnings.warn(msg)
+    else:
+        HIREDIS_AVAILABLE = True
+
+except ImportError:
+    HIREDIS_AVAILABLE = False
+
+# attempt to import ssl. if it is importable, flag that ssl support is enabled
 try:
     import ssl
-    ssl_available = True
+    SSL_AVAILABLE = True
 except ImportError:
-    ssl_available = False
+    SSL_AVAILABLE = False
 
+# sockets in nonblocking mode raise an exception when the socket would
+# otherwise block (e.g., trying to read from a socket that has no data
+# to be read). plain sockets raise BlockingIOError while sockets enabled with
+# ssl support raise various exceptions defined in the ssl module.
+# define a dict of exception class => error number that includes all
+# exceptions and error numbers raised when the socket would block but is
+# otherwise healthy.
 NONBLOCKING_EXCEPTION_ERROR_NUMBERS = {
     BlockingIOError: errno.EWOULDBLOCK,
 }
 
-if ssl_available:
+if SSL_AVAILABLE:
     if hasattr(ssl, 'SSLWantReadError'):
         NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLWantReadError] = 2
         NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLWantWriteError] = 2
@@ -48,43 +73,17 @@ if ssl_available:
 
 NONBLOCKING_EXCEPTIONS = tuple(NONBLOCKING_EXCEPTION_ERROR_NUMBERS.keys())
 
-if HIREDIS_AVAILABLE:
-    import hiredis
-
-    hiredis_version = StrictVersion(hiredis.__version__)
-    HIREDIS_SUPPORTS_CALLABLE_ERRORS = \
-        hiredis_version >= StrictVersion('0.1.3')
-    HIREDIS_SUPPORTS_BYTE_BUFFER = \
-        hiredis_version >= StrictVersion('0.1.4')
-    HIREDIS_SUPPORTS_ENCODING_ERRORS = \
-        hiredis_version >= StrictVersion('1.0.0')
-
-    if not HIREDIS_SUPPORTS_BYTE_BUFFER:
-        msg = ("redis-py works best with hiredis >= 0.1.4. You're running "
-               "hiredis %s. Please consider upgrading." % hiredis.__version__)
-        warnings.warn(msg)
-
-    HIREDIS_USE_BYTE_BUFFER = True
-    # only use byte buffer if hiredis supports it
-    if not HIREDIS_SUPPORTS_BYTE_BUFFER:
-        HIREDIS_USE_BYTE_BUFFER = False
-
+# constants used in redis protocol parsing
 SYM_STAR = b'*'
 SYM_DOLLAR = b'$'
 SYM_CRLF = b'\r\n'
 SYM_EMPTY = b''
 
-SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
-
+# the default value for keyword arguments where a None cannot be used
 SENTINEL = object()
-MODULE_LOAD_ERROR = 'Error loading the extension. ' \
-                    'Please check the server logs.'
-NO_SUCH_MODULE_ERROR = 'Error unloading module: no such module with that name'
-MODULE_UNLOAD_NOT_POSSIBLE_ERROR = 'Error unloading module: operation not ' \
-                                   'possible.'
-MODULE_EXPORTS_DATA_TYPES_ERROR = "Error unloading module: the module " \
-                                  "exports one or more module-side data " \
-                                  "types, can't unload"
+
+
+SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
 
 
 class Encoder:
@@ -138,10 +137,14 @@ class BaseParser:
             # in uppercase
             'wrong number of arguments for \'AUTH\' command':
                 AuthenticationWrongNumberOfArgsError,
-            MODULE_LOAD_ERROR: ModuleError,
-            MODULE_EXPORTS_DATA_TYPES_ERROR: ModuleError,
-            NO_SUCH_MODULE_ERROR: ModuleError,
-            MODULE_UNLOAD_NOT_POSSIBLE_ERROR: ModuleError,
+            'Error loading the extension. Please check the server logs.':
+                ModuleError,
+            ('Error unloading module: the module exports one or more '
+             'module-side data types, can\'t unload'):
+                ModuleError,
+            'Error unloading module: no such module with that name':
+                ModuleError,
+            'Error unloading module: operation not possible.': ModuleError,
         },
         'EXECABORT': ExecAbortError,
         'LOADING': BusyLoadingError,
@@ -368,9 +371,7 @@ class HiredisParser(BaseParser):
         if not HIREDIS_AVAILABLE:
             raise RedisError("Hiredis is not installed")
         self.socket_read_size = socket_read_size
-
-        if HIREDIS_USE_BYTE_BUFFER:
-            self._buffer = bytearray(socket_read_size)
+        self._buffer = bytearray(socket_read_size)
 
     def __del__(self):
         try:
@@ -384,16 +385,12 @@ class HiredisParser(BaseParser):
         kwargs = {
             'protocolError': InvalidResponse,
             'replyError': self.parse_error,
+            'errors': connection.encoder.encoding_errors,
         }
-
-        # hiredis < 0.1.3 doesn't support functions that create exceptions
-        if not HIREDIS_SUPPORTS_CALLABLE_ERRORS:
-            kwargs['replyError'] = ResponseError
 
         if connection.encoder.decode_responses:
             kwargs['encoding'] = connection.encoder.encoding
-        if HIREDIS_SUPPORTS_ENCODING_ERRORS:
-            kwargs['errors'] = connection.encoder.encoding_errors
+
         self._reader = hiredis.Reader(**kwargs)
         self._next_response = False
 
@@ -419,17 +416,10 @@ class HiredisParser(BaseParser):
         try:
             if custom_timeout:
                 sock.settimeout(timeout)
-            if HIREDIS_USE_BYTE_BUFFER:
-                bufflen = self._sock.recv_into(self._buffer)
-                if bufflen == 0:
-                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-                self._reader.feed(self._buffer, 0, bufflen)
-            else:
-                buffer = self._sock.recv(self.socket_read_size)
-                # an empty string indicates the server shutdown the socket
-                if not isinstance(buffer, bytes) or len(buffer) == 0:
-                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-                self._reader.feed(buffer)
+            bufflen = self._sock.recv_into(self._buffer)
+            if bufflen == 0:
+                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+            self._reader.feed(self._buffer, 0, bufflen)
             # data was read from the socket and added to the buffer.
             # return True to indicate that data was read.
             return True
@@ -465,14 +455,7 @@ class HiredisParser(BaseParser):
         while response is False:
             self.read_from_socket()
             response = self._reader.gets()
-        # if an older version of hiredis is installed, we need to attempt
-        # to convert ResponseErrors to their appropriate types.
-        if not HIREDIS_SUPPORTS_CALLABLE_ERRORS:
-            if isinstance(response, ResponseError):
-                response = self.parse_error(response.args[0])
-            elif isinstance(response, list) and response and \
-                    isinstance(response[0], ResponseError):
-                response[0] = self.parse_error(response[0].args[0])
+
         # if the response is a ConnectionError or the response is a list and
         # the first item is a ConnectionError, raise it as something bad
         # happened
@@ -818,7 +801,7 @@ class SSLConnection(Connection):
     def __init__(self, ssl_keyfile=None, ssl_certfile=None,
                  ssl_cert_reqs='required', ssl_ca_certs=None,
                  ssl_check_hostname=False, **kwargs):
-        if not ssl_available:
+        if not SSL_AVAILABLE:
             raise RedisError("Python wasn't built with SSL support")
 
         super().__init__(**kwargs)

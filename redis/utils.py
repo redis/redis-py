@@ -1,13 +1,6 @@
 from contextlib import contextmanager
 
 
-try:
-    import hiredis  # noqa
-    HIREDIS_AVAILABLE = True
-except ImportError:
-    HIREDIS_AVAILABLE = False
-
-
 def from_url(url, db=None, **kwargs):
     """
     Returns an active Redis client generated from the given database URL.
