@@ -919,6 +919,7 @@ def to_bool(value):
 
 
 URL_QUERY_ARGUMENT_PARSERS = {
+    'db': int,
     'socket_timeout': float,
     'socket_connect_timeout': float,
     'socket_keepalive': to_bool,
@@ -927,6 +928,59 @@ URL_QUERY_ARGUMENT_PARSERS = {
     'health_check_interval': int,
     'ssl_check_hostname': to_bool,
 }
+
+
+def parse_url(url):
+    url = urlparse(url)
+    kwargs = {}
+
+    for name, value in parse_qs(url.query).items():
+        if value and len(value) > 0:
+            value = unquote(value[0])
+            parser = URL_QUERY_ARGUMENT_PARSERS.get(name)
+            if parser:
+                try:
+                    kwargs[name] = parser(value)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        "Invalid value for `%s` in connection URL." % name
+                    )
+            else:
+                kwargs[name] = value
+
+    if url.username:
+        kwargs['username'] = unquote(url.username)
+    if url.password:
+        kwargs['password'] = unquote(url.password)
+
+    # We only support redis://, rediss:// and unix:// schemes.
+    if url.scheme == 'unix':
+        if url.path:
+            kwargs['path'] = unquote(url.path)
+        kwargs['connection_class'] = UnixDomainSocketConnection
+
+    elif url.scheme in ('redis', 'rediss'):
+        if url.hostname:
+            kwargs['host'] = unquote(url.hostname)
+        if url.port:
+            kwargs['port'] = int(url.port)
+
+        # If there's a path argument, use it as the db argument if a
+        # querystring value wasn't specified
+        if url.path and 'db' not in kwargs:
+            try:
+                kwargs['db'] = int(unquote(url.path).replace('/', ''))
+            except (AttributeError, ValueError):
+                pass
+
+        if url.scheme == 'rediss':
+            kwargs['connection_class'] = SSLConnection
+    else:
+        valid_schemes = 'redis://, rediss://, unix://'
+        raise ValueError('Redis URL must specify one of the following '
+                         'schemes (%s)' % valid_schemes)
+
+    return kwargs
 
 
 class ConnectionPool:
@@ -943,7 +997,7 @@ class ConnectionPool:
     ``connection_class``.
     """
     @classmethod
-    def from_url(cls, url, db=None, decode_components=False, **kwargs):
+    def from_url(cls, url, **kwargs):
         """
         Return a connection pool configured from the given URL.
 
@@ -955,114 +1009,35 @@ class ConnectionPool:
 
         Three URL schemes are supported:
 
-        - `redis://
-          <https://www.iana.org/assignments/uri-schemes/prov/redis>`_ creates a
-          normal TCP socket connection
-        - `rediss://
-          <https://www.iana.org/assignments/uri-schemes/prov/rediss>`_ creates
-          a SSL wrapped TCP socket connection
-        - ``unix://`` creates a Unix Domain Socket connection
+        - `redis://` creates a TCP socket connection. See more at:
+          <https://www.iana.org/assignments/uri-schemes/prov/redis>
+        - `rediss://` creates a SSL wrapped TCP socket connection. See more at:
+          <https://www.iana.org/assignments/uri-schemes/prov/rediss>
+        - ``unix://``: creates a Unix Domain Socket connection.
 
-        There are several ways to specify a database number. The parse function
-        will return the first specified option:
+        The username, password, hostname, path and all querystring values
+        are passed through urllib.parse.unquote in order to replace any
+        percent-encoded values with their corresponding characters.
+
+        There are several ways to specify a database number. The first value
+        found will be used:
             1. A ``db`` querystring option, e.g. redis://localhost?db=0
-            2. If using the redis:// scheme, the path argument of the url, e.g.
-               redis://localhost/0
-            3. The ``db`` argument to this function.
+            2. If using the redis:// or rediss:// schemes, the path argument
+               of the url, e.g. redis://localhost/0
+            3. A ``db`` keyword argument to this function.
 
-        If none of these options are specified, db=0 is used.
+        If none of these options are specified, the default db=0 is used.
 
-        The ``decode_components`` argument allows this function to work with
-        percent-encoded URLs. If this argument is set to ``True`` all ``%xx``
-        escapes will be replaced by their single-character equivalents after
-        the URL has been parsed. This only applies to the ``hostname``,
-        ``path``, ``username`` and ``password`` components.
-
-        Any additional querystring arguments and keyword arguments will be
-        passed along to the ConnectionPool class's initializer. The querystring
-        arguments ``socket_connect_timeout`` and ``socket_timeout`` if supplied
-        are parsed as float values. The arguments ``socket_keepalive`` and
-        ``retry_on_timeout`` are parsed to boolean values that accept
-        True/False, Yes/No values to indicate state. Invalid types cause a
-        ``UserWarning`` to be raised. In the case of conflicting arguments,
-        querystring arguments always win.
-
+        All querystring options are cast to their appropriate Python types.
+        Boolean arguments can be specified with string values "True"/"False"
+        or "Yes"/"No". Values that cannot be properly cast cause a
+        ``ValueError`` to be raised. Once parsed, the querystring arguments
+        and keyword arguments are passed to the ``ConnectionPool``'s
+        class initializer. In the case of conflicting arguments, querystring
+        arguments always win.
         """
-        url = urlparse(url)
-        url_options = {}
-
-        for name, value in parse_qs(url.query).items():
-            if value and len(value) > 0:
-                parser = URL_QUERY_ARGUMENT_PARSERS.get(name)
-                if parser:
-                    try:
-                        url_options[name] = parser(value[0])
-                    except (TypeError, ValueError):
-                        warnings.warn(UserWarning(
-                            "Invalid value for `%s` in connection URL." % name
-                        ))
-                else:
-                    url_options[name] = value[0]
-
-        if decode_components:
-            username = unquote(url.username) if url.username else None
-            password = unquote(url.password) if url.password else None
-            path = unquote(url.path) if url.path else None
-            hostname = unquote(url.hostname) if url.hostname else None
-        else:
-            username = url.username or None
-            password = url.password or None
-            path = url.path
-            hostname = url.hostname
-
-        # We only support redis://, rediss:// and unix:// schemes.
-        if url.scheme == 'unix':
-            url_options.update({
-                'username': username,
-                'password': password,
-                'path': path,
-                'connection_class': UnixDomainSocketConnection,
-            })
-
-        elif url.scheme in ('redis', 'rediss'):
-            url_options.update({
-                'host': hostname,
-                'port': int(url.port or 6379),
-                'username': username,
-                'password': password,
-            })
-
-            # If there's a path argument, use it as the db argument if a
-            # querystring value wasn't specified
-            if 'db' not in url_options and path:
-                try:
-                    url_options['db'] = int(path.replace('/', ''))
-                except (AttributeError, ValueError):
-                    pass
-
-            if url.scheme == 'rediss':
-                url_options['connection_class'] = SSLConnection
-        else:
-            valid_schemes = ', '.join(('redis://', 'rediss://', 'unix://'))
-            raise ValueError('Redis URL must specify one of the following '
-                             'schemes (%s)' % valid_schemes)
-
-        # last shot at the db value
-        url_options['db'] = int(url_options.get('db', db or 0))
-
-        # update the arguments from the URL values
+        url_options = parse_url(url)
         kwargs.update(url_options)
-
-        # backwards compatability
-        if 'charset' in kwargs:
-            warnings.warn(DeprecationWarning(
-                '"charset" is deprecated. Use "encoding" instead'))
-            kwargs['encoding'] = kwargs.pop('charset')
-        if 'errors' in kwargs:
-            warnings.warn(DeprecationWarning(
-                '"errors" is deprecated. Use "encoding_errors" instead'))
-            kwargs['encoding_errors'] = kwargs.pop('errors')
-
         return cls(**kwargs)
 
     def __init__(self, connection_class=Connection, max_connections=None,

@@ -647,7 +647,7 @@ class Redis:
     }
 
     @classmethod
-    def from_url(cls, url, db=None, **kwargs):
+    def from_url(cls, url, **kwargs):
         """
         Return a Redis client object configured from the given URL
 
@@ -659,28 +659,35 @@ class Redis:
 
         Three URL schemes are supported:
 
-        - ```redis://``
-          <http://www.iana.org/assignments/uri-schemes/prov/redis>`_ creates a
-          normal TCP socket connection
-        - ```rediss://``
-          <http://www.iana.org/assignments/uri-schemes/prov/rediss>`_ creates a
-          SSL wrapped TCP socket connection
-        - ``unix://`` creates a Unix Domain Socket connection
+        - `redis://` creates a TCP socket connection. See more at:
+          <https://www.iana.org/assignments/uri-schemes/prov/redis>
+        - `rediss://` creates a SSL wrapped TCP socket connection. See more at:
+          <https://www.iana.org/assignments/uri-schemes/prov/rediss>
+        - ``unix://``: creates a Unix Domain Socket connection.
 
-        There are several ways to specify a database number. The parse function
-        will return the first specified option:
+        The username, password, hostname, path and all querystring values
+        are passed through urllib.parse.unquote in order to replace any
+        percent-encoded values with their corresponding characters.
+
+        There are several ways to specify a database number. The first value
+        found will be used:
             1. A ``db`` querystring option, e.g. redis://localhost?db=0
-            2. If using the redis:// scheme, the path argument of the url, e.g.
-               redis://localhost/0
-            3. The ``db`` argument to this function.
+            2. If using the redis:// or rediss:// schemes, the path argument
+               of the url, e.g. redis://localhost/0
+            3. A ``db`` keyword argument to this function.
 
-        If none of these options are specified, db=0 is used.
+        If none of these options are specified, the default db=0 is used.
 
-        Any additional querystring arguments and keyword arguments will be
-        passed along to the ConnectionPool class's initializer. In the case
-        of conflicting arguments, querystring arguments always win.
+        All querystring options are cast to their appropriate Python types.
+        Boolean arguments can be specified with string values "True"/"False"
+        or "Yes"/"No". Values that cannot be properly cast cause a
+        ``ValueError`` to be raised. Once parsed, the querystring arguments
+        and keyword arguments are passed to the ``ConnectionPool``'s
+        class initializer. In the case of conflicting arguments, querystring
+        arguments always win.
+
         """
-        connection_pool = ConnectionPool.from_url(url, db=db, **kwargs)
+        connection_pool = ConnectionPool.from_url(url, **kwargs)
         return cls(connection_pool=connection_pool)
 
     def __init__(self, host='localhost', port=6379,
