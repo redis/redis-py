@@ -1,5 +1,9 @@
 * (in development)
-    * Removed support for end of life Python 2.7.
+    * BACKWARDS INCOMPATIBLE: Removed support for end of life Python 2.7. #1318
+    * BACKWARDS INCOMPATIBLE: All values within Redis URLs are unquoted via
+      urllib.parse.unquote. Prior versions of redis-py supported this by
+      specifying the ``decode_components`` flag to the ``from_url`` functions.
+      This is now done by default and cannot be disabled. #589
     * Provide a development and testing environment via docker. Thanks
       @abrookins. #1365
     * Added support for the LPOS command available in Redis 6.0.6. Thanks
