@@ -9,8 +9,13 @@ from string import ascii_letters
 from redis.client import parse_info
 from redis import exceptions
 
-from .conftest import (skip_if_server_version_lt, skip_if_server_version_gte,
-                       skip_unless_arch_bits, REDIS_6_VERSION)
+from .conftest import (
+    _get_client,
+    REDIS_6_VERSION,
+    skip_if_server_version_gte,
+    skip_if_server_version_lt,
+    skip_unless_arch_bits,
+)
 
 
 @pytest.fixture()
@@ -192,6 +197,41 @@ class TestRedisCommands:
         assert r.acl_setuser(username, enabled=False, reset=True)
         users = r.acl_list()
         assert 'user %s off -@all' % username in users
+
+    @skip_if_server_version_lt(REDIS_6_VERSION)
+    def test_acl_log(self, r, request):
+        username = 'redis-py-user'
+
+        def teardown():
+            r.acl_deluser(username)
+
+        request.addfinalizer(teardown)
+        r.acl_setuser(username, enabled=True, reset=True,
+                      commands=['+get', '+set', '+select'],
+                      keys=['cache:*'], nopass=True)
+        r.acl_log_reset()
+
+        user_client = _get_client(redis.Redis, request, flushdb=False,
+                                  username=username)
+
+        # Valid operation and key
+        assert user_client.set('cache:0', 1)
+        assert user_client.get('cache:0') == b'1'
+
+        # Invalid key
+        with pytest.raises(exceptions.NoPermissionError):
+            user_client.get('violated_cache:0')
+
+        # Invalid operation
+        with pytest.raises(exceptions.NoPermissionError):
+            user_client.hset('cache:0', 'hkey', 'hval')
+
+        assert isinstance(r.acl_log(), list)
+        assert len(r.acl_log()) == 2
+        assert len(r.acl_log(count=1)) == 1
+        assert isinstance(r.acl_log()[0], dict)
+        assert 'client-info' in r.acl_log(count=1)[0]
+        assert r.acl_log_reset()
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
     def test_acl_setuser_categories_without_prefix_fails(self, r, request):

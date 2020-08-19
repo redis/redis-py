@@ -2,6 +2,7 @@ import pytest
 import random
 import redis
 from distutils.version import StrictVersion
+from redis.connection import parse_url
 from unittest.mock import Mock
 from urllib.parse import urlparse
 
@@ -60,19 +61,31 @@ def skip_unless_arch_bits(arch_bits):
                               reason="server is not {}-bit".format(arch_bits))
 
 
-def _get_client(cls, request, single_connection_client=True, **kwargs):
+def _get_client(cls, request, single_connection_client=True, flushdb=True,
+                **kwargs):
+    """
+    Helper for fixtures or tests that need a Redis client
+
+    Uses the "--redis-url" command line argument for connection info. Unlike
+    ConnectionPool.from_url, keyword arguments to this function override
+    values specified in the URL.
+    """
     redis_url = request.config.getoption("--redis-url")
-    client = cls.from_url(redis_url, **kwargs)
+    url_options = parse_url(redis_url)
+    url_options.update(kwargs)
+    pool = redis.ConnectionPool(**url_options)
+    client = cls(connection_pool=pool)
     if single_connection_client:
         client = client.client()
     if request:
         def teardown():
-            try:
-                client.flushdb()
-            except redis.ConnectionError:
-                # handle cases where a test disconnected a client
-                # just manually retry the flushdb
-                client.flushdb()
+            if flushdb:
+                try:
+                    client.flushdb()
+                except redis.ConnectionError:
+                    # handle cases where a test disconnected a client
+                    # just manually retry the flushdb
+                    client.flushdb()
             client.close()
             client.connection_pool.disconnect()
         request.addfinalizer(teardown)

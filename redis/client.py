@@ -495,6 +495,43 @@ def parse_acl_getuser(response, **options):
     return data
 
 
+def parse_acl_log(response, **options):
+    if response is None:
+        return None
+    if isinstance(response, list):
+        data = []
+        for log in response:
+            log_data = pairs_to_dict(log, True, True)
+            client_info = log_data.get('client-info', '')
+            log_data["client-info"] = parse_client_info(client_info)
+
+            # float() is lossy comparing to the "double" in C
+            log_data["age-seconds"] = float(log_data["age-seconds"])
+            data.append(log_data)
+    else:
+        data = bool_ok(response)
+    return data
+
+
+def parse_client_info(value):
+    """
+    Parsing client-info in ACL Log in following format.
+    "key1=value1 key2=value2 key3=value3"
+    """
+    client_info = {}
+    infos = value.split(" ")
+    for info in infos:
+        key, value = info.split("=")
+        client_info[key] = value
+
+    # Those fields are definded as int in networking.c
+    for int_key in {"id", "age", "idle", "db", "sub", "psub",
+                    "multi", "qbuf", "qbuf-free", "obl",
+                    "oll", "omem"}:
+        client_info[int_key] = int(client_info[int_key])
+    return client_info
+
+
 def parse_module_result(response):
     if isinstance(response, ModuleError):
         raise response
@@ -563,6 +600,7 @@ class Redis:
         'ACL GETUSER': parse_acl_getuser,
         'ACL LIST': lambda r: list(map(str_if_bytes, r)),
         'ACL LOAD': bool_ok,
+        'ACL LOG': parse_acl_log,
         'ACL SAVE': bool_ok,
         'ACL SETUSER': bool_ok,
         'ACL USERS': lambda r: list(map(str_if_bytes, r)),
@@ -948,6 +986,29 @@ class Redis:
     def acl_list(self):
         "Return a list of all ACLs on the server"
         return self.execute_command('ACL LIST')
+
+    def acl_log(self, count=None):
+        """
+        Get ACL logs as a list.
+        :param int count: Get logs[0:count].
+        :rtype: List.
+        """
+        args = []
+        if count is not None:
+            if not isinstance(count, int):
+                raise DataError('ACL LOG count must be an '
+                                'integer')
+            args.append(count)
+
+        return self.execute_command('ACL LOG', *args)
+
+    def acl_log_reset(self):
+        """
+        Reset ACL logs.
+        :rtype: Boolean.
+        """
+        args = [b'RESET']
+        return self.execute_command('ACL LOG', *args)
 
     def acl_load(self):
         """
