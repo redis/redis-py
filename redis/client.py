@@ -3874,7 +3874,7 @@ class Pipeline(Redis):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.reset()
+        self.execute()  # also resets
 
     def __del__(self):
         try:

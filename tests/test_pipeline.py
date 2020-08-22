@@ -51,6 +51,15 @@ class TestPipeline:
             pipe.execute()
             assert len(pipe) == 0
 
+    def test_pipeline_autoexecute(self, r):
+        with r.pipeline() as pipe:
+            # Fill 'er up!
+            pipe.set('d', 'd1').set('e', 'e1').set('f', 'f1')
+            assert len(pipe) == 3
+
+        # exiting with block calls execute() and reset(), so empty once again
+        assert len(pipe) == 0
+
     def test_pipeline_no_transaction(self, r):
         with r.pipeline(transaction=False) as pipe:
             pipe.set('a', 'a1').set('b', 'b1').set('c', 'c1')
