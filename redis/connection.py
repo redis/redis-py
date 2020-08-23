@@ -213,7 +213,7 @@ class SocketBuffer:
             # there's no data to be read. otherwise raise the
             # original exception.
             allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
-            if not raise_on_timeout and ex.errno == allowed:
+            if ex.errno == allowed:
                 return False
             raise ConnectionError("Error while reading from socket: %s" %
                                   (ex.args,))
@@ -443,7 +443,7 @@ class HiredisParser(BaseParser):
             # there's no data to be read. otherwise raise the
             # original exception.
             allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
-            if not raise_on_timeout and ex.errno == allowed:
+            if ex.errno == allowed:
                 return False
             raise ConnectionError("Error while reading from socket: %s" %
                                   (ex.args,))
