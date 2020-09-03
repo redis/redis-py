@@ -115,6 +115,7 @@ def parse_info(response):
     "Parse the result of Redis's INFO command into a Python dict"
     info = {}
     response = str_if_bytes(response)
+    modules_list = []  # Prepare a list for modules field if exist in resp
 
     def get_value(value):
         if ',' not in value or '=' not in value:
@@ -141,7 +142,18 @@ def parse_info(response):
                 key, value = line.split(':', 1)
                 if key == 'cmdstat_host':
                     key, value = line.rsplit(':', 1)
-                info[key] = get_value(value)
+
+                line_value = get_value(value)
+                # Hardcode a list for key 'modules' since there could be
+                # multiple lines that started with 'module'
+                if key == 'module':
+                    modules_list.append(line_value)
+                else:
+                    info[key] = line_value
+
+                if modules_list:
+                    # Note that the key is 'modules', not 'module'
+                    info['modules'] = modules_list
             else:
                 # if the line isn't splittable, append it to the "__raw__" key
                 info.setdefault('__raw__', []).append(line)
