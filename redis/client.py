@@ -141,7 +141,13 @@ def parse_info(response):
                 key, value = line.split(':', 1)
                 if key == 'cmdstat_host':
                     key, value = line.rsplit(':', 1)
-                info[key] = get_value(value)
+
+                if key == 'module':
+                    # Hardcode a list for key 'modules' since there could be
+                    # multiple lines that started with 'module'
+                    info.setdefault('modules', []).append(get_value(value))
+                else:
+                    info[key] = get_value(value)
             else:
                 # if the line isn't splittable, append it to the "__raw__" key
                 info.setdefault('__raw__', []).append(line)
