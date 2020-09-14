@@ -2,7 +2,7 @@ from unittest import mock
 import pytest
 
 from redis.exceptions import InvalidResponse
-from redis.connection import HIREDIS_AVAILABLE
+from redis.features import HIREDIS_AVAILABLE
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason='PythonParser only')

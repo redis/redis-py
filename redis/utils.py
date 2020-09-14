@@ -1,11 +1,8 @@
 from contextlib import contextmanager
 
 
-try:
-    import hiredis  # noqa
-    HIREDIS_AVAILABLE = True
-except ImportError:
-    HIREDIS_AVAILABLE = False
+# the default value for keyword arguments where a None cannot be used
+DEFAULT = object()
 
 
 def from_url(url, **kwargs):
