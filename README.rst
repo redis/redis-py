@@ -129,7 +129,7 @@ this will cause redis-py 3.0 to raise a ConnectionError.
 This check can be disabled by setting `ssl_cert_reqs` to `None`. Note that
 doing so removes the security check. Do so at your own risk.
 
-Method with hostname verification using a local certificate bundle (linux):
+Example with hostname verification using a local certificate bundle (linux):
 
 .. code-block:: python
 
@@ -140,7 +140,7 @@ Method with hostname verification using a local certificate bundle (linux):
     >>> r.get('foo')
     b'bar'
 
-Method with hostname verification using `certifi <https://pypi.org/project/certifi/>`_:
+Example with hostname verification using `certifi <https://pypi.org/project/certifi/>`_:
 
 .. code-block:: python
 
@@ -151,7 +151,7 @@ Method with hostname verification using `certifi <https://pypi.org/project/certi
     >>> r.get('foo')
     b'bar'
 
-Method turning off hostname verification (not recommended):
+Example turning off hostname verification (not recommended):
 
 .. code-block:: python
 
