@@ -129,8 +129,43 @@ this will cause redis-py 3.0 to raise a ConnectionError.
 This check can be disabled by setting `ssl_cert_reqs` to `None`. Note that
 doing so removes the security check. Do so at your own risk.
 
-It has been reported that SSL certs received from AWS ElastiCache do not have
-proper hostnames and turning off hostname verification is currently required.
+Example with hostname verification using a local certificate bundle (linux):
+
+.. code-block:: pycon
+
+    >>> import redis
+    >>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
+                        ssl=True,
+                        ssl_ca_certs='/etc/ssl/certs/ca-certificates.crt')
+    >>> r.set('foo', 'bar')
+    True
+    >>> r.get('foo')
+    b'bar'
+
+Example with hostname verification using
+`certifi <https://pypi.org/project/certifi/>`_:
+
+.. code-block:: pycon
+
+    >>> import redis, certifi
+    >>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
+                        ssl=True, ssl_ca_certs=certifi.where())
+    >>> r.set('foo', 'bar')
+    True
+    >>> r.get('foo')
+    b'bar'
+
+Example turning off hostname verification (not recommended):
+
+.. code-block:: pycon
+
+    >>> import redis
+    >>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
+                        ssl=True, ssl_cert_reqs=None)
+    >>> r.set('foo', 'bar')
+    True
+    >>> r.get('foo')
+    b'bar'
 
 
 MSET, MSETNX and ZADD
@@ -150,7 +185,7 @@ dict is a mapping of element-names -> score.
 
 MSET, MSETNX and ZADD now look like:
 
-.. code-block:: python
+.. code-block:: pycon
 
     def mset(self, mapping):
     def msetnx(self, mapping):
