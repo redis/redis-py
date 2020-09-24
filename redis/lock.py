@@ -186,14 +186,14 @@ class Lock:
             blocking_timeout = self.blocking_timeout
         stop_trying_at = None
         if blocking_timeout is not None:
-            stop_trying_at = mod_time.time() + blocking_timeout
+            stop_trying_at = mod_time.monotonic() + blocking_timeout
         while True:
             if self.do_acquire(token):
                 self.local.token = token
                 return True
             if not blocking:
                 return False
-            next_try_at = mod_time.time() + sleep
+            next_try_at = mod_time.monotonic() + sleep
             if stop_trying_at is not None and next_try_at > stop_trying_at:
                 return False
             mod_time.sleep(sleep)
