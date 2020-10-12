@@ -1,5 +1,8 @@
 import pytest
+import threading
 import time
+
+from unittest import mock
 
 import redis
 from redis.exceptions import ConnectionError
@@ -543,3 +546,24 @@ class TestPubSubTimeouts:
         p.subscribe('foo')
         assert wait_for_message(p) == make_message('subscribe', 'foo', 1)
         assert p.get_message(timeout=0.01) is None
+
+
+class TestPubSubWorkerThread:
+    def test_pubsub_worker_thread_exception_handler(self, r):
+        event = threading.Event()
+
+        def exception_handler(ex, pubsub, thread):
+            thread.stop()
+            event.set()
+
+        p = r.pubsub()
+        p.subscribe(**{'foo': lambda m: m})
+        with mock.patch.object(p, 'get_message',
+                               side_effect=Exception('error')):
+            pubsub_thread = p.run_in_thread(
+                exception_handler=exception_handler
+            )
+
+        assert event.wait(timeout=1.0)
+        pubsub_thread.join(timeout=1.0)
+        assert not pubsub_thread.is_alive()
