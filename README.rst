@@ -697,6 +697,20 @@ subscribed to patterns or channels that don't have message handlers attached.
     # when it's time to shut it down...
     >>> thread.stop()
 
+`run_in_thread` also supports an optional exception handler, which lets you
+catch exceptions that occur within the worker thread and handle them
+appropriately. The exception handler will take as arguments the exception
+itself, the pubsub object, and the worker thread returned by `run_in_thread`.
+
+.. code-block:: pycon
+    >>> p.subscribe(**{'my-channel': my_handler})
+    >>> def exception_handler(ex, pubsub, thread):
+    >>>     print(ex)
+    >>>     thread.stop()
+    >>>     thread.join(timeout=1.0)
+    >>>     pubsub.close()
+    >>> thread = p.run_in_thread(exception_handler=exception_handler)
+
 A PubSub object adheres to the same encoding semantics as the client instance
 it was created from. Any channel or pattern that's unicode will be encoded
 using the `charset` specified on the client before being sent to Redis. If the
