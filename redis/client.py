@@ -1691,6 +1691,9 @@ class Redis:
         """
         Sets the value at key ``name`` to ``value``
         and returns the old value at key ``name`` atomically.
+
+        As per Redis 6.2, GETSET is considered deprecated.
+        Please use SET with GET parameter in new code.
         """
         return self.execute_command('GETSET', name, value)
 
@@ -1822,7 +1825,7 @@ class Redis:
         return self.execute_command('RESTORE', *params)
 
     def set(self, name, value,
-            ex=None, px=None, nx=False, xx=False, keepttl=False):
+            ex=None, px=None, nx=False, xx=False, keepttl=False, get=False):
         """
         Set the value at key ``name`` to ``value``
 
@@ -1838,6 +1841,10 @@ class Redis:
 
         ``keepttl`` if True, retain the time to live associated with the key.
             (Available since Redis 6.0)
+
+        ``get`` if True, set the value at key ``name`` to ``value`` and return
+            the old value stored at key, or None when key did not exist.
+            (Available since Redis 6.2)
         """
         pieces = [name, value]
         if ex is not None:
@@ -1858,6 +1865,9 @@ class Redis:
 
         if keepttl:
             pieces.append('KEEPTTL')
+
+        if get:
+            pieces.append('GET')
 
         return self.execute_command('SET', *pieces)
 
