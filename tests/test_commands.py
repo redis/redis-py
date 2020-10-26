@@ -912,6 +912,12 @@ class TestRedisCommands:
         assert r.get('a') == b'2'
         assert 0 < r.ttl('a') <= 10
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_set_get(self, r):
+        assert r.set('a', 'foo', get=True) is None
+        assert r.set('a', 'bar', get=True) == b'foo'
+        assert r.get('a') == b'bar'
+
     def test_setex(self, r):
         assert r.setex('a', 60, '1')
         assert r['a'] == b'1'
