@@ -400,12 +400,20 @@ def parse_zscan(response, **options):
 
 def parse_slowlog_get(response, **options):
     space = ' ' if options.get('decode_responses', False) else b' '
-    return [{
-        'id': item[0],
-        'start_time': int(item[1]),
-        'duration': int(item[2]),
-        'command': space.join(item[3])
-    } for item in response]
+    parsed_items = []
+    for item in response:
+        parsed_item = {
+            'id': item[0],
+            'start_time': int(item[1]),
+            'duration': int(item[2]),
+            'command': space.join(item[3])
+        }
+        if len(item) >= 5:
+            parsed_item['client_address'] = str_if_bytes(item[4])
+        if len(item) >= 6:
+            parsed_item['client_name'] = str_if_bytes(item[5])
+        parsed_items.append(parsed_item)
+    return parsed_items
 
 
 def parse_cluster_info(response, **options):

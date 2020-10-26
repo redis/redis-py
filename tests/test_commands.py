@@ -447,6 +447,9 @@ class TestRedisCommands:
     def test_ping(self, r):
         assert r.ping()
 
+    # slowlog get was available since 2.2.12
+    # but socket address and name were added in version 4.0
+    @skip_if_server_version_lt('4.0.0')
     def test_slowlog_get(self, r, slowlog):
         assert r.slowlog_reset()
         unicode_string = chr(3456) + 'abcd' + chr(3421)
@@ -467,6 +470,9 @@ class TestRedisCommands:
         # make sure other attributes are typed correctly
         assert isinstance(slowlog[0]['start_time'], int)
         assert isinstance(slowlog[0]['duration'], int)
+
+        assert isinstance(slowlog[0]['client_address'], str)
+        assert isinstance(slowlog[0]['client_name'], str)
 
     def test_slowlog_get_limit(self, r, slowlog):
         assert r.slowlog_reset()
