@@ -3803,7 +3803,8 @@ class PubSub:
 
         return message
 
-    def run_in_thread(self, sleep_time=0, daemon=False):
+    def run_in_thread(self, sleep_time=0, daemon=False,
+                      exception_handler=None):
         for channel, handler in self.channels.items():
             if handler is None:
                 raise PubSubError("Channel: '%s' has no handler registered" %
@@ -3813,17 +3814,24 @@ class PubSub:
                 raise PubSubError("Pattern: '%s' has no handler registered" %
                                   pattern)
 
-        thread = PubSubWorkerThread(self, sleep_time, daemon=daemon)
+        thread = PubSubWorkerThread(
+            self,
+            sleep_time,
+            daemon=daemon,
+            exception_handler=exception_handler
+        )
         thread.start()
         return thread
 
 
 class PubSubWorkerThread(threading.Thread):
-    def __init__(self, pubsub, sleep_time, daemon=False):
+    def __init__(self, pubsub, sleep_time, daemon=False,
+                 exception_handler=None):
         super().__init__()
         self.daemon = daemon
         self.pubsub = pubsub
         self.sleep_time = sleep_time
+        self.exception_handler = exception_handler
         self._running = threading.Event()
 
     def run(self):
@@ -3833,8 +3841,13 @@ class PubSubWorkerThread(threading.Thread):
         pubsub = self.pubsub
         sleep_time = self.sleep_time
         while self._running.is_set():
-            pubsub.get_message(ignore_subscribe_messages=True,
-                               timeout=sleep_time)
+            try:
+                pubsub.get_message(ignore_subscribe_messages=True,
+                                   timeout=sleep_time)
+            except BaseException as e:
+                if self.exception_handler is None:
+                    raise
+                self.exception_handler(e, pubsub, self)
         pubsub.close()
 
     def stop(self):
