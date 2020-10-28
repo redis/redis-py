@@ -914,7 +914,9 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt('6.2.0')
     def test_set_get(self, r):
-        assert r.set('a', 'foo', get=True) is None
+        assert r.set('a', 'True', get=True) is None
+        assert r.set('a', 'True', get=True) == b'True'
+        assert r.set('a', 'foo') is True
         assert r.set('a', 'bar', get=True) == b'foo'
         assert r.get('a') == b'bar'
 
