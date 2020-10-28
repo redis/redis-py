@@ -557,6 +557,7 @@ def parse_set_result(response, **options):
         return response
     return response and str_if_bytes(response) == 'OK'
 
+
 class Redis:
     """
     Implementation of the Redis protocol.
