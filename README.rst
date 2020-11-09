@@ -75,6 +75,12 @@ specify `decode_responses=True` to `Redis.__init__`. In this case, any
 Redis command that returns a string type will be decoded with the `encoding`
 specified.
 
+The default encoding is "utf-8", but this can be customized with the `encoding`
+argument to the `redis.Redis` class. The `encoding` will be used to
+automatically encode any strings passed to commands, such as key names and
+values. When `decode_responses=True`, string data returned from commands
+will be decoded with the same `encoding`.
+
 
 Upgrading from redis-py 2.X to 3.0
 ----------------------------------
