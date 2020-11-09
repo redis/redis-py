@@ -953,3 +953,11 @@ Special thanks to:
   which some of the socket code is still used.
 * Alexander Solovyov for ideas on the generic response callback system.
 * Paul Hubbard for initial packaging support.
+
+
+Sponsored by
+^^^^^^^^^^^^
+
+.. image:: ./docs/logo-redislabs.png
+   :alt: RedisLabs
+   :target: https://www.redislabs.com
