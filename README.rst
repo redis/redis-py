@@ -81,6 +81,9 @@ automatically encode any strings passed to commands, such as key names and
 values. When `decode_responses=True`, string data returned from commands
 will be decoded with the same `encoding`.
 
+The `charset` parameter in older versions has been deprecated and is replaced 
+by the `encoding` parameter.
+
 
 Upgrading from redis-py 2.X to 3.0
 ----------------------------------
