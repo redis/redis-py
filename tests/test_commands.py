@@ -642,6 +642,19 @@ class TestRedisCommands:
         r.restore('a', 0, dumped, replace=True)
         assert r['a'] == b'bar'
 
+    @skip_if_server_version_lt('5.0.0')
+    def test_dump_and_restore_absttl(self, r):
+        r['a'] = 'foo'
+        dumped = r.dump('a')
+        del r['a']
+        ttl = int(
+            (redis_server_time(r) + datetime.timedelta(minutes=1)).timestamp()
+            * 1000
+        )
+        r.restore('a', ttl, dumped, absttl=True)
+        assert r['a'] == b'foo'
+        assert 0 < r.ttl('a') <= 61
+
     def test_exists(self, r):
         assert r.exists('a') == 0
         r['a'] = 'foo'
