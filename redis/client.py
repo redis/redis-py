@@ -1811,14 +1811,23 @@ class Redis:
         "Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist"
         return self.execute_command('RENAMENX', src, dst)
 
-    def restore(self, name, ttl, value, replace=False):
+    def restore(self, name, ttl, value, replace=False, absttl=False):
         """
         Create a key using the provided serialized value, previously obtained
         using DUMP.
+
+        ``replace`` allows an existing key on ``name`` to be overridden. If
+        it's not specified an error is raised on collision.
+
+        ``absttl`` if True, specified ``ttl`` should represent an absolute Unix
+        timestamp in milliseconds in which the key will expire. (Redis 5.0 or
+        greater).
         """
         params = [name, ttl, value]
         if replace:
             params.append('REPLACE')
+        if absttl:
+            params.append('ABSTTL')
         return self.execute_command('RESTORE', *params)
 
     def set(self, name, value,
