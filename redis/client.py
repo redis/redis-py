@@ -1815,6 +1815,9 @@ class Redis:
         """
         Create a key using the provided serialized value, previously obtained
         using DUMP.
+
+        ``replace`` allows an existing key on ``name`` to be overridden. If
+        it's not specified an error is raised on collision.
         """
         params = [name, ttl, value]
         if replace:
