@@ -398,6 +398,11 @@ def parse_zscan(response, **options):
     return int(cursor), list(zip(it, map(score_cast_func, it)))
 
 
+def parse_zmscore(response, **options):
+    # zmscore: list of scores (double precision floating point number) or nil
+    return [float(score) if score is not None else None for score in response]
+
+
 def parse_slowlog_get(response, **options):
     space = ' ' if options.get('decode_responses', False) else b' '
     return [{
@@ -688,6 +693,7 @@ class Redis:
         'XPENDING': parse_xpending,
         'ZADD': parse_zadd,
         'ZSCAN': parse_zscan,
+        'ZMSCORE': parse_zmscore,
     }
 
     @classmethod
@@ -3057,6 +3063,21 @@ class Redis:
         aggregated based on the ``aggregate``, or SUM if none is provided.
         """
         return self._zaggregate('ZUNIONSTORE', dest, keys, aggregate)
+
+    def zmscore(self, key, members):
+        """
+        Returns the scores associated with the specified members
+        in the sorted set stored at key.
+
+        ``members`` should be a list of the member name.
+        Return type is a list of score.
+        If no member can be matched, an empty list will be returned.
+        """
+        if not isinstance(members, list) or len(members) < 1:
+            raise DataError('ZMSCORE members must be a non-empty list')
+        pieces = [key] + members
+        return self.execute_command('ZMSCORE', *pieces)
+
 
     def _zaggregate(self, command, dest, keys, aggregate=None):
         pieces = [command, dest, len(keys)]
