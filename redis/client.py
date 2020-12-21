@@ -3071,13 +3071,14 @@ class Redis:
 
         ``members`` should be a list of the member name.
         Return type is a list of score.
-        If no member can be matched, an empty list will be returned.
+
+        If the member does not exist, a None will be returned
+        in corresponding position.
         """
         if not isinstance(members, list) or len(members) < 1:
             raise DataError('ZMSCORE members must be a non-empty list')
         pieces = [key] + members
         return self.execute_command('ZMSCORE', *pieces)
-
 
     def _zaggregate(self, command, dest, keys, aggregate=None):
         pieces = [command, dest, len(keys)]
