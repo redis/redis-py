@@ -1438,6 +1438,13 @@ class Redis:
         "Ping the Redis server"
         return self.execute_command('PING')
 
+    def lolwut(self, *version_numbers):
+        "Get the Redis version and a piece of generative computer art"
+        if version_numbers:
+            return self.execute_command('LOLWUT VERSION', *version_numbers)
+        else:
+            return self.execute_command('LOLWUT')
+
     def save(self):
         """
         Tell the Redis server to save its data to disk,

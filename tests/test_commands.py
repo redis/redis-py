@@ -447,6 +447,13 @@ class TestRedisCommands:
     def test_ping(self, r):
         assert r.ping()
 
+    def test_lolwut(self, r):
+        lolwut = r.lolwut().decode('utf-8')
+        assert 'Redis ver.' in lolwut
+
+        lolwut = r.lolwut(5, 6, 7, 8).decode('utf-8')
+        assert 'Redis ver.' in lolwut
+
     def test_slowlog_get(self, r, slowlog):
         assert r.slowlog_reset()
         unicode_string = chr(3456) + 'abcd' + chr(3421)
