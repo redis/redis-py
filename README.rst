@@ -744,6 +744,7 @@ appropriately. The exception handler will take as arguments the exception
 itself, the pubsub object, and the worker thread returned by `run_in_thread`.
 
 .. code-block:: pycon
+
     >>> p.subscribe(**{'my-channel': my_handler})
     >>> def exception_handler(ex, pubsub, thread):
     >>>     print(ex)
