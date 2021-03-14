@@ -8,7 +8,7 @@ import redis
 from redis.exceptions import ConnectionError
 
 from .conftest import _get_client
-from .conftest import skip_if_server_version_lt
+from .conftest import skip_if_server_version_lt, skip_if_server_version_gte
 
 
 def wait_for_message(pubsub, timeout=0.1, ignore_subscribe_messages=False):
@@ -549,6 +549,7 @@ class TestPubSubTimeouts:
 
 
 class TestPubSubWorkerThread:
+    @skip_if_server_version_gte('6.0.0')
     def test_pubsub_worker_thread_exception_handler(self, r):
         event = threading.Event()
 
