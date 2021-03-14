@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 # redis 6 release candidates report a version number of 5.9.x. Use this
 # constant for skip_if decorators as a placeholder until 6.0.0 is officially
 # released
-REDIS_6_VERSION = '5.9.0'
+REDIS_6_VERSION = '6.2.0'
 
 
 REDIS_INFO = {}

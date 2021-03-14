@@ -1666,6 +1666,13 @@ class Redis:
         """
         return self.execute_command('GET', name)
 
+    def getdel(self, name):
+        """
+        Return the value at key ``name``, or None if the key doesn't exist.
+        Delete the key once read.
+        """
+        return self.execute_command('GETDEL', name)
+
     def __getitem__(self, name):
         """
         Return the value at key ``name``, raises a KeyError if the key

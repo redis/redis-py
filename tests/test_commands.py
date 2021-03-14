@@ -112,9 +112,10 @@ class TestRedisCommands:
             'categories': ['-@all'],
             'commands': [],
             'enabled': False,
-            'flags': ['off'],
+            'flags': ['off', 'sanitize-payload'],
             'keys': [],
             'passwords': [],
+            'channels': []
         }
 
         # test nopass=True
@@ -123,9 +124,10 @@ class TestRedisCommands:
             'categories': ['-@all'],
             'commands': [],
             'enabled': True,
-            'flags': ['on', 'nopass'],
+            'flags': ['on', 'nopass', 'sanitize-payload'],
             'keys': [],
             'passwords': [],
+            'channels': [],
         }
 
         # test all args
@@ -138,7 +140,7 @@ class TestRedisCommands:
         assert set(acl['categories']) == set(['-@all', '+@set', '+@hash'])
         assert set(acl['commands']) == set(['+get', '+mget', '-hset'])
         assert acl['enabled'] is True
-        assert acl['flags'] == ['on']
+        assert acl['flags'] == ['on', 'sanitize-payload']
         assert set(acl['keys']) == set([b'cache:*', b'objects:*'])
         assert len(acl['passwords']) == 2
 
@@ -157,7 +159,7 @@ class TestRedisCommands:
         assert set(acl['categories']) == set(['-@all', '+@set', '+@hash'])
         assert set(acl['commands']) == set(['+get', '+mget'])
         assert acl['enabled'] is True
-        assert acl['flags'] == ['on']
+        assert acl['flags'] == ['on', 'sanitize-payload']
         assert set(acl['keys']) == set([b'cache:*', b'objects:*'])
         assert len(acl['passwords']) == 2
 
@@ -196,7 +198,7 @@ class TestRedisCommands:
 
         assert r.acl_setuser(username, enabled=False, reset=True)
         users = r.acl_list()
-        assert 'user %s off -@all' % username in users
+        assert 'user %s off sanitize-payload -@all' % username in users
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
     def test_acl_log(self, r, request):
@@ -704,6 +706,13 @@ class TestRedisCommands:
         assert r.get('byte_string') == byte_string
         assert r.get('integer') == str(integer).encode()
         assert r.get('unicode_string').decode('utf-8') == unicode_string
+
+    def test_getdel(self, r):
+        value = b'value'
+        r.set('a', value)
+        assert r.getdel('a') == value
+        assert r.get('a') is None
+        assert r.getdel('a') is None
 
     def test_getitem_and_setitem(self, r):
         r['a'] = 'bar'
