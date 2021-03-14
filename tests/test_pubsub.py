@@ -8,7 +8,7 @@ import redis
 from redis.exceptions import ConnectionError
 
 from .conftest import _get_client
-from .conftest import skip_if_server_version_lt, skip_if_server_version_gte
+from .conftest import skip_if_server_version_lt
 
 
 def wait_for_message(pubsub, timeout=0.1, ignore_subscribe_messages=False):
@@ -474,7 +474,7 @@ class TestPubSubSubcommands:
     def test_pubsub_channels(self, r):
         p = r.pubsub()
         p.subscribe('foo', 'bar', 'baz', 'quux')
-        for i in range(4):
+        for _ in range(4):
             assert wait_for_message(p)['type'] == 'subscribe'
         expected = [b'bar', b'baz', b'foo', b'quux']
         assert all([channel in r.pubsub_channels() for channel in expected])
@@ -483,11 +483,11 @@ class TestPubSubSubcommands:
     def test_pubsub_numsub(self, r):
         p1 = r.pubsub()
         p1.subscribe('foo', 'bar', 'baz')
-        for i in range(3):
+        for _ in range(3):
             assert wait_for_message(p1)['type'] == 'subscribe'
         p2 = r.pubsub()
         p2.subscribe('bar', 'baz')
-        for i in range(2):
+        for _ in range(2):
             assert wait_for_message(p2)['type'] == 'subscribe'
         p3 = r.pubsub()
         p3.subscribe('baz')
@@ -500,7 +500,7 @@ class TestPubSubSubcommands:
     def test_pubsub_numpat(self, r):
         p = r.pubsub()
         p.psubscribe('*oo', '*ar', 'b*z')
-        for i in range(3):
+        for _ in range(3):
             assert wait_for_message(p)['type'] == 'psubscribe'
         assert r.pubsub_numpat() == 3
 
@@ -549,7 +549,6 @@ class TestPubSubTimeouts:
 
 
 class TestPubSubWorkerThread:
-    @skip_if_server_version_gte('6.0.0')
     def test_pubsub_worker_thread_exception_handler(self, r):
         event = threading.Event()
 
@@ -565,6 +564,6 @@ class TestPubSubWorkerThread:
                 exception_handler=exception_handler
             )
 
-        assert event.wait(timeout=1.0)
+        assert event.wait(timeout=2.0)
         pubsub_thread.join(timeout=1.0)
         assert not pubsub_thread.is_alive()
