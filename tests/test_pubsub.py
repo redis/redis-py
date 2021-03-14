@@ -564,6 +564,6 @@ class TestPubSubWorkerThread:
                 exception_handler=exception_handler
             )
 
-        assert event.wait(timeout=2.0)
+        assert event.wait(timeout=10.0)
         pubsub_thread.join(timeout=1.0)
         assert not pubsub_thread.is_alive()
