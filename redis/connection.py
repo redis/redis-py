@@ -975,6 +975,7 @@ def parse_url(url):
 
         if url.scheme == 'rediss':
             kwargs['connection_class'] = SSLConnection
+            kwargs['ssl_cert_reqs'] = None
     else:
         valid_schemes = 'redis://, rediss://, unix://'
         raise ValueError('Redis URL must specify one of the following '
