@@ -115,9 +115,12 @@ class TestLock:
         assert r.get('foo') is None
 
     def test_lock_context_manager(self, r):
-        with Lock(r, 'foo', blocking_timeout=0.2, blocking=False) as lock:
-            assert r.get('foo') == lock.local.token
-        assert r.get('foo') is None
+        for blocking in [True, False]:
+            with Lock(
+                r, 'foo', blocking_timeout=0.2, blocking=blocking
+            ) as lock:
+                assert r.get('foo') == lock.local.token
+            assert r.get('foo') is None
 
     def test_context_manager_raises_when_locked_not_acquired(self, r):
         r.set('foo', 'bar')
