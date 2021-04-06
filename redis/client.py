@@ -2022,9 +2022,10 @@ class Redis:
         "Return the length of the list ``name``"
         return self.execute_command('LLEN', name)
 
-    def lpop(self, name):
-        "Remove and return the first item of the list ``name``"
-        return self.execute_command('LPOP', name)
+    def lpop(self, name, count = None):
+        "Removes and returns the first elements of the list ``name``"
+        args = (count is not None) and [count] or []
+        return self.execute_command('LPOP', name, *args)
 
     def lpush(self, name, *values):
         "Push ``values`` onto the head of the list ``name``"
