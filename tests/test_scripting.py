@@ -8,6 +8,24 @@ local value = redis.call('GET', KEYS[1])
 value = tonumber(value)
 return value * ARGV[1]"""
 
+no_keys_no_args_script = """
+local value = redis.call('GET', 'a')
+return value
+"""
+
+no_keys_multiple_args_script = """
+local value = redis.call('GET', ARGV[1])
+return value
+"""
+
+multiple_keys_no_args_script = """
+local value = redis.call('GET', KEYS[1])
+value = tonumber(value)
+return value * KEYS[2]
+"""
+
+multiple_keys_multiple_args_script = multiply_script
+
 msgpack_hello_script = """
 local message = cmsgpack.unpack(ARGV[1])
 local name = message['name']
@@ -25,15 +43,44 @@ class TestScripting:
     def reset_scripts(self, r):
         r.script_flush()
 
-    def test_eval(self, r):
+    def test_eval_with_zero_keys_no_args(self, r):
         r.set('a', 2)
-        # 2 * 3 == 6
-        assert r.eval(multiply_script, 1, 'a', 3) == 6
+        assert r.eval(no_keys_no_args_script, 0) == b'2'
 
-    def test_evalsha(self, r):
+    def test_eval_with_no_keys_multiple_args(self, r):
         r.set('a', 2)
-        sha = r.script_load(multiply_script)
+        assert r.eval(no_keys_multiple_args_script, 0, 'a') == b'2'
+
+    def test_eval_with_multiple_keys_no_args(self, r):
+        r.set('a', 2)
         # 2 * 3 == 6
+        assert r.eval(multiple_keys_no_args_script, 2, 'a', 3) == 6
+
+    def test_eval_with_multiple_keys_multiple_args(self, r):
+        r.set('a', 2)
+        # 2 * 3 == 6
+        assert r.eval(multiple_keys_multiple_args_script, 1, 'a', 3) == 6
+
+    def test_evalsha_with_zero_keys_no_args(self, r):
+        r.set('a', 2)
+        sha = r.script_load(no_keys_no_args_script)
+        assert r.evalsha(sha, 0) == b'2'
+
+    def test_evalsha_with_no_keys_multiple_args(self, r):
+        r.set('a', 2)
+        sha = r.script_load(no_keys_multiple_args_script)
+        assert r.evalsha(sha, 0, 'a') == b'2'
+
+    def test_evalsha_with_multiple_keys_no_args(self, r):
+        r.set('a', 2)
+        # 2 * 3 == 6
+        sha = r.script_load(multiple_keys_no_args_script)
+        assert r.evalsha(sha, 2, 'a', 3) == 6
+
+    def test_evalsha_with_multiple_keys_multiple_args(self, r):
+        r.set('a', 2)
+        # 2 * 3 == 6
+        sha = r.script_load(multiple_keys_multiple_args_script)
         assert r.evalsha(sha, 1, 'a', 3) == 6
 
     def test_evalsha_script_not_loaded(self, r):
