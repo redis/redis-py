@@ -404,7 +404,8 @@ def parse_slowlog_get(response, **options):
         'id': item[0],
         'start_time': int(item[1]),
         'duration': int(item[2]),
-        'command': space.join(item[3])
+        'command': space.join(item[3]),
+        'client': item[4]
     } for item in response]
 
 
