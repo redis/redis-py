@@ -503,6 +503,10 @@ def parse_acl_getuser(response, **options):
     data['commands'] = commands
     data['categories'] = categories
     data['enabled'] = 'on' in data['flags']
+
+    # "channels" was added in Redis 6.2.0
+    if "channels" in data:
+        data['channels'] = list(map(str_if_bytes, data['channels']))
     return data
 
 

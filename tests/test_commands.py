@@ -12,6 +12,7 @@ from redis import exceptions
 from .conftest import (
     _get_client,
     REDIS_6_VERSION,
+    server_version_gte,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
@@ -106,15 +107,27 @@ class TestRedisCommands:
             r.acl_deluser(username)
         request.addfinalizer(teardown)
 
+        if server_version_gte("6.2.0"):
+            channels_itm = {'channels': ['*']}
+            enabled_false_flags = ['off', 'allchannels', 'sanitize-payload']
+            nopass_flags = ['on', 'allchannels', 'nopass', 'sanitize-payload']
+            allargs_flags = ['on', 'allchannels', 'sanitize-payload']
+        else:
+            channels_itm = {}
+            enabled_false_flags = ['off']
+            nopass_flags = ['on', 'nopass']
+            allargs_flags = ['on']
+
         # test enabled=False
         assert r.acl_setuser(username, enabled=False, reset=True)
         assert r.acl_getuser(username) == {
             'categories': ['-@all'],
             'commands': [],
             'enabled': False,
-            'flags': ['off'],
+            'flags':  enabled_false_flags,
             'keys': [],
             'passwords': [],
+            **channels_itm,
         }
 
         # test nopass=True
@@ -123,9 +136,10 @@ class TestRedisCommands:
             'categories': ['-@all'],
             'commands': [],
             'enabled': True,
-            'flags': ['on', 'nopass'],
+            'flags': nopass_flags,
             'keys': [],
             'passwords': [],
+            **channels_itm,
         }
 
         # test all args
@@ -138,9 +152,11 @@ class TestRedisCommands:
         assert set(acl['categories']) == set(['-@all', '+@set', '+@hash'])
         assert set(acl['commands']) == set(['+get', '+mget', '-hset'])
         assert acl['enabled'] is True
-        assert acl['flags'] == ['on']
+        assert acl['flags'] == allargs_flags
         assert set(acl['keys']) == set([b'cache:*', b'objects:*'])
         assert len(acl['passwords']) == 2
+        if server_version_gte("6.2.0"):
+            assert acl["channels"] == ['*']
 
         # test reset=False keeps existing ACL and applies new ACL on top
         assert r.acl_setuser(username, enabled=True, reset=True,
@@ -157,9 +173,11 @@ class TestRedisCommands:
         assert set(acl['categories']) == set(['-@all', '+@set', '+@hash'])
         assert set(acl['commands']) == set(['+get', '+mget'])
         assert acl['enabled'] is True
-        assert acl['flags'] == ['on']
+        assert acl['flags'] == allargs_flags
         assert set(acl['keys']) == set([b'cache:*', b'objects:*'])
         assert len(acl['passwords']) == 2
+        if server_version_gte("6.2.0"):
+            assert acl["channels"] == ['*']
 
         # test removal of passwords
         assert r.acl_setuser(username, enabled=True, reset=True,
@@ -196,7 +214,10 @@ class TestRedisCommands:
 
         assert r.acl_setuser(username, enabled=False, reset=True)
         users = r.acl_list()
-        assert 'user %s off -@all' % username in users
+        if server_version_gte("6.2.0"):
+            assert 'user %s off sanitize-payload &* -@all' % username in users
+        else:
+            assert 'user %s off -@all' % username in users
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
     def test_acl_log(self, r, request):

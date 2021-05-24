@@ -40,20 +40,26 @@ def pytest_sessionstart(session):
     REDIS_INFO["arch_bits"] = arch_bits
 
 
-def skip_if_server_version_lt(min_version):
+def server_version_lt(min_version):
     redis_version = REDIS_INFO["version"]
-    check = StrictVersion(redis_version) < StrictVersion(min_version)
+    return StrictVersion(redis_version) < StrictVersion(min_version)
+
+
+def server_version_gte(max_version):
+    redis_version = REDIS_INFO["version"]
+    return StrictVersion(redis_version) >= StrictVersion(max_version)
+
+
+def skip_if_server_version_lt(min_version):
     return pytest.mark.skipif(
-        check,
+        server_version_lt(min_version),
         reason="Redis version required >= {}".format(min_version))
 
 
-def skip_if_server_version_gte(min_version):
-    redis_version = REDIS_INFO["version"]
-    check = StrictVersion(redis_version) >= StrictVersion(min_version)
+def skip_if_server_version_gte(max_version):
     return pytest.mark.skipif(
-        check,
-        reason="Redis version required < {}".format(min_version))
+        server_version_gte(max_version),
+        reason="Redis version required < {}".format(max_version))
 
 
 def skip_unless_arch_bits(arch_bits):
