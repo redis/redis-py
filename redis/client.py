@@ -594,6 +594,8 @@ class Redis:
             'SDIFF SINTER SMEMBERS SUNION',
             lambda r: r and set(r) or set()
         ),
+        **string_keys_to_dict('SMISMEMBER',
+                              lambda r: [bool(int(v)) for v in r]),
         **string_keys_to_dict(
             'ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
             zset_score_pairs
@@ -2386,6 +2388,14 @@ class Redis:
     def smembers(self, name):
         "Return all members of the set ``name``"
         return self.execute_command('SMEMBERS', name)
+
+    def smismember(self, name, values, *args):
+        """
+        Return whether each value in ``values`` is a member of the set ``name``
+        as a list of ``bool`` in the order of ``values``
+        """
+        args = list_or_args(values, args)
+        return self.execute_command('SMISMEMBER', name, *args)
 
     def smove(self, src, dst, value):
         "Move ``value`` from set ``src`` to set ``dst`` atomically"
