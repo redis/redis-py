@@ -1695,7 +1695,7 @@ class Redis:
     def getset(self, name, value):
         """
         Sets the value at key ``name`` to ``value``
-        and returns the old value at key ``name`` atomically.
+        and returns the old value at key ``name`` automically.
         """
         return self.execute_command('GETSET', name, value)
 
