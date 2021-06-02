@@ -400,6 +400,7 @@ def parse_zscan(response, **options):
 
 def parse_slowlog_get(response, **options):
     space = ' ' if options.get('decode_responses', False) else b' '
+
     def parse_item(item):
         result = {
             'id': item[0],
