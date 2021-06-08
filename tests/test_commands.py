@@ -579,6 +579,14 @@ class TestRedisCommands:
         with pytest.raises(exceptions.RedisError):
             r.bitpos(key, 7) == 12
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_copy(self, r):
+        assert r.copy("a", "b") == 0
+        r.set("a", "foo")
+        assert r.copy("a", "b") == 1
+        assert r.get("a") == b"foo"
+        assert r.get("b") == b"foo"
+
     def test_decr(self, r):
         assert r.decr('a') == -1
         assert r['a'] == b'-1'
