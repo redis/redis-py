@@ -1,6 +1,6 @@
 from distutils.version import StrictVersion
 from itertools import chain
-from time import time
+from time import monotonic
 from queue import LifoQueue, Empty, Full
 from urllib.parse import parse_qs, unquote, urlparse
 import errno
@@ -514,7 +514,7 @@ class Connection:
         self.socket_type = socket_type
         self.retry_on_timeout = retry_on_timeout
         self.health_check_interval = health_check_interval
-        self.next_health_check = 0
+        self.next_health_check = -1
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
         self._parser = parser_class(socket_read_size=socket_read_size)
@@ -675,7 +675,7 @@ class Connection:
 
     def check_health(self):
         "Check the health of the connection with a PING/PONG"
-        if self.health_check_interval and time() > self.next_health_check:
+        if self.health_check_interval and monotonic() > self.next_health_check:
             try:
                 self.send_command('PING', check_health=False)
                 if str_if_bytes(self.read_response()) != 'PONG':
@@ -746,7 +746,7 @@ class Connection:
             raise
 
         if self.health_check_interval:
-            self.next_health_check = time() + self.health_check_interval
+            self.next_health_check = monotonic() + self.health_check_interval
 
         if isinstance(response, ResponseError):
             raise response
@@ -873,7 +873,7 @@ class UnixDomainSocketConnection(Connection):
         self.socket_timeout = socket_timeout
         self.retry_on_timeout = retry_on_timeout
         self.health_check_interval = health_check_interval
-        self.next_health_check = 0
+        self.next_health_check = -1
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
         self._parser = parser_class(socket_read_size=socket_read_size)

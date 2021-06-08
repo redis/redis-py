@@ -12,7 +12,7 @@ from .conftest import skip_if_server_version_lt
 
 
 def wait_for_message(pubsub, timeout=0.1, ignore_subscribe_messages=False):
-    now = time.time()
+    now = time.monotonic()
     timeout = now + timeout
     while now < timeout:
         message = pubsub.get_message(
@@ -20,7 +20,7 @@ def wait_for_message(pubsub, timeout=0.1, ignore_subscribe_messages=False):
         if message is not None:
             return message
         time.sleep(0.01)
-        now = time.time()
+        now = time.monotonic()
     return None
 
 

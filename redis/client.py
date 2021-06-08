@@ -3649,7 +3649,8 @@ class PubSub:
                 'pubsub connection not set: '
                 'did you forget to call subscribe() or psubscribe()?')
 
-        if conn.health_check_interval and time.time() > conn.next_health_check:
+        if (conn.health_check_interval
+                and time.monotonic() > conn.next_health_check):
             conn.send_command('PING', self.HEALTH_CHECK_MESSAGE,
                               check_health=False)
 
