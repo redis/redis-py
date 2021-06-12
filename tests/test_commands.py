@@ -587,6 +587,21 @@ class TestRedisCommands:
         assert r.get("a") == b"foo"
         assert r.get("b") == b"foo"
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_copy_and_replace(self, r):
+        r.set("a", "foo1")
+        r.set("b", "foo2")
+        assert r.copy("a", "b") == 0        
+        assert r.copy("a", "b", replace=True) == 1
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_copy_to_another_database(self, request):
+        r0 = _get_client(redis.Redis, request, db=0)
+        r1 = _get_client(redis.Redis, request, db=1)
+        r0.set("a", "foo")
+        assert r0.copy("a", "b", destination_db=1) == 1
+        assert r1.get("b") == b"foo"
+
     def test_decr(self, r):
         assert r.decr('a') == -1
         assert r['a'] == b'-1'
