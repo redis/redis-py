@@ -463,7 +463,7 @@ def parse_georadius_generic(response, **options):
         'withhash': int
     }
 
-    # zip all output results with each casting functino to get
+    # zip all output results with each casting function to get
     # the properly native Python value.
     f = [lambda x: x]
     f += [cast[o] for o in ['withdist', 'withhash', 'withcoord'] if options[o]]
@@ -535,7 +535,7 @@ def parse_client_info(value):
         key, value = info.split("=")
         client_info[key] = value
 
-    # Those fields are definded as int in networking.c
+    # Those fields are defined as int in networking.c
     for int_key in {"id", "age", "idle", "db", "sub", "psub",
                     "multi", "qbuf", "qbuf-free", "obl",
                     "oll", "omem"}:
@@ -1567,7 +1567,7 @@ class Redis:
     def bitcount(self, key, start=None, end=None):
         """
         Returns the count of set bits in the value of ``key``.  Optional
-        ``start`` and ``end`` paramaters indicate which bytes to consider
+        ``start`` and ``end`` parameters indicate which bytes to consider
         """
         params = [key]
         if start is not None and end is not None:
@@ -1595,7 +1595,7 @@ class Redis:
     def bitpos(self, key, bit, start=None, end=None):
         """
         Return the position of the first bit set to 1 or 0 in a string.
-        ``start`` and ``end`` difines search range. The range is interpreted
+        ``start`` and ``end`` defines search range. The range is interpreted
         as a range of bytes and not a range of bits, so start=0 and end=2
         means to look at the first three bytes.
         """
@@ -2430,7 +2430,7 @@ class Redis:
         Acknowledges the successful processing of one or more messages.
         name: name of the stream.
         groupname: name of the consumer group.
-        *ids: message ids to acknowlege.
+        *ids: message ids to acknowledge.
         """
         return self.execute_command('XACK', name, groupname, *ids)
 
@@ -4213,7 +4213,7 @@ class Script:
         try:
             return client.evalsha(self.sha, len(keys), *args)
         except NoScriptError:
-            # Maybe the client is pointed to a differnet server than the client
+            # Maybe the client is pointed to a different server than the client
             # that created this instance?
             # Overwrite the sha just in case there was a discrepancy.
             self.sha = client.script_load(self.script)
