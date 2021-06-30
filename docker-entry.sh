@@ -9,7 +9,7 @@ REDIS_MASTER="${REDIS_MASTER_HOST}":"${REDIS_MASTER_PORT}"
 echo "Testing against Redis Server: ${REDIS_MASTER}"
 
 # skip the "codecov" env if not running on Travis
-if [ -z ${TRAVIS-} ]; then
+if [ "${GITHUB_ACTIONS}" = true ] ; then
     echo "Skipping codecov"
     export TOX_SKIP_ENV="codecov"
 fi
