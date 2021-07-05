@@ -108,25 +108,23 @@ class TestRedisCommands:
 
         # test enabled=False
         assert r.acl_setuser(username, enabled=False, reset=True)
-        assert r.acl_getuser(username) == {
-            'categories': ['-@all'],
-            'commands': [],
-            'enabled': False,
-            'flags': ['off'],
-            'keys': [],
-            'passwords': [],
-        }
+        acl = r.acl_getuser(username)
+        assert acl['categories'] == ['-@all']
+        assert acl['commands'] == []
+        assert acl['enabled'] == False
+        assert 'off' in acl['flags']
+        assert acl['keys'] == []
+        assert acl['passwords'] == []
 
         # test nopass=True
         assert r.acl_setuser(username, enabled=True, reset=True, nopass=True)
-        assert r.acl_getuser(username) == {
-            'categories': ['-@all'],
-            'commands': [],
-            'enabled': True,
-            'flags': ['on', 'nopass'],
-            'keys': [],
-            'passwords': [],
-        }
+        acl = r.acl_getuser(username)
+        assert acl['categories'] == ['-@all']
+        assert acl['commands'] == []
+        assert acl['enabled'] == True
+        assert acl['keys'] == []
+        assert acl['passwords'] == []
+        assert all(flag in acl['flags'] for flag in ['on', 'nopass'])
 
         # test all args
         assert r.acl_setuser(username, enabled=True, reset=True,
@@ -138,9 +136,9 @@ class TestRedisCommands:
         assert set(acl['categories']) == set(['-@all', '+@set', '+@hash'])
         assert set(acl['commands']) == set(['+get', '+mget', '-hset'])
         assert acl['enabled'] is True
-        assert acl['flags'] == ['on']
         assert set(acl['keys']) == set([b'cache:*', b'objects:*'])
         assert len(acl['passwords']) == 2
+        assert 'on' in acl['flags']
 
         # test reset=False keeps existing ACL and applies new ACL on top
         assert r.acl_setuser(username, enabled=True, reset=True,
@@ -157,9 +155,9 @@ class TestRedisCommands:
         assert set(acl['categories']) == set(['-@all', '+@set', '+@hash'])
         assert set(acl['commands']) == set(['+get', '+mget'])
         assert acl['enabled'] is True
-        assert acl['flags'] == ['on']
         assert set(acl['keys']) == set([b'cache:*', b'objects:*'])
         assert len(acl['passwords']) == 2
+        assert 'on' in acl['flags']
 
         # test removal of passwords
         assert r.acl_setuser(username, enabled=True, reset=True,
@@ -186,6 +184,25 @@ class TestRedisCommands:
                              hashed_passwords=['-' + hashed_password])
         assert len(r.acl_getuser(username)['passwords']) == 1
 
+
+    @skip_if_server_version_lt('6.2')
+    def test_acl_setuser_channels(self, r, request):
+        username = 'redis-py-user'
+
+        def teardown():
+            r.acl_deluser(username)
+        request.addfinalizer(teardown)
+
+        # test reset_channels=True
+        assert r.acl_setuser(username, enabled=True, reset_channels=True)
+        assert r.acl_getuser(username)['channels'] == []
+
+        # test pub/sub channel patterns
+        assert r.acl_setuser(username, enabled=True,
+                             channels=['chatroom:*'])
+        acl = r.acl_getuser(username)
+        assert acl['channels'] == [b'chatroom:*']
+
     @skip_if_server_version_lt(REDIS_6_VERSION)
     def test_acl_list(self, r, request):
         username = 'redis-py-user'
@@ -194,9 +211,9 @@ class TestRedisCommands:
             r.acl_deluser(username)
         request.addfinalizer(teardown)
 
-        assert r.acl_setuser(username, enabled=False, reset=True)
-        users = r.acl_list()
-        assert 'user %s off -@all' % username in users
+        assert r.acl_setuser(username, channels='')
+        acl = r.acl_getuser(username)
+        assert acl
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
     def test_acl_log(self, r, request):
