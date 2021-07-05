@@ -1041,8 +1041,8 @@ class Redis:
 
     def acl_setuser(self, username, enabled=False, nopass=False,
                     passwords=None, hashed_passwords=None, categories=None,
-                    commands=None, keys=None, reset=False, reset_keys=False,
-                    reset_passwords=False):
+                    commands=None, keys=None, channels=None, reset=False,
+                    reset_keys=False, reset_channels=False, reset_passwords=False):
         """
         Create or update an ACL user.
 
@@ -1082,6 +1082,11 @@ class Redis:
         to all keys that are prefixed with 'cache:'. ``keys`` should not be
         prefixed with a '~'.
 
+        ```channels`` if specified is a list of channel patterns to grant the user
+        access to. Supports limited glob style patterns including '*' is a wildcard
+        matching 'any string of characters' and '?' is a wildcard matching
+        'any one character' etc. ``channels`` should not be prefixed with a '&'.
+
         ``reset`` is a boolean indicating whether the user should be fully
         reset prior to applying the new ACL. Setting this to True will
         remove all existing passwords, flags and privileges from the user and
@@ -1093,6 +1098,12 @@ class Redis:
         permissions should be reset prior to applying any new key permissions
         specified in ``keys``. If this is False, the user's existing
         key permissions will be kept and any new specified key permissions
+        will be applied on top.
+
+        ``reset_channels`` is a boolean indicating whether the user's channel
+        permissions should be reset prior to aplying any new channel permissions
+        specified in `channels`. If this is False, the user's existing
+        channel permissions will be kept and any new specified key permissions
         will be applied on top.
 
         ``reset_passwords`` is a boolean indicating whether to remove all
@@ -1110,6 +1121,9 @@ class Redis:
 
         if reset_keys:
             pieces.append(b'resetkeys')
+
+        if reset_channels:
+            pieces.append(b'resetchannels')
 
         if reset_passwords:
             pieces.append(b'resetpass')
@@ -1183,6 +1197,11 @@ class Redis:
             for key in keys:
                 key = encoder.encode(key)
                 pieces.append(b'~%s' % key)
+
+        if channels:
+            for channel in channels:
+                channel = encoder.encode(channel)
+                pieces.append(b'&%s' % channel)
 
         return self.execute_command('ACL SETUSER', *pieces)
 
