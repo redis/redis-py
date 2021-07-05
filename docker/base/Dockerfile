@@ -1,1 +1,1 @@
-FROM redis:6.0.9-buster
+FROM redis:6.2.4-buster
