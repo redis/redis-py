@@ -26,6 +26,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
     ModuleError,
+    NoReplicasError,
 )
 from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 
@@ -149,6 +150,7 @@ class BaseParser:
         'READONLY': ReadOnlyError,
         'NOAUTH': AuthenticationError,
         'NOPERM': NoPermissionError,
+        'NOREPLICAS': NoReplicasError,
     }
 
     def parse_error(self, response):

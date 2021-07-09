@@ -525,6 +525,16 @@ class TestConnection:
         with pytest.raises(redis.ReadOnlyError):
             r.execute_command('DEBUG', 'ERROR', 'READONLY blah blah')
 
+    @skip_if_server_version_lt('2.8.8')
+    def test_no_replicas_error(self, r):
+        "NOREPLICAS errors get turned in NoReplicasError exceptions"
+        with pytest.raises(redis.exceptions.NoReplicasError):
+            r.execute_command(
+                'DEBUG',
+                'ERROR',
+                'NOREPLICAS Not enough good replicas to write.'
+            )
+
     def test_connect_from_url_tcp(self):
         connection = redis.Redis.from_url('redis://localhost')
         pool = connection.connection_pool

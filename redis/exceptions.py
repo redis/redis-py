@@ -61,6 +61,10 @@ class ModuleError(ResponseError):
     pass
 
 
+class NoReplicasError(ResponseError):
+    pass
+
+
 class LockError(RedisError, ValueError):
     "Errors acquiring or releasing a lock"
     # NOTE: For backwards compatibility, this class derives from ValueError.
