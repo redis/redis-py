@@ -404,7 +404,12 @@ def parse_slowlog_get(response, **options):
         'id': item[0],
         'start_time': int(item[1]),
         'duration': int(item[2]),
-        'command': space.join(item[3])
+        'command':
+            # Redis Enterprise injects another entry at index [3], which has
+            # the complexity info (i.e. the value N in case the command has
+            # an O(N) complexity) instead of the command.
+            space.join(item[3]) if isinstance(item[3], list) else
+            space.join(item[4])
     } for item in response]
 
 
