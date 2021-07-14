@@ -549,7 +549,8 @@ class TestPubSubTimeouts:
 
 class TestPubSubWorkerThread:
 
-    @pytest.mark.skipif(platform.python_implementation() == 'PyPy', reason="Pypy threading issue")
+    @pytest.mark.skipif(platform.python_implementation() == 'PyPy',
+                        reason="Pypy threading issue")
     def test_pubsub_worker_thread_exception_handler(self, r):
         event = threading.Event()
 
