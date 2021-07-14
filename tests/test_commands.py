@@ -1375,6 +1375,17 @@ class TestRedisCommands:
         # redis-py
         assert r.zadd('a', {'a1': 1}, xx=True, incr=True) is None
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_zadd_gt_lt(self, r):
+
+        for i in range(1, 20):
+            r.zadd('a', {'a%s' % i: i})
+        assert r.zadd('a', {'a20': 5}, gt=3) == 1
+
+        for i in range(1, 20):
+            r.zadd('a', {'a%s' % i: i})
+        assert r.zadd('a', {'a2': 5}, lt=1) == 0
+
     def test_zcard(self, r):
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
         assert r.zcard('a') == 3

@@ -2747,7 +2747,8 @@ class Redis:
         return self.execute_command('XTRIM', name, *pieces)
 
     # SORTED SET COMMANDS
-    def zadd(self, name, mapping, nx=False, xx=False, ch=False, incr=False):
+    def zadd(self, name, mapping, nx=False, xx=False, ch=False, incr=False,
+             gt=None, lt=None):
         """
         Set any number of element-name, score pairs to the key ``name``. Pairs
         are specified as a dict of element-names keys to score values.
@@ -2789,6 +2790,10 @@ class Redis:
         if incr:
             pieces.append(b'INCR')
             options['as_score'] = True
+        if gt:
+            pieces.append(b'GT')
+        if lt:
+            pieces.append(b'LT')
         for pair in mapping.items():
             pieces.append(pair[1])
             pieces.append(pair[0])
