@@ -1209,7 +1209,8 @@ class Redis:
         "Disconnects the client at ``address`` (ip:port)"
         return self.execute_command('CLIENT KILL', address)
 
-    def client_kill_filter(self, _id=None, _type=None, addr=None, skipme=None):
+    def client_kill_filter(self, _id=None, _type=None, addr=None,
+                           skipme=None, laddr=None):
         """
         Disconnects client(s) using a variety of filter options
         :param id: Kills a client by its unique ID field
@@ -1217,6 +1218,7 @@ class Redis:
         'master', 'slave' or 'pubsub'
         :param addr: Kills a client by its 'address:port'
         :param skipme: If True, then the client calling the command
+        :param laddr: Kills a cient by its 'local (bind)  address:port'
         will not get killed even if it is identified by one of the filter
         options. If skipme is not provided, the server defaults to skipme=True
         """
@@ -1238,6 +1240,8 @@ class Redis:
             args.extend((b'ID', _id))
         if addr is not None:
             args.extend((b'ADDR', addr))
+        if laddr is not None:
+            args.extend((b'LADDR', laddr))
         if not args:
             raise DataError("CLIENT KILL <filter> <value> ... ... <filter> "
                             "<value> must specify at least one filter")
