@@ -1741,7 +1741,6 @@ class Redis:
         """
         return self.lmove(first_list, second_list, src, dest)
 
-
     def mget(self, keys, *args):
         """
         Returns a list of values ordered identically to ``keys``

@@ -792,7 +792,6 @@ class TestRedisCommands:
         assert r.blmove('a', 'b') == b'one'
         assert r.blmove('a', 'b', 'right', 'left') == b'four'
 
-
     def test_mset(self, r):
         d = {'a': b'1', 'b': b'2', 'c': b'3'}
         assert r.mset(d)
