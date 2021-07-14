@@ -1735,6 +1735,13 @@ class Redis:
         params = [first_list, second_list, src, dest]
         return self.execute_command("LMOVE", *params)
 
+    def blmove(self, first_list, second_list, src="LEFT", dest="RIGHT"):
+        """
+        Blocking version of lmove.
+        """
+        return self.lmove(first_list, second_list, src, dest)
+
+
     def mget(self, keys, *args):
         """
         Returns a list of values ordered identically to ``keys``
