@@ -781,6 +781,12 @@ class TestRedisCommands:
         r['c'] = '3'
         assert r.mget('a', 'other', 'b', 'c') == [b'1', None, b'2', b'3']
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_lmove(self, r):
+        r.rpush('a', 'one', 'two', 'three', 'four')
+        assert r.lmove('a', 'b') == b'one'
+        assert r.lmove('a', 'b', 'right', 'left') == b'four'
+
     def test_mset(self, r):
         d = {'a': b'1', 'b': b'2', 'c': b'3'}
         assert r.mset(d)
