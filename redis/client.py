@@ -1243,7 +1243,7 @@ class Redis:
                             "<value> must specify at least one filter")
         return self.execute_command('CLIENT KILL', *args)
 
-    def client_list(self, _type=None):
+    def client_list(self, _type=None, client_id=None):
         """
         Returns a list of currently connected clients.
         If type of client specified, only that type will be returned.
@@ -1251,13 +1251,18 @@ class Redis:
          replica, pubsub)
         """
         "Returns a list of currently connected clients"
+        args = []
         if _type is not None:
             client_types = ('normal', 'master', 'replica', 'pubsub')
             if str(_type).lower() not in client_types:
                 raise DataError("CLIENT LIST _type must be one of %r" % (
                                 client_types,))
-            return self.execute_command('CLIENT LIST', b'TYPE', _type)
-        return self.execute_command('CLIENT LIST')
+            args.append(b'TYPE')
+            args.append(_type)
+        if client_id is not None:
+            args.append(b"ID")
+            args.append(client_id)
+        return self.execute_command('CLIENT LIST', *args)
 
     def client_getname(self):
         "Returns the current connection name"
