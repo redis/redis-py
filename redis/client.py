@@ -1624,7 +1624,7 @@ class Redis:
         the ``destination`` key already exists.
         """
         params = [source, destination]
-        if destination_db is None:
+        if destination_db is not None:
             params.extend(["DB", destination_db])
         if replace:
             params.append("REPLACE")
