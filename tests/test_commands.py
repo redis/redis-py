@@ -400,7 +400,6 @@ class TestRedisCommands:
     def test_client_unpause(self, r):
         assert r.client_unpause() == b'OK'
 
-
     def test_config_get(self, r):
         data = r.config_get()
         assert 'maxmemory' in data
