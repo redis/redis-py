@@ -396,6 +396,11 @@ class TestRedisCommands:
         with pytest.raises(exceptions.RedisError):
             r.client_pause(timeout='not an integer')
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_client_unpause(self, r):
+        assert r.client_unpause() == b'OK'
+
+
     def test_config_get(self, r):
         data = r.config_get()
         assert 'maxmemory' in data
