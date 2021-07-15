@@ -1616,7 +1616,7 @@ class Redis:
         """
         Copy the value stored in the ``source`` key to the ``destination`` key.
 
-        ``destination_db`` an alternative destination database. By default, 
+        ``destination_db`` an alternative destination database. By default,
         the ``destination`` key is created in the source Redis database.
 
         ``replace`` whether the ``destination`` key should be removed before
@@ -1624,7 +1624,7 @@ class Redis:
         the ``destination`` key already exists.
         """
         params = [source, destination]
-        if destination_db:
+        if destination_db is None:
             params.extend(["DB", destination_db])
         if replace:
             params.append("REPLACE")

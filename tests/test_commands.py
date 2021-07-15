@@ -590,7 +590,7 @@ class TestRedisCommands:
     def test_copy_and_replace(self, r):
         r.set("a", "foo1")
         r.set("b", "foo2")
-        assert r.copy("a", "b") == 0        
+        assert r.copy("a", "b") == 0
         assert r.copy("a", "b", replace=True) == 1
 
     @skip_if_server_version_lt('6.2.0')
