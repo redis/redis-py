@@ -1820,6 +1820,26 @@ class Redis:
         "Returns the number of milliseconds until the key ``name`` will expire"
         return self.execute_command('PTTL', name)
 
+    def hrandfield(self, key, count=None, withvalues=False):
+        """
+        Return a random field from the hash value stored at key.
+
+        count: if the argument is positive, return an array of distinct fields.
+        If called with a negative count, the behavior changes and the command is
+        allowed to return the same field multiple times. In this case, the number
+        of returned fields is the absolute value of the specified count.
+        withvalues: The optional WITHVALUES modifier changes the reply so it
+        includes the respective values of the randomly selected hash fields.
+        """
+        params = []
+        if count is not None:
+            params.append(count)
+        if withvalues:
+            params.append("WITHVALUES")
+
+        return self.execute_command("HRANDFIELD", key, *params)
+
+
     def randomkey(self):
         "Returns the name of a random key"
         return self.execute_command('RANDOMKEY')

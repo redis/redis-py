@@ -874,6 +874,21 @@ class TestRedisCommands:
         "PTTL on servers 2.8 and after return -2 when the key doesn't exist"
         assert r.pttl('a') == -2
 
+    def test_hrandfield(self, r):
+        assert r.hrandfield('key') is None
+        for val in ('hello', 'I', 'am', 'a', 'test'):
+            r.hset('key', val.upper(), val)
+        assert r.hrandfield('key') is not None
+        assert len(r.hrandfield('key', 2)) == 2
+
+        # with values
+        rand_fields_values = r.hrandfield('key', 2, True)
+        assert len(rand_fields_values) == 4
+        assert rand_fields_values[0] == rand_fields_values[1].upper()
+
+        assert len(r.hrandfield('key', 10)) == 5    # without duplications
+        assert len(r.hrandfield('key', -10)) == 10  # with duplications
+
     def test_randomkey(self, r):
         assert r.randomkey() is None
         for key in ('a', 'b', 'c'):
