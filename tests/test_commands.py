@@ -876,18 +876,13 @@ class TestRedisCommands:
 
     def test_hrandfield(self, r):
         assert r.hrandfield('key') is None
-        for val in ('hello', 'I', 'am', 'a', 'test'):
-            r.hset('key', val.upper(), val)
+        r.hset('key', mapping={'a': 1, 'b': 2, 'c': 3, 'd': 4, 'e': 5})
         assert r.hrandfield('key') is not None
+
         assert len(r.hrandfield('key', 2)) == 2
-
-        # with values
-        rand_fields_values = r.hrandfield('key', 2, True)
-        assert len(rand_fields_values) == 4
-        assert rand_fields_values[0] == rand_fields_values[1].upper()
-
-        assert len(r.hrandfield('key', 10)) == 5    # without duplications
-        assert len(r.hrandfield('key', -10)) == 10  # with duplications
+        assert len(r.hrandfield('key', 2, True)) == 4  # with values
+        assert len(r.hrandfield('key', 10)) == 5       # without duplications
+        assert len(r.hrandfield('key', -10)) == 10     # with duplications
 
     def test_randomkey(self, r):
         assert r.randomkey() is None
