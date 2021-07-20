@@ -561,7 +561,7 @@ class Redis:
     """
     RESPONSE_CALLBACKS = {
         **string_keys_to_dict(
-            'AUTH EXPIRE EXPIREAT HEXISTS HMSET MOVE MSETNX PERSIST '
+            'AUTH COPY EXPIRE EXPIREAT HEXISTS HMSET MOVE MSETNX PERSIST '
             'PSETEX RENAMENX SISMEMBER SMOVE SETEX SETNX',
             bool
         ),
@@ -1611,6 +1611,24 @@ class Redis:
             raise DataError("start argument is not set, "
                             "when end is specified")
         return self.execute_command('BITPOS', *params)
+
+    def copy(self, source, destination, destination_db=None, replace=False):
+        """
+        Copy the value stored in the ``source`` key to the ``destination`` key.
+
+        ``destination_db`` an alternative destination database. By default,
+        the ``destination`` key is created in the source Redis database.
+
+        ``replace`` whether the ``destination`` key should be removed before
+        copying the value to it. By default, the value is not copied if
+        the ``destination`` key already exists.
+        """
+        params = [source, destination]
+        if destination_db is not None:
+            params.extend(["DB", destination_db])
+        if replace:
+            params.append("REPLACE")
+        return self.execute_command('COPY', *params)
 
     def decr(self, name, amount=1):
         """
