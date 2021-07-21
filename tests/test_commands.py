@@ -874,6 +874,7 @@ class TestRedisCommands:
         "PTTL on servers 2.8 and after return -2 when the key doesn't exist"
         assert r.pttl('a') == -2
 
+    @skip_if_server_version_lt('6.2.0')
     def test_hrandfield(self, r):
         assert r.hrandfield('key') is None
         r.hset('key', mapping={'a': 1, 'b': 2, 'c': 3, 'd': 4, 'e': 5})
