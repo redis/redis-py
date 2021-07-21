@@ -727,6 +727,13 @@ class TestRedisCommands:
         assert r.get('integer') == str(integer).encode()
         assert r.get('unicode_string').decode('utf-8') == unicode_string
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_getdel(self, r):
+        assert r.getdel('a') is None
+        assert r.set('a', 1)
+        assert r.getdel('a') == b'1'
+        assert r.getdel('a') is None
+
     def test_getitem_and_setitem(self, r):
         r['a'] = 'bar'
         assert r['a'] == b'bar'

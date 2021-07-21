@@ -1689,6 +1689,15 @@ class Redis:
         """
         return self.execute_command('GET', name)
 
+    def getdel(self, name):
+        """
+        Get the value at key ``name`` and delete the key. This command
+        is similar to GET, except for the fact that it also deletes
+        the key on success (if and only if the key's value type
+        is a string).
+        """
+        return self.execute_command('GETDEL', name)
+
     def __getitem__(self, name):
         """
         Return the value at key ``name``, raises a KeyError if the key
