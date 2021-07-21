@@ -1690,7 +1690,7 @@ class Redis:
         return self.execute_command('GET', name)
 
     def getex(self, name,
-            ex=None, px=None, exat=None, pxat=None, persist=False):
+              ex=None, px=None, exat=None, pxat=None, persist=False):
         """
         Get the value of key and optionally set its expiration.
         GETEX is similar to GET, but is a write command with
