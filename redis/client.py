@@ -530,7 +530,7 @@ def parse_client_info(value):
     "key1=value1 key2=value2 key3=value3"
     """
     client_info = {}
-    infos = value.split(" ")
+    infos = str_if_bytes(value).split(" ")
     for info in infos:
         key, value = info.split("=")
         client_info[key] = value
@@ -538,7 +538,7 @@ def parse_client_info(value):
     # Those fields are definded as int in networking.c
     for int_key in {"id", "age", "idle", "db", "sub", "psub",
                     "multi", "qbuf", "qbuf-free", "obl",
-                    "oll", "omem"}:
+                    "argv-mem", "oll", "omem", "tot-mem"}:
         client_info[int_key] = int(client_info[int_key])
     return client_info
 
@@ -620,6 +620,7 @@ class Redis:
         'CLIENT ID': int,
         'CLIENT KILL': parse_client_kill,
         'CLIENT LIST': parse_client_list,
+        'CLIENT INFO': parse_client_info,
         'CLIENT SETNAME': bool_ok,
         'CLIENT UNBLOCK': lambda r: r and int(r) == 1 or False,
         'CLIENT PAUSE': bool_ok,
@@ -1242,6 +1243,13 @@ class Redis:
             raise DataError("CLIENT KILL <filter> <value> ... ... <filter> "
                             "<value> must specify at least one filter")
         return self.execute_command('CLIENT KILL', *args)
+
+    def client_info(self):
+        """
+        Returns information and statistics about the current
+        client connection.
+        """
+        return self.execute_command('CLIENT INFO')
 
     def client_list(self, _type=None):
         """
