@@ -880,9 +880,12 @@ class TestRedisCommands:
         r.hset('key', mapping={'a': 1, 'b': 2, 'c': 3, 'd': 4, 'e': 5})
         assert r.hrandfield('key') is not None
         assert len(r.hrandfield('key', 2)) == 2
-        assert len(r.hrandfield('key', 2, True)) == 4  # with values
-        assert len(r.hrandfield('key', 10)) == 5       # without duplications
-        assert len(r.hrandfield('key', -10)) == 10     # with duplications
+        # with values
+        assert len(r.hrandfield('key', 2, True)) == 4
+        # without duplications
+        assert len(r.hrandfield('key', 10)) == 5
+        # with duplications
+        assert len(r.hrandfield('key', -10)) == 10
 
     def test_randomkey(self, r):
         assert r.randomkey() is None
