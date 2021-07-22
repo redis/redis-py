@@ -281,6 +281,12 @@ class TestRedisCommands:
         assert isinstance(clients[0], dict)
         assert 'addr' in clients[0]
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_client_info(self, r):
+        info = r.client_info()
+        assert isinstance(info, dict)
+        assert 'addr' in info
+
     @skip_if_server_version_lt('5.0.0')
     def test_client_list_type(self, r):
         with pytest.raises(exceptions.RedisError):
@@ -733,6 +739,21 @@ class TestRedisCommands:
         r.set('a', 1)
         assert r.getdel('a') == b'1'
         assert r.getdel('a') is None
+    
+    @skip_if_server_version_lt('6.2.0')
+    def test_getex(self, r):
+        r.set('a', 1)
+        assert r.getex('a') == b'1'
+        assert r.ttl('a') == -1
+        assert r.getex('a', ex=60) == b'1'
+        assert r.ttl('a') == 60
+        assert r.getex('a', px=6000) == b'1'
+        assert r.ttl('a') == 6
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
+        assert r.getex('a', pxat=expire_at) == b'1'
+        assert r.ttl('a') <= 60
+        assert r.getex('a', persist=True) == b'1'
+        assert r.ttl('a') == -1
 
     def test_getitem_and_setitem(self, r):
         r['a'] = 'bar'
@@ -880,6 +901,19 @@ class TestRedisCommands:
     def test_pttl_no_key(self, r):
         "PTTL on servers 2.8 and after return -2 when the key doesn't exist"
         assert r.pttl('a') == -2
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_hrandfield(self, r):
+        assert r.hrandfield('key') is None
+        r.hset('key', mapping={'a': 1, 'b': 2, 'c': 3, 'd': 4, 'e': 5})
+        assert r.hrandfield('key') is not None
+        assert len(r.hrandfield('key', 2)) == 2
+        # with values
+        assert len(r.hrandfield('key', 2, True)) == 4
+        # without duplications
+        assert len(r.hrandfield('key', 10)) == 5
+        # with duplications
+        assert len(r.hrandfield('key', -10)) == 10
 
     def test_randomkey(self, r):
         assert r.randomkey() is None
