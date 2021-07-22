@@ -730,7 +730,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt('6.2.0')
     def test_getdel(self, r):
         assert r.getdel('a') is None
-        assert r.set('a', 1)
+        r.set('a', 1)
         assert r.getdel('a') == b'1'
         assert r.getdel('a') is None
 
