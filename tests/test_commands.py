@@ -1443,6 +1443,21 @@ class TestRedisCommands:
         assert r.zcount('a', 1, '(' + str(2)) == 1
         assert r.zcount('a', 10, 20) == 0
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_zdiff(self, r):
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        r.zadd('b', {'a1': 1, 'a2': 2})
+        assert r.zdiff(['a', 'b']) == [b'a3']
+        assert r.zdiff(['a', 'b'], withscores=True) == [b'a3', b'3']
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_zdiffstore(self, r):
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        r.zadd('b', {'a1': 1, 'a2': 2})
+        assert r.zdiffstore("out", ['a', 'b'])
+        assert r.zrange("out", 0, -1) == [b'a3']
+        assert r.zrange("out", 0, -1, withscores=True) == [(b'a3', 3.0)]
+
     def test_zincrby(self, r):
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
         assert r.zincrby('a', 1, 'a2') == 3.0
