@@ -727,6 +727,21 @@ class TestRedisCommands:
         assert r.get('integer') == str(integer).encode()
         assert r.get('unicode_string').decode('utf-8') == unicode_string
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_getex(self, r):
+        r.set('a', 1)
+        assert r.getex('a') == b'1'
+        assert r.ttl('a') == -1
+        assert r.getex('a', ex=60) == b'1'
+        assert r.ttl('a') == 60
+        assert r.getex('a', px=6000) == b'1'
+        assert r.ttl('a') == 6
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
+        assert r.getex('a', pxat=expire_at) == b'1'
+        assert r.ttl('a') <= 60
+        assert r.getex('a', persist=True) == b'1'
+        assert r.ttl('a') == -1
+
     def test_getitem_and_setitem(self, r):
         r['a'] = 'bar'
         assert r['a'] == b'bar'
