@@ -595,8 +595,8 @@ class Redis:
             lambda r: r and set(r) or set()
         ),
         **string_keys_to_dict(
-            'ZPOPMAX ZPOPMIN ZDIFF ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
-            zset_score_pairs
+            'ZPOPMAX ZPOPMIN ZDIFF ZRANGE ZRANGEBYSCORE ZREVRANGE '
+            'ZREVRANGEBYSCORE', zset_score_pairs
         ),
         **string_keys_to_dict('BZPOPMIN BZPOPMAX', \
                               lambda r:
