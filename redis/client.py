@@ -1694,22 +1694,24 @@ class Redis:
         """
         Get the value of key and optionally set its expiration.
         GETEX is similar to GET, but is a write command with
-        additional options.
+        additional options. All time parameters can be given as
+        datetime.timedelta or integers.
 
-        ``ex`` Set the specified expire time, in seconds.
+        ``ex`` sets an expire flag on key ``name`` for ``ex`` seconds.
 
-        ``px`` Set the specified expire time, in milliseconds.
+        ``px`` sets an expire flag on key ``name`` for ``px`` milliseconds.
 
-        ``exat`` Set the specified Unix time at which the key
-        will expire, in seconds.
+        ``exat`` sets an expire flag on key ``name`` for ``ex`` seconds,
+        specified in unix time.
 
-        ``pxat`` Set the specified Unix time at which the key
-        will expire, in milliseconds.
+        ``pxat`` sets an expire flag on key ``name`` for ``ex`` milliseconds,
+        specified in unix time.
 
-        ``persist`` Remove the time to live associated with the key.
+        ``persist`` remove the time to live associated with ``name``.
         """
 
         pieces = []
+        # similar to set command
         if ex is not None:
             pieces.append('EX')
             if isinstance(ex, datetime.timedelta):
@@ -1720,6 +1722,7 @@ class Redis:
             if isinstance(px, datetime.timedelta):
                 px = int(px.total_seconds() * 1000)
             pieces.append(px)
+        # similar to pexpireat command
         if exat is not None:
             pieces.append('EXAT')
             if isinstance(exat, datetime.datetime):
