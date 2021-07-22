@@ -1689,6 +1689,57 @@ class Redis:
         """
         return self.execute_command('GET', name)
 
+    def getex(self, name,
+              ex=None, px=None, exat=None, pxat=None, persist=False):
+        """
+        Get the value of key and optionally set its expiration.
+        GETEX is similar to GET, but is a write command with
+        additional options. All time parameters can be given as
+        datetime.timedelta or integers.
+
+        ``ex`` sets an expire flag on key ``name`` for ``ex`` seconds.
+
+        ``px`` sets an expire flag on key ``name`` for ``px`` milliseconds.
+
+        ``exat`` sets an expire flag on key ``name`` for ``ex`` seconds,
+        specified in unix time.
+
+        ``pxat`` sets an expire flag on key ``name`` for ``ex`` milliseconds,
+        specified in unix time.
+
+        ``persist`` remove the time to live associated with ``name``.
+        """
+
+        pieces = []
+        # similar to set command
+        if ex is not None:
+            pieces.append('EX')
+            if isinstance(ex, datetime.timedelta):
+                ex = int(ex.total_seconds())
+            pieces.append(ex)
+        if px is not None:
+            pieces.append('PX')
+            if isinstance(px, datetime.timedelta):
+                px = int(px.total_seconds() * 1000)
+            pieces.append(px)
+        # similar to pexpireat command
+        if exat is not None:
+            pieces.append('EXAT')
+            if isinstance(exat, datetime.datetime):
+                s = int(exat.microsecond / 1000000)
+                exat = int(mod_time.mktime(exat.timetuple())) + s
+            pieces.append(exat)
+        if pxat is not None:
+            pieces.append('PXAT')
+            if isinstance(pxat, datetime.datetime):
+                ms = int(pxat.microsecond / 1000)
+                pxat = int(mod_time.mktime(pxat.timetuple())) * 1000 + ms
+            pieces.append(pxat)
+        if persist:
+            pieces.append('PERSIST')
+
+        return self.execute_command('GETEX', name, *pieces)
+
     def __getitem__(self, name):
         """
         Return the value at key ``name``, raises a KeyError if the key
