@@ -595,8 +595,8 @@ class Redis:
             lambda r: r and set(r) or set()
         ),
         **string_keys_to_dict(
-            'ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
-            zset_score_pairs
+            'ZPOPMAX ZPOPMIN ZINTER ZRANGE ZRANGEBYSCORE ZREVRANGE '
+            'ZREVRANGEBYSCORE', zset_score_pairs
         ),
         **string_keys_to_dict('BZPOPMIN BZPOPMAX', \
                               lambda r:
@@ -2906,11 +2906,27 @@ class Redis:
         "Increment the score of ``value`` in sorted set ``name`` by ``amount``"
         return self.execute_command('ZINCRBY', name, amount, value)
 
+    def zinter(self, keys, aggregate=None, withscores=False):
+        """
+        Return the intersect of multiple sorted sets specified by ``keys``.
+        With the ``aggregate`` option, it is possible to specify how the
+        results of the union are aggregated. This option defaults to SUM,
+        where the score of an element is summed across the inputs where it
+        exists. When this option is set to either MIN or MAX, the resulting
+        set will contain the minimum or maximum score of an element across
+        the inputs where it exists.
+        """
+        return self._zaggregate('ZINTER', None, keys, aggregate, withscores)
+
     def zinterstore(self, dest, keys, aggregate=None):
         """
-        Intersect multiple sorted sets specified by ``keys`` into
-        a new sorted set, ``dest``. Scores in the destination will be
-        aggregated based on the ``aggregate``, or SUM if none is provided.
+        Intersect multiple sorted sets specified by ``keys`` into a new
+        sorted set, ``dest``. Scores in the destination will be aggregated
+        based on the ``aggregate``. This option defaults to SUM, where the
+        score of an element is summed across the inputs where it exists.
+        When this option is set to either MIN or MAX, the resulting set will
+        contain the minimum or maximum score of an element across the inputs
+        where it exists.
         """
         return self._zaggregate('ZINTERSTORE', dest, keys, aggregate)
 
@@ -3169,8 +3185,12 @@ class Redis:
         """
         return self._zaggregate('ZUNIONSTORE', dest, keys, aggregate)
 
-    def _zaggregate(self, command, dest, keys, aggregate=None):
-        pieces = [command, dest, len(keys)]
+    def _zaggregate(self, command, dest, keys, aggregate=None,
+                    withscores=False):
+        pieces = [command]
+        if dest is not None:
+            pieces.append(dest)
+        pieces.append(len(keys))
         if isinstance(keys, dict):
             keys, weights = keys.keys(), keys.values()
         else:
@@ -3182,7 +3202,9 @@ class Redis:
         if aggregate:
             pieces.append(b'AGGREGATE')
             pieces.append(aggregate)
-        return self.execute_command(*pieces)
+        if withscores:
+            pieces.append(b'WITHSCORES')
+        return self.execute_command(*pieces, withscores=withscores)
 
     # HYPERLOGLOG COMMANDS
     def pfadd(self, name, *values):
