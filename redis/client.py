@@ -1697,7 +1697,6 @@ class Redis:
         """
         return self.execute_command('GET', name)
 
-
     def getdel(self, name):
         """
         Get the value at key ``name`` and delete the key. This command
