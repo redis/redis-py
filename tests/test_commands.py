@@ -1588,6 +1588,7 @@ class TestRedisCommands:
         assert r.zrange('a', 0, 1, withscores=True, score_cast_func=int) == \
             [(b'a1', 1), (b'a2', 2)]
 
+    @skip_if_server_version_lt('6.2.0')
     def test_zrangestore(self, r):
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
         assert r.zrangestore('b', 'a', 0, 1)
