@@ -2916,7 +2916,7 @@ class Redis:
         set will contain the minimum or maximum score of an element across
         the inputs where it exists.
         """
-        return self._zaggregate('ZINTER', None, keys, aggregate, withscores)
+        return self._zaggregate('ZINTER', None, keys, aggregate, withscores=withscores)
 
     def zinterstore(self, dest, keys, aggregate=None):
         """
@@ -3186,7 +3186,7 @@ class Redis:
         return self._zaggregate('ZUNIONSTORE', dest, keys, aggregate)
 
     def _zaggregate(self, command, dest, keys, aggregate=None,
-                    withscores=False):
+                    **options):
         pieces = [command]
         if dest is not None:
             pieces.append(dest)
@@ -3202,9 +3202,9 @@ class Redis:
         if aggregate:
             pieces.append(b'AGGREGATE')
             pieces.append(aggregate)
-        if withscores:
+        if 'withscores' in options.keys() and options['withscores']:
             pieces.append(b'WITHSCORES')
-        return self.execute_command(*pieces, withscores=withscores)
+        return self.execute_command(*pieces, **options)
 
     # HYPERLOGLOG COMMANDS
     def pfadd(self, name, *values):
