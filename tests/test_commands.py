@@ -1548,6 +1548,18 @@ class TestRedisCommands:
         assert r.zpopmin('a', count=2) == \
             [(b'a2', 2), (b'a3', 3)]
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_zrandemember(self, r):
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3, 'a4': 4, 'a5': 5})
+        assert r.zrandmember('a') is not None
+        assert len(r.zrandmember('a', 2)) == 2
+        # with scores
+        assert len(r.zrandmember('a', 2, True)) == 4
+        # without duplications
+        assert len(r.zrandmember('a', 10)) == 5
+        # with duplications
+        assert len(r.zrandmember('a', -10)) == 10
+
     @skip_if_server_version_lt('4.9.0')
     def test_bzpopmax(self, r):
         r.zadd('a', {'a1': 1, 'a2': 2})
