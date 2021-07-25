@@ -395,6 +395,26 @@ class TestRedisCommands:
         # we don't know which client ours will be
         assert 'redis_py_test' in [c['name'] for c in clients]
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_client_kill_filter_by_laddr(self, r, r2):
+        r.client_setname('redis-py-c1')
+        r2.client_setname('redis-py-c2')
+        clients = [client for client in r.client_list()
+                   if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
+        assert len(clients) == 2
+
+        clients_by_name = dict([(client.get('name'), client)
+                                for client in clients])
+
+        client_2_addr = clients_by_name['redis-py-c2'].get('laddr')
+        resp = r.client_kill_filter(laddr=client_2_addr)
+        assert resp == 1
+
+        clients = [client for client in r.client_list()
+                   if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
+        assert len(clients) == 1
+        assert clients[0].get('name') == 'redis-py-c1'
+
     @skip_if_server_version_lt('2.9.50')
     def test_client_pause(self, r):
         assert r.client_pause(1)
