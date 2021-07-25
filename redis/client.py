@@ -2912,14 +2912,12 @@ class Redis:
             pieces.append("WITHSCORES")
         return self.execute_command("ZDIFF", *pieces)
 
-    def zdiffstore(self, name, keys, withscores=False):
+    def zdiffstore(self, name, keys):
         """
         Computes the difference between the first and all successive input
         sorted sets provided in ``keys`` and stores the result in ``name``.
         """
         pieces = [len(keys), *keys]
-        if withscores:
-            pieces.append("WITHSCORES")
         return self.execute_command("ZDIFFSTORE", name, *pieces)
 
     def zincrby(self, name, amount, value):
