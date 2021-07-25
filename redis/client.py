@@ -3058,8 +3058,7 @@ class Redis:
         ``withscores`` indicates to return the scores along with the values.
         The return type is a list of (value, score) pairs
         """
-        pieces = ['ZRANGESTORE', dest, name, start, end]
-        return self.execute_command(*pieces)
+        return self.execute_command('ZRANGESTORE', dest, name, start, end)
 
     def zrangebylex(self, name, min, max, start=None, num=None):
         """
