@@ -3205,6 +3205,14 @@ class Redis:
         "Return the score of element ``value`` in sorted set ``name``"
         return self.execute_command('ZSCORE', name, value)
 
+    def zunion(self, keys, aggregate=None):
+        """
+        Union multiple sorted sets specified by ``keys`` into
+        a new sorted set, ``dest``. Scores in the destination will be
+        aggregated based on the ``aggregate``, or SUM if none is provided.
+        """
+        return self._zaggregate('ZUNIONSTORE', keys, aggregate)
+
     def zunionstore(self, dest, keys, aggregate=None):
         """
         Union multiple sorted sets specified by ``keys`` into
