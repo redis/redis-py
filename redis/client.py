@@ -3048,6 +3048,19 @@ class Redis:
         }
         return self.execute_command(*pieces, **options)
 
+    def zrangestore(self, dest, name, start, end):
+        """
+        Stores in ``dest`` the result of a range of values from sorted set
+        ``name`` between ``start`` and ``end`` sorted in ascending order.
+
+        ``start`` and ``end`` can be negative, indicating the end of the range.
+
+        ``withscores`` indicates to return the scores along with the values.
+        The return type is a list of (value, score) pairs
+        """
+        pieces = ['ZRANGESTORE', dest, name, start, end]
+        return self.execute_command(*pieces)
+
     def zrangebylex(self, name, min, max, start=None, num=None):
         """
         Return the lexicographical range of values from sorted set ``name``
