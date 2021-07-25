@@ -3054,9 +3054,6 @@ class Redis:
         ``name`` between ``start`` and ``end`` sorted in ascending order.
 
         ``start`` and ``end`` can be negative, indicating the end of the range.
-
-        ``withscores`` indicates to return the scores along with the values.
-        The return type is a list of (value, score) pairs
         """
         return self.execute_command('ZRANGESTORE', dest, name, start, end)
 
