@@ -783,14 +783,14 @@ class TestRedisCommands:
     @skip_if_server_version_lt('6.2.0')
     def test_lmove(self, r):
         r.rpush('a', 'one', 'two', 'three', 'four')
-        assert r.lmove('a', 'b') == b'one'
-        assert r.lmove('a', 'b', 'right', 'left') == b'four'
+        assert r.lmove('a', 'b')
+        assert r.lmove('a', 'b', 'right', 'left')
 
     @skip_if_server_version_lt('6.2.0')
     def test_blmove(self, r):
         r.rpush('a', 'one', 'two', 'three', 'four')
-        assert r.blmove('a', 'b') == b'one'
-        assert r.blmove('a', 'b', 'right', 'left') == b'four'
+        assert r.blmove('a', 'b')
+        assert r.blmove('a', 'b', 'right', 'left')
 
     def test_mset(self, r):
         d = {'a': b'1', 'b': b'2', 'c': b'3'}

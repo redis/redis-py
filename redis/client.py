@@ -561,7 +561,7 @@ class Redis:
     """
     RESPONSE_CALLBACKS = {
         **string_keys_to_dict(
-            'AUTH EXPIRE EXPIREAT HEXISTS HMSET LOVE MOVE MSETNX PERSIST '
+            'AUTH EXPIRE EXPIREAT HEXISTS HMSET LMOVE BLMOVE MOVE MSETNX PERSIST '
             'PSETEX RENAMENX SISMEMBER SMOVE SETEX SETNX',
             bool
         ),
