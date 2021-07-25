@@ -2916,7 +2916,8 @@ class Redis:
         set will contain the minimum or maximum score of an element across
         the inputs where it exists.
         """
-        return self._zaggregate('ZINTER', None, keys, aggregate, withscores=withscores)
+        return self._zaggregate('ZINTER', None, keys, aggregate,
+                                withscores=withscores)
 
     def zinterstore(self, dest, keys, aggregate=None):
         """
