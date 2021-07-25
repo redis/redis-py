@@ -1300,6 +1300,12 @@ class Redis:
             raise DataError("CLIENT PAUSE timeout must be an integer")
         return self.execute_command('CLIENT PAUSE', str(timeout))
 
+    def client_unpause(self):
+        """
+        Unpause all redis clients
+        """
+        return self.execute_command('CLIENT UNPAUSE')
+
     def readwrite(self):
         "Disables read queries for a connection to a Redis Cluster slave node"
         return self.execute_command('READWRITE')
