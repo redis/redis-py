@@ -2258,6 +2258,16 @@ class TestRedisCommands:
         r.xadd(stream, {'foo': 'bar'}, maxlen=2, approximate=False)
         assert r.xlen(stream) == 2
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_xadd_nomkstream(self, r):
+        # nomkstream option
+        stream = 'stream'
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'some': 'other'}, nomkstream=False)
+        assert r.xlen(stream) == 2
+        r.xadd(stream, {'some': 'other'}, nomkstream=True)
+        assert r.xlen(stream) == 3
+
     @skip_if_server_version_lt('5.0.0')
     def test_xclaim(self, r):
         stream = 'stream'
