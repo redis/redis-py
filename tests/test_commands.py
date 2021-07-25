@@ -766,6 +766,13 @@ class TestRedisCommands:
         assert r.get('unicode_string').decode('utf-8') == unicode_string
 
     @skip_if_server_version_lt('6.2.0')
+    def test_getdel(self, r):
+        assert r.getdel('a') is None
+        r.set('a', 1)
+        assert r.getdel('a') == b'1'
+        assert r.getdel('a') is None
+
+    @skip_if_server_version_lt('6.2.0')
     def test_getex(self, r):
         r.set('a', 1)
         assert r.getex('a') == b'1'
