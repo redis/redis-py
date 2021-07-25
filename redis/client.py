@@ -2898,8 +2898,8 @@ class Redis:
         if incr and len(mapping) != 1:
             raise DataError("ZADD option 'incr' only works when passing a "
                             "single element/score pair")
-        if sum([nx, lt, gr]) > 1:
-            raise DataError("Only one of 'nx', 'lt', and 'gr' may be defined.")
+        if nx is True and (gt is not None or lt is not None):
+            raise DataError("Only one of 'nx', 'lt', or 'gr' may be defined.")
 
         pieces = []
         options = {}

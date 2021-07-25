@@ -1473,6 +1473,12 @@ class TestRedisCommands:
             r.zadd('a', {'a%s' % i: i})
         assert r.zadd('a', {'a2': 5}, lt=1) == 0
 
+        # cannot use both nx and xx options
+        with pytest.raises(exceptions.DataError):
+            r.zadd('a', {'a15': 155}, nx=True, lt=True)
+            r.zadd('a', {'a15': 155}, nx=True, gt=True)
+            r.zadd('a', {'a15': 155}, lx=True, gt=True)
+
     def test_zcard(self, r):
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
         assert r.zcard('a') == 3
