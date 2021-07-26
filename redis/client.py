@@ -648,6 +648,7 @@ class Redis:
         'GEOPOS': lambda r: list(map(lambda ll: (float(ll[0]),
                                      float(ll[1]))
                                      if ll is not None else None, r)),
+        'GEOSEARCH': parse_georadius_generic,
         'GEORADIUS': parse_georadius_generic,
         'GEORADIUSBYMEMBER': parse_georadius_generic,
         'HGETALL': lambda r: r and pairs_to_dict(r) or {},
@@ -3461,6 +3462,96 @@ class Redis:
         """
         return self.execute_command('GEOPOS', name, *values)
 
+    def geosearch(self, name, member=None, longitude=None, latitude=None,
+                  unit='m', radius=None, width=None, height=None, sort=None,
+                  count=None, any=False, withcoord=False,
+                  withdist=False, withhash=False):
+
+        return self._geosearchgeneric('GEOSEARCH',
+                                      name, member=member, longitude=longitude,
+                                      latitude=latitude, unit=unit,
+                                      radius=radius, width=width,
+                                      height=height, sort=sort, count=count,
+                                      any=any, withcoord=withcoord,
+                                      withdist=withdist, withhash=withhash,
+                                      store=None, store_dist=None)
+
+    def geosearchstore(self, dest, name, member=None, longitude=None,
+                       latitude=None, unit='m', radius=None, width=None,
+                       height=None, sort=None, count=None, any=False,
+                       storedist=False):
+
+        return self._geosearchgeneric('GEOSEARCHSTORE',
+                                      dest, name, member=member,
+                                      longitude=longitude, latitude=latitude,
+                                      unit=unit, radius=radius, width=width,
+                                      height=height, sort=sort, count=count,
+                                      any=any, withcoord=None,
+                                      withdist=None, withhash=None,
+                                      store=None, store_dist=storedist)
+
+    def _geosearchgeneric(self, command, *args, **kwargs):
+        pieces = list(args)
+        # FROMMEMBER or FROMLONLAT
+        if kwargs['member'] is None:
+            if kwargs['longitude'] is None or kwargs['latitude'] is None:
+                raise DataError("GEOSEARCH must have member or"
+                                " longitude and latitude")
+        if kwargs['member']:
+            if kwargs['longitude'] or kwargs['latitude']:
+                raise DataError("GEOSEARCH member and longitude or latitude"
+                                " cant be set together")
+            pieces.extend([b'FROMMEMBER', kwargs['member']])
+        if kwargs['longitude'] and kwargs['latitude']:
+            pieces.extend([b'FROMLONLAT',
+                           kwargs['longitude'], kwargs['latitude']])
+
+        # BYRADIUS or BYBOX
+        if kwargs['radius'] is None:
+            if kwargs['width'] is None or kwargs['height'] is None:
+                raise DataError("GEOSEARCH must have radius or"
+                                " width and height")
+        if kwargs['unit'] is None:
+            raise DataError("GEOSEARCH must have unit")
+        if kwargs['unit'].lower() not in ('m', 'km', 'mi', 'ft'):
+            raise DataError("GEOSEARCH invalid unit")
+        if kwargs['radius']:
+            if kwargs['width'] or kwargs['height']:
+                raise DataError("GEOSEARCH radius and width or height"
+                                " cant be set together")
+            pieces.extend([b'BYRADIUS', kwargs['radius'], kwargs['unit']])
+        if kwargs['width'] and kwargs['height']:
+            pieces.extend([b'BYBOX',
+                           kwargs['width'], kwargs['height'], kwargs['unit']])
+
+        # ASC and DESC
+        if kwargs['sort']:
+            if kwargs['sort'].upper() == 'ASC':
+                pieces.append(b'ASC')
+            elif kwargs['sort'].upper() == 'DESC':
+                pieces.append(b'DESC')
+            else:
+                raise DataError("GEOSEARCH invalid sort")
+
+        # count any
+        if kwargs['count']:
+            pieces.extend([b'COUNT', kwargs['count']])
+            if kwargs['any']:
+                pieces.append(b'ANY')
+        elif kwargs['any']:
+            raise DataError("GEOSEARCH any can't be provided without count")
+
+        # withcoord, withdist and withhash
+        for arg_name, byte_repr in (
+                ('withdist', b'WITHDIST'),
+                ('withcoord', b'WITHCOORD'),
+                ('withhash', b'WITHHASH'),
+                ('store_dist', b'STOREDIST')):
+            if kwargs[arg_name]:
+                pieces.append(byte_repr)
+
+        return self.execute_command(command, *pieces, **kwargs)
+
     def georadius(self, name, longitude, latitude, radius, unit=None,
                   withdist=False, withcoord=False, withhash=False, count=None,
                   sort=None, store=None, store_dist=None):
@@ -3523,17 +3614,14 @@ class Redis:
             pieces.append(kwargs['unit'])
         else:
             pieces.append('m',)
-
         for arg_name, byte_repr in (
                 ('withdist', b'WITHDIST'),
                 ('withcoord', b'WITHCOORD'),
                 ('withhash', b'WITHHASH')):
             if kwargs[arg_name]:
                 pieces.append(byte_repr)
-
         if kwargs['count']:
             pieces.extend([b'COUNT', kwargs['count']])
-
         if kwargs['sort']:
             if kwargs['sort'] == 'ASC':
                 pieces.append(b'ASC')
@@ -3541,14 +3629,11 @@ class Redis:
                 pieces.append(b'DESC')
             else:
                 raise DataError("GEORADIUS invalid sort")
-
         if kwargs['store'] and kwargs['store_dist']:
             raise DataError("GEORADIUS store and store_dist cant be set"
                             " together")
-
         if kwargs['store']:
             pieces.extend([b'STORE', kwargs['store']])
-
         if kwargs['store_dist']:
             pieces.extend([b'STOREDIST', kwargs['store_dist']])
 
