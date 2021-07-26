@@ -3631,7 +3631,7 @@ class Redis:
         ``count`` indicates to return the number of elements up to N.
 
         ``sort`` indicates to return the places in a sorted way, ASC for
-        nearest to fairest and DESC for fairest to nearest.
+        nearest to farest and DESC for farest to nearest.
 
         ``store`` indicates to save the places names in a sorted set named
         with a specific key, each element of the destination sorted set is
