@@ -1132,7 +1132,7 @@ class TestRedisCommands:
     def test_lpop_count(self, r):
         r.rpush('a', '1', '2', '3')
         assert r.lpop('a', 2) == [b'1', b'2']
-        assert r.lpop('a', 1) == b'3'
+        assert r.lpop('a', 1) == [b'3']
         assert r.lpop('a') is None
         assert r.lpop('a', 3) is None
 
