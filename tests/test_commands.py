@@ -1132,7 +1132,7 @@ class TestRedisCommands:
     def test_lpop_count(self, r):
         r.rpush('a', '1', '2', '3')
         assert r.lpop('a', 2) == [b'1', b'2']
-        assert r.lpop('a', 1) == [b'3']
+        assert r.lpop('a', 1) == b'3'
         assert r.lpop('a') is None
         assert r.lpop('a', 3) is None
 
@@ -1188,7 +1188,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt('6.2.0')
     def test_rpop_count(self, r):
         r.rpush('a', '1', '2', '3')
-        assert r.rpop('a', 2) == [b'2', b'3']
+        assert r.rpop('a', 2) == [b'3', b'2']
         assert r.rpop('a', 1) == [b'1']
         assert r.rpop('a') is None
         assert r.rpop('a', 3) is None
