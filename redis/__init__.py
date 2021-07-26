@@ -22,6 +22,7 @@ from redis.exceptions import (
     TimeoutError,
     WatchError
 )
+import pkg_resources
 
 
 def int_or_str(value):
@@ -31,7 +32,11 @@ def int_or_str(value):
         return value
 
 
-__version__ = '3.5.3'
+try:
+    __version__ = pkg_resources.get_distribution('redis').version
+except:
+    __version__ = "99.99.99"
+
 VERSION = tuple(map(int_or_str, __version__.split('.')))
 
 __all__ = [
