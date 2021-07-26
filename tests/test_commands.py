@@ -2562,7 +2562,23 @@ class TestRedisCommands:
         assert response[1]['message_id'] == m2
         assert response[1]['consumer'] == consumer2.encode()
 
-        # need to skip for version < 6.2.0
+    @skip_if_server_version_lt('6.2.0')
+    def test_xpending_range_idle(self, r):
+        stream = 'stream'
+        group = 'group'
+        consumer1 = 'consumer1'
+        consumer2 = 'consumer2'
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        r.xgroup_create(stream, group, 0)
+
+        # read 1 message from the group with each consumer
+        r.xreadgroup(group, consumer1, streams={stream: '>'}, count=1)
+        r.xreadgroup(group, consumer2, streams={stream: '>'}, count=1)
+
+        response = r.xpending_range(stream, group,
+                                    min='-', max='+', count=5)
+        assert len(response) == 2
         response = r.xpending_range(stream, group,
                                     min='-', max='+', count=5, idle=1000)
         assert len(response) == 0
