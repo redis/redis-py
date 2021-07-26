@@ -1462,6 +1462,9 @@ class TestRedisCommands:
         r.zadd('b', {'a1': 2, 'a2': 2, 'a3': 2})
         r.zadd('c', {'a1': 6, 'a3': 5, 'a4': 4})
         assert r.zinter(['a', 'b', 'c']) == [b'a3', b'a1']
+        # invalid aggregation
+        with pytest.raises(exceptions.DataError):
+            r.zinter(['a', 'b', 'c'], aggregate='foo', withscores=True)
         # aggregate with SUM
         assert r.zinter(['a', 'b', 'c'], withscores=True) \
                == [(b'a3', 8), (b'a1', 9)]
