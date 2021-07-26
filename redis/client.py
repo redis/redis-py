@@ -3201,8 +3201,11 @@ class Redis:
             pieces.append(b'WEIGHTS')
             pieces.extend(weights)
         if aggregate:
-            pieces.append(b'AGGREGATE')
-            pieces.append(aggregate)
+            if aggregate.upper() in ['SUM', 'MIN', 'MAX']:
+                pieces.append(b'AGGREGATE')
+                pieces.append(aggregate)
+            else:
+                raise DataError("aggregate can be sum, min or max.")
         if 'withscores' in options.keys() and options['withscores']:
             pieces.append(b'WITHSCORES')
         return self.execute_command(*pieces, **options)
