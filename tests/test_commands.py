@@ -2224,6 +2224,48 @@ class TestRedisCommands:
                            withcoord=True, withhash=True) == []
 
     @skip_if_server_version_lt('6.2.0')
+    def test_geosearch_negative(self, r):
+        # not specifying member nor longitude and latitude
+        with pytest.raises(exceptions.DataError):
+            assert r.geosearch('barcelona')
+        # specifying member and longitude and latitude
+        with pytest.raises(exceptions.DataError):
+            assert r.geosearch('barcelona',
+                               member="Paris", longitude=2, latitude=1)
+        # specifying one of longitude and latitude
+        with pytest.raises(exceptions.DataError):
+            assert r.geosearch('barcelona', longitude=2)
+        with pytest.raises(exceptions.DataError):
+            assert r.geosearch('barcelona', latitude=2)
+
+        # not specifying radius nor width and height
+        with pytest.raises(exceptions.DataError):
+            assert r.geosearch('barcelona', member="Paris")
+        # specifying radius and width and height
+        with pytest.raises(exceptions.DataError):
+            assert r.geosearch('barcelona', member="Paris",
+                               radius=3, width=2, height=1)
+        # specifying one of width and height
+        with pytest.raises(exceptions.DataError):
+            assert r.geosearch('barcelona', member="Paris", width=2)
+        with pytest.raises(exceptions.DataError):
+            assert r.geosearch('barcelona', member="Paris", height=2)
+
+        # invalid sort
+        with pytest.raises(exceptions.DataError):
+            assert r.geosearch('barcelona',
+                               member="Paris", width=2, height=2, sort="wrong")
+
+        # invalid unit
+        with pytest.raises(exceptions.DataError):
+            assert r.geosearch('barcelona',
+                               member="Paris", width=2, height=2, unit="miles")
+
+        # use any without count
+        with pytest.raises(exceptions.DataError):
+            assert r.geosearch('barcelona', member='place3', radius=100, any=1)
+
+    @skip_if_server_version_lt('6.2.0')
     def test_geosearchstore(self, r):
         values = (2.1909389952632, 41.433791470673, 'place1') + \
                  (2.1873744593677, 41.406342043777, 'place2')
