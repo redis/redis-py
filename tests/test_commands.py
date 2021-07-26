@@ -2562,6 +2562,11 @@ class TestRedisCommands:
         assert response[1]['message_id'] == m2
         assert response[1]['consumer'] == consumer2.encode()
 
+        # need to skip for version < 6.2.0
+        response = r.xpending_range(stream, group,
+                                    min='-', max='+', count=5, idle=1000)
+        assert len(response) == 0
+
     @skip_if_server_version_lt('5.0.0')
     def test_xrange(self, r):
         stream = 'stream'

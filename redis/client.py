@@ -2724,7 +2724,7 @@ class Redis:
         return self.execute_command('XPENDING', name, groupname)
 
     def xpending_range(self, name, groupname, min, max, count,
-                       consumername=None):
+                       consumername=None, idle=None):
         """
         Returns information about pending messages, in a range.
         name: name of the stream.
@@ -2733,15 +2733,26 @@ class Redis:
         max: maximum stream ID.
         count: number of messages to return
         consumername: name of a consumer to filter by (optional).
+        idle: available from  version 6.2. filter entries by their
+        idle-time, given in milliseconds (optional).
         """
         pieces = [name, groupname]
         if min is not None or max is not None or count is not None:
             if min is None or max is None or count is None:
                 raise DataError("XPENDING must be provided with min, max "
                                 "and count parameters, or none of them. ")
+            if idle is not None:
+                if not isinstance(idle, int) or count < -1:
+                    raise DataError("XPENDING idle must be a integer >= -1")
+                pieces.extend(['IDLE', str(idle)])
             if not isinstance(count, int) or count < -1:
                 raise DataError("XPENDING count must be a integer >= -1")
-            pieces.extend((min, max, str(count)))
+            pieces.extend([min, max, str(count)])
+        if idle is not None:
+            if min is None or max is None or count is None:
+                raise DataError("if XPENDING is provided with idle time,"
+                                " it must be provided with min, max and"
+                                " count parameters")
         if consumername is not None:
             if min is None or max is None or count is None:
                 raise DataError("if XPENDING is provided with consumername,"
