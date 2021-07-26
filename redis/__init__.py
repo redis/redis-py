@@ -34,7 +34,7 @@ def int_or_str(value):
 
 try:
     __version__ = pkg_resources.get_distribution('redis').version
-except:
+except pkg_resources.DistributionNotFound:
     __version__ = "99.99.99"
 
 VERSION = tuple(map(int_or_str, __version__.split('.')))
