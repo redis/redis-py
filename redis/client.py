@@ -442,9 +442,14 @@ def parse_cluster_nodes(response, **options):
 
 
 def parse_geosearch_generic(response, **options):
+    """
+    Parse the response of 'GEOSEARCH', GEORADIUS' and 'GEORADIUSBYMEMBER'
+    commands according to 'withdist', 'withhash' and 'withcoord' labels.
+    """
     if options['store'] or options['store_dist']:
-        # `store` and `store_diff` cant be combined
+        # `store` and `store_dist` cant be combined
         # with other command arguments.
+        # relevant to 'GEORADIUS' and 'GEORADIUSBYMEMBER'
         return response
 
     if type(response) != list:
@@ -452,7 +457,7 @@ def parse_geosearch_generic(response, **options):
     else:
         response_list = response
 
-    if not options['withdist'] and not options['withcoord']\
+    if not options['withdist'] and not options['withcoord'] \
             and not options['withhash']:
         # just a bunch of places
         return response_list
