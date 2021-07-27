@@ -415,14 +415,14 @@ def parse_slowlog_get(response, **options):
 
 def parse_stralgo(response, **options):
     """
-    Parse the response from `STRALGO`.
-    Without modifiers the returned value is a string.
+    Parse the response from `STRALGO` command.
+    Without modifiers the returned value is string.
     When LEN is given the command returns the length of the result
     (i.e integer).
-    When IDX is given the command returns an dictionary with the LCS
+    When IDX is given the command returns a dictionary with the LCS
     length and all the ranges in both the strings, start and end
     offset for each string, where there are matches.
-    When WITHMATCHLEN is given, each array representing  a match will
+    When WITHMATCHLEN is given, each array representing a match will
     also have the length of the match at the beginning of the array.
     """
     if options['len']:
@@ -2057,7 +2057,7 @@ class Redis:
         """
         return self.execute_command('SETRANGE', name, offset, value)
 
-    def stralgo(self, algo, input1, input2, specific_argument=None, len=False,
+    def stralgo(self, algo, value1, value2, specific_argument=None, len=False,
                 idx=False, minmatchlen=None, withmatchlen=False):
         """
         Implements complex algorithms that operate on strings.
@@ -2067,10 +2067,10 @@ class Redis:
 
         ``algo`` Right now must be LCS
 
-        ``input1`` and ``input2`` Can be two strings or two keys
+        ``value1`` and ``value2`` Can be two strings or two keys
 
         ``specific_argument`` Specifying if the arguments to the algorithm
-        will be keys or strings. Can be only STRINGS (default) or KEYS.
+        will be keys or strings. strings is the default.
 
         ``len`` Returns just the len of the match.
 
@@ -2088,13 +2088,13 @@ class Redis:
             raise DataError("The supported algorithms are: %s"
                             % (', '.join(supported_algo)))
         if specific_argument:
-            if specific_argument not in ['KEYS', 'STRINGS']:
+            if specific_argument not in ['keys', 'strings']:
                 raise DataError("specific_argument can be only"
-                                " KEYS or STRINGS")
+                                " keys or strings")
         else:
             specific_argument = b'STRINGS'
 
-        pieces = [algo, specific_argument, input1, input2]
+        pieces = [algo, specific_argument.upper(), value1, value2]
         if len:
             if idx:
                 raise DataError("len and idx cannot be provided together."

@@ -1030,6 +1030,7 @@ class TestRedisCommands:
         assert r.setrange('a', 6, '12345') == 11
         assert r['a'] == b'abcdef12345'
 
+    @skip_if_server_version_lt('6.0.0')
     def test_stralgo_lcs(self, r):
         key1 = 'key1'
         key2 = 'key2'
@@ -1061,6 +1062,7 @@ class TestRedisCommands:
                    'matches': [[4, (4, 7), (5, 8)]]
                }
 
+    @skip_if_server_version_lt('6.0.0')
     def test_stralgo_negative(self, r):
         with pytest.raises(exceptions.DataError):
             r.stralgo('ISSUB', 'value1', 'value2')
