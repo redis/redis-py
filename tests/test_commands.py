@@ -1030,6 +1030,47 @@ class TestRedisCommands:
         assert r.setrange('a', 6, '12345') == 11
         assert r['a'] == b'abcdef12345'
 
+    def test_stralgo_lcs(self, r):
+        key1 = 'key1'
+        key2 = 'key2'
+        value1 = 'ohmytext'
+        value2 = 'mynewtext'
+        res = 'mytext'
+        # test LCS of strings
+        assert r.stralgo('LCS', value1, value2) == res
+        # test using keys
+        r.mset({key1: value1, key2: value2})
+        assert r.stralgo('LCS', key1, key2, specific_argument="KEYS") == res
+        # test other labels
+        assert r.stralgo('LCS', value1, value2, len=True) == len(res)
+        assert r.stralgo('LCS', value1, value2, idx=True) == \
+               {
+                   'len': len(res),
+                   'matches': [[(4, 7), (5, 8)], [(2, 3), (0, 1)]]
+               }
+        assert r.stralgo('LCS', value1, value2,
+                         idx=True, withmatchlen=True) == \
+               {
+                   'len': len(res),
+                   'matches': [[4, (4, 7), (5, 8)], [2, (2, 3), (0, 1)]]
+               }
+        assert r.stralgo('LCS', value1, value2,
+                         idx=True, minmatchlen=4, withmatchlen=True) == \
+               {
+                   'len': len(res),
+                   'matches': [[4, (4, 7), (5, 8)]]
+               }
+
+    def test_stralgo_negative(self, r):
+        with pytest.raises(exceptions.DataError):
+            r.stralgo('ISSUB', 'value1', 'value2')
+        with pytest.raises(exceptions.DataError):
+            r.stralgo('LCS', 'value1', 'value2', len=True, idx=True)
+        with pytest.raises(exceptions.DataError):
+            r.stralgo('LCS', 'value1', 'value2', specific_argument="INT")
+        with pytest.raises(exceptions.DataError):
+            r.stralgo('LCS', 'value1', 'value2', idx=True, minmatchlen=1.5)
+
     def test_strlen(self, r):
         r['a'] = 'foo'
         assert r.strlen('a') == 3
