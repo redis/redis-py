@@ -281,6 +281,12 @@ class TestRedisCommands:
         assert isinstance(clients[0], dict)
         assert 'addr' in clients[0]
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_client_info(self, r):
+        info = r.client_info()
+        assert isinstance(info, dict)
+        assert 'addr' in info
+
     @skip_if_server_version_lt('5.0.0')
     def test_client_list_type(self, r):
         with pytest.raises(exceptions.RedisError):
@@ -389,12 +395,36 @@ class TestRedisCommands:
         # we don't know which client ours will be
         assert 'redis_py_test' in [c['name'] for c in clients]
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_client_kill_filter_by_laddr(self, r, r2):
+        r.client_setname('redis-py-c1')
+        r2.client_setname('redis-py-c2')
+        clients = [client for client in r.client_list()
+                   if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
+        assert len(clients) == 2
+
+        clients_by_name = dict([(client.get('name'), client)
+                                for client in clients])
+
+        client_2_addr = clients_by_name['redis-py-c2'].get('laddr')
+        resp = r.client_kill_filter(laddr=client_2_addr)
+        assert resp == 1
+
+        clients = [client for client in r.client_list()
+                   if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
+        assert len(clients) == 1
+        assert clients[0].get('name') == 'redis-py-c1'
+
     @skip_if_server_version_lt('2.9.50')
     def test_client_pause(self, r):
         assert r.client_pause(1)
         assert r.client_pause(timeout=1)
         with pytest.raises(exceptions.RedisError):
             r.client_pause(timeout='not an integer')
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_client_unpause(self, r):
+        assert r.client_unpause() == b'OK'
 
     def test_config_get(self, r):
         data = r.config_get()
@@ -578,6 +608,29 @@ class TestRedisCommands:
         with pytest.raises(exceptions.RedisError):
             r.bitpos(key, 7) == 12
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_copy(self, r):
+        assert r.copy("a", "b") == 0
+        r.set("a", "foo")
+        assert r.copy("a", "b") == 1
+        assert r.get("a") == b"foo"
+        assert r.get("b") == b"foo"
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_copy_and_replace(self, r):
+        r.set("a", "foo1")
+        r.set("b", "foo2")
+        assert r.copy("a", "b") == 0
+        assert r.copy("a", "b", replace=True) == 1
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_copy_to_another_database(self, request):
+        r0 = _get_client(redis.Redis, request, db=0)
+        r1 = _get_client(redis.Redis, request, db=1)
+        r0.set("a", "foo")
+        assert r0.copy("a", "b", destination_db=1) == 1
+        assert r1.get("b") == b"foo"
+
     def test_decr(self, r):
         assert r.decr('a') == -1
         assert r['a'] == b'-1'
@@ -703,6 +756,28 @@ class TestRedisCommands:
         assert r.get('byte_string') == byte_string
         assert r.get('integer') == str(integer).encode()
         assert r.get('unicode_string').decode('utf-8') == unicode_string
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_getdel(self, r):
+        assert r.getdel('a') is None
+        r.set('a', 1)
+        assert r.getdel('a') == b'1'
+        assert r.getdel('a') is None
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_getex(self, r):
+        r.set('a', 1)
+        assert r.getex('a') == b'1'
+        assert r.ttl('a') == -1
+        assert r.getex('a', ex=60) == b'1'
+        assert r.ttl('a') == 60
+        assert r.getex('a', px=6000) == b'1'
+        assert r.ttl('a') == 6
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
+        assert r.getex('a', pxat=expire_at) == b'1'
+        assert r.ttl('a') <= 60
+        assert r.getex('a', persist=True) == b'1'
+        assert r.ttl('a') == -1
 
     def test_getitem_and_setitem(self, r):
         r['a'] = 'bar'
@@ -862,6 +937,19 @@ class TestRedisCommands:
     def test_pttl_no_key(self, r):
         "PTTL on servers 2.8 and after return -2 when the key doesn't exist"
         assert r.pttl('a') == -2
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_hrandfield(self, r):
+        assert r.hrandfield('key') is None
+        r.hset('key', mapping={'a': 1, 'b': 2, 'c': 3, 'd': 4, 'e': 5})
+        assert r.hrandfield('key') is not None
+        assert len(r.hrandfield('key', 2)) == 2
+        # with values
+        assert len(r.hrandfield('key', 2, True)) == 4
+        # without duplications
+        assert len(r.hrandfield('key', 10)) == 5
+        # with duplications
+        assert len(r.hrandfield('key', -10)) == 10
 
     def test_randomkey(self, r):
         assert r.randomkey() is None
@@ -1460,6 +1548,18 @@ class TestRedisCommands:
         # with count
         assert r.zpopmin('a', count=2) == \
             [(b'a2', 2), (b'a3', 3)]
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_zrandemember(self, r):
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3, 'a4': 4, 'a5': 5})
+        assert r.zrandmember('a') is not None
+        assert len(r.zrandmember('a', 2)) == 2
+        # with scores
+        assert len(r.zrandmember('a', 2, True)) == 4
+        # without duplications
+        assert len(r.zrandmember('a', 10)) == 5
+        # with duplications
+        assert len(r.zrandmember('a', -10)) == 10
 
     @skip_if_server_version_lt('4.9.0')
     def test_bzpopmax(self, r):
@@ -2201,6 +2301,16 @@ class TestRedisCommands:
         # with maxlen, the list evicts the first message
         r.xadd(stream, {'foo': 'bar'}, maxlen=2, approximate=False)
         assert r.xlen(stream) == 2
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_xadd_nomkstream(self, r):
+        # nomkstream option
+        stream = 'stream'
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'some': 'other'}, nomkstream=False)
+        assert r.xlen(stream) == 2
+        r.xadd(stream, {'some': 'other'}, nomkstream=True)
+        assert r.xlen(stream) == 3
 
     @skip_if_server_version_lt('5.0.0')
     def test_xclaim(self, r):
