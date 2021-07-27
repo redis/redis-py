@@ -432,7 +432,8 @@ def parse_stralgo(response, **options):
             matches = [[(int(match[-1]))] + list(map(tuple, match[:-1]))
                        for match in response[1]]
         else:
-            matches = [list(map(tuple, match)) for match in response[1]]
+            matches = [list(map(tuple, match))
+                       for match in response[1]]
         return {
             str_if_bytes(response[0]): matches,
             str_if_bytes(response[2]): int(response[3])
