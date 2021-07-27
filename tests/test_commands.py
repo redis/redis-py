@@ -1041,7 +1041,7 @@ class TestRedisCommands:
         assert r.stralgo('LCS', value1, value2) == res
         # test using keys
         r.mset({key1: value1, key2: value2})
-        assert r.stralgo('LCS', key1, key2, specific_argument="KEYS") == res
+        assert r.stralgo('LCS', key1, key2, specific_argument="keys") == res
         # test other labels
         assert r.stralgo('LCS', value1, value2, len=True) == len(res)
         assert r.stralgo('LCS', value1, value2, idx=True) == \
