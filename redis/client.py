@@ -413,6 +413,33 @@ def parse_slowlog_get(response, **options):
     } for item in response]
 
 
+def parse_stralgo(response, **options):
+    """
+    Parse the response from `STRALGO`.
+    Without modifiers the returned value is a string.
+    When LEN is given the command returns the length of the result
+    (i.e integer).
+    When IDX is given the command returns an dictionary with the LCS
+    length and all the ranges in both the strings, start and end
+    offset for each string, where there are matches.
+    When WITHMATCHLEN is given, each array representing  a match will
+    also have the length of the match at the beginning of the array.
+    """
+    if options['len']:
+        return int(response)
+    if options['idx']:
+        if options['withmatchlen']:
+            matches = [[(int(match[-1]))] + list(map(tuple, match[:-1]))
+                       for match in response[1]]
+        else:
+            matches = [list(map(tuple, match)) for match in response[1]]
+        return {
+            str_if_bytes(response[0]): matches,
+            str_if_bytes(response[2]): int(response[3])
+        }
+    return str_if_bytes(response)
+
+
 def parse_cluster_info(response, **options):
     response = str_if_bytes(response)
     return dict(line.split(':') for line in response.splitlines() if line)
@@ -681,6 +708,7 @@ class Redis:
         'SLOWLOG GET': parse_slowlog_get,
         'SLOWLOG LEN': int,
         'SLOWLOG RESET': bool_ok,
+        'STRALGO': parse_stralgo,
         'SSCAN': parse_scan,
         'TIME': lambda x: (int(x[0]), int(x[1])),
         'XCLAIM': parse_xclaim,
@@ -2028,6 +2056,62 @@ class Redis:
         Returns the length of the new string.
         """
         return self.execute_command('SETRANGE', name, offset, value)
+
+    def stralgo(self, algo, input1, input2, specific_argument=None, len=False,
+                idx=False, minmatchlen=None, withmatchlen=False):
+        """
+        Implements complex algorithms that operate on strings.
+        Right now the only algorithm implemented is the LCS algorithm
+        (longest common substring). However new algorithms could be
+        implemented in the future.
+
+        ``algo`` Right now must be LCS
+
+        ``input1`` and ``input2`` Can be two strings or two keys
+
+        ``specific_argument`` Specifying if the arguments to the algorithm
+        will be keys or strings. Can be only STRINGS (default) or KEYS.
+
+        ``len`` Returns just the len of the match.
+
+        ``idx`` Returns the match positions in each string.
+
+        ``minmatchlen`` Restrict the list of matches to the ones of a given
+        minimal length. Can be provided only when ``idx`` set to True.
+
+        ``withmatchlen`` Returns the matches with the len of the match.
+        Can be provided only when ``idx`` set to True.
+        """
+        # check validity
+        supported_algo = ['LCS']
+        if algo not in supported_algo:
+            raise DataError("The supported algorithms are: %s"
+                            % (', '.join(supported_algo)))
+        if specific_argument:
+            if specific_argument not in ['KEYS', 'STRINGS']:
+                raise DataError("specific_argument can be only"
+                                " KEYS or STRINGS")
+        else:
+            specific_argument = b'STRINGS'
+
+        pieces = [algo, specific_argument, input1, input2]
+        if len:
+            if idx:
+                raise DataError("len and idx cannot be provided together."
+                                " Just use idx.")
+            pieces.append(b'LEN')
+        if idx:
+            pieces.append(b'IDX')
+        if minmatchlen:
+            if not isinstance(minmatchlen, int):
+                raise DataError('minmatchlen argument must be a integer')
+            pieces.extend([b'MINMATCHLEN', str(minmatchlen)])
+        if withmatchlen:
+            pieces.append(b'WITHMATCHLEN')
+
+        return self.execute_command('STRALGO', *pieces, len=len, idx=idx,
+                                    minmatchlen=minmatchlen,
+                                    withmatchlen=withmatchlen)
 
     def strlen(self, name):
         "Return the number of bytes stored in the value of ``name``"
