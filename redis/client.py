@@ -3075,7 +3075,7 @@ class Redis:
 
     def zrevrangebylex(self, name, max, min, start=None, num=None):
         """
-        Return the reversed lexicographical range of valuees from sorted set
+        Return the reversed lexicographical range of values from sorted set
         ``name`` between ``max`` and ``min``.
 
         If ``start`` and ``num`` are specified, then return a slice of the
