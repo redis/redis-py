@@ -595,7 +595,7 @@ class Redis:
             lambda r: r and set(r) or set()
         ),
         **string_keys_to_dict(
-            'ZPOPMAX ZPOPMIN ZINTER ZRANGE ZRANGEBYSCORE ZREVRANGE '
+            'ZPOPMAX ZPOPMIN ZINTER ZUNION ZRANGE ZRANGEBYSCORE ZREVRANGE '
             'ZREVRANGEBYSCORE', zset_score_pairs
         ),
         **string_keys_to_dict('BZPOPMIN BZPOPMAX', \
@@ -3228,7 +3228,7 @@ class Redis:
         Scores will be aggregated based on the ``aggregate``, or SUM if
         none is provided.
         """
-        return self._zaggregate('ZUNIONSTORE', None, keys, aggregate,
+        return self._zaggregate('ZUNION', None, keys, aggregate,
                                 withscores=withscores)
 
     def zunionstore(self, dest, keys, aggregate=None):
