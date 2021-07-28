@@ -3206,7 +3206,7 @@ class Redis:
                 pieces.append(aggregate)
             else:
                 raise DataError("aggregate can be sum, min or max.")
-        if 'withscores' in options.keys() and options['withscores']:
+        if options.get('withscores', False):
             pieces.append(b'WITHSCORES')
         return self.execute_command(*pieces, **options)
 
