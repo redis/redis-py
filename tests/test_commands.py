@@ -2300,6 +2300,40 @@ class TestRedisCommands:
         r.xadd(stream, {'some': 'other'}, nomkstream=True)
         assert r.xlen(stream) == 3
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_xautoclaim(self, r):
+        stream = 'stream'
+        group = 'group'
+        consumer1 = 'consumer1'
+        consumer2 = 'consumer2'
+
+        message_id1 = r.xadd(stream, {'john': 'wick'})
+        message_id2 = r.xadd(stream, {'johny': 'deff'})
+        message = get_stream_message(r, stream, message_id1)
+        r.xgroup_create(stream, group, 0)
+
+        # trying to claim a message that isn't already pending doesn't
+        # do anything
+        response = r.xautoclaim(stream, group, consumer2, min_idle_time=0)
+        assert response == []
+
+        # read the group as consumer1 to initially claim the messages
+        r.xreadgroup(group, consumer1, streams={stream: '>'})
+
+        # claim one message as consumer2
+        response = r.xautoclaim(stream, group, consumer2,
+                                min_idle_time=0, count=1)
+        assert response == [message]
+
+        # reclaim the messages as consumer1, but use the justid argument
+        # which only returns message ids
+        assert r.xautoclaim(stream, group, consumer1, min_idle_time=0,
+                            start_id=0, justid=True) == \
+               [message_id1, message_id2]
+        assert r.xautoclaim(stream, group, consumer1, min_idle_time=0,
+                            start_id=message_id2, justid=True) == \
+               [message_id2]
+
     @skip_if_server_version_lt('5.0.0')
     def test_xclaim(self, r):
         stream = 'stream'
