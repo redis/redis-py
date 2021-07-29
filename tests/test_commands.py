@@ -2583,6 +2583,39 @@ class TestRedisCommands:
                                     min='-', max='+', count=5, idle=1000)
         assert len(response) == 0
 
+    def test_xpending_range_negative(self, r):
+        stream = 'stream'
+        group = 'group'
+        with pytest.raises(redis.DataError) as e:
+            r.xpending_range(stream, group, min='-', max='+', count=None)
+        assert e.value.args[0] == "XPENDING must be provided with min, max " \
+                                  "and count parameters, or none of them. "
+        with pytest.raises(ValueError):
+            r.xpending_range(stream, group, min='-', max='+', count="one")
+        with pytest.raises(redis.DataError) as e:
+            r.xpending_range(stream, group, min='-', max='+', count=-1)
+        assert e.value.args[0] == "XPENDING count must be a integer >= 0"
+        with pytest.raises(ValueError):
+            r.xpending_range(stream, group, min='-', max='+', count=5,
+                             idle="one")
+        with pytest.raises(redis.DataError) as e:
+            r.xpending_range(stream, group, min='-', max='+', count=5,
+                             idle=-1)
+        assert e.value.args[0] == "XPENDING idle must be a integer >= 0"
+        with pytest.raises(redis.DataError) as e:
+            r.xpending_range(stream, group, min=None, max=None, count=None,
+                             idle=0)
+        assert e.value.args[0] == "if XPENDING is provided with idle time," \
+                                  " it must be provided with min, max and" \
+                                  " count parameters"
+        with pytest.raises(redis.DataError) as e:
+            r.xpending_range(stream, group, min=None, max=None, count=None,
+                             consumername=0)
+        assert e.value.args[0] == \
+               "if XPENDING is provided with consumername," \
+               " it must be provided with min, max and" \
+               " count parameters"
+
     @skip_if_server_version_lt('5.0.0')
     def test_xrange(self, r):
         stream = 'stream'
