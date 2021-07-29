@@ -595,8 +595,8 @@ class Redis:
             lambda r: r and set(r) or set()
         ),
         **string_keys_to_dict(
-            'ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
-            zset_score_pairs
+            'ZPOPMAX ZPOPMIN ZDIFF ZRANGE ZRANGEBYSCORE ZREVRANGE '
+            'ZREVRANGEBYSCORE', zset_score_pairs
         ),
         **string_keys_to_dict('BZPOPMIN BZPOPMAX', \
                               lambda r:
@@ -2931,6 +2931,24 @@ class Redis:
         a score between ``min`` and ``max``.
         """
         return self.execute_command('ZCOUNT', name, min, max)
+
+    def zdiff(self, keys, withscores=False):
+        """
+        Returns the difference between the first and all successive input
+        sorted sets provided in ``keys``.
+        """
+        pieces = [len(keys), *keys]
+        if withscores:
+            pieces.append("WITHSCORES")
+        return self.execute_command("ZDIFF", *pieces)
+
+    def zdiffstore(self, dest, keys):
+        """
+        Computes the difference between the first and all successive input
+        sorted sets provided in ``keys`` and stores the result in ``dest``.
+        """
+        pieces = [len(keys), *keys]
+        return self.execute_command("ZDIFFSTORE", dest, *pieces)
 
     def zincrby(self, name, amount, value):
         "Increment the score of ``value`` in sorted set ``name`` by ``amount``"
