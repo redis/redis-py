@@ -1737,6 +1737,11 @@ class Redis:
         ``persist`` remove the time to live associated with ``name``.
         """
 
+        opset = set([ex, px, exat, pxat])
+        if len(opset) > 2 or len(opset) > 1 and persist:
+            raise DataError("``ex``, ``px``, ``exat``, ``pxat``",
+                            "and ``persist`` are mutually exclusive.")
+
         pieces = []
         # similar to set command
         if ex is not None:
