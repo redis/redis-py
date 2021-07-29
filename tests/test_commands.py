@@ -2648,6 +2648,9 @@ class TestRedisCommands:
         assert r.xtrim(stream, 3, approximate=True, limit=2) == 0
         r.delete(stream)
 
+        with pytest.raises(redis.DataError):
+            assert r.xtrim(stream, maxlen=3, minid="sometestvalue")
+
         # minid with a limit
         m1 = r.xadd(stream, {'foo': 'bar'})
         r.xadd(stream, {'foo': 'bar'})
