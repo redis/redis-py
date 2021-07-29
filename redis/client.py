@@ -2603,19 +2603,23 @@ class Redis:
         justid: optional boolean, false by default. Return just an array of IDs
         of messages successfully claimed, without returning the actual message
         """
-        if not isinstance(min_idle_time, int) or min_idle_time < 0:
-            raise DataError("XAUTOCLAIM min_idle_time must be a non negative"
-                            " integer")
-        kwargs = {}
-        pieces = [name, groupname, consumername, str(min_idle_time), start_id]
+        try:
+            if int(min_idle_time) < 0:
+                raise DataError("XAUTOCLAIM min_idle_time must be a non"
+                                "negative integer")
+        except TypeError:
+            pass
 
-        if count is not None:
-            if not isinstance(count, int):
-                raise DataError("XAUTOCLAIM retrycount must be an integer")
-            pieces.extend([b'COUNT', str(count)])
+        kwargs = {}
+        pieces = [name, groupname, consumername, min_idle_time, start_id]
+
+        try:
+            if int(count) < 0:
+                raise DataError("XPENDING count must be a integer >= 0")
+            pieces.extend([b'COUNT', count])
+        except TypeError:
+            pass
         if justid:
-            if not isinstance(justid, bool):
-                raise DataError("XAUTOCLAIM justid must be a boolean")
             pieces.append(b'JUSTID')
             kwargs['parse_justid'] = True
 

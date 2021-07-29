@@ -2334,6 +2334,20 @@ class TestRedisCommands:
                             start_id=message_id2, justid=True) == \
                [message_id2]
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_xautoclaim_negative(self, r):
+        stream = 'stream'
+        group = 'group'
+        consumer = 'consumer'
+        with pytest.raises(redis.DataError):
+            r.xautoclaim(stream, group, consumer, min_idle_time=-1)
+        with pytest.raises(ValueError):
+            r.xautoclaim(stream, group, consumer, min_idle_time="wrong")
+        with pytest.raises(redis.DataError):
+            r.xautoclaim(stream, group, consumer, min_idle_time=0,
+                         count=-1)
+
+
     @skip_if_server_version_lt('5.0.0')
     def test_xclaim(self, r):
         stream = 'stream'
