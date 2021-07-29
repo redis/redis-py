@@ -1835,7 +1835,8 @@ class Redis:
         """
         Blocking version of lmove.
         """
-        return self.lmove(first_list, second_list, src, dest)
+        params = [first_list, second_list, src, dest]
+        return self.execute_command("BLMOVE", *params)
 
     def mget(self, keys, *args):
         """

@@ -865,7 +865,7 @@ class TestRedisCommands:
     def test_blmove(self, r):
         r.rpush('a', 'one', 'two', 'three', 'four')
         assert r.blmove('a', 'b')
-        assert r.blmove('a', 'b', 'right', 'left')
+        assert r.blmove('a', 'b', 'RIGHT', 'LEFT')
 
     def test_mset(self, r):
         d = {'a': b'1', 'b': b'2', 'c': b'3'}
