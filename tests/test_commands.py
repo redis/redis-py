@@ -2347,14 +2347,12 @@ class TestRedisCommands:
             r.xautoclaim(stream, group, consumer, min_idle_time=0,
                          count=-1)
 
-
     @skip_if_server_version_lt('5.0.0')
     def test_xclaim(self, r):
         stream = 'stream'
         group = 'group'
         consumer1 = 'consumer1'
         consumer2 = 'consumer2'
-
         message_id = r.xadd(stream, {'john': 'wick'})
         message = get_stream_message(r, stream, message_id)
         r.xgroup_create(stream, group, 0)
