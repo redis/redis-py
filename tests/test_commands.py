@@ -1462,6 +1462,23 @@ class TestRedisCommands:
         # redis-py
         assert r.zadd('a', {'a1': 1}, xx=True, incr=True) is None
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_zadd_gt_lt(self, r):
+
+        for i in range(1, 20):
+            r.zadd('a', {'a%s' % i: i})
+        assert r.zadd('a', {'a20': 5}, gt=3) == 1
+
+        for i in range(1, 20):
+            r.zadd('a', {'a%s' % i: i})
+        assert r.zadd('a', {'a2': 5}, lt=1) == 0
+
+        # cannot use both nx and xx options
+        with pytest.raises(exceptions.DataError):
+            r.zadd('a', {'a15': 155}, nx=True, lt=True)
+            r.zadd('a', {'a15': 155}, nx=True, gt=True)
+            r.zadd('a', {'a15': 155}, lx=True, gt=True)
+
     def test_zcard(self, r):
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
         assert r.zcard('a') == 3
@@ -1473,6 +1490,21 @@ class TestRedisCommands:
         assert r.zcount('a', '(' + str(1), 2) == 1
         assert r.zcount('a', 1, '(' + str(2)) == 1
         assert r.zcount('a', 10, 20) == 0
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_zdiff(self, r):
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        r.zadd('b', {'a1': 1, 'a2': 2})
+        assert r.zdiff(['a', 'b']) == [b'a3']
+        assert r.zdiff(['a', 'b'], withscores=True) == [b'a3', b'3']
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_zdiffstore(self, r):
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        r.zadd('b', {'a1': 1, 'a2': 2})
+        assert r.zdiffstore("out", ['a', 'b'])
+        assert r.zrange("out", 0, -1) == [b'a3']
+        assert r.zrange("out", 0, -1, withscores=True) == [(b'a3', 3.0)]
 
     def test_zincrby(self, r):
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
@@ -1609,6 +1641,16 @@ class TestRedisCommands:
         # custom score function
         assert r.zrange('a', 0, 1, withscores=True, score_cast_func=int) == \
             [(b'a1', 1), (b'a2', 2)]
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_zrangestore(self, r):
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        assert r.zrangestore('b', 'a', 0, 1)
+        assert r.zrange('b', 0, -1) == [b'a1', b'a2']
+        assert r.zrangestore('b', 'a', 1, 2)
+        assert r.zrange('b', 0, -1) == [b'a2', b'a3']
+        assert r.zrange('b', 0, -1, withscores=True) == \
+               [(b'a2', 2), (b'a3', 3)]
 
     @skip_if_server_version_lt('2.8.9')
     def test_zrangebylex(self, r):

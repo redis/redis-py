@@ -595,8 +595,8 @@ class Redis:
             lambda r: r and set(r) or set()
         ),
         **string_keys_to_dict(
-            'ZPOPMAX ZPOPMIN ZINTER ZUNION ZRANGE ZRANGEBYSCORE ZREVRANGE '
-            'ZREVRANGEBYSCORE', zset_score_pairs
+            'ZPOPMAX ZPOPMIN ZINTER ZUNION ZDIFF ZRANGE ZRANGEBYSCORE'
+            'ZREVRANGE ZREVRANGEBYSCORE', zset_score_pairs
         ),
         **string_keys_to_dict('BZPOPMIN BZPOPMAX', \
                               lambda r:
@@ -2866,7 +2866,8 @@ class Redis:
         return self.execute_command('XTRIM', name, *pieces)
 
     # SORTED SET COMMANDS
-    def zadd(self, name, mapping, nx=False, xx=False, ch=False, incr=False):
+    def zadd(self, name, mapping, nx=False, xx=False, ch=False, incr=False,
+             gt=None, lt=None):
         """
         Set any number of element-name, score pairs to the key ``name``. Pairs
         are specified as a dict of element-names keys to score values.
@@ -2897,6 +2898,9 @@ class Redis:
         if incr and len(mapping) != 1:
             raise DataError("ZADD option 'incr' only works when passing a "
                             "single element/score pair")
+        if nx is True and (gt is not None or lt is not None):
+            raise DataError("Only one of 'nx', 'lt', or 'gr' may be defined.")
+
         pieces = []
         options = {}
         if nx:
@@ -2908,6 +2912,10 @@ class Redis:
         if incr:
             pieces.append(b'INCR')
             options['as_score'] = True
+        if gt:
+            pieces.append(b'GT')
+        if lt:
+            pieces.append(b'LT')
         for pair in mapping.items():
             pieces.append(pair[1])
             pieces.append(pair[0])
@@ -2923,6 +2931,24 @@ class Redis:
         a score between ``min`` and ``max``.
         """
         return self.execute_command('ZCOUNT', name, min, max)
+
+    def zdiff(self, keys, withscores=False):
+        """
+        Returns the difference between the first and all successive input
+        sorted sets provided in ``keys``.
+        """
+        pieces = [len(keys), *keys]
+        if withscores:
+            pieces.append("WITHSCORES")
+        return self.execute_command("ZDIFF", *pieces)
+
+    def zdiffstore(self, dest, keys):
+        """
+        Computes the difference between the first and all successive input
+        sorted sets provided in ``keys`` and stores the result in ``dest``.
+        """
+        pieces = [len(keys), *keys]
+        return self.execute_command("ZDIFFSTORE", dest, *pieces)
 
     def zincrby(self, name, amount, value):
         "Increment the score of ``value`` in sorted set ``name`` by ``amount``"
@@ -3064,6 +3090,15 @@ class Redis:
             'score_cast_func': score_cast_func
         }
         return self.execute_command(*pieces, **options)
+
+    def zrangestore(self, dest, name, start, end):
+        """
+        Stores in ``dest`` the result of a range of values from sorted set
+        ``name`` between ``start`` and ``end`` sorted in ascending order.
+
+        ``start`` and ``end`` can be negative, indicating the end of the range.
+        """
+        return self.execute_command('ZRANGESTORE', dest, name, start, end)
 
     def zrangebylex(self, name, min, max, start=None, num=None):
         """
