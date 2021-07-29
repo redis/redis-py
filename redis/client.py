@@ -2058,8 +2058,8 @@ class Redis:
         """
         return self.execute_command('SETRANGE', name, offset, value)
 
-    def stralgo(self, algo, value1, value2, specific_argument=None, len=False,
-                idx=False, minmatchlen=None, withmatchlen=False):
+    def stralgo(self, algo, value1, value2, specific_argument='strings',
+                len=False, idx=False, minmatchlen=None, withmatchlen=False):
         """
         Implements complex algorithms that operate on strings.
         Right now the only algorithm implemented is the LCS algorithm
@@ -2088,25 +2088,22 @@ class Redis:
         if algo not in supported_algo:
             raise DataError("The supported algorithms are: %s"
                             % (', '.join(supported_algo)))
-        if specific_argument:
-            if specific_argument not in ['keys', 'strings']:
-                raise DataError("specific_argument can be only"
-                                " keys or strings")
-        else:
-            specific_argument = b'STRINGS'
+        if specific_argument not in ['keys', 'strings']:
+            raise DataError("specific_argument can be only"
+                            " keys or strings")
+        if len and idx:
+            raise DataError("len and idx cannot be provided together.")
 
         pieces = [algo, specific_argument.upper(), value1, value2]
         if len:
-            if idx:
-                raise DataError("len and idx cannot be provided together."
-                                " Just use idx.")
             pieces.append(b'LEN')
         if idx:
             pieces.append(b'IDX')
-        if minmatchlen:
-            if not isinstance(minmatchlen, int):
-                raise DataError('minmatchlen argument must be a integer')
-            pieces.extend([b'MINMATCHLEN', str(minmatchlen)])
+        try:
+            int(minmatchlen)
+            pieces.extend([b'MINMATCHLEN', minmatchlen])
+        except TypeError:
+            pass
         if withmatchlen:
             pieces.append(b'WITHMATCHLEN')
 

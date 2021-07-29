@@ -1070,8 +1070,8 @@ class TestRedisCommands:
             r.stralgo('LCS', 'value1', 'value2', len=True, idx=True)
         with pytest.raises(exceptions.DataError):
             r.stralgo('LCS', 'value1', 'value2', specific_argument="INT")
-        with pytest.raises(exceptions.DataError):
-            r.stralgo('LCS', 'value1', 'value2', idx=True, minmatchlen=1.5)
+        with pytest.raises(ValueError):
+            r.stralgo('LCS', 'value1', 'value2', idx=True, minmatchlen="one")
 
     def test_strlen(self, r):
         r['a'] = 'foo'
