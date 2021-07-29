@@ -595,8 +595,8 @@ class Redis:
             lambda r: r and set(r) or set()
         ),
         **string_keys_to_dict(
-            'ZPOPMAX ZPOPMIN ZINTER ZRANGE ZRANGEBYSCORE ZREVRANGE '
-            'ZREVRANGEBYSCORE', zset_score_pairs
+            'ZPOPMAX ZPOPMIN ZINTER ZDIFF ZRANGE ZRANGEBYSCORE '
+            'ZREVRANGE ZREVRANGEBYSCORE', zset_score_pairs
         ),
         **string_keys_to_dict('BZPOPMIN BZPOPMAX', \
                               lambda r:
@@ -1210,7 +1210,8 @@ class Redis:
         "Disconnects the client at ``address`` (ip:port)"
         return self.execute_command('CLIENT KILL', address)
 
-    def client_kill_filter(self, _id=None, _type=None, addr=None, skipme=None):
+    def client_kill_filter(self, _id=None, _type=None, addr=None,
+                           skipme=None, laddr=None):
         """
         Disconnects client(s) using a variety of filter options
         :param id: Kills a client by its unique ID field
@@ -1218,6 +1219,7 @@ class Redis:
         'master', 'slave' or 'pubsub'
         :param addr: Kills a client by its 'address:port'
         :param skipme: If True, then the client calling the command
+        :param laddr: Kills a cient by its 'local (bind)  address:port'
         will not get killed even if it is identified by one of the filter
         options. If skipme is not provided, the server defaults to skipme=True
         """
@@ -1239,6 +1241,8 @@ class Redis:
             args.extend((b'ID', _id))
         if addr is not None:
             args.extend((b'ADDR', addr))
+        if laddr is not None:
+            args.extend((b'LADDR', laddr))
         if not args:
             raise DataError("CLIENT KILL <filter> <value> ... ... <filter> "
                             "<value> must specify at least one filter")
@@ -1299,6 +1303,12 @@ class Redis:
         if not isinstance(timeout, int):
             raise DataError("CLIENT PAUSE timeout must be an integer")
         return self.execute_command('CLIENT PAUSE', str(timeout))
+
+    def client_unpause(self):
+        """
+        Unpause all redis clients
+        """
+        return self.execute_command('CLIENT UNPAUSE')
 
     def readwrite(self):
         "Disables read queries for a connection to a Redis Cluster slave node"
@@ -1696,6 +1706,15 @@ class Redis:
         Return the value at key ``name``, or None if the key doesn't exist
         """
         return self.execute_command('GET', name)
+
+    def getdel(self, name):
+        """
+        Get the value at key ``name`` and delete the key. This command
+        is similar to GET, except for the fact that it also deletes
+        the key on success (if and only if the key's value type
+        is a string).
+        """
+        return self.execute_command('GETDEL', name)
 
     def getex(self, name,
               ex=None, px=None, exat=None, pxat=None, persist=False):
@@ -2531,7 +2550,8 @@ class Redis:
         """
         return self.execute_command('XACK', name, groupname, *ids)
 
-    def xadd(self, name, fields, id='*', maxlen=None, approximate=True):
+    def xadd(self, name, fields, id='*', maxlen=None, approximate=True,
+             nomkstream=False):
         """
         Add to a stream.
         name: name of the stream
@@ -2539,7 +2559,7 @@ class Redis:
         id: Location to insert this record. By default it is appended.
         maxlen: truncate old stream members beyond this size
         approximate: actual stream length may be slightly more than maxlen
-
+        nomkstream: When set to true, do not make a stream
         """
         pieces = []
         if maxlen is not None:
@@ -2549,6 +2569,8 @@ class Redis:
             if approximate:
                 pieces.append(b'~')
             pieces.append(str(maxlen))
+        if nomkstream:
+            pieces.append(b'NOMKSTREAM')
         pieces.append(id)
         if not isinstance(fields, dict) or len(fields) == 0:
             raise DataError('XADD fields must be a non-empty dict')
@@ -2844,7 +2866,8 @@ class Redis:
         return self.execute_command('XTRIM', name, *pieces)
 
     # SORTED SET COMMANDS
-    def zadd(self, name, mapping, nx=False, xx=False, ch=False, incr=False):
+    def zadd(self, name, mapping, nx=False, xx=False, ch=False, incr=False,
+             gt=None, lt=None):
         """
         Set any number of element-name, score pairs to the key ``name``. Pairs
         are specified as a dict of element-names keys to score values.
@@ -2875,6 +2898,9 @@ class Redis:
         if incr and len(mapping) != 1:
             raise DataError("ZADD option 'incr' only works when passing a "
                             "single element/score pair")
+        if nx is True and (gt is not None or lt is not None):
+            raise DataError("Only one of 'nx', 'lt', or 'gr' may be defined.")
+
         pieces = []
         options = {}
         if nx:
@@ -2886,6 +2912,10 @@ class Redis:
         if incr:
             pieces.append(b'INCR')
             options['as_score'] = True
+        if gt:
+            pieces.append(b'GT')
+        if lt:
+            pieces.append(b'LT')
         for pair in mapping.items():
             pieces.append(pair[1])
             pieces.append(pair[0])
@@ -2901,6 +2931,24 @@ class Redis:
         a score between ``min`` and ``max``.
         """
         return self.execute_command('ZCOUNT', name, min, max)
+
+    def zdiff(self, keys, withscores=False):
+        """
+        Returns the difference between the first and all successive input
+        sorted sets provided in ``keys``.
+        """
+        pieces = [len(keys), *keys]
+        if withscores:
+            pieces.append("WITHSCORES")
+        return self.execute_command("ZDIFF", *pieces)
+
+    def zdiffstore(self, dest, keys):
+        """
+        Computes the difference between the first and all successive input
+        sorted sets provided in ``keys`` and stores the result in ``dest``.
+        """
+        pieces = [len(keys), *keys]
+        return self.execute_command("ZDIFFSTORE", dest, *pieces)
 
     def zincrby(self, name, amount, value):
         "Increment the score of ``value`` in sorted set ``name`` by ``amount``"
@@ -2959,6 +3007,28 @@ class Redis:
             'withscores': True
         }
         return self.execute_command('ZPOPMIN', name, *args, **options)
+
+    def zrandmember(self, key, count=None, withscores=False):
+        """
+        Return a random element from the sorted set value stored at key.
+
+        ``count`` if the argument is positive, return an array of distinct
+        fields. If called with a negative count, the behavior changes and
+        the command is allowed to return the same field multiple times.
+        In this case, the number of returned fields is the absolute value
+        of the specified count.
+
+        ``withscores`` The optional WITHSCORES modifier changes the reply so it
+        includes the respective scores of the randomly selected elements from
+        the sorted set.
+        """
+        params = []
+        if count is not None:
+            params.append(count)
+        if withscores:
+            params.append("WITHSCORES")
+
+        return self.execute_command("ZRANDMEMBER", key, *params)
 
     def bzpopmax(self, keys, timeout=0):
         """
@@ -3020,6 +3090,15 @@ class Redis:
             'score_cast_func': score_cast_func
         }
         return self.execute_command(*pieces, **options)
+
+    def zrangestore(self, dest, name, start, end):
+        """
+        Stores in ``dest`` the result of a range of values from sorted set
+        ``name`` between ``start`` and ``end`` sorted in ascending order.
+
+        ``start`` and ``end`` can be negative, indicating the end of the range.
+        """
+        return self.execute_command('ZRANGESTORE', dest, name, start, end)
 
     def zrangebylex(self, name, min, max, start=None, num=None):
         """

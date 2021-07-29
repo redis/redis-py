@@ -395,12 +395,36 @@ class TestRedisCommands:
         # we don't know which client ours will be
         assert 'redis_py_test' in [c['name'] for c in clients]
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_client_kill_filter_by_laddr(self, r, r2):
+        r.client_setname('redis-py-c1')
+        r2.client_setname('redis-py-c2')
+        clients = [client for client in r.client_list()
+                   if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
+        assert len(clients) == 2
+
+        clients_by_name = dict([(client.get('name'), client)
+                                for client in clients])
+
+        client_2_addr = clients_by_name['redis-py-c2'].get('laddr')
+        resp = r.client_kill_filter(laddr=client_2_addr)
+        assert resp == 1
+
+        clients = [client for client in r.client_list()
+                   if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
+        assert len(clients) == 1
+        assert clients[0].get('name') == 'redis-py-c1'
+
     @skip_if_server_version_lt('2.9.50')
     def test_client_pause(self, r):
         assert r.client_pause(1)
         assert r.client_pause(timeout=1)
         with pytest.raises(exceptions.RedisError):
             r.client_pause(timeout='not an integer')
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_client_unpause(self, r):
+        assert r.client_unpause() == b'OK'
 
     def test_config_get(self, r):
         data = r.config_get()
@@ -732,6 +756,13 @@ class TestRedisCommands:
         assert r.get('byte_string') == byte_string
         assert r.get('integer') == str(integer).encode()
         assert r.get('unicode_string').decode('utf-8') == unicode_string
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_getdel(self, r):
+        assert r.getdel('a') is None
+        r.set('a', 1)
+        assert r.getdel('a') == b'1'
+        assert r.getdel('a') is None
 
     @skip_if_server_version_lt('6.2.0')
     def test_getex(self, r):
@@ -1431,6 +1462,23 @@ class TestRedisCommands:
         # redis-py
         assert r.zadd('a', {'a1': 1}, xx=True, incr=True) is None
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_zadd_gt_lt(self, r):
+
+        for i in range(1, 20):
+            r.zadd('a', {'a%s' % i: i})
+        assert r.zadd('a', {'a20': 5}, gt=3) == 1
+
+        for i in range(1, 20):
+            r.zadd('a', {'a%s' % i: i})
+        assert r.zadd('a', {'a2': 5}, lt=1) == 0
+
+        # cannot use both nx and xx options
+        with pytest.raises(exceptions.DataError):
+            r.zadd('a', {'a15': 155}, nx=True, lt=True)
+            r.zadd('a', {'a15': 155}, nx=True, gt=True)
+            r.zadd('a', {'a15': 155}, lx=True, gt=True)
+
     def test_zcard(self, r):
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
         assert r.zcard('a') == 3
@@ -1442,6 +1490,21 @@ class TestRedisCommands:
         assert r.zcount('a', '(' + str(1), 2) == 1
         assert r.zcount('a', 1, '(' + str(2)) == 1
         assert r.zcount('a', 10, 20) == 0
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_zdiff(self, r):
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        r.zadd('b', {'a1': 1, 'a2': 2})
+        assert r.zdiff(['a', 'b']) == [b'a3']
+        assert r.zdiff(['a', 'b'], withscores=True) == [b'a3', b'3']
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_zdiffstore(self, r):
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        r.zadd('b', {'a1': 1, 'a2': 2})
+        assert r.zdiffstore("out", ['a', 'b'])
+        assert r.zrange("out", 0, -1) == [b'a3']
+        assert r.zrange("out", 0, -1, withscores=True) == [(b'a3', 3.0)]
 
     def test_zincrby(self, r):
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
@@ -1528,6 +1591,18 @@ class TestRedisCommands:
         assert r.zpopmin('a', count=2) == \
             [(b'a2', 2), (b'a3', 3)]
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_zrandemember(self, r):
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3, 'a4': 4, 'a5': 5})
+        assert r.zrandmember('a') is not None
+        assert len(r.zrandmember('a', 2)) == 2
+        # with scores
+        assert len(r.zrandmember('a', 2, True)) == 4
+        # without duplications
+        assert len(r.zrandmember('a', 10)) == 5
+        # with duplications
+        assert len(r.zrandmember('a', -10)) == 10
+
     @skip_if_server_version_lt('4.9.0')
     def test_bzpopmax(self, r):
         r.zadd('a', {'a1': 1, 'a2': 2})
@@ -1566,6 +1641,16 @@ class TestRedisCommands:
         # custom score function
         assert r.zrange('a', 0, 1, withscores=True, score_cast_func=int) == \
             [(b'a1', 1), (b'a2', 2)]
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_zrangestore(self, r):
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        assert r.zrangestore('b', 'a', 0, 1)
+        assert r.zrange('b', 0, -1) == [b'a1', b'a2']
+        assert r.zrangestore('b', 'a', 1, 2)
+        assert r.zrange('b', 0, -1) == [b'a2', b'a3']
+        assert r.zrange('b', 0, -1, withscores=True) == \
+               [(b'a2', 2), (b'a3', 3)]
 
     @skip_if_server_version_lt('2.8.9')
     def test_zrangebylex(self, r):
@@ -2268,6 +2353,16 @@ class TestRedisCommands:
         # with maxlen, the list evicts the first message
         r.xadd(stream, {'foo': 'bar'}, maxlen=2, approximate=False)
         assert r.xlen(stream) == 2
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_xadd_nomkstream(self, r):
+        # nomkstream option
+        stream = 'stream'
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'some': 'other'}, nomkstream=False)
+        assert r.xlen(stream) == 2
+        r.xadd(stream, {'some': 'other'}, nomkstream=True)
+        assert r.xlen(stream) == 3
 
     @skip_if_server_version_lt('5.0.0')
     def test_xclaim(self, r):
