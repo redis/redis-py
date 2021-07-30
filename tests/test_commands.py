@@ -864,8 +864,8 @@ class TestRedisCommands:
     @skip_if_server_version_lt('6.2.0')
     def test_blmove(self, r):
         r.rpush('a', 'one', 'two', 'three', 'four')
-        assert r.blmove('a', 'b')
-        assert r.blmove('a', 'b', 'RIGHT', 'LEFT')
+        assert r.blmove('a', 'b', 5)
+        assert r.blmove('a', 'b', 1, 'RIGHT', 'LEFT')
 
     def test_mset(self, r):
         d = {'a': b'1', 'b': b'2', 'c': b'3'}

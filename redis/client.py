@@ -1831,11 +1831,11 @@ class Redis:
         params = [first_list, second_list, src, dest]
         return self.execute_command("LMOVE", *params)
 
-    def blmove(self, first_list, second_list, src="LEFT", dest="RIGHT"):
+    def blmove(self, first_list, second_list, timeout, src="LEFT", dest="RIGHT"):
         """
         Blocking version of lmove.
         """
-        params = [first_list, second_list, src, dest]
+        params = [first_list, second_list, src, dest, timeout]
         return self.execute_command("BLMOVE", *params)
 
     def mget(self, keys, *args):
