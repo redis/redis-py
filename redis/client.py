@@ -3322,7 +3322,7 @@ class Redis:
     def hset(self, name, key=None, value=None, mapping=None):
         """
         Set ``key`` to ``value`` within hash ``name``,
-        ``mapping`` accepts a dict of key/value pairs that that will be
+        ``mapping`` accepts a dict of key/value pairs that will be
         added to hash ``name``.
         Returns the number of fields that were added.
         """
