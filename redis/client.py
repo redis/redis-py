@@ -2905,6 +2905,8 @@ class Redis:
                             "single element/score pair")
         if nx is True and (gt is not None or lt is not None):
             raise DataError("Only one of 'nx', 'lt', or 'gr' may be defined.")
+        if gt is not None and lt is not None:
+            raise DataError("Only one of 'gt' or 'lt' can be set.")
 
         pieces = []
         options = {}
