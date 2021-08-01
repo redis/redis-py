@@ -1519,6 +1519,28 @@ class TestRedisCommands:
         assert r.zlexcount('a', '-', '+') == 7
         assert r.zlexcount('a', '[b', '[f') == 5
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_zinter(self, r):
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 1})
+        r.zadd('b', {'a1': 2, 'a2': 2, 'a3': 2})
+        r.zadd('c', {'a1': 6, 'a3': 5, 'a4': 4})
+        assert r.zinter(['a', 'b', 'c']) == [b'a3', b'a1']
+        # invalid aggregation
+        with pytest.raises(exceptions.DataError):
+            r.zinter(['a', 'b', 'c'], aggregate='foo', withscores=True)
+        # aggregate with SUM
+        assert r.zinter(['a', 'b', 'c'], withscores=True) \
+               == [(b'a3', 8), (b'a1', 9)]
+        # aggregate with MAX
+        assert r.zinter(['a', 'b', 'c'], aggregate='MAX', withscores=True) \
+               == [(b'a3', 5), (b'a1', 6)]
+        # aggregate with MIN
+        assert r.zinter(['a', 'b', 'c'], aggregate='MIN', withscores=True) \
+               == [(b'a1', 1), (b'a3', 1)]
+        # with weights
+        assert r.zinter({'a': 1, 'b': 2, 'c': 3}, withscores=True) \
+               == [(b'a3', 20), (b'a1', 23)]
+
     def test_zinterstore_sum(self, r):
         r.zadd('a', {'a1': 1, 'a2': 1, 'a3': 1})
         r.zadd('b', {'a1': 2, 'a2': 2, 'a3': 2})
