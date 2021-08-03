@@ -2892,9 +2892,18 @@ class Redis:
         the existing score will be incremented by. When using this mode the
         return value of ZADD will be the new score of the element.
 
+        ``LT`` Only update existing elements if the new score is less than
+        the current score. This flag doesn't prevent adding new elements.
+
+        ``GT`` Only update existing elements if the new score is greater than
+        the current score. This flag doesn't prevent adding new elements.
+
         The return value of ZADD varies based on the mode specified. With no
         options, ZADD returns the number of new elements added to the sorted
         set.
+
+        ``NX``, ``LT``, and ``GT`` are mutually exclusive options.
+        See: https://redis.io/commands/ZADD
         """
         if not mapping:
             raise DataError("ZADD requires at least one element/score pair")
@@ -2904,7 +2913,7 @@ class Redis:
             raise DataError("ZADD option 'incr' only works when passing a "
                             "single element/score pair")
         if nx is True and (gt is not None or lt is not None):
-            raise DataError("Only one of 'nx', 'lt', or 'gr' may be defined.")
+            raise DataError("Only one of 'nx', 'lt', or 'gt' may be defined.")
         if gt is not None and lt is not None:
             raise DataError("Only one of 'gt' or 'lt' can be set.")
 
