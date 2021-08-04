@@ -595,8 +595,8 @@ class Redis:
             lambda r: r and set(r) or set()
         ),
         **string_keys_to_dict(
-            'ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
-            zset_score_pairs
+            'ZPOPMAX ZPOPMIN ZINTER ZDIFF ZRANGE ZRANGEBYSCORE '
+            'ZREVRANGE ZREVRANGEBYSCORE', zset_score_pairs
         ),
         **string_keys_to_dict('BZPOPMIN BZPOPMAX', \
                               lambda r:
@@ -1741,6 +1741,11 @@ class Redis:
 
         ``persist`` remove the time to live associated with ``name``.
         """
+
+        opset = set([ex, px, exat, pxat])
+        if len(opset) > 2 or len(opset) > 1 and persist:
+            raise DataError("``ex``, ``px``, ``exat``, ``pxat``",
+                            "and ``persist`` are mutually exclusive.")
 
         pieces = []
         # similar to set command
@@ -2892,9 +2897,18 @@ class Redis:
         the existing score will be incremented by. When using this mode the
         return value of ZADD will be the new score of the element.
 
+        ``LT`` Only update existing elements if the new score is less than
+        the current score. This flag doesn't prevent adding new elements.
+
+        ``GT`` Only update existing elements if the new score is greater than
+        the current score. This flag doesn't prevent adding new elements.
+
         The return value of ZADD varies based on the mode specified. With no
         options, ZADD returns the number of new elements added to the sorted
         set.
+
+        ``NX``, ``LT``, and ``GT`` are mutually exclusive options.
+        See: https://redis.io/commands/ZADD
         """
         if not mapping:
             raise DataError("ZADD requires at least one element/score pair")
@@ -2937,15 +2951,50 @@ class Redis:
         """
         return self.execute_command('ZCOUNT', name, min, max)
 
+    def zdiff(self, keys, withscores=False):
+        """
+        Returns the difference between the first and all successive input
+        sorted sets provided in ``keys``.
+        """
+        pieces = [len(keys), *keys]
+        if withscores:
+            pieces.append("WITHSCORES")
+        return self.execute_command("ZDIFF", *pieces)
+
+    def zdiffstore(self, dest, keys):
+        """
+        Computes the difference between the first and all successive input
+        sorted sets provided in ``keys`` and stores the result in ``dest``.
+        """
+        pieces = [len(keys), *keys]
+        return self.execute_command("ZDIFFSTORE", dest, *pieces)
+
     def zincrby(self, name, amount, value):
         "Increment the score of ``value`` in sorted set ``name`` by ``amount``"
         return self.execute_command('ZINCRBY', name, amount, value)
 
+    def zinter(self, keys, aggregate=None, withscores=False):
+        """
+        Return the intersect of multiple sorted sets specified by ``keys``.
+        With the ``aggregate`` option, it is possible to specify how the
+        results of the union are aggregated. This option defaults to SUM,
+        where the score of an element is summed across the inputs where it
+        exists. When this option is set to either MIN or MAX, the resulting
+        set will contain the minimum or maximum score of an element across
+        the inputs where it exists.
+        """
+        return self._zaggregate('ZINTER', None, keys, aggregate,
+                                withscores=withscores)
+
     def zinterstore(self, dest, keys, aggregate=None):
         """
-        Intersect multiple sorted sets specified by ``keys`` into
-        a new sorted set, ``dest``. Scores in the destination will be
-        aggregated based on the ``aggregate``, or SUM if none is provided.
+        Intersect multiple sorted sets specified by ``keys`` into a new
+        sorted set, ``dest``. Scores in the destination will be aggregated
+        based on the ``aggregate``. This option defaults to SUM, where the
+        score of an element is summed across the inputs where it exists.
+        When this option is set to either MIN or MAX, the resulting set will
+        contain the minimum or maximum score of an element across the inputs
+        where it exists.
         """
         return self._zaggregate('ZINTERSTORE', dest, keys, aggregate)
 
@@ -3060,6 +3109,15 @@ class Redis:
             'score_cast_func': score_cast_func
         }
         return self.execute_command(*pieces, **options)
+
+    def zrangestore(self, dest, name, start, end):
+        """
+        Stores in ``dest`` the result of a range of values from sorted set
+        ``name`` between ``start`` and ``end`` sorted in ascending order.
+
+        ``start`` and ``end`` can be negative, indicating the end of the range.
+        """
+        return self.execute_command('ZRANGESTORE', dest, name, start, end)
 
     def zrangebylex(self, name, min, max, start=None, num=None):
         """
@@ -3226,8 +3284,12 @@ class Redis:
         """
         return self._zaggregate('ZUNIONSTORE', dest, keys, aggregate)
 
-    def _zaggregate(self, command, dest, keys, aggregate=None):
-        pieces = [command, dest, len(keys)]
+    def _zaggregate(self, command, dest, keys, aggregate=None,
+                    **options):
+        pieces = [command]
+        if dest is not None:
+            pieces.append(dest)
+        pieces.append(len(keys))
         if isinstance(keys, dict):
             keys, weights = keys.keys(), keys.values()
         else:
@@ -3237,9 +3299,14 @@ class Redis:
             pieces.append(b'WEIGHTS')
             pieces.extend(weights)
         if aggregate:
-            pieces.append(b'AGGREGATE')
-            pieces.append(aggregate)
-        return self.execute_command(*pieces)
+            if aggregate.upper() in ['SUM', 'MIN', 'MAX']:
+                pieces.append(b'AGGREGATE')
+                pieces.append(aggregate)
+            else:
+                raise DataError("aggregate can be sum, min or max.")
+        if options.get('withscores', False):
+            pieces.append(b'WITHSCORES')
+        return self.execute_command(*pieces, **options)
 
     # HYPERLOGLOG COMMANDS
     def pfadd(self, name, *values):
@@ -3295,7 +3362,7 @@ class Redis:
     def hset(self, name, key=None, value=None, mapping=None):
         """
         Set ``key`` to ``value`` within hash ``name``,
-        ``mapping`` accepts a dict of key/value pairs that that will be
+        ``mapping`` accepts a dict of key/value pairs that will be
         added to hash ``name``.
         Returns the number of fields that were added.
         """
