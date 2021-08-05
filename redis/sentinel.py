@@ -2,6 +2,7 @@ import random
 import weakref
 
 from redis.client import Redis
+from redis.commands import SentinalCommands
 from redis.connection import ConnectionPool, Connection
 from redis.exceptions import (ConnectionError, ResponseError, ReadOnlyError,
                               TimeoutError)
@@ -132,7 +133,7 @@ class SentinelConnectionPool(ConnectionPool):
         raise SlaveNotFoundError('No slave found for %r' % (self.service_name))
 
 
-class Sentinel:
+class Sentinel(SentinalCommands, object):
     """
     Redis Sentinel cluster client
 
