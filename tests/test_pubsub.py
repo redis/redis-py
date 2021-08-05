@@ -1,11 +1,13 @@
-import pytest
+import threading
 import time
+from unittest import mock
+import platform
 
+import pytest
 import redis
 from redis.exceptions import ConnectionError
 
-from .conftest import _get_client
-from .conftest import skip_if_server_version_lt
+from .conftest import _get_client, skip_if_server_version_lt
 
 
 def wait_for_message(pubsub, timeout=0.1, ignore_subscribe_messages=False):
@@ -543,3 +545,28 @@ class TestPubSubTimeouts:
         p.subscribe('foo')
         assert wait_for_message(p) == make_message('subscribe', 'foo', 1)
         assert p.get_message(timeout=0.01) is None
+
+
+class TestPubSubWorkerThread:
+
+    @pytest.mark.skipif(platform.python_implementation() == 'PyPy',
+                        reason="Pypy threading issue")
+    def test_pubsub_worker_thread_exception_handler(self, r):
+        event = threading.Event()
+
+        def exception_handler(ex, pubsub, thread):
+            thread.stop()
+            event.set()
+
+        p = r.pubsub()
+        p.subscribe(**{'foo': lambda m: m})
+        with mock.patch.object(p, 'get_message',
+                               side_effect=Exception('error')):
+            pubsub_thread = p.run_in_thread(
+                daemon=True,
+                exception_handler=exception_handler
+            )
+
+        assert event.wait(timeout=1.0)
+        pubsub_thread.join(timeout=1.0)
+        assert not pubsub_thread.is_alive()

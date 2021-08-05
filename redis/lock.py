@@ -149,9 +149,7 @@ class Lock:
                 client.register_script(cls.LUA_REACQUIRE_SCRIPT)
 
     def __enter__(self):
-        # force blocking, as otherwise the user would have to check whether
-        # the lock was actually acquired or not.
-        if self.acquire(blocking=True):
+        if self.acquire():
             return self
         raise LockError("Unable to acquire lock within the time specified")
 

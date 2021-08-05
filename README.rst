@@ -3,8 +3,8 @@ redis-py
 
 The Python interface to the Redis key-value store.
 
-.. image:: https://secure.travis-ci.org/andymccurdy/redis-py.svg?branch=master
-        :target: https://travis-ci.org/andymccurdy/redis-py
+.. image:: https://github.com/andymccurdy/redis-py/workflows/CI/badge.svg?branch=master
+        :target: https://github.com/andymccurdy/redis-py/actions?query=workflow%3ACI+branch%3Amaster
 .. image:: https://readthedocs.org/projects/redis-py/badge/?version=stable&style=flat
         :target: https://redis-py.readthedocs.io/en/stable/
 .. image:: https://badge.fury.io/py/redis.svg
@@ -74,6 +74,12 @@ If **all** string responses from a client should be decoded, the user can
 specify `decode_responses=True` to `Redis.__init__`. In this case, any
 Redis command that returns a string type will be decoded with the `encoding`
 specified.
+
+The default encoding is "utf-8", but this can be customized with the `encoding`
+argument to the `redis.Redis` class. The `encoding` will be used to
+automatically encode any strings passed to commands, such as key names and
+values. When `decode_responses=True`, string data returned from commands
+will be decoded with the same `encoding`.
 
 
 Upgrading from redis-py 2.X to 3.0
@@ -732,6 +738,20 @@ subscribed to patterns or channels that don't have message handlers attached.
     # when it's time to shut it down...
     >>> thread.stop()
 
+`run_in_thread` also supports an optional exception handler, which lets you
+catch exceptions that occur within the worker thread and handle them
+appropriately. The exception handler will take as arguments the exception
+itself, the pubsub object, and the worker thread returned by `run_in_thread`.
+
+.. code-block:: pycon
+    >>> p.subscribe(**{'my-channel': my_handler})
+    >>> def exception_handler(ex, pubsub, thread):
+    >>>     print(ex)
+    >>>     thread.stop()
+    >>>     thread.join(timeout=1.0)
+    >>>     pubsub.close()
+    >>> thread = p.run_in_thread(exception_handler=exception_handler)
+
 A PubSub object adheres to the same encoding semantics as the client instance
 it was created from. Any channel or pattern that's unicode will be encoded
 using the `charset` specified on the client before being sent to Redis. If the
@@ -939,3 +959,11 @@ Special thanks to:
   which some of the socket code is still used.
 * Alexander Solovyov for ideas on the generic response callback system.
 * Paul Hubbard for initial packaging support.
+
+
+Sponsored by
+^^^^^^^^^^^^
+
+.. image:: ./docs/logo-redislabs.png
+   :alt: RedisLabs
+   :target: https://www.redislabs.com
