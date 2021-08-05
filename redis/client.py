@@ -595,7 +595,7 @@ class Redis:
             lambda r: r and set(r) or set()
         ),
         **string_keys_to_dict(
-            'ZPOPMAX ZPOPMIN ZINTER ZUNION ZDIFF ZRANGE ZRANGEBYSCORE'
+            'ZPOPMAX ZPOPMIN ZINTER ZDIFF ZUNION ZRANGE ZRANGEBYSCORE '
             'ZREVRANGE ZREVRANGEBYSCORE', zset_score_pairs
         ),
         **string_keys_to_dict('BZPOPMIN BZPOPMAX', \
@@ -1736,6 +1736,11 @@ class Redis:
 
         ``persist`` remove the time to live associated with ``name``.
         """
+
+        opset = set([ex, px, exat, pxat])
+        if len(opset) > 2 or len(opset) > 1 and persist:
+            raise DataError("``ex``, ``px``, ``exat``, ``pxat``",
+                            "and ``persist`` are mutually exclusive.")
 
         pieces = []
         # similar to set command
@@ -3353,7 +3358,7 @@ class Redis:
     def hset(self, name, key=None, value=None, mapping=None):
         """
         Set ``key`` to ``value`` within hash ``name``,
-        ``mapping`` accepts a dict of key/value pairs that that will be
+        ``mapping`` accepts a dict of key/value pairs that will be
         added to hash ``name``.
         Returns the number of fields that were added.
         """
