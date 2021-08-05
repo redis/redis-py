@@ -407,13 +407,7 @@ class TestRedisCommands:
                                 for client in clients])
 
         client_2_addr = clients_by_name['redis-py-c2'].get('laddr')
-        resp = r.client_kill_filter(laddr=client_2_addr)
-        assert resp == 1
-
-        clients = [client for client in r.client_list()
-                   if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
-        assert len(clients) == 1
-        assert clients[0].get('name') == 'redis-py-c1'
+        assert r.client_kill_filter(laddr=client_2_addr)
 
     @skip_if_server_version_lt('2.9.50')
     def test_client_pause(self, r):
@@ -775,7 +769,7 @@ class TestRedisCommands:
         assert r.ttl('a') == 6
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         assert r.getex('a', pxat=expire_at) == b'1'
-        assert r.ttl('a') <= 60
+        assert r.ttl('a') <= 61
         assert r.getex('a', persist=True) == b'1'
         assert r.ttl('a') == -1
 
@@ -1478,6 +1472,23 @@ class TestRedisCommands:
         # redis-py
         assert r.zadd('a', {'a1': 1}, xx=True, incr=True) is None
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_zadd_gt_lt(self, r):
+
+        for i in range(1, 20):
+            r.zadd('a', {'a%s' % i: i})
+        assert r.zadd('a', {'a20': 5}, gt=3) == 1
+
+        for i in range(1, 20):
+            r.zadd('a', {'a%s' % i: i})
+        assert r.zadd('a', {'a2': 5}, lt=1) == 0
+
+        # cannot use both nx and xx options
+        with pytest.raises(exceptions.DataError):
+            r.zadd('a', {'a15': 155}, nx=True, lt=True)
+            r.zadd('a', {'a15': 155}, nx=True, gt=True)
+            r.zadd('a', {'a15': 155}, lx=True, gt=True)
+
     def test_zcard(self, r):
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
         assert r.zcard('a') == 3
@@ -1489,6 +1500,21 @@ class TestRedisCommands:
         assert r.zcount('a', '(' + str(1), 2) == 1
         assert r.zcount('a', 1, '(' + str(2)) == 1
         assert r.zcount('a', 10, 20) == 0
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_zdiff(self, r):
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        r.zadd('b', {'a1': 1, 'a2': 2})
+        assert r.zdiff(['a', 'b']) == [b'a3']
+        assert r.zdiff(['a', 'b'], withscores=True) == [b'a3', b'3']
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_zdiffstore(self, r):
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        r.zadd('b', {'a1': 1, 'a2': 2})
+        assert r.zdiffstore("out", ['a', 'b'])
+        assert r.zrange("out", 0, -1) == [b'a3']
+        assert r.zrange("out", 0, -1, withscores=True) == [(b'a3', 3.0)]
 
     def test_zincrby(self, r):
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
@@ -1502,6 +1528,28 @@ class TestRedisCommands:
         r.zadd('a', {'a': 0, 'b': 0, 'c': 0, 'd': 0, 'e': 0, 'f': 0, 'g': 0})
         assert r.zlexcount('a', '-', '+') == 7
         assert r.zlexcount('a', '[b', '[f') == 5
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_zinter(self, r):
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 1})
+        r.zadd('b', {'a1': 2, 'a2': 2, 'a3': 2})
+        r.zadd('c', {'a1': 6, 'a3': 5, 'a4': 4})
+        assert r.zinter(['a', 'b', 'c']) == [b'a3', b'a1']
+        # invalid aggregation
+        with pytest.raises(exceptions.DataError):
+            r.zinter(['a', 'b', 'c'], aggregate='foo', withscores=True)
+        # aggregate with SUM
+        assert r.zinter(['a', 'b', 'c'], withscores=True) \
+               == [(b'a3', 8), (b'a1', 9)]
+        # aggregate with MAX
+        assert r.zinter(['a', 'b', 'c'], aggregate='MAX', withscores=True) \
+               == [(b'a3', 5), (b'a1', 6)]
+        # aggregate with MIN
+        assert r.zinter(['a', 'b', 'c'], aggregate='MIN', withscores=True) \
+               == [(b'a1', 1), (b'a3', 1)]
+        # with weights
+        assert r.zinter({'a': 1, 'b': 2, 'c': 3}, withscores=True) \
+               == [(b'a3', 20), (b'a1', 23)]
 
     def test_zinterstore_sum(self, r):
         r.zadd('a', {'a1': 1, 'a2': 1, 'a3': 1})
@@ -1603,6 +1651,16 @@ class TestRedisCommands:
         # custom score function
         assert r.zrange('a', 0, 1, withscores=True, score_cast_func=int) == \
             [(b'a1', 1), (b'a2', 2)]
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_zrangestore(self, r):
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
+        assert r.zrangestore('b', 'a', 0, 1)
+        assert r.zrange('b', 0, -1) == [b'a1', b'a2']
+        assert r.zrangestore('b', 'a', 1, 2)
+        assert r.zrange('b', 0, -1) == [b'a2', b'a3']
+        assert r.zrange('b', 0, -1, withscores=True) == \
+               [(b'a2', 2), (b'a3', 3)]
 
     @skip_if_server_version_lt('2.8.9')
     def test_zrangebylex(self, r):
