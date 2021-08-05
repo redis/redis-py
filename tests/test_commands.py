@@ -407,13 +407,7 @@ class TestRedisCommands:
                                 for client in clients])
 
         client_2_addr = clients_by_name['redis-py-c2'].get('laddr')
-        resp = r.client_kill_filter(laddr=client_2_addr)
-        assert resp == 1
-
-        clients = [client for client in r.client_list()
-                   if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
-        assert len(clients) == 1
-        assert clients[0].get('name') == 'redis-py-c1'
+        assert r.client_kill_filter(laddr=client_2_addr)
 
     @skip_if_server_version_lt('2.9.50')
     def test_client_pause(self, r):
