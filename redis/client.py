@@ -3260,6 +3260,7 @@ class Redis:
     def zunion(self, keys, aggregate=None, withscores=False):
         """
         Return the union of multiple sorted sets specified by ``keys``.
+        ``keys`` can be provided as dictionary of keys and their weights.
         Scores will be aggregated based on the ``aggregate``, or SUM if
         none is provided.
         """
