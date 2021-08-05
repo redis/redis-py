@@ -2586,6 +2586,7 @@ class TestRedisCommands:
     def test_xpending_range_negative(self, r):
         stream = 'stream'
         group = 'group'
+        x = int(str("5"))
         with pytest.raises(redis.DataError):
             r.xpending_range(stream, group, min='-', max='+', count=None)
         with pytest.raises(ValueError):
@@ -2595,6 +2596,9 @@ class TestRedisCommands:
         with pytest.raises(ValueError):
             r.xpending_range(stream, group, min='-', max='+', count=5,
                              idle="one")
+        with pytest.raises(redis.exceptions.ResponseError):
+            r.xpending_range(stream, group, min='-', max='+', count=5,
+                             idle=1.5)
         with pytest.raises(redis.DataError):
             r.xpending_range(stream, group, min='-', max='+', count=5,
                              idle=-1)
