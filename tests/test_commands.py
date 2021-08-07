@@ -407,13 +407,7 @@ class TestRedisCommands:
                                 for client in clients])
 
         client_2_addr = clients_by_name['redis-py-c2'].get('laddr')
-        resp = r.client_kill_filter(laddr=client_2_addr)
-        assert resp == 1
-
-        clients = [client for client in r.client_list()
-                   if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
-        assert len(clients) == 1
-        assert clients[0].get('name') == 'redis-py-c1'
+        assert r.client_kill_filter(laddr=client_2_addr)
 
     @skip_if_server_version_lt('2.9.50')
     def test_client_pause(self, r):
@@ -775,7 +769,7 @@ class TestRedisCommands:
         assert r.ttl('a') == 6
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         assert r.getex('a', pxat=expire_at) == b'1'
-        assert r.ttl('a') <= 60
+        assert r.ttl('a') <= 61
         assert r.getex('a', persist=True) == b'1'
         assert r.ttl('a') == -1
 
@@ -1128,6 +1122,14 @@ class TestRedisCommands:
         assert r.lpop('a') == b'3'
         assert r.lpop('a') is None
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_lpop_count(self, r):
+        r.rpush('a', '1', '2', '3')
+        assert r.lpop('a', 2) == [b'1', b'2']
+        assert r.lpop('a', 1) == [b'3']
+        assert r.lpop('a') is None
+        assert r.lpop('a', 3) is None
+
     def test_lpush(self, r):
         assert r.lpush('a', '1') == 1
         assert r.lpush('a', '2') == 2
@@ -1176,6 +1178,14 @@ class TestRedisCommands:
         assert r.rpop('a') == b'2'
         assert r.rpop('a') == b'1'
         assert r.rpop('a') is None
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_rpop_count(self, r):
+        r.rpush('a', '1', '2', '3')
+        assert r.rpop('a', 2) == [b'3', b'2']
+        assert r.rpop('a', 1) == [b'1']
+        assert r.rpop('a') is None
+        assert r.rpop('a', 3) is None
 
     def test_rpoplpush(self, r):
         r.rpush('a', 'a1', 'a2', 'a3')
@@ -2375,13 +2385,59 @@ class TestRedisCommands:
         r.xadd(stream, {'some': 'other'}, nomkstream=True)
         assert r.xlen(stream) == 3
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_xautoclaim(self, r):
+        stream = 'stream'
+        group = 'group'
+        consumer1 = 'consumer1'
+        consumer2 = 'consumer2'
+
+        message_id1 = r.xadd(stream, {'john': 'wick'})
+        message_id2 = r.xadd(stream, {'johny': 'deff'})
+        message = get_stream_message(r, stream, message_id1)
+        r.xgroup_create(stream, group, 0)
+
+        # trying to claim a message that isn't already pending doesn't
+        # do anything
+        response = r.xautoclaim(stream, group, consumer2, min_idle_time=0)
+        assert response == []
+
+        # read the group as consumer1 to initially claim the messages
+        r.xreadgroup(group, consumer1, streams={stream: '>'})
+
+        # claim one message as consumer2
+        response = r.xautoclaim(stream, group, consumer2,
+                                min_idle_time=0, count=1)
+        assert response == [message]
+
+        # reclaim the messages as consumer1, but use the justid argument
+        # which only returns message ids
+        assert r.xautoclaim(stream, group, consumer1, min_idle_time=0,
+                            start_id=0, justid=True) == \
+               [message_id1, message_id2]
+        assert r.xautoclaim(stream, group, consumer1, min_idle_time=0,
+                            start_id=message_id2, justid=True) == \
+               [message_id2]
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_xautoclaim_negative(self, r):
+        stream = 'stream'
+        group = 'group'
+        consumer = 'consumer'
+        with pytest.raises(redis.DataError):
+            r.xautoclaim(stream, group, consumer, min_idle_time=-1)
+        with pytest.raises(ValueError):
+            r.xautoclaim(stream, group, consumer, min_idle_time="wrong")
+        with pytest.raises(redis.DataError):
+            r.xautoclaim(stream, group, consumer, min_idle_time=0,
+                         count=-1)
+
     @skip_if_server_version_lt('5.0.0')
     def test_xclaim(self, r):
         stream = 'stream'
         group = 'group'
         consumer1 = 'consumer1'
         consumer2 = 'consumer2'
-
         message_id = r.xadd(stream, {'john': 'wick'})
         message = get_stream_message(r, stream, message_id)
         r.xgroup_create(stream, group, 0)
@@ -2636,6 +2692,52 @@ class TestRedisCommands:
         assert response[0]['consumer'] == consumer1.encode()
         assert response[1]['message_id'] == m2
         assert response[1]['consumer'] == consumer2.encode()
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_xpending_range_idle(self, r):
+        stream = 'stream'
+        group = 'group'
+        consumer1 = 'consumer1'
+        consumer2 = 'consumer2'
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        r.xgroup_create(stream, group, 0)
+
+        # read 1 message from the group with each consumer
+        r.xreadgroup(group, consumer1, streams={stream: '>'}, count=1)
+        r.xreadgroup(group, consumer2, streams={stream: '>'}, count=1)
+
+        response = r.xpending_range(stream, group,
+                                    min='-', max='+', count=5)
+        assert len(response) == 2
+        response = r.xpending_range(stream, group,
+                                    min='-', max='+', count=5, idle=1000)
+        assert len(response) == 0
+
+    def test_xpending_range_negative(self, r):
+        stream = 'stream'
+        group = 'group'
+        with pytest.raises(redis.DataError):
+            r.xpending_range(stream, group, min='-', max='+', count=None)
+        with pytest.raises(ValueError):
+            r.xpending_range(stream, group, min='-', max='+', count="one")
+        with pytest.raises(redis.DataError):
+            r.xpending_range(stream, group, min='-', max='+', count=-1)
+        with pytest.raises(ValueError):
+            r.xpending_range(stream, group, min='-', max='+', count=5,
+                             idle="one")
+        with pytest.raises(redis.exceptions.ResponseError):
+            r.xpending_range(stream, group, min='-', max='+', count=5,
+                             idle=1.5)
+        with pytest.raises(redis.DataError):
+            r.xpending_range(stream, group, min='-', max='+', count=5,
+                             idle=-1)
+        with pytest.raises(redis.DataError):
+            r.xpending_range(stream, group, min=None, max=None, count=None,
+                             idle=0)
+        with pytest.raises(redis.DataError):
+            r.xpending_range(stream, group, min=None, max=None, count=None,
+                             consumername=0)
 
     @skip_if_server_version_lt('5.0.0')
     def test_xrange(self, r):

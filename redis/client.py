@@ -316,6 +316,12 @@ def parse_xclaim(response, **options):
     return parse_stream_list(response)
 
 
+def parse_xautoclaim(response, **options):
+    if options.get('parse_justid', False):
+        return response[1]
+    return parse_stream_list(response[1])
+
+
 def parse_xinfo_stream(response):
     data = pairs_to_dict(response, decode_keys=True)
     first = data['first-entry']
@@ -689,6 +695,7 @@ class Redis:
         'SSCAN': parse_scan,
         'TIME': lambda x: (int(x[0]), int(x[1])),
         'XCLAIM': parse_xclaim,
+        'XAUTOCLAIM': parse_xautoclaim,
         'XGROUP CREATE': bool_ok,
         'XGROUP DELCONSUMER': int,
         'XGROUP DESTROY': bool,
@@ -2154,9 +2161,18 @@ class Redis:
         "Return the length of the list ``name``"
         return self.execute_command('LLEN', name)
 
-    def lpop(self, name):
-        "Remove and return the first item of the list ``name``"
-        return self.execute_command('LPOP', name)
+    def lpop(self, name, count=None):
+        """
+        Removes and returns the first elements of the list ``name``.
+
+        By default, the command pops a single element from the beginning of
+        the list. When provided with the optional ``count`` argument, the reply
+        will consist of up to count elements, depending on the list's length.
+        """
+        if count is not None:
+            return self.execute_command('LPOP', name, count)
+        else:
+            return self.execute_command('LPOP', name)
 
     def lpush(self, name, *values):
         "Push ``values`` onto the head of the list ``name``"
@@ -2202,9 +2218,18 @@ class Redis:
         """
         return self.execute_command('LTRIM', name, start, end)
 
-    def rpop(self, name):
-        "Remove and return the last item of the list ``name``"
-        return self.execute_command('RPOP', name)
+    def rpop(self, name, count=None):
+        """
+        Removes and returns the last elements of the list ``name``.
+
+        By default, the command pops a single element from the end of the list.
+        When provided with the optional ``count`` argument, the reply will
+        consist of up to count elements, depending on the list's length.
+        """
+        if count is not None:
+            return self.execute_command('RPOP', name, count)
+        else:
+            return self.execute_command('RPOP', name)
 
     def rpoplpush(self, src, dst):
         """
@@ -2589,6 +2614,46 @@ class Redis:
             pieces.extend(pair)
         return self.execute_command('XADD', name, *pieces)
 
+    def xautoclaim(self, name, groupname, consumername, min_idle_time,
+                   start_id=0, count=None, justid=False):
+        """
+        Transfers ownership of pending stream entries that match the specified
+        criteria. Conceptually, equivalent to calling XPENDING and then XCLAIM,
+        but provides a more straightforward way to deal with message delivery
+        failures via SCAN-like semantics.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        consumername: name of a consumer that claims the message.
+        min_idle_time: filter messages that were idle less than this amount of
+        milliseconds.
+        start_id: filter messages with equal or greater ID.
+        count: optional integer, upper limit of the number of entries that the
+        command attempts to claim. Set to 100 by default.
+        justid: optional boolean, false by default. Return just an array of IDs
+        of messages successfully claimed, without returning the actual message
+        """
+        try:
+            if int(min_idle_time) < 0:
+                raise DataError("XAUTOCLAIM min_idle_time must be a non"
+                                "negative integer")
+        except TypeError:
+            pass
+
+        kwargs = {}
+        pieces = [name, groupname, consumername, min_idle_time, start_id]
+
+        try:
+            if int(count) < 0:
+                raise DataError("XPENDING count must be a integer >= 0")
+            pieces.extend([b'COUNT', count])
+        except TypeError:
+            pass
+        if justid:
+            pieces.append(b'JUSTID')
+            kwargs['parse_justid'] = True
+
+        return self.execute_command('XAUTOCLAIM', *pieces, **kwargs)
+
     def xclaim(self, name, groupname, consumername, min_idle_time, message_ids,
                idle=None, time=None, retrycount=None, force=False,
                justid=False):
@@ -2735,7 +2800,7 @@ class Redis:
         return self.execute_command('XPENDING', name, groupname)
 
     def xpending_range(self, name, groupname, min, max, count,
-                       consumername=None):
+                       consumername=None, idle=None):
         """
         Returns information about pending messages, in a range.
         name: name of the stream.
@@ -2744,21 +2809,35 @@ class Redis:
         max: maximum stream ID.
         count: number of messages to return
         consumername: name of a consumer to filter by (optional).
+        idle: available from  version 6.2. filter entries by their
+        idle-time, given in milliseconds (optional).
         """
+        if {min, max, count} == {None}:
+            if idle is not None or consumername is not None:
+                raise DataError("if XPENDING is provided with idle time"
+                                " or consumername, it must be provided"
+                                " with min, max and count parameters")
+            return self.xpending(name, groupname)
+
         pieces = [name, groupname]
-        if min is not None or max is not None or count is not None:
-            if min is None or max is None or count is None:
-                raise DataError("XPENDING must be provided with min, max "
-                                "and count parameters, or none of them. ")
-            if not isinstance(count, int) or count < -1:
-                raise DataError("XPENDING count must be a integer >= -1")
-            pieces.extend((min, max, str(count)))
-        if consumername is not None:
-            if min is None or max is None or count is None:
-                raise DataError("if XPENDING is provided with consumername,"
-                                " it must be provided with min, max and"
-                                " count parameters")
-            pieces.append(consumername)
+        if min is None or max is None or count is None:
+            raise DataError("XPENDING must be provided with min, max "
+                            "and count parameters, or none of them.")
+        # idle
+        try:
+            if int(idle) < 0:
+                raise DataError("XPENDING idle must be a integer >= 0")
+            pieces.extend(['IDLE', idle])
+        except TypeError:
+            pass
+        # count
+        try:
+            if int(count) < 0:
+                raise DataError("XPENDING count must be a integer >= 0")
+            pieces.extend([min, max, count])
+        except TypeError:
+            pass
+
         return self.execute_command('XPENDING', *pieces, parse_detail=True)
 
     def xrange(self, name, min='-', max='+', count=None):
