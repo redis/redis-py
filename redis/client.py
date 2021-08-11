@@ -316,6 +316,12 @@ def parse_xclaim(response, **options):
     return parse_stream_list(response)
 
 
+def parse_xautoclaim(response, **options):
+    if options.get('parse_justid', False):
+        return response[1]
+    return parse_stream_list(response[1])
+
+
 def parse_xinfo_stream(response):
     data = pairs_to_dict(response, decode_keys=True)
     first = data['first-entry']
@@ -463,7 +469,7 @@ def parse_georadius_generic(response, **options):
         'withhash': int
     }
 
-    # zip all output results with each casting functino to get
+    # zip all output results with each casting function to get
     # the properly native Python value.
     f = [lambda x: x]
     f += [cast[o] for o in ['withdist', 'withhash', 'withcoord'] if options[o]]
@@ -535,7 +541,7 @@ def parse_client_info(value):
         key, value = info.split("=")
         client_info[key] = value
 
-    # Those fields are definded as int in networking.c
+    # Those fields are defined as int in networking.c
     for int_key in {"id", "age", "idle", "db", "sub", "psub",
                     "multi", "qbuf", "qbuf-free", "obl",
                     "argv-mem", "oll", "omem", "tot-mem"}:
@@ -595,8 +601,8 @@ class Redis:
             lambda r: r and set(r) or set()
         ),
         **string_keys_to_dict(
-            'ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
-            zset_score_pairs
+            'ZPOPMAX ZPOPMIN ZINTER ZDIFF ZRANGE ZRANGEBYSCORE '
+            'ZREVRANGE ZREVRANGEBYSCORE', zset_score_pairs
         ),
         **string_keys_to_dict('BZPOPMIN BZPOPMAX', \
                               lambda r:
@@ -684,6 +690,7 @@ class Redis:
         'SSCAN': parse_scan,
         'TIME': lambda x: (int(x[0]), int(x[1])),
         'XCLAIM': parse_xclaim,
+        'XAUTOCLAIM': parse_xautoclaim,
         'XGROUP CREATE': bool_ok,
         'XGROUP DELCONSUMER': int,
         'XGROUP DESTROY': bool,
@@ -1585,7 +1592,7 @@ class Redis:
     def bitcount(self, key, start=None, end=None):
         """
         Returns the count of set bits in the value of ``key``.  Optional
-        ``start`` and ``end`` paramaters indicate which bytes to consider
+        ``start`` and ``end`` parameters indicate which bytes to consider
         """
         params = [key]
         if start is not None and end is not None:
@@ -1613,7 +1620,7 @@ class Redis:
     def bitpos(self, key, bit, start=None, end=None):
         """
         Return the position of the first bit set to 1 or 0 in a string.
-        ``start`` and ``end`` difines search range. The range is interpreted
+        ``start`` and ``end`` defines search range. The range is interpreted
         as a range of bytes and not a range of bits, so start=0 and end=2
         means to look at the first three bytes.
         """
@@ -1736,6 +1743,11 @@ class Redis:
 
         ``persist`` remove the time to live associated with ``name``.
         """
+
+        opset = set([ex, px, exat, pxat])
+        if len(opset) > 2 or len(opset) > 1 and persist:
+            raise DataError("``ex``, ``px``, ``exat``, ``pxat``",
+                            "and ``persist`` are mutually exclusive.")
 
         pieces = []
         # similar to set command
@@ -2159,9 +2171,18 @@ class Redis:
         "Return the length of the list ``name``"
         return self.execute_command('LLEN', name)
 
-    def lpop(self, name):
-        "Remove and return the first item of the list ``name``"
-        return self.execute_command('LPOP', name)
+    def lpop(self, name, count=None):
+        """
+        Removes and returns the first elements of the list ``name``.
+
+        By default, the command pops a single element from the beginning of
+        the list. When provided with the optional ``count`` argument, the reply
+        will consist of up to count elements, depending on the list's length.
+        """
+        if count is not None:
+            return self.execute_command('LPOP', name, count)
+        else:
+            return self.execute_command('LPOP', name)
 
     def lpush(self, name, *values):
         "Push ``values`` onto the head of the list ``name``"
@@ -2207,9 +2228,18 @@ class Redis:
         """
         return self.execute_command('LTRIM', name, start, end)
 
-    def rpop(self, name):
-        "Remove and return the last item of the list ``name``"
-        return self.execute_command('RPOP', name)
+    def rpop(self, name, count=None):
+        """
+        Removes and returns the last elements of the list ``name``.
+
+        By default, the command pops a single element from the end of the list.
+        When provided with the optional ``count`` argument, the reply will
+        consist of up to count elements, depending on the list's length.
+        """
+        if count is not None:
+            return self.execute_command('RPOP', name, count)
+        else:
+            return self.execute_command('RPOP', name)
 
     def rpoplpush(self, src, dst):
         """
@@ -2562,7 +2592,7 @@ class Redis:
         Acknowledges the successful processing of one or more messages.
         name: name of the stream.
         groupname: name of the consumer group.
-        *ids: message ids to acknowlege.
+        *ids: message ids to acknowledge.
         """
         return self.execute_command('XACK', name, groupname, *ids)
 
@@ -2593,6 +2623,46 @@ class Redis:
         for pair in fields.items():
             pieces.extend(pair)
         return self.execute_command('XADD', name, *pieces)
+
+    def xautoclaim(self, name, groupname, consumername, min_idle_time,
+                   start_id=0, count=None, justid=False):
+        """
+        Transfers ownership of pending stream entries that match the specified
+        criteria. Conceptually, equivalent to calling XPENDING and then XCLAIM,
+        but provides a more straightforward way to deal with message delivery
+        failures via SCAN-like semantics.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        consumername: name of a consumer that claims the message.
+        min_idle_time: filter messages that were idle less than this amount of
+        milliseconds.
+        start_id: filter messages with equal or greater ID.
+        count: optional integer, upper limit of the number of entries that the
+        command attempts to claim. Set to 100 by default.
+        justid: optional boolean, false by default. Return just an array of IDs
+        of messages successfully claimed, without returning the actual message
+        """
+        try:
+            if int(min_idle_time) < 0:
+                raise DataError("XAUTOCLAIM min_idle_time must be a non"
+                                "negative integer")
+        except TypeError:
+            pass
+
+        kwargs = {}
+        pieces = [name, groupname, consumername, min_idle_time, start_id]
+
+        try:
+            if int(count) < 0:
+                raise DataError("XPENDING count must be a integer >= 0")
+            pieces.extend([b'COUNT', count])
+        except TypeError:
+            pass
+        if justid:
+            pieces.append(b'JUSTID')
+            kwargs['parse_justid'] = True
+
+        return self.execute_command('XAUTOCLAIM', *pieces, **kwargs)
 
     def xclaim(self, name, groupname, consumername, min_idle_time, message_ids,
                idle=None, time=None, retrycount=None, force=False,
@@ -2740,7 +2810,7 @@ class Redis:
         return self.execute_command('XPENDING', name, groupname)
 
     def xpending_range(self, name, groupname, min, max, count,
-                       consumername=None):
+                       consumername=None, idle=None):
         """
         Returns information about pending messages, in a range.
         name: name of the stream.
@@ -2749,21 +2819,35 @@ class Redis:
         max: maximum stream ID.
         count: number of messages to return
         consumername: name of a consumer to filter by (optional).
+        idle: available from  version 6.2. filter entries by their
+        idle-time, given in milliseconds (optional).
         """
+        if {min, max, count} == {None}:
+            if idle is not None or consumername is not None:
+                raise DataError("if XPENDING is provided with idle time"
+                                " or consumername, it must be provided"
+                                " with min, max and count parameters")
+            return self.xpending(name, groupname)
+
         pieces = [name, groupname]
-        if min is not None or max is not None or count is not None:
-            if min is None or max is None or count is None:
-                raise DataError("XPENDING must be provided with min, max "
-                                "and count parameters, or none of them. ")
-            if not isinstance(count, int) or count < -1:
-                raise DataError("XPENDING count must be a integer >= -1")
-            pieces.extend((min, max, str(count)))
-        if consumername is not None:
-            if min is None or max is None or count is None:
-                raise DataError("if XPENDING is provided with consumername,"
-                                " it must be provided with min, max and"
-                                " count parameters")
-            pieces.append(consumername)
+        if min is None or max is None or count is None:
+            raise DataError("XPENDING must be provided with min, max "
+                            "and count parameters, or none of them.")
+        # idle
+        try:
+            if int(idle) < 0:
+                raise DataError("XPENDING idle must be a integer >= 0")
+            pieces.extend(['IDLE', idle])
+        except TypeError:
+            pass
+        # count
+        try:
+            if int(count) < 0:
+                raise DataError("XPENDING count must be a integer >= 0")
+            pieces.extend([min, max, count])
+        except TypeError:
+            pass
+
         return self.execute_command('XPENDING', *pieces, parse_detail=True)
 
     def xrange(self, name, min='-', max='+', count=None):
@@ -2903,9 +2987,18 @@ class Redis:
         the existing score will be incremented by. When using this mode the
         return value of ZADD will be the new score of the element.
 
+        ``LT`` Only update existing elements if the new score is less than
+        the current score. This flag doesn't prevent adding new elements.
+
+        ``GT`` Only update existing elements if the new score is greater than
+        the current score. This flag doesn't prevent adding new elements.
+
         The return value of ZADD varies based on the mode specified. With no
         options, ZADD returns the number of new elements added to the sorted
         set.
+
+        ``NX``, ``LT``, and ``GT`` are mutually exclusive options.
+        See: https://redis.io/commands/ZADD
         """
         if not mapping:
             raise DataError("ZADD requires at least one element/score pair")
@@ -2915,7 +3008,9 @@ class Redis:
             raise DataError("ZADD option 'incr' only works when passing a "
                             "single element/score pair")
         if nx is True and (gt is not None or lt is not None):
-            raise DataError("Only one of 'nx', 'lt', or 'gr' may be defined.")
+            raise DataError("Only one of 'nx', 'lt', or 'gt' may be defined.")
+        if gt is not None and lt is not None:
+            raise DataError("Only one of 'gt' or 'lt' can be set.")
 
         pieces = []
         options = {}
@@ -2948,15 +3043,50 @@ class Redis:
         """
         return self.execute_command('ZCOUNT', name, min, max)
 
+    def zdiff(self, keys, withscores=False):
+        """
+        Returns the difference between the first and all successive input
+        sorted sets provided in ``keys``.
+        """
+        pieces = [len(keys), *keys]
+        if withscores:
+            pieces.append("WITHSCORES")
+        return self.execute_command("ZDIFF", *pieces)
+
+    def zdiffstore(self, dest, keys):
+        """
+        Computes the difference between the first and all successive input
+        sorted sets provided in ``keys`` and stores the result in ``dest``.
+        """
+        pieces = [len(keys), *keys]
+        return self.execute_command("ZDIFFSTORE", dest, *pieces)
+
     def zincrby(self, name, amount, value):
         "Increment the score of ``value`` in sorted set ``name`` by ``amount``"
         return self.execute_command('ZINCRBY', name, amount, value)
 
+    def zinter(self, keys, aggregate=None, withscores=False):
+        """
+        Return the intersect of multiple sorted sets specified by ``keys``.
+        With the ``aggregate`` option, it is possible to specify how the
+        results of the union are aggregated. This option defaults to SUM,
+        where the score of an element is summed across the inputs where it
+        exists. When this option is set to either MIN or MAX, the resulting
+        set will contain the minimum or maximum score of an element across
+        the inputs where it exists.
+        """
+        return self._zaggregate('ZINTER', None, keys, aggregate,
+                                withscores=withscores)
+
     def zinterstore(self, dest, keys, aggregate=None):
         """
-        Intersect multiple sorted sets specified by ``keys`` into
-        a new sorted set, ``dest``. Scores in the destination will be
-        aggregated based on the ``aggregate``, or SUM if none is provided.
+        Intersect multiple sorted sets specified by ``keys`` into a new
+        sorted set, ``dest``. Scores in the destination will be aggregated
+        based on the ``aggregate``. This option defaults to SUM, where the
+        score of an element is summed across the inputs where it exists.
+        When this option is set to either MIN or MAX, the resulting set will
+        contain the minimum or maximum score of an element across the inputs
+        where it exists.
         """
         return self._zaggregate('ZINTERSTORE', dest, keys, aggregate)
 
@@ -3071,6 +3201,15 @@ class Redis:
             'score_cast_func': score_cast_func
         }
         return self.execute_command(*pieces, **options)
+
+    def zrangestore(self, dest, name, start, end):
+        """
+        Stores in ``dest`` the result of a range of values from sorted set
+        ``name`` between ``start`` and ``end`` sorted in ascending order.
+
+        ``start`` and ``end`` can be negative, indicating the end of the range.
+        """
+        return self.execute_command('ZRANGESTORE', dest, name, start, end)
 
     def zrangebylex(self, name, min, max, start=None, num=None):
         """
@@ -3237,8 +3376,12 @@ class Redis:
         """
         return self._zaggregate('ZUNIONSTORE', dest, keys, aggregate)
 
-    def _zaggregate(self, command, dest, keys, aggregate=None):
-        pieces = [command, dest, len(keys)]
+    def _zaggregate(self, command, dest, keys, aggregate=None,
+                    **options):
+        pieces = [command]
+        if dest is not None:
+            pieces.append(dest)
+        pieces.append(len(keys))
         if isinstance(keys, dict):
             keys, weights = keys.keys(), keys.values()
         else:
@@ -3248,9 +3391,14 @@ class Redis:
             pieces.append(b'WEIGHTS')
             pieces.extend(weights)
         if aggregate:
-            pieces.append(b'AGGREGATE')
-            pieces.append(aggregate)
-        return self.execute_command(*pieces)
+            if aggregate.upper() in ['SUM', 'MIN', 'MAX']:
+                pieces.append(b'AGGREGATE')
+                pieces.append(aggregate)
+            else:
+                raise DataError("aggregate can be sum, min or max.")
+        if options.get('withscores', False):
+            pieces.append(b'WITHSCORES')
+        return self.execute_command(*pieces, **options)
 
     # HYPERLOGLOG COMMANDS
     def pfadd(self, name, *values):
@@ -3306,7 +3454,7 @@ class Redis:
     def hset(self, name, key=None, value=None, mapping=None):
         """
         Set ``key`` to ``value`` within hash ``name``,
-        ``mapping`` accepts a dict of key/value pairs that that will be
+        ``mapping`` accepts a dict of key/value pairs that will be
         added to hash ``name``.
         Returns the number of fields that were added.
         """
@@ -4378,7 +4526,7 @@ class Script:
         try:
             return client.evalsha(self.sha, len(keys), *args)
         except NoScriptError:
-            # Maybe the client is pointed to a differnet server than the client
+            # Maybe the client is pointed to a different server than the client
             # that created this instance?
             # Overwrite the sha just in case there was a discrepancy.
             self.sha = client.script_load(self.script)
