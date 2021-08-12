@@ -46,7 +46,7 @@ setup(
     packages=['redis'],
     tests_require=[
         'mock',
-        'pytest>=2.5.0',
+        'pytest>=2.5.0,<4.0.0',
     ],
     cmdclass={'test': PyTest},
     classifiers=[
