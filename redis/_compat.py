@@ -1,6 +1,85 @@
 """Internal module for Python 2 backwards compatibility."""
+import errno
 import sys
 
+try:
+    InterruptedError = InterruptedError
+except:
+    InterruptedError = OSError
+
+# For Python older than 3.5, retry EINTR.
+if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and
+                               sys.version_info[1] < 5):
+    # Adapted from https://bugs.python.org/review/23863/patch/14532/54418
+    import socket
+    import time
+    import errno
+
+    from select import select as _select
+
+    def select(rlist, wlist, xlist, timeout):
+        while True:
+            try:
+                return _select(rlist, wlist, xlist, timeout)
+            except InterruptedError as e:
+                # Python 2 does not define InterruptedError, instead
+                # try to catch an OSError with errno == EINTR == 4.
+                if getattr(e, 'errno', None) == getattr(errno, 'EINTR', 4):
+                    continue
+                raise
+
+    # Wrapper for handling interruptable system calls.
+    def _retryable_call(s, func, *args, **kwargs):
+        # Some modules (SSL) use the _fileobject wrapper directly and
+        # implement a smaller portion of the socket interface, thus we
+        # need to let them continue to do so.
+        timeout, deadline = None, 0.0
+        attempted = False
+        try:
+            timeout = s.gettimeout()
+        except AttributeError:
+            pass
+
+        if timeout:
+            deadline = time.time() + timeout
+
+        try:
+            while True:
+                if attempted and timeout:
+                    now = time.time()
+                    if now >= deadline:
+                        raise socket.error(errno.EWOULDBLOCK, "timed out")
+                    else:
+                        # Overwrite the timeout on the socket object
+                        # to take into account elapsed time.
+                        s.settimeout(deadline - now)
+                try:
+                    attempted = True
+                    return func(*args, **kwargs)
+                except socket.error as e:
+                    if e.args[0] == errno.EINTR:
+                        continue
+                    raise
+        finally:
+            # Set the existing timeout back for future
+            # calls.
+            if timeout:
+                s.settimeout(timeout)
+
+    def recv(sock, *args, **kwargs):
+        return _retryable_call(sock, sock.recv, *args, **kwargs)
+
+    def recv_into(sock, *args, **kwargs):
+        return _retryable_call(sock, sock.recv_into, *args, **kwargs)
+
+else:  # Python 3.5 and above automatically retry EINTR
+    from select import select
+
+    def recv(sock, *args, **kwargs):
+        return sock.recv(*args, **kwargs)
+
+    def recv_into(sock, *args, **kwargs):
+        return sock.recv_into(*args, **kwargs)
 
 if sys.version_info[0] < 3:
     from urllib import unquote

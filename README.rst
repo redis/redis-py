@@ -174,7 +174,7 @@ set_response_callback method. This method accepts two arguments: a command
 name and the callback. Callbacks added in this manner are only valid on the
 instance the callback is added to. If you want to define or override a callback
 globally, you should make a subclass of the Redis client and add your callback
-to its REDIS_CALLBACKS class dictionary.
+to its RESPONSE_CALLBACKS class dictionary.
 
 Response callbacks take at least one parameter: the response from the Redis
 server. Keyword arguments may also be accepted in order to further control
@@ -291,7 +291,7 @@ duration of a WATCH, care must be taken to ensure that the connection is
 returned to the connection pool by calling the reset() method. If the
 Pipeline is used as a context manager (as in the example above) reset()
 will be called automatically. Of course you can do this the manual way by
-explicity calling reset():
+explicitly calling reset():
 
 .. code-block:: pycon
 
@@ -444,7 +444,7 @@ application.
     >>> r.publish('my-channel')
     1
     >>> p.get_message()
-    {'channel': 'my-channel', data': 'my data', 'pattern': None, 'type': 'message'}
+    {'channel': 'my-channel', 'data': 'my data', 'pattern': None, 'type': 'message'}
 
 There are three different strategies for reading messages.
 
@@ -518,6 +518,22 @@ cannot be delivered. When you're finished with a PubSub object, call its
     >>> p = r.pubsub()
     >>> ...
     >>> p.close()
+
+
+The PUBSUB set of subcommands CHANNELS, NUMSUB and NUMPAT are also
+supported:
+
+.. code-block:: pycon
+
+    >>> r.pubsub_channels()
+    ['foo', 'bar']
+    >>> r.pubsub_numsub('foo', 'bar')
+    [('foo', 9001), ('bar', 42)]
+    >>> r.pubsub_numsub('baz')
+    [('baz', 0)]
+    >>> r.pubsub_numpat()
+    1204
+
 
 LUA Scripting
 ^^^^^^^^^^^^^
