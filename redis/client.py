@@ -1276,7 +1276,7 @@ class Redis:
         """
         return self.execute_command('CLIENT INFO')
 
-    def client_list(self, _type=None):
+    def client_list(self, _type=None, client_id=None):
         """
         Returns a list of currently connected clients.
         If type of client specified, only that type will be returned.
@@ -1284,13 +1284,18 @@ class Redis:
          replica, pubsub)
         """
         "Returns a list of currently connected clients"
+        args = []
         if _type is not None:
             client_types = ('normal', 'master', 'replica', 'pubsub')
             if str(_type).lower() not in client_types:
                 raise DataError("CLIENT LIST _type must be one of %r" % (
                                 client_types,))
-            return self.execute_command('CLIENT LIST', b'TYPE', _type)
-        return self.execute_command('CLIENT LIST')
+            args.append(b'TYPE')
+            args.append(_type)
+        if client_id is not None:
+            args.append(b"ID")
+            args.append(client_id)
+        return self.execute_command('CLIENT LIST', *args)
 
     def client_getname(self):
         "Returns the current connection name"
@@ -3053,9 +3058,7 @@ class Redis:
             raise DataError("ZADD option 'incr' only works when passing a "
                             "single element/score pair")
         if nx is True and (gt is not None or lt is not None):
-            raise DataError("Only one of 'nx', 'lt', or 'gt' may be defined.")
-        if gt is not None and lt is not None:
-            raise DataError("Only one of 'gt' or 'lt' can be set.")
+            raise DataError("Only one of 'nx', 'lt', or 'gr' may be defined.")
 
         pieces = []
         options = {}
