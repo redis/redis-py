@@ -615,7 +615,7 @@ class Redis:
             lambda r: r and set(r) or set()
         ),
         **string_keys_to_dict(
-            'ZPOPMAX ZPOPMIN ZINTER ZDIFF ZRANGE ZRANGEBYSCORE '
+            'ZPOPMAX ZPOPMIN ZINTER ZDIFF ZUNION ZRANGE ZRANGEBYSCORE '
             'ZREVRANGE ZREVRANGEBYSCORE', zset_score_pairs
         ),
         **string_keys_to_dict('BZPOPMIN BZPOPMAX', \
@@ -3415,6 +3415,16 @@ class Redis:
     def zscore(self, name, value):
         "Return the score of element ``value`` in sorted set ``name``"
         return self.execute_command('ZSCORE', name, value)
+
+    def zunion(self, keys, aggregate=None, withscores=False):
+        """
+        Return the union of multiple sorted sets specified by ``keys``.
+        ``keys`` can be provided as dictionary of keys and their weights.
+        Scores will be aggregated based on the ``aggregate``, or SUM if
+        none is provided.
+        """
+        return self._zaggregate('ZUNION', None, keys, aggregate,
+                                withscores=withscores)
 
     def zunionstore(self, dest, keys, aggregate=None):
         """
