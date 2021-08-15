@@ -2979,17 +2979,35 @@ class Redis:
 
         return self.execute_command('XREVRANGE', name, *pieces)
 
-    def xtrim(self, name, maxlen, approximate=True):
+    def xtrim(self, name, maxlen=None, approximate=True, minid=None,
+              limit=None):
         """
         Trims old messages from a stream.
         name: name of the stream.
         maxlen: truncate old stream messages beyond this size
         approximate: actual stream length may be slightly more than maxlen
+        minin: the minimum id in the stream to query
+        limit: specifies the maximum number of entries to retrieve
         """
-        pieces = [b'MAXLEN']
+        pieces = []
+        if maxlen is not None and minid is not None:
+            raise DataError("Only one of ```maxlen``` or ```minid```",
+                            "may be specified")
+
+        if maxlen is not None:
+            pieces.append(b'MAXLEN')
+        if minid is not None:
+            pieces.append(b'MINID')
         if approximate:
             pieces.append(b'~')
-        pieces.append(maxlen)
+        if maxlen is not None:
+            pieces.append(maxlen)
+        if minid is not None:
+            pieces.append(minid)
+        if limit is not None:
+            pieces.append(b"LIMIT")
+            pieces.append(limit)
+
         return self.execute_command('XTRIM', name, *pieces)
 
     # SORTED SET COMMANDS

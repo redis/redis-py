@@ -2927,6 +2927,47 @@ class TestRedisCommands:
         # 1 message is trimmed
         assert r.xtrim(stream, 3, approximate=False) == 1
 
+    @skip_if_server_version_lt('6.2.4')
+    def test_xtrim_minlen_and_length_args(self, r):
+        stream = 'stream'
+
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+
+        # Future self: No limits without approximate, according to the api
+        with pytest.raises(redis.ResponseError):
+            assert r.xtrim(stream, 3, approximate=False, limit=2)
+
+        # maxlen with a limit
+        assert r.xtrim(stream, 3, approximate=True, limit=2) == 0
+        r.delete(stream)
+
+        with pytest.raises(redis.DataError):
+            assert r.xtrim(stream, maxlen=3, minid="sometestvalue")
+
+        # minid with a limit
+        m1 = r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        assert r.xtrim(stream, None, approximate=True, minid=m1, limit=3) == 0
+
+        # pure minid
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        m4 = r.xadd(stream, {'foo': 'bar'})
+        assert r.xtrim(stream, None, approximate=False, minid=m4) == 7
+
+        # minid approximate
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        m3 = r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        assert r.xtrim(stream, None, approximate=True, minid=m3) == 0
+
     def test_bitfield_operations(self, r):
         # comments show affected bits
         bf = r.bitfield('a')
