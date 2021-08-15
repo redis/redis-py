@@ -581,8 +581,8 @@ class Redis:
     """
     RESPONSE_CALLBACKS = {
         **string_keys_to_dict(
-            'AUTH COPY EXPIRE EXPIREAT HEXISTS HMSET MOVE MSETNX PERSIST '
-            'PSETEX RENAMENX SISMEMBER SMOVE SETEX SETNX',
+            'AUTH COPY EXPIRE EXPIREAT HEXISTS HMSET LMOVE BLMOVE MOVE '
+            'MSETNX PERSIST PSETEX RENAMENX SISMEMBER SMOVE SETEX SETNX',
             bool
         ),
         **string_keys_to_dict(
@@ -1850,6 +1850,23 @@ class Redis:
     def keys(self, pattern='*'):
         "Returns a list of keys matching ``pattern``"
         return self.execute_command('KEYS', pattern)
+
+    def lmove(self, first_list, second_list, src="LEFT", dest="RIGHT"):
+        """
+        Atomically returns and removes the first/last element of a list,
+        pushing it as the first/last element on the destination list.
+        Returns the element being popped and pushed.
+        """
+        params = [first_list, second_list, src, dest]
+        return self.execute_command("LMOVE", *params)
+
+    def blmove(self, first_list, second_list, timeout,
+               src="LEFT", dest="RIGHT"):
+        """
+        Blocking version of lmove.
+        """
+        params = [first_list, second_list, src, dest, timeout]
+        return self.execute_command("BLMOVE", *params)
 
     def mget(self, keys, *args):
         """
