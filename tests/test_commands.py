@@ -295,6 +295,14 @@ class TestRedisCommands:
             clients = r.client_list(_type=client_type)
             assert isinstance(clients, list)
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_client_list_client_id(self, r):
+        clients = r.client_list()
+        client_id = clients[0]['id']
+        clients = r.client_list(client_id=client_id)
+        assert len(clients) == 1
+        assert 'addr' in clients[0]
+
     @skip_if_server_version_lt('5.0.0')
     def test_client_id(self, r):
         assert r.client_id() > 0
@@ -407,13 +415,7 @@ class TestRedisCommands:
                                 for client in clients])
 
         client_2_addr = clients_by_name['redis-py-c2'].get('laddr')
-        resp = r.client_kill_filter(laddr=client_2_addr)
-        assert resp == 1
-
-        clients = [client for client in r.client_list()
-                   if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
-        assert len(clients) == 1
-        assert clients[0].get('name') == 'redis-py-c1'
+        assert r.client_kill_filter(laddr=client_2_addr)
 
     @skip_if_server_version_lt('2.9.50')
     def test_client_pause(self, r):
@@ -855,6 +857,18 @@ class TestRedisCommands:
         r['c'] = '3'
         assert r.mget('a', 'other', 'b', 'c') == [b'1', None, b'2', b'3']
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_lmove(self, r):
+        r.rpush('a', 'one', 'two', 'three', 'four')
+        assert r.lmove('a', 'b')
+        assert r.lmove('a', 'b', 'right', 'left')
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_blmove(self, r):
+        r.rpush('a', 'one', 'two', 'three', 'four')
+        assert r.blmove('a', 'b', 5)
+        assert r.blmove('a', 'b', 1, 'RIGHT', 'LEFT')
+
     def test_mset(self, r):
         d = {'a': b'1', 'b': b'2', 'c': b'3'}
         assert r.mset(d)
@@ -1012,6 +1026,14 @@ class TestRedisCommands:
         assert r.get('a') == b'2'
         assert 0 < r.ttl('a') <= 10
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_set_get(self, r):
+        assert r.set('a', 'True', get=True) is None
+        assert r.set('a', 'True', get=True) == b'True'
+        assert r.set('a', 'foo') is True
+        assert r.set('a', 'bar', get=True) == b'foo'
+        assert r.get('a') == b'bar'
+
     def test_setex(self, r):
         assert r.setex('a', 60, '1')
         assert r['a'] == b'1'
@@ -1128,6 +1150,14 @@ class TestRedisCommands:
         assert r.lpop('a') == b'3'
         assert r.lpop('a') is None
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_lpop_count(self, r):
+        r.rpush('a', '1', '2', '3')
+        assert r.lpop('a', 2) == [b'1', b'2']
+        assert r.lpop('a', 1) == [b'3']
+        assert r.lpop('a') is None
+        assert r.lpop('a', 3) is None
+
     def test_lpush(self, r):
         assert r.lpush('a', '1') == 1
         assert r.lpush('a', '2') == 2
@@ -1176,6 +1206,14 @@ class TestRedisCommands:
         assert r.rpop('a') == b'2'
         assert r.rpop('a') == b'1'
         assert r.rpop('a') is None
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_rpop_count(self, r):
+        r.rpush('a', '1', '2', '3')
+        assert r.rpop('a', 2) == [b'3', b'2']
+        assert r.rpop('a', 1) == [b'1']
+        assert r.rpop('a') is None
+        assert r.rpop('a', 3) is None
 
     def test_rpoplpush(self, r):
         r.rpush('a', 'a1', 'a2', 'a3')
@@ -1775,6 +1813,26 @@ class TestRedisCommands:
         assert r.zscore('a', 'a2') == 2.0
         assert r.zscore('a', 'a4') is None
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_zunion(self, r):
+        r.zadd('a', {'a1': 1, 'a2': 1, 'a3': 1})
+        r.zadd('b', {'a1': 2, 'a2': 2, 'a3': 2})
+        r.zadd('c', {'a1': 6, 'a3': 5, 'a4': 4})
+        # sum
+        assert r.zunion(['a', 'b', 'c']) == \
+            [b'a2', b'a4', b'a3', b'a1']
+        assert r.zunion(['a', 'b', 'c'], withscores=True) == \
+            [(b'a2', 3), (b'a4', 4), (b'a3', 8), (b'a1', 9)]
+        # max
+        assert r.zunion(['a', 'b', 'c'], aggregate='MAX', withscores=True)\
+               == [(b'a2', 2), (b'a4', 4), (b'a3', 5), (b'a1', 6)]
+        # min
+        assert r.zunion(['a', 'b', 'c'], aggregate='MIN', withscores=True)\
+               == [(b'a1', 1), (b'a2', 1), (b'a3', 1), (b'a4', 4)]
+        # with weight
+        assert r.zunion({'a': 1, 'b': 2, 'c': 3}, withscores=True)\
+               == [(b'a2', 5), (b'a4', 12), (b'a3', 20), (b'a1', 23)]
+
     def test_zunionstore_sum(self, r):
         r.zadd('a', {'a1': 1, 'a2': 1, 'a3': 1})
         r.zadd('b', {'a1': 2, 'a2': 2, 'a3': 2})
@@ -2364,13 +2422,59 @@ class TestRedisCommands:
         r.xadd(stream, {'some': 'other'}, nomkstream=True)
         assert r.xlen(stream) == 3
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_xautoclaim(self, r):
+        stream = 'stream'
+        group = 'group'
+        consumer1 = 'consumer1'
+        consumer2 = 'consumer2'
+
+        message_id1 = r.xadd(stream, {'john': 'wick'})
+        message_id2 = r.xadd(stream, {'johny': 'deff'})
+        message = get_stream_message(r, stream, message_id1)
+        r.xgroup_create(stream, group, 0)
+
+        # trying to claim a message that isn't already pending doesn't
+        # do anything
+        response = r.xautoclaim(stream, group, consumer2, min_idle_time=0)
+        assert response == []
+
+        # read the group as consumer1 to initially claim the messages
+        r.xreadgroup(group, consumer1, streams={stream: '>'})
+
+        # claim one message as consumer2
+        response = r.xautoclaim(stream, group, consumer2,
+                                min_idle_time=0, count=1)
+        assert response == [message]
+
+        # reclaim the messages as consumer1, but use the justid argument
+        # which only returns message ids
+        assert r.xautoclaim(stream, group, consumer1, min_idle_time=0,
+                            start_id=0, justid=True) == \
+               [message_id1, message_id2]
+        assert r.xautoclaim(stream, group, consumer1, min_idle_time=0,
+                            start_id=message_id2, justid=True) == \
+               [message_id2]
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_xautoclaim_negative(self, r):
+        stream = 'stream'
+        group = 'group'
+        consumer = 'consumer'
+        with pytest.raises(redis.DataError):
+            r.xautoclaim(stream, group, consumer, min_idle_time=-1)
+        with pytest.raises(ValueError):
+            r.xautoclaim(stream, group, consumer, min_idle_time="wrong")
+        with pytest.raises(redis.DataError):
+            r.xautoclaim(stream, group, consumer, min_idle_time=0,
+                         count=-1)
+
     @skip_if_server_version_lt('5.0.0')
     def test_xclaim(self, r):
         stream = 'stream'
         group = 'group'
         consumer1 = 'consumer1'
         consumer2 = 'consumer2'
-
         message_id = r.xadd(stream, {'john': 'wick'})
         message = get_stream_message(r, stream, message_id)
         r.xgroup_create(stream, group, 0)
@@ -2626,6 +2730,52 @@ class TestRedisCommands:
         assert response[1]['message_id'] == m2
         assert response[1]['consumer'] == consumer2.encode()
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_xpending_range_idle(self, r):
+        stream = 'stream'
+        group = 'group'
+        consumer1 = 'consumer1'
+        consumer2 = 'consumer2'
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        r.xgroup_create(stream, group, 0)
+
+        # read 1 message from the group with each consumer
+        r.xreadgroup(group, consumer1, streams={stream: '>'}, count=1)
+        r.xreadgroup(group, consumer2, streams={stream: '>'}, count=1)
+
+        response = r.xpending_range(stream, group,
+                                    min='-', max='+', count=5)
+        assert len(response) == 2
+        response = r.xpending_range(stream, group,
+                                    min='-', max='+', count=5, idle=1000)
+        assert len(response) == 0
+
+    def test_xpending_range_negative(self, r):
+        stream = 'stream'
+        group = 'group'
+        with pytest.raises(redis.DataError):
+            r.xpending_range(stream, group, min='-', max='+', count=None)
+        with pytest.raises(ValueError):
+            r.xpending_range(stream, group, min='-', max='+', count="one")
+        with pytest.raises(redis.DataError):
+            r.xpending_range(stream, group, min='-', max='+', count=-1)
+        with pytest.raises(ValueError):
+            r.xpending_range(stream, group, min='-', max='+', count=5,
+                             idle="one")
+        with pytest.raises(redis.exceptions.ResponseError):
+            r.xpending_range(stream, group, min='-', max='+', count=5,
+                             idle=1.5)
+        with pytest.raises(redis.DataError):
+            r.xpending_range(stream, group, min='-', max='+', count=5,
+                             idle=-1)
+        with pytest.raises(redis.DataError):
+            r.xpending_range(stream, group, min=None, max=None, count=None,
+                             idle=0)
+        with pytest.raises(redis.DataError):
+            r.xpending_range(stream, group, min=None, max=None, count=None,
+                             consumername=0)
+
     @skip_if_server_version_lt('5.0.0')
     def test_xrange(self, r):
         stream = 'stream'
@@ -2804,6 +2954,47 @@ class TestRedisCommands:
 
         # 1 message is trimmed
         assert r.xtrim(stream, 3, approximate=False) == 1
+
+    @skip_if_server_version_lt('6.2.4')
+    def test_xtrim_minlen_and_length_args(self, r):
+        stream = 'stream'
+
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+
+        # Future self: No limits without approximate, according to the api
+        with pytest.raises(redis.ResponseError):
+            assert r.xtrim(stream, 3, approximate=False, limit=2)
+
+        # maxlen with a limit
+        assert r.xtrim(stream, 3, approximate=True, limit=2) == 0
+        r.delete(stream)
+
+        with pytest.raises(redis.DataError):
+            assert r.xtrim(stream, maxlen=3, minid="sometestvalue")
+
+        # minid with a limit
+        m1 = r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        assert r.xtrim(stream, None, approximate=True, minid=m1, limit=3) == 0
+
+        # pure minid
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        m4 = r.xadd(stream, {'foo': 'bar'})
+        assert r.xtrim(stream, None, approximate=False, minid=m4) == 7
+
+        # minid approximate
+        r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        m3 = r.xadd(stream, {'foo': 'bar'})
+        r.xadd(stream, {'foo': 'bar'})
+        assert r.xtrim(stream, None, approximate=True, minid=m3) == 0
 
     def test_bitfield_operations(self, r):
         # comments show affected bits

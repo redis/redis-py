@@ -324,7 +324,7 @@ class Commands:
         """
         return self.execute_command('CLIENT INFO')
 
-    def client_list(self, _type=None):
+    def client_list(self, _type=None, client_id=None):
         """
         Returns a list of currently connected clients.
         If type of client specified, only that type will be returned.
@@ -332,13 +332,18 @@ class Commands:
          replica, pubsub)
         """
         "Returns a list of currently connected clients"
+        args = []
         if _type is not None:
             client_types = ('normal', 'master', 'replica', 'pubsub')
             if str(_type).lower() not in client_types:
                 raise DataError("CLIENT LIST _type must be one of %r" % (
                                 client_types,))
-            return self.execute_command('CLIENT LIST', b'TYPE', _type)
-        return self.execute_command('CLIENT LIST')
+            args.append(b'TYPE')
+            args.append(_type)
+        if client_id is not None:
+            args.append(b"ID")
+            args.append(client_id)
+        return self.execute_command('CLIENT LIST', *args)
 
     def client_getname(self):
         "Returns the current connection name"
@@ -616,7 +621,7 @@ class Commands:
     def bitcount(self, key, start=None, end=None):
         """
         Returns the count of set bits in the value of ``key``.  Optional
-        ``start`` and ``end`` paramaters indicate which bytes to consider
+        ``start`` and ``end`` parameters indicate which bytes to consider
         """
         params = [key]
         if start is not None and end is not None:
@@ -644,7 +649,7 @@ class Commands:
     def bitpos(self, key, bit, start=None, end=None):
         """
         Return the position of the first bit set to 1 or 0 in a string.
-        ``start`` and ``end`` difines search range. The range is interpreted
+        ``start`` and ``end`` defines search range. The range is interpreted
         as a range of bytes and not a range of bits, so start=0 and end=2
         means to look at the first three bytes.
         """
@@ -828,6 +833,9 @@ class Commands:
         """
         Sets the value at key ``name`` to ``value``
         and returns the old value at key ``name`` atomically.
+
+        As per Redis 6.2, GETSET is considered deprecated.
+        Please use SET with GET parameter in new code.
         """
         return self.execute_command('GETSET', name, value)
 
@@ -858,14 +866,32 @@ class Commands:
         "Returns a list of keys matching ``pattern``"
         return self.execute_command('KEYS', pattern)
 
+    def lmove(self, first_list, second_list, src="LEFT", dest="RIGHT"):
+        """
+        Atomically returns and removes the first/last element of a list,
+        pushing it as the first/last element on the destination list.
+        Returns the element being popped and pushed.
+        """
+        params = [first_list, second_list, src, dest]
+        return self.execute_command("LMOVE", *params)
+
+    def blmove(self, first_list, second_list, timeout,
+               src="LEFT", dest="RIGHT"):
+        """
+        Blocking version of lmove.
+        """
+        params = [first_list, second_list, src, dest, timeout]
+        return self.execute_command("BLMOVE", *params)
+
     def mget(self, keys, *args):
         """
         Returns a list of values ordered identically to ``keys``
         """
+        from redis.client import EMPTY_RESPONSE
         args = list_or_args(keys, args)
         options = {}
         if not args:
-            options["EMPTY_RESPONSE"] = []
+            options[EMPTY_RESPONSE] = []
         return self.execute_command('MGET', *args, **options)
 
     def mset(self, mapping):
@@ -988,7 +1014,7 @@ class Commands:
         return self.execute_command('RESTORE', *params)
 
     def set(self, name, value,
-            ex=None, px=None, nx=False, xx=False, keepttl=False):
+            ex=None, px=None, nx=False, xx=False, keepttl=False, get=False):
         """
         Set the value at key ``name`` to ``value``
 
@@ -1004,8 +1030,13 @@ class Commands:
 
         ``keepttl`` if True, retain the time to live associated with the key.
             (Available since Redis 6.0)
+
+        ``get`` if True, set the value at key ``name`` to ``value`` and return
+            the old value stored at key, or None when key did not exist.
+            (Available since Redis 6.2)
         """
         pieces = [name, value]
+        options = {}
         if ex is not None:
             pieces.append('EX')
             if isinstance(ex, datetime.timedelta):
@@ -1025,7 +1056,11 @@ class Commands:
         if keepttl:
             pieces.append('KEEPTTL')
 
-        return self.execute_command('SET', *pieces)
+        if get:
+            pieces.append('GET')
+            options["get"] = True
+
+        return self.execute_command('SET', *pieces, **options)
 
     def __setitem__(self, name, value):
         self.set(name, value)
@@ -1179,9 +1214,18 @@ class Commands:
         "Return the length of the list ``name``"
         return self.execute_command('LLEN', name)
 
-    def lpop(self, name):
-        "Remove and return the first item of the list ``name``"
-        return self.execute_command('LPOP', name)
+    def lpop(self, name, count=None):
+        """
+        Removes and returns the first elements of the list ``name``.
+
+        By default, the command pops a single element from the beginning of
+        the list. When provided with the optional ``count`` argument, the reply
+        will consist of up to count elements, depending on the list's length.
+        """
+        if count is not None:
+            return self.execute_command('LPOP', name, count)
+        else:
+            return self.execute_command('LPOP', name)
 
     def lpush(self, name, *values):
         "Push ``values`` onto the head of the list ``name``"
@@ -1227,9 +1271,18 @@ class Commands:
         """
         return self.execute_command('LTRIM', name, start, end)
 
-    def rpop(self, name):
-        "Remove and return the last item of the list ``name``"
-        return self.execute_command('RPOP', name)
+    def rpop(self, name, count=None):
+        """
+        Removes and returns the last elements of the list ``name``.
+
+        By default, the command pops a single element from the end of the list.
+        When provided with the optional ``count`` argument, the reply will
+        consist of up to count elements, depending on the list's length.
+        """
+        if count is not None:
+            return self.execute_command('RPOP', name, count)
+        else:
+            return self.execute_command('RPOP', name)
 
     def rpoplpush(self, src, dst):
         """
@@ -1582,7 +1635,7 @@ class Commands:
         Acknowledges the successful processing of one or more messages.
         name: name of the stream.
         groupname: name of the consumer group.
-        *ids: message ids to acknowlege.
+        *ids: message ids to acknowledge.
         """
         return self.execute_command('XACK', name, groupname, *ids)
 
@@ -1613,6 +1666,46 @@ class Commands:
         for pair in fields.items():
             pieces.extend(pair)
         return self.execute_command('XADD', name, *pieces)
+
+    def xautoclaim(self, name, groupname, consumername, min_idle_time,
+                   start_id=0, count=None, justid=False):
+        """
+        Transfers ownership of pending stream entries that match the specified
+        criteria. Conceptually, equivalent to calling XPENDING and then XCLAIM,
+        but provides a more straightforward way to deal with message delivery
+        failures via SCAN-like semantics.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        consumername: name of a consumer that claims the message.
+        min_idle_time: filter messages that were idle less than this amount of
+        milliseconds.
+        start_id: filter messages with equal or greater ID.
+        count: optional integer, upper limit of the number of entries that the
+        command attempts to claim. Set to 100 by default.
+        justid: optional boolean, false by default. Return just an array of IDs
+        of messages successfully claimed, without returning the actual message
+        """
+        try:
+            if int(min_idle_time) < 0:
+                raise DataError("XAUTOCLAIM min_idle_time must be a non"
+                                "negative integer")
+        except TypeError:
+            pass
+
+        kwargs = {}
+        pieces = [name, groupname, consumername, min_idle_time, start_id]
+
+        try:
+            if int(count) < 0:
+                raise DataError("XPENDING count must be a integer >= 0")
+            pieces.extend([b'COUNT', count])
+        except TypeError:
+            pass
+        if justid:
+            pieces.append(b'JUSTID')
+            kwargs['parse_justid'] = True
+
+        return self.execute_command('XAUTOCLAIM', *pieces, **kwargs)
 
     def xclaim(self, name, groupname, consumername, min_idle_time, message_ids,
                idle=None, time=None, retrycount=None, force=False,
@@ -1760,7 +1853,7 @@ class Commands:
         return self.execute_command('XPENDING', name, groupname)
 
     def xpending_range(self, name, groupname, min, max, count,
-                       consumername=None):
+                       consumername=None, idle=None):
         """
         Returns information about pending messages, in a range.
         name: name of the stream.
@@ -1769,21 +1862,35 @@ class Commands:
         max: maximum stream ID.
         count: number of messages to return
         consumername: name of a consumer to filter by (optional).
+        idle: available from  version 6.2. filter entries by their
+        idle-time, given in milliseconds (optional).
         """
+        if {min, max, count} == {None}:
+            if idle is not None or consumername is not None:
+                raise DataError("if XPENDING is provided with idle time"
+                                " or consumername, it must be provided"
+                                " with min, max and count parameters")
+            return self.xpending(name, groupname)
+
         pieces = [name, groupname]
-        if min is not None or max is not None or count is not None:
-            if min is None or max is None or count is None:
-                raise DataError("XPENDING must be provided with min, max "
-                                "and count parameters, or none of them. ")
-            if not isinstance(count, int) or count < -1:
-                raise DataError("XPENDING count must be a integer >= -1")
-            pieces.extend((min, max, str(count)))
-        if consumername is not None:
-            if min is None or max is None or count is None:
-                raise DataError("if XPENDING is provided with consumername,"
-                                " it must be provided with min, max and"
-                                " count parameters")
-            pieces.append(consumername)
+        if min is None or max is None or count is None:
+            raise DataError("XPENDING must be provided with min, max "
+                            "and count parameters, or none of them.")
+        # idle
+        try:
+            if int(idle) < 0:
+                raise DataError("XPENDING idle must be a integer >= 0")
+            pieces.extend(['IDLE', idle])
+        except TypeError:
+            pass
+        # count
+        try:
+            if int(count) < 0:
+                raise DataError("XPENDING count must be a integer >= 0")
+            pieces.extend([min, max, count])
+        except TypeError:
+            pass
+
         return self.execute_command('XPENDING', *pieces, parse_detail=True)
 
     def xrange(self, name, min='-', max='+', count=None):
@@ -1888,17 +1995,35 @@ class Commands:
 
         return self.execute_command('XREVRANGE', name, *pieces)
 
-    def xtrim(self, name, maxlen, approximate=True):
+    def xtrim(self, name, maxlen=None, approximate=True, minid=None,
+              limit=None):
         """
         Trims old messages from a stream.
         name: name of the stream.
         maxlen: truncate old stream messages beyond this size
         approximate: actual stream length may be slightly more than maxlen
+        minin: the minimum id in the stream to query
+        limit: specifies the maximum number of entries to retrieve
         """
-        pieces = [b'MAXLEN']
+        pieces = []
+        if maxlen is not None and minid is not None:
+            raise DataError("Only one of ```maxlen``` or ```minid```",
+                            "may be specified")
+
+        if maxlen is not None:
+            pieces.append(b'MAXLEN')
+        if minid is not None:
+            pieces.append(b'MINID')
         if approximate:
             pieces.append(b'~')
-        pieces.append(maxlen)
+        if maxlen is not None:
+            pieces.append(maxlen)
+        if minid is not None:
+            pieces.append(minid)
+        if limit is not None:
+            pieces.append(b"LIMIT")
+            pieces.append(limit)
+
         return self.execute_command('XTRIM', name, *pieces)
 
     # SORTED SET COMMANDS
@@ -1944,9 +2069,7 @@ class Commands:
             raise DataError("ZADD option 'incr' only works when passing a "
                             "single element/score pair")
         if nx is True and (gt is not None or lt is not None):
-            raise DataError("Only one of 'nx', 'lt', or 'gt' may be defined.")
-        if gt is not None and lt is not None:
-            raise DataError("Only one of 'gt' or 'lt' can be set.")
+            raise DataError("Only one of 'nx', 'lt', or 'gr' may be defined.")
 
         pieces = []
         options = {}
@@ -2303,6 +2426,16 @@ class Commands:
     def zscore(self, name, value):
         "Return the score of element ``value`` in sorted set ``name``"
         return self.execute_command('ZSCORE', name, value)
+
+    def zunion(self, keys, aggregate=None, withscores=False):
+        """
+        Return the union of multiple sorted sets specified by ``keys``.
+        ``keys`` can be provided as dictionary of keys and their weights.
+        Scores will be aggregated based on the ``aggregate``, or SUM if
+        none is provided.
+        """
+        return self._zaggregate('ZUNION', None, keys, aggregate,
+                                withscores=withscores)
 
     def zunionstore(self, dest, keys, aggregate=None):
         """
@@ -2713,7 +2846,7 @@ class Script:
         try:
             return client.evalsha(self.sha, len(keys), *args)
         except NoScriptError:
-            # Maybe the client is pointed to a differnet server than the client
+            # Maybe the client is pointed to a different server than the client
             # that created this instance?
             # Overwrite the sha just in case there was a discrepancy.
             self.sha = client.script_load(self.script)
@@ -2859,5 +2992,3 @@ class SentinalCommands:
     def sentinel_slaves(self, service_name):
         "Returns a list of slaves for ``service_name``"
         return self.execute_command('SENTINEL SLAVES', service_name)
-
-
