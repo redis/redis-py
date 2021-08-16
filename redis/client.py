@@ -3366,7 +3366,7 @@ class Redis:
         """
         return self._zaggregate('ZUNIONSTORE', dest, keys, aggregate)
 
-    def zmscore(self, key, members=None):
+    def zmscore(self, key, members):
         """
         Returns the scores associated with the specified members
         in the sorted set stored at key.
