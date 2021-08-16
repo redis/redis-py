@@ -222,8 +222,13 @@ class Lock:
         if stored_token and not isinstance(stored_token, bytes):
             encoder = self.redis.connection_pool.get_encoder()
             stored_token = encoder.encode(stored_token)
-        return self.local.token is not None and \
-            stored_token == self.local.token
+        local_token = self.local.token
+        # in case local token is not stored as bytes
+        if self.local.token and not isinstance(self.local.token, bytes):
+            encoder = self.redis.connection_pool.get_encoder()
+            local_token = encoder.encode(self.local.token)
+        return local_token is not None and \
+            stored_token == local_token
 
     def release(self):
         "Releases the already acquired lock"
