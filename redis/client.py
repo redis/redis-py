@@ -3366,7 +3366,7 @@ class Redis:
         """
         return self._zaggregate('ZUNIONSTORE', dest, keys, aggregate)
 
-    def zmscore(self, key, members):
+    def zmscore(self, key, members=[]):
         """
         Returns the scores associated with the specified members
         in the sorted set stored at key.
@@ -3377,7 +3377,7 @@ class Redis:
         If the member does not exist, a None will be returned
         in corresponding position.
         """
-        if not isinstance(members, list) or len(members) < 1:
+        if not members:
             raise DataError('ZMSCORE members must be a non-empty list')
         pieces = [key] + members
         return self.execute_command('ZMSCORE', *pieces)
