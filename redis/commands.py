@@ -2949,6 +2949,7 @@ class BitFieldOperation:
         self.reset()
         return self.client.execute_command(*command)
 
+
 class SentinalCommands:
     """
     A class containing the commands specific to redis sentinal. This class is
