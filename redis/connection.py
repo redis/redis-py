@@ -3,6 +3,7 @@ from itertools import chain
 from time import time
 from queue import LifoQueue, Empty, Full
 from urllib.parse import parse_qs, unquote, urlparse
+import copy
 import errno
 import io
 import os
@@ -28,6 +29,8 @@ from redis.exceptions import (
     ModuleError,
 )
 from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
+from redis.backoff import NoBackoff
+from redis.retry import Retry
 
 try:
     import ssl
@@ -499,7 +502,13 @@ class Connection:
                  socket_type=0, retry_on_timeout=False, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  parser_class=DefaultParser, socket_read_size=65536,
-                 health_check_interval=0, client_name=None, username=None):
+                 health_check_interval=0, client_name=None, username=None,
+                 retry=None):
+        """
+        Initialize a new Connection.
+        To specify a retry policy, first set `retry_on_timeout` to `True`
+        then set `retry` to a valid `Retry` object
+        """
         self.pid = os.getpid()
         self.host = host
         self.port = int(port)
@@ -513,6 +522,14 @@ class Connection:
         self.socket_keepalive_options = socket_keepalive_options or {}
         self.socket_type = socket_type
         self.retry_on_timeout = retry_on_timeout
+        if retry_on_timeout:
+            if retry is None:
+                self.retry = Retry(NoBackoff(), 1)
+            else:
+                # deep-copy the Retry object as it is mutable
+                self.retry = copy.deepcopy(retry)
+        else:
+            self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
         self.next_health_check = 0
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
@@ -673,23 +690,23 @@ class Connection:
             pass
         self._sock = None
 
+    def _send_ping(self):
+        """Send PING, expect PONG in return"""
+        self.send_command('PING', check_health=False)
+        if str_if_bytes(self.read_response()) != 'PONG':
+            raise ConnectionError('Bad response from PING health check')
+
+    def _ping_failed(self, error):
+        """Function to call when PING fails"""
+        self.disconnect()
+
     def check_health(self):
-        "Check the health of the connection with a PING/PONG"
+        """Check the health of the connection with a PING/PONG"""
         if self.health_check_interval and time() > self.next_health_check:
-            try:
-                self.send_command('PING', check_health=False)
-                if str_if_bytes(self.read_response()) != 'PONG':
-                    raise ConnectionError(
-                        'Bad response from PING health check')
-            except (ConnectionError, TimeoutError):
-                self.disconnect()
-                self.send_command('PING', check_health=False)
-                if str_if_bytes(self.read_response()) != 'PONG':
-                    raise ConnectionError(
-                        'Bad response from PING health check')
+            self.retry.call_with_retry(self._send_ping, self._ping_failed)
 
     def send_packed_command(self, command, check_health=True):
-        "Send an already packed command to the Redis server"
+        """Send an already packed command to the Redis server"""
         if not self._sock:
             self.connect()
         # guard against health check recursion
@@ -717,12 +734,12 @@ class Connection:
             raise
 
     def send_command(self, *args, **kwargs):
-        "Pack and send a command to the Redis server"
+        """Pack and send a command to the Redis server"""
         self.send_packed_command(self.pack_command(*args),
                                  check_health=kwargs.get('check_health', True))
 
     def can_read(self, timeout=0):
-        "Poll the socket to see if there's data that can be read."
+        """Poll the socket to see if there's data that can be read."""
         sock = self._sock
         if not sock:
             self.connect()
@@ -730,7 +747,7 @@ class Connection:
         return self._parser.can_read(timeout)
 
     def read_response(self):
-        "Read the response from a previously sent command"
+        """Read the response from a previously sent command"""
         try:
             response = self._parser.read_response()
         except socket.timeout:
@@ -753,7 +770,7 @@ class Connection:
         return response
 
     def pack_command(self, *args):
-        "Pack a series of arguments into the Redis protocol"
+        """Pack a series of arguments into the Redis protocol"""
         output = []
         # the client might have included 1 or more literal arguments in
         # the command name, e.g., 'CONFIG GET'. The Redis server expects these
@@ -787,7 +804,7 @@ class Connection:
         return output
 
     def pack_commands(self, commands):
-        "Pack multiple commands into the Redis protocol"
+        """Pack multiple commands into the Redis protocol"""
         output = []
         pieces = []
         buffer_length = 0
