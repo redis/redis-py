@@ -770,9 +770,7 @@ class Commands:
         return self.execute_command('FLUSHDB', *args)
 
     def get(self, name):
-        """
-        Return the value at key ``name``, or None if the key doesn't exist
-        """
+        """Return the value at key ``name``, or None if the key doesn't exist."""
         return self.execute_command('GET', name)
 
     def getdel(self, name):
@@ -2667,7 +2665,7 @@ class Commands:
         """
         return Script(self, script)
 
-    # GEO COMMANDS
+    # region GEO COMMANDS
     def geoadd(self, name, *values):
         """
         Add the specified geospatial items to the specified key identified
@@ -2679,20 +2677,6 @@ class Commands:
             raise DataError("GEOADD requires places with lon, lat and name"
                             " values")
         return self.execute_command('GEOADD', name, *values)
-
-    def geodist(self, name, place1, place2, unit=None):
-        """
-        Return the distance between ``place1`` and ``place2`` members of the
-        ``name`` key.
-        The units must be one of the following : m, km mi, ft. By default
-        meters are used.
-        """
-        pieces = [name, place1, place2]
-        if unit and unit not in ('m', 'km', 'mi', 'ft'):
-            raise DataError("GEODIST invalid unit")
-        elif unit:
-            pieces.append(unit)
-        return self.execute_command('GEODIST', *pieces)
 
     def geohash(self, name, *values):
         """
@@ -2708,6 +2692,20 @@ class Commands:
         is represented by the pairs lon and lat.
         """
         return self.execute_command('GEOPOS', name, *values)
+
+    def geodist(self, name, place1, place2, unit=None):
+        """
+        Return the distance between ``place1`` and ``place2`` members of the
+        ``name`` key.
+        The units must be one of the following : m, km, mi or ft. By default
+        meters are used.
+        """
+        pieces = [name, place1, place2]
+        if unit and unit not in ('m', 'km', 'mi', 'ft'):
+            raise DataError("GEODIST invalid unit")
+        elif unit:
+            pieces.append(unit)
+        return self.execute_command('GEODIST', *pieces)
 
     def georadius(self, name, longitude, latitude, radius, unit=None,
                   withdist=False, withcoord=False, withhash=False, count=None,
@@ -2801,8 +2799,9 @@ class Commands:
             pieces.extend([b'STOREDIST', kwargs['store_dist']])
 
         return self.execute_command(command, *pieces, **kwargs)
+    #endregion
 
-    # MODULE COMMANDS
+    # region MODULE COMMANDS
     def module_load(self, path):
         """
         Loads the module from ``path``.
@@ -2823,6 +2822,7 @@ class Commands:
         all loaded modules.
         """
         return self.execute_command('MODULE LIST')
+    # endregion
 
 
 class Script:
