@@ -36,61 +36,7 @@ class Commands:
 
     # SERVER INFORMATION
 
-    # ACL methods
-    def acl_cat(self, category=None):
-        """
-        Returns a list of categories or commands within a category.
-
-        If ``category`` is not supplied, returns a list of all categories.
-        If ``category`` is supplied, returns a list of all commands within
-        that category.
-        """
-        pieces = [category] if category else []
-        return self.execute_command('ACL CAT', *pieces)
-
-    def acl_deluser(self, username):
-        "Delete the ACL for the specified ``username``"
-        return self.execute_command('ACL DELUSER', username)
-
-    def acl_genpass(self):
-        "Generate a random password value"
-        return self.execute_command('ACL GENPASS')
-
-    def acl_getuser(self, username):
-        """
-        Get the ACL details for the specified ``username``.
-
-        If ``username`` does not exist, return None
-        """
-        return self.execute_command('ACL GETUSER', username)
-
-    def acl_list(self):
-        "Return a list of all ACLs on the server"
-        return self.execute_command('ACL LIST')
-
-    def acl_log(self, count=None):
-        """
-        Get ACL logs as a list.
-        :param int count: Get logs[0:count].
-        :rtype: List.
-        """
-        args = []
-        if count is not None:
-            if not isinstance(count, int):
-                raise DataError('ACL LOG count must be an '
-                                'integer')
-            args.append(count)
-
-        return self.execute_command('ACL LOG', *args)
-
-    def acl_log_reset(self):
-        """
-        Reset ACL logs.
-        :rtype: Boolean.
-        """
-        args = [b'RESET']
-        return self.execute_command('ACL LOG', *args)
-
+    # region ACL methods
     def acl_load(self):
         """
         Load ACL rules from the configured ``aclfile``.
@@ -108,6 +54,22 @@ class Commands:
         directive to be able to save ACL rules to an aclfile.
         """
         return self.execute_command('ACL SAVE')
+
+    def acl_list(self):
+        """Return a list of all ACLs on the server"""
+        return self.execute_command('ACL LIST')
+
+    def acl_users(self):
+        """Returns a list of all registered users on the server."""
+        return self.execute_command('ACL USERS')
+
+    def acl_getuser(self, username):
+        """
+        Get the ACL details for the specified ``username``.
+
+        If ``username`` does not exist, return None
+        """
+        return self.execute_command('ACL GETUSER', username)
 
     def acl_setuser(self, username, enabled=False, nopass=False,
                     passwords=None, hashed_passwords=None, categories=None,
@@ -256,13 +218,54 @@ class Commands:
 
         return self.execute_command('ACL SETUSER', *pieces)
 
-    def acl_users(self):
-        "Returns a list of all registered users on the server."
-        return self.execute_command('ACL USERS')
+    def acl_deluser(self, username):
+        """Delete the ACL for the specified ``username``"""
+        return self.execute_command('ACL DELUSER', username)
+
+    def acl_cat(self, category=None):
+        """
+        Returns a list of categories or commands within a category.
+
+        If ``category`` is not supplied, returns a list of all categories.
+        If ``category`` is supplied, returns a list of all commands within
+        that category.
+        """
+        pieces = [category] if category else []
+        return self.execute_command('ACL CAT', *pieces)
+
+    def acl_genpass(self):
+        """Generate a random password value"""
+        return self.execute_command('ACL GENPASS')
 
     def acl_whoami(self):
-        "Get the username for the current connection"
+        """Get the username for the current connection"""
         return self.execute_command('ACL WHOAMI')
+
+    def acl_log(self, count=None):
+        """
+        Get ACL logs as a list.
+
+        :param int count: Get logs[0:count].
+        :rtype: List.
+        """
+        args = []
+        if count is not None:
+            if not isinstance(count, int):
+                raise DataError('ACL LOG count must be an '
+                                'integer')
+            args.append(count)
+
+        return self.execute_command('ACL LOG', *args)
+
+    def acl_log_reset(self):
+        """
+        Reset ACL logs.
+
+        :rtype: Boolean.
+        """
+        args = [b'RESET']
+        return self.execute_command('ACL LOG', *args)
+    # endregion
 
     def bgrewriteaof(self):
         "Tell the Redis server to rewrite the AOF file from data in memory."
