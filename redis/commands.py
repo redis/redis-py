@@ -479,25 +479,6 @@ class Commands:
         """
         return self.execute_command('SAVE')
 
-    def swapdb(self, first, second):
-        "Swap two databases"
-        return self.execute_command('SWAPDB', first, second)
-
-    def info(self, section=None):
-        """
-        Returns a dictionary containing information about the Redis server
-
-        The ``section`` option can be used to select a specific section
-        of information
-
-        The section option is not supported by older versions of Redis Server,
-        and will generate ResponseError
-        """
-        if section is None:
-            return self.execute_command('INFO')
-        else:
-            return self.execute_command('INFO', section)
-
     def shutdown(self, save=False, nosave=False):
         """Shutdown the Redis server.  If Redis has persistence configured,
         data will be flushed before shutdown.  If the "save" option is set,
@@ -542,12 +523,31 @@ class Commands:
         return self.execute_command(*args, decode_responses=decode_responses)
 
     def slowlog_len(self):
-        "Get the number of items in the slowlog"
+        """Get the number of items in the slowlog."""
         return self.execute_command('SLOWLOG LEN')
 
     def slowlog_reset(self):
-        "Remove all items in the slowlog"
+        """Remove all items in the slowlog."""
         return self.execute_command('SLOWLOG RESET')
+
+    def swapdb(self, first, second):
+        "Swap two databases"
+        return self.execute_command('SWAPDB', first, second)
+
+    def info(self, section=None):
+        """
+        Returns a dictionary containing information about the Redis server
+
+        The ``section`` option can be used to select a specific section
+        of information
+
+        The section option is not supported by older versions of Redis Server,
+        and will generate ResponseError
+        """
+        if section is None:
+            return self.execute_command('INFO')
+        else:
+            return self.execute_command('INFO', section)
 
     def time(self):
         """
@@ -1082,7 +1082,7 @@ class Commands:
         return self.execute_command('SETEX', name, time, value)
 
     def setnx(self, name, value):
-        "Set the value of key ``name`` to ``value`` if key doesn't exist"
+        """Set the value of key ``name`` to ``value`` if key doesn't exist."""
         return self.execute_command('SETNX', name, value)
 
     def setrange(self, name, offset, value):
@@ -1099,7 +1099,7 @@ class Commands:
         return self.execute_command('SETRANGE', name, offset, value)
 
     def strlen(self, name):
-        "Return the number of bytes stored in the value of ``name``"
+        """Return the number of bytes stored in the value of ``name``."""
         return self.execute_command('STRLEN', name)
 
     def substr(self, name, start, end=-1):
@@ -1599,7 +1599,7 @@ class Commands:
                                       score_cast_func=score_cast_func)
             yield from data
 
-    # region SET COMMANDS
+    # region SETS COMMANDS
     def sadd(self, name, *values):
         """Add ``value(s)`` to set ``name``."""
         return self.execute_command('SADD', name, *values)
@@ -1609,7 +1609,7 @@ class Commands:
         return self.execute_command('SCARD', name)
 
     def sdiff(self, keys, *args):
-        "Return the difference of sets specified by ``keys``"
+        """Return the difference of sets specified by ``keys``."""
         args = list_or_args(keys, args)
         return self.execute_command('SDIFF', *args)
 
@@ -1622,32 +1622,34 @@ class Commands:
         return self.execute_command('SDIFFSTORE', dest, *args)
 
     def sinter(self, keys, *args):
-        "Return the intersection of sets specified by ``keys``"
+        """Return the intersection of sets specified by ``keys``."""
         args = list_or_args(keys, args)
         return self.execute_command('SINTER', *args)
 
     def sinterstore(self, dest, keys, *args):
         """
         Store the intersection of sets specified by ``keys`` into a new
-        set named ``dest``.  Returns the number of keys in the new set.
+        set named ``dest``.
+
+        Returns the number of keys in the new set.
         """
         args = list_or_args(keys, args)
         return self.execute_command('SINTERSTORE', dest, *args)
 
     def sismember(self, name, value):
-        "Return a boolean indicating if ``value`` is a member of set ``name``"
+        """Return a boolean indicating if ``value`` is a member of set ``name``."""
         return self.execute_command('SISMEMBER', name, value)
 
     def smembers(self, name):
-        "Return all members of the set ``name``"
+        """Return all members of the set ``name``."""
         return self.execute_command('SMEMBERS', name)
 
     def smove(self, src, dst, value):
-        "Move ``value`` from set ``src`` to set ``dst`` atomically"
+        """Move ``value`` from set ``src`` to set ``dst`` atomically."""
         return self.execute_command('SMOVE', src, dst, value)
 
     def spop(self, name, count=None):
-        "Remove and return a random member of set ``name``"
+        """Remove and return a random member of set ``name``."""
         args = (count is not None) and [count] or []
         return self.execute_command('SPOP', name, *args)
 
@@ -1663,11 +1665,11 @@ class Commands:
         return self.execute_command('SRANDMEMBER', name, *args)
 
     def srem(self, name, *values):
-        "Remove ``values`` from set ``name``"
+        """Remove ``values`` from set ``name``."""
         return self.execute_command('SREM', name, *values)
 
     def sunion(self, keys, *args):
-        "Return the union of sets specified by ``keys``"
+        """Return the union of sets specified by ``keys``."""
         args = list_or_args(keys, args)
         return self.execute_command('SUNION', *args)
 
@@ -1678,8 +1680,9 @@ class Commands:
         """
         args = list_or_args(keys, args)
         return self.execute_command('SUNIONSTORE', dest, *args)
+    # endregion
 
-    # STREAMS COMMANDS
+    # region STREAMS COMMANDS
     def xack(self, name, groupname, *ids):
         """
         Acknowledges the successful processing of one or more messages.
