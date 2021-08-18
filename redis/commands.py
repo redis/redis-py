@@ -398,6 +398,21 @@ class Commands:
         """Reset runtime statistics."""
         return self.execute_command('CONFIG RESETSTAT')
 
+    def info(self, section=None):
+        """
+        Returns a dictionary containing information about the Redis server.
+
+        The ``section`` option can be used to select a specific section
+        of information.
+
+        The section option is not supported by older versions of Redis Server,
+        and will generate ResponseError.
+        """
+        if section is None:
+            return self.execute_command('INFO')
+        else:
+            return self.execute_command('INFO', section)
+
     def migrate(self, host, port, keys, destination_db, timeout,
                 copy=False, replace=False, auth=None):
         """
@@ -549,21 +564,6 @@ class Commands:
         reached.
         """
         return self.execute_command('WAIT', num_replicas, timeout)
-
-    def info(self, section=None):
-        """
-        Returns a dictionary containing information about the Redis server
-
-        The ``section`` option can be used to select a specific section
-        of information
-
-        The section option is not supported by older versions of Redis Server,
-        and will generate ResponseError
-        """
-        if section is None:
-            return self.execute_command('INFO')
-        else:
-            return self.execute_command('INFO', section)
 
     # region BASIC KEY COMMANDS
     def append(self, key, value):
@@ -2828,7 +2828,7 @@ class Commands:
 
 
 class Script:
-    "An executable Lua script object returned by ``register_script``"
+    """An executable Lua script object returned by ``register_script``"""
 
     def __init__(self, registered_client, script):
         self.registered_client = registered_client
