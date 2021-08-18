@@ -1,3 +1,5 @@
+from redis.backoff import NoBackoff
+from redis.retry import Retry
 import pytest
 import random
 import redis
@@ -107,6 +109,7 @@ def r2(request):
 
 def _gen_cluster_mock_resp(r, response):
     connection = Mock()
+    connection.retry = Retry(NoBackoff(), 0)
     connection.read_response.return_value = response
     r.connection = connection
     return r
