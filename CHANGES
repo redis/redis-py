@@ -12,6 +12,56 @@
       @2014BDuck. #1307
     * Added support for ABSTTL option of the RESTORE command available in
       Redis 5.0. Thanks @charettes. #1423
+    * Migrated commands to a mixin. Thanks @chayim. #1534
+    * Added support for ZUNION, available in Redis 6.2.0. Thanks
+      @AvitalFineRedis. #1522
+    * Added support for CLIENT LIST with ID, available in Redis 6.2.0.
+      Thanks @chayim. #1505
+    * Added support for MINID and LIMIT with xtrim, available in Reds 6.2.0.
+      Thanks @chayim. #1508
+    * Implemented LMOVE and BLMOVE commands, available in Redis 6.2.0.
+      Thanks @chayim. #1504
+    * Added GET argument to SET command, available in Redis 6.2.0.
+      Thanks @2014BDuck. #1412
+    * Documentation fixes. Thanks @enjoy-binbin @jonher937. #1496 #1532
+    * Added support for XAUTOCLAIM, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1529
+    * Added IDLE support for XPENDING, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1523
+    * Add a count parameter to lpop/rpop, available in Redis 6.2.0.
+      Thanks @wavenator. #1487
+    * Added a (pypy) trove classifier for Python 3.9.
+      Thanks @D3X. #1535
+    * Added ZINTER support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1520
+    * Added ZINTER support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1520
+    * Added ZDIFF and ZDIFFSTORE support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1518
+    * Added ZRANGESTORE support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1521
+    * Added LT and GT support for ZADD, available in Redis 6.2.0.
+      Thanks @chayim. #1509
+    * Added ZRANDMEMBER support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1519
+    * Added GETDEL support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1514
+    * Added CLIENT KILL laddr filter, available in Redis 6.2.0.
+      Thanks @chayim. #1506
+    * Added CLIENT UNPAUSE, available in Redis 6.2.0.
+      Thanks @chayim. #1512
+    * Added NOMKSTREAM support for XADD, available in Redis 6.2.0.
+      Thanks @chayim. #1507
+    * Added HRANDFIELD support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1513
+    * Added CLIENT INFO support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1517
+    * Added GETEX support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1515
+    * Added support for COPY command, available in Redis 6.2.0.
+      Thanks @malinaa96. #1492
+    * Added support for COPY command, available in Redis 6.2.0.
+      Thanks @malinaa96. #1492
 * 3.5.3 (June 1, 2020)
     * Restore try/except clauses to __del__ methods. These will be removed
       in 4.0 when more explicit resource management if enforced. #1339
