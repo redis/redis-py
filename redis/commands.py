@@ -36,535 +36,6 @@ class Commands:
 
     # SERVER INFORMATION
 
-    # region ACL COMMANDS
-    def acl_load(self):
-        """
-        Load ACL rules from the configured ``aclfile``.
-
-        Note that the server must be configured with the ``aclfile``
-        directive to be able to load ACL rules from an aclfile.
-        """
-        return self.execute_command('ACL LOAD')
-
-    def acl_save(self):
-        """
-        Save ACL rules to the configured ``aclfile``.
-
-        Note that the server must be configured with the ``aclfile``
-        directive to be able to save ACL rules to an aclfile.
-        """
-        return self.execute_command('ACL SAVE')
-
-    def acl_list(self):
-        """Return a list of all ACLs on the server"""
-        return self.execute_command('ACL LIST')
-
-    def acl_users(self):
-        """Returns a list of all registered users on the server."""
-        return self.execute_command('ACL USERS')
-
-    def acl_getuser(self, username):
-        """
-        Get the ACL details for the specified ``username``.
-
-        If ``username`` does not exist, return None
-        """
-        return self.execute_command('ACL GETUSER', username)
-
-    def acl_setuser(self, username, enabled=False, nopass=False,
-                    passwords=None, hashed_passwords=None, categories=None,
-                    commands=None, keys=None, reset=False, reset_keys=False,
-                    reset_passwords=False):
-        """
-        Create or update an ACL user.
-
-        Create or update the ACL for ``username``. If the user already exists,
-        the existing ACL is completely overwritten and replaced with the
-        specified values.
-
-        ``enabled`` is a boolean indicating whether the user should be allowed
-        to authenticate or not. Defaults to ``False``.
-
-        ``nopass`` is a boolean indicating whether the can authenticate without
-        a password. This cannot be True if ``passwords`` are also specified.
-
-        ``passwords`` if specified is a list of plain text passwords
-        to add to or remove from the user. Each password must be prefixed with
-        a '+' to add or a '-' to remove. For convenience, the value of
-        ``passwords`` can be a simple prefixed string when adding or
-        removing a single password.
-
-        ``hashed_passwords`` if specified is a list of SHA-256 hashed passwords
-        to add to or remove from the user. Each hashed password must be
-        prefixed with a '+' to add or a '-' to remove. For convenience,
-        the value of ``hashed_passwords`` can be a simple prefixed string when
-        adding or removing a single password.
-
-        ``categories`` if specified is a list of strings representing category
-        permissions. Each string must be prefixed with either a '+' to add the
-        category permission or a '-' to remove the category permission.
-
-        ``commands`` if specified is a list of strings representing command
-        permissions. Each string must be prefixed with either a '+' to add the
-        command permission or a '-' to remove the command permission.
-
-        ``keys`` if specified is a list of key patterns to grant the user
-        access to. Keys patterns allow '*' to support wildcard matching. For
-        example, '*' grants access to all keys while 'cache:*' grants access
-        to all keys that are prefixed with 'cache:'. ``keys`` should not be
-        prefixed with a '~'.
-
-        ``reset`` is a boolean indicating whether the user should be fully
-        reset prior to applying the new ACL. Setting this to True will
-        remove all existing passwords, flags and privileges from the user and
-        then apply the specified rules. If this is False, the user's existing
-        passwords, flags and privileges will be kept and any new specified
-        rules will be applied on top.
-
-        ``reset_keys`` is a boolean indicating whether the user's key
-        permissions should be reset prior to applying any new key permissions
-        specified in ``keys``. If this is False, the user's existing
-        key permissions will be kept and any new specified key permissions
-        will be applied on top.
-
-        ``reset_passwords`` is a boolean indicating whether to remove all
-        existing passwords and the 'nopass' flag from the user prior to
-        applying any new passwords specified in 'passwords' or
-        'hashed_passwords'. If this is False, the user's existing passwords
-        and 'nopass' status will be kept and any new specified passwords
-        or hashed_passwords will be applied on top.
-        """
-        encoder = self.connection_pool.get_encoder()
-        pieces = [username]
-
-        if reset:
-            pieces.append(b'reset')
-
-        if reset_keys:
-            pieces.append(b'resetkeys')
-
-        if reset_passwords:
-            pieces.append(b'resetpass')
-
-        if enabled:
-            pieces.append(b'on')
-        else:
-            pieces.append(b'off')
-
-        if (passwords or hashed_passwords) and nopass:
-            raise DataError('Cannot set \'nopass\' and supply '
-                            '\'passwords\' or \'hashed_passwords\'')
-
-        if passwords:
-            # as most users will have only one password, allow remove_passwords
-            # to be specified as a simple string or a list
-            passwords = list_or_args(passwords, [])
-            for i, password in enumerate(passwords):
-                password = encoder.encode(password)
-                if password.startswith(b'+'):
-                    pieces.append(b'>%s' % password[1:])
-                elif password.startswith(b'-'):
-                    pieces.append(b'<%s' % password[1:])
-                else:
-                    raise DataError('Password %d must be prefixeed with a '
-                                    '"+" to add or a "-" to remove' % i)
-
-        if hashed_passwords:
-            # as most users will have only one password, allow remove_passwords
-            # to be specified as a simple string or a list
-            hashed_passwords = list_or_args(hashed_passwords, [])
-            for i, hashed_password in enumerate(hashed_passwords):
-                hashed_password = encoder.encode(hashed_password)
-                if hashed_password.startswith(b'+'):
-                    pieces.append(b'#%s' % hashed_password[1:])
-                elif hashed_password.startswith(b'-'):
-                    pieces.append(b'!%s' % hashed_password[1:])
-                else:
-                    raise DataError('Hashed %d password must be prefixeed '
-                                    'with a "+" to add or a "-" to remove' % i)
-
-        if nopass:
-            pieces.append(b'nopass')
-
-        if categories:
-            for category in categories:
-                category = encoder.encode(category)
-                # categories can be prefixed with one of (+@, +, -@, -)
-                if category.startswith(b'+@'):
-                    pieces.append(category)
-                elif category.startswith(b'+'):
-                    pieces.append(b'+@%s' % category[1:])
-                elif category.startswith(b'-@'):
-                    pieces.append(category)
-                elif category.startswith(b'-'):
-                    pieces.append(b'-@%s' % category[1:])
-                else:
-                    raise DataError('Category "%s" must be prefixed with '
-                                    '"+" or "-"'
-                                    % encoder.decode(category, force=True))
-        if commands:
-            for cmd in commands:
-                cmd = encoder.encode(cmd)
-                if not cmd.startswith(b'+') and not cmd.startswith(b'-'):
-                    raise DataError('Command "%s" must be prefixed with '
-                                    '"+" or "-"'
-                                    % encoder.decode(cmd, force=True))
-                pieces.append(cmd)
-
-        if keys:
-            for key in keys:
-                key = encoder.encode(key)
-                pieces.append(b'~%s' % key)
-
-        return self.execute_command('ACL SETUSER', *pieces)
-
-    def acl_deluser(self, username):
-        """Delete the ACL for the specified ``username``"""
-        return self.execute_command('ACL DELUSER', username)
-
-    def acl_cat(self, category=None):
-        """
-        Returns a list of categories or commands within a category.
-
-        If ``category`` is not supplied, returns a list of all categories.
-        If ``category`` is supplied, returns a list of all commands within
-        that category.
-        """
-        pieces = [category] if category else []
-        return self.execute_command('ACL CAT', *pieces)
-
-    def acl_genpass(self):
-        """Generate a random password value"""
-        return self.execute_command('ACL GENPASS')
-
-    def acl_whoami(self):
-        """Get the username for the current connection"""
-        return self.execute_command('ACL WHOAMI')
-
-    def acl_log(self, count=None):
-        """
-        Get ACL logs as a list.
-
-        :param int count: Get logs[0:count].
-        :rtype: List.
-        """
-        args = []
-        if count is not None:
-            if not isinstance(count, int):
-                raise DataError('ACL LOG count must be an '
-                                'integer')
-            args.append(count)
-
-        return self.execute_command('ACL LOG', *args)
-
-    def acl_log_reset(self):
-        """
-        Reset ACL logs.
-
-        :rtype: Boolean.
-        """
-        args = [b'RESET']
-        return self.execute_command('ACL LOG', *args)
-    # endregion
-
-    # region CLIENT COMMANDS
-    def client_id(self):
-        """Returns the current connection id"""
-        return self.execute_command('CLIENT ID')
-
-    def client_info(self):
-        """
-        Returns information and statistics about the current
-        client connection.
-        """
-        return self.execute_command('CLIENT INFO')
-
-    def client_kill(self, address):
-        """Disconnects the client at ``address`` (ip:port)"""
-        return self.execute_command('CLIENT KILL', address)
-
-    def client_kill_filter(self, _id=None, _type=None, addr=None,
-                           skipme=None, laddr=None):
-        """
-        Disconnects client(s) using a variety of filter options
-        :param id: Kills a client by its unique ID field
-        :param type: Kills a client by type where type is one of 'normal',
-        'master', 'slave' or 'pubsub'
-        :param addr: Kills a client by its 'address:port'
-        :param skipme: If True, then the client calling the command
-        :param laddr: Kills a cient by its 'local (bind)  address:port'
-        will not get killed even if it is identified by one of the filter
-        options. If skipme is not provided, the server defaults to skipme=True
-        """
-        args = []
-        if _type is not None:
-            client_types = ('normal', 'master', 'slave', 'pubsub')
-            if str(_type).lower() not in client_types:
-                raise DataError("CLIENT KILL type must be one of %r" % (
-                                client_types,))
-            args.extend((b'TYPE', _type))
-        if skipme is not None:
-            if not isinstance(skipme, bool):
-                raise DataError("CLIENT KILL skipme must be a bool")
-            if skipme:
-                args.extend((b'SKIPME', b'YES'))
-            else:
-                args.extend((b'SKIPME', b'NO'))
-        if _id is not None:
-            args.extend((b'ID', _id))
-        if addr is not None:
-            args.extend((b'ADDR', addr))
-        if laddr is not None:
-            args.extend((b'LADDR', laddr))
-        if not args:
-            raise DataError("CLIENT KILL <filter> <value> ... ... <filter> "
-                            "<value> must specify at least one filter")
-        return self.execute_command('CLIENT KILL', *args)
-
-    def client_list(self, _type=None, client_id=None):
-        """
-        Returns a list of currently connected clients.
-        If type of client specified, only that type will be returned.
-
-        :param _type: optional. one of the client types (normal, master,
-         replica, pubsub)
-        :param client_id: optional. will return entries for clients with
-        ID matching the client-id argument.
-        """
-        args = []
-        if _type is not None:
-            client_types = ('normal', 'master', 'replica', 'pubsub')
-            if str(_type).lower() not in client_types:
-                raise DataError("CLIENT LIST _type must be one of %r" % (
-                                client_types,))
-            args.append(b'TYPE')
-            args.append(_type)
-        if client_id is not None:
-            args.append(b"ID")
-            args.append(client_id)
-        return self.execute_command('CLIENT LIST', *args)
-
-    def client_getname(self):
-        """Returns the current connection name."""
-        return self.execute_command('CLIENT GETNAME')
-
-    def client_unpause(self):
-        """Unpause all redis clients."""
-        return self.execute_command('CLIENT UNPAUSE')
-
-    def client_pause(self, timeout):
-        """
-        Suspend all the Redis clients for the specified amount of time.
-
-        :param timeout: milliseconds to pause clients
-        """
-        if not isinstance(timeout, int):
-            raise DataError("CLIENT PAUSE timeout must be an integer")
-        return self.execute_command('CLIENT PAUSE', str(timeout))
-
-    def client_setname(self, name):
-        """Sets the current connection name."""
-        return self.execute_command('CLIENT SETNAME', name)
-
-    def client_unblock(self, client_id, error=False):
-        """
-        Unblocks a connection by its client id.
-        If ``error`` is True, unblocks the client with a special error message.
-        If ``error`` is False (default), the client is unblocked using the
-        regular timeout mechanism.
-        """
-        args = ['CLIENT UNBLOCK', int(client_id)]
-        if error:
-            args.append(b'ERROR')
-        return self.execute_command(*args)
-    # endregion
-
-    def cluster(self, cluster_arg, *args):
-        return self.execute_command('CLUSTER %s' % cluster_arg.upper(), *args)
-
-    def config_get(self, pattern="*"):
-        """Return a dictionary of configuration based on the ``pattern``."""
-        return self.execute_command('CONFIG GET', pattern)
-
-    def config_rewrite(self):
-        """Rewrite config file with the minimal change to reflect running config."""
-        return self.execute_command('CONFIG REWRITE')
-
-    def config_set(self, name, value):
-        """Set config item ``name`` with ``value``."""
-        return self.execute_command('CONFIG SET', name, value)
-
-    def config_resetstat(self):
-        """Reset runtime statistics."""
-        return self.execute_command('CONFIG RESETSTAT')
-
-    def info(self, section=None):
-        """
-        Returns a dictionary containing information about the Redis server.
-
-        The ``section`` option can be used to select a specific section
-        of information.
-
-        The section option is not supported by older versions of Redis Server,
-        and will generate ResponseError.
-        """
-        if section is None:
-            return self.execute_command('INFO')
-        else:
-            return self.execute_command('INFO', section)
-
-    def migrate(self, host, port, keys, destination_db, timeout,
-                copy=False, replace=False, auth=None):
-        """
-        Migrate 1 or more keys from the current Redis server to a different
-        server specified by the ``host``, ``port`` and ``destination_db``.
-
-        The ``timeout``, specified in milliseconds, indicates the maximum
-        time the connection between the two servers can be idle before the
-        command is interrupted.
-
-        If ``copy`` is True, the specified ``keys`` are NOT deleted from
-        the source server.
-
-        If ``replace`` is True, this operation will overwrite the keys
-        on the destination server if they exist.
-
-        If ``auth`` is specified, authenticate to the destination server with
-        the password provided.
-        """
-        keys = list_or_args(keys, [])
-        if not keys:
-            raise DataError('MIGRATE requires at least one key')
-        pieces = []
-        if copy:
-            pieces.append(b'COPY')
-        if replace:
-            pieces.append(b'REPLACE')
-        if auth:
-            pieces.append(b'AUTH')
-            pieces.append(auth)
-        pieces.append(b'KEYS')
-        pieces.extend(keys)
-        return self.execute_command('MIGRATE', host, port, '', destination_db,
-                                    timeout, *pieces)
-
-    # region MEMORY COMMANDS
-    def memory_purge(self):
-        """Attempts to purge dirty pages for reclamation by allocator."""
-        return self.execute_command('MEMORY PURGE')
-
-    def memory_stats(self):
-        """Return a dictionary of memory stats."""
-        return self.execute_command('MEMORY STATS')
-
-    def memory_usage(self, key, samples=None):
-        """
-        Return the total memory usage for key, its value and associated
-        administrative overheads.
-
-        For nested data structures, ``samples`` is the number of elements to
-        sample. If left unspecified, the server's default is 5. Use 0 to sample
-        all elements.
-        """
-        args = []
-        if isinstance(samples, int):
-            args.extend([b'SAMPLES', samples])
-        return self.execute_command('MEMORY USAGE', key, *args)
-    # endregion
-
-    def object(self, infotype, key):
-        """Return the encoding, idletime, or refcount about the key."""
-        return self.execute_command('OBJECT', infotype, key, infotype=infotype)
-
-    def ping(self):
-        """Ping the Redis server."""
-        return self.execute_command('PING')
-
-    def publish(self, channel, message):
-        """
-        Publish ``message`` on ``channel``.
-        Returns the number of subscribers the message was delivered to.
-        """
-        return self.execute_command('PUBLISH', channel, message)
-
-    def save(self):
-        """
-        Tell the Redis server to save its data to disk,
-        blocking until the save is complete.
-        """
-        return self.execute_command('SAVE')
-
-    def shutdown(self, save=False, nosave=False):
-        """Shutdown the Redis server.  If Redis has persistence configured,
-        data will be flushed before shutdown.  If the "save" option is set,
-        a data flush will be attempted even if there is no persistence
-        configured.  If the "nosave" option is set, no data flush will be
-        attempted.  The "save" and "nosave" options cannot both be set.
-        """
-        if save and nosave:
-            raise DataError('SHUTDOWN save and nosave cannot both be set')
-        args = ['SHUTDOWN']
-        if save:
-            args.append('SAVE')
-        if nosave:
-            args.append('NOSAVE')
-        try:
-            self.execute_command(*args)
-        except ConnectionError:
-            # a ConnectionError here is expected
-            return
-        raise RedisError("SHUTDOWN seems to have failed.")
-
-    def slaveof(self, host=None, port=None):
-        """
-        Set the server to be a replicated slave of the instance identified
-        by the ``host`` and ``port``. If called without arguments, the
-        instance is promoted to a master instead.
-        """
-        if host is None and port is None:
-            return self.execute_command('SLAVEOF', b'NO', b'ONE')
-        return self.execute_command('SLAVEOF', host, port)
-
-    def slowlog_get(self, num=None):
-        """
-        Get the entries from the slowlog. If ``num`` is specified, get the
-        most recent ``num`` items.
-        """
-        args = ['SLOWLOG GET']
-        if num is not None:
-            args.append(num)
-        decode_responses = self.connection_pool.connection_kwargs.get(
-            'decode_responses', False)
-        return self.execute_command(*args, decode_responses=decode_responses)
-
-    def slowlog_len(self):
-        """Get the number of items in the slowlog."""
-        return self.execute_command('SLOWLOG LEN')
-
-    def slowlog_reset(self):
-        """Remove all items in the slowlog."""
-        return self.execute_command('SLOWLOG RESET')
-
-    def swapdb(self, first, second):
-        """Swap two databases."""
-        return self.execute_command('SWAPDB', first, second)
-
-    def time(self):
-        """
-        Returns the server time as a 2-item tuple of ints:
-        (seconds since epoch, microseconds into this second).
-        """
-        return self.execute_command('TIME')
-
-    def wait(self, num_replicas, timeout):
-        """
-        Redis synchronous replication
-        That returns the number of replicas that processed the query when
-        we finally have at least ``num_replicas``, or when the ``timeout`` was
-        reached.
-        """
-        return self.execute_command('WAIT', num_replicas, timeout)
-
     # region BASIC KEY COMMANDS
     def append(self, key, value):
         """
@@ -1449,6 +920,836 @@ class Commands:
         return self.execute_command('SORT', *pieces, **options)
     # endregion
 
+    # region ACL COMMANDS
+    def acl_load(self):
+        """
+        Load ACL rules from the configured ``aclfile``.
+
+        Note that the server must be configured with the ``aclfile``
+        directive to be able to load ACL rules from an aclfile.
+        """
+        return self.execute_command('ACL LOAD')
+
+    def acl_save(self):
+        """
+        Save ACL rules to the configured ``aclfile``.
+
+        Note that the server must be configured with the ``aclfile``
+        directive to be able to save ACL rules to an aclfile.
+        """
+        return self.execute_command('ACL SAVE')
+
+    def acl_list(self):
+        """Return a list of all ACLs on the server"""
+        return self.execute_command('ACL LIST')
+
+    def acl_users(self):
+        """Returns a list of all registered users on the server."""
+        return self.execute_command('ACL USERS')
+
+    def acl_getuser(self, username):
+        """
+        Get the ACL details for the specified ``username``.
+
+        If ``username`` does not exist, return None
+        """
+        return self.execute_command('ACL GETUSER', username)
+
+    def acl_setuser(self, username, enabled=False, nopass=False,
+                    passwords=None, hashed_passwords=None, categories=None,
+                    commands=None, keys=None, reset=False, reset_keys=False,
+                    reset_passwords=False):
+        """
+        Create or update an ACL user.
+
+        Create or update the ACL for ``username``. If the user already exists,
+        the existing ACL is completely overwritten and replaced with the
+        specified values.
+
+        ``enabled`` is a boolean indicating whether the user should be allowed
+        to authenticate or not. Defaults to ``False``.
+
+        ``nopass`` is a boolean indicating whether the can authenticate without
+        a password. This cannot be True if ``passwords`` are also specified.
+
+        ``passwords`` if specified is a list of plain text passwords
+        to add to or remove from the user. Each password must be prefixed with
+        a '+' to add or a '-' to remove. For convenience, the value of
+        ``passwords`` can be a simple prefixed string when adding or
+        removing a single password.
+
+        ``hashed_passwords`` if specified is a list of SHA-256 hashed passwords
+        to add to or remove from the user. Each hashed password must be
+        prefixed with a '+' to add or a '-' to remove. For convenience,
+        the value of ``hashed_passwords`` can be a simple prefixed string when
+        adding or removing a single password.
+
+        ``categories`` if specified is a list of strings representing category
+        permissions. Each string must be prefixed with either a '+' to add the
+        category permission or a '-' to remove the category permission.
+
+        ``commands`` if specified is a list of strings representing command
+        permissions. Each string must be prefixed with either a '+' to add the
+        command permission or a '-' to remove the command permission.
+
+        ``keys`` if specified is a list of key patterns to grant the user
+        access to. Keys patterns allow '*' to support wildcard matching. For
+        example, '*' grants access to all keys while 'cache:*' grants access
+        to all keys that are prefixed with 'cache:'. ``keys`` should not be
+        prefixed with a '~'.
+
+        ``reset`` is a boolean indicating whether the user should be fully
+        reset prior to applying the new ACL. Setting this to True will
+        remove all existing passwords, flags and privileges from the user and
+        then apply the specified rules. If this is False, the user's existing
+        passwords, flags and privileges will be kept and any new specified
+        rules will be applied on top.
+
+        ``reset_keys`` is a boolean indicating whether the user's key
+        permissions should be reset prior to applying any new key permissions
+        specified in ``keys``. If this is False, the user's existing
+        key permissions will be kept and any new specified key permissions
+        will be applied on top.
+
+        ``reset_passwords`` is a boolean indicating whether to remove all
+        existing passwords and the 'nopass' flag from the user prior to
+        applying any new passwords specified in 'passwords' or
+        'hashed_passwords'. If this is False, the user's existing passwords
+        and 'nopass' status will be kept and any new specified passwords
+        or hashed_passwords will be applied on top.
+        """
+        encoder = self.connection_pool.get_encoder()
+        pieces = [username]
+
+        if reset:
+            pieces.append(b'reset')
+
+        if reset_keys:
+            pieces.append(b'resetkeys')
+
+        if reset_passwords:
+            pieces.append(b'resetpass')
+
+        if enabled:
+            pieces.append(b'on')
+        else:
+            pieces.append(b'off')
+
+        if (passwords or hashed_passwords) and nopass:
+            raise DataError('Cannot set \'nopass\' and supply '
+                            '\'passwords\' or \'hashed_passwords\'')
+
+        if passwords:
+            # as most users will have only one password, allow remove_passwords
+            # to be specified as a simple string or a list
+            passwords = list_or_args(passwords, [])
+            for i, password in enumerate(passwords):
+                password = encoder.encode(password)
+                if password.startswith(b'+'):
+                    pieces.append(b'>%s' % password[1:])
+                elif password.startswith(b'-'):
+                    pieces.append(b'<%s' % password[1:])
+                else:
+                    raise DataError('Password %d must be prefixeed with a '
+                                    '"+" to add or a "-" to remove' % i)
+
+        if hashed_passwords:
+            # as most users will have only one password, allow remove_passwords
+            # to be specified as a simple string or a list
+            hashed_passwords = list_or_args(hashed_passwords, [])
+            for i, hashed_password in enumerate(hashed_passwords):
+                hashed_password = encoder.encode(hashed_password)
+                if hashed_password.startswith(b'+'):
+                    pieces.append(b'#%s' % hashed_password[1:])
+                elif hashed_password.startswith(b'-'):
+                    pieces.append(b'!%s' % hashed_password[1:])
+                else:
+                    raise DataError('Hashed %d password must be prefixeed '
+                                    'with a "+" to add or a "-" to remove' % i)
+
+        if nopass:
+            pieces.append(b'nopass')
+
+        if categories:
+            for category in categories:
+                category = encoder.encode(category)
+                # categories can be prefixed with one of (+@, +, -@, -)
+                if category.startswith(b'+@'):
+                    pieces.append(category)
+                elif category.startswith(b'+'):
+                    pieces.append(b'+@%s' % category[1:])
+                elif category.startswith(b'-@'):
+                    pieces.append(category)
+                elif category.startswith(b'-'):
+                    pieces.append(b'-@%s' % category[1:])
+                else:
+                    raise DataError('Category "%s" must be prefixed with '
+                                    '"+" or "-"'
+                                    % encoder.decode(category, force=True))
+        if commands:
+            for cmd in commands:
+                cmd = encoder.encode(cmd)
+                if not cmd.startswith(b'+') and not cmd.startswith(b'-'):
+                    raise DataError('Command "%s" must be prefixed with '
+                                    '"+" or "-"'
+                                    % encoder.decode(cmd, force=True))
+                pieces.append(cmd)
+
+        if keys:
+            for key in keys:
+                key = encoder.encode(key)
+                pieces.append(b'~%s' % key)
+
+        return self.execute_command('ACL SETUSER', *pieces)
+
+    def acl_deluser(self, username):
+        """Delete the ACL for the specified ``username``"""
+        return self.execute_command('ACL DELUSER', username)
+
+    def acl_cat(self, category=None):
+        """
+        Returns a list of categories or commands within a category.
+
+        If ``category`` is not supplied, returns a list of all categories.
+        If ``category`` is supplied, returns a list of all commands within
+        that category.
+        """
+        pieces = [category] if category else []
+        return self.execute_command('ACL CAT', *pieces)
+
+    def acl_genpass(self):
+        """Generate a random password value"""
+        return self.execute_command('ACL GENPASS')
+
+    def acl_whoami(self):
+        """Get the username for the current connection"""
+        return self.execute_command('ACL WHOAMI')
+
+    def acl_log(self, count=None):
+        """
+        Get ACL logs as a list.
+
+        :param int count: Get logs[0:count].
+        :rtype: List.
+        """
+        args = []
+        if count is not None:
+            if not isinstance(count, int):
+                raise DataError('ACL LOG count must be an '
+                                'integer')
+            args.append(count)
+
+        return self.execute_command('ACL LOG', *args)
+
+    def acl_log_reset(self):
+        """
+        Reset ACL logs.
+
+        :rtype: Boolean.
+        """
+        args = [b'RESET']
+        return self.execute_command('ACL LOG', *args)
+    # endregion
+
+    # region CLIENT COMMANDS
+    def client_id(self):
+        """Returns the current connection id"""
+        return self.execute_command('CLIENT ID')
+
+    def client_info(self):
+        """
+        Returns information and statistics about the current
+        client connection.
+        """
+        return self.execute_command('CLIENT INFO')
+
+    def client_kill(self, address):
+        """Disconnects the client at ``address`` (ip:port)"""
+        return self.execute_command('CLIENT KILL', address)
+
+    def client_kill_filter(self, _id=None, _type=None, addr=None,
+                           skipme=None, laddr=None):
+        """
+        Disconnects client(s) using a variety of filter options
+        :param id: Kills a client by its unique ID field
+        :param type: Kills a client by type where type is one of 'normal',
+        'master', 'slave' or 'pubsub'
+        :param addr: Kills a client by its 'address:port'
+        :param skipme: If True, then the client calling the command
+        :param laddr: Kills a cient by its 'local (bind)  address:port'
+        will not get killed even if it is identified by one of the filter
+        options. If skipme is not provided, the server defaults to skipme=True
+        """
+        args = []
+        if _type is not None:
+            client_types = ('normal', 'master', 'slave', 'pubsub')
+            if str(_type).lower() not in client_types:
+                raise DataError("CLIENT KILL type must be one of %r" % (
+                                client_types,))
+            args.extend((b'TYPE', _type))
+        if skipme is not None:
+            if not isinstance(skipme, bool):
+                raise DataError("CLIENT KILL skipme must be a bool")
+            if skipme:
+                args.extend((b'SKIPME', b'YES'))
+            else:
+                args.extend((b'SKIPME', b'NO'))
+        if _id is not None:
+            args.extend((b'ID', _id))
+        if addr is not None:
+            args.extend((b'ADDR', addr))
+        if laddr is not None:
+            args.extend((b'LADDR', laddr))
+        if not args:
+            raise DataError("CLIENT KILL <filter> <value> ... ... <filter> "
+                            "<value> must specify at least one filter")
+        return self.execute_command('CLIENT KILL', *args)
+
+    def client_list(self, _type=None, client_id=None):
+        """
+        Returns a list of currently connected clients.
+        If type of client specified, only that type will be returned.
+
+        :param _type: optional. one of the client types (normal, master,
+         replica, pubsub)
+        :param client_id: optional. will return entries for clients with
+        ID matching the client-id argument.
+        """
+        args = []
+        if _type is not None:
+            client_types = ('normal', 'master', 'replica', 'pubsub')
+            if str(_type).lower() not in client_types:
+                raise DataError("CLIENT LIST _type must be one of %r" % (
+                                client_types,))
+            args.append(b'TYPE')
+            args.append(_type)
+        if client_id is not None:
+            args.append(b"ID")
+            args.append(client_id)
+        return self.execute_command('CLIENT LIST', *args)
+
+    def client_getname(self):
+        """Returns the current connection name."""
+        return self.execute_command('CLIENT GETNAME')
+
+    def client_unpause(self):
+        """Unpause all redis clients."""
+        return self.execute_command('CLIENT UNPAUSE')
+
+    def client_pause(self, timeout):
+        """
+        Suspend all the Redis clients for the specified amount of time.
+
+        :param timeout: milliseconds to pause clients
+        """
+        if not isinstance(timeout, int):
+            raise DataError("CLIENT PAUSE timeout must be an integer")
+        return self.execute_command('CLIENT PAUSE', str(timeout))
+
+    def client_setname(self, name):
+        """Sets the current connection name."""
+        return self.execute_command('CLIENT SETNAME', name)
+
+    def client_unblock(self, client_id, error=False):
+        """
+        Unblocks a connection by its client id.
+        If ``error`` is True, unblocks the client with a special error message.
+        If ``error`` is False (default), the client is unblocked using the
+        regular timeout mechanism.
+        """
+        args = ['CLIENT UNBLOCK', int(client_id)]
+        if error:
+            args.append(b'ERROR')
+        return self.execute_command(*args)
+    # endregion
+
+    def cluster(self, cluster_arg, *args):
+        return self.execute_command('CLUSTER %s' % cluster_arg.upper(), *args)
+
+    def config_get(self, pattern="*"):
+        """Return a dictionary of configuration based on the ``pattern``."""
+        return self.execute_command('CONFIG GET', pattern)
+
+    def config_rewrite(self):
+        """Rewrite config file with the minimal change to reflect running config."""
+        return self.execute_command('CONFIG REWRITE')
+
+    def config_set(self, name, value):
+        """Set config item ``name`` with ``value``."""
+        return self.execute_command('CONFIG SET', name, value)
+
+    def config_resetstat(self):
+        """Reset runtime statistics."""
+        return self.execute_command('CONFIG RESETSTAT')
+
+    # region GEO COMMANDS
+    def geoadd(self, name, *values):
+        """
+        Add the specified geospatial items to the specified key identified
+        by the ``name`` argument. The Geospatial items are given as ordered
+        members of the ``values`` argument, each item or place is formed by
+        the triad longitude, latitude and name.
+        """
+        if len(values) % 3 != 0:
+            raise DataError("GEOADD requires places with lon, lat and name"
+                            " values")
+        return self.execute_command('GEOADD', name, *values)
+
+    def geohash(self, name, *values):
+        """
+        Return the geo hash string for each item of ``values`` members of
+        the specified key identified by the ``name`` argument.
+        """
+        return self.execute_command('GEOHASH', name, *values)
+
+    def geopos(self, name, *values):
+        """
+        Return the positions of each item of ``values`` as members of
+        the specified key identified by the ``name`` argument. Each position
+        is represented by the pairs lon and lat.
+        """
+        return self.execute_command('GEOPOS', name, *values)
+
+    def geodist(self, name, place1, place2, unit=None):
+        """
+        Return the distance between ``place1`` and ``place2`` members of the
+        ``name`` key.
+        The units must be one of the following : m, km, mi or ft. By default
+        meters are used.
+        """
+        pieces = [name, place1, place2]
+        if unit and unit not in ('m', 'km', 'mi', 'ft'):
+            raise DataError("GEODIST invalid unit")
+        elif unit:
+            pieces.append(unit)
+        return self.execute_command('GEODIST', *pieces)
+
+    def georadius(self, name, longitude, latitude, radius, unit=None,
+                  withdist=False, withcoord=False, withhash=False, count=None,
+                  sort=None, store=None, store_dist=None):
+        """
+        Return the members of the specified key identified by the
+        ``name`` argument which are within the borders of the area specified
+        with the ``latitude`` and ``longitude`` location and the maximum
+        distance from the center specified by the ``radius`` value.
+
+        The units must be one of the following : m, km mi, ft. By default
+
+        ``withdist`` indicates to return the distances of each place.
+
+        ``withcoord`` indicates to return the latitude and longitude of
+        each place.
+
+        ``withhash`` indicates to return the geohash string of each place.
+
+        ``count`` indicates to return the number of elements up to N.
+
+        ``sort`` indicates to return the places in a sorted way, ASC for
+        nearest to fairest and DESC for fairest to nearest.
+
+        ``store`` indicates to save the places names in a sorted set named
+        with a specific key, each element of the destination sorted set is
+        populated with the score got from the original geo sorted set.
+
+        ``store_dist`` indicates to save the places names in a sorted set
+        named with a specific key, instead of ``store`` the sorted set
+        destination score is set with the distance.
+        """
+        return self._georadiusgeneric('GEORADIUS',
+                                      name, longitude, latitude, radius,
+                                      unit=unit, withdist=withdist,
+                                      withcoord=withcoord, withhash=withhash,
+                                      count=count, sort=sort, store=store,
+                                      store_dist=store_dist)
+
+    def georadiusbymember(self, name, member, radius, unit=None,
+                          withdist=False, withcoord=False, withhash=False,
+                          count=None, sort=None, store=None, store_dist=None):
+        """
+        This command is exactly like ``georadius`` with the sole difference
+        that instead of taking, as the center of the area to query, a longitude
+        and latitude value, it takes the name of a member already existing
+        inside the geospatial index represented by the sorted set.
+        """
+        return self._georadiusgeneric('GEORADIUSBYMEMBER',
+                                      name, member, radius, unit=unit,
+                                      withdist=withdist, withcoord=withcoord,
+                                      withhash=withhash, count=count,
+                                      sort=sort, store=store,
+                                      store_dist=store_dist)
+
+    def _georadiusgeneric(self, command, *args, **kwargs):
+        pieces = list(args)
+        if kwargs['unit'] and kwargs['unit'] not in ('m', 'km', 'mi', 'ft'):
+            raise DataError("GEORADIUS invalid unit")
+        elif kwargs['unit']:
+            pieces.append(kwargs['unit'])
+        else:
+            pieces.append('m',)
+
+        for arg_name, byte_repr in (
+                ('withdist', b'WITHDIST'),
+                ('withcoord', b'WITHCOORD'),
+                ('withhash', b'WITHHASH')):
+            if kwargs[arg_name]:
+                pieces.append(byte_repr)
+
+        if kwargs['count']:
+            pieces.extend([b'COUNT', kwargs['count']])
+
+        if kwargs['sort']:
+            if kwargs['sort'] == 'ASC':
+                pieces.append(b'ASC')
+            elif kwargs['sort'] == 'DESC':
+                pieces.append(b'DESC')
+            else:
+                raise DataError("GEORADIUS invalid sort")
+
+        if kwargs['store'] and kwargs['store_dist']:
+            raise DataError("GEORADIUS store and store_dist cant be set"
+                            " together")
+
+        if kwargs['store']:
+            pieces.extend([b'STORE', kwargs['store']])
+
+        if kwargs['store_dist']:
+            pieces.extend([b'STOREDIST', kwargs['store_dist']])
+
+        return self.execute_command(command, *pieces, **kwargs)
+    #endregion
+
+    # region HASH COMMANDS
+    def hdel(self, name, *keys):
+        """Delete ``keys`` from hash ``name``."""
+        return self.execute_command('HDEL', name, *keys)
+
+    def hexists(self, name, key):
+        """Returns a boolean indicating if ``key`` exists within hash ``name``."""
+        return self.execute_command('HEXISTS', name, key)
+
+    def hget(self, name, key):
+        """Return the value of ``key`` within the hash ``name``"""
+        return self.execute_command('HGET', name, key)
+
+    def hgetall(self, name):
+        """Return a Python dict of the hash's name/value pairs."""
+        return self.execute_command('HGETALL', name)
+
+    def hincrby(self, name, key, amount=1):
+        """Increment the value of ``key`` in hash ``name`` by ``amount``."""
+        return self.execute_command('HINCRBY', name, key, amount)
+
+    def hincrbyfloat(self, name, key, amount=1.0):
+        """Increment the value of ``key`` in hash ``name`` by floating ``amount``."""
+        return self.execute_command('HINCRBYFLOAT', name, key, amount)
+
+    def hkeys(self, name):
+        """Return the list of keys within hash ``name``."""
+        return self.execute_command('HKEYS', name)
+
+    def hlen(self, name):
+        """Return the number of elements in hash ``name``."""
+        return self.execute_command('HLEN', name)
+
+    def hmget(self, name, keys, *args):
+        """Returns a list of values ordered identically to ``keys``."""
+        args = list_or_args(keys, args)
+        return self.execute_command('HMGET', name, *args)
+
+    def hmset(self, name, mapping):
+        """
+        Set key to value within hash ``name`` for each corresponding
+        key and value from the ``mapping`` dict.
+        """
+        warnings.warn(
+            '%s.hmset() is deprecated. Use %s.hset() instead.'
+            % (self.__class__.__name__, self.__class__.__name__),
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if not mapping:
+            raise DataError("'hmset' with 'mapping' of length 0")
+        items = []
+        for pair in mapping.items():
+            items.extend(pair)
+        return self.execute_command('HMSET', name, *items)
+
+    def hset(self, name, key=None, value=None, mapping=None):
+        """
+        Set ``key`` to ``value`` within hash ``name``,
+        ``mapping`` accepts a dict of key/value pairs that will be
+        added to hash ``name``.
+        Returns the number of fields that were added.
+        """
+        if key is None and not mapping:
+            raise DataError("'hset' with no key value pairs")
+        items = []
+        if key is not None:
+            items.extend((key, value))
+        if mapping:
+            for pair in mapping.items():
+                items.extend(pair)
+
+        return self.execute_command('HSET', name, *items)
+
+    def hsetnx(self, name, key, value):
+        """
+        Set ``key`` to ``value`` within hash ``name`` if ``key`` does not
+        exist.  Returns 1 if HSETNX created a field, otherwise 0.
+        """
+        return self.execute_command('HSETNX', name, key, value)
+
+    def hrandfield(self, key, count=None, withvalues=False):
+        """
+        Return a random field from the hash value stored at key.
+
+        count: if the argument is positive, return an array of distinct fields.
+        If called with a negative count, the behavior changes and the command
+        is allowed to return the same field multiple times. In this case,
+        the number of returned fields is the absolute value of the
+        specified count.
+        withvalues: The optional WITHVALUES modifier changes the reply so it
+        includes the respective values of the randomly selected hash fields.
+        """
+        params = []
+        if count is not None:
+            params.append(count)
+        if withvalues:
+            params.append("WITHVALUES")
+
+        return self.execute_command("HRANDFIELD", key, *params)
+
+    def hstrlen(self, name, key):
+        """
+        Return the number of bytes stored in the value of ``key``
+        within hash ``name``
+        """
+        return self.execute_command('HSTRLEN', name, key)
+
+    def hvals(self, name):
+        """Return the list of values within hash ``name``."""
+        return self.execute_command('HVALS', name)
+    # endregion
+
+    def info(self, section=None):
+        """
+        Returns a dictionary containing information about the Redis server.
+
+        The ``section`` option can be used to select a specific section
+        of information.
+
+        The section option is not supported by older versions of Redis Server,
+        and will generate ResponseError.
+        """
+        if section is None:
+            return self.execute_command('INFO')
+        else:
+            return self.execute_command('INFO', section)
+
+    def migrate(self, host, port, keys, destination_db, timeout,
+                copy=False, replace=False, auth=None):
+        """
+        Migrate 1 or more keys from the current Redis server to a different
+        server specified by the ``host``, ``port`` and ``destination_db``.
+
+        The ``timeout``, specified in milliseconds, indicates the maximum
+        time the connection between the two servers can be idle before the
+        command is interrupted.
+
+        If ``copy`` is True, the specified ``keys`` are NOT deleted from
+        the source server.
+
+        If ``replace`` is True, this operation will overwrite the keys
+        on the destination server if they exist.
+
+        If ``auth`` is specified, authenticate to the destination server with
+        the password provided.
+        """
+        keys = list_or_args(keys, [])
+        if not keys:
+            raise DataError('MIGRATE requires at least one key')
+        pieces = []
+        if copy:
+            pieces.append(b'COPY')
+        if replace:
+            pieces.append(b'REPLACE')
+        if auth:
+            pieces.append(b'AUTH')
+            pieces.append(auth)
+        pieces.append(b'KEYS')
+        pieces.extend(keys)
+        return self.execute_command('MIGRATE', host, port, '', destination_db,
+                                    timeout, *pieces)
+
+    # region MEMORY COMMANDS
+    def memory_purge(self):
+        """Attempts to purge dirty pages for reclamation by allocator."""
+        return self.execute_command('MEMORY PURGE')
+
+    def memory_stats(self):
+        """Return a dictionary of memory stats."""
+        return self.execute_command('MEMORY STATS')
+
+    def memory_usage(self, key, samples=None):
+        """
+        Return the total memory usage for key, its value and associated
+        administrative overheads.
+
+        For nested data structures, ``samples`` is the number of elements to
+        sample. If left unspecified, the server's default is 5. Use 0 to sample
+        all elements.
+        """
+        args = []
+        if isinstance(samples, int):
+            args.extend([b'SAMPLES', samples])
+        return self.execute_command('MEMORY USAGE', key, *args)
+    # endregion
+
+    # region MODULE COMMANDS
+    def module_list(self):
+        """
+        Returns a list of dictionaries containing the name and version of
+        all loaded modules.
+        """
+        return self.execute_command('MODULE LIST')
+
+    def module_load(self, path):
+        """
+        Loads the module from ``path``.
+        Raises ``ModuleError`` if a module is not found at ``path``.
+        """
+        return self.execute_command('MODULE LOAD', path)
+
+    def module_unload(self, name):
+        """
+        Unloads the module ``name``.
+        Raises ``ModuleError`` if ``name`` is not in loaded modules.
+        """
+        return self.execute_command('MODULE UNLOAD', name)
+    # endregion
+
+    def object(self, infotype, key):
+        """Return the encoding, idletime, or refcount about the key."""
+        return self.execute_command('OBJECT', infotype, key, infotype=infotype)
+
+    def ping(self):
+        """Ping the Redis server."""
+        return self.execute_command('PING')
+
+    def publish(self, channel, message):
+        """
+        Publish ``message`` on ``channel``.
+        Returns the number of subscribers the message was delivered to.
+        """
+        return self.execute_command('PUBLISH', channel, message)
+
+    # region HYPERLOGLOG COMMANDS
+    def pfadd(self, name, *values):
+        """Adds the specified elements to the specified HyperLogLog."""
+        return self.execute_command('PFADD', name, *values)
+
+    def pfcount(self, *sources):
+        """
+        Return the approximated cardinality of
+        the set observed by the HyperLogLog at key(s).
+        """
+        return self.execute_command('PFCOUNT', *sources)
+
+    def pfmerge(self, dest, *sources):
+        """Merge N different HyperLogLogs into a single one."""
+        return self.execute_command('PFMERGE', dest, *sources)
+    # endregion
+
+    # region SETS COMMANDS
+    def sadd(self, name, *values):
+        """Add ``value(s)`` to set ``name``."""
+        return self.execute_command('SADD', name, *values)
+
+    def scard(self, name):
+        """Return the number of elements in set ``name``."""
+        return self.execute_command('SCARD', name)
+
+    def sdiff(self, keys, *args):
+        """Return the difference of sets specified by ``keys``."""
+        args = list_or_args(keys, args)
+        return self.execute_command('SDIFF', *args)
+
+    def sdiffstore(self, dest, keys, *args):
+        """
+        Store the difference of sets specified by ``keys`` into a new
+        set named ``dest``.  Returns the number of keys in the new set.
+        """
+        args = list_or_args(keys, args)
+        return self.execute_command('SDIFFSTORE', dest, *args)
+
+    def sinter(self, keys, *args):
+        """Return the intersection of sets specified by ``keys``."""
+        args = list_or_args(keys, args)
+        return self.execute_command('SINTER', *args)
+
+    def sinterstore(self, dest, keys, *args):
+        """
+        Store the intersection of sets specified by ``keys`` into a new
+        set named ``dest``.
+
+        Returns the number of keys in the new set.
+        """
+        args = list_or_args(keys, args)
+        return self.execute_command('SINTERSTORE', dest, *args)
+
+    def sismember(self, name, value):
+        """Return a boolean indicating if ``value`` is a member of set ``name``."""
+        return self.execute_command('SISMEMBER', name, value)
+
+    def smembers(self, name):
+        """Return all members of the set ``name``."""
+        return self.execute_command('SMEMBERS', name)
+
+    def smove(self, src, dst, value):
+        """Move ``value`` from set ``src`` to set ``dst`` atomically."""
+        return self.execute_command('SMOVE', src, dst, value)
+
+    def spop(self, name, count=None):
+        """Remove and return a random member of set ``name``."""
+        args = (count is not None) and [count] or []
+        return self.execute_command('SPOP', name, *args)
+
+    def srandmember(self, name, number=None):
+        """
+        If ``number`` is None, returns a random member of set ``name``.
+
+        If ``number`` is supplied, returns a list of ``number`` random
+        members of set ``name``. Note this is only available when running
+        Redis 2.6+.
+        """
+        args = (number is not None) and [number] or []
+        return self.execute_command('SRANDMEMBER', name, *args)
+
+    def srem(self, name, *values):
+        """Remove ``values`` from set ``name``."""
+        return self.execute_command('SREM', name, *values)
+
+    def sunion(self, keys, *args):
+        """Return the union of sets specified by ``keys``."""
+        args = list_or_args(keys, args)
+        return self.execute_command('SUNION', *args)
+
+    def sunionstore(self, dest, keys, *args):
+        """
+        Store the union of sets specified by ``keys`` into a new
+        set named ``dest``.  Returns the number of keys in the new set.
+        """
+        args = list_or_args(keys, args)
+        return self.execute_command('SUNIONSTORE', dest, *args)
+    # endregion
+
+    def save(self):
+        """
+        Tell the Redis server to save its data to disk,
+        blocking until the save is complete.
+        """
+        return self.execute_command('SAVE')
+
     # region SCAN COMMANDS
     def scan(self, cursor=0, match=None, count=None, _type=None):
         """
@@ -1597,88 +1898,107 @@ class Commands:
             yield from data
     # endregion
 
-    # region SETS COMMANDS
-    def sadd(self, name, *values):
-        """Add ``value(s)`` to set ``name``."""
-        return self.execute_command('SADD', name, *values)
-
-    def scard(self, name):
-        """Return the number of elements in set ``name``."""
-        return self.execute_command('SCARD', name)
-
-    def sdiff(self, keys, *args):
-        """Return the difference of sets specified by ``keys``."""
-        args = list_or_args(keys, args)
-        return self.execute_command('SDIFF', *args)
-
-    def sdiffstore(self, dest, keys, *args):
+    # region SCRIPT commands
+    def register_script(self, script):
         """
-        Store the difference of sets specified by ``keys`` into a new
-        set named ``dest``.  Returns the number of keys in the new set.
+        Register a Lua ``script`` specifying the ``keys`` it will touch.
+        Returns a Script object that is callable and hides the complexity of
+        deal with scripts, keys, and shas. This is the preferred way to work
+        with Lua scripts.
         """
-        args = list_or_args(keys, args)
-        return self.execute_command('SDIFFSTORE', dest, *args)
+        return Script(self, script)
 
-    def sinter(self, keys, *args):
-        """Return the intersection of sets specified by ``keys``."""
-        args = list_or_args(keys, args)
-        return self.execute_command('SINTER', *args)
-
-    def sinterstore(self, dest, keys, *args):
+    def script_exists(self, *args):
         """
-        Store the intersection of sets specified by ``keys`` into a new
-        set named ``dest``.
-
-        Returns the number of keys in the new set.
+        Check if a script exists in the script cache by specifying the SHAs of
+        each script as ``args``. Returns a list of boolean values indicating if
+        if each already script exists in the cache.
         """
-        args = list_or_args(keys, args)
-        return self.execute_command('SINTERSTORE', dest, *args)
+        return self.execute_command('SCRIPT EXISTS', *args)
 
-    def sismember(self, name, value):
-        """Return a boolean indicating if ``value`` is a member of set ``name``."""
-        return self.execute_command('SISMEMBER', name, value)
+    def script_flush(self):
+        """Flush all scripts from the script cache."""
+        return self.execute_command('SCRIPT FLUSH')
 
-    def smembers(self, name):
-        """Return all members of the set ``name``."""
-        return self.execute_command('SMEMBERS', name)
+    def script_kill(self):
+        """Kill the currently executing Lua script."""
+        return self.execute_command('SCRIPT KILL')
 
-    def smove(self, src, dst, value):
-        """Move ``value`` from set ``src`` to set ``dst`` atomically."""
-        return self.execute_command('SMOVE', src, dst, value)
-
-    def spop(self, name, count=None):
-        """Remove and return a random member of set ``name``."""
-        args = (count is not None) and [count] or []
-        return self.execute_command('SPOP', name, *args)
-
-    def srandmember(self, name, number=None):
-        """
-        If ``number`` is None, returns a random member of set ``name``.
-
-        If ``number`` is supplied, returns a list of ``number`` random
-        members of set ``name``. Note this is only available when running
-        Redis 2.6+.
-        """
-        args = (number is not None) and [number] or []
-        return self.execute_command('SRANDMEMBER', name, *args)
-
-    def srem(self, name, *values):
-        """Remove ``values`` from set ``name``."""
-        return self.execute_command('SREM', name, *values)
-
-    def sunion(self, keys, *args):
-        """Return the union of sets specified by ``keys``."""
-        args = list_or_args(keys, args)
-        return self.execute_command('SUNION', *args)
-
-    def sunionstore(self, dest, keys, *args):
-        """
-        Store the union of sets specified by ``keys`` into a new
-        set named ``dest``.  Returns the number of keys in the new set.
-        """
-        args = list_or_args(keys, args)
-        return self.execute_command('SUNIONSTORE', dest, *args)
+    def script_load(self, script):
+        """Load a Lua ``script`` into the script cache. Returns the SHA."""
+        return self.execute_command('SCRIPT LOAD', script)
     # endregion
+
+    def shutdown(self, save=False, nosave=False):
+        """Shutdown the Redis server.  If Redis has persistence configured,
+        data will be flushed before shutdown.  If the "save" option is set,
+        a data flush will be attempted even if there is no persistence
+        configured.  If the "nosave" option is set, no data flush will be
+        attempted.  The "save" and "nosave" options cannot both be set.
+        """
+        if save and nosave:
+            raise DataError('SHUTDOWN save and nosave cannot both be set')
+        args = ['SHUTDOWN']
+        if save:
+            args.append('SAVE')
+        if nosave:
+            args.append('NOSAVE')
+        try:
+            self.execute_command(*args)
+        except ConnectionError:
+            # a ConnectionError here is expected
+            return
+        raise RedisError("SHUTDOWN seems to have failed.")
+
+    def slaveof(self, host=None, port=None):
+        """
+        Set the server to be a replicated slave of the instance identified
+        by the ``host`` and ``port``. If called without arguments, the
+        instance is promoted to a master instead.
+        """
+        if host is None and port is None:
+            return self.execute_command('SLAVEOF', b'NO', b'ONE')
+        return self.execute_command('SLAVEOF', host, port)
+
+    def slowlog_get(self, num=None):
+        """
+        Get the entries from the slowlog. If ``num`` is specified, get the
+        most recent ``num`` items.
+        """
+        args = ['SLOWLOG GET']
+        if num is not None:
+            args.append(num)
+        decode_responses = self.connection_pool.connection_kwargs.get(
+            'decode_responses', False)
+        return self.execute_command(*args, decode_responses=decode_responses)
+
+    def slowlog_len(self):
+        """Get the number of items in the slowlog."""
+        return self.execute_command('SLOWLOG LEN')
+
+    def slowlog_reset(self):
+        """Remove all items in the slowlog."""
+        return self.execute_command('SLOWLOG RESET')
+
+    def swapdb(self, first, second):
+        """Swap two databases."""
+        return self.execute_command('SWAPDB', first, second)
+
+    def time(self):
+        """
+        Returns the server time as a 2-item tuple of ints:
+        (seconds since epoch, microseconds into this second).
+        """
+        return self.execute_command('TIME')
+
+    def wait(self, num_replicas, timeout):
+        """
+        Redis synchronous replication
+        That returns the number of replicas that processed the query when
+        we finally have at least ``num_replicas``, or when the ``timeout`` was
+        reached.
+        """
+        return self.execute_command('WAIT', num_replicas, timeout)
 
     # region STREAMS COMMANDS
     def xinfo_consumers(self, name, groupname):
@@ -2492,344 +2812,20 @@ class Commands:
         return self.execute_command(*pieces, **options)
     # endregion
 
-    # region HYPERLOGLOG COMMANDS
-    def pfadd(self, name, *values):
-        """Adds the specified elements to the specified HyperLogLog."""
-        return self.execute_command('PFADD', name, *values)
-
-    def pfcount(self, *sources):
-        """
-        Return the approximated cardinality of
-        the set observed by the HyperLogLog at key(s).
-        """
-        return self.execute_command('PFCOUNT', *sources)
-
-    def pfmerge(self, dest, *sources):
-        """Merge N different HyperLogLogs into a single one."""
-        return self.execute_command('PFMERGE', dest, *sources)
-    # endregion
-
-    # region HASH COMMANDS
-    def hdel(self, name, *keys):
-        """Delete ``keys`` from hash ``name``."""
-        return self.execute_command('HDEL', name, *keys)
-
-    def hexists(self, name, key):
-        """Returns a boolean indicating if ``key`` exists within hash ``name``."""
-        return self.execute_command('HEXISTS', name, key)
-
-    def hget(self, name, key):
-        """Return the value of ``key`` within the hash ``name``"""
-        return self.execute_command('HGET', name, key)
-
-    def hgetall(self, name):
-        """Return a Python dict of the hash's name/value pairs."""
-        return self.execute_command('HGETALL', name)
-
-    def hincrby(self, name, key, amount=1):
-        """Increment the value of ``key`` in hash ``name`` by ``amount``."""
-        return self.execute_command('HINCRBY', name, key, amount)
-
-    def hincrbyfloat(self, name, key, amount=1.0):
-        """Increment the value of ``key`` in hash ``name`` by floating ``amount``."""
-        return self.execute_command('HINCRBYFLOAT', name, key, amount)
-
-    def hkeys(self, name):
-        """Return the list of keys within hash ``name``."""
-        return self.execute_command('HKEYS', name)
-
-    def hlen(self, name):
-        """Return the number of elements in hash ``name``."""
-        return self.execute_command('HLEN', name)
-
-    def hmget(self, name, keys, *args):
-        """Returns a list of values ordered identically to ``keys``."""
-        args = list_or_args(keys, args)
-        return self.execute_command('HMGET', name, *args)
-
-    def hmset(self, name, mapping):
-        """
-        Set key to value within hash ``name`` for each corresponding
-        key and value from the ``mapping`` dict.
-        """
-        warnings.warn(
-            '%s.hmset() is deprecated. Use %s.hset() instead.'
-            % (self.__class__.__name__, self.__class__.__name__),
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if not mapping:
-            raise DataError("'hmset' with 'mapping' of length 0")
-        items = []
-        for pair in mapping.items():
-            items.extend(pair)
-        return self.execute_command('HMSET', name, *items)
-
-    def hset(self, name, key=None, value=None, mapping=None):
-        """
-        Set ``key`` to ``value`` within hash ``name``,
-        ``mapping`` accepts a dict of key/value pairs that will be
-        added to hash ``name``.
-        Returns the number of fields that were added.
-        """
-        if key is None and not mapping:
-            raise DataError("'hset' with no key value pairs")
-        items = []
-        if key is not None:
-            items.extend((key, value))
-        if mapping:
-            for pair in mapping.items():
-                items.extend(pair)
-
-        return self.execute_command('HSET', name, *items)
-
-    def hsetnx(self, name, key, value):
-        """
-        Set ``key`` to ``value`` within hash ``name`` if ``key`` does not
-        exist.  Returns 1 if HSETNX created a field, otherwise 0.
-        """
-        return self.execute_command('HSETNX', name, key, value)
-
-    def hrandfield(self, key, count=None, withvalues=False):
-        """
-        Return a random field from the hash value stored at key.
-
-        count: if the argument is positive, return an array of distinct fields.
-        If called with a negative count, the behavior changes and the command
-        is allowed to return the same field multiple times. In this case,
-        the number of returned fields is the absolute value of the
-        specified count.
-        withvalues: The optional WITHVALUES modifier changes the reply so it
-        includes the respective values of the randomly selected hash fields.
-        """
-        params = []
-        if count is not None:
-            params.append(count)
-        if withvalues:
-            params.append("WITHVALUES")
-
-        return self.execute_command("HRANDFIELD", key, *params)
-
-    def hstrlen(self, name, key):
-        """
-        Return the number of bytes stored in the value of ``key``
-        within hash ``name``
-        """
-        return self.execute_command('HSTRLEN', name, key)
-
-    def hvals(self, name):
-        """Return the list of values within hash ``name``."""
-        return self.execute_command('HVALS', name)
-    # endregion
-
     def pubsub_channels(self, pattern='*'):
-        """
-        Return a list of channels that have at least one subscriber
-        """
+        """Return a list of channels that have at least one subscriber."""
         return self.execute_command('PUBSUB CHANNELS', pattern)
 
     def pubsub_numpat(self):
-        """
-        Returns the number of subscriptions to patterns
-        """
+        """Returns the number of subscriptions to patterns."""
         return self.execute_command('PUBSUB NUMPAT')
 
     def pubsub_numsub(self, *args):
         """
         Return a list of (channel, number of subscribers) tuples
-        for each channel given in ``*args``
+        for each channel given in ``*args``.
         """
         return self.execute_command('PUBSUB NUMSUB', *args)
-
-    # region SCRIPT commands
-    def script_exists(self, *args):
-        """
-        Check if a script exists in the script cache by specifying the SHAs of
-        each script as ``args``. Returns a list of boolean values indicating if
-        if each already script exists in the cache.
-        """
-        return self.execute_command('SCRIPT EXISTS', *args)
-
-    def script_flush(self):
-        """Flush all scripts from the script cache."""
-        return self.execute_command('SCRIPT FLUSH')
-
-    def script_kill(self):
-        """Kill the currently executing Lua script."""
-        return self.execute_command('SCRIPT KILL')
-
-    def script_load(self, script):
-        """Load a Lua ``script`` into the script cache. Returns the SHA."""
-        return self.execute_command('SCRIPT LOAD', script)
-    # endregion
-
-    def register_script(self, script):
-        """
-        Register a Lua ``script`` specifying the ``keys`` it will touch.
-        Returns a Script object that is callable and hides the complexity of
-        deal with scripts, keys, and shas. This is the preferred way to work
-        with Lua scripts.
-        """
-        return Script(self, script)
-
-    # region GEO COMMANDS
-    def geoadd(self, name, *values):
-        """
-        Add the specified geospatial items to the specified key identified
-        by the ``name`` argument. The Geospatial items are given as ordered
-        members of the ``values`` argument, each item or place is formed by
-        the triad longitude, latitude and name.
-        """
-        if len(values) % 3 != 0:
-            raise DataError("GEOADD requires places with lon, lat and name"
-                            " values")
-        return self.execute_command('GEOADD', name, *values)
-
-    def geohash(self, name, *values):
-        """
-        Return the geo hash string for each item of ``values`` members of
-        the specified key identified by the ``name`` argument.
-        """
-        return self.execute_command('GEOHASH', name, *values)
-
-    def geopos(self, name, *values):
-        """
-        Return the positions of each item of ``values`` as members of
-        the specified key identified by the ``name`` argument. Each position
-        is represented by the pairs lon and lat.
-        """
-        return self.execute_command('GEOPOS', name, *values)
-
-    def geodist(self, name, place1, place2, unit=None):
-        """
-        Return the distance between ``place1`` and ``place2`` members of the
-        ``name`` key.
-        The units must be one of the following : m, km, mi or ft. By default
-        meters are used.
-        """
-        pieces = [name, place1, place2]
-        if unit and unit not in ('m', 'km', 'mi', 'ft'):
-            raise DataError("GEODIST invalid unit")
-        elif unit:
-            pieces.append(unit)
-        return self.execute_command('GEODIST', *pieces)
-
-    def georadius(self, name, longitude, latitude, radius, unit=None,
-                  withdist=False, withcoord=False, withhash=False, count=None,
-                  sort=None, store=None, store_dist=None):
-        """
-        Return the members of the specified key identified by the
-        ``name`` argument which are within the borders of the area specified
-        with the ``latitude`` and ``longitude`` location and the maximum
-        distance from the center specified by the ``radius`` value.
-
-        The units must be one of the following : m, km mi, ft. By default
-
-        ``withdist`` indicates to return the distances of each place.
-
-        ``withcoord`` indicates to return the latitude and longitude of
-        each place.
-
-        ``withhash`` indicates to return the geohash string of each place.
-
-        ``count`` indicates to return the number of elements up to N.
-
-        ``sort`` indicates to return the places in a sorted way, ASC for
-        nearest to fairest and DESC for fairest to nearest.
-
-        ``store`` indicates to save the places names in a sorted set named
-        with a specific key, each element of the destination sorted set is
-        populated with the score got from the original geo sorted set.
-
-        ``store_dist`` indicates to save the places names in a sorted set
-        named with a specific key, instead of ``store`` the sorted set
-        destination score is set with the distance.
-        """
-        return self._georadiusgeneric('GEORADIUS',
-                                      name, longitude, latitude, radius,
-                                      unit=unit, withdist=withdist,
-                                      withcoord=withcoord, withhash=withhash,
-                                      count=count, sort=sort, store=store,
-                                      store_dist=store_dist)
-
-    def georadiusbymember(self, name, member, radius, unit=None,
-                          withdist=False, withcoord=False, withhash=False,
-                          count=None, sort=None, store=None, store_dist=None):
-        """
-        This command is exactly like ``georadius`` with the sole difference
-        that instead of taking, as the center of the area to query, a longitude
-        and latitude value, it takes the name of a member already existing
-        inside the geospatial index represented by the sorted set.
-        """
-        return self._georadiusgeneric('GEORADIUSBYMEMBER',
-                                      name, member, radius, unit=unit,
-                                      withdist=withdist, withcoord=withcoord,
-                                      withhash=withhash, count=count,
-                                      sort=sort, store=store,
-                                      store_dist=store_dist)
-
-    def _georadiusgeneric(self, command, *args, **kwargs):
-        pieces = list(args)
-        if kwargs['unit'] and kwargs['unit'] not in ('m', 'km', 'mi', 'ft'):
-            raise DataError("GEORADIUS invalid unit")
-        elif kwargs['unit']:
-            pieces.append(kwargs['unit'])
-        else:
-            pieces.append('m',)
-
-        for arg_name, byte_repr in (
-                ('withdist', b'WITHDIST'),
-                ('withcoord', b'WITHCOORD'),
-                ('withhash', b'WITHHASH')):
-            if kwargs[arg_name]:
-                pieces.append(byte_repr)
-
-        if kwargs['count']:
-            pieces.extend([b'COUNT', kwargs['count']])
-
-        if kwargs['sort']:
-            if kwargs['sort'] == 'ASC':
-                pieces.append(b'ASC')
-            elif kwargs['sort'] == 'DESC':
-                pieces.append(b'DESC')
-            else:
-                raise DataError("GEORADIUS invalid sort")
-
-        if kwargs['store'] and kwargs['store_dist']:
-            raise DataError("GEORADIUS store and store_dist cant be set"
-                            " together")
-
-        if kwargs['store']:
-            pieces.extend([b'STORE', kwargs['store']])
-
-        if kwargs['store_dist']:
-            pieces.extend([b'STOREDIST', kwargs['store_dist']])
-
-        return self.execute_command(command, *pieces, **kwargs)
-    #endregion
-
-    # region MODULE COMMANDS
-    def module_list(self):
-        """
-        Returns a list of dictionaries containing the name and version of
-        all loaded modules.
-        """
-        return self.execute_command('MODULE LIST')
-
-    def module_load(self, path):
-        """
-        Loads the module from ``path``.
-        Raises ``ModuleError`` if a module is not found at ``path``.
-        """
-        return self.execute_command('MODULE LOAD', path)
-
-    def module_unload(self, name):
-        """
-        Unloads the module ``name``.
-        Raises ``ModuleError`` if ``name`` is not in loaded modules.
-        """
-        return self.execute_command('MODULE UNLOAD', name)
-    # endregion
 
 
 class Script:
