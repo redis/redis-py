@@ -382,14 +382,6 @@ class Commands:
     def cluster(self, cluster_arg, *args):
         return self.execute_command('CLUSTER %s' % cluster_arg.upper(), *args)
 
-    def readwrite(self):
-        "Disables read queries for a connection to a Redis Cluster slave node"
-        return self.execute_command('READWRITE')
-
-    def readonly(self):
-        "Enables read queries for a connection to a Redis Cluster replica node"
-        return self.execute_command('READONLY')
-
     def config_get(self, pattern="*"):
         """Return a dictionary of configuration based on the ``pattern``."""
         return self.execute_command('CONFIG GET', pattern)
@@ -441,29 +433,6 @@ class Commands:
         return self.execute_command('MIGRATE', host, port, '', destination_db,
                                     timeout, *pieces)
 
-    def object(self, infotype, key):
-        """Return the encoding, idletime, or refcount about the key."""
-        return self.execute_command('OBJECT', infotype, key, infotype=infotype)
-
-    def swapdb(self, first, second):
-        "Swap two databases"
-        return self.execute_command('SWAPDB', first, second)
-
-    def info(self, section=None):
-        """
-        Returns a dictionary containing information about the Redis server
-
-        The ``section`` option can be used to select a specific section
-        of information
-
-        The section option is not supported by older versions of Redis Server,
-        and will generate ResponseError
-        """
-        if section is None:
-            return self.execute_command('INFO')
-        else:
-            return self.execute_command('INFO', section)
-
     # region MEMORY commands
     def memory_purge(self):
         """Attempts to purge dirty pages for reclamation by allocator."""
@@ -488,16 +457,46 @@ class Commands:
         return self.execute_command('MEMORY USAGE', key, *args)
     # endregion
 
+    def object(self, infotype, key):
+        """Return the encoding, idletime, or refcount about the key."""
+        return self.execute_command('OBJECT', infotype, key, infotype=infotype)
+
     def ping(self):
-        "Ping the Redis server"
+        """Ping the Redis server."""
         return self.execute_command('PING')
+
+    def publish(self, channel, message):
+        """
+        Publish ``message`` on ``channel``.
+        Returns the number of subscribers the message was delivered to.
+        """
+        return self.execute_command('PUBLISH', channel, message)
 
     def save(self):
         """
         Tell the Redis server to save its data to disk,
-        blocking until the save is complete
+        blocking until the save is complete.
         """
         return self.execute_command('SAVE')
+
+    def swapdb(self, first, second):
+        "Swap two databases"
+        return self.execute_command('SWAPDB', first, second)
+
+    def info(self, section=None):
+        """
+        Returns a dictionary containing information about the Redis server
+
+        The ``section`` option can be used to select a specific section
+        of information
+
+        The section option is not supported by older versions of Redis Server,
+        and will generate ResponseError
+        """
+        if section is None:
+            return self.execute_command('INFO')
+        else:
+            return self.execute_command('INFO', section)
 
     def shutdown(self, save=False, nosave=False):
         """Shutdown the Redis server.  If Redis has persistence configured,
@@ -963,28 +962,34 @@ class Commands:
         """
         Set the value of key ``name`` to ``value`` that expires in ``time_ms``
         milliseconds. ``time_ms`` can be represented by an integer or a Python
-        timedelta object
+        timedelta object.
         """
         if isinstance(time_ms, datetime.timedelta):
             time_ms = int(time_ms.total_seconds() * 1000)
         return self.execute_command('PSETEX', name, time_ms, value)
 
     def pttl(self, name):
-        "Returns the number of milliseconds until the key ``name`` will expire"
+        """Returns the number of milliseconds until the key ``name`` will expire."""
         return self.execute_command('PTTL', name)
 
     def randomkey(self):
-        "Returns the name of a random key"
+        """Returns the name of a random key."""
         return self.execute_command('RANDOMKEY')
 
+    def readonly(self):
+        """Enables read queries for a connection to a Redis Cluster replica node."""
+        return self.execute_command('READONLY')
+
+    def readwrite(self):
+        """Disables read queries for a connection to a Redis Cluster slave node."""
+        return self.execute_command('READWRITE')
+
     def rename(self, src, dst):
-        """
-        Rename key ``src`` to ``dst``
-        """
+        """Rename key ``src`` to ``dst``."""
         return self.execute_command('RENAME', src, dst)
 
     def renamenx(self, src, dst):
-        "Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist"
+        """Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist."""
         return self.execute_command('RENAMENX', src, dst)
 
     def restore(self, name, ttl, value, replace=False, absttl=False):
@@ -1372,11 +1377,11 @@ class Commands:
         return self.execute_command('RPOPLPUSH', src, dst)
 
     def rpush(self, name, *values):
-        "Push ``values`` onto the tail of the list ``name``"
+        """Push ``values`` onto the tail of the list ``name``."""
         return self.execute_command('RPUSH', name, *values)
 
     def rpushx(self, name, value):
-        "Push ``value`` onto the tail of the list ``name`` if ``name`` exists"
+        """Push ``value`` onto the tail of the list ``name`` if ``name`` exists."""
         return self.execute_command('RPUSHX', name, value)
 
     def sort(self, name, start=None, num=None, by=None, get=None,
@@ -1594,13 +1599,13 @@ class Commands:
                                       score_cast_func=score_cast_func)
             yield from data
 
-    # SET COMMANDS
+    # region SET COMMANDS
     def sadd(self, name, *values):
-        "Add ``value(s)`` to set ``name``"
+        """Add ``value(s)`` to set ``name``."""
         return self.execute_command('SADD', name, *values)
 
     def scard(self, name):
-        "Return the number of elements in set ``name``"
+        """Return the number of elements in set ``name``."""
         return self.execute_command('SCARD', name)
 
     def sdiff(self, keys, *args):
@@ -2610,13 +2615,6 @@ class Commands:
         return self.execute_command('HVALS', name)
     # endregion
 
-    def publish(self, channel, message):
-        """
-        Publish ``message`` on ``channel``.
-        Returns the number of subscribers the message was delivered to.
-        """
-        return self.execute_command('PUBLISH', channel, message)
-
     def pubsub_channels(self, pattern='*'):
         """
         Return a list of channels that have at least one subscriber
@@ -2636,6 +2634,7 @@ class Commands:
         """
         return self.execute_command('PUBSUB NUMSUB', *args)
 
+    # region SCRIPT commands
     def script_exists(self, *args):
         """
         Check if a script exists in the script cache by specifying the SHAs of
@@ -2645,16 +2644,17 @@ class Commands:
         return self.execute_command('SCRIPT EXISTS', *args)
 
     def script_flush(self):
-        "Flush all scripts from the script cache"
+        """Flush all scripts from the script cache."""
         return self.execute_command('SCRIPT FLUSH')
 
     def script_kill(self):
-        "Kill the currently executing Lua script"
+        """Kill the currently executing Lua script."""
         return self.execute_command('SCRIPT KILL')
 
     def script_load(self, script):
-        "Load a Lua ``script`` into the script cache. Returns the SHA."
+        """Load a Lua ``script`` into the script cache. Returns the SHA."""
         return self.execute_command('SCRIPT LOAD', script)
+    # endregion
 
     def register_script(self, script):
         """
