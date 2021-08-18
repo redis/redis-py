@@ -425,13 +425,6 @@ class Commands:
         else:
             return self.execute_command('INFO', section)
 
-    def lastsave(self):
-        """
-        Return a Python datetime object representing the last time the
-        Redis database was saved to disk
-        """
-        return self.execute_command('LASTSAVE')
-
     def migrate(self, host, port, keys, destination_db, timeout,
                 copy=False, replace=False, auth=None):
         """
@@ -872,14 +865,14 @@ class Commands:
     def incr(self, name, amount=1):
         """
         Increments the value of ``key`` by ``amount``.  If no key exists,
-        the value will be initialized as ``amount``
+        the value will be initialized as ``amount``.
         """
         return self.incrby(name, amount)
 
     def incrby(self, name, amount=1):
         """
         Increments the value of ``key`` by ``amount``.  If no key exists,
-        the value will be initialized as ``amount``
+        the value will be initialized as ``amount``.
         """
         # An alias for ``incr()``, because it is already implemented
         # as INCRBY redis command.
@@ -888,22 +881,20 @@ class Commands:
     def incrbyfloat(self, name, amount=1.0):
         """
         Increments the value at key ``name`` by floating ``amount``.
-        If no key exists, the value will be initialized as ``amount``
+        If no key exists, the value will be initialized as ``amount``.
         """
         return self.execute_command('INCRBYFLOAT', name, amount)
 
     def keys(self, pattern='*'):
-        "Returns a list of keys matching ``pattern``"
+        """Returns a list of keys matching ``pattern``."""
         return self.execute_command('KEYS', pattern)
 
-    def lmove(self, first_list, second_list, src="LEFT", dest="RIGHT"):
+    def lastsave(self):
         """
-        Atomically returns and removes the first/last element of a list,
-        pushing it as the first/last element on the destination list.
-        Returns the element being popped and pushed.
+        Return a Python datetime object representing the last time the
+        Redis database was saved to disk.
         """
-        params = [first_list, second_list, src, dest]
-        return self.execute_command("LMOVE", *params)
+        return self.execute_command('LASTSAVE')
 
     def mget(self, keys, *args):
         """
@@ -1146,6 +1137,131 @@ class Commands:
         return self.execute_command('UNLINK', *names)
 
     # region LIST COMMANDS
+    def lindex(self, name, index):
+        """
+        Return the item from list ``name`` at position ``index``.
+
+        Negative indexes are supported and will return an item at the
+        end of the list.
+        """
+        return self.execute_command('LINDEX', name, index)
+
+    def linsert(self, name, where, refvalue, value):
+        """
+        Insert ``value`` in list ``name`` either immediately before or after
+        [``where``] ``refvalue``
+
+        Returns the new length of the list on success or -1 if ``refvalue``
+        is not in the list.
+        """
+        return self.execute_command('LINSERT', name, where, refvalue, value)
+
+    def llen(self, name):
+        """Return the length of the list ``name``."""
+        return self.execute_command('LLEN', name)
+
+    def lmove(self, first_list, second_list, src="LEFT", dest="RIGHT"):
+        """
+        Atomically returns and removes the first/last element of a list,
+        pushing it as the first/last element on the destination list.
+        Returns the element being popped and pushed.
+        """
+        params = [first_list, second_list, src, dest]
+        return self.execute_command("LMOVE", *params)
+
+    def lpop(self, name, count=None):
+        """
+        Removes and returns the first elements of the list ``name``.
+
+        By default, the command pops a single element from the beginning of
+        the list. When provided with the optional ``count`` argument, the reply
+        will consist of up to count elements, depending on the list's length.
+        """
+        if count is not None:
+            return self.execute_command('LPOP', name, count)
+        else:
+            return self.execute_command('LPOP', name)
+
+    def lpos(self, name, value, rank=None, count=None, maxlen=None):
+        """
+        Get position of ``value`` within the list ``name``
+
+         If specified, ``rank`` indicates the "rank" of the first element to
+         return in case there are multiple copies of ``value`` in the list.
+         By default, LPOS returns the position of the first occurrence of
+         ``value`` in the list. When ``rank`` 2, LPOS returns the position of
+         the second ``value`` in the list. If ``rank`` is negative, LPOS
+         searches the list in reverse. For example, -1 would return the
+         position of the last occurrence of ``value`` and -2 would return the
+         position of the next to last occurrence of ``value``.
+
+         If specified, ``count`` indicates that LPOS should return a list of
+         up to ``count`` positions. A ``count`` of 2 would return a list of
+         up to 2 positions. A ``count`` of 0 returns a list of all positions
+         matching ``value``. When ``count`` is specified and but ``value``
+         does not exist in the list, an empty list is returned.
+
+         If specified, ``maxlen`` indicates the maximum number of list
+         elements to scan. A ``maxlen`` of 1000 will only return the
+         position(s) of items within the first 1000 entries in the list.
+         A ``maxlen`` of 0 (the default) will scan the entire list.
+        """
+        pieces = [name, value]
+        if rank is not None:
+            pieces.extend(['RANK', rank])
+
+        if count is not None:
+            pieces.extend(['COUNT', count])
+
+        if maxlen is not None:
+            pieces.extend(['MAXLEN', maxlen])
+
+        return self.execute_command('LPOS', *pieces)
+
+    def lpush(self, name, *values):
+        """Push ``values`` onto the head of the list ``name``."""
+        return self.execute_command('LPUSH', name, *values)
+
+    def lpushx(self, name, value):
+        """Push ``value`` onto the head of the list ``name`` if ``name`` exists."""
+        return self.execute_command('LPUSHX', name, value)
+
+    def lrange(self, name, start, end):
+        """
+        Return a slice of the list ``name`` between
+        position ``start`` and ``end``.
+
+        ``start`` and ``end`` can be negative numbers just like
+        Python slicing notation.
+        """
+        return self.execute_command('LRANGE', name, start, end)
+
+    def lrem(self, name, count, value):
+        """
+        Remove the first ``count`` occurrences of elements equal to ``value``
+        from the list stored at ``name``.
+
+        The count argument influences the operation in the following ways:
+            count > 0: Remove elements equal to value moving from head to tail.
+            count < 0: Remove elements equal to value moving from tail to head.
+            count = 0: Remove all elements equal to value.
+        """
+        return self.execute_command('LREM', name, count, value)
+
+    def lset(self, name, index, value):
+        """Set ``position`` of list ``name`` to ``value``."""
+        return self.execute_command('LSET', name, index, value)
+
+    def ltrim(self, name, start, end):
+        """
+        Trim the list ``name``, removing all values not within the slice
+        between ``start`` and ``end``.
+
+        ``start`` and ``end`` can be negative numbers just like
+        Python slicing notation.
+        """
+        return self.execute_command('LTRIM', name, start, end)
+
     def blpop(self, keys, timeout=0):
         """
         LPOP a value off of the first non-empty list
@@ -1235,86 +1351,6 @@ class Commands:
         keys.append(timeout)
         return self.execute_command('BZPOPMAX', *keys)
 
-    def lindex(self, name, index):
-        """
-        Return the item from list ``name`` at position ``index``
-
-        Negative indexes are supported and will return an item at the
-        end of the list
-        """
-        return self.execute_command('LINDEX', name, index)
-
-    def linsert(self, name, where, refvalue, value):
-        """
-        Insert ``value`` in list ``name`` either immediately before or after
-        [``where``] ``refvalue``
-
-        Returns the new length of the list on success or -1 if ``refvalue``
-        is not in the list.
-        """
-        return self.execute_command('LINSERT', name, where, refvalue, value)
-
-    def llen(self, name):
-        "Return the length of the list ``name``"
-        return self.execute_command('LLEN', name)
-
-    def lpop(self, name, count=None):
-        """
-        Removes and returns the first elements of the list ``name``.
-
-        By default, the command pops a single element from the beginning of
-        the list. When provided with the optional ``count`` argument, the reply
-        will consist of up to count elements, depending on the list's length.
-        """
-        if count is not None:
-            return self.execute_command('LPOP', name, count)
-        else:
-            return self.execute_command('LPOP', name)
-
-    def lpush(self, name, *values):
-        "Push ``values`` onto the head of the list ``name``"
-        return self.execute_command('LPUSH', name, *values)
-
-    def lpushx(self, name, value):
-        "Push ``value`` onto the head of the list ``name`` if ``name`` exists"
-        return self.execute_command('LPUSHX', name, value)
-
-    def lrange(self, name, start, end):
-        """
-        Return a slice of the list ``name`` between
-        position ``start`` and ``end``
-
-        ``start`` and ``end`` can be negative numbers just like
-        Python slicing notation
-        """
-        return self.execute_command('LRANGE', name, start, end)
-
-    def lrem(self, name, count, value):
-        """
-        Remove the first ``count`` occurrences of elements equal to ``value``
-        from the list stored at ``name``.
-
-        The count argument influences the operation in the following ways:
-            count > 0: Remove elements equal to value moving from head to tail.
-            count < 0: Remove elements equal to value moving from tail to head.
-            count = 0: Remove all elements equal to value.
-        """
-        return self.execute_command('LREM', name, count, value)
-
-    def lset(self, name, index, value):
-        "Set ``position`` of list ``name`` to ``value``"
-        return self.execute_command('LSET', name, index, value)
-
-    def ltrim(self, name, start, end):
-        """
-        Trim the list ``name``, removing all values not within the slice
-        between ``start`` and ``end``
-
-        ``start`` and ``end`` can be negative numbers just like
-        Python slicing notation
-        """
-        return self.execute_command('LTRIM', name, start, end)
-
     def rpop(self, name, count=None):
         """
         Removes and returns the last elements of the list ``name``.
@@ -1342,42 +1378,6 @@ class Commands:
     def rpushx(self, name, value):
         "Push ``value`` onto the tail of the list ``name`` if ``name`` exists"
         return self.execute_command('RPUSHX', name, value)
-
-    def lpos(self, name, value, rank=None, count=None, maxlen=None):
-        """
-        Get position of ``value`` within the list ``name``
-
-         If specified, ``rank`` indicates the "rank" of the first element to
-         return in case there are multiple copies of ``value`` in the list.
-         By default, LPOS returns the position of the first occurrence of
-         ``value`` in the list. When ``rank`` 2, LPOS returns the position of
-         the second ``value`` in the list. If ``rank`` is negative, LPOS
-         searches the list in reverse. For example, -1 would return the
-         position of the last occurrence of ``value`` and -2 would return the
-         position of the next to last occurrence of ``value``.
-
-         If specified, ``count`` indicates that LPOS should return a list of
-         up to ``count`` positions. A ``count`` of 2 would return a list of
-         up to 2 positions. A ``count`` of 0 returns a list of all positions
-         matching ``value``. When ``count`` is specified and but ``value``
-         does not exist in the list, an empty list is returned.
-
-         If specified, ``maxlen`` indicates the maximum number of list
-         elements to scan. A ``maxlen`` of 1000 will only return the
-         position(s) of items within the first 1000 entries in the list.
-         A ``maxlen`` of 0 (the default) will scan the entire list.
-        """
-        pieces = [name, value]
-        if rank is not None:
-            pieces.extend(['RANK', rank])
-
-        if count is not None:
-            pieces.extend(['COUNT', count])
-
-        if maxlen is not None:
-            pieces.extend(['MAXLEN', maxlen])
-
-        return self.execute_command('LPOS', *pieces)
 
     def sort(self, name, start=None, num=None, by=None, get=None,
              desc=False, alpha=False, store=None, groups=False):
