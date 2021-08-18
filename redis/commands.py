@@ -1681,14 +1681,27 @@ class Commands:
     # endregion
 
     # region STREAMS COMMANDS
-    def xack(self, name, groupname, *ids):
+    def xinfo_consumers(self, name, groupname):
         """
-        Acknowledges the successful processing of one or more messages.
+        Returns general information about the consumers in the group.
         name: name of the stream.
         groupname: name of the consumer group.
-        *ids: message ids to acknowledge.
         """
-        return self.execute_command('XACK', name, groupname, *ids)
+        return self.execute_command('XINFO CONSUMERS', name, groupname)
+
+    def xinfo_groups(self, name):
+        """
+        Returns general information about the consumer groups of the stream.
+        name: name of the stream.
+        """
+        return self.execute_command('XINFO GROUPS', name)
+
+    def xinfo_stream(self, name):
+        """
+        Returns general information about the stream.
+        name: name of the stream.
+        """
+        return self.execute_command('XINFO STREAM', name)
 
     def xadd(self, name, fields, id='*', maxlen=None, approximate=True,
              nomkstream=False):
@@ -1718,45 +1731,206 @@ class Commands:
             pieces.extend(pair)
         return self.execute_command('XADD', name, *pieces)
 
-    def xautoclaim(self, name, groupname, consumername, min_idle_time,
-                   start_id=0, count=None, justid=False):
+    def xtrim(self, name, maxlen=None, approximate=True, minid=None,
+              limit=None):
         """
-        Transfers ownership of pending stream entries that match the specified
-        criteria. Conceptually, equivalent to calling XPENDING and then XCLAIM,
-        but provides a more straightforward way to deal with message delivery
-        failures via SCAN-like semantics.
+        Trims old messages from a stream.
+        name: name of the stream.
+        maxlen: truncate old stream messages beyond this size
+        approximate: actual stream length may be slightly more than maxlen
+        minin: the minimum id in the stream to query
+        limit: specifies the maximum number of entries to retrieve
+        """
+        pieces = []
+        if maxlen is not None and minid is not None:
+            raise DataError("Only one of ```maxlen``` or ```minid```",
+                            "may be specified")
+
+        if maxlen is not None:
+            pieces.append(b'MAXLEN')
+        if minid is not None:
+            pieces.append(b'MINID')
+        if approximate:
+            pieces.append(b'~')
+        if maxlen is not None:
+            pieces.append(maxlen)
+        if minid is not None:
+            pieces.append(minid)
+        if limit is not None:
+            pieces.append(b"LIMIT")
+            pieces.append(limit)
+
+        return self.execute_command('XTRIM', name, *pieces)
+
+    def xdel(self, name, *ids):
+        """
+        Deletes one or more messages from a stream.
+
+        name: name of the stream.
+        *ids: message ids to delete.
+        """
+        return self.execute_command('XDEL', name, *ids)
+
+    def xrange(self, name, min='-', max='+', count=None):
+        """
+        Read stream values within an interval.
+        name: name of the stream.
+
+        start: first stream ID. defaults to '-',
+               meaning the earliest available.
+        finish: last stream ID. defaults to '+',
+                meaning the latest available.
+        count: if set, only return this many items, beginning with the
+               earliest available.
+        """
+        pieces = [min, max]
+        if count is not None:
+            if not isinstance(count, int) or count < 1:
+                raise DataError('XRANGE count must be a positive integer')
+            pieces.append(b'COUNT')
+            pieces.append(str(count))
+
+        return self.execute_command('XRANGE', name, *pieces)
+
+    def xrevrange(self, name, max='+', min='-', count=None):
+        """
+        Read stream values within an interval, in reverse order.
+
+        name: name of the stream
+        start: first stream ID. defaults to '+',
+               meaning the latest available.
+        finish: last stream ID. defaults to '-',
+                meaning the earliest available.
+        count: if set, only return this many items, beginning with the
+               latest available.
+        """
+        pieces = [max, min]
+        if count is not None:
+            if not isinstance(count, int) or count < 1:
+                raise DataError('XREVRANGE count must be a positive integer')
+            pieces.append(b'COUNT')
+            pieces.append(str(count))
+
+        return self.execute_command('XREVRANGE', name, *pieces)
+
+    def xlen(self, name):
+        """Returns the number of elements in a given stream."""
+        return self.execute_command('XLEN', name)
+
+    def xread(self, streams, count=None, block=None):
+        """
+        Block and monitor multiple streams for new data.
+        streams: a dict of stream names to stream IDs, where
+                   IDs indicate the last ID already seen.
+        count: if set, only return this many items, beginning with the
+               earliest available.
+        block: number of milliseconds to wait, if nothing already present.
+        """
+        pieces = []
+        if block is not None:
+            if not isinstance(block, int) or block < 0:
+                raise DataError('XREAD block must be a non-negative integer')
+            pieces.append(b'BLOCK')
+            pieces.append(str(block))
+        if count is not None:
+            if not isinstance(count, int) or count < 1:
+                raise DataError('XREAD count must be a positive integer')
+            pieces.append(b'COUNT')
+            pieces.append(str(count))
+        if not isinstance(streams, dict) or len(streams) == 0:
+            raise DataError('XREAD streams must be a non empty dict')
+        pieces.append(b'STREAMS')
+        keys, values = zip(*streams.items())
+        pieces.extend(keys)
+        pieces.extend(values)
+        return self.execute_command('XREAD', *pieces)
+
+    def xgroup_create(self, name, groupname, id='$', mkstream=False):
+        """
+        Create a new consumer group associated with a stream.
+
         name: name of the stream.
         groupname: name of the consumer group.
-        consumername: name of a consumer that claims the message.
-        min_idle_time: filter messages that were idle less than this amount of
-        milliseconds.
-        start_id: filter messages with equal or greater ID.
-        count: optional integer, upper limit of the number of entries that the
-        command attempts to claim. Set to 100 by default.
-        justid: optional boolean, false by default. Return just an array of IDs
-        of messages successfully claimed, without returning the actual message
+        id: ID of the last item in the stream to consider already delivered.
         """
-        try:
-            if int(min_idle_time) < 0:
-                raise DataError("XAUTOCLAIM min_idle_time must be a non"
-                                "negative integer")
-        except TypeError:
-            pass
+        pieces = ['XGROUP CREATE', name, groupname, id]
+        if mkstream:
+            pieces.append(b'MKSTREAM')
+        return self.execute_command(*pieces)
 
-        kwargs = {}
-        pieces = [name, groupname, consumername, min_idle_time, start_id]
+    def xgroup_setid(self, name, groupname, id):
+        """
+        Set the consumer group last delivered ID to something else.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        id: ID of the last item in the stream to consider already delivered.
+        """
+        return self.execute_command('XGROUP SETID', name, groupname, id)
 
-        try:
-            if int(count) < 0:
-                raise DataError("XPENDING count must be a integer >= 0")
-            pieces.extend([b'COUNT', count])
-        except TypeError:
-            pass
-        if justid:
-            pieces.append(b'JUSTID')
-            kwargs['parse_justid'] = True
+    def xgroup_destroy(self, name, groupname):
+        """
+        Destroy a consumer group.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        """
+        return self.execute_command('XGROUP DESTROY', name, groupname)
 
-        return self.execute_command('XAUTOCLAIM', *pieces, **kwargs)
+    def xgroup_delconsumer(self, name, groupname, consumername):
+        """
+        Remove a specific consumer from a consumer group.
+        Returns the number of pending messages that the consumer had before it
+        was deleted.
+
+        name: name of the stream.
+        groupname: name of the consumer group.
+        consumername: name of consumer to delete
+        """
+        return self.execute_command('XGROUP DELCONSUMER', name, groupname,
+                                    consumername)
+
+    def xreadgroup(self, groupname, consumername, streams, count=None,
+                   block=None, noack=False):
+        """
+        Read from a stream via a consumer group.
+        groupname: name of the consumer group.
+        consumername: name of the requesting consumer.
+        streams: a dict of stream names to stream IDs, where
+               IDs indicate the last ID already seen.
+        count: if set, only return this many items, beginning with the
+               earliest available.
+        block: number of milliseconds to wait, if nothing already present.
+        noack: do not add messages to the PEL
+        """
+        pieces = [b'GROUP', groupname, consumername]
+        if count is not None:
+            if not isinstance(count, int) or count < 1:
+                raise DataError("XREADGROUP count must be a positive integer")
+            pieces.append(b'COUNT')
+            pieces.append(str(count))
+        if block is not None:
+            if not isinstance(block, int) or block < 0:
+                raise DataError("XREADGROUP block must be a non-negative "
+                                "integer")
+            pieces.append(b'BLOCK')
+            pieces.append(str(block))
+        if noack:
+            pieces.append(b'NOACK')
+        if not isinstance(streams, dict) or len(streams) == 0:
+            raise DataError('XREADGROUP streams must be a non empty dict')
+        pieces.append(b'STREAMS')
+        pieces.extend(streams.keys())
+        pieces.extend(streams.values())
+        return self.execute_command('XREADGROUP', *pieces)
+
+    def xack(self, name, groupname, *ids):
+        """
+        Acknowledges the successful processing of one or more messages.
+
+        name: name of the stream.
+        groupname: name of the consumer group.
+        *ids: message ids to acknowledge.
+        """
+        return self.execute_command('XACK', name, groupname, *ids)
 
     def xclaim(self, name, groupname, consumername, min_idle_time, message_ids,
                idle=None, time=None, retrycount=None, force=False,
@@ -1818,82 +1992,45 @@ class Commands:
             kwargs['parse_justid'] = True
         return self.execute_command('XCLAIM', *pieces, **kwargs)
 
-    def xdel(self, name, *ids):
+    def xautoclaim(self, name, groupname, consumername, min_idle_time,
+                   start_id=0, count=None, justid=False):
         """
-        Deletes one or more messages from a stream.
-        name: name of the stream.
-        *ids: message ids to delete.
-        """
-        return self.execute_command('XDEL', name, *ids)
-
-    def xgroup_create(self, name, groupname, id='$', mkstream=False):
-        """
-        Create a new consumer group associated with a stream.
+        Transfers ownership of pending stream entries that match the specified
+        criteria. Conceptually, equivalent to calling XPENDING and then XCLAIM,
+        but provides a more straightforward way to deal with message delivery
+        failures via SCAN-like semantics.
         name: name of the stream.
         groupname: name of the consumer group.
-        id: ID of the last item in the stream to consider already delivered.
+        consumername: name of a consumer that claims the message.
+        min_idle_time: filter messages that were idle less than this amount of
+        milliseconds.
+        start_id: filter messages with equal or greater ID.
+        count: optional integer, upper limit of the number of entries that the
+        command attempts to claim. Set to 100 by default.
+        justid: optional boolean, false by default. Return just an array of IDs
+        of messages successfully claimed, without returning the actual message
         """
-        pieces = ['XGROUP CREATE', name, groupname, id]
-        if mkstream:
-            pieces.append(b'MKSTREAM')
-        return self.execute_command(*pieces)
+        try:
+            if int(min_idle_time) < 0:
+                raise DataError("XAUTOCLAIM min_idle_time must be a non"
+                                "negative integer")
+        except TypeError:
+            pass
 
-    def xgroup_delconsumer(self, name, groupname, consumername):
-        """
-        Remove a specific consumer from a consumer group.
-        Returns the number of pending messages that the consumer had before it
-        was deleted.
-        name: name of the stream.
-        groupname: name of the consumer group.
-        consumername: name of consumer to delete
-        """
-        return self.execute_command('XGROUP DELCONSUMER', name, groupname,
-                                    consumername)
+        kwargs = {}
+        pieces = [name, groupname, consumername, min_idle_time, start_id]
 
-    def xgroup_destroy(self, name, groupname):
-        """
-        Destroy a consumer group.
-        name: name of the stream.
-        groupname: name of the consumer group.
-        """
-        return self.execute_command('XGROUP DESTROY', name, groupname)
+        try:
+            if int(count) < 0:
+                raise DataError("XPENDING count must be a integer >= 0")
+            pieces.extend([b'COUNT', count])
+        except TypeError:
+            pass
+        if justid:
+            pieces.append(b'JUSTID')
+            kwargs['parse_justid'] = True
 
-    def xgroup_setid(self, name, groupname, id):
-        """
-        Set the consumer group last delivered ID to something else.
-        name: name of the stream.
-        groupname: name of the consumer group.
-        id: ID of the last item in the stream to consider already delivered.
-        """
-        return self.execute_command('XGROUP SETID', name, groupname, id)
-
-    def xinfo_consumers(self, name, groupname):
-        """
-        Returns general information about the consumers in the group.
-        name: name of the stream.
-        groupname: name of the consumer group.
-        """
-        return self.execute_command('XINFO CONSUMERS', name, groupname)
-
-    def xinfo_groups(self, name):
-        """
-        Returns general information about the consumer groups of the stream.
-        name: name of the stream.
-        """
-        return self.execute_command('XINFO GROUPS', name)
-
-    def xinfo_stream(self, name):
-        """
-        Returns general information about the stream.
-        name: name of the stream.
-        """
-        return self.execute_command('XINFO STREAM', name)
-
-    def xlen(self, name):
-        """
-        Returns the number of elements in a given stream.
-        """
-        return self.execute_command('XLEN', name)
+        return self.execute_command('XAUTOCLAIM', *pieces, **kwargs)
 
     def xpending(self, name, groupname):
         """
@@ -1943,139 +2080,7 @@ class Commands:
             pass
 
         return self.execute_command('XPENDING', *pieces, parse_detail=True)
-
-    def xrange(self, name, min='-', max='+', count=None):
-        """
-        Read stream values within an interval.
-        name: name of the stream.
-        start: first stream ID. defaults to '-',
-               meaning the earliest available.
-        finish: last stream ID. defaults to '+',
-                meaning the latest available.
-        count: if set, only return this many items, beginning with the
-               earliest available.
-        """
-        pieces = [min, max]
-        if count is not None:
-            if not isinstance(count, int) or count < 1:
-                raise DataError('XRANGE count must be a positive integer')
-            pieces.append(b'COUNT')
-            pieces.append(str(count))
-
-        return self.execute_command('XRANGE', name, *pieces)
-
-    def xread(self, streams, count=None, block=None):
-        """
-        Block and monitor multiple streams for new data.
-        streams: a dict of stream names to stream IDs, where
-                   IDs indicate the last ID already seen.
-        count: if set, only return this many items, beginning with the
-               earliest available.
-        block: number of milliseconds to wait, if nothing already present.
-        """
-        pieces = []
-        if block is not None:
-            if not isinstance(block, int) or block < 0:
-                raise DataError('XREAD block must be a non-negative integer')
-            pieces.append(b'BLOCK')
-            pieces.append(str(block))
-        if count is not None:
-            if not isinstance(count, int) or count < 1:
-                raise DataError('XREAD count must be a positive integer')
-            pieces.append(b'COUNT')
-            pieces.append(str(count))
-        if not isinstance(streams, dict) or len(streams) == 0:
-            raise DataError('XREAD streams must be a non empty dict')
-        pieces.append(b'STREAMS')
-        keys, values = zip(*streams.items())
-        pieces.extend(keys)
-        pieces.extend(values)
-        return self.execute_command('XREAD', *pieces)
-
-    def xreadgroup(self, groupname, consumername, streams, count=None,
-                   block=None, noack=False):
-        """
-        Read from a stream via a consumer group.
-        groupname: name of the consumer group.
-        consumername: name of the requesting consumer.
-        streams: a dict of stream names to stream IDs, where
-               IDs indicate the last ID already seen.
-        count: if set, only return this many items, beginning with the
-               earliest available.
-        block: number of milliseconds to wait, if nothing already present.
-        noack: do not add messages to the PEL
-        """
-        pieces = [b'GROUP', groupname, consumername]
-        if count is not None:
-            if not isinstance(count, int) or count < 1:
-                raise DataError("XREADGROUP count must be a positive integer")
-            pieces.append(b'COUNT')
-            pieces.append(str(count))
-        if block is not None:
-            if not isinstance(block, int) or block < 0:
-                raise DataError("XREADGROUP block must be a non-negative "
-                                "integer")
-            pieces.append(b'BLOCK')
-            pieces.append(str(block))
-        if noack:
-            pieces.append(b'NOACK')
-        if not isinstance(streams, dict) or len(streams) == 0:
-            raise DataError('XREADGROUP streams must be a non empty dict')
-        pieces.append(b'STREAMS')
-        pieces.extend(streams.keys())
-        pieces.extend(streams.values())
-        return self.execute_command('XREADGROUP', *pieces)
-
-    def xrevrange(self, name, max='+', min='-', count=None):
-        """
-        Read stream values within an interval, in reverse order.
-        name: name of the stream
-        start: first stream ID. defaults to '+',
-               meaning the latest available.
-        finish: last stream ID. defaults to '-',
-                meaning the earliest available.
-        count: if set, only return this many items, beginning with the
-               latest available.
-        """
-        pieces = [max, min]
-        if count is not None:
-            if not isinstance(count, int) or count < 1:
-                raise DataError('XREVRANGE count must be a positive integer')
-            pieces.append(b'COUNT')
-            pieces.append(str(count))
-
-        return self.execute_command('XREVRANGE', name, *pieces)
-
-    def xtrim(self, name, maxlen=None, approximate=True, minid=None,
-              limit=None):
-        """
-        Trims old messages from a stream.
-        name: name of the stream.
-        maxlen: truncate old stream messages beyond this size
-        approximate: actual stream length may be slightly more than maxlen
-        minin: the minimum id in the stream to query
-        limit: specifies the maximum number of entries to retrieve
-        """
-        pieces = []
-        if maxlen is not None and minid is not None:
-            raise DataError("Only one of ```maxlen``` or ```minid```",
-                            "may be specified")
-
-        if maxlen is not None:
-            pieces.append(b'MAXLEN')
-        if minid is not None:
-            pieces.append(b'MINID')
-        if approximate:
-            pieces.append(b'~')
-        if maxlen is not None:
-            pieces.append(maxlen)
-        if minid is not None:
-            pieces.append(minid)
-        if limit is not None:
-            pieces.append(b"LIMIT")
-            pieces.append(limit)
-
-        return self.execute_command('XTRIM', name, *pieces)
+    # endregion
 
     # region SORTED SETS COMMANDS
     def zadd(self, name, mapping, nx=False, xx=False, ch=False, incr=False,
