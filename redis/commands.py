@@ -406,25 +406,6 @@ class Commands:
         """Reset runtime statistics."""
         return self.execute_command('CONFIG RESETSTAT')
 
-    def swapdb(self, first, second):
-        "Swap two databases"
-        return self.execute_command('SWAPDB', first, second)
-
-    def info(self, section=None):
-        """
-        Returns a dictionary containing information about the Redis server
-
-        The ``section`` option can be used to select a specific section
-        of information
-
-        The section option is not supported by older versions of Redis Server,
-        and will generate ResponseError
-        """
-        if section is None:
-            return self.execute_command('INFO')
-        else:
-            return self.execute_command('INFO', section)
-
     def migrate(self, host, port, keys, destination_db, timeout,
                 copy=False, replace=False, auth=None):
         """
@@ -461,8 +442,27 @@ class Commands:
                                     timeout, *pieces)
 
     def object(self, infotype, key):
-        "Return the encoding, idletime, or refcount about the key"
+        """Return the encoding, idletime, or refcount about the key."""
         return self.execute_command('OBJECT', infotype, key, infotype=infotype)
+
+    def swapdb(self, first, second):
+        "Swap two databases"
+        return self.execute_command('SWAPDB', first, second)
+
+    def info(self, section=None):
+        """
+        Returns a dictionary containing information about the Redis server
+
+        The ``section`` option can be used to select a specific section
+        of information
+
+        The section option is not supported by older versions of Redis Server,
+        and will generate ResponseError
+        """
+        if section is None:
+            return self.execute_command('INFO')
+        else:
+            return self.execute_command('INFO', section)
 
     # region MEMORY commands
     def memory_purge(self):
@@ -899,15 +899,17 @@ class Commands:
         return self.execute_command('LASTSAVE')
 
     def mget(self, keys, *args):
-        """
-        Returns a list of values ordered identically to ``keys``
-        """
+        """Returns a list of values ordered identically to ``keys``."""
         from redis.client import EMPTY_RESPONSE
         args = list_or_args(keys, args)
         options = {}
         if not args:
             options[EMPTY_RESPONSE] = []
         return self.execute_command('MGET', *args, **options)
+
+    def move(self, name, db):
+        """Moves the key ``name`` to a different Redis database ``db``."""
+        return self.execute_command('MOVE', name, db)
 
     def mset(self, mapping):
         """
@@ -932,12 +934,8 @@ class Commands:
             items.extend(pair)
         return self.execute_command('MSETNX', *items)
 
-    def move(self, name, db):
-        "Moves the key ``name`` to a different Redis database ``db``"
-        return self.execute_command('MOVE', name, db)
-
     def persist(self, name):
-        "Removes an expiration on ``name``"
+        """Removes an expiration on ``name``."""
         return self.execute_command('PERSIST', name)
 
     def pexpire(self, name, time):
@@ -2482,9 +2480,9 @@ class Commands:
             pieces.append(b'WITHSCORES')
         return self.execute_command(*pieces, **options)
 
-    # HYPERLOGLOG COMMANDS
+    # region HYPERLOGLOG COMMANDS
     def pfadd(self, name, *values):
-        "Adds the specified elements to the specified HyperLogLog."
+        """Adds the specified elements to the specified HyperLogLog."""
         return self.execute_command('PFADD', name, *values)
 
     def pfcount(self, *sources):
@@ -2495,8 +2493,9 @@ class Commands:
         return self.execute_command('PFCOUNT', *sources)
 
     def pfmerge(self, dest, *sources):
-        "Merge N different HyperLogLogs into a single one."
+        """Merge N different HyperLogLogs into a single one."""
         return self.execute_command('PFMERGE', dest, *sources)
+    # endregion
 
     # region HASH COMMANDS
     def hdel(self, name, *keys):
@@ -2803,6 +2802,13 @@ class Commands:
     #endregion
 
     # region MODULE COMMANDS
+    def module_list(self):
+        """
+        Returns a list of dictionaries containing the name and version of
+        all loaded modules.
+        """
+        return self.execute_command('MODULE LIST')
+
     def module_load(self, path):
         """
         Loads the module from ``path``.
@@ -2816,13 +2822,6 @@ class Commands:
         Raises ``ModuleError`` if ``name`` is not in loaded modules.
         """
         return self.execute_command('MODULE UNLOAD', name)
-
-    def module_list(self):
-        """
-        Returns a list of dictionaries containing the name and version of
-        all loaded modules.
-        """
-        return self.execute_command('MODULE LIST')
     # endregion
 
 
