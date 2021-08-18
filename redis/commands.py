@@ -46,7 +46,10 @@ class Commands:
         return self.execute_command('APPEND', key, value)
 
     def bgrewriteaof(self):
-        """Tell the Redis server to rewrite the AOF file from data in memory."""
+        """
+        Tell the Redis server to rewrite the AOF file from
+        data in memory.
+        """
         return self.execute_command('BGREWRITEAOF')
 
     def bgsave(self):
@@ -235,7 +238,10 @@ class Commands:
         return self.execute_command('FLUSHDB', *args)
 
     def get(self, name):
-        """Return the value at key ``name``, or None if the key doesn't exist."""
+        """
+        Return the value at key ``name``, or None if
+        the key doesn't exist.
+        """
         return self.execute_command('GET', name)
 
     def getbit(self, name, offset):
@@ -440,7 +446,10 @@ class Commands:
         return self.execute_command('PSETEX', name, time_ms, value)
 
     def pttl(self, name):
-        """Returns the number of milliseconds until the key ``name`` will expire."""
+        """
+        Returns the number of milliseconds until the key ``name``
+        will expire.
+        """
         return self.execute_command('PTTL', name)
 
     def randomkey(self):
@@ -448,11 +457,17 @@ class Commands:
         return self.execute_command('RANDOMKEY')
 
     def readonly(self):
-        """Enables read queries for a connection to a Redis Cluster replica node."""
+        """
+        Enables read queries for a connection to a Redis Cluster
+        replica node.
+        """
         return self.execute_command('READONLY')
 
     def readwrite(self):
-        """Disables read queries for a connection to a Redis Cluster slave node."""
+        """
+        Disables read queries for a connection to a Redis
+        Cluster slave node.
+        """
         return self.execute_command('READWRITE')
 
     def rename(self, src, dst):
@@ -600,12 +615,18 @@ class Commands:
         return self.execute_command('UNLINK', *names)
 
     def unwatch(self):
-        """Unwatches the value at key ``name``, or None of the key doesn't exist."""
+        """
+        Unwatches the value at key ``name``, or None of the key doesn't
+        exist.
+        """
         warnings.warn(
             DeprecationWarning('Call UNWATCH from a Pipeline object'))
 
     def watch(self, *names):
-        """Watches the values at keys ``names``, or None if the key doesn't exist."""
+        """
+        Watches the values at keys ``names``, or None if the
+        key doesn't exist.
+        """
         warnings.warn(DeprecationWarning('Call WATCH from a Pipeline object'))
     # endregion
 
@@ -696,7 +717,10 @@ class Commands:
         return self.execute_command('LPUSH', name, *values)
 
     def lpushx(self, name, value):
-        """Push ``value`` onto the head of the list ``name`` if ``name`` exists."""
+        """
+        Push ``value`` onto the head of the list ``name`` if
+        ``name`` exists.
+        """
         return self.execute_command('LPUSHX', name, value)
 
     def lrange(self, name, start, end):
@@ -849,7 +873,10 @@ class Commands:
         return self.execute_command('RPUSH', name, *values)
 
     def rpushx(self, name, value):
-        """Push ``value`` onto the tail of the list ``name`` if ``name`` exists."""
+        """
+        Push ``value`` onto the tail of the list ``name`` if
+        ``name`` exists.
+        """
         return self.execute_command('RPUSHX', name, value)
 
     def sort(self, name, start=None, num=None, by=None, get=None,
@@ -1271,7 +1298,10 @@ class Commands:
         return self.execute_command('CONFIG GET', pattern)
 
     def config_rewrite(self):
-        """Rewrite config file with the minimal change to reflect running config."""
+        """
+        Rewrite config file with the minimal change to
+        reflect running config.
+        """
         return self.execute_command('CONFIG REWRITE')
 
     def config_set(self, name, value):
@@ -1416,7 +1446,7 @@ class Commands:
             pieces.extend([b'STOREDIST', kwargs['store_dist']])
 
         return self.execute_command(command, *pieces, **kwargs)
-    #endregion
+    # endregion
 
     # region HASH COMMANDS
     def hdel(self, name, *keys):
@@ -1424,7 +1454,10 @@ class Commands:
         return self.execute_command('HDEL', name, *keys)
 
     def hexists(self, name, key):
-        """Returns a boolean indicating if ``key`` exists within hash ``name``."""
+        """
+        Returns a boolean indicating if ``key`` exists within
+        hash ``name``.
+        """
         return self.execute_command('HEXISTS', name, key)
 
     def hget(self, name, key):
@@ -1440,7 +1473,10 @@ class Commands:
         return self.execute_command('HINCRBY', name, key, amount)
 
     def hincrbyfloat(self, name, key, amount=1.0):
-        """Increment the value of ``key`` in hash ``name`` by floating ``amount``."""
+        """
+        Increment the value of ``key`` in hash ``name`` by
+        floating ``amount``.
+        """
         return self.execute_command('HINCRBYFLOAT', name, key, amount)
 
     def hkeys(self, name):
@@ -1698,7 +1734,10 @@ class Commands:
         return self.execute_command('SINTERSTORE', dest, *args)
 
     def sismember(self, name, value):
-        """Return a boolean indicating if ``value`` is a member of set ``name``."""
+        """
+        Return a boolean indicating if ``value`` is a member
+        of set ``name``.
+        """
         return self.execute_command('SISMEMBER', name, value)
 
     def smembers(self, name):
@@ -2497,7 +2536,10 @@ class Commands:
         return self.execute_command("ZDIFFSTORE", dest, *pieces)
 
     def zincrby(self, name, amount, value):
-        """Increment the score of ``value`` in sorted set ``name`` by ``amount``."""
+        """
+        Increment the score of ``value`` in sorted set ``name`` by
+        ``amount``.
+        """
         return self.execute_command('ZINCRBY', name, amount, value)
 
     def zinter(self, keys, aggregate=None, withscores=False):
