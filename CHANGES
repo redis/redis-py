@@ -400,7 +400,7 @@
 * 2.10.2
     * Added support for Hiredis's new bytearray support. Thanks
       https://github.com/tzickel
-    * POSSIBLE BACKWARDS INCOMPATBLE CHANGE: Fixed a possible race condition
+    * POSSIBLE BACKWARDS INCOMPATIBLE CHANGE: Fixed a possible race condition
       when multiple threads share the same Lock instance with a timeout. Lock
       tokens are now stored in thread local storage by default. If you have
       code that acquires a lock in one thread and passes that lock instance to
@@ -455,12 +455,12 @@
     * Fixed Sentinel state parsing on Python 3.
     * Added support for SENTINEL MONITOR, SENTINEL REMOVE, and SENTINEL SET
       commands. Thanks Greg Murphy.
-    * INFO ouput that doesn't follow the "key:value" format will now be
+    * INFO output that doesn't follow the "key:value" format will now be
       appended to a key named "__raw__" in the INFO dictionary. Thanks Pedro
       Larroy.
     * The "vagrant" directory contains a complete vagrant environment for
       redis-py developers. The environment runs a Redis master, a Redis slave,
-      and 3 Sentinels. Future iterations of the test sutie will incorporate
+      and 3 Sentinels. Future iterations of the test suite will incorporate
       more integration style tests, ensuring things like failover happen
       correctly.
     * It's now possible to create connection pool instances from a URL.
