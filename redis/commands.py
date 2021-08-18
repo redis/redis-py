@@ -267,19 +267,20 @@ class Commands:
         return self.execute_command('ACL LOG', *args)
     # endregion
 
-    def bgrewriteaof(self):
-        "Tell the Redis server to rewrite the AOF file from data in memory."
-        return self.execute_command('BGREWRITEAOF')
+    # region client methods
+    def client_id(self):
+        """Returns the current connection id"""
+        return self.execute_command('CLIENT ID')
 
-    def bgsave(self):
+    def client_info(self):
         """
-        Tell the Redis server to save its data to disk.  Unlike save(),
-        this method is asynchronous and returns immediately.
+        Returns information and statistics about the current
+        client connection.
         """
-        return self.execute_command('BGSAVE')
+        return self.execute_command('CLIENT INFO')
 
     def client_kill(self, address):
-        "Disconnects the client at ``address`` (ip:port)"
+        """Disconnects the client at ``address`` (ip:port)"""
         return self.execute_command('CLIENT KILL', address)
 
     def client_kill_filter(self, _id=None, _type=None, addr=None,
@@ -320,21 +321,16 @@ class Commands:
                             "<value> must specify at least one filter")
         return self.execute_command('CLIENT KILL', *args)
 
-    def client_info(self):
-        """
-        Returns information and statistics about the current
-        client connection.
-        """
-        return self.execute_command('CLIENT INFO')
-
     def client_list(self, _type=None, client_id=None):
         """
         Returns a list of currently connected clients.
         If type of client specified, only that type will be returned.
+
         :param _type: optional. one of the client types (normal, master,
          replica, pubsub)
+        :param client_id: optional. will return entries for clients with
+        ID matching the client-id argument.
         """
-        "Returns a list of currently connected clients"
         args = []
         if _type is not None:
             client_types = ('normal', 'master', 'replica', 'pubsub')
@@ -349,15 +345,25 @@ class Commands:
         return self.execute_command('CLIENT LIST', *args)
 
     def client_getname(self):
-        "Returns the current connection name"
+        """Returns the current connection name."""
         return self.execute_command('CLIENT GETNAME')
 
-    def client_id(self):
-        "Returns the current connection id"
-        return self.execute_command('CLIENT ID')
+    def client_unpause(self):
+        """Unpause all redis clients."""
+        return self.execute_command('CLIENT UNPAUSE')
+
+    def client_pause(self, timeout):
+        """
+        Suspend all the Redis clients for the specified amount of time.
+
+        :param timeout: milliseconds to pause clients
+        """
+        if not isinstance(timeout, int):
+            raise DataError("CLIENT PAUSE timeout must be an integer")
+        return self.execute_command('CLIENT PAUSE', str(timeout))
 
     def client_setname(self, name):
-        "Sets the current connection name"
+        """Sets the current connection name."""
         return self.execute_command('CLIENT SETNAME', name)
 
     def client_unblock(self, client_id, error=False):
@@ -371,21 +377,10 @@ class Commands:
         if error:
             args.append(b'ERROR')
         return self.execute_command(*args)
+    # endregion
 
-    def client_pause(self, timeout):
-        """
-        Suspend all the Redis clients for the specified amount of time
-        :param timeout: milliseconds to pause clients
-        """
-        if not isinstance(timeout, int):
-            raise DataError("CLIENT PAUSE timeout must be an integer")
-        return self.execute_command('CLIENT PAUSE', str(timeout))
-
-    def client_unpause(self):
-        """
-        Unpause all redis clients
-        """
-        return self.execute_command('CLIENT UNPAUSE')
+    def cluster(self, cluster_arg, *args):
+        return self.execute_command('CLUSTER %s' % cluster_arg.upper(), *args)
 
     def readwrite(self):
         "Disables read queries for a connection to a Redis Cluster slave node"
@@ -396,56 +391,20 @@ class Commands:
         return self.execute_command('READONLY')
 
     def config_get(self, pattern="*"):
-        "Return a dictionary of configuration based on the ``pattern``"
+        """Return a dictionary of configuration based on the ``pattern``."""
         return self.execute_command('CONFIG GET', pattern)
 
+    def config_rewrite(self):
+        """Rewrite config file with the minimal change to reflect running config."""
+        return self.execute_command('CONFIG REWRITE')
+
     def config_set(self, name, value):
-        "Set config item ``name`` with ``value``"
+        """Set config item ``name`` with ``value``."""
         return self.execute_command('CONFIG SET', name, value)
 
     def config_resetstat(self):
-        "Reset runtime statistics"
+        """Reset runtime statistics."""
         return self.execute_command('CONFIG RESETSTAT')
-
-    def config_rewrite(self):
-        "Rewrite config file with the minimal change to reflect running config"
-        return self.execute_command('CONFIG REWRITE')
-
-    def dbsize(self):
-        "Returns the number of keys in the current database"
-        return self.execute_command('DBSIZE')
-
-    def debug_object(self, key):
-        "Returns version specific meta information about a given key"
-        return self.execute_command('DEBUG OBJECT', key)
-
-    def echo(self, value):
-        "Echo the string back from the server"
-        return self.execute_command('ECHO', value)
-
-    def flushall(self, asynchronous=False):
-        """
-        Delete all keys in all databases on the current host.
-
-        ``asynchronous`` indicates whether the operation is
-        executed asynchronously by the server.
-        """
-        args = []
-        if asynchronous:
-            args.append(b'ASYNC')
-        return self.execute_command('FLUSHALL', *args)
-
-    def flushdb(self, asynchronous=False):
-        """
-        Delete all keys in the current database.
-
-        ``asynchronous`` indicates whether the operation is
-        executed asynchronously by the server.
-        """
-        args = []
-        if asynchronous:
-            args.append(b'ASYNC')
-        return self.execute_command('FLUSHDB', *args)
 
     def swapdb(self, first, second):
         "Swap two databases"
@@ -612,7 +571,7 @@ class Commands:
         """
         return self.execute_command('WAIT', num_replicas, timeout)
 
-    # BASIC KEY COMMANDS
+    # region BASIC KEY COMMANDS
     def append(self, key, value):
         """
         Appends the string ``value`` to the value at ``key``. If ``key``
@@ -621,10 +580,21 @@ class Commands:
         """
         return self.execute_command('APPEND', key, value)
 
+    def bgrewriteaof(self):
+        """Tell the Redis server to rewrite the AOF file from data in memory."""
+        return self.execute_command('BGREWRITEAOF')
+
+    def bgsave(self):
+        """
+        Tell the Redis server to save its data to disk.  Unlike save(),
+        this method is asynchronous and returns immediately.
+        """
+        return self.execute_command('BGSAVE')
+
     def bitcount(self, key, start=None, end=None):
         """
         Returns the count of set bits in the value of ``key``.  Optional
-        ``start`` and ``end`` parameters indicate which bytes to consider
+        ``start`` and ``end`` parameters indicate which bytes to consider.
         """
         params = [key]
         if start is not None and end is not None:
@@ -687,6 +657,14 @@ class Commands:
             params.append("REPLACE")
         return self.execute_command('COPY', *params)
 
+    def dbsize(self):
+        """Returns the number of keys in the current database."""
+        return self.execute_command('DBSIZE')
+
+    def debug_object(self, key):
+        """Returns version specific meta information about a given key."""
+        return self.execute_command('DEBUG OBJECT', key)
+
     def decr(self, name, amount=1):
         """
         Decrements the value of ``key`` by ``amount``.  If no key exists,
@@ -704,7 +682,7 @@ class Commands:
         return self.execute_command('DECRBY', name, amount)
 
     def delete(self, *names):
-        "Delete one or more keys specified by ``names``"
+        """Delete one or more keys specified by ``names``."""
         return self.execute_command('DEL', *names)
 
     def __delitem__(self, name):
@@ -717,8 +695,35 @@ class Commands:
         """
         return self.execute_command('DUMP', name)
 
+    def echo(self, value):
+        """Echo the string back from the server."""
+        return self.execute_command('ECHO', value)
+
+    def eval(self, script, numkeys, *keys_and_args):
+        """
+        Execute the Lua ``script``, specifying the ``numkeys`` the script
+        will touch and the key names and argument values in ``keys_and_args``.
+        Returns the result of the script.
+
+        In practice, use the object returned by ``register_script``. This
+        function exists purely for Redis API completion.
+        """
+        return self.execute_command('EVAL', script, numkeys, *keys_and_args)
+
+    def evalsha(self, sha, numkeys, *keys_and_args):
+        """
+        Use the ``sha`` to execute a Lua script already registered via EVAL
+        or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
+        key names and argument values in ``keys_and_args``. Returns the result
+        of the script.
+
+        In practice, use the object returned by ``register_script``. This
+        function exists purely for Redis API completion.
+        """
+        return self.execute_command('EVALSHA', sha, numkeys, *keys_and_args)
+
     def exists(self, *names):
-        "Returns the number of ``names`` that exist"
+        """Returns the number of ``names`` that exist."""
         return self.execute_command('EXISTS', *names)
     __contains__ = exists
 
@@ -739,6 +744,30 @@ class Commands:
         if isinstance(when, datetime.datetime):
             when = int(time.mktime(when.timetuple()))
         return self.execute_command('EXPIREAT', name, when)
+
+    def flushall(self, asynchronous=False):
+        """
+        Delete all keys in all databases on the current host.
+
+        ``asynchronous`` indicates whether the operation is
+        executed asynchronously by the server.
+        """
+        args = []
+        if asynchronous:
+            args.append(b'ASYNC')
+        return self.execute_command('FLUSHALL', *args)
+
+    def flushdb(self, asynchronous=False):
+        """
+        Delete all keys in the current database.
+
+        ``asynchronous`` indicates whether the operation is
+        executed asynchronously by the server.
+        """
+        args = []
+        if asynchronous:
+            args.append(b'ASYNC')
+        return self.execute_command('FLUSHDB', *args)
 
     def get(self, name):
         """
@@ -877,14 +906,6 @@ class Commands:
         """
         params = [first_list, second_list, src, dest]
         return self.execute_command("LMOVE", *params)
-
-    def blmove(self, first_list, second_list, timeout,
-               src="LEFT", dest="RIGHT"):
-        """
-        Blocking version of lmove.
-        """
-        params = [first_list, second_list, src, dest, timeout]
-        return self.execute_command("BLMOVE", *params)
 
     def mget(self, keys, *args):
         """
@@ -1146,7 +1167,7 @@ class Commands:
         "Unlink one or more keys specified by ``names``"
         return self.execute_command('UNLINK', *names)
 
-    # LIST COMMANDS
+    # region LIST COMMANDS
     def blpop(self, keys, timeout=0):
         """
         LPOP a value off of the first non-empty list
@@ -1193,6 +1214,48 @@ class Commands:
         if timeout is None:
             timeout = 0
         return self.execute_command('BRPOPLPUSH', src, dst, timeout)
+
+    def blmove(self, first_list, second_list, timeout,
+               src="LEFT", dest="RIGHT"):
+        """
+        Blocking version of lmove.
+        """
+        params = [first_list, second_list, src, dest, timeout]
+        return self.execute_command("BLMOVE", *params)
+
+    def bzpopmin(self, keys, timeout=0):
+        """
+        ZPOPMIN a value off of the first non-empty sorted set
+        named in the ``keys`` list.
+
+        If none of the sorted sets in ``keys`` has a value to ZPOPMIN,
+        then block for ``timeout`` seconds, or until a member gets added
+        to one of the sorted sets.
+
+        If timeout is 0, then block indefinitely.
+        """
+        if timeout is None:
+            timeout = 0
+        keys = list_or_args(keys, None)
+        keys.append(timeout)
+        return self.execute_command('BZPOPMIN', *keys)
+
+    def bzpopmax(self, keys, timeout=0):
+        """
+        ZPOPMAX a value off of the first non-empty sorted set
+        named in the ``keys`` list.
+
+        If none of the sorted sets in ``keys`` has a value to ZPOPMAX,
+        then block for ``timeout`` seconds, or until a member gets added
+        to one of the sorted sets.
+
+        If timeout is 0, then block indefinitely.
+        """
+        if timeout is None:
+            timeout = 0
+        keys = list_or_args(keys, None)
+        keys.append(timeout)
+        return self.execute_command('BZPOPMAX', *keys)
 
     def lindex(self, name, index):
         """
@@ -1404,6 +1467,7 @@ class Commands:
 
         options = {'groups': len(get) if groups else None}
         return self.execute_command('SORT', *pieces, **options)
+    # endregion
 
     # SCAN COMMANDS
     def scan(self, cursor=0, match=None, count=None, _type=None):
@@ -2203,40 +2267,6 @@ class Commands:
 
         return self.execute_command("ZRANDMEMBER", key, *params)
 
-    def bzpopmax(self, keys, timeout=0):
-        """
-        ZPOPMAX a value off of the first non-empty sorted set
-        named in the ``keys`` list.
-
-        If none of the sorted sets in ``keys`` has a value to ZPOPMAX,
-        then block for ``timeout`` seconds, or until a member gets added
-        to one of the sorted sets.
-
-        If timeout is 0, then block indefinitely.
-        """
-        if timeout is None:
-            timeout = 0
-        keys = list_or_args(keys, None)
-        keys.append(timeout)
-        return self.execute_command('BZPOPMAX', *keys)
-
-    def bzpopmin(self, keys, timeout=0):
-        """
-        ZPOPMIN a value off of the first non-empty sorted set
-        named in the ``keys`` list.
-
-        If none of the sorted sets in ``keys`` has a value to ZPOPMIN,
-        then block for ``timeout`` seconds, or until a member gets added
-        to one of the sorted sets.
-
-        If timeout is 0, then block indefinitely.
-        """
-        if timeout is None:
-            timeout = 0
-        keys = list_or_args(keys, None)
-        keys.append(timeout)
-        return self.execute_command('BZPOPMIN', *keys)
-
     def zrange(self, name, start, end, desc=False, withscores=False,
                score_cast_func=float):
         """
@@ -2607,32 +2637,6 @@ class Commands:
         for each channel given in ``*args``
         """
         return self.execute_command('PUBSUB NUMSUB', *args)
-
-    def cluster(self, cluster_arg, *args):
-        return self.execute_command('CLUSTER %s' % cluster_arg.upper(), *args)
-
-    def eval(self, script, numkeys, *keys_and_args):
-        """
-        Execute the Lua ``script``, specifying the ``numkeys`` the script
-        will touch and the key names and argument values in ``keys_and_args``.
-        Returns the result of the script.
-
-        In practice, use the object returned by ``register_script``. This
-        function exists purely for Redis API completion.
-        """
-        return self.execute_command('EVAL', script, numkeys, *keys_and_args)
-
-    def evalsha(self, sha, numkeys, *keys_and_args):
-        """
-        Use the ``sha`` to execute a Lua script already registered via EVAL
-        or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
-        key names and argument values in ``keys_and_args``. Returns the result
-        of the script.
-
-        In practice, use the object returned by ``register_script``. This
-        function exists purely for Redis API completion.
-        """
-        return self.execute_command('EVALSHA', sha, numkeys, *keys_and_args)
 
     def script_exists(self, *args):
         """
