@@ -464,8 +464,13 @@ class Commands:
         "Return the encoding, idletime, or refcount about the key"
         return self.execute_command('OBJECT', infotype, key, infotype=infotype)
 
+    # region MEMORY commands
+    def memory_purge(self):
+        """Attempts to purge dirty pages for reclamation by allocator."""
+        return self.execute_command('MEMORY PURGE')
+
     def memory_stats(self):
-        "Return a dictionary of memory stats"
+        """Return a dictionary of memory stats."""
         return self.execute_command('MEMORY STATS')
 
     def memory_usage(self, key, samples=None):
@@ -481,10 +486,7 @@ class Commands:
         if isinstance(samples, int):
             args.extend([b'SAMPLES', samples])
         return self.execute_command('MEMORY USAGE', key, *args)
-
-    def memory_purge(self):
-        "Attempts to purge dirty pages for reclamation by allocator"
-        return self.execute_command('MEMORY PURGE')
+    # endregion
 
     def ping(self):
         "Ping the Redis server"
