@@ -36,7 +36,7 @@ class Commands:
 
     # SERVER INFORMATION
 
-    # region ACL methods
+    # region ACL COMMANDS
     def acl_load(self):
         """
         Load ACL rules from the configured ``aclfile``.
@@ -267,7 +267,7 @@ class Commands:
         return self.execute_command('ACL LOG', *args)
     # endregion
 
-    # region client methods
+    # region CLIENT COMMANDS
     def client_id(self):
         """Returns the current connection id"""
         return self.execute_command('CLIENT ID')
@@ -433,7 +433,7 @@ class Commands:
         return self.execute_command('MIGRATE', host, port, '', destination_db,
                                     timeout, *pieces)
 
-    # region MEMORY commands
+    # region MEMORY COMMANDS
     def memory_purge(self):
         """Attempts to purge dirty pages for reclamation by allocator."""
         return self.execute_command('MEMORY PURGE')
@@ -1449,7 +1449,7 @@ class Commands:
         return self.execute_command('SORT', *pieces, **options)
     # endregion
 
-    # SCAN COMMANDS
+    # region SCAN COMMANDS
     def scan(self, cursor=0, match=None, count=None, _type=None):
         """
         Incrementally return lists of key names. Also return a cursor
@@ -1595,6 +1595,7 @@ class Commands:
                                       count=count,
                                       score_cast_func=score_cast_func)
             yield from data
+    # endregion
 
     # region SETS COMMANDS
     def sadd(self, name, *values):
@@ -2076,7 +2077,7 @@ class Commands:
 
         return self.execute_command('XTRIM', name, *pieces)
 
-    # SORTED SET COMMANDS
+    # region SORTED SETS COMMANDS
     def zadd(self, name, mapping, nx=False, xx=False, ch=False, incr=False,
              gt=None, lt=None):
         """
@@ -2142,7 +2143,7 @@ class Commands:
         return self.execute_command('ZADD', name, *pieces, **options)
 
     def zcard(self, name):
-        "Return the number of elements in the sorted set ``name``"
+        """Return the number of elements in the sorted set ``name``."""
         return self.execute_command('ZCARD', name)
 
     def zcount(self, name, min, max):
@@ -2171,7 +2172,7 @@ class Commands:
         return self.execute_command("ZDIFFSTORE", dest, *pieces)
 
     def zincrby(self, name, amount, value):
-        "Increment the score of ``value`` in sorted set ``name`` by ``amount``"
+        """Increment the score of ``value`` in sorted set ``name`` by ``amount``."""
         return self.execute_command('ZINCRBY', name, amount, value)
 
     def zinter(self, keys, aggregate=None, withscores=False):
@@ -2250,6 +2251,15 @@ class Commands:
 
         return self.execute_command("ZRANDMEMBER", key, *params)
 
+    def zrangestore(self, dest, name, start, end):
+        """
+        Stores in ``dest`` the result of a range of values from sorted set
+        ``name`` between ``start`` and ``end`` sorted in ascending order.
+
+        ``start`` and ``end`` can be negative, indicating the end of the range.
+        """
+        return self.execute_command('ZRANGESTORE', dest, name, start, end)
+
     def zrange(self, name, start, end, desc=False, withscores=False,
                score_cast_func=float):
         """
@@ -2276,15 +2286,6 @@ class Commands:
             'score_cast_func': score_cast_func
         }
         return self.execute_command(*pieces, **options)
-
-    def zrangestore(self, dest, name, start, end):
-        """
-        Stores in ``dest`` the result of a range of values from sorted set
-        ``name`` between ``start`` and ``end`` sorted in ascending order.
-
-        ``start`` and ``end`` can be negative, indicating the end of the range.
-        """
-        return self.execute_command('ZRANGESTORE', dest, name, start, end)
 
     def zrangebylex(self, name, min, max, start=None, num=None):
         """
@@ -2349,12 +2350,12 @@ class Commands:
     def zrank(self, name, value):
         """
         Returns a 0-based value indicating the rank of ``value`` in sorted set
-        ``name``
+        ``name``.
         """
         return self.execute_command('ZRANK', name, value)
 
     def zrem(self, name, *values):
-        "Remove member ``values`` from sorted set ``name``"
+        """Remove member ``values`` from sorted set ``name``."""
         return self.execute_command('ZREM', name, *values)
 
     def zremrangebylex(self, name, min, max):
@@ -2371,7 +2372,7 @@ class Commands:
         Remove all elements in the sorted set ``name`` with ranks between
         ``min`` and ``max``. Values are 0-based, ordered from smallest score
         to largest. Values can be negative indicating the highest scores.
-        Returns the number of elements removed
+        Returns the number of elements removed.
         """
         return self.execute_command('ZREMRANGEBYRANK', name, min, max)
 
@@ -2435,12 +2436,12 @@ class Commands:
     def zrevrank(self, name, value):
         """
         Returns a 0-based value indicating the descending rank of
-        ``value`` in sorted set ``name``
+        ``value`` in sorted set ``name``.
         """
         return self.execute_command('ZREVRANK', name, value)
 
     def zscore(self, name, value):
-        "Return the score of element ``value`` in sorted set ``name``"
+        """Return the score of element ``value`` in sorted set ``name``."""
         return self.execute_command('ZSCORE', name, value)
 
     def zunion(self, keys, aggregate=None, withscores=False):
@@ -2484,6 +2485,7 @@ class Commands:
         if options.get('withscores', False):
             pieces.append(b'WITHSCORES')
         return self.execute_command(*pieces, **options)
+    # endregion
 
     # region HYPERLOGLOG COMMANDS
     def pfadd(self, name, *values):
