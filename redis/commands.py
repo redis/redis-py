@@ -531,23 +531,8 @@ class Commands:
         return self.execute_command('SLOWLOG RESET')
 
     def swapdb(self, first, second):
-        "Swap two databases"
+        """Swap two databases."""
         return self.execute_command('SWAPDB', first, second)
-
-    def info(self, section=None):
-        """
-        Returns a dictionary containing information about the Redis server
-
-        The ``section`` option can be used to select a specific section
-        of information
-
-        The section option is not supported by older versions of Redis Server,
-        and will generate ResponseError
-        """
-        if section is None:
-            return self.execute_command('INFO')
-        else:
-            return self.execute_command('INFO', section)
 
     def time(self):
         """
@@ -564,6 +549,21 @@ class Commands:
         reached.
         """
         return self.execute_command('WAIT', num_replicas, timeout)
+
+    def info(self, section=None):
+        """
+        Returns a dictionary containing information about the Redis server
+
+        The ``section`` option can be used to select a specific section
+        of information
+
+        The section option is not supported by older versions of Redis Server,
+        and will generate ResponseError
+        """
+        if section is None:
+            return self.execute_command('INFO')
+        else:
+            return self.execute_command('INFO', section)
 
     # region BASIC KEY COMMANDS
     def append(self, key, value):
@@ -1117,29 +1117,26 @@ class Commands:
         return self.execute_command('TOUCH', *args)
 
     def ttl(self, name):
-        "Returns the number of seconds until the key ``name`` will expire"
+        """Returns the number of seconds until the key ``name`` will expire."""
         return self.execute_command('TTL', name)
 
     def type(self, name):
-        "Returns the type of key ``name``"
+        """Returns the type of key ``name``."""
         return self.execute_command('TYPE', name)
 
-    def watch(self, *names):
-        """
-        Watches the values at keys ``names``, or None if the key doesn't exist
-        """
-        warnings.warn(DeprecationWarning('Call WATCH from a Pipeline object'))
+    def unlink(self, *names):
+        """Unlink one or more keys specified by ``names``."""
+        return self.execute_command('UNLINK', *names)
 
     def unwatch(self):
-        """
-        Unwatches the value at key ``name``, or None of the key doesn't exist
-        """
+        """Unwatches the value at key ``name``, or None of the key doesn't exist."""
         warnings.warn(
             DeprecationWarning('Call UNWATCH from a Pipeline object'))
 
-    def unlink(self, *names):
-        "Unlink one or more keys specified by ``names``"
-        return self.execute_command('UNLINK', *names)
+    def watch(self, *names):
+        """Watches the values at keys ``names``, or None if the key doesn't exist."""
+        warnings.warn(DeprecationWarning('Call WATCH from a Pipeline object'))
+    # endregion
 
     # region LIST COMMANDS
     def lindex(self, name, index):
