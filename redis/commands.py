@@ -982,26 +982,6 @@ class Commands:
         "Returns the number of milliseconds until the key ``name`` will expire"
         return self.execute_command('PTTL', name)
 
-    def hrandfield(self, key, count=None, withvalues=False):
-        """
-        Return a random field from the hash value stored at key.
-
-        count: if the argument is positive, return an array of distinct fields.
-        If called with a negative count, the behavior changes and the command
-        is allowed to return the same field multiple times. In this case,
-        the number of returned fields is the absolute value of the
-        specified count.
-        withvalues: The optional WITHVALUES modifier changes the reply so it
-        includes the respective values of the randomly selected hash fields.
-        """
-        params = []
-        if count is not None:
-            params.append(count)
-        if withvalues:
-            params.append("WITHVALUES")
-
-        return self.execute_command("HRANDFIELD", key, *params)
-
     def randomkey(self):
         "Returns the name of a random key"
         return self.execute_command('RANDOMKEY')
@@ -2516,40 +2496,61 @@ class Commands:
         "Merge N different HyperLogLogs into a single one."
         return self.execute_command('PFMERGE', dest, *sources)
 
-    # HASH COMMANDS
+    # region HASH COMMANDS
     def hdel(self, name, *keys):
-        "Delete ``keys`` from hash ``name``"
+        """Delete ``keys`` from hash ``name``."""
         return self.execute_command('HDEL', name, *keys)
 
     def hexists(self, name, key):
-        "Returns a boolean indicating if ``key`` exists within hash ``name``"
+        """Returns a boolean indicating if ``key`` exists within hash ``name``."""
         return self.execute_command('HEXISTS', name, key)
 
     def hget(self, name, key):
-        "Return the value of ``key`` within the hash ``name``"
+        """Return the value of ``key`` within the hash ``name``"""
         return self.execute_command('HGET', name, key)
 
     def hgetall(self, name):
-        "Return a Python dict of the hash's name/value pairs"
+        """Return a Python dict of the hash's name/value pairs."""
         return self.execute_command('HGETALL', name)
 
     def hincrby(self, name, key, amount=1):
-        "Increment the value of ``key`` in hash ``name`` by ``amount``"
+        """Increment the value of ``key`` in hash ``name`` by ``amount``."""
         return self.execute_command('HINCRBY', name, key, amount)
 
     def hincrbyfloat(self, name, key, amount=1.0):
-        """
-        Increment the value of ``key`` in hash ``name`` by floating ``amount``
-        """
+        """Increment the value of ``key`` in hash ``name`` by floating ``amount``."""
         return self.execute_command('HINCRBYFLOAT', name, key, amount)
 
     def hkeys(self, name):
-        "Return the list of keys within hash ``name``"
+        """Return the list of keys within hash ``name``."""
         return self.execute_command('HKEYS', name)
 
     def hlen(self, name):
-        "Return the number of elements in hash ``name``"
+        """Return the number of elements in hash ``name``."""
         return self.execute_command('HLEN', name)
+
+    def hmget(self, name, keys, *args):
+        """Returns a list of values ordered identically to ``keys``."""
+        args = list_or_args(keys, args)
+        return self.execute_command('HMGET', name, *args)
+
+    def hmset(self, name, mapping):
+        """
+        Set key to value within hash ``name`` for each corresponding
+        key and value from the ``mapping`` dict.
+        """
+        warnings.warn(
+            '%s.hmset() is deprecated. Use %s.hset() instead.'
+            % (self.__class__.__name__, self.__class__.__name__),
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if not mapping:
+            raise DataError("'hmset' with 'mapping' of length 0")
+        items = []
+        for pair in mapping.items():
+            items.extend(pair)
+        return self.execute_command('HMSET', name, *items)
 
     def hset(self, name, key=None, value=None, mapping=None):
         """
@@ -2576,32 +2577,25 @@ class Commands:
         """
         return self.execute_command('HSETNX', name, key, value)
 
-    def hmset(self, name, mapping):
+    def hrandfield(self, key, count=None, withvalues=False):
         """
-        Set key to value within hash ``name`` for each corresponding
-        key and value from the ``mapping`` dict.
+        Return a random field from the hash value stored at key.
+
+        count: if the argument is positive, return an array of distinct fields.
+        If called with a negative count, the behavior changes and the command
+        is allowed to return the same field multiple times. In this case,
+        the number of returned fields is the absolute value of the
+        specified count.
+        withvalues: The optional WITHVALUES modifier changes the reply so it
+        includes the respective values of the randomly selected hash fields.
         """
-        warnings.warn(
-            '%s.hmset() is deprecated. Use %s.hset() instead.'
-            % (self.__class__.__name__, self.__class__.__name__),
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if not mapping:
-            raise DataError("'hmset' with 'mapping' of length 0")
-        items = []
-        for pair in mapping.items():
-            items.extend(pair)
-        return self.execute_command('HMSET', name, *items)
+        params = []
+        if count is not None:
+            params.append(count)
+        if withvalues:
+            params.append("WITHVALUES")
 
-    def hmget(self, name, keys, *args):
-        "Returns a list of values ordered identically to ``keys``"
-        args = list_or_args(keys, args)
-        return self.execute_command('HMGET', name, *args)
-
-    def hvals(self, name):
-        "Return the list of values within hash ``name``"
-        return self.execute_command('HVALS', name)
+        return self.execute_command("HRANDFIELD", key, *params)
 
     def hstrlen(self, name, key):
         """
@@ -2609,6 +2603,11 @@ class Commands:
         within hash ``name``
         """
         return self.execute_command('HSTRLEN', name, key)
+
+    def hvals(self, name):
+        """Return the list of values within hash ``name``."""
+        return self.execute_command('HVALS', name)
+    # endregion
 
     def publish(self, channel, message):
         """
