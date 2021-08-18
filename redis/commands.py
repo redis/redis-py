@@ -773,6 +773,10 @@ class Commands:
         """Return the value at key ``name``, or None if the key doesn't exist."""
         return self.execute_command('GET', name)
 
+    def getbit(self, name, offset):
+        """Returns a boolean indicating the value of ``offset`` in ``name``."""
+        return self.execute_command('GETBIT', name, offset)
+
     def getdel(self, name):
         """
         Get the value at key ``name`` and delete the key. This command
@@ -838,20 +842,6 @@ class Commands:
 
         return self.execute_command('GETEX', name, *pieces)
 
-    def __getitem__(self, name):
-        """
-        Return the value at key ``name``, raises a KeyError if the key
-        doesn't exist.
-        """
-        value = self.get(name)
-        if value is not None:
-            return value
-        raise KeyError(name)
-
-    def getbit(self, name, offset):
-        "Returns a boolean indicating the value of ``offset`` in ``name``"
-        return self.execute_command('GETBIT', name, offset)
-
     def getrange(self, key, start, end):
         """
         Returns the substring of the string value stored at ``key``,
@@ -868,6 +858,16 @@ class Commands:
         Please use SET with GET parameter in new code.
         """
         return self.execute_command('GETSET', name, value)
+
+    def __getitem__(self, name):
+        """
+        Return the value at key ``name``, raises a KeyError if the key
+        doesn't exist.
+        """
+        value = self.get(name)
+        if value is not None:
+            return value
+        raise KeyError(name)
 
     def incr(self, name, amount=1):
         """
