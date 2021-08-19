@@ -1666,9 +1666,6 @@ class Commands:
                 pieces.append(b'~')
             pieces.append(minid)
         if limit is not None:
-            if maxlen is None and minid is None:
-                raise DataError("approximate must be provided with one of "
-                                "```maxlen``` or ```minid```.")
             pieces.append(b"LIMIT")
             pieces.append(limit)
         if nomkstream:

@@ -2423,7 +2423,7 @@ class TestRedisCommands:
         assert r.xlen(stream) == 3
 
     @skip_if_server_version_lt('6.2.0')
-    def test_xadd_minlen_and_length_args(self, r):
+    def test_xadd_minlen_and_limit(self, r):
         stream = 'stream'
 
         r.xadd(stream, {'foo': 'bar'})
@@ -2435,6 +2435,10 @@ class TestRedisCommands:
         with pytest.raises(redis.ResponseError):
             assert r.xadd(stream, {'foo': 'bar'}, maxlen=3,
                           approximate=False, limit=2)
+
+        # limit can not be provided without maxlen or minid
+        with pytest.raises(redis.ResponseError):
+            assert r.xadd(stream, {'foo': 'bar'}, limit=2)
 
         # maxlen with a limit
         assert r.xadd(stream, {'foo': 'bar'}, maxlen=3,
