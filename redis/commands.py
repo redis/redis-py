@@ -1680,32 +1680,6 @@ class Commands:
             pieces.extend(pair)
         return self.execute_command('XADD', name, *pieces)
 
-
-
-        """if maxlen is not None:
-            pieces.append(b'MAXLEN')
-        if minid is not None:
-            pieces.append(b'MINID')
-        if approximate:
-            pieces.append(b'~')
-        if maxlen is not None:
-            if not isinstance(maxlen, int) or maxlen < 1:
-                raise DataError('XADD maxlen must be a positive integer')
-            pieces.append(str(maxlen))
-        if minid is not None:
-            pieces.append(minid)
-        if limit is not None:
-            pieces.append(b"LIMIT")
-            pieces.append(limit)
-        if nomkstream:
-            pieces.append(b'NOMKSTREAM')
-        pieces.append(id)
-        if not isinstance(fields, dict) or len(fields) == 0:
-            raise DataError('XADD fields must be a non-empty dict')
-        for pair in fields.items():
-            pieces.extend(pair)
-        return self.execute_command('XADD', name, *pieces)"""
-
     def xautoclaim(self, name, groupname, consumername, min_idle_time,
                    start_id=0, count=None, justid=False):
         """
