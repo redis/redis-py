@@ -1640,7 +1640,7 @@ class Commands:
         return self.execute_command('XACK', name, groupname, *ids)
 
     def xadd(self, name, fields, id='*', maxlen=None, approximate=True,
-             nomkstream=False):
+             nomkstream=False, minid=None, limit=None):
         """
         Add to a stream.
         name: name of the stream
@@ -1649,6 +1649,8 @@ class Commands:
         maxlen: truncate old stream members beyond this size
         approximate: actual stream length may be slightly more than maxlen
         nomkstream: When set to true, do not make a stream
+        minid: the minimum id in the stream to query
+        limit: specifies the maximum number of entries to retrieve
         """
         pieces = []
         if maxlen is not None:
@@ -1658,6 +1660,17 @@ class Commands:
             if approximate:
                 pieces.append(b'~')
             pieces.append(str(maxlen))
+        if minid is not None:
+            pieces.append(b'MINID')
+            if approximate:
+                pieces.append(b'~')
+            pieces.append(minid)
+        if limit is not None:
+            if maxlen is None and minid is None:
+                raise DataError("approximate must be provided with one of "
+                                "```maxlen``` or ```minid```.")
+            pieces.append(b"LIMIT")
+            pieces.append(limit)
         if nomkstream:
             pieces.append(b'NOMKSTREAM')
         pieces.append(id)
@@ -1666,6 +1679,32 @@ class Commands:
         for pair in fields.items():
             pieces.extend(pair)
         return self.execute_command('XADD', name, *pieces)
+
+
+
+        """if maxlen is not None:
+            pieces.append(b'MAXLEN')
+        if minid is not None:
+            pieces.append(b'MINID')
+        if approximate:
+            pieces.append(b'~')
+        if maxlen is not None:
+            if not isinstance(maxlen, int) or maxlen < 1:
+                raise DataError('XADD maxlen must be a positive integer')
+            pieces.append(str(maxlen))
+        if minid is not None:
+            pieces.append(minid)
+        if limit is not None:
+            pieces.append(b"LIMIT")
+            pieces.append(limit)
+        if nomkstream:
+            pieces.append(b'NOMKSTREAM')
+        pieces.append(id)
+        if not isinstance(fields, dict) or len(fields) == 0:
+            raise DataError('XADD fields must be a non-empty dict')
+        for pair in fields.items():
+            pieces.extend(pair)
+        return self.execute_command('XADD', name, *pieces)"""
 
     def xautoclaim(self, name, groupname, consumername, min_idle_time,
                    start_id=0, count=None, justid=False):
@@ -2002,7 +2041,7 @@ class Commands:
         name: name of the stream.
         maxlen: truncate old stream messages beyond this size
         approximate: actual stream length may be slightly more than maxlen
-        minin: the minimum id in the stream to query
+        minid: the minimum id in the stream to query
         limit: specifies the maximum number of entries to retrieve
         """
         pieces = []
