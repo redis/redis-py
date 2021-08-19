@@ -1011,13 +1011,13 @@ class TestRedisCommands:
         assert r.set('a', '1', ex=expire_at)
         assert 0 < r.ttl('a') <= 60
 
-    @skip_if_server_version_lt('2.6.0')
+    @skip_if_server_version_lt('6.2.0')
     def test_set_exat_timedelta(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(seconds=10)
         assert r.set('a', '1', exat=expire_at)
         assert 0 < r.ttl('a') <= 10
 
-    @skip_if_server_version_lt('2.6.0')
+    @skip_if_server_version_lt('6.2.0')
     def test_set_pxat_timedelta(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(seconds=10)
         assert r.set('a', '1', pxat=expire_at)
