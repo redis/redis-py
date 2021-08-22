@@ -425,6 +425,10 @@ class TestRedisCommands:
             r.client_pause(timeout='not an integer')
 
     @skip_if_server_version_lt('6.2.0')
+    def test_client_pause_write(self, r):
+        assert r.client_pause(timeout=10000, all=False)
+
+    @skip_if_server_version_lt('6.2.0')
     def test_client_unpause(self, r):
         assert r.client_unpause() == b'OK'
 

@@ -369,14 +369,26 @@ class Commands:
             args.append(b'ERROR')
         return self.execute_command(*args)
 
-    def client_pause(self, timeout):
+    def client_pause(self, timeout, all=True):
         """
         Suspend all the Redis clients for the specified amount of time
         :param timeout: milliseconds to pause clients
+        :param all: If true (default) all client commands are blocked.
+             otherwise, clients are only blocked if they attempt to execute
+             a write command.
+             For the WRITE mode, some commands have special behavior:
+                 EVAL/EVALSHA: Will block client for all scripts.
+                 PUBLISH: Will block client.
+                 PFCOUNT: Will block client.
+                 WAIT: Acknowledgments will be delayed, so this command will
+                 appear blocked.
         """
+        args = ['CLIENT PAUSE', str(timeout)]
         if not isinstance(timeout, int):
             raise DataError("CLIENT PAUSE timeout must be an integer")
-        return self.execute_command('CLIENT PAUSE', str(timeout))
+        if not all:
+            args.append('WRITE')
+        return self.execute_command(*args)
 
     def client_unpause(self):
         """
