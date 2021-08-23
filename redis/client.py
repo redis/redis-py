@@ -417,10 +417,10 @@ def parse_stralgo(response, **options):
     When WITHMATCHLEN is given, each array representing a match will
     also have the length of the match at the beginning of the array.
     """
-    if options['len']:
+    if options.get('len', False):
         return int(response)
-    if options['idx']:
-        if options['withmatchlen']:
+    if options.get('idx', False):
+        if options.get('withmatchlen', False):
             matches = [[(int(match[-1]))] + list(map(tuple, match[:-1]))
                        for match in response[1]]
         else:
