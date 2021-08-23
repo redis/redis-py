@@ -35,8 +35,10 @@ class SentinelTestClient:
         from redis.client import bool_ok
         return bool_ok
 
+
 class SentinelTestCluster:
-    def __init__(self, servisentinel_ce_name='mymaster', ip='127.0.0.1', port=6379):
+    def __init__(self, servisentinel_ce_name='mymaster', ip='127.0.0.1',
+                 port=6379):
         self.clients = {}
         self.master = {
             'ip': ip,
@@ -82,6 +84,7 @@ def sentinel(request, cluster):
 def test_discover_master(sentinel, master_ip):
     address = sentinel.discover_master('mymaster')
     assert address == (master_ip, 6379)
+
 
 def test_discover_master_error(sentinel):
     with pytest.raises(MasterNotFoundError):
@@ -202,11 +205,14 @@ def test_slave_round_robin(cluster, sentinel, master_ip):
     with pytest.raises(SlaveNotFoundError):
         next(rotator)
 
+
 def test_ckquorum(cluster, sentinel):
     assert sentinel.sentinel_ckquorum("mymaster")
 
+
 def test_flushconfig(cluster, sentinel):
     assert sentinel.sentinel_flushconfig()
+
 
 def test_reset(cluster, sentinel):
     cluster.master['is_odown'] = True
