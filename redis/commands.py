@@ -2950,7 +2950,7 @@ class BitFieldOperation:
         return self.client.execute_command(*command)
 
 
-class SentinalCommands:
+class SentinelCommands:
     """
     A class containing the commands specific to redis sentinal. This class is
     to be used as a mixin.
@@ -3003,7 +3003,7 @@ class SentinalCommands:
         failover in progress), and removes every slave and sentinel already
         discovered and associated with the master.
         """
-        return self.execute_command('SENTINEL RESET', pattern)
+        return self.execute_command('SENTINEL RESET', pattern, once=True)
 
     def sentinel_failover(self, new_master_name):
         """
@@ -3023,7 +3023,9 @@ class SentinalCommands:
         This command should be used in monitoring systems to check if a
         Sentinel deployment is ok.
         """
-        return self.execute_command('SENTINEL CKQUORUM', new_master_name)
+        return self.execute_command('SENTINEL CKQUORUM',
+                                    new_master_name,
+                                    once=True)
 
     def sentinel_flushconfig(self):
         """
