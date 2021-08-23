@@ -1646,10 +1646,10 @@ class Commands:
         name: name of the stream
         fields: dict of field/value pairs to insert into the stream
         id: Location to insert this record. By default it is appended.
-        maxlen: truncate old stream members beyond this size
+        maxlen: truncate old stream members beyond this size. Can't be specify with minid.
+        minid: the minimum id in the stream to query. Can't be specify with maxlen.
         approximate: actual stream length may be slightly more than maxlen
         nomkstream: When set to true, do not make a stream
-        minid: the minimum id in the stream to query
         limit: specifies the maximum number of entries to retrieve
         """
         pieces = []
