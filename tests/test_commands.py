@@ -1,5 +1,7 @@
 import binascii
 import datetime
+import threading
+
 import pytest
 import re
 import redis
@@ -434,13 +436,18 @@ class TestRedisCommands:
 
         clients_by_name = dict([(client.get('name'), client)
                                 for client in clients])"""
+        assert r.client_pause(timeout=1000, all=False)
 
-        assert r.client_pause(timeout=100000000, all=False)
+        x = threading.Thread(target=r2, args=(1,))
+        x.start()
         r.set('FOO', 'BAR')
         assert r.get('FOO') != 'BAR'
         assert r.ping()
         r2.client_unpause()
 
+    def thread_function(self, r):
+        assert r.ping()
+        r.client_unpause()
 
     @skip_if_server_version_lt('6.2.0')
     def test_client_unpause(self, r):
