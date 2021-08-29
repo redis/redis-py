@@ -2446,7 +2446,7 @@ class TestRedisCommands:
         r.delete(stream)
 
         # maxlen and minid can not be provided together
-        with pytest.raises(redis.ResponseError):
+        with pytest.raises(redis.DataError):
             assert r.xadd(stream, {'foo': 'bar'}, maxlen=3,
                           minid="sometestvalue")
 
