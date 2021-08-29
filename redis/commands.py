@@ -1653,6 +1653,10 @@ class Commands:
         limit: specifies the maximum number of entries to retrieve
         """
         pieces = []
+        if maxlen is not None and minid is not None:
+            raise DataError("Only one of ```maxlen``` or ```minid```",
+                            "may be specified")
+
         if maxlen is not None:
             if not isinstance(maxlen, int) or maxlen < 1:
                 raise DataError('XADD maxlen must be a positive integer')
