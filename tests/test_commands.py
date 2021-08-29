@@ -1865,6 +1865,17 @@ class TestRedisCommands:
         assert r.zrange('d', 0, -1, withscores=True) == \
             [(b'a2', 5), (b'a4', 12), (b'a3', 20), (b'a1', 23)]
 
+    @skip_if_server_version_lt('6.1.240')
+    def test_zmscore(self, r):
+        with pytest.raises(exceptions.DataError):
+            r.zmscore('invalid_key', [])
+
+        assert r.zmscore('invalid_key', ['invalid_member']) == [None]
+
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3.5})
+        assert r.zmscore('a', ['a1', 'a2', 'a3', 'a4']) == \
+            [1.0, 2.0, 3.5, None]
+
     # HYPERLOGLOG TESTS
     @skip_if_server_version_lt('2.8.9')
     def test_pfadd(self, r):

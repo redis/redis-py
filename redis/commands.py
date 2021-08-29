@@ -2461,6 +2461,20 @@ class Commands:
         """
         return self._zaggregate('ZUNIONSTORE', dest, keys, aggregate)
 
+    def zmscore(self, key, members):
+        """
+        Returns the scores associated with the specified members
+        in the sorted set stored at key.
+        ``members`` should be a list of the member name.
+        Return type is a list of score.
+        If the member does not exist, a None will be returned
+        in corresponding position.
+        """
+        if not members:
+            raise DataError('ZMSCORE members must be a non-empty list')
+        pieces = [key] + members
+        return self.execute_command('ZMSCORE', *pieces)
+
     def _zaggregate(self, command, dest, keys, aggregate=None,
                     **options):
         pieces = [command]
