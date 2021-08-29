@@ -3,7 +3,7 @@ from redis.retry import Retry
 import pytest
 import random
 import redis
-from distutils.version import StrictVersion
+from packaging.version import Version
 from redis.connection import parse_url
 from unittest.mock import Mock
 from urllib.parse import urlparse
@@ -44,7 +44,7 @@ def pytest_sessionstart(session):
 
 def skip_if_server_version_lt(min_version):
     redis_version = REDIS_INFO["version"]
-    check = StrictVersion(redis_version) < StrictVersion(min_version)
+    check = Version(redis_version) < Version(min_version)
     return pytest.mark.skipif(
         check,
         reason="Redis version required >= {}".format(min_version))
@@ -52,7 +52,7 @@ def skip_if_server_version_lt(min_version):
 
 def skip_if_server_version_gte(min_version):
     redis_version = REDIS_INFO["version"]
-    check = StrictVersion(redis_version) >= StrictVersion(min_version)
+    check = Version(redis_version) >= Version(min_version)
     return pytest.mark.skipif(
         check,
         reason="Redis version required < {}".format(min_version))
@@ -183,7 +183,7 @@ def wait_for_command(client, monitor, command):
     # if we find a command with our key before the command we're waiting
     # for, something went wrong
     redis_version = REDIS_INFO["version"]
-    if StrictVersion(redis_version) >= StrictVersion('5.0.0'):
+    if Version(redis_version) >= Version('5.0.0'):
         id_str = str(client.client_id())
     else:
         id_str = '%08x' % random.randrange(2**32)
