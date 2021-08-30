@@ -1870,6 +1870,18 @@ class Commands:
         """
         return self.execute_command('XGROUP DESTROY', name, groupname)
 
+    def xgroup_createconsumer(self, name, groupname, consumername):
+        """
+        Consumers in a consumer group are auto-created every time a new
+        consumer name is mentioned by some command.
+        They can be explicitly created by using this command.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        consumername: name of consumer to create.
+        """
+        return self.execute_command('XGROUP CREATECONSUMER', name, groupname,
+                                    consumername)
+
     def xgroup_setid(self, name, groupname, id):
         """
         Set the consumer group last delivered ID to something else.
