@@ -1,7 +1,7 @@
 import pytest
 
 import redis
-from .conftest import wait_for_command
+from .conftest import wait_for_command, skip_if_server_version_lt
 
 
 class TestPipeline:
@@ -353,3 +353,29 @@ class TestPipeline:
 
             assert pipe == pipe2
             assert response == [True, [0, 0, 15, 15, 14], b'1']
+
+    @skip_if_server_version_lt('2.0.0')
+    def test_pipeline_discard(self, r):
+
+        # empty pipeline should raise an error
+        with r.pipeline() as pipe:
+            pipe.set('key', 'someval')
+            pipe.discard()
+            with pytest.raises(redis.exceptions.ResponseError):
+                pipe.execute()
+
+        # setting a pipeline and discarding should do the same
+        with r.pipeline() as pipe:
+            pipe.set('key', 'someval')
+            pipe.set('someotherkey', 'val')
+            response = pipe.execute()
+            pipe.set('key', 'another value!')
+            pipe.discard()
+            pipe.set('key', 'another vae!')
+            with pytest.raises(redis.exceptions.ResponseError):
+                pipe.execute()
+
+            pipe.set('foo', 'bar')
+            response = pipe.execute()
+        assert response[0]
+        assert r.get('foo') == b'bar'
