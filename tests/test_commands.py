@@ -478,6 +478,9 @@ class TestRedisCommands:
     def test_ping(self, r):
         assert r.ping()
 
+    def test_quit(self, r):
+        assert r.quit()
+
     def test_slowlog_get(self, r, slowlog):
         assert r.slowlog_reset()
         unicode_string = chr(3456) + 'abcd' + chr(3421)

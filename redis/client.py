@@ -709,6 +709,7 @@ class Redis(Commands, object):
         'MODULE LIST': lambda r: [pairs_to_dict(m) for m in r],
         'OBJECT': parse_object,
         'PING': lambda r: str_if_bytes(r) == 'PONG',
+        'QUIT': bool_ok,
         'STRALGO': parse_stralgo,
         'PUBSUB NUMSUB': parse_pubsub_numsub,
         'RANDOMKEY': lambda r: r and r or None,

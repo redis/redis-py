@@ -538,6 +538,12 @@ class Commands:
         "Ping the Redis server"
         return self.execute_command('PING')
 
+    def quit(self):
+        """Ask the server to close the connection.
+        https://redis.io/commands/quit
+        """
+        return self.execute_command('QUIT')
+
     def save(self):
         """
         Tell the Redis server to save its data to disk,
