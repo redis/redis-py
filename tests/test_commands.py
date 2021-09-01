@@ -1087,9 +1087,9 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt('6.2.0')
     def test_set_pxat_timedelta(self, r):
-        expire_at = redis_server_time(r) + datetime.timedelta(seconds=10)
+        expire_at = redis_server_time(r) + datetime.timedelta(seconds=50)
         assert r.set('a', '1', pxat=expire_at)
-        assert 0 < r.ttl('a') <= 10
+        assert 0 < r.ttl('a') <= 100
 
     @skip_if_server_version_lt('2.6.0')
     def test_set_multipleoptions(self, r):
