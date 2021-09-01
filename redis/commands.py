@@ -52,9 +52,22 @@ class Commands:
         "Delete the ACL for the specified ``username``"
         return self.execute_command('ACL DELUSER', username)
 
-    def acl_genpass(self):
-        "Generate a random password value"
-        return self.execute_command('ACL GENPASS')
+    def acl_genpass(self, bits=None):
+        """Generate a random password value.
+        If ``bits`` is supplied then use this number of bits, rounded to
+        the next multiple of 4.
+        See: https://redis.io/commands/acl-genpass
+        """
+        pieces = []
+        if bits is not None:
+            try:
+                b = int(bits)
+                if b < 0 or b > 4096:
+                    raise ValueError
+            except ValueError:
+                raise DataError('genpass optionally accepts a bits argument, '
+                                'between 0 and 4096.')
+        return self.execute_command('ACL GENPASS', *pieces)
 
     def acl_getuser(self, username):
         """
