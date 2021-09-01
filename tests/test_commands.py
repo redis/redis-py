@@ -1263,6 +1263,15 @@ class TestRedisCommands:
         assert r.lpushx('a', '4') == 4
         assert r.lrange('a', 0, -1) == [b'4', b'1', b'2', b'3']
 
+    @skip_if_server_version_lt('4.0.0')
+    def test_lpushx_with_list(self, r):
+        # now with a list
+        r.lpush('somekey', 'a')
+        r.lpush('somekey', 'b')
+        assert r.lpushx('somekey', 'foo', 'asdasd', 55, 'asdasdas') == 6
+        res = r.lrange('somekey', 0, -1)
+        assert res == [b'asdasdas', b'55', b'asdasd', b'foo', b'b', b'a']
+
     def test_lrange(self, r):
         r.rpush('a', '1', '2', '3', '4', '5')
         assert r.lrange('a', 0, 2) == [b'1', b'2', b'3']
