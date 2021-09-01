@@ -3228,6 +3228,12 @@ class TestRedisCommands:
         assert isinstance(r.module_list(), list)
         assert not r.module_list()
 
+    @skip_if_server_version_lt('2.8.13')
+    def test_command_count(self, r):
+        res = r.command_count()
+        assert isinstance(res, int)
+        assert res >= 100
+
 
 class TestBinarySave:
 
