@@ -315,6 +315,12 @@ class TestRedisCommands:
     def test_client_id(self, r):
         assert r.client_id() > 0
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_client_trackinginfo(self, r):
+        res = r.client_trackinginfo()
+        assert len(res) > 2
+        assert 'prefixes' in res
+
     @skip_if_server_version_lt('5.0.0')
     def test_client_unblock(self, r):
         myid = r.client_id()

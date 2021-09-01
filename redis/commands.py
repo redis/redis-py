@@ -369,6 +369,13 @@ class Commands:
         "Returns the current connection id"
         return self.execute_command('CLIENT ID')
 
+    def client_trackinginfo(self):
+        """Returns the information about the current client connection's
+        use of the server assisted client side cache.
+        See https://redis.io/commands/client-trackinginfo
+        """
+        return self.execute_command('CLIENT TRACKINGINFO')
+
     def client_setname(self, name):
         "Sets the current connection name"
         return self.execute_command('CLIENT SETNAME', name)
