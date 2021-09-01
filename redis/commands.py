@@ -2924,6 +2924,136 @@ class Commands:
 
         return self.execute_command(command, *pieces, **kwargs)
 
+    def geosearch(self, name, member=None, longitude=None, latitude=None,
+                  unit='m', radius=None, width=None, height=None, sort=None,
+                  count=None, any=False, withcoord=False,
+                  withdist=False, withhash=False):
+        """
+        Return the members of specified key identified by the
+        ``name`` argument, which are within the borders of the
+        area specified by a given shape. This command extends the
+        GEORADIUS command, so in addition to searching within circular
+        areas, it supports searching within rectangular areas.
+        This command should be used in place of the deprecated
+        GEORADIUS and GEORADIUSBYMEMBER commands.
+        ``member`` Use the position of the given existing
+         member in the sorted set. Can't be given with ``longitude``
+         and ``latitude``.
+        ``longitude`` and ``latitude`` Use the position given by
+        this coordinates. Can't be given with ``member``
+        ``radius`` Similar to GEORADIUS, search inside circular
+        area according the given radius. Can't be given with
+        ``height`` and ``width``.
+        ``height`` and ``width`` Search inside an axis-aligned
+        rectangle, determined by the given height and width.
+        Can't be given with ``radius``
+        ``unit`` must be one of the following : m, km, mi, ft.
+        `m` for meters (the default value), `km` for kilometers,
+        `mi` for miles and `ft` for feet.
+        ``sort`` indicates to return the places in a sorted way,
+        ASC for nearest to farest and DESC for farest to nearest.
+        ``count`` limit the results to the first count matching items.
+        ``any`` is set to True, the command will return as soon as
+        enough matches are found. Can't be provided without ``count``
+        ``withdist`` indicates to return the distances of each place.
+        ``withcoord`` indicates to return the latitude and longitude of
+        each place.
+        ``withhash`` indicates to return the geohash string of each place.
+        """
+
+        return self._geosearchgeneric('GEOSEARCH',
+                                      name, member=member, longitude=longitude,
+                                      latitude=latitude, unit=unit,
+                                      radius=radius, width=width,
+                                      height=height, sort=sort, count=count,
+                                      any=any, withcoord=withcoord,
+                                      withdist=withdist, withhash=withhash,
+                                      store=None, store_dist=None)
+
+    def geosearchstore(self, dest, name, member=None, longitude=None,
+                       latitude=None, unit='m', radius=None, width=None,
+                       height=None, sort=None, count=None, any=False,
+                       storedist=False):
+        """
+        This command is like GEOSEARCH, but stores the result in
+        ``dest``. By default, it stores the results in the destination
+        sorted set with their geospatial information.
+        if ``store_dist`` set to True, the command will stores the
+        items in a sorted set populated with their distance from the
+        center of the circle or box, as a floating-point number.
+        """
+        return self._geosearchgeneric('GEOSEARCHSTORE',
+                                      dest, name, member=member,
+                                      longitude=longitude, latitude=latitude,
+                                      unit=unit, radius=radius, width=width,
+                                      height=height, sort=sort, count=count,
+                                      any=any, withcoord=None,
+                                      withdist=None, withhash=None,
+                                      store=None, store_dist=storedist)
+
+    def _geosearchgeneric(self, command, *args, **kwargs):
+        pieces = list(args)
+
+        # FROMMEMBER or FROMLONLAT
+        if kwargs['member'] is None:
+            if kwargs['longitude'] is None or kwargs['latitude'] is None:
+                raise DataError("GEOSEARCH must have member or"
+                                " longitude and latitude")
+        if kwargs['member']:
+            if kwargs['longitude'] or kwargs['latitude']:
+                raise DataError("GEOSEARCH member and longitude or latitude"
+                                " cant be set together")
+            pieces.extend([b'FROMMEMBER', kwargs['member']])
+        if kwargs['longitude'] and kwargs['latitude']:
+            pieces.extend([b'FROMLONLAT',
+                           kwargs['longitude'], kwargs['latitude']])
+
+        # BYRADIUS or BYBOX
+        if kwargs['radius'] is None:
+            if kwargs['width'] is None or kwargs['height'] is None:
+                raise DataError("GEOSEARCH must have radius or"
+                                " width and height")
+        if kwargs['unit'] is None:
+            raise DataError("GEOSEARCH must have unit")
+        if kwargs['unit'].lower() not in ('m', 'km', 'mi', 'ft'):
+            raise DataError("GEOSEARCH invalid unit")
+        if kwargs['radius']:
+            if kwargs['width'] or kwargs['height']:
+                raise DataError("GEOSEARCH radius and width or height"
+                                " cant be set together")
+            pieces.extend([b'BYRADIUS', kwargs['radius'], kwargs['unit']])
+        if kwargs['width'] and kwargs['height']:
+            pieces.extend([b'BYBOX',
+                           kwargs['width'], kwargs['height'], kwargs['unit']])
+
+        # sort
+        if kwargs['sort']:
+            if kwargs['sort'].upper() == 'ASC':
+                pieces.append(b'ASC')
+            elif kwargs['sort'].upper() == 'DESC':
+                pieces.append(b'DESC')
+            else:
+                raise DataError("GEOSEARCH invalid sort")
+
+        # count any
+        if kwargs['count']:
+            pieces.extend([b'COUNT', kwargs['count']])
+            if kwargs['any']:
+                pieces.append(b'ANY')
+        elif kwargs['any']:
+            raise DataError("GEOSEARCH any can't be provided without count")
+
+        # other properties
+        for arg_name, byte_repr in (
+                ('withdist', b'WITHDIST'),
+                ('withcoord', b'WITHCOORD'),
+                ('withhash', b'WITHHASH'),
+                ('store_dist', b'STOREDIST')):
+            if kwargs[arg_name]:
+                pieces.append(byte_repr)
+
+        return self.execute_command(command, *pieces, **kwargs)
+
     # MODULE COMMANDS
     def module_load(self, path):
         """

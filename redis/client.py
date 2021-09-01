@@ -472,10 +472,15 @@ def parse_cluster_nodes(response, **options):
     return dict(_parse_node_line(line) for line in raw_lines)
 
 
-def parse_georadius_generic(response, **options):
+def parse_geosearch_generic(response, **options):
+    """
+    Parse the response of 'GEOSEARCH', GEORADIUS' and 'GEORADIUSBYMEMBER'
+    commands according to 'withdist', 'withhash' and 'withcoord' labels.
+    """
     if options['store'] or options['store_dist']:
-        # `store` and `store_diff` cant be combined
+        # `store` and `store_dist` cant be combined
         # with other command arguments.
+        # relevant to 'GEORADIUS' and 'GEORADIUSBYMEMBER'
         return response
 
     if type(response) != list:
@@ -483,7 +488,7 @@ def parse_georadius_generic(response, **options):
     else:
         response_list = response
 
-    if not options['withdist'] and not options['withcoord']\
+    if not options['withdist'] and not options['withcoord'] \
             and not options['withhash']:
         # just a bunch of places
         return response_list
@@ -695,8 +700,9 @@ class Redis(Commands, object):
         'GEOPOS': lambda r: list(map(lambda ll: (float(ll[0]),
                                      float(ll[1]))
                                      if ll is not None else None, r)),
-        'GEORADIUS': parse_georadius_generic,
-        'GEORADIUSBYMEMBER': parse_georadius_generic,
+        'GEOSEARCH': parse_geosearch_generic,
+        'GEORADIUS': parse_geosearch_generic,
+        'GEORADIUSBYMEMBER': parse_geosearch_generic,
         'HGETALL': lambda r: r and pairs_to_dict(r) or {},
         'HSCAN': parse_hscan,
         'INFO': parse_info,
