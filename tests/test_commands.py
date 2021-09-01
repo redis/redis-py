@@ -547,6 +547,11 @@ class TestRedisCommands:
         assert isinstance(t[0], int)
         assert isinstance(t[1], int)
 
+    def test_bgsave(self, r):
+        assert r.bgsave()
+        time.sleep(0.3)
+        assert r.bgsave(True)
+
     # BASIC KEY COMMANDS
     def test_append(self, r):
         assert r.append('a', 'a1') == 2
