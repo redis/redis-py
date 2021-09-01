@@ -48,9 +48,9 @@ class Commands:
         pieces = [category] if category else []
         return self.execute_command('ACL CAT', *pieces)
 
-    def acl_deluser(self, username):
+    def acl_deluser(self, *username):
         "Delete the ACL for the specified ``username``"
-        return self.execute_command('ACL DELUSER', username)
+        return self.execute_command('ACL DELUSER', *username)
 
     def acl_genpass(self):
         "Generate a random password value"
@@ -63,6 +63,12 @@ class Commands:
         If ``username`` does not exist, return None
         """
         return self.execute_command('ACL GETUSER', username)
+
+    def acl_help(self):
+        """The ACL HELP command returns helpful text describing
+        the different subcommands.
+        """
+        return self.execute_command('ACL HELP')
 
     def acl_list(self):
         "Return a list of all ACLs on the server"

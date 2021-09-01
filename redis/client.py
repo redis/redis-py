@@ -654,6 +654,7 @@ class Redis(Commands, object):
         'ACL DELUSER': int,
         'ACL GENPASS': str_if_bytes,
         'ACL GETUSER': parse_acl_getuser,
+        'ACL HELP': lambda r: list(map(str_if_bytes, r)),
         'ACL LIST': lambda r: list(map(str_if_bytes, r)),
         'ACL LOAD': bool_ok,
         'ACL LOG': parse_acl_log,

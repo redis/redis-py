@@ -93,6 +93,17 @@ class TestRedisCommands:
         assert r.acl_setuser(username, enabled=False, reset=True)
         assert r.acl_deluser(username) == 1
 
+        # now, a group of users
+        users = ['bogususer_%d' % r for r in range(0, 5)]
+        for u in users:
+            r.acl_setuser(u, enabled=False, reset=True)
+        assert r.acl_deluser(*users) > 1
+        assert r.acl_getuser(users[0]) is None
+        assert r.acl_getuser(users[1]) is None
+        assert r.acl_getuser(users[2]) is None
+        assert r.acl_getuser(users[3]) is None
+        assert r.acl_getuser(users[4]) is None
+
     @skip_if_server_version_lt(REDIS_6_VERSION)
     def test_acl_genpass(self, r):
         password = r.acl_genpass()
@@ -184,6 +195,12 @@ class TestRedisCommands:
         assert r.acl_setuser(username, enabled=True,
                              hashed_passwords=['-' + hashed_password])
         assert len(r.acl_getuser(username)['passwords']) == 1
+
+    @skip_if_server_version_lt(REDIS_6_VERSION)
+    def test_acl_help(self, r):
+        res = r.acl_help()
+        assert isinstance(res, list)
+        assert len(res) != 0
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
     def test_acl_list(self, r, request):
