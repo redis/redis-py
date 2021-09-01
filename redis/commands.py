@@ -268,12 +268,15 @@ class Commands:
         "Tell the Redis server to rewrite the AOF file from data in memory."
         return self.execute_command('BGREWRITEAOF')
 
-    def bgsave(self):
+    def bgsave(self, schedule=True):
         """
         Tell the Redis server to save its data to disk.  Unlike save(),
         this method is asynchronous and returns immediately.
         """
-        return self.execute_command('BGSAVE')
+        pieces = []
+        if schedule:
+            pieces.append("SCHEDULE")
+        return self.execute_command('BGSAVE', *pieces)
 
     def client_kill(self, address):
         "Disconnects the client at ``address`` (ip:port)"
