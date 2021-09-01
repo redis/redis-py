@@ -2924,6 +2924,9 @@ class Commands:
         """
         return self.execute_command('MODULE LIST')
 
+    def command_count(self):
+        return self.execute_command('COMMAND COUNT')
+
 
 class Script:
     "An executable Lua script object returned by ``register_script``"
