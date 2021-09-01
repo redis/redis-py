@@ -669,6 +669,7 @@ class Redis(Commands, object):
         'CLIENT SETNAME': bool_ok,
         'CLIENT UNBLOCK': lambda r: r and int(r) == 1 or False,
         'CLIENT PAUSE': bool_ok,
+        'CLIENT TRACKINGINFO': lambda r: list(map(str_if_bytes, r)),
         'CLUSTER ADDSLOTS': bool_ok,
         'CLUSTER COUNT-FAILURE-REPORTS': lambda x: int(x),
         'CLUSTER COUNTKEYSINSLOT': lambda x: int(x),
