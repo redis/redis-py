@@ -1318,9 +1318,9 @@ class Commands:
         "Push ``values`` onto the head of the list ``name``"
         return self.execute_command('LPUSH', name, *values)
 
-    def lpushx(self, name, value):
+    def lpushx(self, name, *values):
         "Push ``value`` onto the head of the list ``name`` if ``name`` exists"
-        return self.execute_command('LPUSHX', name, value)
+        return self.execute_command('LPUSHX', name, *values)
 
     def lrange(self, name, start, end):
         """
