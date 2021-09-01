@@ -30,6 +30,24 @@ class TestScripting:
         # 2 * 3 == 6
         assert r.eval(multiply_script, 1, 'a', 3) == 6
 
+    def test_script_flush(self, r):
+        r.set('a', 2)
+        r.script_load(multiply_script)
+        r.script_flush('ASYNC')
+
+        r.set('a', 2)
+        r.script_load(multiply_script)
+        r.script_flush('SYNC')
+
+        r.set('a', 2)
+        r.script_load(multiply_script)
+        r.script_flush()
+
+        with pytest.raises(exceptions.DataError):
+            r.set('a', 2)
+            r.script_load(multiply_script)
+            r.script_flush("NOTREAL")
+
     def test_evalsha(self, r):
         r.set('a', 2)
         sha = r.script_load(multiply_script)
