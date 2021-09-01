@@ -1802,6 +1802,12 @@ class Pipeline(Redis):
         finally:
             self.reset()
 
+    def discard(self):
+        """Flushes all previously queued commands
+        See: https://redis.io/commands/DISCARD
+        """
+        self.execute_command("DISCARD")
+
     def watch(self, *names):
         "Watches the values at keys ``names``"
         if self.explicit_transaction:
