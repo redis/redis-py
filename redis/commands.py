@@ -302,7 +302,7 @@ class Commands:
         return self.execute_command('CLIENT KILL', address)
 
     def client_kill_filter(self, _id=None, _type=None, addr=None,
-                           skipme=None, laddr=None):
+                           skipme=None, laddr=None, user=None):
         """
         Disconnects client(s) using a variety of filter options
         :param id: Kills a client by its unique ID field
@@ -310,7 +310,8 @@ class Commands:
         'master', 'slave' or 'pubsub'
         :param addr: Kills a client by its 'address:port'
         :param skipme: If True, then the client calling the command
-        :param laddr: Kills a cient by its 'local (bind)  address:port'
+        :param laddr: Kills a client by its 'local (bind)  address:port'
+        :param user: Kills a client for a specific user name
         will not get killed even if it is identified by one of the filter
         options. If skipme is not provided, the server defaults to skipme=True
         """
@@ -334,6 +335,8 @@ class Commands:
             args.extend((b'ADDR', addr))
         if laddr is not None:
             args.extend((b'LADDR', laddr))
+        if user is not None:
+            args.extend((b'USER', user))
         if not args:
             raise DataError("CLIENT KILL <filter> <value> ... ... <filter> "
                             "<value> must specify at least one filter")
@@ -346,7 +349,7 @@ class Commands:
         """
         return self.execute_command('CLIENT INFO')
 
-    def client_list(self, _type=None, client_id=None):
+    def client_list(self, _type=None, client_id=[]):
         """
         Returns a list of currently connected clients.
         If type of client specified, only that type will be returned.
@@ -362,9 +365,11 @@ class Commands:
                                 client_types,))
             args.append(b'TYPE')
             args.append(_type)
-        if client_id is not None:
+        if not isinstance(client_id, list):
+            raise DataError("client_id must be a list")
+        if client_id != []:
             args.append(b"ID")
-            args.append(client_id)
+            args.append(' '.join(client_id))
         return self.execute_command('CLIENT LIST', *args)
 
     def client_getname(self):
