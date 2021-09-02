@@ -504,6 +504,13 @@ class Commands:
         """
         return self.execute_command('LASTSAVE')
 
+    def lolwut(self, *version_numbers):
+        "Get the Redis version and a piece of generative computer art"
+        if version_numbers:
+            return self.execute_command('LOLWUT VERSION', *version_numbers)
+        else:
+            return self.execute_command('LOLWUT')
+
     def migrate(self, host, port, keys, destination_db, timeout,
                 copy=False, replace=False, auth=None):
         """

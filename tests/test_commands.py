@@ -518,6 +518,13 @@ class TestRedisCommands:
     def test_lastsave(self, r):
         assert isinstance(r.lastsave(), datetime.datetime)
 
+    def test_lolwut(self, r):
+        lolwut = r.lolwut().decode('utf-8')
+        assert 'Redis ver.' in lolwut
+
+        lolwut = r.lolwut(5, 6, 7, 8).decode('utf-8')
+        assert 'Redis ver.' in lolwut
+
     def test_object(self, r):
         r['a'] = 'foo'
         assert isinstance(r.object('refcount', 'a'), int)
