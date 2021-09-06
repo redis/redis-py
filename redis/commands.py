@@ -505,7 +505,9 @@ class Commands:
         return self.execute_command('LASTSAVE')
 
     def lolwut(self, *version_numbers):
-        "Get the Redis version and a piece of generative computer art"
+        """Get the Redis version and a piece of generative computer art
+        See: https://redis.io/commands/lolwut
+        """
         if version_numbers:
             return self.execute_command('LOLWUT VERSION', *version_numbers)
         else:
