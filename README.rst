@@ -964,6 +964,6 @@ Special thanks to:
 Sponsored by
 ^^^^^^^^^^^^
 
-.. image:: ./docs/logo-redislabs.png
-   :alt: RedisLabs
-   :target: https://www.redislabs.com
+.. image:: ./docs/logo-redis.png
+   :alt: Redis
+   :target: https://www.redis.com
