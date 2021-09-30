@@ -101,6 +101,12 @@ def r(request):
 
 
 @pytest.fixture()
+def r_timeout(request):
+    with _get_client(redis.Redis, request, socket_timeout=1) as client:
+        yield client
+
+
+@pytest.fixture()
 def r2(request):
     "A second client for tests that need multiple"
     with _get_client(redis.Redis, request) as client:

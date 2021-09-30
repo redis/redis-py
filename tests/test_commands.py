@@ -478,6 +478,19 @@ class TestRedisCommands:
     def test_client_unpause(self, r):
         assert r.client_unpause() == b'OK'
 
+    @skip_if_server_version_lt('3.2.0')
+    def test_client_reply(self, r, r_timeout):
+        assert r_timeout.client_reply('ON') == b'OK'
+        with pytest.raises(exceptions.TimeoutError):
+            r_timeout.client_reply('OFF')
+
+            r_timeout.client_reply('SKIP')
+
+        assert r_timeout.set('foo', 'bar')
+
+        # validate it was set
+        assert r.get('foo') == b'bar'
+
     def test_config_get(self, r):
         data = r.config_get()
         assert 'maxmemory' in data
