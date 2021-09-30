@@ -7,7 +7,7 @@ from unittest import mock
 
 from threading import Thread
 from redis.connection import ssl_available, to_bool
-from .conftest import skip_if_server_version_lt, _get_client, REDIS_6_VERSION
+from .conftest import skip_if_server_version_lt, _get_client
 from .test_pubsub import wait_for_message
 
 
@@ -200,7 +200,7 @@ class TestConnectionPoolURLParsing:
             'port': 6380,
         }
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_username(self):
         pool = redis.ConnectionPool.from_url('redis://myuser:@localhost')
         assert pool.connection_class == redis.Connection
@@ -209,7 +209,7 @@ class TestConnectionPoolURLParsing:
             'username': 'myuser',
         }
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_quoted_username(self):
         pool = redis.ConnectionPool.from_url(
             'redis://%2Fmyuser%2F%2B name%3D%24+:@localhost')
@@ -236,7 +236,7 @@ class TestConnectionPoolURLParsing:
             'password': '/mypass/+ word=$+',
         }
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_username_and_password(self):
         pool = redis.ConnectionPool.from_url('redis://myuser:mypass@localhost')
         assert pool.connection_class == redis.Connection
@@ -349,7 +349,7 @@ class TestConnectionPoolUnixSocketURLParsing:
             'path': '/socket',
         }
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_username(self):
         pool = redis.ConnectionPool.from_url('unix://myuser:@/socket')
         assert pool.connection_class == redis.UnixDomainSocketConnection
@@ -358,7 +358,7 @@ class TestConnectionPoolUnixSocketURLParsing:
             'username': 'myuser',
         }
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_quoted_username(self):
         pool = redis.ConnectionPool.from_url(
             'unix://%2Fmyuser%2F%2B name%3D%24+:@/socket')
