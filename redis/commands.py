@@ -3081,12 +3081,14 @@ class Commands:
         return self.execute_command(command, *pieces, **kwargs)
 
     # MODULE COMMANDS
-    def module_load(self, path):
+    def module_load(self, path, *args):
         """
         Loads the module from ``path``.
         Raises ``ModuleError`` if a module is not found at ``path``.
         """
-        return self.execute_command('MODULE LOAD', path)
+        pieces = list(args)
+        pieces.insert(0, path)
+        return self.execute_command('MODULE LOAD', *pieces)
 
     def module_unload(self, name):
         """

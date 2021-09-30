@@ -3461,6 +3461,16 @@ class TestRedisCommands:
         assert isinstance(res, int)
         assert res >= 100
 
+    @skip_if_server_version_lt('4.0.0')
+    def test_module(self, r):
+        with pytest.raises(redis.exceptions.ModuleError) as excinfo:
+            r.module_load('/some/fake/path')
+            assert "Error loading the extension." in str(excinfo.value)
+
+        with pytest.raises(redis.exceptions.ModuleError) as excinfo:
+            r.module_load('/some/fake/path', 'arg1', 'arg2', 'arg3', 'arg4')
+            assert "Error loading the extension." in str(excinfo.value)
+
 
 class TestBinarySave:
 
