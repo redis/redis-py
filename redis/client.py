@@ -1259,7 +1259,10 @@ class PubSub:
 
         self.check_health()
 
-        if not block and not conn.can_read(timeout=timeout):
+        if(
+                not block
+                and not self._execute(conn, conn.can_read, timeout=timeout)
+        ):
             return None
         response = self._execute(conn, conn.read_response)
 
