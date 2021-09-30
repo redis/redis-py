@@ -3471,6 +3471,48 @@ class TestRedisCommands:
             r.module_load('/some/fake/path', 'arg1', 'arg2', 'arg3', 'arg4')
             assert "Error loading the extension." in str(excinfo.value)
 
+    @skip_if_server_version_lt('2.6.0')
+    def test_restore(self, r):
+
+        # standard restore
+        key = 'foo'
+        r.set(key, 'bar')
+        dumpdata = r.dump(key)
+        r.delete(key)
+        assert r.restore(key, 0, dumpdata)
+        assert r.get(key) == b'bar'
+
+        # overwrite restore
+        with pytest.raises(redis.exceptions.ResponseError):
+            assert r.restore(key, 0, dumpdata)
+        r.set(key, 'a new value!')
+        assert r.restore(key, 0, dumpdata, replace=True)
+        assert r.get(key) == b'bar'
+
+        # ttl check
+        key2 = 'another'
+        r.set(key2, 'blee!')
+        dumpdata = r.dump(key2)
+        r.delete(key2)
+        assert r.restore(key2, 0, dumpdata)
+        assert r.ttl(key2) == -1
+
+        # idletime
+        key = 'yayakey'
+        r.set(key, 'blee!')
+        dumpdata = r.dump(key)
+        r.delete(key)
+        assert r.restore(key, 0, dumpdata, idletime=5)
+        assert r.get(key) == b'blee!'
+
+        # frequency
+        key = 'yayakey'
+        r.set(key, 'blee!')
+        dumpdata = r.dump(key)
+        r.delete(key)
+        assert r.restore(key, 0, dumpdata, frequency=5)
+        assert r.get(key) == b'blee!'
+
 
 class TestBinarySave:
 
