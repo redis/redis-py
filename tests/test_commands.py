@@ -518,6 +518,7 @@ class TestRedisCommands:
     def test_lastsave(self, r):
         assert isinstance(r.lastsave(), datetime.datetime)
 
+    @skip_if_server_version_lt('5.0.0')
     def test_lolwut(self, r):
         lolwut = r.lolwut().decode('utf-8')
         assert 'Redis ver.' in lolwut
