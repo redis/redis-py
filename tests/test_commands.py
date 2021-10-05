@@ -1687,7 +1687,7 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             r.zadd('a', {'a15': 155}, nx=True, lt=True)
             r.zadd('a', {'a15': 155}, nx=True, gt=True)
-            r.zadd('a', {'a15': 155}, lx=True, gt=True)
+            r.zadd('a', {'a15': 155}, lt=True, gt=True)
 
     def test_zcard(self, r):
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
