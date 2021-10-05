@@ -1122,7 +1122,7 @@ class Commands:
             (Available since Redis 6.0)
 
         ``get`` if True, set the value at key ``name`` to ``value`` and return
-            the old value stored at key, or None when key did not exist.
+            the old value stored at key, or None if key did not exist.
             (Available since Redis 6.2)
 
         ``exat`` sets an expire flag on key ``name`` for ``ex`` seconds,
