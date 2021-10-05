@@ -3148,6 +3148,7 @@ class TestRedisCommands:
                                     min='-', max='+', count=5, idle=1000)
         assert len(response) == 0
 
+    @skip_if_server_version_lt('6.2.0')
     def test_xpending_range_negative(self, r):
         stream = 'stream'
         group = 'group'
