@@ -355,6 +355,7 @@ class Commands:
         If type of client specified, only that type will be returned.
         :param _type: optional. one of the client types (normal, master,
          replica, pubsub)
+        :param client_id: optional. a list of client ids
         """
         "Returns a list of currently connected clients"
         args = []
@@ -2189,7 +2190,7 @@ class Commands:
         """
         pieces = []
         if maxlen is not None and minid is not None:
-            raise DataError("Only one of ```maxlen``` or ```minid```",
+            raise DataError("Only one of ``maxlen`` or ``minid`` "
                             "may be specified")
 
         if maxlen is not None:
