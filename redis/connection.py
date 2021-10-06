@@ -1393,3 +1393,54 @@ class BlockingConnectionPool(ConnectionPool):
         self._checkpid()
         for connection in self._connections:
             connection.disconnect()
+
+
+class ThrottleConnectionPool(BlockingConnectionPool):
+    """
+    Thread-safe throttling connection pool based on the
+    BlockingConnectionPool::
+
+        >>> from redis.client import Redis
+        >>> client = Redis(connection_pool=ThrottleConnectionPool())
+
+    Use ``throttle_interval`` to increase / decrease the throttle
+    a new connection::
+
+        >>> pool = ThrottleConnectionPool(throttle_interval=0.5)
+
+    It is available to make a connection xxx per second among the threads:
+
+        - 0.1 call per second: 10.0
+        - 0.5 call per second: 2.0
+        - 1   call per second: 1.0
+        - 2   call per second: 0.5
+        - 3   call per second: 0.3
+        - 10  call per second: 0.1
+    """
+    def __init__(self, throttle_interval=0.1, **blocking_kwargs):
+        self.throttle_interval = throttle_interval
+        self.throttle_last_time = 0.0
+        self._throttle_lock = threading.Lock()
+        self._throttle_event = threading.Event()
+
+        super().__init__(**blocking_kwargs)
+
+    def rate_limited(self):
+        timeout = self.throttle_interval * threading.active_count()
+        self._throttle_lock.acquire(timeout=timeout)
+
+        elapsed = time() - self.throttle_last_time
+        left_to_wait = self.throttle_interval - elapsed
+
+        if left_to_wait > 0.0:
+            self._throttle_event.wait(left_to_wait)
+
+        if self._throttle_lock.locked():
+            self._throttle_lock.release()
+
+    def make_connection(self):
+        "make a new connection"
+        self.rate_limited()
+        connection = super().make_connection()
+        self.throttle_last_time = time()
+        return connection

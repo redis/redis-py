@@ -177,6 +177,30 @@ class TestBlockingConnectionPool:
         assert repr(pool) == expected
 
 
+class TestThrottleConnectionPool(TestBlockingConnectionPool):
+    def get_pool(self, connection_kwargs=None,
+                 max_connections=10, timeout=20, interval=0.1):
+        connection_kwargs = connection_kwargs or {}
+        pool = redis.ThrottleConnectionPool(throttle_interval=interval,
+                                            connection_class=DummyConnection,
+                                            max_connections=max_connections,
+                                            timeout=timeout,
+                                            **connection_kwargs)
+        return pool
+
+    def test_connection_pool_waits_until_throttle_interval(self, master_host):
+        "When make a new connections, wait for throttle interval seconds"
+        connection_kwargs = {'host': master_host}
+        pool = self.get_pool(interval=0.5,
+                             connection_kwargs=connection_kwargs)
+        start = time.time()
+        pool.get_connection('_')
+        pool.get_connection('_')  # wait at least 0.5 seconds
+
+        elapsed = time.time() - start
+        assert elapsed >= 0.5
+
+
 class TestConnectionPoolURLParsing:
     def test_hostname(self):
         pool = redis.ConnectionPool.from_url('redis://my.host')
@@ -321,9 +345,13 @@ class TestConnectionPoolURLParsing:
             'b': '2'
         }
 
-    def test_calling_from_subclass_returns_correct_instance(self):
+    def test_calling_from_blocking_subclass_returns_correct_instance(self):
         pool = redis.BlockingConnectionPool.from_url('redis://localhost')
         assert isinstance(pool, redis.BlockingConnectionPool)
+
+    def test_calling_from_throttle_subclass_returns_correct_instance(self):
+        pool = redis.ThrottleConnectionPool.from_url('redis://localhost')
+        assert isinstance(pool, redis.ThrottleConnectionPool)
 
     def test_client_creates_connection_pool(self):
         r = redis.Redis.from_url('redis://myhost')

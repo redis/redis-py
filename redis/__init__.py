@@ -4,6 +4,7 @@ from redis.connection import (
     ConnectionPool,
     Connection,
     SSLConnection,
+    ThrottleConnectionPool,
     UnixDomainSocketConnection
 )
 from redis.utils import from_url
@@ -53,6 +54,7 @@ __all__ = [
     'ResponseError',
     'SSLConnection',
     'StrictRedis',
+    'ThrottleConnectionPool',
     'TimeoutError',
     'UnixDomainSocketConnection',
     'WatchError',
