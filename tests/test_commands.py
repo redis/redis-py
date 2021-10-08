@@ -2463,7 +2463,7 @@ class TestRedisCommands:
         assert r.geosearch('barcelona', member='place3', radius=100,
                            unit='km', count=2) == [b'place3', b'\x80place2']
         assert r.geosearch('barcelona', member='place3', radius=100,
-                           unit='km', count=1, any=1)[0] \
+                           unit='km', count=1, any=True)[0] \
                in [b'place1', b'place3', b'\x80place2']
 
     @skip_unless_arch_bits(64)
@@ -2568,7 +2568,7 @@ class TestRedisCommands:
 
         # use any without count
         with pytest.raises(exceptions.DataError):
-            assert r.geosearch('barcelona', member='place3', radius=100, any=1)
+            assert r.geosearch('barcelona', member='place3', radius=100, any=True)
 
     @skip_if_server_version_lt('6.2.0')
     def test_geosearchstore(self, r):
