@@ -1802,10 +1802,10 @@ class Commands:
         id: Location to insert this record. By default it is appended.
         maxlen: truncate old stream members beyond this size.
         Can't be specify with minid.
-        minid: the minimum id in the stream to query.
-        Can't be specify with maxlen.
         approximate: actual stream length may be slightly more than maxlen
         nomkstream: When set to true, do not make a stream
+        minid: the minimum id in the stream to query.
+        Can't be specify with maxlen.
         limit: specifies the maximum number of entries to retrieve
         """
         pieces = []
@@ -2183,8 +2183,10 @@ class Commands:
         Trims old messages from a stream.
         name: name of the stream.
         maxlen: truncate old stream messages beyond this size
+        Can't be specified with minid.
         approximate: actual stream length may be slightly more than maxlen
         minid: the minimum id in the stream to query
+        Can't be specified with maxlen.
         limit: specifies the maximum number of entries to retrieve
         """
         pieces = []
