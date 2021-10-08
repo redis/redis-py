@@ -1810,7 +1810,7 @@ class Commands:
         """
         pieces = []
         if maxlen is not None and minid is not None:
-            raise DataError("Only one of ```maxlen``` or ```minid```",
+            raise DataError("Only one of ```maxlen``` or ```minid``` "
                             "may be specified")
 
         if maxlen is not None:
@@ -2191,7 +2191,7 @@ class Commands:
         """
         pieces = []
         if maxlen is not None and minid is not None:
-            raise DataError("Only one of ```maxlen``` or ```minid```",
+            raise DataError("Only one of ```maxlen``` or ```minid``` "
                             "may be specified")
 
         if maxlen is not None:
