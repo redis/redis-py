@@ -349,7 +349,7 @@ class Commands:
         """
         return self.execute_command('CLIENT INFO')
 
-    def client_list(self, _type=None, client_id=[]):
+    def client_list(self, _type=None, client_id=None):
         """
         Returns a list of currently connected clients.
         If type of client specified, only that type will be returned.
@@ -365,6 +365,8 @@ class Commands:
                                 client_types,))
             args.append(b'TYPE')
             args.append(_type)
+        if client_id is None:
+            client_id = []
         if not isinstance(client_id, list):
             raise DataError("client_id must be a list")
         if client_id != []:
