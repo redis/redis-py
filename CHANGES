@@ -4,16 +4,27 @@
       urllib.parse.unquote. Prior versions of redis-py supported this by
       specifying the ``decode_components`` flag to the ``from_url`` functions.
       This is now done by default and cannot be disabled. #589
-    * POTENTIALLY INCOMPATIBLE: Redis commands were moved into a mixin 
-      (see commands.py). Anyone importing ``redis.client`` to access commands 
-      directly should import ``redis.commands``.
+    * POTENTIALLY INCOMPATIBLE: Redis commands were moved into a mixin
+      (see commands.py). Anyone importing ``redis.client`` to access commands
+      directly should import ``redis.commands``. #1534, #1550
+    * Removed technical debt on REDIS_6_VERSION placeholder. Thanks @chayim #1582.
+    * Various docus fixes. Thanks @Andrew-Chen-Wang #1585, #1586.
+    * Support for LOLWUT command, available since Redis 5.0.0.
+      Thanks @brainix #1568.
+    * Added support for CLIENT REPLY, available in Redis 3.2.0.
+      Thanks @chayim #1581.
+    * Support for Auto-reconnect PubSub on get_message. Thanks @luhn #1574.
+    * Fix RST syntax error in README/ Thanks @JanCBrammer #1451.
+    * IDLETIME and FREQ support for RESTORE. Thanks @chayim #1580.
+    * Supporting args with MODULE LOAD. Thanks @chayim #1579.
+    * Updating RedisLabs with Redis. Thanks @gkorland #1575.
     * Added support for ASYNC to SCRIPT FLUSH available in Redis 6.2.0.
       Thanks @chayim. #1567
-    * Added CLIENT LIST fix to support multiple client ids available in 
+    * Added CLIENT LIST fix to support multiple client ids available in
       Redis 2.8.12. Thanks @chayim #1563.
     * Added DISCARD support for pipelines available in Redis 2.0.0.
       Thanks @chayim #1565.
-    * Added ACL DELUSER support for deleting lists of users available in 
+    * Added ACL DELUSER support for deleting lists of users available in
       Redis 6.2.0. Thanks @chayim. #1562
     * Added CLIENT TRACKINFO support available in Redis 6.2.0.
       Thanks @chayim. #1560
@@ -31,10 +42,10 @@
       Thanks @ian28223 #1489.
     * Added support for STRALGO available in Redis 6.0.0.
       Thanks @AvitalFineRedis. #1528
-    * Addes support for ZMSCORE available in Redis 6.2.0. 
+    * Addes support for ZMSCORE available in Redis 6.2.0.
       Thanks @2014BDuck and @jiekun.zhu. #1437
-    * Support MINID and LIMIT on XADD available in Redis 6.2.0. 
-      Thanks @AvitalFineRedis. #1548  
+    * Support MINID and LIMIT on XADD available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1548
     * Added sentinel commands FLUSHCONFIG, CKQUORUM, FAILOVER, and RESET
       available in Redis 2.8.12.
       Thanks @otherpirate. #834
