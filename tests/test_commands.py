@@ -11,7 +11,6 @@ from redis import exceptions
 
 from .conftest import (
     _get_client,
-    REDIS_6_VERSION,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
@@ -68,19 +67,19 @@ class TestRedisCommands:
             r['a']
 
     # SERVER INFORMATION
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_acl_cat_no_category(self, r):
         categories = r.acl_cat()
         assert isinstance(categories, list)
         assert 'read' in categories
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_acl_cat_with_category(self, r):
         commands = r.acl_cat('read')
         assert isinstance(commands, list)
         assert 'get' in commands
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_acl_deluser(self, r, request):
         username = 'redis-py-user'
 
@@ -104,7 +103,7 @@ class TestRedisCommands:
         assert r.acl_getuser(users[3]) is None
         assert r.acl_getuser(users[4]) is None
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_acl_genpass(self, r):
         password = r.acl_genpass()
         assert isinstance(password, str)
@@ -117,7 +116,7 @@ class TestRedisCommands:
         r.acl_genpass(555)
         assert isinstance(password, str)
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_acl_getuser_setuser(self, r, request):
         username = 'redis-py-user'
 
@@ -204,13 +203,13 @@ class TestRedisCommands:
                              hashed_passwords=['-' + hashed_password])
         assert len(r.acl_getuser(username)['passwords']) == 1
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_acl_help(self, r):
         res = r.acl_help()
         assert isinstance(res, list)
         assert len(res) != 0
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_acl_list(self, r, request):
         username = 'redis-py-user'
 
@@ -222,7 +221,7 @@ class TestRedisCommands:
         users = r.acl_list()
         assert len(users) == 2
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_acl_log(self, r, request):
         username = 'redis-py-user'
 
@@ -257,7 +256,7 @@ class TestRedisCommands:
         assert 'client-info' in r.acl_log(count=1)[0]
         assert r.acl_log_reset()
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_acl_setuser_categories_without_prefix_fails(self, r, request):
         username = 'redis-py-user'
 
@@ -268,7 +267,7 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             r.acl_setuser(username, categories=['list'])
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_acl_setuser_commands_without_prefix_fails(self, r, request):
         username = 'redis-py-user'
 
@@ -279,7 +278,7 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             r.acl_setuser(username, commands=['get'])
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_acl_setuser_add_passwords_and_nopass_fails(self, r, request):
         username = 'redis-py-user'
 
@@ -290,13 +289,13 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             r.acl_setuser(username, passwords='+mypass', nopass=True)
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_acl_users(self, r):
         users = r.acl_users()
         assert isinstance(users, list)
         assert len(users) > 0
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_acl_whoami(self, r):
         username = r.acl_whoami()
         assert isinstance(username, str)
@@ -1137,7 +1136,7 @@ class TestRedisCommands:
         assert r.set('a', '1', xx=True, px=10000)
         assert 0 < r.ttl('a') <= 10
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_set_keepttl(self, r):
         r['a'] = 'val'
         assert r.set('a', '1', xx=True, px=10000)
@@ -1451,7 +1450,7 @@ class TestRedisCommands:
         _, keys = r.scan(match='a')
         assert set(keys) == {b'a'}
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt("6.0.0")
     def test_scan_type(self, r):
         r.sadd('a-set', 1)
         r.hset('a-hash', 'foo', 2)
