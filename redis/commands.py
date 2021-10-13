@@ -439,11 +439,15 @@ class Commands:
         return self.execute_command('CLIENT UNPAUSE')
 
     def readwrite(self):
-        """Disables read queries for a connection to a Redis Cluster slave node"""
+        """
+        Disables read queries for a connection to a Redis Cluster slave node.
+        """
         return self.execute_command('READWRITE')
 
     def readonly(self):
-        """Enables read queries for a connection to a Redis Cluster replica node"""
+        """
+        Enables read queries for a connection to a Redis Cluster replica node.
+        """
         return self.execute_command('READONLY')
 
     def config_get(self, pattern="*"):
@@ -459,7 +463,9 @@ class Commands:
         return self.execute_command('CONFIG RESETSTAT')
 
     def config_rewrite(self):
-        """Rewrite config file with the minimal change to reflect running config"""
+        """
+        Rewrite config file with the minimal change to reflect running config.
+        """
         return self.execute_command('CONFIG REWRITE')
 
     def dbsize(self):
