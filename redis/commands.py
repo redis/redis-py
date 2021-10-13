@@ -2417,31 +2417,35 @@ class Commands:
 
         ``start`` and ``end`` can be negative, indicating the end of the range.
 
-        ``desc`` a boolean indicating whether to sort the results in reversed order.
+        ``desc`` a boolean indicating whether to sort the results in reversed
+        order.
 
         ``withscores`` indicates to return the scores along with the values.
         The return type is a list of (value, score) pairs.
 
         ``score_cast_func`` a callable used to cast the score return value.
 
-        ``byscore`` when set to True, returns the range of elements from the sorted
-        set having scores equal or between ``start`` and ``end``.
+        ``byscore`` when set to True, returns the range of elements from the
+        sorted set having scores equal or between ``start`` and ``end``.
 
-        ``bylex`` when set to True, returns the range of elements from the sorted
-        set between the ``start`` and ``end`` lexicographical closed range intervals.
-        Valid ``start`` and ``end`` must start with ( or [, in order to specify whether
-        the range interval is exclusive or inclusive, respectively.
+        ``bylex`` when set to True, returns the range of elements from the
+        sorted set between the ``start`` and ``end`` lexicographical closed
+        range intervals.
+        Valid ``start`` and ``end`` must start with ( or [, in order to specify
+        whether the range interval is exclusive or inclusive, respectively.
 
         ``offset`` and ``num`` are specified, then return a slice of the range.
         Can't be provided when using ``bylex``.
         """
         if byscore and bylex:
-            raise DataError("``byscore`` and ``bylex`` can not be specified together.")
+            raise DataError("``byscore`` and ``bylex`` can not be "
+                            "specified together.")
         if (offset is not None and num is None) or \
                 (num is not None and offset is None):
             raise DataError("``offset`` and ``num`` must both be specified.")
         if bylex and withscores:
-            raise DataError("``withscores`` not supported in combination with ``bylex``.")
+            raise DataError("``withscores`` not supported in combination "
+                            "with ``bylex``.")
         pieces = ['ZRANGE', name, start, end]
         if byscore:
             pieces.append('BYSCORE')
@@ -2473,7 +2477,8 @@ class Commands:
         ``score_cast_func`` a callable used to cast the score return value
         """
         return self.zrange(name, start, end, desc=True,
-                           withscores=withscores, score_cast_func=score_cast_func)
+                           withscores=withscores,
+                           score_cast_func=score_cast_func)
 
     def zrangestore(self, dest, name, start, end):
         """
@@ -2502,7 +2507,8 @@ class Commands:
         If ``start`` and ``num`` are specified, then return a slice of the
         range.
         """
-        return self.zrange(name, max, min, desc=True, bylex=True, offset=start, num=num)
+        return self.zrange(name, max, min, desc=True,
+                           bylex=True, offset=start, num=num)
 
     def zrangebyscore(self, name, min, max, start=None, num=None,
                       withscores=False, score_cast_func=float):
@@ -2518,8 +2524,10 @@ class Commands:
 
         `score_cast_func`` a callable used to cast the score return value
         """
-        return self.zrange(name, min, max, byscore=True, offset=start, num=num,
-                           withscores=withscores, score_cast_func=score_cast_func)
+        return self.zrange(name, min, max, byscore=True,
+                           offset=start, num=num,
+                           withscores=withscores,
+                           score_cast_func=score_cast_func)
 
     def zrevrangebyscore(self, name, max, min, start=None, num=None,
                          withscores=False, score_cast_func=float):
@@ -2535,8 +2543,10 @@ class Commands:
 
         ``score_cast_func`` a callable used to cast the score return value
         """
-        return self.zrange(name, max, min, desc=True, byscore=True, offset=start, num=num,
-                           withscores=withscores, score_cast_func=score_cast_func)
+        return self.zrange(name, max, min, desc=True,
+                           byscore=True, offset=start,
+                           num=num, withscores=withscores,
+                           score_cast_func=score_cast_func)
 
     def zrank(self, name, value):
         """

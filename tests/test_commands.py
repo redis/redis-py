@@ -1872,19 +1872,21 @@ class TestRedisCommands:
         assert r.zrange('a', '+', '[f', desc=True, bylex=True) == [b'g', b'f']
         assert r.zrange('a', '-', '+', bylex=True, offset=3, num=2) == \
                [b'd', b'e']
-        assert r.zrange('a', '+', '-', desc=True, bylex=True, offset=3, num=2) == \
+        assert r.zrange('a', '+', '-', desc=True, bylex=True,
+                        offset=3, num=2) == \
                [b'd', b'c']
 
         # byscore
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3, 'a4': 4, 'a5': 5})
         assert r.zrange('a', 2, 4, byscore=True, offset=1, num=2) == \
                [b'a3', b'a4']
-        assert r.zrange('a', 4, 2, desc=True, byscore=True, offset=1, num=2) == \
+        assert r.zrange('a', 4, 2, desc=True, byscore=True,
+                        offset=1, num=2) == \
                [b'a3', b'a2']
         assert r.zrange('a', 2, 4, byscore=True, withscores=True) == \
                [(b'a2', 2.0), (b'a3', 3.0), (b'a4', 4.0)]
-        assert r.zrange('a', 4, 2, desc=True, byscore=True, withscores=True,
-                                  score_cast_func=int) == \
+        assert r.zrange('a', 4, 2, desc=True, byscore=True,
+                        withscores=True, score_cast_func=int) == \
                [(b'a4', 4), (b'a3', 3), (b'a2', 2)]
 
         # rev
