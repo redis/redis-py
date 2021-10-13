@@ -1840,6 +1840,7 @@ class TestRedisCommands:
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
         assert r.zrange('a', 0, 1) == [b'a1', b'a2']
         assert r.zrange('a', 1, 2) == [b'a2', b'a3']
+        assert r.zrange('a', 0, 2, desc=True) == [b'a3', b'a2', b'a1']
 
         # withscores
         assert r.zrange('a', 0, 1, withscores=True) == \
@@ -1850,6 +1851,44 @@ class TestRedisCommands:
         # custom score function
         assert r.zrange('a', 0, 1, withscores=True, score_cast_func=int) == \
                [(b'a1', 1), (b'a2', 2)]
+
+    def test_zrange_errors(self, r):
+        with pytest.raises(exceptions.DataError):
+            r.zrange('a', 0, 1, byscore=True, bylex=True)
+        with pytest.raises(exceptions.DataError):
+            r.zrange('a', 0, 1, bylex=True, withscores=True)
+        with pytest.raises(exceptions.DataError):
+            r.zrange('a', 0, 1, byscore=True, withscores=True, offset=4)
+        with pytest.raises(exceptions.DataError):
+            r.zrange('a', 0, 1, byscore=True, withscores=True, num=2)
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_zrange_params(self, r):
+        # bylex
+        r.zadd('a', {'a': 0, 'b': 0, 'c': 0, 'd': 0, 'e': 0, 'f': 0, 'g': 0})
+        assert r.zrange('a', '[aaa', '(g', bylex=True) == \
+               [b'b', b'c', b'd', b'e', b'f']
+        assert r.zrange('a', '[f', '+', bylex=True) == [b'f', b'g']
+        assert r.zrange('a', '+', '[f', desc=True, bylex=True) == [b'g', b'f']
+        assert r.zrange('a', '-', '+', bylex=True, offset=3, num=2) == \
+               [b'd', b'e']
+        assert r.zrange('a', '+', '-', desc=True, bylex=True, offset=3, num=2) == \
+               [b'd', b'c']
+
+        # byscore
+        r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3, 'a4': 4, 'a5': 5})
+        assert r.zrange('a', 2, 4, byscore=True, offset=1, num=2) == \
+               [b'a3', b'a4']
+        assert r.zrange('a', 4, 2, desc=True, byscore=True, offset=1, num=2) == \
+               [b'a3', b'a2']
+        assert r.zrange('a', 2, 4, byscore=True, withscores=True) == \
+               [(b'a2', 2.0), (b'a3', 3.0), (b'a4', 4.0)]
+        assert r.zrange('a', 4, 2, desc=True, byscore=True, withscores=True,
+                                  score_cast_func=int) == \
+               [(b'a4', 4), (b'a3', 3), (b'a2', 2)]
+
+        # rev
+        assert r.zrange('a', 0, 1, desc=True) == [b'a5', b'a4']
 
     @skip_if_server_version_lt('6.2.0')
     def test_zrangestore(self, r):
@@ -1885,16 +1924,12 @@ class TestRedisCommands:
     def test_zrangebyscore(self, r):
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3, 'a4': 4, 'a5': 5})
         assert r.zrangebyscore('a', 2, 4) == [b'a2', b'a3', b'a4']
-
         # slicing with start/num
         assert r.zrangebyscore('a', 2, 4, start=1, num=2) == \
                [b'a3', b'a4']
-
         # withscores
         assert r.zrangebyscore('a', 2, 4, withscores=True) == \
                [(b'a2', 2.0), (b'a3', 3.0), (b'a4', 4.0)]
-
-        # custom score function
         assert r.zrangebyscore('a', 2, 4, withscores=True,
                                score_cast_func=int) == \
                [(b'a2', 2), (b'a3', 3), (b'a4', 4)]
@@ -1958,15 +1993,12 @@ class TestRedisCommands:
     def test_zrevrangebyscore(self, r):
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3, 'a4': 4, 'a5': 5})
         assert r.zrevrangebyscore('a', 4, 2) == [b'a4', b'a3', b'a2']
-
         # slicing with start/num
         assert r.zrevrangebyscore('a', 4, 2, start=1, num=2) == \
                [b'a3', b'a2']
-
         # withscores
         assert r.zrevrangebyscore('a', 4, 2, withscores=True) == \
                [(b'a4', 4.0), (b'a3', 3.0), (b'a2', 2.0)]
-
         # custom score function
         assert r.zrevrangebyscore('a', 4, 2, withscores=True,
                                   score_cast_func=int) == \
