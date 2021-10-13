@@ -373,7 +373,7 @@ class Commands:
         return self.execute_command('CLIENT LIST', *args)
 
     def client_getname(self):
-        "Returns the current connection name"
+        """Returns the current connection name"""
         return self.execute_command('CLIENT GETNAME')
 
     def client_reply(self, reply):
@@ -396,11 +396,12 @@ class Commands:
         return self.execute_command("CLIENT REPLY", reply)
 
     def client_id(self):
-        "Returns the current connection id"
+        """Returns the current connection id"""
         return self.execute_command('CLIENT ID')
 
     def client_trackinginfo(self):
-        """Returns the information about the current client connection's
+        """
+        Returns the information about the current client connection's
         use of the server assisted client side cache.
         See https://redis.io/commands/client-trackinginfo
         """
@@ -438,15 +439,15 @@ class Commands:
         return self.execute_command('CLIENT UNPAUSE')
 
     def readwrite(self):
-        "Disables read queries for a connection to a Redis Cluster slave node"
+        """Disables read queries for a connection to a Redis Cluster slave node"""
         return self.execute_command('READWRITE')
 
     def readonly(self):
-        "Enables read queries for a connection to a Redis Cluster replica node"
+        """Enables read queries for a connection to a Redis Cluster replica node"""
         return self.execute_command('READONLY')
 
     def config_get(self, pattern="*"):
-        "Return a dictionary of configuration based on the ``pattern``"
+        """Return a dictionary of configuration based on the ``pattern``"""
         return self.execute_command('CONFIG GET', pattern)
 
     def config_set(self, name, value):
@@ -454,23 +455,23 @@ class Commands:
         return self.execute_command('CONFIG SET', name, value)
 
     def config_resetstat(self):
-        "Reset runtime statistics"
+        """Reset runtime statistics"""
         return self.execute_command('CONFIG RESETSTAT')
 
     def config_rewrite(self):
-        "Rewrite config file with the minimal change to reflect running config"
+        """Rewrite config file with the minimal change to reflect running config"""
         return self.execute_command('CONFIG REWRITE')
 
     def dbsize(self):
-        "Returns the number of keys in the current database"
+        """Returns the number of keys in the current database"""
         return self.execute_command('DBSIZE')
 
     def debug_object(self, key):
-        "Returns version specific meta information about a given key"
+        """Returns version specific meta information about a given key"""
         return self.execute_command('DEBUG OBJECT', key)
 
     def echo(self, value):
-        "Echo the string back from the server"
+        """Echo the string back from the server"""
         return self.execute_command('ECHO', value)
 
     def flushall(self, asynchronous=False):
@@ -524,7 +525,8 @@ class Commands:
         return self.execute_command('LASTSAVE')
 
     def lolwut(self, *version_numbers):
-        """Get the Redis version and a piece of generative computer art
+        """
+        Get the Redis version and a piece of generative computer art
         See: https://redis.io/commands/lolwut
         """
         if version_numbers:
