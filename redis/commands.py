@@ -2417,12 +2417,12 @@ class Commands:
 
         ``start`` and ``end`` can be negative, indicating the end of the range.
 
-        ``desc`` a boolean indicating whether to sort the results in reversed order
+        ``desc`` a boolean indicating whether to sort the results in reversed order.
 
         ``withscores`` indicates to return the scores along with the values.
-        The return type is a list of (value, score) pairs
+        The return type is a list of (value, score) pairs.
 
-        ``score_cast_func`` a callable used to cast the score return value
+        ``score_cast_func`` a callable used to cast the score return value.
 
         ``byscore`` when set to True, returns the range of elements from the sorted
         set having scores equal or between ``start`` and ``end``.
@@ -2436,12 +2436,12 @@ class Commands:
         Can't be provided when using ``bylex``.
         """
         if byscore and bylex:
-            raise DataError("``byscore`` and ``bylex`` can be specified together.")
+            raise DataError("``byscore`` and ``bylex`` can not be specified together.")
         if (offset is not None and num is None) or \
                 (num is not None and offset is None):
-            raise DataError("``offset`` and ``num`` must both be specified")
+            raise DataError("``offset`` and ``num`` must both be specified.")
         if bylex and withscores:
-            raise DataError("``withscores`` not supported in combination with ``bylex``")
+            raise DataError("``withscores`` not supported in combination with ``bylex``.")
         pieces = ['ZRANGE', name, start, end]
         if byscore:
             pieces.append('BYSCORE')
