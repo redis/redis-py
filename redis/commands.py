@@ -568,11 +568,16 @@ class Commands:
                                     timeout, *pieces)
 
     def object(self, infotype, key):
-        "Return the encoding, idletime, or refcount about the key"
+        """Return the encoding, idletime, or refcount about the key"""
         return self.execute_command('OBJECT', infotype, key, infotype=infotype)
 
+    def memory_doctor(self):
+        raise NotImplementedError(
+            "MEMORY DOCTOR is not supported in the client."
+        )
+
     def memory_stats(self):
-        "Return a dictionary of memory stats"
+        """Return a dictionary of memory stats"""
         return self.execute_command('MEMORY STATS')
 
     def memory_usage(self, key, samples=None):
@@ -590,15 +595,16 @@ class Commands:
         return self.execute_command('MEMORY USAGE', key, *args)
 
     def memory_purge(self):
-        "Attempts to purge dirty pages for reclamation by allocator"
+        """Attempts to purge dirty pages for reclamation by allocator"""
         return self.execute_command('MEMORY PURGE')
 
     def ping(self):
-        "Ping the Redis server"
+        """Ping the Redis server"""
         return self.execute_command('PING')
 
     def quit(self):
-        """Ask the server to close the connection.
+        """
+        Ask the server to close the connection.
         https://redis.io/commands/quit
         """
         return self.execute_command('QUIT')
