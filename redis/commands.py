@@ -1732,7 +1732,9 @@ class Commands:
         return self.execute_command('SINTERSTORE', dest, *args)
 
     def sismember(self, name, value):
-        """Return a boolean indicating if ``value`` is a member of set ``name``"""
+        """
+        Return a boolean indicating if ``value`` is a member of set ``name``
+        """
         return self.execute_command('SISMEMBER', name, value)
 
     def smembers(self, name):
@@ -2470,7 +2472,7 @@ class Commands:
         Can't be provided when using ``bylex``.
         """
         return self._zrange('ZRANGE', None, name, start, end, desc, byscore,
-                     bylex, withscores, score_cast_func, offset, num)
+                            bylex, withscores, score_cast_func, offset, num)
 
     def zrevrange(self, name, start, end, withscores=False,
                   score_cast_func=float):
@@ -2513,8 +2515,8 @@ class Commands:
         ``offset`` and ``num`` are specified, then return a slice of the range.
         Can't be provided when using ``bylex``.
         """
-        return self._zrange('ZRANGESTORE', dest, name, start, end, desc, byscore,
-                            bylex, False, None, offset, num)
+        return self._zrange('ZRANGESTORE', dest, name, start, end, desc,
+                            byscore, bylex, False, None, offset, num)
 
     def zrangebylex(self, name, min, max, start=None, num=None):
         """
