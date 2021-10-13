@@ -276,15 +276,15 @@ class Commands:
         return self.execute_command('ACL SETUSER', *pieces)
 
     def acl_users(self):
-        "Returns a list of all registered users on the server."
+        """Returns a list of all registered users on the server."""
         return self.execute_command('ACL USERS')
 
     def acl_whoami(self):
-        "Get the username for the current connection"
+        """Get the username for the current connection"""
         return self.execute_command('ACL WHOAMI')
 
     def bgrewriteaof(self):
-        "Tell the Redis server to rewrite the AOF file from data in memory."
+        """Tell the Redis server to rewrite the AOF file from data in memory."""
         return self.execute_command('BGREWRITEAOF')
 
     def bgsave(self, schedule=True):
@@ -568,11 +568,16 @@ class Commands:
                                     timeout, *pieces)
 
     def object(self, infotype, key):
-        "Return the encoding, idletime, or refcount about the key"
+        """Return the encoding, idletime, or refcount about the key"""
         return self.execute_command('OBJECT', infotype, key, infotype=infotype)
 
+    def memory_doctor(self):
+        raise NotImplementedError(
+            "MEMORY DOCTOR is not supported in the client."
+        )
+
     def memory_stats(self):
-        "Return a dictionary of memory stats"
+        """Return a dictionary of memory stats"""
         return self.execute_command('MEMORY STATS')
 
     def memory_usage(self, key, samples=None):
@@ -590,7 +595,7 @@ class Commands:
         return self.execute_command('MEMORY USAGE', key, *args)
 
     def memory_purge(self):
-        "Attempts to purge dirty pages for reclamation by allocator"
+        """Attempts to purge dirty pages for reclamation by allocator"""
         return self.execute_command('MEMORY PURGE')
 
     def ping(self):
