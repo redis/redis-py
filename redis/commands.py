@@ -2908,7 +2908,7 @@ class Commands:
 
     def georadius(self, name, longitude, latitude, radius, unit=None,
                   withdist=False, withcoord=False, withhash=False, count=None,
-                  sort=None, store=None, store_dist=None):
+                  sort=None, store=None, store_dist=None, any=False):
         """
         Return the members of the specified key identified by the
         ``name`` argument which are within the borders of the area specified
@@ -2942,11 +2942,12 @@ class Commands:
                                       unit=unit, withdist=withdist,
                                       withcoord=withcoord, withhash=withhash,
                                       count=count, sort=sort, store=store,
-                                      store_dist=store_dist)
+                                      store_dist=store_dist, any=any)
 
     def georadiusbymember(self, name, member, radius, unit=None,
                           withdist=False, withcoord=False, withhash=False,
-                          count=None, sort=None, store=None, store_dist=None):
+                          count=None, sort=None, store=None, store_dist=None,
+                          any=False):
         """
         This command is exactly like ``georadius`` with the sole difference
         that instead of taking, as the center of the area to query, a longitude
@@ -2958,7 +2959,7 @@ class Commands:
                                       withdist=withdist, withcoord=withcoord,
                                       withhash=withhash, count=count,
                                       sort=sort, store=store,
-                                      store_dist=store_dist)
+                                      store_dist=store_dist, any=any)
 
     def _georadiusgeneric(self, command, *args, **kwargs):
         pieces = list(args)
@@ -2969,21 +2970,26 @@ class Commands:
         else:
             pieces.append('m',)
 
+        if kwargs['any'] and kwargs['count'] is None:
+            raise DataError("``any`` can't be provided without ``count``")
+
         for arg_name, byte_repr in (
-                ('withdist', b'WITHDIST'),
-                ('withcoord', b'WITHCOORD'),
-                ('withhash', b'WITHHASH')):
+                ('withdist', 'WITHDIST'),
+                ('withcoord', 'WITHCOORD'),
+                ('withhash', 'WITHHASH')):
             if kwargs[arg_name]:
                 pieces.append(byte_repr)
 
-        if kwargs['count']:
-            pieces.extend([b'COUNT', kwargs['count']])
+        if kwargs['count'] is not None:
+            pieces.extend(['COUNT', kwargs['count']])
+            if kwargs['any']:
+                pieces.append('ANY')
 
         if kwargs['sort']:
             if kwargs['sort'] == 'ASC':
-                pieces.append(b'ASC')
+                pieces.append('ASC')
             elif kwargs['sort'] == 'DESC':
-                pieces.append(b'DESC')
+                pieces.append('DESC')
             else:
                 raise DataError("GEORADIUS invalid sort")
 
@@ -3116,7 +3122,8 @@ class Commands:
             if kwargs['any']:
                 pieces.append(b'ANY')
         elif kwargs['any']:
-            raise DataError("GEOSEARCH any can't be provided without count")
+            raise DataError("GEOSEARCH ``any`` can't be provided "
+                            "without count")
 
         # other properties
         for arg_name, byte_repr in (
