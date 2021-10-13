@@ -2072,6 +2072,9 @@ class Commands:
             pieces.extend([min, max, count])
         except TypeError:
             pass
+        # consumername
+        if consumername:
+            pieces.append(consumername)
 
         return self.execute_command('XPENDING', *pieces, parse_detail=True)
 
