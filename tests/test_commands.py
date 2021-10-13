@@ -2393,6 +2393,7 @@ class TestRedisCommands:
         assert r.geoadd('a', *values, nx=True) == 1
         assert r.zrange('a', 0, -1) == [b'place3', b'place2', b'place1']
 
+    @skip_if_server_version_lt('6.2.0')
     def test_geoadd_xx(self, r):
         values = (2.1909389952632, 41.433791470673, 'place1')
         assert r.geoadd('a', *values) == 1
@@ -2402,6 +2403,7 @@ class TestRedisCommands:
         assert r.zrange('a', 0, -1) == \
                [b'place1']
 
+    @skip_if_server_version_lt('6.2.0')
     def test_geoadd_ch(self, r):
         values = (2.1909389952632, 41.433791470673, 'place1')
         assert r.geoadd('a', *values) == 1
