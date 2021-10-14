@@ -551,6 +551,7 @@ class TestRedisCommands:
     def test_quit(self, r):
         assert r.quit()
 
+    @skip_if_server_version_lt('2.8.12')
     def test_role(self, r):
         assert r.role()[0] == b'master'
 
