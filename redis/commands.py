@@ -3154,6 +3154,11 @@ class Commands:
         """
         return self.execute_command('MODULE LIST')
 
+    def command(self):
+        raise NotImplementedError(
+            "COMMAND is not supported in the client."
+        )
+
     def command_count(self):
         return self.execute_command('COMMAND COUNT')
 
