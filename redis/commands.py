@@ -575,6 +575,10 @@ class Commands:
         "Return a dictionary of memory stats"
         return self.execute_command('MEMORY STATS')
 
+    def memory_malloc_stats(self):
+        """Return an internal statistics report from the memory allocator."""
+        return self.execute_command('MEMORY MALLOC-STATS')
+
     def memory_usage(self, key, samples=None):
         """
         Return the total memory usage for key, its value and associated
