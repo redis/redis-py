@@ -2655,6 +2655,9 @@ class TestRedisCommands:
         r.geoadd('barcelona', *values)
         assert r.georadius('barcelona', 2.191, 41.433, 3000, count=1) == \
                [b'place1']
+        assert r.georadius('barcelona', 2.191, 41.433, 3000,
+                           count=1, any=True) == \
+               [b'place2']
 
     @skip_if_server_version_lt('3.2.0')
     def test_georadius_sort(self, r):
@@ -2706,6 +2709,9 @@ class TestRedisCommands:
                  (2.187376320362091, 41.40634178640635)],
                 [b'place1', 0.0, 3471609698139488,
                  (2.1909382939338684, 41.433790281840835)]]
+        assert r.georadiusbymember('barcelona', 'place1', 4000,
+                                   count=1, any=True) == \
+               [b'\x80place2']
 
     @skip_if_server_version_lt('5.0.0')
     def test_xack(self, r):
