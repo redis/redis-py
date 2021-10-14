@@ -3156,7 +3156,7 @@ class Commands:
 
     def command(self):
         raise NotImplementedError(
-            "COMMAND is not supported in the client."
+            "COMMAND is intentionally not implemented in the client."
         )
 
     def command_count(self):
