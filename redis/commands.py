@@ -3154,9 +3154,9 @@ class Commands:
         """
         return self.execute_command('MODULE LIST')
 
-    def command(self):
+    def command_info(self):
         raise NotImplementedError(
-            "COMMAND is intentionally not implemented in the client."
+            "COMMAND INFO is intentionally not implemented in the client."
         )
 
     def command_count(self):
