@@ -399,8 +399,72 @@ class Commands:
         "Returns the current connection id"
         return self.execute_command('CLIENT ID')
 
+    def client_tracking_on(self, clientid=None, bcast=False,
+                           optin=False, optout=False,noloop=False,
+                           *prefix):
+        """
+        Turn on the tracking mode.
+        For more information about the options look at client_tracking func.
+        """
+        return self.client_tracking(
+            True, clientid, bcast, optin, optout, noloop, prefix
+        )
+
+    def client_tracking_off(self, clientid=None, bcast=False,
+                            optin=False, optout=False,noloop=False,
+                            *prefix):
+        """
+        Turn off the tracking mode.
+        For more information about the options look at client_tracking func.
+        """
+        return self.client_tracking(
+            False, clientid, bcast, optin, optout, noloop, prefix
+        )
+
+    def client_tracking(self, on=True, clientid=None, bcast=False,
+                        optin=False, optout=False,noloop=False, *prefix):
+        """
+        Enables the tracking feature of the Redis server, that is used
+        for server assisted client side caching.
+
+        ``on`` indicate for tracking on or tracking off. The dafualt is on.
+
+        ``clientid`` send invalidation messages to the connection with the specified ID.
+
+        ``bcast`` enable tracking in broadcasting mode. In this mode invalidation
+        messages are reported for all the prefixes specified, regardless of the
+        keys requested by the connection.
+
+        ``optin``  when broadcasting is NOT active, normally don't track keys in read
+        only commands, unless they are called immediately after a CLIENT CACHING yes command.
+
+        ``optout`` when broadcasting is NOT active, normally track keys in read only commands,
+        unless they are called immediately after a CLIENT CACHING no command.
+
+        ``noloop`` don't send notifications about keys modified by this connection itself.
+
+        ``prefix``  for broadcasting, register a given key prefix, so that notifications will
+        be provided only for keys starting with this string.
+        """
+        pieces = ['ON'] if on else ['OFF']
+        if clientid is not None:
+            pieces.extend(['REDIRECT', clientid])
+        for pre in prefix:
+            pieces.extend(['PREFIX', pre])
+        if bcast:
+            pieces.append('BCAST')
+        if optin:
+            pieces.append('OPTIN')
+        if optout:
+            pieces.append('OPTOUT')
+        if noloop:
+            pieces.append('NOLOOP')
+
+        return self.execute_command('CLIENT TRACKING', *pieces)
+
     def client_trackinginfo(self):
-        """Returns the information about the current client connection's
+        """
+        Returns the information about the current client connection's
         use of the server assisted client side cache.
         See https://redis.io/commands/client-trackinginfo
         """
