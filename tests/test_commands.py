@@ -3455,6 +3455,10 @@ class TestRedisCommands:
         assert resp == [0, None, 255]
 
     @skip_if_server_version_lt('4.0.0')
+    def test_memory_malloc_stats(self, r):
+        assert r.memory_malloc_stats()
+
+    @skip_if_server_version_lt('4.0.0')
     def test_memory_stats(self, r):
         # put a key into the current db to make sure that "db.<current-db>"
         # has data
