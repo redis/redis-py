@@ -2415,7 +2415,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt('3.2.0')
     def test_geoadd_invalid_params(self, r):
         with pytest.raises(exceptions.RedisError):
-            r.geoadd('barcelona', *(1, 2))
+            r.geoadd('barcelona', (1, 2))
 
     @skip_if_server_version_lt('3.2.0')
     def test_geodist(self, r):
