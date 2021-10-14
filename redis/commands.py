@@ -2865,12 +2865,14 @@ class Commands:
         return Script(self, script)
 
     # GEO COMMANDS
-    def geoadd(self, name, *values, nx=False, xx=False, ch=False):
+    def geoadd(self, name, nx=False, xx=False, ch=False, *values):
         """
         Add the specified geospatial items to the specified key identified
         by the ``name`` argument. The Geospatial items are given as ordered
         members of the ``values`` argument, each item or place is formed by
         the triad longitude, latitude and name.
+
+        Note: You can use ZREM to remove elements.
 
         ``nx`` forces ZADD to only create new elements and not to update
         scores for elements that already exist.
