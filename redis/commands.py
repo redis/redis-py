@@ -2887,14 +2887,13 @@ class Commands:
         if len(values) % 3 != 0:
             raise DataError("GEOADD requires places with lon, lat and name"
                             " values")
-
         pieces = [name]
         if nx:
-            pieces.append(b'NX')
+            pieces.append('NX')
         if xx:
-            pieces.append(b'XX')
+            pieces.append('XX')
         if ch:
-            pieces.append(b'CH')
+            pieces.append('CH')
         pieces.extend(values)
         return self.execute_command('GEOADD', *pieces)
 
