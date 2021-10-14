@@ -320,7 +320,7 @@ class Commands:
             client_types = ('normal', 'master', 'slave', 'pubsub')
             if str(_type).lower() not in client_types:
                 raise DataError("CLIENT KILL type must be one of %r" % (
-                                client_types,))
+                    client_types,))
             args.extend((b'TYPE', _type))
         if skipme is not None:
             if not isinstance(skipme, bool):
@@ -363,7 +363,7 @@ class Commands:
             client_types = ('normal', 'master', 'replica', 'pubsub')
             if str(_type).lower() not in client_types:
                 raise DataError("CLIENT LIST _type must be one of %r" % (
-                                client_types,))
+                    client_types,))
             args.append(b'TYPE')
             args.append(_type)
         if not isinstance(client_id, list):
@@ -542,7 +542,8 @@ class Commands:
             return self.execute_command('LOLWUT')
 
     def migrate(self, host, port, keys, destination_db, timeout,
-                copy=False, replace=False, auth=None):
+                copy=False, replace=False, auth=None, auth2username=None,
+                auth2Password=None):
         """
         Migrate 1 or more keys from the current Redis server to a different
         server specified by the ``host``, ``port`` and ``destination_db``.
@@ -563,15 +564,20 @@ class Commands:
         keys = list_or_args(keys, [])
         if not keys:
             raise DataError('MIGRATE requires at least one key')
+        if auth2username is None and auth2Password is not None or \
+                auth2Password is None and auth2username is not None:
+            raise DataError('auth2username and auth2Password must be given together.')
         pieces = []
         if copy:
-            pieces.append(b'COPY')
+            pieces.append('COPY')
         if replace:
-            pieces.append(b'REPLACE')
+            pieces.append('REPLACE')
         if auth:
-            pieces.append(b'AUTH')
+            pieces.append('AUTH')
             pieces.append(auth)
-        pieces.append(b'KEYS')
+        if auth2username and auth2Password:
+            pieces.extend(['AUTH2', auth2username, auth2Password])
+        pieces.append('KEYS')
         pieces.extend(keys)
         return self.execute_command('MIGRATE', host, port, '', destination_db,
                                     timeout, *pieces)
@@ -809,6 +815,7 @@ class Commands:
     def exists(self, *names):
         "Returns the number of ``names`` that exist"
         return self.execute_command('EXISTS', *names)
+
     __contains__ = exists
 
     def expire(self, name, time):
@@ -2992,7 +2999,7 @@ class Commands:
         elif kwargs['unit']:
             pieces.append(kwargs['unit'])
         else:
-            pieces.append('m',)
+            pieces.append('m', )
 
         if kwargs['any'] and kwargs['count'] is None:
             raise DataError("``any`` can't be provided without ``count``")
@@ -3231,6 +3238,7 @@ class BitFieldOperation:
     """
     Command builder for BITFIELD commands.
     """
+
     def __init__(self, client, key, default_overflow=None):
         self.client = client
         self.key = key
