@@ -2865,7 +2865,7 @@ class Commands:
         return Script(self, script)
 
     # GEO COMMANDS
-    def geoadd(self, name, nx=False, xx=False, ch=False, *values):
+    def geoadd(self, name, values, nx=False, xx=False, ch=False):
         """
         Add the specified geospatial items to the specified key identified
         by the ``name`` argument. The Geospatial items are given as ordered
