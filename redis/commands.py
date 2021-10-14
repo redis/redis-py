@@ -2861,7 +2861,7 @@ class Commands:
         See: https://redis.io/commands/script-flush
         """
         if sync_type not in ["SYNC", "ASYNC"]:
-            raise DataError("SCRIPT FLUSH defaults to SYNC or"
+            raise DataError("SCRIPT FLUSH defaults to SYNC or "
                             "accepts SYNC/ASYNC")
         pieces = [sync_type]
         return self.execute_command('SCRIPT FLUSH', *pieces)
@@ -3155,9 +3155,7 @@ class Commands:
         Passes all ``*args`` to the module, during loading.
         Raises ``ModuleError`` if a module is not found at ``path``.
         """
-        pieces = list(args)
-        pieces.insert(0, path)
-        return self.execute_command('MODULE LOAD', *pieces)
+        return self.execute_command('MODULE LOAD', path, *args)
 
     def module_unload(self, name):
         """
