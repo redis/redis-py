@@ -581,7 +581,7 @@ class Commands:
 
     def memory_doctor(self):
         raise NotImplementedError(
-            "MEMORY DOCTOR is not supported in the client."
+            "MEMORY DOCTOR is intentionally not implemented in the client."
         )
 
     def memory_stats(self):
