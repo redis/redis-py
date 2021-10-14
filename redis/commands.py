@@ -584,6 +584,11 @@ class Commands:
             "MEMORY DOCTOR is intentionally not implemented in the client."
         )
 
+    def memory_HELP(self):
+        raise NotImplementedError(
+            "MEMORY HELP is intentionally not implemented in the client."
+        )
+
     def memory_stats(self):
         """Return a dictionary of memory stats"""
         return self.execute_command('MEMORY STATS')
