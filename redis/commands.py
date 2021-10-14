@@ -584,7 +584,7 @@ class Commands:
             "MEMORY DOCTOR is intentionally not implemented in the client."
         )
 
-    def memory_HELP(self):
+    def memory_help(self):
         raise NotImplementedError(
             "MEMORY HELP is intentionally not implemented in the client."
         )
