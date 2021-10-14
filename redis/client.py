@@ -1053,6 +1053,8 @@ class Redis(Commands, object):
             raise
         if command_name in self.response_callbacks:
             return self.response_callbacks[command_name](response, **options)
+        else:
+            return response
         return response
 
 
