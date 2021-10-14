@@ -297,6 +297,14 @@ class Commands:
             pieces.append("SCHEDULE")
         return self.execute_command('BGSAVE', *pieces)
 
+    def role(self):
+        """
+        Provide information on the role of a Redis instance in
+        the context of replication, by returning if the instance
+        is currently a master, slave, or sentinel.
+        """
+        return self.execute_command('ROLE')
+
     def client_kill(self, address):
         "Disconnects the client at ``address`` (ip:port)"
         return self.execute_command('CLIENT KILL', address)
