@@ -400,7 +400,7 @@ class Commands:
         return self.execute_command('CLIENT ID')
 
     def client_tracking_on(self, clientid=None, bcast=False,
-                           optin=False, optout=False,noloop=False,
+                           optin=False, optout=False, noloop=False,
                            *prefix):
         """
         Turn on the tracking mode.
@@ -411,7 +411,7 @@ class Commands:
         )
 
     def client_tracking_off(self, clientid=None, bcast=False,
-                            optin=False, optout=False,noloop=False,
+                            optin=False, optout=False, noloop=False,
                             *prefix):
         """
         Turn off the tracking mode.
@@ -422,29 +422,33 @@ class Commands:
         )
 
     def client_tracking(self, on=True, clientid=None, bcast=False,
-                        optin=False, optout=False,noloop=False, *prefix):
+                        optin=False, optout=False, noloop=False, *prefix):
         """
         Enables the tracking feature of the Redis server, that is used
         for server assisted client side caching.
 
         ``on`` indicate for tracking on or tracking off. The dafualt is on.
 
-        ``clientid`` send invalidation messages to the connection with the specified ID.
+        ``clientid`` send invalidation messages to the connection with
+        the specified ID.
 
-        ``bcast`` enable tracking in broadcasting mode. In this mode invalidation
-        messages are reported for all the prefixes specified, regardless of the
-        keys requested by the connection.
+        ``bcast`` enable tracking in broadcasting mode. In this mode
+        invalidation messages are reported for all the prefixes
+        specified, regardless of the keys requested by the connection.
 
-        ``optin``  when broadcasting is NOT active, normally don't track keys in read
-        only commands, unless they are called immediately after a CLIENT CACHING yes command.
+        ``optin``  when broadcasting is NOT active, normally don't track
+        keys in read only commands, unless they are called immediately
+        after a CLIENT CACHING yes command.
 
-        ``optout`` when broadcasting is NOT active, normally track keys in read only commands,
-        unless they are called immediately after a CLIENT CACHING no command.
+        ``optout`` when broadcasting is NOT active, normally track keys in
+        read only commands, unless they are called immediately after a
+        CLIENT CACHING no command.
 
-        ``noloop`` don't send notifications about keys modified by this connection itself.
+        ``noloop`` don't send notifications about keys modified by this
+        connection itself.
 
-        ``prefix``  for broadcasting, register a given key prefix, so that notifications will
-        be provided only for keys starting with this string.
+        ``prefix``  for broadcasting, register a given key prefix, so that
+        notifications will be provided only for keys starting with this string.
         """
         pieces = ['ON'] if on else ['OFF']
         if clientid is not None:
