@@ -566,7 +566,8 @@ class Commands:
             raise DataError('MIGRATE requires at least one key')
         if auth2username is None and auth2Password is not None or \
                 auth2Password is None and auth2username is not None:
-            raise DataError('auth2username and auth2Password must be given together.')
+            raise DataError('auth2username and auth2Password must be '
+                            'given together.')
         pieces = []
         if copy:
             pieces.append('COPY')
