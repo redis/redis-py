@@ -2416,7 +2416,8 @@ class Commands:
         keys.append(timeout)
         return self.execute_command('BZPOPMIN', *keys)
 
-    def zrange(self, name, start, end, desc=False, byScore = False, byLex = False, limit=None,  withscores=False,
+    def zrange(self, name, start, end, desc=False,
+               byScore=False, byLex=False, limit=None,  withscores=False,
                score_cast_func=float):
         """
         Return a range of values from sorted set ``name`` between
@@ -2425,15 +2426,18 @@ class Commands:
         ``start`` and ``end`` can be negative, indicating the end of the range.
 
         ``desc`` a boolean indicating whether to sort the results descendingly
-        
-        ``byScore`` and ``byLex``: boolean. Allows to do selection by numerical scores or by lexical order.
-            If both are ``True``, then ``byScore`` get a priority.
-        
-        ``rev``: boolean. Reverses order of elements from highest to lowest scores.
-        
-        ``limit``: subscibable iterable(e.g. list or tuple) of 2 elements or ``None``. 
-            If not None, then the command will record only limit[1] elements starting from limit[0] element in found range.
-        
+
+        ``byScore`` and ``byLex``: boolean. Allows to do selection
+                by numerical scores or by lexical order.
+                If both are ``True``, then ``byScore`` get a priority.
+
+        ``rev``: boolean. Reverses order of elements from highest
+                to lowest scores.
+
+        ``limit``: list or tuple of 2 elements or ``None``.
+                If not None, then the command will record only limit[1]
+                elements starting from limit[0] element in found range.
+
         See details in Redis documentation for ZRANGE command.
 
         ``withscores`` indicates to return the scores along with the values.
@@ -2442,18 +2446,19 @@ class Commands:
         ``score_cast_func`` a callable used to cast the score return value
         """
         if desc:
-            return self.zrevrange(name, start, end, byScore, byLex, limit, withscores,
+            return self.zrevrange(name, start, end, byScore, byLex,
+                                  limit, withscores,
                                   score_cast_func)
         pieces = ['ZRANGE', name, start, end]
-        
+
         if byScore:
             pieces.append('BYSCORE')
         elif byLex:
             pieces.append('BYLEX')
 
         if limit is not None:
-            if len(limit)==2:
-                pieces.extend(['LIMIT',limit[0],limit[1]])
+            if len(limit) == 2:
+                pieces.extend(['LIMIT', limit[0], limit[1]])
 
         if withscores:
             pieces.append(b'WITHSCORES')
@@ -2463,21 +2468,25 @@ class Commands:
         }
         return self.execute_command(*pieces, **options)
 
-    def zrangestore(self, dest, name, start, end, byScore = False, byLex = False, rev = False, limit=None):
+    def zrangestore(self, dest, name, start, end, byScore=False, byLex=False,
+                    rev=False, limit=None):
         """
         Stores in ``dest`` the result of a range of values from sorted set
         ``name`` between ``start`` and ``end`` sorted in ascending order.
 
         ``start`` and ``end`` can be negative, indicating the end of the range.
 
-        ``byScore`` and ``byLex``: boolean. Allows to do selection by numerical scores or by lexical order.
-            If both are ``True``, then ``byScore`` get a priority.
-        
-        ``rev``: boolean. Reverses order of elements from highest to lowest scores.
-        
-        ``limit``: subscibable iterable(e.g. list or tuple) of 2 elements or ``None``. 
-            If not None, then the command will record only limit[1] elements starting from limit[0] element in found range.
-        
+        ``byScore`` and ``byLex``: boolean. Allows to do selection
+                by numerical scores or by lexical order.
+                If both are ``True``, then ``byScore`` get a priority.
+
+        ``rev``: boolean. Reverses order of elements from highest
+                to lowest scores.
+
+        ``limit``: list or tuple of 2 elements or ``None``.
+                If not None, then the command will record only limit[1]
+                elements starting from limit[0] element in found range.
+
         See details in Redis documentation for ZRANGE command.
 
         """
@@ -2492,10 +2501,10 @@ class Commands:
             params.append('REV')
 
         if limit is not None:
-            if len(limit)==2:
-                params.extend(['LIMIT',limit[0],limit[1]])
+            if len(limit) == 2:
+                params.extend(['LIMIT', limit[0], limit[1]])
 
-        return self.execute_command('ZRANGESTORE', *params )
+        return self.execute_command('ZRANGESTORE', *params)
 
     def zrangebylex(self, name, min, max, start=None, num=None):
         """
@@ -2593,22 +2602,27 @@ class Commands:
         """
         return self.execute_command('ZREMRANGEBYSCORE', name, min, max)
 
-    def zrevrange(self, name, start, end, byScore = False, byLex = False, limit=None, withscores=False,
+    def zrevrange(self, name, start, end, byScore=False, byLex=False,
+                  limit=None, withscores=False,
                   score_cast_func=float):
         """
         Return a range of values from sorted set ``name`` between
         ``start`` and ``end`` sorted in descending order.
 
-        ``start`` and ``end`` can be negative, indicating the end of the range.
+        ``start`` and ``end`` can be negative, indicating the end
+                of the range.
 
-        ``byScore`` and ``byLex``: boolean. Allows to do selection by numerical scores or by lexical order.
-            If both are ``True``, then ``byScore`` get a priority.
-        
-        ``rev``: boolean. Reverses order of elements from highest to lowest scores.
-        
-        ``limit``: subscibable iterable(e.g. list or tuple) of 2 elements or ``None``. 
-            If not None, then the command will record only limit[1] elements starting from limit[0] element in found range.
-        
+        ``byScore`` and ``byLex``: boolean. Allows to do selection
+                by numerical scores or by lexical order.
+                If both are ``True``, then ``byScore`` get a priority.
+
+        ``rev``: boolean. Reverses order of elements from highest
+                to lowest scores.
+
+        ``limit``: list or tuple of 2 elements or ``None``.
+                If not None, then the command will record only limit[1]
+                elements starting from limit[0] element in found range.
+
         See details in Redis documentation for ZRANGE command.
 
         ``withscores`` indicates to return the scores along with the values
@@ -2623,8 +2637,8 @@ class Commands:
             pieces.append('BYLEX')
 
         if limit is not None:
-            if len(limit)==2:
-                pieces.extend(['LIMIT',limit[0],limit[1]])
+            if len(limit) == 2:
+                pieces.extend(['LIMIT', limit[0], limit[1]])
 
         if withscores:
             pieces.append(b'WITHSCORES')
