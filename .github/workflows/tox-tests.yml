@@ -31,7 +31,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install --upgrade pip tox tox-docker==3.0.0
+          pip install --upgrade pip tox==3.24.0 tox-docker==3.0.0
 
       - name: run tests
         run: |
