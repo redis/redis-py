@@ -1,5 +1,7 @@
 name: code linting
-on: push
+on:
+  push:
+  pull_request:
 
 jobs:
 
