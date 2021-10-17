@@ -1,0 +1,28 @@
+name: code linting
+on: push
+
+jobs:
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+
+      - name: Install tox and friends
+        run: |
+          pip install --upgrade pip flake8 tox
+
+      - name: Cache tox environments
+        uses: actions/cache@v2
+        with:
+          path: |
+            .tox
+            ~/.cache
+          key: lint-${{ hashFiles('**/setup.py', '**/tox.ini') }}
+
+      - name: lint
+        run: tox -e linters

@@ -57,7 +57,7 @@ Following are a few tips that can help you work with the Docker-based developmen
 To get a bash shell inside of a container:
 
 ``$ docker-compose run <service> /bin/bash``
- 
+
 **Note**: The term "service" refers to the "services" defined in the ``docker-compose.yml`` file: "master", "slave", "sentinel_1", "sentinel_2", "sentinel_3", "test".
 
 Containers run a minimal Debian image that probably lacks tools you want to use. To install packages, first get a bash session (see previous tip) and then run:
@@ -77,6 +77,10 @@ Here, the flag ``-e py36`` runs tests against the Python 3.6 tox environment. An
 Our test suite uses ``pytest``. You can run a specific test suite against a specific Python version like this:
 
 ``$ docker-compose run test tox -e py36 -- --redis-url=redis://master:6379/9 tests/test_commands.py``
+
+Continuous Integration
+^^^^^^^^^^^^^^^^^^^^^^
+GitHub Actions run our CI pipeline, but they differ somewhat from the above. GitHub actions run tox directly, rather than making use of the docker-compose files. If you install `tox-docker https://github.com/tox-dev/tox-docker` locally, then running tox will download and configure dockers, similarly to docker-compose.
 
 Troubleshooting
 ^^^^^^^^^^^^^^^

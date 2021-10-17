@@ -1,0 +1,37 @@
+name: run tests
+on: push
+
+jobs:
+  run_tests:
+    name: Run tests
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 4
+      matrix:
+        python-version: [ '3.5', '3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7' ]
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: $ {{ matrix.python-version }}
+
+      - name: Cache paths
+        uses: actions/cache@v2
+        with:
+          path: |
+            .tox
+            ~/.cache/pip
+          key: v-${{ hashFiles('**/tox.ini', '**/setup.py') }}-${{ matrix.python-version }}
+          restore-keys: |
+            v-${{ hashFiles('**/tox.ini', '**/setup.py') }}-${{ matrix.python-version }}
+
+      - name: Install Dependencies
+        run: |
+          poetry install
+          pip install --upgrade pip tox tox-docker
+
+      - name: run tests
+        run: |
+          tox
