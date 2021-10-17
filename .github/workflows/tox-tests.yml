@@ -17,7 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
-          python-version: $ {{ matrix.python-version }}
+          python-version: ${{ matrix.python-version }}
 
       - name: Cache paths
         uses: actions/cache@v2
