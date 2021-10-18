@@ -377,6 +377,14 @@ class Commands:
         """Returns the current connection name"""
         return self.execute_command('CLIENT GETNAME')
 
+    def client_getredir(self):
+        """Returns the ID (an integer) of the client to whom we are
+        redirecting tracking notifications.
+
+        see: https://redis.io/commands/client-getredir
+        """
+        return self.execute_command('CLIENT GETREDIR')
+
     def client_reply(self, reply):
         """Enable and disable redis server replies.
         ``reply`` Must be ON OFF or SKIP,
