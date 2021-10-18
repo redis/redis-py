@@ -3613,6 +3613,14 @@ class TestRedisCommands:
         assert r.restore(key, 0, dumpdata, frequency=5)
         assert r.get(key) == b'blee!'
 
+    @skip_if_server_version_lt('5.0.0')
+    def test_replicaof(self, r):
+
+        with pytest.raises(redis.ResponseError):
+            assert r.replicaof("NO ONE")
+
+        assert r.replicaof("NO", "ONE")
+
 
 class TestBinarySave:
 
