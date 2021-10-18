@@ -490,6 +490,11 @@ class TestRedisCommands:
         # validate it was set
         assert r.get('foo') == b'bar'
 
+    @skip_if_server_version_lt('6.0.0')
+    def test_client_getredir(self, r):
+        assert isinstance(r.client_getredir(), int)
+        assert r.client_getredir() == -1
+
     def test_config_get(self, r):
         data = r.config_get()
         assert 'maxmemory' in data
