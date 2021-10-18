@@ -477,6 +477,11 @@ class Commands:
         """Returns version specific meta information about a given key"""
         return self.execute_command('DEBUG OBJECT', key)
 
+    def debug_segfault(self):
+        raise NotImplementedError(
+            "DEBUG SEGFAULT is intentionally not implemented in the client."
+        )
+
     def echo(self, value):
         """Echo the string back from the server"""
         return self.execute_command('ECHO', value)
@@ -2875,6 +2880,11 @@ class Commands:
         if each already script exists in the cache.
         """
         return self.execute_command('SCRIPT EXISTS', *args)
+
+    def script_debug(self, *args):
+        raise NotImplementedError(
+            "SCRIPT DEBUG is intentionally not implemented in the client."
+        )
 
     def script_flush(self, sync_type="SYNC"):
         """Flush all scripts from the script cache.

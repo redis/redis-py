@@ -1624,6 +1624,16 @@ class TestRedisCommands:
         assert r.sunionstore('c', 'a', 'b') == 3
         assert r.smembers('c') == {b'1', b'2', b'3'}
 
+    @skip_if_server_version_lt('1.0.0')
+    def test_debug_segfault(self, r):
+        with pytest.raises(NotImplementedError):
+            r.debug_segfault()
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_script_debug(self, r):
+        with pytest.raises(NotImplementedError):
+            r.script_debug()
+
     # SORTED SET COMMANDS
     def test_zadd(self, r):
         mapping = {'a1': 1.0, 'a2': 2.0, 'a3': 3.0}
@@ -3529,6 +3539,16 @@ class TestRedisCommands:
                 .get('u16', 0)         # 00000000 11111111
                 .execute())
         assert resp == [0, None, 255]
+
+    @skip_if_server_version_lt('4.0.0')
+    def test_memory_help(self, r):
+        with pytest.raises(NotImplementedError):
+            r.memory_help()
+
+    @skip_if_server_version_lt('4.0.0')
+    def test_memory_doctor(self, r):
+        with pytest.raises(NotImplementedError):
+            r.memory_doctor()
 
     @skip_if_server_version_lt('4.0.0')
     def test_memory_malloc_stats(self, r):
