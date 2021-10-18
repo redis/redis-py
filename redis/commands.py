@@ -310,10 +310,10 @@ class Commands:
         'master', 'slave' or 'pubsub'
         :param addr: Kills a client by its 'address:port'
         :param skipme: If True, then the client calling the command
-        :param laddr: Kills a client by its 'local (bind)  address:port'
-        :param user: Kills a client for a specific user name
         will not get killed even if it is identified by one of the filter
         options. If skipme is not provided, the server defaults to skipme=True
+        :param laddr: Kills a client by its 'local (bind) address:port'
+        :param user: Kills a client for a specific user name
         """
         args = []
         if _type is not None:
