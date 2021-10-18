@@ -49,7 +49,7 @@ class Commands:
         return self.execute_command('ACL CAT', *pieces)
 
     def acl_deluser(self, *username):
-        "Delete the ACL for the specified ``username``"
+        "Delete the ACL for the specified ``username``s"
         return self.execute_command('ACL DELUSER', *username)
 
     def acl_genpass(self, bits=None):
