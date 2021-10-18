@@ -3,14 +3,14 @@ redis-py
 
 The Python interface to the Redis key-value store.
 
-.. image:: https://github.com/andymccurdy/redis-py/workflows/CI/badge.svg?branch=master
-        :target: https://github.com/andymccurdy/redis-py/actions?query=workflow%3ACI+branch%3Amaster
+.. image:: https://github.com/redis/redis-py/workflows/CI/badge.svg?branch=master
+        :target: https://github.com/redis/redis-py/actions?query=workflow%3ACI+branch%3Amaster
 .. image:: https://readthedocs.org/projects/redis-py/badge/?version=stable&style=flat
         :target: https://redis-py.readthedocs.io/en/stable/
 .. image:: https://badge.fury.io/py/redis.svg
         :target: https://pypi.org/project/redis/
-.. image:: https://codecov.io/gh/andymccurdy/redis-py/branch/master/graph/badge.svg
-  :target: https://codecov.io/gh/andymccurdy/redis-py
+.. image:: https://codecov.io/gh/redis/redis-py/branch/master/graph/badge.svg
+  :target: https://codecov.io/gh/redis/redis-py
 
 
 Python 2 Compatibility Note
@@ -51,7 +51,7 @@ Contributing
 ------------
 
 Want to contribute a feature, bug report, or report an issue? Check out our `guide to
-contributing <https://github.com/andymccurdy/redis-py/blob/master/CONTRIBUTING.rst>`_.
+contributing <https://github.com/redis/redis-py/blob/master/CONTRIBUTING.rst>`_.
 
 
 Getting Started
@@ -127,7 +127,7 @@ SSL Connections
 
 redis-py 3.0 changes the default value of the `ssl_cert_reqs` option from
 `None` to `'required'`. See
-`Issue 1016 <https://github.com/andymccurdy/redis-py/issues/1016>`_. This
+`Issue 1016 <https://github.com/redis/redis-py/issues/1016>`_. This
 change enforces hostname validation when accepting a cert from a remote SSL
 terminator. If the terminator doesn't properly set the hostname on the cert
 this will cause redis-py 3.0 to raise a ConnectionError.
@@ -284,7 +284,7 @@ to the official command syntax. There are a few exceptions:
   will return a PubSub instance where you can subscribe to channels and listen
   for messages. You can only call PUBLISH from the Redis client (see
   `this comment on issue #151
-  <https://github.com/andymccurdy/redis-py/issues/151#issuecomment-1545015>`_
+  <https://github.com/redis/redis-py/issues/151#issuecomment-1545015>`_
   for details).
 * **SCAN/SSCAN/HSCAN/ZSCAN**: The \*SCAN commands are implemented as they
   exist in the Redis documentation. In addition, each command has an equivalent
@@ -952,7 +952,7 @@ Author
 ^^^^^^
 
 redis-py is developed and maintained by Andy McCurdy (sedrik@gmail.com).
-It can be found here: https://github.com/andymccurdy/redis-py
+It can be found here: https://github.com/redis/redis-py
 
 Special thanks to:
 

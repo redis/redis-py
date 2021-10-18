@@ -49,7 +49,7 @@ class Commands:
         return self.execute_command('ACL CAT', *pieces)
 
     def acl_deluser(self, *username):
-        "Delete the ACL for the specified ``username``"
+        "Delete the ACL for the specified ``username``s"
         return self.execute_command('ACL DELUSER', *username)
 
     def acl_genpass(self, bits=None):
@@ -312,7 +312,7 @@ class Commands:
         :param skipme: If True, then the client calling the command
         will not get killed even if it is identified by one of the filter
         options. If skipme is not provided, the server defaults to skipme=True
-        :param laddr: Kills a client by its 'local (bind)  address:port'
+        :param laddr: Kills a client by its 'local (bind) address:port'
         :param user: Kills a client for a specific user name
         """
         args = []
@@ -355,6 +355,7 @@ class Commands:
         If type of client specified, only that type will be returned.
         :param _type: optional. one of the client types (normal, master,
          replica, pubsub)
+        :param client_id: optional. a list of client ids
         """
         "Returns a list of currently connected clients"
         args = []
@@ -373,7 +374,7 @@ class Commands:
         return self.execute_command('CLIENT LIST', *args)
 
     def client_getname(self):
-        "Returns the current connection name"
+        """Returns the current connection name"""
         return self.execute_command('CLIENT GETNAME')
 
     def client_reply(self, reply):
@@ -396,11 +397,12 @@ class Commands:
         return self.execute_command("CLIENT REPLY", reply)
 
     def client_id(self):
-        "Returns the current connection id"
+        """Returns the current connection id"""
         return self.execute_command('CLIENT ID')
 
     def client_trackinginfo(self):
-        """Returns the information about the current client connection's
+        """
+        Returns the information about the current client connection's
         use of the server assisted client side cache.
         See https://redis.io/commands/client-trackinginfo
         """
@@ -438,15 +440,19 @@ class Commands:
         return self.execute_command('CLIENT UNPAUSE')
 
     def readwrite(self):
-        "Disables read queries for a connection to a Redis Cluster slave node"
+        """
+        Disables read queries for a connection to a Redis Cluster slave node.
+        """
         return self.execute_command('READWRITE')
 
     def readonly(self):
-        "Enables read queries for a connection to a Redis Cluster replica node"
+        """
+        Enables read queries for a connection to a Redis Cluster replica node.
+        """
         return self.execute_command('READONLY')
 
     def config_get(self, pattern="*"):
-        "Return a dictionary of configuration based on the ``pattern``"
+        """Return a dictionary of configuration based on the ``pattern``"""
         return self.execute_command('CONFIG GET', pattern)
 
     def config_set(self, name, value):
@@ -454,23 +460,25 @@ class Commands:
         return self.execute_command('CONFIG SET', name, value)
 
     def config_resetstat(self):
-        "Reset runtime statistics"
+        """Reset runtime statistics"""
         return self.execute_command('CONFIG RESETSTAT')
 
     def config_rewrite(self):
-        "Rewrite config file with the minimal change to reflect running config"
+        """
+        Rewrite config file with the minimal change to reflect running config.
+        """
         return self.execute_command('CONFIG REWRITE')
 
     def dbsize(self):
-        "Returns the number of keys in the current database"
+        """Returns the number of keys in the current database"""
         return self.execute_command('DBSIZE')
 
     def debug_object(self, key):
-        "Returns version specific meta information about a given key"
+        """Returns version specific meta information about a given key"""
         return self.execute_command('DEBUG OBJECT', key)
 
     def echo(self, value):
-        "Echo the string back from the server"
+        """Echo the string back from the server"""
         return self.execute_command('ECHO', value)
 
     def flushall(self, asynchronous=False):
@@ -524,7 +532,8 @@ class Commands:
         return self.execute_command('LASTSAVE')
 
     def lolwut(self, *version_numbers):
-        """Get the Redis version and a piece of generative computer art
+        """
+        Get the Redis version and a piece of generative computer art
         See: https://redis.io/commands/lolwut
         """
         if version_numbers:
@@ -568,12 +577,26 @@ class Commands:
                                     timeout, *pieces)
 
     def object(self, infotype, key):
-        "Return the encoding, idletime, or refcount about the key"
+        """Return the encoding, idletime, or refcount about the key"""
         return self.execute_command('OBJECT', infotype, key, infotype=infotype)
 
+    def memory_doctor(self):
+        raise NotImplementedError(
+            "MEMORY DOCTOR is intentionally not implemented in the client."
+        )
+
+    def memory_help(self):
+        raise NotImplementedError(
+            "MEMORY HELP is intentionally not implemented in the client."
+        )
+
     def memory_stats(self):
-        "Return a dictionary of memory stats"
+        """Return a dictionary of memory stats"""
         return self.execute_command('MEMORY STATS')
+
+    def memory_malloc_stats(self):
+        """Return an internal statistics report from the memory allocator."""
+        return self.execute_command('MEMORY MALLOC-STATS')
 
     def memory_usage(self, key, samples=None):
         """
@@ -590,15 +613,16 @@ class Commands:
         return self.execute_command('MEMORY USAGE', key, *args)
 
     def memory_purge(self):
-        "Attempts to purge dirty pages for reclamation by allocator"
+        """Attempts to purge dirty pages for reclamation by allocator"""
         return self.execute_command('MEMORY PURGE')
 
     def ping(self):
-        "Ping the Redis server"
+        """Ping the Redis server"""
         return self.execute_command('PING')
 
     def quit(self):
-        """Ask the server to close the connection.
+        """
+        Ask the server to close the connection.
         https://redis.io/commands/quit
         """
         return self.execute_command('QUIT')
@@ -1049,7 +1073,7 @@ class Commands:
         return self.execute_command("HRANDFIELD", key, *params)
 
     def randomkey(self):
-        "Returns the name of a random key"
+        """Returns the name of a random key"""
         return self.execute_command('RANDOMKEY')
 
     def rename(self, src, dst):
@@ -1059,7 +1083,7 @@ class Commands:
         return self.execute_command('RENAME', src, dst)
 
     def renamenx(self, src, dst):
-        "Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist"
+        """Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist"""
         return self.execute_command('RENAMENX', src, dst)
 
     def restore(self, name, ttl, value, replace=False, absttl=False,
@@ -1122,7 +1146,7 @@ class Commands:
             (Available since Redis 6.0)
 
         ``get`` if True, set the value at key ``name`` to ``value`` and return
-            the old value stored at key, or None when key did not exist.
+            the old value stored at key, or None if the key did not exist.
             (Available since Redis 6.2)
 
         ``exat`` sets an expire flag on key ``name`` for ``ex`` seconds,
@@ -1521,32 +1545,25 @@ class Commands:
 
         pieces = [name]
         if by is not None:
-            pieces.append(b'BY')
-            pieces.append(by)
+            pieces.extend([b'BY', by])
         if start is not None and num is not None:
-            pieces.append(b'LIMIT')
-            pieces.append(start)
-            pieces.append(num)
+            pieces.extend([b'LIMIT', start, num])
         if get is not None:
             # If get is a string assume we want to get a single value.
             # Otherwise assume it's an interable and we want to get multiple
             # values. We can't just iterate blindly because strings are
             # iterable.
             if isinstance(get, (bytes, str)):
-                pieces.append(b'GET')
-                pieces.append(get)
+                pieces.extend([b'GET', get])
             else:
                 for g in get:
-                    pieces.append(b'GET')
-                    pieces.append(g)
+                    pieces.extend([b'GET', g])
         if desc:
             pieces.append(b'DESC')
         if alpha:
             pieces.append(b'ALPHA')
         if store is not None:
-            pieces.append(b'STORE')
-            pieces.append(store)
-
+            pieces.extend([b'STORE', store])
         if groups:
             if not get or isinstance(get, (bytes, str)) or len(get) < 2:
                 raise DataError('when using "groups" the "get" argument '
@@ -1705,15 +1722,15 @@ class Commands:
 
     # SET COMMANDS
     def sadd(self, name, *values):
-        "Add ``value(s)`` to set ``name``"
+        """Add ``value(s)`` to set ``name``"""
         return self.execute_command('SADD', name, *values)
 
     def scard(self, name):
-        "Return the number of elements in set ``name``"
+        """Return the number of elements in set ``name``"""
         return self.execute_command('SCARD', name)
 
     def sdiff(self, keys, *args):
-        "Return the difference of sets specified by ``keys``"
+        """Return the difference of sets specified by ``keys``"""
         args = list_or_args(keys, args)
         return self.execute_command('SDIFF', *args)
 
@@ -1726,7 +1743,7 @@ class Commands:
         return self.execute_command('SDIFFSTORE', dest, *args)
 
     def sinter(self, keys, *args):
-        "Return the intersection of sets specified by ``keys``"
+        """Return the intersection of sets specified by ``keys``"""
         args = list_or_args(keys, args)
         return self.execute_command('SINTER', *args)
 
@@ -1739,15 +1756,17 @@ class Commands:
         return self.execute_command('SINTERSTORE', dest, *args)
 
     def sismember(self, name, value):
-        "Return a boolean indicating if ``value`` is a member of set ``name``"
+        """
+        Return a boolean indicating if ``value`` is a member of set ``name``
+        """
         return self.execute_command('SISMEMBER', name, value)
 
     def smembers(self, name):
-        "Return all members of the set ``name``"
+        """Return all members of the set ``name``"""
         return self.execute_command('SMEMBERS', name)
 
     def smove(self, src, dst, value):
-        "Move ``value`` from set ``src`` to set ``dst`` atomically"
+        """Move ``value`` from set ``src`` to set ``dst`` atomically"""
         return self.execute_command('SMOVE', src, dst, value)
 
     def spop(self, name, count=None):
@@ -1826,8 +1845,7 @@ class Commands:
                 pieces.append(b'~')
             pieces.append(minid)
         if limit is not None:
-            pieces.append(b"LIMIT")
-            pieces.append(limit)
+            pieces.extend([b'LIMIT', limit])
         if nomkstream:
             pieces.append(b'NOMKSTREAM')
         pieces.append(id)
@@ -2189,7 +2207,7 @@ class Commands:
         """
         pieces = []
         if maxlen is not None and minid is not None:
-            raise DataError("Only one of ```maxlen``` or ```minid```",
+            raise DataError("Only one of ``maxlen`` or ``minid`` "
                             "may be specified")
 
         if maxlen is not None:
@@ -2416,41 +2434,113 @@ class Commands:
         keys.append(timeout)
         return self.execute_command('BZPOPMIN', *keys)
 
-    def zrange(self, name, start, end, desc=False, withscores=False,
-               score_cast_func=float):
-        """
-        Return a range of values from sorted set ``name`` between
-        ``start`` and ``end`` sorted in ascending order.
-
-        ``start`` and ``end`` can be negative, indicating the end of the range.
-
-        ``desc`` a boolean indicating whether to sort the results descendingly
-
-        ``withscores`` indicates to return the scores along with the values.
-        The return type is a list of (value, score) pairs
-
-        ``score_cast_func`` a callable used to cast the score return value
-        """
+    def _zrange(self, command, dest, name, start, end, desc=False,
+                byscore=False, bylex=False, withscores=False,
+                score_cast_func=float, offset=None, num=None):
+        if byscore and bylex:
+            raise DataError("``byscore`` and ``bylex`` can not be "
+                            "specified together.")
+        if (offset is not None and num is None) or \
+                (num is not None and offset is None):
+            raise DataError("``offset`` and ``num`` must both be specified.")
+        if bylex and withscores:
+            raise DataError("``withscores`` not supported in combination "
+                            "with ``bylex``.")
+        pieces = [command]
+        if dest:
+            pieces.append(dest)
+        pieces.extend([name, start, end])
+        if byscore:
+            pieces.append('BYSCORE')
+        if bylex:
+            pieces.append('BYLEX')
         if desc:
-            return self.zrevrange(name, start, end, withscores,
-                                  score_cast_func)
-        pieces = ['ZRANGE', name, start, end]
+            pieces.append('REV')
+        if offset is not None and num is not None:
+            pieces.extend(['LIMIT', offset, num])
         if withscores:
-            pieces.append(b'WITHSCORES')
+            pieces.append('WITHSCORES')
         options = {
             'withscores': withscores,
             'score_cast_func': score_cast_func
         }
         return self.execute_command(*pieces, **options)
 
-    def zrangestore(self, dest, name, start, end):
+    def zrange(self, name, start, end, desc=False, withscores=False,
+               score_cast_func=float, byscore=False, bylex=False,
+               offset=None, num=None):
+        """
+        Return a range of values from sorted set ``name`` between
+        ``start`` and ``end`` sorted in ascending order.
+
+        ``start`` and ``end`` can be negative, indicating the end of the range.
+
+        ``desc`` a boolean indicating whether to sort the results in reversed
+        order.
+
+        ``withscores`` indicates to return the scores along with the values.
+        The return type is a list of (value, score) pairs.
+
+        ``score_cast_func`` a callable used to cast the score return value.
+
+        ``byscore`` when set to True, returns the range of elements from the
+        sorted set having scores equal or between ``start`` and ``end``.
+
+        ``bylex`` when set to True, returns the range of elements from the
+        sorted set between the ``start`` and ``end`` lexicographical closed
+        range intervals.
+        Valid ``start`` and ``end`` must start with ( or [, in order to specify
+        whether the range interval is exclusive or inclusive, respectively.
+
+        ``offset`` and ``num`` are specified, then return a slice of the range.
+        Can't be provided when using ``bylex``.
+        """
+        return self._zrange('ZRANGE', None, name, start, end, desc, byscore,
+                            bylex, withscores, score_cast_func, offset, num)
+
+    def zrevrange(self, name, start, end, withscores=False,
+                  score_cast_func=float):
+        """
+        Return a range of values from sorted set ``name`` between
+        ``start`` and ``end`` sorted in descending order.
+
+        ``start`` and ``end`` can be negative, indicating the end of the range.
+
+        ``withscores`` indicates to return the scores along with the values
+        The return type is a list of (value, score) pairs
+
+        ``score_cast_func`` a callable used to cast the score return value
+        """
+        return self.zrange(name, start, end, desc=True,
+                           withscores=withscores,
+                           score_cast_func=score_cast_func)
+
+    def zrangestore(self, dest, name, start, end,
+                    byscore=False, bylex=False, desc=False,
+                    offset=None, num=None):
         """
         Stores in ``dest`` the result of a range of values from sorted set
         ``name`` between ``start`` and ``end`` sorted in ascending order.
 
         ``start`` and ``end`` can be negative, indicating the end of the range.
+
+        ``byscore`` when set to True, returns the range of elements from the
+        sorted set having scores equal or between ``start`` and ``end``.
+
+        ``bylex`` when set to True, returns the range of elements from the
+        sorted set between the ``start`` and ``end`` lexicographical closed
+        range intervals.
+        Valid ``start`` and ``end`` must start with ( or [, in order to specify
+        whether the range interval is exclusive or inclusive, respectively.
+
+        ``desc`` a boolean indicating whether to sort the results in reversed
+        order.
+
+        ``offset`` and ``num`` are specified, then return a slice of the range.
+        Can't be provided when using ``bylex``.
         """
-        return self.execute_command('ZRANGESTORE', dest, name, start, end)
+        return self._zrange('ZRANGESTORE', dest, name, start, end, desc,
+                            byscore, bylex, False, None, offset, num)
 
     def zrangebylex(self, name, min, max, start=None, num=None):
         """
@@ -2460,13 +2550,7 @@ class Commands:
         If ``start`` and ``num`` are specified, then return a slice of the
         range.
         """
-        if (start is not None and num is None) or \
-                (num is not None and start is None):
-            raise DataError("``start`` and ``num`` must both be specified")
-        pieces = ['ZRANGEBYLEX', name, min, max]
-        if start is not None and num is not None:
-            pieces.extend([b'LIMIT', start, num])
-        return self.execute_command(*pieces)
+        return self.zrange(name, min, max, bylex=True, offset=start, num=num)
 
     def zrevrangebylex(self, name, max, min, start=None, num=None):
         """
@@ -2476,13 +2560,8 @@ class Commands:
         If ``start`` and ``num`` are specified, then return a slice of the
         range.
         """
-        if (start is not None and num is None) or \
-                (num is not None and start is None):
-            raise DataError("``start`` and ``num`` must both be specified")
-        pieces = ['ZREVRANGEBYLEX', name, max, min]
-        if start is not None and num is not None:
-            pieces.extend([b'LIMIT', start, num])
-        return self.execute_command(*pieces)
+        return self.zrange(name, max, min, desc=True,
+                           bylex=True, offset=start, num=num)
 
     def zrangebyscore(self, name, min, max, start=None, num=None,
                       withscores=False, score_cast_func=float):
@@ -2498,19 +2577,29 @@ class Commands:
 
         `score_cast_func`` a callable used to cast the score return value
         """
-        if (start is not None and num is None) or \
-                (num is not None and start is None):
-            raise DataError("``start`` and ``num`` must both be specified")
-        pieces = ['ZRANGEBYSCORE', name, min, max]
-        if start is not None and num is not None:
-            pieces.extend([b'LIMIT', start, num])
-        if withscores:
-            pieces.append(b'WITHSCORES')
-        options = {
-            'withscores': withscores,
-            'score_cast_func': score_cast_func
-        }
-        return self.execute_command(*pieces, **options)
+        return self.zrange(name, min, max, byscore=True,
+                           offset=start, num=num,
+                           withscores=withscores,
+                           score_cast_func=score_cast_func)
+
+    def zrevrangebyscore(self, name, max, min, start=None, num=None,
+                         withscores=False, score_cast_func=float):
+        """
+        Return a range of values from the sorted set ``name`` with scores
+        between ``min`` and ``max`` in descending order.
+
+        If ``start`` and ``num`` are specified, then return a slice
+        of the range.
+
+        ``withscores`` indicates to return the scores along with the values.
+        The return type is a list of (value, score) pairs
+
+        ``score_cast_func`` a callable used to cast the score return value
+        """
+        return self.zrange(name, max, min, desc=True,
+                           byscore=True, offset=start,
+                           num=num, withscores=withscores,
+                           score_cast_func=score_cast_func)
 
     def zrank(self, name, value):
         """
@@ -2547,56 +2636,6 @@ class Commands:
         between ``min`` and ``max``. Returns the number of elements removed.
         """
         return self.execute_command('ZREMRANGEBYSCORE', name, min, max)
-
-    def zrevrange(self, name, start, end, withscores=False,
-                  score_cast_func=float):
-        """
-        Return a range of values from sorted set ``name`` between
-        ``start`` and ``end`` sorted in descending order.
-
-        ``start`` and ``end`` can be negative, indicating the end of the range.
-
-        ``withscores`` indicates to return the scores along with the values
-        The return type is a list of (value, score) pairs
-
-        ``score_cast_func`` a callable used to cast the score return value
-        """
-        pieces = ['ZREVRANGE', name, start, end]
-        if withscores:
-            pieces.append(b'WITHSCORES')
-        options = {
-            'withscores': withscores,
-            'score_cast_func': score_cast_func
-        }
-        return self.execute_command(*pieces, **options)
-
-    def zrevrangebyscore(self, name, max, min, start=None, num=None,
-                         withscores=False, score_cast_func=float):
-        """
-        Return a range of values from the sorted set ``name`` with scores
-        between ``min`` and ``max`` in descending order.
-
-        If ``start`` and ``num`` are specified, then return a slice
-        of the range.
-
-        ``withscores`` indicates to return the scores along with the values.
-        The return type is a list of (value, score) pairs
-
-        ``score_cast_func`` a callable used to cast the score return value
-        """
-        if (start is not None and num is None) or \
-                (num is not None and start is None):
-            raise DataError("``start`` and ``num`` must both be specified")
-        pieces = ['ZREVRANGEBYSCORE', name, max, min]
-        if start is not None and num is not None:
-            pieces.extend([b'LIMIT', start, num])
-        if withscores:
-            pieces.append(b'WITHSCORES')
-        options = {
-            'withscores': withscores,
-            'score_cast_func': score_cast_func
-        }
-        return self.execute_command(*pieces, **options)
 
     def zrevrank(self, name, value):
         """
@@ -2842,7 +2881,7 @@ class Commands:
         See: https://redis.io/commands/script-flush
         """
         if sync_type not in ["SYNC", "ASYNC"]:
-            raise DataError("SCRIPT FLUSH defaults to SYNC or"
+            raise DataError("SCRIPT FLUSH defaults to SYNC or "
                             "accepts SYNC/ASYNC")
         pieces = [sync_type]
         return self.execute_command('SCRIPT FLUSH', *pieces)
@@ -2865,17 +2904,39 @@ class Commands:
         return Script(self, script)
 
     # GEO COMMANDS
-    def geoadd(self, name, *values):
+    def geoadd(self, name, values, nx=False, xx=False, ch=False):
         """
         Add the specified geospatial items to the specified key identified
         by the ``name`` argument. The Geospatial items are given as ordered
         members of the ``values`` argument, each item or place is formed by
         the triad longitude, latitude and name.
+
+        Note: You can use ZREM to remove elements.
+
+        ``nx`` forces ZADD to only create new elements and not to update
+        scores for elements that already exist.
+
+        ``xx`` forces ZADD to only update scores of elements that already
+        exist. New elements will not be added.
+
+        ``ch`` modifies the return value to be the numbers of elements changed.
+        Changed elements include new elements that were added and elements
+        whose scores changed.
         """
+        if nx and xx:
+            raise DataError("GEOADD allows either 'nx' or 'xx', not both")
         if len(values) % 3 != 0:
             raise DataError("GEOADD requires places with lon, lat and name"
                             " values")
-        return self.execute_command('GEOADD', name, *values)
+        pieces = [name]
+        if nx:
+            pieces.append('NX')
+        if xx:
+            pieces.append('XX')
+        if ch:
+            pieces.append('CH')
+        pieces.extend(values)
+        return self.execute_command('GEOADD', *pieces)
 
     def geodist(self, name, place1, place2, unit=None):
         """
@@ -2908,7 +2969,7 @@ class Commands:
 
     def georadius(self, name, longitude, latitude, radius, unit=None,
                   withdist=False, withcoord=False, withhash=False, count=None,
-                  sort=None, store=None, store_dist=None):
+                  sort=None, store=None, store_dist=None, any=False):
         """
         Return the members of the specified key identified by the
         ``name`` argument which are within the borders of the area specified
@@ -2942,11 +3003,12 @@ class Commands:
                                       unit=unit, withdist=withdist,
                                       withcoord=withcoord, withhash=withhash,
                                       count=count, sort=sort, store=store,
-                                      store_dist=store_dist)
+                                      store_dist=store_dist, any=any)
 
     def georadiusbymember(self, name, member, radius, unit=None,
                           withdist=False, withcoord=False, withhash=False,
-                          count=None, sort=None, store=None, store_dist=None):
+                          count=None, sort=None, store=None, store_dist=None,
+                          any=False):
         """
         This command is exactly like ``georadius`` with the sole difference
         that instead of taking, as the center of the area to query, a longitude
@@ -2958,7 +3020,7 @@ class Commands:
                                       withdist=withdist, withcoord=withcoord,
                                       withhash=withhash, count=count,
                                       sort=sort, store=store,
-                                      store_dist=store_dist)
+                                      store_dist=store_dist, any=any)
 
     def _georadiusgeneric(self, command, *args, **kwargs):
         pieces = list(args)
@@ -2969,21 +3031,26 @@ class Commands:
         else:
             pieces.append('m',)
 
+        if kwargs['any'] and kwargs['count'] is None:
+            raise DataError("``any`` can't be provided without ``count``")
+
         for arg_name, byte_repr in (
-                ('withdist', b'WITHDIST'),
-                ('withcoord', b'WITHCOORD'),
-                ('withhash', b'WITHHASH')):
+                ('withdist', 'WITHDIST'),
+                ('withcoord', 'WITHCOORD'),
+                ('withhash', 'WITHHASH')):
             if kwargs[arg_name]:
                 pieces.append(byte_repr)
 
-        if kwargs['count']:
-            pieces.extend([b'COUNT', kwargs['count']])
+        if kwargs['count'] is not None:
+            pieces.extend(['COUNT', kwargs['count']])
+            if kwargs['any']:
+                pieces.append('ANY')
 
         if kwargs['sort']:
             if kwargs['sort'] == 'ASC':
-                pieces.append(b'ASC')
+                pieces.append('ASC')
             elif kwargs['sort'] == 'DESC':
-                pieces.append(b'DESC')
+                pieces.append('DESC')
             else:
                 raise DataError("GEORADIUS invalid sort")
 
@@ -3116,7 +3183,8 @@ class Commands:
             if kwargs['any']:
                 pieces.append(b'ANY')
         elif kwargs['any']:
-            raise DataError("GEOSEARCH any can't be provided without count")
+            raise DataError("GEOSEARCH ``any`` can't be provided "
+                            "without count")
 
         # other properties
         for arg_name, byte_repr in (
@@ -3136,9 +3204,7 @@ class Commands:
         Passes all ``*args`` to the module, during loading.
         Raises ``ModuleError`` if a module is not found at ``path``.
         """
-        pieces = list(args)
-        pieces.insert(0, path)
-        return self.execute_command('MODULE LOAD', *pieces)
+        return self.execute_command('MODULE LOAD', path, *args)
 
     def module_unload(self, name):
         """
@@ -3153,6 +3219,11 @@ class Commands:
         all loaded modules.
         """
         return self.execute_command('MODULE LIST')
+
+    def command_info(self):
+        raise NotImplementedError(
+            "COMMAND INFO is intentionally not implemented in the client."
+        )
 
     def command_count(self):
         return self.execute_command('COMMAND COUNT')
