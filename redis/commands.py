@@ -1073,7 +1073,7 @@ class Commands:
         return self.execute_command("HRANDFIELD", key, *params)
 
     def randomkey(self):
-        "Returns the name of a random key"
+        """Returns the name of a random key"""
         return self.execute_command('RANDOMKEY')
 
     def rename(self, src, dst):
@@ -1083,7 +1083,7 @@ class Commands:
         return self.execute_command('RENAME', src, dst)
 
     def renamenx(self, src, dst):
-        "Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist"
+        """Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist"""
         return self.execute_command('RENAMENX', src, dst)
 
     def restore(self, name, ttl, value, replace=False, absttl=False,
@@ -1545,32 +1545,25 @@ class Commands:
 
         pieces = [name]
         if by is not None:
-            pieces.append(b'BY')
-            pieces.append(by)
+            pieces.extend([b'BY', by])
         if start is not None and num is not None:
-            pieces.append(b'LIMIT')
-            pieces.append(start)
-            pieces.append(num)
+            pieces.extend([b'LIMIT', start, num])
         if get is not None:
             # If get is a string assume we want to get a single value.
             # Otherwise assume it's an interable and we want to get multiple
             # values. We can't just iterate blindly because strings are
             # iterable.
             if isinstance(get, (bytes, str)):
-                pieces.append(b'GET')
-                pieces.append(get)
+                pieces.extend([b'GET', get])
             else:
                 for g in get:
-                    pieces.append(b'GET')
-                    pieces.append(g)
+                    pieces.extend([b'GET', g])
         if desc:
             pieces.append(b'DESC')
         if alpha:
             pieces.append(b'ALPHA')
         if store is not None:
-            pieces.append(b'STORE')
-            pieces.append(store)
-
+            pieces.extend([b'STORE', store])
         if groups:
             if not get or isinstance(get, (bytes, str)) or len(get) < 2:
                 raise DataError('when using "groups" the "get" argument '
@@ -1729,15 +1722,15 @@ class Commands:
 
     # SET COMMANDS
     def sadd(self, name, *values):
-        "Add ``value(s)`` to set ``name``"
+        """Add ``value(s)`` to set ``name``"""
         return self.execute_command('SADD', name, *values)
 
     def scard(self, name):
-        "Return the number of elements in set ``name``"
+        """Return the number of elements in set ``name``"""
         return self.execute_command('SCARD', name)
 
     def sdiff(self, keys, *args):
-        "Return the difference of sets specified by ``keys``"
+        """Return the difference of sets specified by ``keys``"""
         args = list_or_args(keys, args)
         return self.execute_command('SDIFF', *args)
 
@@ -1750,7 +1743,7 @@ class Commands:
         return self.execute_command('SDIFFSTORE', dest, *args)
 
     def sinter(self, keys, *args):
-        "Return the intersection of sets specified by ``keys``"
+        """Return the intersection of sets specified by ``keys``"""
         args = list_or_args(keys, args)
         return self.execute_command('SINTER', *args)
 
@@ -1763,15 +1756,17 @@ class Commands:
         return self.execute_command('SINTERSTORE', dest, *args)
 
     def sismember(self, name, value):
-        "Return a boolean indicating if ``value`` is a member of set ``name``"
+        """
+        Return a boolean indicating if ``value`` is a member of set ``name``
+        """
         return self.execute_command('SISMEMBER', name, value)
 
     def smembers(self, name):
-        "Return all members of the set ``name``"
+        """Return all members of the set ``name``"""
         return self.execute_command('SMEMBERS', name)
 
     def smove(self, src, dst, value):
-        "Move ``value`` from set ``src`` to set ``dst`` atomically"
+        """Move ``value`` from set ``src`` to set ``dst`` atomically"""
         return self.execute_command('SMOVE', src, dst, value)
 
     def spop(self, name, count=None):
@@ -1850,8 +1845,7 @@ class Commands:
                 pieces.append(b'~')
             pieces.append(minid)
         if limit is not None:
-            pieces.append(b"LIMIT")
-            pieces.append(limit)
+            pieces.extend([b'LIMIT', limit])
         if nomkstream:
             pieces.append(b'NOMKSTREAM')
         pieces.append(id)
@@ -2440,41 +2434,113 @@ class Commands:
         keys.append(timeout)
         return self.execute_command('BZPOPMIN', *keys)
 
-    def zrange(self, name, start, end, desc=False, withscores=False,
-               score_cast_func=float):
-        """
-        Return a range of values from sorted set ``name`` between
-        ``start`` and ``end`` sorted in ascending order.
-
-        ``start`` and ``end`` can be negative, indicating the end of the range.
-
-        ``desc`` a boolean indicating whether to sort the results descendingly
-
-        ``withscores`` indicates to return the scores along with the values.
-        The return type is a list of (value, score) pairs
-
-        ``score_cast_func`` a callable used to cast the score return value
-        """
+    def _zrange(self, command, dest, name, start, end, desc=False,
+                byscore=False, bylex=False, withscores=False,
+                score_cast_func=float, offset=None, num=None):
+        if byscore and bylex:
+            raise DataError("``byscore`` and ``bylex`` can not be "
+                            "specified together.")
+        if (offset is not None and num is None) or \
+                (num is not None and offset is None):
+            raise DataError("``offset`` and ``num`` must both be specified.")
+        if bylex and withscores:
+            raise DataError("``withscores`` not supported in combination "
+                            "with ``bylex``.")
+        pieces = [command]
+        if dest:
+            pieces.append(dest)
+        pieces.extend([name, start, end])
+        if byscore:
+            pieces.append('BYSCORE')
+        if bylex:
+            pieces.append('BYLEX')
         if desc:
-            return self.zrevrange(name, start, end, withscores,
-                                  score_cast_func)
-        pieces = ['ZRANGE', name, start, end]
+            pieces.append('REV')
+        if offset is not None and num is not None:
+            pieces.extend(['LIMIT', offset, num])
         if withscores:
-            pieces.append(b'WITHSCORES')
+            pieces.append('WITHSCORES')
         options = {
             'withscores': withscores,
             'score_cast_func': score_cast_func
         }
         return self.execute_command(*pieces, **options)
 
-    def zrangestore(self, dest, name, start, end):
+    def zrange(self, name, start, end, desc=False, withscores=False,
+               score_cast_func=float, byscore=False, bylex=False,
+               offset=None, num=None):
+        """
+        Return a range of values from sorted set ``name`` between
+        ``start`` and ``end`` sorted in ascending order.
+
+        ``start`` and ``end`` can be negative, indicating the end of the range.
+
+        ``desc`` a boolean indicating whether to sort the results in reversed
+        order.
+
+        ``withscores`` indicates to return the scores along with the values.
+        The return type is a list of (value, score) pairs.
+
+        ``score_cast_func`` a callable used to cast the score return value.
+
+        ``byscore`` when set to True, returns the range of elements from the
+        sorted set having scores equal or between ``start`` and ``end``.
+
+        ``bylex`` when set to True, returns the range of elements from the
+        sorted set between the ``start`` and ``end`` lexicographical closed
+        range intervals.
+        Valid ``start`` and ``end`` must start with ( or [, in order to specify
+        whether the range interval is exclusive or inclusive, respectively.
+
+        ``offset`` and ``num`` are specified, then return a slice of the range.
+        Can't be provided when using ``bylex``.
+        """
+        return self._zrange('ZRANGE', None, name, start, end, desc, byscore,
+                            bylex, withscores, score_cast_func, offset, num)
+
+    def zrevrange(self, name, start, end, withscores=False,
+                  score_cast_func=float):
+        """
+        Return a range of values from sorted set ``name`` between
+        ``start`` and ``end`` sorted in descending order.
+
+        ``start`` and ``end`` can be negative, indicating the end of the range.
+
+        ``withscores`` indicates to return the scores along with the values
+        The return type is a list of (value, score) pairs
+
+        ``score_cast_func`` a callable used to cast the score return value
+        """
+        return self.zrange(name, start, end, desc=True,
+                           withscores=withscores,
+                           score_cast_func=score_cast_func)
+
+    def zrangestore(self, dest, name, start, end,
+                    byscore=False, bylex=False, desc=False,
+                    offset=None, num=None):
         """
         Stores in ``dest`` the result of a range of values from sorted set
         ``name`` between ``start`` and ``end`` sorted in ascending order.
 
         ``start`` and ``end`` can be negative, indicating the end of the range.
+
+        ``byscore`` when set to True, returns the range of elements from the
+        sorted set having scores equal or between ``start`` and ``end``.
+
+        ``bylex`` when set to True, returns the range of elements from the
+        sorted set between the ``start`` and ``end`` lexicographical closed
+        range intervals.
+        Valid ``start`` and ``end`` must start with ( or [, in order to specify
+        whether the range interval is exclusive or inclusive, respectively.
+
+        ``desc`` a boolean indicating whether to sort the results in reversed
+        order.
+
+        ``offset`` and ``num`` are specified, then return a slice of the range.
+        Can't be provided when using ``bylex``.
         """
-        return self.execute_command('ZRANGESTORE', dest, name, start, end)
+        return self._zrange('ZRANGESTORE', dest, name, start, end, desc,
+                            byscore, bylex, False, None, offset, num)
 
     def zrangebylex(self, name, min, max, start=None, num=None):
         """
@@ -2484,13 +2550,7 @@ class Commands:
         If ``start`` and ``num`` are specified, then return a slice of the
         range.
         """
-        if (start is not None and num is None) or \
-                (num is not None and start is None):
-            raise DataError("``start`` and ``num`` must both be specified")
-        pieces = ['ZRANGEBYLEX', name, min, max]
-        if start is not None and num is not None:
-            pieces.extend([b'LIMIT', start, num])
-        return self.execute_command(*pieces)
+        return self.zrange(name, min, max, bylex=True, offset=start, num=num)
 
     def zrevrangebylex(self, name, max, min, start=None, num=None):
         """
@@ -2500,13 +2560,8 @@ class Commands:
         If ``start`` and ``num`` are specified, then return a slice of the
         range.
         """
-        if (start is not None and num is None) or \
-                (num is not None and start is None):
-            raise DataError("``start`` and ``num`` must both be specified")
-        pieces = ['ZREVRANGEBYLEX', name, max, min]
-        if start is not None and num is not None:
-            pieces.extend([b'LIMIT', start, num])
-        return self.execute_command(*pieces)
+        return self.zrange(name, max, min, desc=True,
+                           bylex=True, offset=start, num=num)
 
     def zrangebyscore(self, name, min, max, start=None, num=None,
                       withscores=False, score_cast_func=float):
@@ -2522,19 +2577,29 @@ class Commands:
 
         `score_cast_func`` a callable used to cast the score return value
         """
-        if (start is not None and num is None) or \
-                (num is not None and start is None):
-            raise DataError("``start`` and ``num`` must both be specified")
-        pieces = ['ZRANGEBYSCORE', name, min, max]
-        if start is not None and num is not None:
-            pieces.extend([b'LIMIT', start, num])
-        if withscores:
-            pieces.append(b'WITHSCORES')
-        options = {
-            'withscores': withscores,
-            'score_cast_func': score_cast_func
-        }
-        return self.execute_command(*pieces, **options)
+        return self.zrange(name, min, max, byscore=True,
+                           offset=start, num=num,
+                           withscores=withscores,
+                           score_cast_func=score_cast_func)
+
+    def zrevrangebyscore(self, name, max, min, start=None, num=None,
+                         withscores=False, score_cast_func=float):
+        """
+        Return a range of values from the sorted set ``name`` with scores
+        between ``min`` and ``max`` in descending order.
+
+        If ``start`` and ``num`` are specified, then return a slice
+        of the range.
+
+        ``withscores`` indicates to return the scores along with the values.
+        The return type is a list of (value, score) pairs
+
+        ``score_cast_func`` a callable used to cast the score return value
+        """
+        return self.zrange(name, max, min, desc=True,
+                           byscore=True, offset=start,
+                           num=num, withscores=withscores,
+                           score_cast_func=score_cast_func)
 
     def zrank(self, name, value):
         """
@@ -2571,56 +2636,6 @@ class Commands:
         between ``min`` and ``max``. Returns the number of elements removed.
         """
         return self.execute_command('ZREMRANGEBYSCORE', name, min, max)
-
-    def zrevrange(self, name, start, end, withscores=False,
-                  score_cast_func=float):
-        """
-        Return a range of values from sorted set ``name`` between
-        ``start`` and ``end`` sorted in descending order.
-
-        ``start`` and ``end`` can be negative, indicating the end of the range.
-
-        ``withscores`` indicates to return the scores along with the values
-        The return type is a list of (value, score) pairs
-
-        ``score_cast_func`` a callable used to cast the score return value
-        """
-        pieces = ['ZREVRANGE', name, start, end]
-        if withscores:
-            pieces.append(b'WITHSCORES')
-        options = {
-            'withscores': withscores,
-            'score_cast_func': score_cast_func
-        }
-        return self.execute_command(*pieces, **options)
-
-    def zrevrangebyscore(self, name, max, min, start=None, num=None,
-                         withscores=False, score_cast_func=float):
-        """
-        Return a range of values from the sorted set ``name`` with scores
-        between ``min`` and ``max`` in descending order.
-
-        If ``start`` and ``num`` are specified, then return a slice
-        of the range.
-
-        ``withscores`` indicates to return the scores along with the values.
-        The return type is a list of (value, score) pairs
-
-        ``score_cast_func`` a callable used to cast the score return value
-        """
-        if (start is not None and num is None) or \
-                (num is not None and start is None):
-            raise DataError("``start`` and ``num`` must both be specified")
-        pieces = ['ZREVRANGEBYSCORE', name, max, min]
-        if start is not None and num is not None:
-            pieces.extend([b'LIMIT', start, num])
-        if withscores:
-            pieces.append(b'WITHSCORES')
-        options = {
-            'withscores': withscores,
-            'score_cast_func': score_cast_func
-        }
-        return self.execute_command(*pieces, **options)
 
     def zrevrank(self, name, value):
         """
