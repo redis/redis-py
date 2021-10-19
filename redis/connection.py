@@ -1,4 +1,4 @@
-from packaging.version import Version
+from distutils.version import LooseVersion
 from itertools import chain
 from time import time
 from queue import LifoQueue, Empty, Full
@@ -54,13 +54,13 @@ NONBLOCKING_EXCEPTIONS = tuple(NONBLOCKING_EXCEPTION_ERROR_NUMBERS.keys())
 if HIREDIS_AVAILABLE:
     import hiredis
 
-    hiredis_version = Version(hiredis.__version__)
+    hiredis_version = LooseVersion(hiredis.__version__)
     HIREDIS_SUPPORTS_CALLABLE_ERRORS = \
-        hiredis_version >= Version('0.1.3')
+        hiredis_version >= LooseVersion('0.1.3')
     HIREDIS_SUPPORTS_BYTE_BUFFER = \
-        hiredis_version >= Version('0.1.4')
+        hiredis_version >= LooseVersion('0.1.4')
     HIREDIS_SUPPORTS_ENCODING_ERRORS = \
-        hiredis_version >= Version('1.0.0')
+        hiredis_version >= LooseVersion('1.0.0')
 
     if not HIREDIS_SUPPORTS_BYTE_BUFFER:
         msg = ("redis-py works best with hiredis >= 0.1.4. You're running "
