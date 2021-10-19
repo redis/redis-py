@@ -3217,6 +3217,14 @@ class TestRedisCommands:
         assert response[1]['message_id'] == m2
         assert response[1]['consumer'] == consumer2.encode()
 
+        # test with consumer name
+        response = r.xpending_range(stream, group,
+                                    min='-', max='+', count=5,
+                                    consumername=consumer1)
+        assert len(response) == 1
+        assert response[0]['message_id'] == m1
+        assert response[0]['consumer'] == consumer1.encode()
+
     @skip_if_server_version_lt('6.2.0')
     def test_xpending_range_idle(self, r):
         stream = 'stream'

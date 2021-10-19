@@ -2065,18 +2065,21 @@ class Commands:
         """
         return self.execute_command('XPENDING', name, groupname)
 
-    def xpending_range(self, name, groupname, min, max, count,
-                       consumername=None, idle=None):
+    def xpending_range(self, name, groupname, idle=None,
+                       min=None, max=None, count=None,
+                       consumername=None):
         """
         Returns information about pending messages, in a range.
+
         name: name of the stream.
         groupname: name of the consumer group.
+        idle: available from  version 6.2. filter entries by their
+        idle-time, given in milliseconds (optional).
         min: minimum stream ID.
         max: maximum stream ID.
         count: number of messages to return
         consumername: name of a consumer to filter by (optional).
-        idle: available from  version 6.2. filter entries by their
-        idle-time, given in milliseconds (optional).
+
         """
         if {min, max, count} == {None}:
             if idle is not None or consumername is not None:
@@ -2103,6 +2106,9 @@ class Commands:
             pieces.extend([min, max, count])
         except TypeError:
             pass
+        # consumername
+        if consumername:
+            pieces.append(consumername)
 
         return self.execute_command('XPENDING', *pieces, parse_detail=True)
 
