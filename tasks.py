@@ -57,4 +57,4 @@ def clean(c):
 @task
 def package(c):
     """Create the python packages"""
-    run("python setup.py build sdist bdist_wheel")
+    run("python setup.py build install")

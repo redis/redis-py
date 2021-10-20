@@ -2,7 +2,15 @@ name: CI
 
 on:
   push:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.rst'
+      - '**/*.md'
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.rst'
+      - '**/*.md'
 
 jobs:
 
@@ -39,3 +47,17 @@ jobs:
         run: |
           pip install -r dev_requirements.txt
           invoke tests
+
+  build_package:
+    name: Validate building and installing the package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: install python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+      - name: build and install
+        run: |
+          pip install -r dev_requirements.txt
+          invoke package
