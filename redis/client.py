@@ -6,10 +6,7 @@ import re
 import threading
 import time
 import warnings
-from redis.commands import (
-    list_or_args,
-    Commands
-)
+from redis.commands import CoreCommands, list_or_args
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
                               SSLConnection)
 from redis.lock import Lock
@@ -599,7 +596,7 @@ def parse_set_result(response, **options):
     return response and str_if_bytes(response) == 'OK'
 
 
-class Redis(Commands, object):
+class Redis(CoreCommands, object):
     """
     Implementation of the Redis protocol.
 
