@@ -2,12 +2,62 @@ name: CI
 
 on:
   push:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.rst'
+      - '**/*.md'
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.rst'
+      - '**/*.md'
 
 jobs:
-  integration:
+
+  lint:
+    name: Code linters
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - name: test
-        run: make test
+      - name: install python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+      - name: run code linters
+        run: |
+          pip install -r dev_requirements.txt
+          invoke linters
+
+  run-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 6
+      matrix:
+        python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    name: Python ${{ matrix.python-version }} tests
+    steps:
+      - uses: actions/checkout@v2
+      - name: install python
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: run tests
+        run: |
+          pip install -r dev_requirements.txt
+          invoke tests
+
+  build_package:
+    name: Validate building and installing the package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: install python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+      - name: build and install
+        run: |
+          pip install invoke
+          invoke package
