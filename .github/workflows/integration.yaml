@@ -9,16 +9,16 @@ jobs:
   lint:
     name: Code linters
     runs-on: ubuntu-latest
-  steps:
-    - uses: action/checkout@v2
-    - name: install python
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.9
-    - name: run code linters
-      run: |
-        pip install -r dev_requirements.txt
-        invoke linters
+    steps:
+      - uses: action/checkout@v2
+      - name: install python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+      - name: run code linters
+        run: |
+          pip install -r dev_requirements.txt
+          invoke linters
 
   run-tests:
     runs-on: ubuntu-latest
