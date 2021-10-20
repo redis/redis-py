@@ -10,7 +10,7 @@ jobs:
     name: Code linters
     runs-on: ubuntu-latest
     steps:
-      - uses: action/checkout@v2
+      - uses: actions/checkout@v2
       - name: install python
         uses: actions/setup-python@v2
         with:
@@ -30,7 +30,7 @@ jobs:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: Python ${{ matrix.python-version }} tests
     steps:
-      - uses: action/checkout@v2
+      - uses: actions/checkout@v2
       - name: install python
         uses: actions/setup-python@v2
         with:
