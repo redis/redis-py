@@ -3249,10 +3249,10 @@ class CoreCommands:
         jj = JSON(client=self, encoder=encoder, decoder=decoder)
         return jj
 
-    def ft(self):
-        from .ft import Search
-        ft = Search(client=self)
-        return ft
+    # def ft(self):
+    #     from .ft import Search
+    #     ft = Search(client=self)
+    #     return ft
 
     # ### end redis modules ### #
 
