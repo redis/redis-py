@@ -1,15 +1,18 @@
 import os
 import shutil
-import tox
 from invoke import task, run
 
 with open('tox.ini') as fp:
     lines = fp.read().split("\n")
-    dockers = [l.split("=")[1].strip() for l in lines if l.find("name") != -1]
+    dockers = [line.split("=")[1].strip() for line in lines
+               if line.find("name") != -1]
+
 
 @task
 def devenv(c):
-    """Builds a development environment: downloads, and starts all dockers specified in the tox.ini file."""
+    """Builds a development environment: downloads, and starts all dockers
+    specified in the tox.ini file.
+    """
     clean(c)
     cmd = 'tox -e devenv'
     for d in dockers:
@@ -17,22 +20,29 @@ def devenv(c):
     print("Running: {}".format(cmd))
     run(cmd)
 
+
 @task
-def lint(c):
+def linters(c):
     """Run code linters"""
     run("flake8")
 
-@task
-def all_tests(c):
-    """Run all linters, and tests in redis-py. This assumes you have all pythons specified in tox.ini"""
-    lint(c)
-    test(c)
 
 @task
-def test(c):
-    """Run the redis-py test suite against the current python, with and without hiredis"""
-    run("tox -e plain")
-    run("tox -e hiredis")
+def all_tests(c):
+    """Run all linters, and tests in redis-py. This assumes you have all
+    the python versions specified in the tox.ini file.
+    """
+    linters(c)
+    tests(c)
+
+
+@task
+def tests(c):
+    """Run the redis-py test suite against the current python,
+    with and without hiredis.
+    """
+    run("tox -e plain -e hiredis")
+
 
 @task
 def clean(c):
@@ -42,6 +52,7 @@ def clean(c):
     if os.path.isdir("dist"):
         shutil.rmtree("dist")
     run("docker rm -f {}".format(' '.join(dockers)))
+
 
 @task
 def package(c):

@@ -34,7 +34,7 @@ Here's how to get started with your code contribution:
     b. source .venv/bin/activate
     c. pip install -r dev_requirements.txt
 3. If you need a development environment, run ``invoke devenv``
-4. While developing, make sure the tests pass by running ``invoke test``
+4. While developing, make sure the tests pass by running ``invoke tests``
 5. If you like the change and think the project could use it, send a pull request
 
 To see what else is part of the automation, run ``invoke -l``
