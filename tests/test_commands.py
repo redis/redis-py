@@ -1920,12 +1920,13 @@ class TestRedisCommands:
         assert r.zrangestore('b', 'a', 1, 2, desc=True)
         assert r.zrange('b', 0, -1) == [b'a1', b'a2']
         # by score
-        assert r.zrangestore('b', 'a', 1, 2, byscore=True,
-                             offset=0, num=1)
-        assert r.zrange('b', 0, -1) == [b'a1']
+        assert r.zrangestore('b', 'a', 2, 1, byscore=True,
+                             offset=0, num=1, desc=True)
+        assert r.zrange('b', 0, -1) == [b'a2']
         # by lex
-        assert r.zrange('a', '[a2', '(a3', bylex=True) == \
-               [b'a2']
+        assert r.zrangestore('b', 'a', '[a2', '(a3', bylex=True,
+                             offset=0, num=1)
+        assert r.zrange('b', 0, -1) == [b'a2']
 
     @skip_if_server_version_lt('2.8.9')
     def test_zrangebylex(self, r):
