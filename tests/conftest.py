@@ -27,7 +27,6 @@ def pytest_addoption(parser):
                           " defaults to `%(default)s`")
 
 
-
 def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
     info = client.info()
@@ -73,7 +72,7 @@ def skip_unless_arch_bits(arch_bits):
 def skip_ifmodversion_lt(min_version: str, module_name: str):
     modules = REDIS_INFO["modules"]
     if modules == []:
-        raise AttributeError("No redis module named {}".format(module_name))
+        return pytest.mark.skipif(True, reason="No redis modules found")
 
     for j in modules:
         if module_name == j.get('name'):
@@ -114,6 +113,7 @@ def _get_client(cls, request, single_connection_client=True, flushdb=True,
             client.connection_pool.disconnect()
         request.addfinalizer(teardown)
     return client
+
 
 @pytest.fixture()
 def modclient(request, port=16379, **kwargs):

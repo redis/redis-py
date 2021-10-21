@@ -2,7 +2,6 @@ import datetime
 import time
 import warnings
 import hashlib
-from json import JSONEncoder, JSONDecoder
 
 from .helpers import list_or_args
 from redis.exceptions import (
@@ -3242,19 +3241,6 @@ class CoreCommands:
 
     def command_count(self):
         return self.execute_command('COMMAND COUNT')
-
-    # ### redis module support ### #
-    def json(self, encoder=JSONEncoder(), decoder=JSONDecoder()):
-        from .json import JSON
-        jj = JSON(client=self, encoder=encoder, decoder=decoder)
-        return jj
-
-    # def ft(self):
-    #     from .ft import Search
-    #     ft = Search(client=self)
-    #     return ft
-
-    # ### end redis modules ### #
 
 
 class Script:

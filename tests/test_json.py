@@ -1,7 +1,5 @@
 import pytest
 import redis
-# import redisplus.json
-# from redisplus import Client
 from redis.commands.json.path import Path
 from .conftest import skip_ifmodversion_lt
 
@@ -95,7 +93,6 @@ def test_typeshouldsucceed(client):
     assert b"integer" == client.json().type("1")
 
 
-@pytest.mark.integrations
 @pytest.mark.json
 def test_numincrbyshouldsucceed(client):
     client.json().set("num", Path.rootPath(), 1)

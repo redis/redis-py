@@ -3222,7 +3222,6 @@ class TestRedisCommands:
         response = r.xpending_range(stream, group,
                                     min='-', max='+', count=5,
                                     consumername=consumer1)
-        assert len(response) == 1
         assert response[0]['message_id'] == m1
         assert response[0]['consumer'] == consumer1.encode()
 
