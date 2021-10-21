@@ -1174,12 +1174,18 @@ class Commands:
             pieces.append('EX')
             if isinstance(ex, datetime.timedelta):
                 ex = int(ex.total_seconds())
-            pieces.append(ex)
+            if isinstance(ex, int):
+                pieces.append(ex)
+            else:
+                raise DataError("ex must be datetime.timedelta or int")
         if px is not None:
             pieces.append('PX')
             if isinstance(px, datetime.timedelta):
                 px = int(px.total_seconds() * 1000)
-            pieces.append(px)
+            if isinstance(px, int):
+                pieces.append(px)
+            else:
+                raise DataError("px must be datetime.timedelta or int")
         if exat is not None:
             pieces.append('EXAT')
             if isinstance(exat, datetime.datetime):
