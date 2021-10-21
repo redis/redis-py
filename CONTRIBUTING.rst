@@ -29,25 +29,36 @@ Here's how to get started with your code contribution:
 
 1. Create your own fork of redis-py
 2. Do the changes in your fork
-3. If you need a development environment, run ``make dev``
-4. While developing, make sure the tests pass by running ``make test``
+3. Create a virtualenv and install the development dependencies from the dev_requirements.txt file:
+    a. python -m venv .venv
+    b. source .venv/bin/activate
+    c. pip install -r dev_requirements.txt
+3. If you need a development environment, run ``invoke devenv``
+4. While developing, make sure the tests pass by running ``invoke tests``
 5. If you like the change and think the project could use it, send a pull request
+
+To see what else is part of the automation, run ``invoke -l``
 
 The Development Environment
 ---------------------------
 
-Running ``make dev`` will create a Docker-based development environment that starts the following containers:
+Running ``invoke devenv`` installs the development dependencies specified in the dev_requirements.txt. It starts all of the dockers used by this project, and leaves them running. These can be easily cleaned up with ``invoke clean``. NOTE: it is assumed that the user running these tests, can execute docker and its various commands.
 
 * A master Redis node
-* A slave Redis node
+* A Redis replica node
 * Three sentinel Redis nodes
-* A test container
+* A multi-python docker, with your source code mounted in /data
 
-The slave is a replica of the master node, using the `leader-follower replication <https://redis.io/topics/replication>`_ feature.
+The replica node, is a replica of the master node, using the `leader-follower replication <https://redis.io/topics/replication>`_ feature.
 
 The sentinels monitor the master node in a `sentinel high-availability configuration <https://redis.io/topics/sentinel>`_.
 
-Meanwhile, the `test` container hosts the code from your checkout of ``redis-py`` and allows running tests against many Python versions.
+Testing
+-------
+
+Each run of tox starts and stops the various dockers required.  Sometimes things get stuck, an ``invoke clean`` can help.
+
+Continuous Integration uses these same wrappers to run all of these tests against multiple versions of python. Feel free to test your changes against all the python versions supported, as declared by the tox.ini file (eg: tox -e py39). If you have the various python versions on your desktop, you can run *tox* by itself, to test all supported versions. Alternatively, as your source code is mounted in the **lots-of-pythons** docker, you can start exploring from there, with all supported python versions!
 
 Docker Tips
 ^^^^^^^^^^^
@@ -56,17 +67,17 @@ Following are a few tips that can help you work with the Docker-based developmen
 
 To get a bash shell inside of a container:
 
-``$ docker-compose run <service> /bin/bash``
- 
-**Note**: The term "service" refers to the "services" defined in the ``docker-compose.yml`` file: "master", "slave", "sentinel_1", "sentinel_2", "sentinel_3", "test".
+``$ docker run -it <service> /bin/bash``
+
+**Note**: The term "service" refers to the "services" defined in the ``tox.ini`` file at the top of the repo: "master", "replicaof", "sentinel_1", "sentinel_2", "sentinel_3".
 
 Containers run a minimal Debian image that probably lacks tools you want to use. To install packages, first get a bash session (see previous tip) and then run:
 
 ``$ apt update && apt install <package>``
 
-You can see the combined logging output of all containers like this:
+You can see the logging output of a containers like this:
 
-``$ docker-compose logs``
+``$ docker logs -f <service>``
 
 The command `make test` runs all tests in all tested Python environments. To run the tests in a single environment, like Python 3.6, use a command like this:
 
@@ -81,13 +92,11 @@ Our test suite uses ``pytest``. You can run a specific test suite against a spec
 Troubleshooting
 ^^^^^^^^^^^^^^^
 If you get any errors when running ``make dev`` or ``make test``, make sure that you
-are using supported versions of Docker and docker-compose.
+are using supported versions of Docker.
 
-The included Dockerfiles and docker-compose.yml file work with the following
-versions of Docker and docker-compose:
+Please try at least versions of Docker.
 
 * Docker 19.03.12
-* docker-compose 1.26.2
 
 How to Report a Bug
 -------------------
