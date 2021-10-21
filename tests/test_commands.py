@@ -1104,6 +1104,8 @@ class TestRedisCommands:
         assert r['a'] == b'1'
         assert 0 < r.pttl('a') <= 10000
         assert 0 < r.ttl('a') <= 10
+        with pytest.raises(exceptions.DataError):
+            assert r.set('a', '1', px=10.0)
 
     @skip_if_server_version_lt('2.6.0')
     def test_set_px_timedelta(self, r):
@@ -1116,8 +1118,8 @@ class TestRedisCommands:
     def test_set_ex(self, r):
         assert r.set('a', '1', ex=10)
         assert 0 < r.ttl('a') <= 10
-        assert r.set('a', '1', ex=10.0)
-        assert 0 < r.ttl('a') <= 10
+        with pytest.raises(exceptions.DataError):
+            assert r.set('a', '1', ex=10.0)
 
     @skip_if_server_version_lt('2.6.0')
     def test_set_ex_timedelta(self, r):
