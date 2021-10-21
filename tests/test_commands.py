@@ -1116,6 +1116,8 @@ class TestRedisCommands:
     def test_set_ex(self, r):
         assert r.set('a', '1', ex=10)
         assert 0 < r.ttl('a') <= 10
+        assert r.set('a', '1', ex=10.0)
+        assert 0 < r.ttl('a') <= 10
 
     @skip_if_server_version_lt('2.6.0')
     def test_set_ex_timedelta(self, r):

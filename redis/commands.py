@@ -1173,13 +1173,21 @@ class Commands:
         if ex is not None:
             pieces.append('EX')
             if isinstance(ex, datetime.timedelta):
-                ex = int(ex.total_seconds())
-            pieces.append(ex)
+                ex = ex.total_seconds()
+            try:
+                ex = int(ex)
+                pieces.append(ex)
+            except TypeError:
+                pass
         if px is not None:
             pieces.append('PX')
             if isinstance(px, datetime.timedelta):
-                px = int(px.total_seconds() * 1000)
-            pieces.append(px)
+                px = px.total_seconds() * 1000
+            try:
+                px = int(px)
+                pieces.append(px)
+            except TypeError:
+                pass
         if exat is not None:
             pieces.append('EXAT')
             if isinstance(exat, datetime.datetime):
