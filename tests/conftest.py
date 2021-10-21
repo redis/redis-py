@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/9"
-default_redismod_url = "redis://localhost:16379/9"
+default_redismod_url = "redis://localhost:36379/9"
 
 
 def pytest_addoption(parser):
@@ -116,7 +116,7 @@ def _get_client(cls, request, single_connection_client=True, flushdb=True,
 
 
 @pytest.fixture()
-def modclient(request, port=16379, **kwargs):
+def modclient(request, port=36379, **kwargs):
     with _get_client(redis.Redis, request, port=port, **kwargs) as client:
         yield client
 
