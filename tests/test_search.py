@@ -47,16 +47,13 @@ def waitForIndex(env, idx, timeout=None):
                 break
 
 
-def getClient(name):
+def getClient():
     """
     Gets a client client attached to an index name which is ready to be
     created
     """
-    # rc = Redis(decode_responses=True), extras={"search": {"index_name": name}})
-    # return rc
-    rc = Redis.from_url(default_redismod_url)
-    search = rc.ft(index_name=name)
-    return search
+    rc = Redis.from_url(default_redismod_url, decode_responses=True)
+    return rc
 
 
 def createIndex(client, num_docs=100, definition=None):
@@ -93,6 +90,12 @@ def createIndex(client, num_docs=100, definition=None):
     for key, doc in chapters.items():
         indexer.add_document(key, **doc)
     indexer.commit()
+
+
+# override the default module client, search requires both db=0, and text
+@pytest.fixture
+def modclient():
+    return Redis.from_url(default_redismod_url, db=0, decode_responses=True)
 
 
 @pytest.fixture
@@ -254,7 +257,6 @@ def testReplace(client):
     client.ft().add_document("doc1", replace=True, txt="this is a replaced doc")
 
     res = client.ft().search("foo bar")
-    print(res.__dict__)
     assert 1 == res.total
     assert "doc2" == res.docs[0].id
 
@@ -355,12 +357,12 @@ def testDropIndex(client):
     for x in range(20):
         for keep_docs in [[True, {}], [False, {"name": "haveit"}]]:
             idx = "HaveIt"
-            index = getClient(idx)
+            index = getClient()
             index.hset("index:haveit", mapping={"name": "haveit"})
             idef = IndexDefinition(prefix=["index:"])
-            index.ft().create_index((TextField("name"),), definition=idef)
+            index.ft(idx).create_index((TextField("name"),), definition=idef)
             waitForIndex(index, idx)
-            index.ft().dropindex(delete_documents=keep_docs[0])
+            index.ft(idx).dropindex(delete_documents=keep_docs[0])
             i = index.hgetall("index:haveit")
             assert i == keep_docs[1]
 
@@ -393,7 +395,6 @@ def testAutoComplete(client):
         for row in cr:
             n += 1
             term, score = row[0], float(row[1])
-            # print term, score
             assert n == client.ft().sugadd("ac", Suggestion(term, score=score))
 
     assert n == client.ft().suglen("ac")
@@ -561,9 +562,9 @@ def testSummarize(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
-def testAlias(client):
-    index1 = getClient("testAlias")
-    index2 = getClient("testAlias2")
+def testAlias():
+    index1 = getClient()
+    index2 = getClient()
 
     index1.hset("index1:lonestar", mapping={"name": "lonestar"})
     index2.hset("index2:yogurt", mapping={"name": "yogurt"})
@@ -573,66 +574,67 @@ def testAlias(client):
     def1 = IndexDefinition(prefix=["index1:"], score_field="name")
     def2 = IndexDefinition(prefix=["index2:"], score_field="name")
 
-    index1.ft.create_index((TextField("name"),), definition=def1)
-    index2.ft.create_index((TextField("name"),), definition=def2)
+    ftindex1 = index1.ft("testAlias")
+    ftindex2 = index1.ft("testAlias2")
+    ftindex1.create_index((TextField("name"),), definition=def1)
+    ftindex2.create_index((TextField("name"),), definition=def2)
 
-    res = index1.ft.search("*").docs[0]
+    res = ftindex1.search("*").docs[0]
     assert "index1:lonestar" == res.id
 
     # create alias and check for results
-    index1.ft.aliasadd("spaceballs")
-    alias_client = getClient("spaceballs")
-    res = alias_client.ft.search("*").docs[0]
+    ftindex1.aliasadd("spaceballs")
+    alias_client = getClient().ft("spaceballs")
+    res = alias_client.search("*").docs[0]
     assert "index1:lonestar" == res.id
 
     # We should throw an exception when trying to add an alias that already exists
     with pytest.raises(Exception):
-        index2.ft.aliasadd("spaceballs")
+        ftindex2.aliasadd("spaceballs")
 
     # update alias and ensure new results
-    index2.ft.aliasupdate("spaceballs")
-    alias_client2 = getClient("spaceballs")
-    res = alias_client2.ft.search("*").docs[0]
+    ftindex2.aliasupdate("spaceballs")
+    alias_client2 = getClient().ft("spaceballs")
+    res = alias_client2.search("*").docs[0]
     assert "index2:yogurt" == res.id
 
-    index2.ft.aliasdel("spaceballs")
+    ftindex2.aliasdel("spaceballs")
     with pytest.raises(Exception):
-        alias_client2.ft.search("*").docs[0]
+        alias_client2.search("*").docs[0]
 
 
 @pytest.mark.redismod
 def testAliasBasic(client):
     # Creating a client with one index
-    index1 = getClient("testAlias")
-    index1.flushdb()
+    index1 = getClient().ft("testAlias")
 
-    index1.ft.create_index((TextField("txt"),))
-    index1.ft.add_document("doc1", txt="text goes here")
+    index1.create_index((TextField("txt"),))
+    index1.add_document("doc1", txt="text goes here")
 
-    index2 = getClient("testAlias2")
-    index2.ft.create_index((TextField("txt"),))
-    index2.ft.add_document("doc2", txt="text goes here")
+    index2 = getClient().ft("testAlias2")
+    index2.create_index((TextField("txt"),))
+    index2.add_document("doc2", txt="text goes here")
 
     # add the actual alias and check
-    index1.ft.aliasadd("myalias")
-    alias_client = getClient("myalias")
-    res = sorted(alias_client.ft.search("*").docs, key=lambda x: x.id)
+    index1.aliasadd("myalias")
+    alias_client = getClient().ft("myalias")
+    res = sorted(alias_client.search("*").docs, key=lambda x: x.id)
     assert "doc1" == res[0].id
 
     # We should throw an exception when trying to add an alias that already exists
     with pytest.raises(Exception):
-        index2.ft.aliasadd("myalias")
+        index2.aliasadd("myalias")
 
     # update the alias and ensure we get doc2
-    index2.ft.aliasupdate("myalias")
-    alias_client2 = getClient("myalias")
-    res = sorted(alias_client2.ft.search("*").docs, key=lambda x: x.id)
+    index2.aliasupdate("myalias")
+    alias_client2 = getClient().ft("myalias")
+    res = sorted(alias_client2.search("*").docs, key=lambda x: x.id)
     assert "doc1" == res[0].id
 
     # delete the alias and expect an error if we try to query again
-    index2.ft.aliasdel("myalias")
+    index2.aliasdel("myalias")
     with pytest.raises(Exception):
-        _ = alias_client2.ft.search("*").docs[0]
+        _ = alias_client2.search("*").docs[0]
 
 
 @pytest.mark.redismod
@@ -950,7 +952,7 @@ def testIndexDefinition(client):
         "txt",
     ] == definition.args
 
-    createIndex(client.ft, num_docs=500, definition=definition)
+    createIndex(client.ft(), num_docs=500, definition=definition)
 
 
 @pytest.mark.redismod
@@ -961,7 +963,7 @@ def testCreateClientDefinition(client):
     and use hset to test the client definition (the default is HASH).
     """
     definition = IndexDefinition(prefix=["hset:", "henry"])
-    createIndex(client.ft, num_docs=500, definition=definition)
+    createIndex(client.ft(), num_docs=500, definition=definition)
 
     info = client.ft().info()
     assert 494 == int(info["num_docs"])
@@ -979,7 +981,7 @@ def testCreateClientDefinitionHash(client):
     and use hset to test the client definition.
     """
     definition = IndexDefinition(prefix=["hset:", "henry"], index_type=IndexType.HASH)
-    createIndex(client.ft, num_docs=500, definition=definition)
+    createIndex(client.ft(), num_docs=500, definition=definition)
 
     info = client.ft().info()
     assert 494 == int(info["num_docs"])

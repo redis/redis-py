@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/9"
 
-default_redismod_url = "redis://localhost:36379/0"
+default_redismod_url = "redis://localhost:36379"
 
 
 def pytest_addoption(parser):
@@ -119,8 +119,8 @@ def _get_client(cls, request, single_connection_client=True, flushdb=True,
 # specifically set to the zero database, because creating
 # an index on db != 0 raises a ResponseError in redis
 @pytest.fixture()
-def modclient(request, port=36379, **kwargs):
-    with _get_client(redis.Redis, request, port=port, db=0, **kwargs) as client:
+def modclient(request, **kwargs):
+    with _get_client(redis.Redis, request, **kwargs) as client:
         yield client
 
 
