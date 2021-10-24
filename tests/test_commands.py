@@ -1104,7 +1104,7 @@ class TestRedisCommands:
         assert r['a'] == b'1'
         assert 0 < r.pttl('a') <= 10000
         assert 0 < r.ttl('a') <= 10
-        with pytest.raises(exceptions.DataError):
+        with pytest.raises(exceptions.ResponseError):
             assert r.set('a', '1', px=10.0)
 
     @skip_if_server_version_lt('2.6.0')
@@ -1118,7 +1118,7 @@ class TestRedisCommands:
     def test_set_ex(self, r):
         assert r.set('a', '1', ex=10)
         assert 0 < r.ttl('a') <= 10
-        with pytest.raises(exceptions.DataError):
+        with pytest.raises(exceptions.ResponseError):
             assert r.set('a', '1', ex=10.0)
 
     @skip_if_server_version_lt('2.6.0')
