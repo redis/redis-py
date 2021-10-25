@@ -86,6 +86,7 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
 
 
 def _get_client(cls, request, single_connection_client=True, flushdb=True,
+                from_url=None,
                 **kwargs):
     """
     Helper for fixtures or tests that need a Redis client
@@ -94,7 +95,10 @@ def _get_client(cls, request, single_connection_client=True, flushdb=True,
     ConnectionPool.from_url, keyword arguments to this function override
     values specified in the URL.
     """
-    redis_url = request.config.getoption("--redis-url")
+    if from_url is None:
+        redis_url = request.config.getoption("--redis-url")
+    else:
+        redis_url = from_url
     url_options = parse_url(redis_url)
     url_options.update(kwargs)
     pool = redis.ConnectionPool(**url_options)
@@ -120,7 +124,8 @@ def _get_client(cls, request, single_connection_client=True, flushdb=True,
 # an index on db != 0 raises a ResponseError in redis
 @pytest.fixture()
 def modclient(request, **kwargs):
-    with _get_client(redis.Redis, request, **kwargs) as client:
+    rmurl = request.config.getoption('--redismod-url')
+    with _get_client(redis.Redis, request, from_url=rmurl, **kwargs) as client:
         yield client
 
 
