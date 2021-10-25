@@ -646,7 +646,6 @@ def test_alias():
     index1.hset("index1:lonestar", mapping={"name": "lonestar"})
     index2.hset("index2:yogurt", mapping={"name": "yogurt"})
 
-
     if os.environ.get("GITHUB_WORKFLOW", None) is not None:
         time.sleep(2)
     else:
