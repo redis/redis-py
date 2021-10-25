@@ -43,6 +43,10 @@ class TestScripting:
         r.script_load(multiply_script)
         r.script_flush()
 
+        r.set('a', 2)
+        r.script_load(multiply_script)
+        r.script_flush(None)
+
         with pytest.raises(exceptions.DataError):
             r.set('a', 2)
             r.script_load(multiply_script)
