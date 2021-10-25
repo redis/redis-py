@@ -15,3 +15,12 @@ class RedisModuleCommands:
         from .json import JSON
         jj = JSON(client=self, encoder=encoder, decoder=decoder)
         return jj
+
+    def ft(self, index_name="idx"):
+        """Access the search namespace, providing support for redis search."""
+        if 'search' not in self.loaded_modules:
+            raise ModuleError("search is not a loaded in the redis instance.")
+
+        from .search import Search
+        s = Search(client=self, index_name=index_name)
+        return s

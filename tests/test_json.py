@@ -10,7 +10,7 @@ def client(modclient):
     return modclient
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_json_setbinarykey(client):
     d = {"hello": "world", b"some": "value"}
     with pytest.raises(TypeError):
@@ -18,7 +18,7 @@ def test_json_setbinarykey(client):
     assert client.json().set("somekey", Path.rootPath(), d, decode_keys=True)
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_json_setgetdeleteforget(client):
     assert client.json().set("foo", Path.rootPath(), "bar")
     assert client.json().get("foo") == "bar"
@@ -28,13 +28,13 @@ def test_json_setgetdeleteforget(client):
     assert client.exists("foo") == 0
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_justaget(client):
     client.json().set("foo", Path.rootPath(), "bar")
     assert client.json().get("foo") == "bar"
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_json_get_jset(client):
     assert client.json().set("foo", Path.rootPath(), "bar")
     assert "bar" == client.json().get("foo")
@@ -43,7 +43,7 @@ def test_json_get_jset(client):
     assert client.exists("foo") == 0
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_nonascii_setgetdelete(client):
     assert client.json().set("notascii", Path.rootPath(),
                              "hyvää-élève") is True
@@ -52,7 +52,7 @@ def test_nonascii_setgetdelete(client):
     assert client.exists("notascii") == 0
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_jsonsetexistentialmodifiersshouldsucceed(client):
     obj = {"foo": "bar"}
     assert client.json().set("obj", Path.rootPath(), obj)
@@ -70,7 +70,7 @@ def test_jsonsetexistentialmodifiersshouldsucceed(client):
         client.json().set("obj", Path("foo"), "baz", nx=True, xx=True)
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_mgetshouldsucceed(client):
     client.json().set("1", Path.rootPath(), 1)
     client.json().set("2", Path.rootPath(), 2)
@@ -79,7 +79,7 @@ def test_mgetshouldsucceed(client):
     assert e == r
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "ReJSON")  # todo: update after the release
 def test_clearShouldSucceed(client):
     client.json().set("arr", Path.rootPath(), [0, 1, 2, 3, 4])
@@ -87,13 +87,13 @@ def test_clearShouldSucceed(client):
     assert [] == client.json().get("arr")
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_typeshouldsucceed(client):
     client.json().set("1", Path.rootPath(), 1)
     assert b"integer" == client.json().type("1")
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_numincrbyshouldsucceed(client):
     client.json().set("num", Path.rootPath(), 1)
     assert 2 == client.json().numincrby("num", Path.rootPath(), 1)
@@ -101,7 +101,7 @@ def test_numincrbyshouldsucceed(client):
     assert 1.25 == client.json().numincrby("num", Path.rootPath(), -1.25)
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_nummultbyshouldsucceed(client):
     client.json().set("num", Path.rootPath(), 1)
     assert 2 == client.json().nummultby("num", Path.rootPath(), 2)
@@ -109,7 +109,7 @@ def test_nummultbyshouldsucceed(client):
     assert 2.5 == client.json().nummultby("num", Path.rootPath(), 0.5)
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "ReJSON")  # todo: update after the release
 def test_toggleShouldSucceed(client):
     client.json().set("bool", Path.rootPath(), False)
@@ -121,20 +121,20 @@ def test_toggleShouldSucceed(client):
         client.json().toggle("num", Path.rootPath())
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_strappendshouldsucceed(client):
     client.json().set("str", Path.rootPath(), "foo")
     assert 6 == client.json().strappend("str", "bar", Path.rootPath())
     assert "foobar" == client.json().get("str", Path.rootPath())
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_debug(client):
     client.json().set("str", Path.rootPath(), "foo")
     assert 24 == client.json().debug("str", Path.rootPath())
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_strlenshouldsucceed(client):
     client.json().set("str", Path.rootPath(), "foo")
     assert 3 == client.json().strlen("str", Path.rootPath())
@@ -142,7 +142,7 @@ def test_strlenshouldsucceed(client):
     assert 6 == client.json().strlen("str", Path.rootPath())
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_arrappendshouldsucceed(client):
     client.json().set("arr", Path.rootPath(), [1])
     assert 2 == client.json().arrappend("arr", Path.rootPath(), 2)
@@ -150,14 +150,14 @@ def test_arrappendshouldsucceed(client):
     assert 7 == client.json().arrappend("arr", Path.rootPath(), *[5, 6, 7])
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def testArrIndexShouldSucceed(client):
     client.json().set("arr", Path.rootPath(), [0, 1, 2, 3, 4])
     assert 1 == client.json().arrindex("arr", Path.rootPath(), 1)
     assert -1 == client.json().arrindex("arr", Path.rootPath(), 1, 2)
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_arrinsertshouldsucceed(client):
     client.json().set("arr", Path.rootPath(), [0, 4])
     assert 5 - -client.json().arrinsert(
@@ -173,13 +173,13 @@ def test_arrinsertshouldsucceed(client):
     assert [0, 1, 2, 3, 4] == client.json().get("arr")
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_arrlenshouldsucceed(client):
     client.json().set("arr", Path.rootPath(), [0, 1, 2, 3, 4])
     assert 5 == client.json().arrlen("arr", Path.rootPath())
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_arrpopshouldsucceed(client):
     client.json().set("arr", Path.rootPath(), [0, 1, 2, 3, 4])
     assert 4 == client.json().arrpop("arr", Path.rootPath(), 4)
@@ -189,14 +189,14 @@ def test_arrpopshouldsucceed(client):
     assert [1] == client.json().get("arr")
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_arrtrimshouldsucceed(client):
     client.json().set("arr", Path.rootPath(), [0, 1, 2, 3, 4])
     assert 3 == client.json().arrtrim("arr", Path.rootPath(), 1, 3)
     assert [1, 2, 3] == client.json().get("arr")
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_respshouldsucceed(client):
     obj = {"foo": "bar", "baz": 1, "qaz": True}
     client.json().set("obj", Path.rootPath(), obj)
@@ -205,7 +205,7 @@ def test_respshouldsucceed(client):
     assert client.json().resp("obj", Path("qaz"))
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_objkeysshouldsucceed(client):
     obj = {"foo": "bar", "baz": "qaz"}
     client.json().set("obj", Path.rootPath(), obj)
@@ -216,7 +216,7 @@ def test_objkeysshouldsucceed(client):
     assert exp == keys
 
 
-@pytest.mark.json
+@pytest.mark.redismod
 def test_objlenshouldsucceed(client):
     obj = {"foo": "bar", "baz": "qaz"}
     client.json().set("obj", Path.rootPath(), obj)
@@ -224,7 +224,7 @@ def test_objlenshouldsucceed(client):
 
 
 # @pytest.mark.pipeline
-# @pytest.mark.json
+# @pytest.mark.redismod
 # def test_pipelineshouldsucceed(client):
 #     p = client.json().pipeline()
 #     p.set("foo", Path.rootPath(), "bar")
