@@ -1157,13 +1157,19 @@ class CoreCommands:
         if ex is not None:
             pieces.append('EX')
             if isinstance(ex, datetime.timedelta):
-                ex = int(ex.total_seconds())
-            pieces.append(ex)
+                pieces.append(int(ex.total_seconds()))
+            elif isinstance(ex, int):
+                pieces.append(ex)
+            else:
+                raise DataError("ex must be datetime.timedelta or int")
         if px is not None:
             pieces.append('PX')
             if isinstance(px, datetime.timedelta):
-                px = int(px.total_seconds() * 1000)
-            pieces.append(px)
+                pieces.append(int(px.total_seconds() * 1000))
+            elif isinstance(px, int):
+                pieces.append(px)
+            else:
+                raise DataError("px must be datetime.timedelta or int")
         if exat is not None:
             pieces.append('EXAT')
             if isinstance(exat, datetime.datetime):
@@ -2028,12 +2034,18 @@ class CoreCommands:
         """
         return self.execute_command('XINFO GROUPS', name)
 
-    def xinfo_stream(self, name):
+    def xinfo_stream(self, name, full=False):
         """
         Returns general information about the stream.
         name: name of the stream.
+        full: optional boolean, false by default. Return full summary
         """
-        return self.execute_command('XINFO STREAM', name)
+        pieces = [name]
+        options = {}
+        if full:
+            pieces.append(b'FULL')
+            options = {'full': full}
+        return self.execute_command('XINFO STREAM', *pieces, **options)
 
     def xlen(self, name):
         """
@@ -2049,18 +2061,21 @@ class CoreCommands:
         """
         return self.execute_command('XPENDING', name, groupname)
 
-    def xpending_range(self, name, groupname, min, max, count,
-                       consumername=None, idle=None):
+    def xpending_range(self, name, groupname, idle=None,
+                       min=None, max=None, count=None,
+                       consumername=None):
         """
         Returns information about pending messages, in a range.
+
         name: name of the stream.
         groupname: name of the consumer group.
+        idle: available from  version 6.2. filter entries by their
+        idle-time, given in milliseconds (optional).
         min: minimum stream ID.
         max: maximum stream ID.
         count: number of messages to return
         consumername: name of a consumer to filter by (optional).
-        idle: available from  version 6.2. filter entries by their
-        idle-time, given in milliseconds (optional).
+
         """
         if {min, max, count} == {None}:
             if idle is not None or consumername is not None:
@@ -2087,6 +2102,9 @@ class CoreCommands:
             pieces.extend([min, max, count])
         except TypeError:
             pass
+        # consumername
+        if consumername:
+            pieces.append(consumername)
 
         return self.execute_command('XPENDING', *pieces, parse_detail=True)
 
@@ -2888,16 +2906,22 @@ class CoreCommands:
             "SCRIPT DEBUG is intentionally not implemented in the client."
         )
 
-    def script_flush(self, sync_type="SYNC"):
+    def script_flush(self, sync_type=None):
         """Flush all scripts from the script cache.
         ``sync_type`` is by default SYNC (synchronous) but it can also be
                       ASYNC.
         See: https://redis.io/commands/script-flush
         """
-        if sync_type not in ["SYNC", "ASYNC"]:
-            raise DataError("SCRIPT FLUSH defaults to SYNC or "
-                            "accepts SYNC/ASYNC")
-        pieces = [sync_type]
+
+        # Redis pre 6 had no sync_type.
+        if sync_type not in ["SYNC", "ASYNC", None]:
+            raise DataError("SCRIPT FLUSH defaults to SYNC in redis > 6.2, or "
+                            "accepts SYNC/ASYNC. For older versions, "
+                            "of redis leave as None.")
+        if sync_type is None:
+            pieces = []
+        else:
+            pieces = [sync_type]
         return self.execute_command('SCRIPT FLUSH', *pieces)
 
     def script_kill(self):
