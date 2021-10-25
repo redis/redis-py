@@ -1104,7 +1104,7 @@ class TestRedisCommands:
         assert r['a'] == b'1'
         assert 0 < r.pttl('a') <= 10000
         assert 0 < r.ttl('a') <= 10
-        with pytest.raises(exceptions.ResponseError):
+        with pytest.raises(exceptions.DataError):
             assert r.set('a', '1', px=10.0)
 
     @skip_if_server_version_lt('2.6.0')
@@ -1118,7 +1118,7 @@ class TestRedisCommands:
     def test_set_ex(self, r):
         assert r.set('a', '1', ex=10)
         assert 0 < r.ttl('a') <= 10
-        with pytest.raises(exceptions.ResponseError):
+        with pytest.raises(exceptions.DataError):
             assert r.set('a', '1', ex=10.0)
 
     @skip_if_server_version_lt('2.6.0')
@@ -3154,6 +3154,18 @@ class TestRedisCommands:
         assert info['length'] == 2
         assert info['first-entry'] == get_stream_message(r, stream, m1)
         assert info['last-entry'] == get_stream_message(r, stream, m2)
+
+    @skip_if_server_version_lt('6.0.0')
+    def test_xinfo_stream_full(self, r):
+        stream = 'stream'
+        group = 'group'
+        m1 = r.xadd(stream, {'foo': 'bar'})
+        r.xgroup_create(stream, group, 0)
+        info = r.xinfo_stream(stream, full=True)
+
+        assert info['length'] == 1
+        assert m1 in info['entries']
+        assert len(info['groups']) == 1
 
     @skip_if_server_version_lt('5.0.0')
     def test_xlen(self, r):

@@ -305,14 +305,24 @@ def parse_xautoclaim(response, **options):
     return parse_stream_list(response[1])
 
 
-def parse_xinfo_stream(response):
+def parse_xinfo_stream(response, **options):
     data = pairs_to_dict(response, decode_keys=True)
-    first = data['first-entry']
-    if first is not None:
-        data['first-entry'] = (first[0], pairs_to_dict(first[1]))
-    last = data['last-entry']
-    if last is not None:
-        data['last-entry'] = (last[0], pairs_to_dict(last[1]))
+    if not options.get('full', False):
+        first = data['first-entry']
+        if first is not None:
+            data['first-entry'] = (first[0], pairs_to_dict(first[1]))
+        last = data['last-entry']
+        if last is not None:
+            data['last-entry'] = (last[0], pairs_to_dict(last[1]))
+    else:
+        data['entries'] = {
+            _id: pairs_to_dict(entry)
+            for _id, entry in data['entries']
+        }
+        data['groups'] = [
+            pairs_to_dict(group, decode_keys=True)
+            for group in data['groups']
+        ]
     return data
 
 
