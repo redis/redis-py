@@ -3155,6 +3155,18 @@ class TestRedisCommands:
         assert info['first-entry'] == get_stream_message(r, stream, m1)
         assert info['last-entry'] == get_stream_message(r, stream, m2)
 
+    @skip_if_server_version_lt('6.0.0')
+    def test_xinfo_stream_full(self, r):
+        stream = 'stream'
+        group = 'group'
+        m1 = r.xadd(stream, {'foo': 'bar'})
+        r.xgroup_create(stream, group, 0)
+        info = r.xinfo_stream(stream, full=True)
+
+        assert info['length'] == 1
+        assert m1 in info['entries']
+        assert len(info['groups']) == 1
+
     @skip_if_server_version_lt('5.0.0')
     def test_xlen(self, r):
         stream = 'stream'

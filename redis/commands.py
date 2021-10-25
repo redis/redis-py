@@ -2050,12 +2050,18 @@ class Commands:
         """
         return self.execute_command('XINFO GROUPS', name)
 
-    def xinfo_stream(self, name):
+    def xinfo_stream(self, name, full=False):
         """
         Returns general information about the stream.
         name: name of the stream.
+        full: optional boolean, false by default. Return full summary
         """
-        return self.execute_command('XINFO STREAM', name)
+        pieces = [name]
+        options = {}
+        if full:
+            pieces.append(b'FULL')
+            options = {'full': full}
+        return self.execute_command('XINFO STREAM', *pieces, **options)
 
     def xlen(self, name):
         """
@@ -2916,16 +2922,22 @@ class Commands:
             "SCRIPT DEBUG is intentionally not implemented in the client."
         )
 
-    def script_flush(self, sync_type="SYNC"):
+    def script_flush(self, sync_type=None):
         """Flush all scripts from the script cache.
         ``sync_type`` is by default SYNC (synchronous) but it can also be
                       ASYNC.
         See: https://redis.io/commands/script-flush
         """
-        if sync_type not in ["SYNC", "ASYNC"]:
-            raise DataError("SCRIPT FLUSH defaults to SYNC or "
-                            "accepts SYNC/ASYNC")
-        pieces = [sync_type]
+
+        # Redis pre 6 had no sync_type.
+        if sync_type not in ["SYNC", "ASYNC", None]:
+            raise DataError("SCRIPT FLUSH defaults to SYNC in redis > 6.2, or "
+                            "accepts SYNC/ASYNC. For older versions, "
+                            "of redis leave as None.")
+        if sync_type is None:
+            pieces = []
+        else:
+            pieces = [sync_type]
         return self.execute_command('SCRIPT FLUSH', *pieces)
 
     def script_kill(self):
