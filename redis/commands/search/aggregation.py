@@ -281,8 +281,8 @@ class AggregateRequest(object):
         - **fields**: The fields by which to sort. This can be either a single
             field or a list of fields. If you wish to specify order, you can
             use the `Asc` or `Desc` wrapper classes.
-        - **max**: Maximum number of results to return. This can be used instead
-            of `LIMIT` and is also faster.
+        - **max**: Maximum number of results to return. This can be
+            used instead of `LIMIT` and is also faster.
 
 
         Example of sorting by `foo` ascending and `bar` descending:
@@ -310,7 +310,8 @@ class AggregateRequest(object):
 
     def filter(self, expressions):
         """
-        Specify filter for post-query results using predicates relating to values in the result set.
+        Specify filter for post-query results using predicates relating to
+        values in the result set.
 
         ### Parameters
 

@@ -18,7 +18,8 @@ def between(a, b, inclusive_min=True, inclusive_max=True):
     """
     Indicate that value is a numeric range
     """
-    return RangeValue(a, b, inclusive_min=inclusive_min, inclusive_max=inclusive_max)
+    return RangeValue(a, b, inclusive_min=inclusive_min,
+                      inclusive_max=inclusive_max)
 
 
 def equal(n):
@@ -67,8 +68,8 @@ class Value(object):
     @property
     def combinable(self):
         """
-        Whether this type of value may be combined with other values for the same
-        field. This makes the filter potentially more efficient
+        Whether this type of value may be combined with other values
+        for the same field. This makes the filter potentially more efficient
         """
         return False
 
@@ -201,9 +202,11 @@ class Node(object):
         if len(vals) == 1:
             return [BaseNode("@{}:{}".format(key, vals[0].to_string()))]
         if not vals[0].combinable:
-            return [BaseNode("@{}:{}".format(key, v.to_string())) for v in vals]
+            return [BaseNode("@{}:{}".format(key,
+                                             v.to_string())) for v in vals]
         s = BaseNode(
-            "@{}:({})".format(key, self.JOINSTR.join(v.to_string() for v in vals))
+            "@{}:({})".format(key,
+                              self.JOINSTR.join(v.to_string() for v in vals))
         )
         return [s]
 

@@ -71,9 +71,12 @@ class SearchCommands:
         ### Parameters:
 
         - **fields**: a list of TextField or NumericField objects
-        - **no_term_offsets**: If true, we will not save term offsets in the index
-        - **no_field_flags**: If true, we will not save field flags that allow searching in specific fields
-        - **stopwords**: If not None, we create the index with this custom stopword list. The list can be empty
+        - **no_term_offsets**: If true, we will not save term offsets in
+        the index
+        - **no_field_flags**: If true, we will not save field flags that
+        allow searching in specific fields
+        - **stopwords**: If not None, we create the index with this custom
+        stopword list. The list can be empty
         """
 
         args = [CREATE_CMD, self.index_name]
@@ -98,7 +101,8 @@ class SearchCommands:
 
     def alter_schema_add(self, fields):
         """
-        Alter the existing search index by adding new fields. The index must already exist.
+        Alter the existing search index by adding new fields. The index
+        must already exist.
 
         ### Parameters:
 
@@ -219,17 +223,26 @@ class SearchCommands:
         ### Parameters
 
         - **doc_id**: the id of the saved document.
-        - **nosave**: if set to true, we just index the document, and don't save a copy of it. This means that searches will just return ids.
+        - **nosave**: if set to true, we just index the document, and don't
+                      save a copy of it. This means that searches will just
+                      return ids.
         - **score**: the document ranking, between 0.0 and 1.0
-        - **payload**: optional inner-index payload we can save for fast access in scoring functions
-        - **replace**: if True, and the document already is in the index, we perform an update and reindex the document
-        - **partial**: if True, the fields specified will be added to the existing document.
-                       This has the added benefit that any fields specified with `no_index`
+        - **payload**: optional inner-index payload we can save for fast
+        i              access in scoring functions
+        - **replace**: if True, and the document already is in the index,
+        we perform an update and reindex the document
+        - **partial**: if True, the fields specified will be added to the
+                       existing document.
+                       This has the added benefit that any fields specified
+                       with `no_index`
                        will not be reindexed again. Implies `replace`
         - **language**: Specify the language used for document tokenization.
-        - **no_create**: if True, the document is only updated and reindexed if it already exists.
-                         If the document does not exist, an error will be returned. Implies `replace`
-        - **fields** kwargs dictionary of the document fields to be saved and/or indexed.
+        - **no_create**: if True, the document is only updated and reindexed
+                         if it already exists.
+                         If the document does not exist, an error will be
+                         returned. Implies `replace`
+        - **fields** kwargs dictionary of the document fields to be saved
+                         and/or indexed.
                      NOTE: Geo points shoule be encoded as strings of "lon,lat"
         """
         return self._add_document(
@@ -257,9 +270,11 @@ class SearchCommands:
 
         ### Parameters
 
-        - **doc_id**: the document's id. This has to be an existing HASH key in Redis that will hold the fields the index needs.
-        - **score**: the document ranking, between 0.0 and 1.0
-        - **replace**: if True, and the document already is in the index, we perform an update and reindex the document
+        - **doc_id**: the document's id. This has to be an existing HASH key
+                      in Redis that will hold the fields the index needs.
+        - **score**:  the document ranking, between 0.0 and 1.0
+        - **replace**: if True, and the document already is in the index, we
+                      perform an update and reindex the document
         - **language**: Specify the language used for document tokenization.
         """
         return self._add_document_hash(
@@ -277,7 +292,8 @@ class SearchCommands:
 
         ### Parameters
 
-        - **delete_actual_document**: if set to True, RediSearch also delete the actual document if it is in the index
+        - **delete_actual_document**: if set to True, RediSearch also delete
+                                      the actual document if it is in the index
         """
         args = [DEL_CMD, self.index_name, doc_id]
         if conn is None:
@@ -316,7 +332,8 @@ class SearchCommands:
 
     def info(self):
         """
-        Get info an stats about the the current index, including the number of documents, memory consumption, etc
+        Get info an stats about the the current index, including the number of
+        documents, memory consumption, etc
         """
 
         res = self.client.execute_command(INFO_CMD, self.index_name)
@@ -341,7 +358,8 @@ class SearchCommands:
 
         ### Parameters
 
-        - **query**: the search query. Either a text for simple queries with default parameters, or a Query object for complex queries.
+        - **query**: the search query. Either a text for simple queries with
+                     default parameters, or a Query object for complex queries.
                      See RediSearch's documentation on query format
         """
         args, query = self._mk_query_args(query)
@@ -368,8 +386,8 @@ class SearchCommands:
 
         **query**: This can be either an `AggeregateRequest`, or a `Cursor`
 
-        An `AggregateResult` object is returned. You can access the rows from its
-        `rows` property, which will always yield the rows of the result
+        An `AggregateResult` object is returned. You can access the rows from
+        its `rows` property, which will always yield the rows of the result.
         """
         if isinstance(query, AggregateRequest):
             has_cursor = bool(query._cursor)
@@ -408,7 +426,8 @@ class SearchCommands:
         ### Parameters
 
         **query**: search query.
-        **distance***: the maximal Levenshtein distance for spelling suggestions (default: 1, max: 4).
+        **distance***: the maximal Levenshtein distance for spelling
+                       suggestions (default: 1, max: 4).
         **include**: specifies an inclusion custom dictionary.
         **exclude**: specifies an exclusion custom dictionary.
         """
@@ -455,7 +474,8 @@ class SearchCommands:
             #     ]
             # }
             corrections[_correction[1]] = [
-                {"score": _item[0], "suggestion": _item[1]} for _item in _correction[2]
+                {"score": _item[0], "suggestion": _item[1]}
+                for _item in _correction[2]
             ]
 
         return corrections
@@ -566,11 +586,13 @@ class SearchCommands:
 
     def sugadd(self, key, *suggestions, **kwargs):
         """
-        Add suggestion terms to the AutoCompleter engine. Each suggestion has a score and string.
-        If kwargs["increment"] is true and the terms are already in the server's dictionary, we increment their scores.
-        More information `here <https://oss.redis.com/redisearch/master/Commands/#ftsugadd>`_.
+        Add suggestion terms to the AutoCompleter engine. Each suggestion has
+        a score and string.
+        If kwargs["increment"] is true and the terms are already in the
+        server's dictionary, we increment their scores.
+        More information `here <https://oss.redis.com/redisearch/master/Commands/#ftsugadd>`_.  # noqa
         """
-        # If Transaction is not set to false it will attempt a MULTI/EXEC which will error
+        # If Transaction is not False it will MULTI/EXEC which will error
         pipe = self.pipeline(transaction=False)
         for sug in suggestions:
             args = [SUGADD_COMMAND, key, sug.string, sug.score]
@@ -587,7 +609,7 @@ class SearchCommands:
     def suglen(self, key):
         """
         Return the number of entries in the AutoCompleter index.
-        More information `here <https://oss.redis.com/redisearch/master/Commands/#ftsuglen>`_.
+        More information `here <https://oss.redis.com/redisearch/master/Commands/#ftsuglen>`_.  # noqa
         """
         return self.execute_command(SUGLEN_COMMAND, key)
 
@@ -595,16 +617,17 @@ class SearchCommands:
         """
         Delete a string from the AutoCompleter index.
         Returns 1 if the string was found and deleted, 0 otherwise.
-        More information `here <https://oss.redis.com/redisearch/master/Commands/#ftsugdel>`_.
+        More information `here <https://oss.redis.com/redisearch/master/Commands/#ftsugdel>`_.  # noqa
         """
         return self.execute_command(SUGDEL_COMMAND, key, string)
 
     def sugget(
-        self, key, prefix, fuzzy=False, num=10, with_scores=False, with_payloads=False
+        self, key, prefix, fuzzy=False, num=10, with_scores=False,
+        with_payloads=False
     ):
         """
         Get a list of suggestions from the AutoCompleter, for a given prefix.
-        More information `here <https://oss.redis.com/redisearch/master/Commands/#ftsugget>`_.
+        More information `here <https://oss.redis.com/redisearch/master/Commands/#ftsugget>`_.  # noqa
 
         Parameters:
 
@@ -612,21 +635,25 @@ class SearchCommands:
             The prefix we are searching. **Must be valid ascii or utf-8**
         fuzzy : bool
             If set to true, the prefix search is done in fuzzy mode.
-            **NOTE**: Running fuzzy searches on short (<3 letters) prefixes can be very
+            **NOTE**: Running fuzzy searches on short (<3 letters) prefixes
+            can be very
             slow, and even scan the entire index.
         with_scores : bool
-            If set to true, we also return the (refactored) score of each suggestion.
-            This is normally not needed, and is NOT the original score inserted into the index.
+            If set to true, we also return the (refactored) score of
+            each suggestion.
+            This is normally not needed, and is NOT the original score
+            inserted into the index.
         with_payloads : bool
             Return suggestion payloads
         num : int
-            The maximum number of results we return. Note that we might return less.
-            The algorithm trims irrelevant suggestions.
+            The maximum number of results we return. Note that we might
+            return less. The algorithm trims irrelevant suggestions.
 
         Returns:
 
         list:
-             A list of Suggestion objects. If with_scores was False, the score of all suggestions is 1.
+             A list of Suggestion objects. If with_scores was False, the
+             score of all suggestions is 1.
         """
         args = [SUGGET_COMMAND, key, prefix, "MAX", num]
         if fuzzy:
@@ -647,7 +674,8 @@ class SearchCommands:
     def synupdate(self, groupid, skipinitial=False, *terms):
         """
         Updates a synonym group.
-        The command is used to create or update a synonym group with additional terms.
+        The command is used to create or update a synonym group with
+        additional terms.
         Only documents which were indexed after the update will be affected.
 
         Parameters:

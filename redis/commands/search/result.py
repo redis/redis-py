@@ -6,14 +6,16 @@ from ._util import to_string
 
 class Result(object):
     """
-    Represents the result of a search query, and has an array of Document objects
+    Represents the result of a search query, and has an array of Document
+    objects
     """
 
     def __init__(
         self, res, hascontent, duration=0, has_payload=False, with_scores=False
     ):
         """
-        - **snippets**: An optional dictionary of the form {field: snippet_size} for snippet formatting
+        - **snippets**: An optional dictionary of the form
+        {field: snippet_size} for snippet formatting
         """
 
         self.total = res[0]

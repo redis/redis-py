@@ -4,7 +4,8 @@ from ._util import to_string
 
 class Suggestion(object):
     """
-    Represents a single suggestion being sent or returned from the auto complete server
+    Represents a single suggestion being sent or returned from the
+    autocomplete server
     """
 
     def __init__(self, string, score=1.0, payload=None):
@@ -46,6 +47,8 @@ class SuggestionParser(object):
     def __iter__(self):
         for i in xrange(0, len(self._sugs), self.sugsize):
             ss = self._sugs[i]
-            score = float(self._sugs[i + self._scoreidx]) if self.with_scores else 1.0
-            payload = self._sugs[i + self._payloadidx] if self.with_payloads else None
+            score = float(self._sugs[i + self._scoreidx]) \
+                if self.with_scores else 1.0
+            payload = self._sugs[i + self._payloadidx] \
+                if self.with_payloads else None
             yield Suggestion(ss, score, payload)

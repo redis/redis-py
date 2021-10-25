@@ -9,7 +9,8 @@ class IndexType(Enum):
 
 
 class IndexDefinition(object):
-    """IndexDefinition is used to define a index definition for automatic indexing on Hash or Json update."""
+    """IndexDefinition is used to define a index definition for automatic
+    indexing on Hash or Json update."""
 
     def __init__(
         self,
@@ -37,7 +38,8 @@ class IndexDefinition(object):
         elif index_type is IndexType.JSON:
             self.args.extend(["ON", "JSON"])
         elif index_type is not None:
-            raise RuntimeError("index_type must be one of {}".format(list(IndexType)))
+            raise RuntimeError("index_type must be one of {}".
+                               format(list(IndexType)))
 
     def _appendPrefix(self, prefix):
         """Append PREFIX."""

@@ -10,22 +10,44 @@ from .conftest import skip_ifmodversion_lt, default_redismod_url
 from redis import Redis
 
 import redis.commands.search
-from redis.exceptions import RedisError
 from redis.commands.json.path import Path
 from redis.commands.search import Search
-from redis.commands.search.field import *
-from redis.commands.search.query import *
-from redis.commands.search.result import *
-from redis.commands.search.indexDefinition import *
-from redis.commands.search.suggestion import *
+from redis.commands.search.field import (
+    GeoField,
+    NumericField,
+    TagField,
+    TextField
+)
+from redis.commands.search.query import (
+    GeoFilter,
+    NumericFilter,
+    Query
+)
+from redis.commands.search.result import Result
+from redis.commands.search.indexDefinition import IndexDefinition, IndexType
+from redis.commands.search.suggestion import Suggestion
 import redis.commands.search.aggregation as aggregations
 import redis.commands.search.reducers as reducers
 
 WILL_PLAY_TEXT = (
-    os.path.abspath(os.path.dirname(__file__)) + "/testdata/will_play_text.csv.bz2"
+    os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__),
+            "testdata",
+            "will_play_text.csv.bz2"
+        )
+    )
 )
 
-TITLES_CSV = os.path.abspath(os.path.dirname(__file__)) + "/testdata/titles.csv"
+TITLES_CSV = (
+    os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__),
+            "testdata",
+            "titles.csv"
+        )
+    )
+)
 
 
 def waitForIndex(env, idx, timeout=None):
@@ -59,7 +81,9 @@ def getClient():
 def createIndex(client, num_docs=100, definition=None):
     try:
         client.create_index(
-            (TextField("play", weight=5.0), TextField("txt"), NumericField("chapter")),
+            (TextField("play", weight=5.0),
+                TextField("txt"),
+                NumericField("chapter")),
             definition=definition,
         )
     except redis.ResponseError:
@@ -71,9 +95,9 @@ def createIndex(client, num_docs=100, definition=None):
 
     r = csv.reader(bzfp, delimiter=";")
     for n, line in enumerate(r):
-        # ['62816', 'Merchant of Venice', '9', '3.2.74', 'PORTIA', "I'll begin it,--Ding, dong, bell."]
 
-        play, chapter, character, text = line[1], line[2], line[4], line[5]  # noqa
+        play, chapter, _, text = \
+            line[1], line[2], line[4], line[5]
 
         key = "{}:{}".format(play, chapter).lower()
         d = chapters.setdefault(key, {})
@@ -105,7 +129,7 @@ def client(modclient):
 
 
 @pytest.mark.redismod
-def testClient(client):
+def test_client(client):
     num_docs = 500
     createIndex(client.ft(), num_docs=num_docs)
     waitForIndex(client, "idx")
@@ -158,13 +182,19 @@ def testClient(client):
     assert total > vtotal
 
     # test in fields
-    txt_total = client.ft().search(Query("henry").no_content().limit_fields("txt")).total
-    play_total = client.ft().search(
-        Query("henry").no_content().limit_fields("play")
-    ).total
-    both_total = client.ft().search(
-        Query("henry").no_content().limit_fields("play", "txt")
-    ).total
+    txt_total = (
+        client.ft().search(
+            Query("henry").no_content().limit_fields("txt")).total
+    )
+    play_total = (
+        client.ft().search(
+            Query("henry").no_content().limit_fields("play")).total
+    )
+    both_total = (
+        client.ft()
+        .search(Query("henry").no_content().limit_fields("play", "txt"))
+        .total
+    )
     assert 129 == txt_total
     assert 494 == play_total
     assert 494 == both_total
@@ -185,12 +215,12 @@ def testClient(client):
     ids = [x.id for x in docs.docs]
     assert set(ids) == set(subset)
 
-    # self.assertRaises(redis.ResponseError, client.ft, Query('henry king').return_fields('play', 'nonexist'))
-
     # test slop and in order
     assert 193 == client.ft().search(Query("henry king")).total
-    assert 3 == client.ft().search(Query("henry king").slop(0).in_order()).total
-    assert 52 == client.ft().search(Query("king henry").slop(0).in_order()).total
+    assert 3 == client.ft().search(
+        Query("henry king").slop(0).in_order()).total
+    assert 52 == client.ft().search(
+        Query("king henry").slop(0).in_order()).total
     assert 53 == client.ft().search(Query("henry king").slop(0)).total
     assert 167 == client.ft().search(Query("henry king").slop(100)).total
 
@@ -212,7 +242,7 @@ def testClient(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
-def testPayloads(client):
+def test_payloads(client):
     client.ft().create_index((TextField("txt"),))
 
     client.ft().add_document("doc1", payload="foo baz", txt="foo bar")
@@ -228,7 +258,7 @@ def testPayloads(client):
 
 
 @pytest.mark.redismod
-def testScores(client):
+def test_scores(client):
     client.ft().create_index((TextField("txt"),))
 
     client.ft().add_document("doc1", txt="foo baz")
@@ -245,7 +275,7 @@ def testScores(client):
 
 
 @pytest.mark.redismod
-def testReplace(client):
+def test_replace(client):
     client.ft().create_index((TextField("txt"),))
 
     client.ft().add_document("doc1", txt="foo bar")
@@ -254,7 +284,11 @@ def testReplace(client):
 
     res = client.ft().search("foo bar")
     assert 2 == res.total
-    client.ft().add_document("doc1", replace=True, txt="this is a replaced doc")
+    client.ft().add_document(
+        "doc1",
+        replace=True,
+        txt="this is a replaced doc"
+    )
 
     res = client.ft().search("foo bar")
     assert 1 == res.total
@@ -266,8 +300,11 @@ def testReplace(client):
 
 
 @pytest.mark.redismod
-def testStopwords(client):
-    client.ft().create_index((TextField("txt"),), stopwords=["foo", "bar", "baz"])
+def test_stopwords(client):
+    client.ft().create_index(
+        (TextField("txt"),),
+        stopwords=["foo", "bar", "baz"]
+    )
     client.ft().add_document("doc1", txt="foo bar")
     client.ft().add_document("doc2", txt="hello world")
     waitForIndex(client, "idx")
@@ -280,9 +317,18 @@ def testStopwords(client):
 
 
 @pytest.mark.redismod
-def testFilters(client):
-    client.ft().create_index((TextField("txt"), NumericField("num"), GeoField("loc")))
-    client.ft().add_document("doc1", txt="foo bar", num=3.141, loc="-0.441,51.458")
+def test_filters(client):
+    client.ft().create_index(
+        (TextField("txt"),
+            NumericField("num"),
+            GeoField("loc"))
+    )
+    client.ft().add_document(
+        "doc1",
+        txt="foo bar",
+        num=3.141,
+        loc="-0.441,51.458"
+    )
     client.ft().add_document("doc2", txt="foo baz", num=2, loc="-0.1,51.2")
 
     waitForIndex(client, "idx")
@@ -290,7 +336,8 @@ def testFilters(client):
     q1 = Query("foo").add_filter(NumericFilter("num", 0, 2)).no_content()
     q2 = (
         Query("foo")
-        .add_filter(NumericFilter("num", 2, NumericFilter.INF, minExclusive=True))
+        .add_filter(
+            NumericFilter("num", 2, NumericFilter.INF, minExclusive=True))
         .no_content()
     )
     res1, res2 = client.ft().search(q1), client.ft().search(q2)
@@ -301,8 +348,10 @@ def testFilters(client):
     assert "doc1" == res2.docs[0].id
 
     # Test geo filter
-    q1 = Query("foo").add_filter(GeoFilter("loc", -0.44, 51.45, 10)).no_content()
-    q2 = Query("foo").add_filter(GeoFilter("loc", -0.44, 51.45, 100)).no_content()
+    q1 = Query("foo").add_filter(
+        GeoFilter("loc", -0.44, 51.45, 10)).no_content()
+    q2 = Query("foo").add_filter(
+        GeoFilter("loc", -0.44, 51.45, 100)).no_content()
     res1, res2 = client.ft().search(q1), client.ft().search(q2)
 
     assert 1 == res1.total
@@ -316,7 +365,7 @@ def testFilters(client):
 
 
 @pytest.mark.redismod
-def testPayloadsWithNoContent(client):
+def test_payloads_with_no_content(client):
     client.ft().create_index((TextField("txt"),))
     client.ft().add_document("doc1", payload="foo baz", txt="foo bar")
     client.ft().add_document("doc2", payload="foo baz2", txt="foo bar")
@@ -327,8 +376,11 @@ def testPayloadsWithNoContent(client):
 
 
 @pytest.mark.redismod
-def testSortby(client):
-    client.ft().create_index((TextField("txt"), NumericField("num", sortable=True)))
+def test_sort_by(client):
+    client.ft().create_index(
+        (TextField("txt"),
+            NumericField("num", sortable=True))
+    )
     client.ft().add_document("doc1", txt="foo bar", num=1)
     client.ft().add_document("doc2", txt="foo baz", num=2)
     client.ft().add_document("doc3", txt="foo qux", num=3)
@@ -350,7 +402,7 @@ def testSortby(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
-def testDropIndex(client):
+def test_drop_index():
     """
     Ensure the index gets dropped by data remains by default
     """
@@ -368,9 +420,12 @@ def testDropIndex(client):
 
 
 @pytest.mark.redismod
-def testExample(client):
+def test_example(client):
     # Creating the index definition and schema
-    client.ft().create_index((TextField("title", weight=5.0), TextField("body")))
+    client.ft().create_index(
+        (TextField("title", weight=5.0),
+            TextField("body"))
+    )
 
     # Indexing a document
     client.ft().add_document(
@@ -387,7 +442,7 @@ def testExample(client):
 
 
 @pytest.mark.redismod
-def testAutoComplete(client):
+def test_auto_complete(client):
     n = 0
     with open(TITLES_CSV) as f:
         cr = csv.reader(f)
@@ -428,7 +483,12 @@ def testAutoComplete(client):
     client.ft().sugadd("ac", Suggestion("pay2", payload="pl2"))
     client.ft().sugadd("ac", Suggestion("pay3", payload="pl3"))
 
-    sugs = client.ft().sugget("ac", "pay", with_payloads=True, with_scores=True)
+    sugs = client.ft().sugget(
+        "ac",
+        "pay",
+        with_payloads=True,
+        with_scores=True
+    )
     assert 3 == len(sugs)
     for sug in sugs:
         assert sug.payload
@@ -436,7 +496,7 @@ def testAutoComplete(client):
 
 
 @pytest.mark.redismod
-def testNoIndex(client):
+def test_no_index(client):
     client.ft().create_index(
         (
             TextField("field"),
@@ -479,7 +539,7 @@ def testNoIndex(client):
 
     # Ensure exception is raised for non-indexable, non-sortable fields
     with pytest.raises(Exception):
-        TextFiled("name", no_index=True, sortable=False)
+        TextField("name", no_index=True, sortable=False)
     with pytest.raises(Exception):
         NumericField("name", no_index=True, sortable=False)
     with pytest.raises(Exception):
@@ -489,8 +549,12 @@ def testNoIndex(client):
 
 
 @pytest.mark.redismod
-def testPartial(client):
-    client.ft().create_index((TextField("f1"), TextField("f2"), TextField("f3")))
+def test_partial(client):
+    client.ft().create_index(
+        (TextField("f1"),
+            TextField("f2"),
+            TextField("f3"))
+    )
     client.ft().add_document("doc1", f1="f1_val", f2="f2_val")
     client.ft().add_document("doc2", f1="f1_val", f2="f2_val")
     client.ft().add_document("doc1", f3="f3_val", partial=True)
@@ -501,14 +565,18 @@ def testPartial(client):
     res = client.ft().search("@f3:f3_val")
     assert 2 == res.total
 
-    # Only the document updated with PARTIAL should still have the f1 and f2 values
+    # Only the document updated with PARTIAL should still have f1 and f2 values
     res = client.ft().search("@f3:f3_val @f2:f2_val @f1:f1_val")
     assert 1 == res.total
 
 
 @pytest.mark.redismod
-def testNoCreate(client):
-    client.ft().create_index((TextField("f1"), TextField("f2"), TextField("f3")))
+def test_no_create(client):
+    client.ft().create_index(
+        (TextField("f1"),
+            TextField("f2"),
+            TextField("f3"))
+    )
     client.ft().add_document("doc1", f1="f1_val", f2="f2_val")
     client.ft().add_document("doc2", f1="f1_val", f2="f2_val")
     client.ft().add_document("doc1", f3="f3_val", no_create=True)
@@ -519,23 +587,32 @@ def testNoCreate(client):
     res = client.ft().search("@f3:f3_val")
     assert 2 == res.total
 
-    # Only the document updated with PARTIAL should still have the f1 and f2 values
+    # Only the document updated with PARTIAL should still have f1 and f2 values
     res = client.ft().search("@f3:f3_val @f2:f2_val @f1:f1_val")
     assert 1 == res.total
 
     with pytest.raises(redis.ResponseError):
-        client.ft().add_document("doc3", f2="f2_val", f3="f3_val", no_create=True)
+        client.ft().add_document(
+            "doc3",
+            f2="f2_val",
+            f3="f3_val",
+            no_create=True
+        )
 
 
 @pytest.mark.redismod
-def testExplain(client):
-    client.ft().create_index((TextField("f1"), TextField("f2"), TextField("f3")))
+def test_explain(client):
+    client.ft().create_index(
+        (TextField("f1"),
+            TextField("f2"),
+            TextField("f3"))
+    )
     res = client.ft().explain("@f3:f3_val @f2:f2_val @f1:f1_val")
     assert res
 
 
 @pytest.mark.redismod
-def testSummarize(client):
+def test_summarize(client):
     createIndex(client.ft())
     waitForIndex(client, "idx")
 
@@ -546,7 +623,7 @@ def testSummarize(client):
     doc = sorted(client.ft().search(q).docs)[0]
     assert "<b>Henry</b> IV" == doc.play
     assert (
-        "ACT I SCENE I. London. The palace. Enter <b>KING</b> <b>HENRY</b>, LORD JOHN OF LANCASTER, the EARL of WESTMORELAND, SIR... "
+        "ACT I SCENE I. London. The palace. Enter <b>KING</b> <b>HENRY</b>, LORD JOHN OF LANCASTER, the EARL of WESTMORELAND, SIR... "  # noqa
         == doc.txt
     )
 
@@ -555,14 +632,14 @@ def testSummarize(client):
     doc = sorted(client.ft().search(q).docs)[0]
     assert "<b>Henry</b> ... " == doc.play
     assert (
-        "ACT I SCENE I. London. The palace. Enter <b>KING</b> <b>HENRY</b>, LORD JOHN OF LANCASTER, the EARL of WESTMORELAND, SIR... "
+        "ACT I SCENE I. London. The palace. Enter <b>KING</b> <b>HENRY</b>, LORD JOHN OF LANCASTER, the EARL of WESTMORELAND, SIR... "  # noqa
         == doc.txt
     )
 
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
-def testAlias():
+def test_alias():
     index1 = getClient()
     index2 = getClient()
 
@@ -588,7 +665,7 @@ def testAlias():
     res = alias_client.search("*").docs[0]
     assert "index1:lonestar" == res.id
 
-    # We should throw an exception when trying to add an alias that already exists
+    # Throw an exception when trying to add an alias that already exists
     with pytest.raises(Exception):
         ftindex2.aliasadd("spaceballs")
 
@@ -604,8 +681,9 @@ def testAlias():
 
 
 @pytest.mark.redismod
-def testAliasBasic(client):
+def test_alias_basic():
     # Creating a client with one index
+    getClient().flushdb()
     index1 = getClient().ft("testAlias")
 
     index1.create_index((TextField("txt"),))
@@ -621,7 +699,7 @@ def testAliasBasic(client):
     res = sorted(alias_client.search("*").docs, key=lambda x: x.id)
     assert "doc1" == res[0].id
 
-    # We should throw an exception when trying to add an alias that already exists
+    # Throw an exception when trying to add an alias that already exists
     with pytest.raises(Exception):
         index2.aliasadd("myalias")
 
@@ -638,7 +716,7 @@ def testAliasBasic(client):
 
 
 @pytest.mark.redismod
-def testTags(client):
+def test_tags(client):
     client.ft().create_index((TextField("txt"), TagField("tags")))
     tags = "foo,foo bar,hello;world"
     tags2 = "soba,ramen"
@@ -668,7 +746,7 @@ def testTags(client):
 
 
 @pytest.mark.redismod
-def testTextFieldSortableNostem(client):
+def test_textfield_sortable_nostem(client):
     # Creating the index definition with sortable and no_stem
     client.ft().create_index((TextField("txt", sortable=True, no_stem=True),))
 
@@ -679,7 +757,7 @@ def testTextFieldSortableNostem(client):
 
 
 @pytest.mark.redismod
-def testAlterSchemaAdd(client):
+def test_alter_schema_add(client):
     # Creating the index definition and schema
     client.ft().create_index(TextField("title"))
 
@@ -700,10 +778,14 @@ def testAlterSchemaAdd(client):
 
 
 @pytest.mark.redismod
-def testSpellCheck(client):
+def test_spell_check(client):
     client.ft().create_index((TextField("f1"), TextField("f2")))
 
-    client.ft().add_document("doc1", f1="some valid content", f2="this is sample text")
+    client.ft().add_document(
+        "doc1",
+        f1="some valid content",
+        f2="this is sample text"
+    )
     client.ft().add_document("doc2", f1="very important", f2="lorem ipsum")
     waitForIndex(client, "idx")
 
@@ -737,7 +819,7 @@ def testSpellCheck(client):
 
 
 @pytest.mark.redismod
-def testDictOps(client):
+def test_dict_operations(client):
     client.ft().create_index((TextField("f1"), TextField("f2")))
     # Add three items
     res = client.ft().dict_add("custom_dict", "item1", "item2", "item3")
@@ -756,7 +838,7 @@ def testDictOps(client):
 
 
 @pytest.mark.redismod
-def testPhoneticMatcher(client):
+def test_phonetic_matcher(client):
     client.ft().create_index((TextField("name"),))
     client.ft().add_document("doc1", name="Jon")
     client.ft().add_document("doc2", name="John")
@@ -778,7 +860,7 @@ def testPhoneticMatcher(client):
 
 
 @pytest.mark.redismod
-def testScorer(client):
+def test_scorer(client):
     client.ft().create_index((TextField("description"),))
 
     client.ft().add_document(
@@ -786,7 +868,7 @@ def testScorer(client):
     )
     client.ft().add_document(
         "doc2",
-        description="Quick alice was beginning to get very tired of sitting by her quick sister on the bank, and of having nothing to do.",
+        description="Quick alice was beginning to get very tired of sitting by her quick sister on the bank, and of having nothing to do.",  # noqa
     )
 
     # default scorer is TFIDF
@@ -794,7 +876,8 @@ def testScorer(client):
     assert 1.0 == res.docs[0].score
     res = client.ft().search(Query("quick").scorer("TFIDF").with_scores())
     assert 1.0 == res.docs[0].score
-    res = client.ft().search(Query("quick").scorer("TFIDF.DOCNORM").with_scores())
+    res = client.ft().search(
+        Query("quick").scorer("TFIDF.DOCNORM").with_scores())
     assert 0.1111111111111111 == res.docs[0].score
     res = client.ft().search(Query("quick").scorer("BM25").with_scores())
     assert 0.17699114465425977 == res.docs[0].score
@@ -807,7 +890,7 @@ def testScorer(client):
 
 
 @pytest.mark.redismod
-def testGet(client):
+def test_get(client):
     client.ft().create_index((TextField("f1"), TextField("f2")))
 
     assert [None] == client.ft().get("doc1")
@@ -831,7 +914,7 @@ def testGet(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
-def testConfig(client):
+def test_config(client):
     assert client.ft().config_set("TIMEOUT", "100")
     with pytest.raises(redis.ResponseError):
         client.ft().config_set("TIMEOUT", "null")
@@ -842,7 +925,7 @@ def testConfig(client):
 
 
 @pytest.mark.redismod
-def testAggregations(client):
+def test_aggregations(client):
     # Creating the index definition and schema
     client.ft().create_index(
         (
@@ -864,14 +947,14 @@ def testAggregations(client):
     client.ft().add_document(
         "ai",
         title="RedisAI",
-        body="RedisAI executes Deep Learning/Machine Learning models and managing their data.",
+        body="RedisAI executes Deep Learning/Machine Learning models and managing their data.",  # noqa
         parent="redis",
         random_num=3,
     )
     client.ft().add_document(
         "json",
         title="RedisJson",
-        body="RedisJSON implements ECMA-404 The JSON Data Interchange Standard as a native data type.",
+        body="RedisJSON implements ECMA-404 The JSON Data Interchange Standard as a native data type.",  # noqa
         parent="redis",
         random_num=8,
     )
@@ -913,7 +996,7 @@ def testAggregations(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
-def testIndexDefinition(client):
+def test_index_definition(client):
     """
     Create definition and test its args
     """
@@ -957,7 +1040,7 @@ def testIndexDefinition(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
-def testCreateClientDefinition(client):
+def test_create_client_definition(client):
     """
     Create definition with no index type provided,
     and use hset to test the client definition (the default is HASH).
@@ -975,12 +1058,15 @@ def testCreateClientDefinition(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
-def testCreateClientDefinitionHash(client):
+def test_create_client_definition_hash(client):
     """
     Create definition with IndexType.HASH as index type (ON HASH),
     and use hset to test the client definition.
     """
-    definition = IndexDefinition(prefix=["hset:", "henry"], index_type=IndexType.HASH)
+    definition = IndexDefinition(
+        prefix=["hset:", "henry"],
+        index_type=IndexType.HASH
+    )
     createIndex(client.ft(), num_docs=500, definition=definition)
 
     info = client.ft().info()
@@ -993,7 +1079,7 @@ def testCreateClientDefinitionHash(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
-def testCreateClientDefinitionJson(client):
+def test_create_client_definition_json(client):
     """
     Create definition with IndexType.JSON as index type (ON JSON),
     and use json client to test it.
@@ -1013,7 +1099,7 @@ def testCreateClientDefinitionJson(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
-def testFieldsAsName(client):
+def test_fields_as_name(client):
     # create index
     SCHEMA = (
         TextField("$.name", sortable=True, as_name="name"),
@@ -1023,10 +1109,15 @@ def testFieldsAsName(client):
     client.ft().create_index(SCHEMA, definition=definition)
 
     # insert json data
-    res = client.json().set("doc:1", Path.rootPath(), {"name": "Jon", "age": 25})
+    res = client.json().set(
+        "doc:1",
+        Path.rootPath(),
+        {"name": "Jon", "age": 25}
+    )
     assert res
 
-    total = client.ft().search(Query("Jon").return_fields("name", "just_a_number")).docs
+    total = client.ft().search(
+        Query("Jon").return_fields("name", "just_a_number")).docs
     assert 1 == len(total)
     assert "doc:1" == total[0].id
     assert "Jon" == total[0].name
@@ -1035,7 +1126,7 @@ def testFieldsAsName(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
-def testSearchReturnFields(client):
+def test_search_return_fields(client):
     res = client.json().set(
         "doc:1",
         Path.rootPath(),
@@ -1052,19 +1143,21 @@ def testSearchReturnFields(client):
     client.ft().create_index(SCHEMA, definition=definition)
     waitForIndex(client, "idx")
 
-    total = client.ft().search(Query("*").return_field("$.t", as_field="txt")).docs
+    total = client.ft().search(
+        Query("*").return_field("$.t", as_field="txt")).docs
     assert 1 == len(total)
     assert "doc:1" == total[0].id
     assert "riceratops" == total[0].txt
 
-    total = client.ft().search(Query("*").return_field("$.t2", as_field="txt")).docs
+    total = client.ft().search(
+        Query("*").return_field("$.t2", as_field="txt")).docs
     assert 1 == len(total)
     assert "doc:1" == total[0].id
     assert "telmatosaurus" == total[0].txt
 
 
 @pytest.mark.redismod
-def testSynupdate(client):
+def test_synupdate(client):
     definition = IndexDefinition(index_type=IndexType.HASH)
     client.ft().create_index(
         (
@@ -1075,10 +1168,17 @@ def testSynupdate(client):
     )
 
     client.ft().synupdate("id1", True, "boy", "child", "offspring")
-    client.ft().add_document("doc1", title="he is a baby", body="this is a test")
+    client.ft().add_document(
+        "doc1",
+        title="he is a baby",
+        body="this is a test")
 
     client.ft().synupdate("id1", True, "baby")
-    client.ft().add_document("doc2", title="he is another baby", body="another test")
+    client.ft().add_document(
+        "doc2",
+        title="he is another baby",
+        body="another test"
+    )
 
     res = client.ft().search(Query("child").expander("SYNONYM"))
     assert res.docs[0].id == "doc2"
@@ -1087,7 +1187,7 @@ def testSynupdate(client):
 
 
 @pytest.mark.redismod
-def testSyndump(client):
+def test_syndump(client):
     definition = IndexDefinition(index_type=IndexType.HASH)
     client.ft().create_index(
         (
