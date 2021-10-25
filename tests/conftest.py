@@ -11,12 +11,19 @@ from urllib.parse import urlparse
 
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/9"
+default_redismod_url = "redis://localhost:36379/9"
 
 
 def pytest_addoption(parser):
     parser.addoption('--redis-url', default=default_redis_url,
                      action="store",
                      help="Redis connection string,"
+                          " defaults to `%(default)s`")
+
+    parser.addoption('--redismod-url', default=default_redismod_url,
+                     action="store",
+                     help="Connection string to redis server"
+                          " with loaded modules,"
                           " defaults to `%(default)s`")
 
 
@@ -34,6 +41,11 @@ def pytest_sessionstart(session):
     arch_bits = info["arch_bits"]
     REDIS_INFO["version"] = version
     REDIS_INFO["arch_bits"] = arch_bits
+
+    # module info
+    redismod_url = session.config.getoption("--redismod-url")
+    info = _get_info(redismod_url)
+    REDIS_INFO["modules"] = info["modules"]
 
 
 def skip_if_server_version_lt(min_version):
@@ -55,6 +67,21 @@ def skip_if_server_version_gte(min_version):
 def skip_unless_arch_bits(arch_bits):
     return pytest.mark.skipif(REDIS_INFO["arch_bits"] != arch_bits,
                               reason="server is not {}-bit".format(arch_bits))
+
+
+def skip_ifmodversion_lt(min_version: str, module_name: str):
+    modules = REDIS_INFO["modules"]
+    if modules == []:
+        return pytest.mark.skipif(True, reason="No redis modules found")
+
+    for j in modules:
+        if module_name == j.get('name'):
+            version = j.get('ver')
+            mv = int(min_version.replace(".", ""))
+            check = version < mv
+            return pytest.mark.skipif(check, reason="Redis module version")
+
+    raise AttributeError("No redis module named {}".format(module_name))
 
 
 def _get_client(cls, request, single_connection_client=True, flushdb=True,
@@ -86,6 +113,12 @@ def _get_client(cls, request, single_connection_client=True, flushdb=True,
             client.connection_pool.disconnect()
         request.addfinalizer(teardown)
     return client
+
+
+@pytest.fixture()
+def modclient(request, port=36379, **kwargs):
+    with _get_client(redis.Redis, request, port=port, **kwargs) as client:
+        yield client
 
 
 @pytest.fixture()
