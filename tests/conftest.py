@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/9"
+default_redismod_url = "redis://localhost:36379/9"
 
 default_redismod_url = "redis://localhost:36379"
 
