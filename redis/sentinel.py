@@ -3,7 +3,7 @@ import weakref
 
 from redis.client import Redis
 from redis.commands import SentinelCommands
-from redis.connection import ConnectionPool, Connection
+from redis.connection import ConnectionPool, Connection, SSLConnection
 from redis.exceptions import (ConnectionError, ResponseError, ReadOnlyError,
                               TimeoutError)
 from redis.utils import str_if_bytes
@@ -64,6 +64,10 @@ class SentinelManagedConnection(Connection):
                 self.disconnect()
                 raise ConnectionError('The previous master is now a slave')
             raise
+
+
+class SentinelManagedSSLConnection(SentinelManagedConnection, SSLConnection):
+    pass
 
 
 class SentinelConnectionPool(ConnectionPool):
