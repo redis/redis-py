@@ -2050,12 +2050,18 @@ class Commands:
         """
         return self.execute_command('XINFO GROUPS', name)
 
-    def xinfo_stream(self, name):
+    def xinfo_stream(self, name, full=False):
         """
         Returns general information about the stream.
         name: name of the stream.
+        full: optional boolean, false by default. Return full summary
         """
-        return self.execute_command('XINFO STREAM', name)
+        pieces = [name]
+        options = {}
+        if full:
+            pieces.append(b'FULL')
+            options = {'full': full}
+        return self.execute_command('XINFO STREAM', *pieces, **options)
 
     def xlen(self, name):
         """
