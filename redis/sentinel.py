@@ -3,7 +3,7 @@ import weakref
 
 from redis.client import Redis
 from redis.commands import SentinelCommands
-from redis.connection import ConnectionPool, Connection
+from redis.connection import ConnectionPool, SSLConnection
 from redis.exceptions import (ConnectionError, ResponseError, ReadOnlyError,
                               TimeoutError)
 from redis.utils import str_if_bytes
@@ -17,10 +17,15 @@ class SlaveNotFoundError(ConnectionError):
     pass
 
 
-class SentinelManagedConnection(Connection):
+class SentinelManagedConnection(SSLConnection):
     def __init__(self, **kwargs):
         self.connection_pool = kwargs.pop('connection_pool')
-        super().__init__(**kwargs)
+        if "ssl" not in kwargs or not kwargs.pop("ssl", False):
+            # use constructor from Connection class
+            super(SSLConnection, self).__init__(**kwargs)
+        else:
+            # use constructor from SSLConnection class
+            super().__init__(**kwargs)
 
     def __repr__(self):
         pool = self.connection_pool
