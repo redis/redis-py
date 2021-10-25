@@ -2932,8 +2932,8 @@ class Commands:
         # Redis pre 6 had no sync_type.
         if sync_type not in ["SYNC", "ASYNC", None]:
             raise DataError("SCRIPT FLUSH defaults to SYNC in redis > 6.2, or "
-                                "accepts SYNC/ASYNC. For older versions, "
-                                "of redis leave as None.")
+                            "accepts SYNC/ASYNC. For older versions, "
+                            "of redis leave as None.")
         if sync_type is None:
             pieces = []
         else:
