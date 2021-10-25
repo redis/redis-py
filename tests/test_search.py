@@ -646,7 +646,11 @@ def test_alias():
     index1.hset("index1:lonestar", mapping={"name": "lonestar"})
     index2.hset("index2:yogurt", mapping={"name": "yogurt"})
 
-    time.sleep(2)
+
+    if os.environ.get("GITHUB_WORKFLOW", None) is not None:
+        time.sleep(2)
+    else:
+        time.sleep(5)
 
     def1 = IndexDefinition(prefix=["index1:"], score_field="name")
     def2 = IndexDefinition(prefix=["index2:"], score_field="name")
