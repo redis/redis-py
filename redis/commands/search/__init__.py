@@ -83,7 +83,7 @@ class Search(SearchCommands):
             self.pipeline.execute()
             self.current_chunk = 0
 
-    def __init__(self, client, index_name="idx"):
+    def __init__(self, client, version=None, index_name="idx"):
         """
         Create a new Client for the given index_name.
         The default name is `idx`
@@ -91,6 +91,7 @@ class Search(SearchCommands):
         If conn is not None, we employ an already existing redis connection
         """
         self.client = client
+        self.MODULE_VERSION = version
         self.index_name = index_name
         self.execute_command = client.execute_command
         self.pipeline = client.pipeline

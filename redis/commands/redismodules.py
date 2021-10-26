@@ -9,18 +9,26 @@ class RedisModuleCommands:
 
     def json(self, encoder=JSONEncoder(), decoder=JSONDecoder()):
         """Access the json namespace, providing support for redis json."""
-        if 'rejson' not in self.loaded_modules:
+        try:
+            modversion = self.loaded_modules['rejson']
+        except IndexError:
             raise ModuleError("rejson is not a loaded in the redis instance.")
 
         from .json import JSON
-        jj = JSON(client=self, encoder=encoder, decoder=decoder)
+        jj = JSON(
+                client=self,
+                version=modversion,
+                encoder=encoder,
+                decoder=decoder)
         return jj
 
     def ft(self, index_name="idx"):
         """Access the search namespace, providing support for redis search."""
-        if 'search' not in self.loaded_modules:
-            raise ModuleError("search is not a loaded in the redis instance.")
+        try:
+            modversion = self.loaded_modules['search']
+        except IndexError:
+            raise ModuleError("rejson is not a loaded in the redis instance.")
 
         from .search import Search
-        s = Search(client=self, index_name=index_name)
+        s = Search(client=self, version=modversion, index_name=index_name)
         return s

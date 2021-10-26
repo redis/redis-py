@@ -23,6 +23,7 @@ class JSON(JSONCommands):
     def __init__(
         self,
         client,
+        version=None,
         decoder=JSONDecoder(),
         encoder=JSONEncoder(),
     ):
@@ -62,6 +63,7 @@ class JSON(JSONCommands):
 
         self.client = client
         self.execute_command = client.execute_command
+        self.MODULE_VERSION = version
 
         for key, value in self.MODULE_CALLBACKS.items():
             self.client.set_response_callback(key, value)
