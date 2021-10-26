@@ -6,11 +6,6 @@ on:
       - 'docs/**'
       - '**/*.rst'
       - '**/*.md'
-  pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.rst'
-      - '**/*.md'
 
 jobs:
 
