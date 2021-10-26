@@ -15,7 +15,11 @@ class RedisModuleCommands:
             raise ModuleError("rejson is not a loaded in the redis instance.")
 
         from .json import JSON
-        jj = JSON(client=self, version=modversion, encoder=encoder, decoder=decoder)
+        jj = JSON(
+                client=self,
+                version=modversion,
+                encoder=encoder,
+                decoder=decoder)
         return jj
 
     def ft(self, index_name="idx"):
