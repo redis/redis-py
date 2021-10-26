@@ -6,6 +6,7 @@ setup(
     name="redis",
     description="Python client for Redis database and key-value store",
     long_description=open("README.md").read().strip(),
+    long_description_content_type="text/markdown",
     keywords=["Redis", "key-value store", "database"],
     license="MIT",
     version=redis.__version__,
