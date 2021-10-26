@@ -6,6 +6,9 @@ on:
       - 'docs/**'
       - '**/*.rst'
       - '**/*.md'
+  pull_request:
+    branches:
+      - master
 
 jobs:
 
