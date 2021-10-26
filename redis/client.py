@@ -930,7 +930,7 @@ class Redis(RedisModuleCommands, CoreCommands, object):
             return mods
 
         try:
-            mods = [f.get('name').lower() for f in self.info().get('modules')]
+            mods = {f.get('name').lower(): f.get('ver') for f in self.info().get('modules')}
         except TypeError:
             mods = []
         setattr(self, key, mods)
