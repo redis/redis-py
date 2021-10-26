@@ -1,3 +1,10 @@
+# DEPRECATED
+
+This file is historic. Starting with redis-py 4.0.0b1, please see the GitHub releases page at
+https://github.com/redis/redis-py/releases.
+
+------------------------------------------------------------------------------------------------
+
 * (in development)
     * BACKWARDS INCOMPATIBLE: Removed support for end of life Python 2.7. #1318
     * BACKWARDS INCOMPATIBLE: All values within Redis URLs are unquoted via
