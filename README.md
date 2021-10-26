@@ -5,7 +5,8 @@ The Python interface to the Redis key-value store.
 [![image](https://github.com/redis/redis-py/workflows/CI/badge.svg?branch=master)](https://github.com/redis/redis-py/actions?query=workflow%3ACI+branch%3Amaster) 
 [![image](https://readthedocs.org/projects/redis-py/badge/?version=stable&style=flat)](https://redis-py.readthedocs.io/en/stable/) 
 [![image](https://badge.fury.io/py/redis.svg)](https://pypi.org/project/redis/) 
-[![image](https://codecov.io/gh/redis/redis-py/branch/master/graph/badge.svg)](https://codecov.io/gh/redis/redis-py)
+[![codecov](https://codecov.io/gh/redis/redis-py/branch/master/graph/badge.svg?token=yenl5fzxxr)](https://codecov.io/gh/redis/redis-py)
+
 
 ## Python 2 Compatibility Note
 

@@ -3,3 +3,4 @@ pytest==6.2.5
 tox==3.24.4
 tox-docker==3.1.0
 invoke==1.6.0
+pytest-cov>=3.0.0

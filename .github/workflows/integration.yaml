@@ -6,11 +6,6 @@ on:
       - 'docs/**'
       - '**/*.rst'
       - '**/*.md'
-  pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.rst'
-      - '**/*.md'
 
 jobs:
 
@@ -47,6 +42,11 @@ jobs:
         run: |
           pip install -r dev_requirements.txt
           invoke tests
+      - name: Upload codecov coverage
+        uses: codecov/codecov-action@v2
+        with:
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   build_package:
     name: Validate building and installing the package
