@@ -23,7 +23,7 @@ def devenv(c):
 @task
 def linters(c):
     """Run code linters"""
-    run("flake8")
+    run("linters")
 
 
 @task

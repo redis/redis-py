@@ -746,7 +746,6 @@ class Connection:
         sock = self._sock
         if not sock:
             self.connect()
-            sock = self._sock
         return self._parser.can_read(timeout)
 
     def read_response(self):
