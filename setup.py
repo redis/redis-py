@@ -16,11 +16,13 @@ setup(
             "redis.commands",
             "redis.commands.json",
             "redis.commands.search",
+            "redis.commands.timeseries",
         ]
     ),
     url="https://github.com/redis/redis-py",
     author="Redis Inc.",
     author_email="oss@redis.com",
+    python_requires=">=3.6",
     classifiers=[
         "Development Status :: 5 - Production/Stable",
         "Environment :: Console",

@@ -27,8 +27,22 @@ class RedisModuleCommands:
         try:
             modversion = self.loaded_modules['search']
         except IndexError:
-            raise ModuleError("rejson is not a loaded in the redis instance.")
+            raise ModuleError("search is not a loaded in the redis instance.")
 
         from .search import Search
         s = Search(client=self, version=modversion, index_name=index_name)
+        return s
+
+    def ts(self, index_name="idx"):
+        """Access the timeseries namespace, providing support for
+        redis timeseries data.
+        """
+        try:
+            modversion = self.loaded_modules['timeseries']
+        except IndexError:
+            raise ModuleError("timeseries is not a loaded in "
+                              "the redis instance.")
+
+        from .timeseries import TimeSeries
+        s = TimeSeries(client=self, version=modversion, index_name=index_name)
         return s
