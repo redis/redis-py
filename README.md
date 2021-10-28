@@ -4,21 +4,19 @@ The Python interface to the Redis key-value store.
 
 [![CI](https://github.com/redis/redis-py/workflows/CI/badge.svg?branch=master)](https://github.com/redis/redis-py/actions?query=workflow%3ACI+branch%3Amaster) 
 [![docs](https://readthedocs.org/projects/redis-py/badge/?version=stable&style=flat)](https://redis-py.readthedocs.io/en/stable/) 
+[![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE.txt)
 [![pypi](https://badge.fury.io/py/redis.svg)](https://pypi.org/project/redis/) 
 [![codecov](https://codecov.io/gh/redis/redis-py/branch/master/graph/badge.svg?token=yenl5fzxxr)](https://codecov.io/gh/redis/redis-py)
 [![Total alerts](https://img.shields.io/lgtm/alerts/g/redis/redis-py.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/redis/redis-py/alerts/)
 
+[Installation](##installation) | [Contributing](##contributing) |  [Getting Started](##getting-started) | [Connecting To Redis](##connecting-to-redis)
 
-## Python 2 Compatibility Note
+---------------------------------------------
 
-redis-py 3.5.x will be the last version of redis-py that supports Python
-2. The 3.5.x line will continue to get bug fixes and security patches
-that support Python 2 until August 1, 2020. redis-py 4.0 will be the
-next major version and will require Python 3.5+.
 
 ## Installation
 
-redis-py requires a running Redis server. See [Redis\'s
+redis-py requires a running Redis server. See [Redis's
 quickstart](https://redis.io/topics/quickstart) for installation
 instructions.
 
@@ -45,11 +43,13 @@ $ python setup.py install
 
 ## Contributing
 
-Want to contribute a feature, bug report, or report an issue? Check out
+Want to contribute a feature, bug fix, or report an issue? Check out
 our [guide to
-contributing](https://github.com/redis/redis-py/blob/master/CONTRIBUTING.rst).
+contributing](https://github.com/redis/redis-py/blob/master/CONTRIBUTING.md).
 
 ## Getting Started
+
+redis-py supports Python 3.6+.
 
 ``` pycon
 >>> import redis
@@ -61,118 +61,26 @@ b'bar'
 ```
 
 By default, all responses are returned as bytes in Python
-3 and str in Python 2. The user is responsible for
-decoding to Python 3 strings or Python 2 unicode objects.
+3.
 
 If **all** string responses from a client should be decoded, the user
-can specify decode_responses=True to
-Redis.\_\_init\_\_. In this case, any Redis command that
+can specify *decode_responses=True* in
+```Redis.__init__```. In this case, any Redis command that
 returns a string type will be decoded with the encoding
 specified.
 
-The default encoding is \"utf-8\", but this can be customized with the
-encoding argument to the redis.Redis class.
+The default encoding is utf-8, but this can be customized by specifiying the
+encoding argument for the redis.Redis class.
 The encoding will be used to automatically encode any
-strings passed to commands, such as key names and values. When
-decode_responses=True, string data returned from commands
-will be decoded with the same encoding.
+strings passed to commands, such as key names and values. 
 
-## Upgrading from redis-py 2.X to 3.0
 
-redis-py 3.0 introduces many new features but required a number of
-backwards incompatible changes to be made in the process. This section
-attempts to provide an upgrade path for users migrating from 2.X to 3.0.
-
-### Python Version Support
-
-redis-py supports Python 3.5+.
-
-### Client Classes: Redis and StrictRedis
-
-redis-py 3.0 drops support for the legacy \"Redis\" client class.
-\"StrictRedis\" has been renamed to \"Redis\" and an alias named
-\"StrictRedis\" is provided so that users previously using
-\"StrictRedis\" can continue to run unchanged.
-
-The 2.X \"Redis\" class provided alternative implementations of a few
-commands. This confused users (rightfully so) and caused a number of
-support issues. To make things easier going forward, it was decided to
-drop support for these alternate implementations and instead focus on a
-single client class.
-
-2.X users that are already using StrictRedis don\'t have to change the
-class name. StrictRedis will continue to work for the foreseeable
-future.
-
-2.X users that are using the Redis class will have to make changes if
-they use any of the following commands:
-
--   SETEX: The argument order has changed. The new order is (name, time,
-    value).
--   LREM: The argument order has changed. The new order is (name, num,
-    value).
--   TTL and PTTL: The return value is now always an int and matches the
-    official Redis command (>0 indicates the timeout, -1 indicates that
-    the key exists but that it has no expire time set, -2 indicates that
-    the key does not exist)
-
-### SSL Connections
-
-redis-py 3.0 changes the default value of the
-ssl_cert_reqs option from None to
-\'required\'. See [Issue
-1016](https://github.com/redis/redis-py/issues/1016). This change
-enforces hostname validation when accepting a cert from a remote SSL
-terminator. If the terminator doesn\'t properly set the hostname on the
-cert this will cause redis-py 3.0 to raise a ConnectionError.
-
-This check can be disabled by setting ssl_cert_reqs to
-None. Note that doing so removes the security check. Do so
-at your own risk.
-
-Example with hostname verification using a local certificate bundle
-(linux):
-
-``` pycon
->>> import redis
->>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
-                    ssl=True,
-                    ssl_ca_certs='/etc/ssl/certs/ca-certificates.crt')
->>> r.set('foo', 'bar')
-True
->>> r.get('foo')
-b'bar'
-```
-
-Example with hostname verification using
-[certifi](https://pypi.org/project/certifi/):
-
-``` pycon
->>> import redis, certifi
->>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
-                    ssl=True, ssl_ca_certs=certifi.where())
->>> r.set('foo', 'bar')
-True
->>> r.get('foo')
-b'bar'
-```
-
-Example turning off hostname verification (not recommended):
-
-``` pycon
->>> import redis
->>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
-                    ssl=True, ssl_cert_reqs=None)
->>> r.set('foo', 'bar')
-True
->>> r.get('foo')
-b'bar'
-```
+--------------------
 
 ### MSET, MSETNX and ZADD
 
 These commands all accept a mapping of key/value pairs. In redis-py 2.X
-this mapping could be specified as `*args` or as `**kwargs`. Both of
+this mapping could be specified as **args* or as `**kwargs`. Both of
 these styles caused issues when Redis introduced optional flags to ZADD.
 Relying on `*args` caused issues with the optional argument order,
 especially in Python 2.7. Relying on `**kwargs` caused potential
@@ -229,8 +137,8 @@ supports the Lua-based lock. In doing so, LuaLock has been renamed to
 Lock. This also means that redis-py Lock objects require Redis server
 2.6 or greater.
 
-2.X users that were explicitly referring to \"LuaLock\" will have to now
-refer to \"Lock\" instead.
+2.X users that were explicitly referring to *LuaLock* will have to now
+refer to *Lock* instead.
 
 ### Locks as Context Managers
 
@@ -240,7 +148,7 @@ This is more of a bug fix than a backwards incompatible change. However,
 given an error is now raised where none was before, this might alarm
 some users.
 
-2.X users should make sure they\'re wrapping their lock code in a
+2.X users should make sure they're wrapping their lock code in a
 try/catch like this:
 
 ``` python
@@ -259,8 +167,8 @@ to adhere to the official command syntax. There are a few exceptions:
 
 -   **SELECT**: Not implemented. See the explanation in the Thread
     Safety section below.
--   **DEL**: \'del\' is a reserved keyword in the Python syntax.
-    Therefore redis-py uses \'delete\' instead.
+-   **DEL**: *del* is a reserved keyword in the Python syntax.
+    Therefore redis-py uses *delete* instead.
 -   **MULTI/EXEC**: These are implemented as part of the Pipeline class.
     The pipeline is wrapped with the MULTI and EXEC statements by
     default when it is executed, which can be disabled by specifying
@@ -273,14 +181,44 @@ to adhere to the official command syntax. There are a few exceptions:
     PUBLISH from the Redis client (see [this comment on issue
     #151](https://github.com/redis/redis-py/issues/151#issuecomment-1545015)
     for details).
--   **SCAN/SSCAN/HSCAN/ZSCAN**: The \*SCAN commands are implemented as
+-   **SCAN/SSCAN/HSCAN/ZSCAN**: The *SCAN commands are implemented as
     they exist in the Redis documentation. In addition, each command has
     an equivalent iterator method. These are purely for convenience so
-    the user doesn\'t have to keep track of the cursor while iterating.
+    the user doesn't have to keep track of the cursor while iterating.
     Use the scan_iter/sscan_iter/hscan_iter/zscan_iter methods for this
     behavior.
 
-## More Detail
+## Connecting to Redis
+
+### Client Classes: Redis and StrictRedis
+
+redis-py 3.0 drops support for the legacy *Redis* client class.
+*StrictRedis* has been renamed to *Redis* and an alias named
+*StrictRedis* is provided so that users previously using
+*StrictRedis* can continue to run unchanged.
+
+The 2.X *Redis* class provided alternative implementations of a few
+commands. This confused users (rightfully so) and caused a number of
+support issues. To make things easier going forward, it was decided to
+drop support for these alternate implementations and instead focus on a
+single client class.
+
+2.X users that are already using StrictRedis don\'t have to change the
+class name. StrictRedis will continue to work for the foreseeable
+future.
+
+2.X users that are using the Redis class will have to make changes if
+they use any of the following commands:
+
+-   SETEX: The argument order has changed. The new order is (name, time,
+    value).
+-   LREM: The argument order has changed. The new order is (name, num,
+    value).
+-   TTL and PTTL: The return value is now always an int and matches the
+    official Redis command (>0 indicates the timeout, -1 indicates that
+    the key exists but that it has no expire time set, -2 indicates that
+    the key does not exist)
+
 
 ### Connection Pools
 
@@ -355,13 +293,115 @@ option to a value less than 30.
 
 This option also works on any PubSub connection that is created from a
 client with `health_check_interval` enabled. PubSub users need to ensure
-that `get_message()` or `listen()` are called more frequently than
+that *get_message()* or `listen()` are called more frequently than
 `health_check_interval` seconds. It is assumed that most workloads
 already do this.
 
 If your PubSub use case doesn\'t call `get_message()` or `listen()`
 frequently, you should call `pubsub.check_health()` explicitly on a
 regularly basis.
+
+### SSL Connections
+
+redis-py 3.0 changes the default value of the
+ssl_cert_reqs option from None to
+\'required\'. See [Issue
+1016](https://github.com/redis/redis-py/issues/1016). This change
+enforces hostname validation when accepting a cert from a remote SSL
+terminator. If the terminator doesn\'t properly set the hostname on the
+cert this will cause redis-py 3.0 to raise a ConnectionError.
+
+This check can be disabled by setting ssl_cert_reqs to
+None. Note that doing so removes the security check. Do so
+at your own risk.
+
+Example with hostname verification using a local certificate bundle
+(linux):
+
+``` pycon
+>>> import redis
+>>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
+                    ssl=True,
+                    ssl_ca_certs='/etc/ssl/certs/ca-certificates.crt')
+>>> r.set('foo', 'bar')
+True
+>>> r.get('foo')
+b'bar'
+```
+
+Example with hostname verification using
+[certifi](https://pypi.org/project/certifi/):
+
+``` pycon
+>>> import redis, certifi
+>>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
+                    ssl=True, ssl_ca_certs=certifi.where())
+>>> r.set('foo', 'bar')
+True
+>>> r.get('foo')
+b'bar'
+```
+
+Example turning off hostname verification (not recommended):
+
+``` pycon
+>>> import redis
+>>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
+                    ssl=True, ssl_cert_reqs=None)
+>>> r.set('foo', 'bar')
+True
+>>> r.get('foo')
+b'bar'
+```
+
+### Sentinel support
+
+redis-py can be used together with [Redis
+Sentinel](https://redis.io/topics/sentinel) to discover Redis nodes. You
+need to have at least one Sentinel daemon running in order to use
+redis-py's Sentinel support.
+
+Connecting redis-py to the Sentinel instance(s) is easy. You can use a
+Sentinel connection to discover the master and slaves network addresses:
+
+``` pycon
+>>> from redis.sentinel import Sentinel
+>>> sentinel = Sentinel([('localhost', 26379)], socket_timeout=0.1)
+>>> sentinel.discover_master('mymaster')
+('127.0.0.1', 6379)
+>>> sentinel.discover_slaves('mymaster')
+[('127.0.0.1', 6380)]
+```
+
+You can also create Redis client connections from a Sentinel instance.
+You can connect to either the master (for write operations) or a slave
+(for read-only operations).
+
+``` pycon
+>>> master = sentinel.master_for('mymaster', socket_timeout=0.1)
+>>> slave = sentinel.slave_for('mymaster', socket_timeout=0.1)
+>>> master.set('foo', 'bar')
+>>> slave.get('foo')
+b'bar'
+```
+
+The master and slave objects are normal Redis instances with their
+connection pool bound to the Sentinel instance. When a Sentinel backed
+client attempts to establish a connection, it first queries the Sentinel
+servers to determine an appropriate host to connect to. If no server is
+found, a MasterNotFoundError or SlaveNotFoundError is raised. Both
+exceptions are subclasses of ConnectionError.
+
+When trying to connect to a slave client, the Sentinel connection pool
+will iterate over the list of slaves until it finds one that can be
+connected to. If no slaves can be connected to, a connection will be
+established with the master.
+
+See [Guidelines for Redis clients with support for Redis
+Sentinel](https://redis.io/topics/sentinel-clients) to learn more about
+Redis Sentinel.
+
+--------------------------
 
 ### Parsers
 
@@ -875,52 +915,6 @@ just prior to pipeline execution.
 [True, 25]
 ```
 
-### Sentinel support
-
-redis-py can be used together with [Redis
-Sentinel](https://redis.io/topics/sentinel) to discover Redis nodes. You
-need to have at least one Sentinel daemon running in order to use
-redis-py\'s Sentinel support.
-
-Connecting redis-py to the Sentinel instance(s) is easy. You can use a
-Sentinel connection to discover the master and slaves network addresses:
-
-``` pycon
->>> from redis.sentinel import Sentinel
->>> sentinel = Sentinel([('localhost', 26379)], socket_timeout=0.1)
->>> sentinel.discover_master('mymaster')
-('127.0.0.1', 6379)
->>> sentinel.discover_slaves('mymaster')
-[('127.0.0.1', 6380)]
-```
-
-You can also create Redis client connections from a Sentinel instance.
-You can connect to either the master (for write operations) or a slave
-(for read-only operations).
-
-``` pycon
->>> master = sentinel.master_for('mymaster', socket_timeout=0.1)
->>> slave = sentinel.slave_for('mymaster', socket_timeout=0.1)
->>> master.set('foo', 'bar')
->>> slave.get('foo')
-b'bar'
-```
-
-The master and slave objects are normal Redis instances with their
-connection pool bound to the Sentinel instance. When a Sentinel backed
-client attempts to establish a connection, it first queries the Sentinel
-servers to determine an appropriate host to connect to. If no server is
-found, a MasterNotFoundError or SlaveNotFoundError is raised. Both
-exceptions are subclasses of ConnectionError.
-
-When trying to connect to a slave client, the Sentinel connection pool
-will iterate over the list of slaves until it finds one that can be
-connected to. If no slaves can be connected to, a connection will be
-established with the master.
-
-See [Guidelines for Redis clients with support for Redis
-Sentinel](https://redis.io/topics/sentinel-clients) to learn more about
-Redis Sentinel.
 
 ### Scan Iterators
 
@@ -1167,18 +1161,16 @@ to learn more about Redis Cluster.
 
 ### Author
 
-redis-py is developed and maintained by Andy McCurdy
-(<sedrik@gmail.com>). It can be found here:
-<https://github.com/redis/redis-py>
+redis-py is developed and maintained by [Redis Inc](https://redis.com). It can be found [here](
+https://github.com/redis/redis-py), or downloaded from [pypi](https://pypi.org/project/redis/).
 
 Special thanks to:
 
+-   Andy McCurdy (<sedrik@gmail.com>) the original author of redis-py.
 -   Ludovico Magnocavallo, author of the original Python Redis client,
     from which some of the socket code is still used.
 -   Alexander Solovyov for ideas on the generic response callback
     system.
 -   Paul Hubbard for initial packaging support.
-
-### Sponsored by
 
 [![Redis](./docs/logo-redis.png)](https://www.redis.com)
