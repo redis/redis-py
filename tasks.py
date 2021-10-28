@@ -23,7 +23,7 @@ def devenv(c):
 @task
 def linters(c):
     """Run code linters"""
-    run("linters")
+    run("tox -e linters")
 
 
 @task
