@@ -23,3 +23,17 @@ def nativestr(x):
 def delist(x):
     """Given a list of binaries, return the stringified version."""
     return [nativestr(obj) for obj in x]
+
+
+def parse_to_list(response):
+    """Optimistally parse the response to a list.
+    """
+    res = []
+    for item in response:
+        try:
+            res.append(int(item))
+        except ValueError:
+            res.append(nativestr(item))
+        except TypeError:
+            res.append(None)
+    return res

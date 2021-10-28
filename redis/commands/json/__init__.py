@@ -1,12 +1,8 @@
-# from typing import Optional
 from json import JSONDecoder, JSONEncoder
-
-# # from redis.client import Redis
 
 from .helpers import bulk_of_jsons
 from ..helpers import nativestr, delist
 from .commands import JSONCommands
-# from ..feature import AbstractFeature
 
 
 class JSON(JSONCommands):
