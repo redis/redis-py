@@ -1,7 +1,9 @@
 import pytest
 
 from redis import exceptions
-
+from .conftest import (
+    skip_if_cluster_mode,
+)
 
 multiply_script = """
 local value = redis.call('GET', KEYS[1])
@@ -20,6 +22,7 @@ return "hello " .. name
 """
 
 
+@skip_if_cluster_mode()
 class TestScripting:
     @pytest.fixture(autouse=True)
     def reset_scripts(self, r):

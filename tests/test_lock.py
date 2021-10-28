@@ -4,9 +4,10 @@ import time
 from redis.exceptions import LockError, LockNotOwnedError
 from redis.client import Redis
 from redis.lock import Lock
-from .conftest import _get_client
+from .conftest import _get_client, skip_if_cluster_mode
 
 
+@skip_if_cluster_mode()
 class TestLock:
     @pytest.fixture()
     def r_decoded(self, request):
@@ -220,6 +221,7 @@ class TestLock:
             lock.reacquire()
 
 
+@skip_if_cluster_mode()
 class TestLockClassSelection:
     def test_lock_class_argument(self, r):
         class MyLock:

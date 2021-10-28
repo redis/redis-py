@@ -1,6 +1,7 @@
-from .conftest import wait_for_command
+from .conftest import wait_for_command, skip_if_cluster_mode
 
 
+@skip_if_cluster_mode()
 class TestMonitor:
     def test_wait_command_not_found(self, r):
         "Make sure the wait_for_command func works when command is not found"

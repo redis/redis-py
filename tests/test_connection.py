@@ -4,10 +4,11 @@ import pytest
 
 from redis.exceptions import InvalidResponse, ModuleError
 from redis.utils import HIREDIS_AVAILABLE
-from .conftest import skip_if_server_version_lt
+from .conftest import skip_if_server_version_lt, skip_if_cluster_mode
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason='PythonParser only')
+@skip_if_cluster_mode()
 def test_invalid_response(r):
     raw = b'x'
     parser = r.connection._parser
@@ -17,12 +18,14 @@ def test_invalid_response(r):
     assert str(cm.value) == 'Protocol Error: %r' % raw
 
 
+@skip_if_cluster_mode()
 @skip_if_server_version_lt('4.0.0')
 def test_loaded_modules(r, modclient):
     assert r.loaded_modules == []
     assert 'rejson' in modclient.loaded_modules.keys()
 
 
+@skip_if_cluster_mode()
 @skip_if_server_version_lt('4.0.0')
 def test_loading_external_modules(r, modclient):
     def inner():

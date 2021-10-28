@@ -12,14 +12,7 @@ from redis.exceptions import (
 )
 
 
-class CoreCommands:
-    """
-    A class containing all of the implemented redis commands. This class is
-    to be used as a mixin.
-    """
-
-    # SERVER INFORMATION
-
+class AclCommands:
     # ACL methods
     def acl_cat(self, category=None):
         """
@@ -267,6 +260,8 @@ class CoreCommands:
         "Get the username for the current connection"
         return self.execute_command('ACL WHOAMI')
 
+
+class ManagementCommands:
     def bgrewriteaof(self):
         "Tell the Redis server to rewrite the AOF file from data in memory."
         return self.execute_command('BGREWRITEAOF')
@@ -431,6 +426,14 @@ class CoreCommands:
         """
         return self.execute_command('CLIENT UNPAUSE')
 
+    def command_info(self):
+        raise NotImplementedError(
+            "COMMAND INFO is intentionally not implemented in the client."
+        )
+
+    def command_count(self):
+        return self.execute_command('COMMAND COUNT')
+
     def readwrite(self):
         """
         Disables read queries for a connection to a Redis Cluster slave node.
@@ -460,6 +463,9 @@ class CoreCommands:
         Rewrite config file with the minimal change to reflect running config.
         """
         return self.execute_command('CONFIG REWRITE')
+
+    def cluster(self, cluster_arg, *args):
+        return self.execute_command('CLUSTER %s' % cluster_arg.upper(), *args)
 
     def dbsize(self):
         """Returns the number of keys in the current database"""
@@ -624,6 +630,16 @@ class CoreCommands:
         """
         return self.execute_command('QUIT')
 
+    def replicaof(self, *args):
+        """
+        Update the replication settings of a redis replica, on the fly.
+        Examples of valid arguments include:
+            NO ONE (set no replication)
+            host port (set to the host and port of a redis server)
+        see: https://redis.io/commands/replicaof
+        """
+        return self.execute_command('REPLICAOF', *args)
+
     def save(self):
         """
         Tell the Redis server to save its data to disk,
@@ -698,6 +714,8 @@ class CoreCommands:
         """
         return self.execute_command('WAIT', num_replicas, timeout)
 
+
+class BasicKeyCommands:
     # BASIC KEY COMMANDS
     def append(self, key, value):
         """
@@ -1324,6 +1342,8 @@ class CoreCommands:
         "Unlink one or more keys specified by ``names``"
         return self.execute_command('UNLINK', *names)
 
+
+class ListCommands:
     # LIST COMMANDS
     def blpop(self, keys, timeout=0):
         """
@@ -1576,6 +1596,8 @@ class CoreCommands:
         options = {'groups': len(get) if groups else None}
         return self.execute_command('SORT', *pieces, **options)
 
+
+class ScanCommands:
     # SCAN COMMANDS
     def scan(self, cursor=0, match=None, count=None, _type=None):
         """
@@ -1723,6 +1745,8 @@ class CoreCommands:
                                       score_cast_func=score_cast_func)
             yield from data
 
+
+class SetCommands:
     # SET COMMANDS
     def sadd(self, name, *values):
         """Add ``value(s)`` to set ``name``"""
@@ -1805,6 +1829,8 @@ class CoreCommands:
         args = list_or_args(keys, args)
         return self.execute_command('SUNIONSTORE', dest, *args)
 
+
+class StreamsCommands:
     # STREAMS COMMANDS
     def xack(self, name, groupname, *ids):
         """
@@ -2243,6 +2269,8 @@ class CoreCommands:
 
         return self.execute_command('XTRIM', name, *pieces)
 
+
+class SortedSetCommands:
     # SORTED SET COMMANDS
     def zadd(self, name, mapping, nx=False, xx=False, ch=False, incr=False,
              gt=None, lt=None):
@@ -2721,6 +2749,8 @@ class CoreCommands:
             pieces.append(b'WITHSCORES')
         return self.execute_command(*pieces, **options)
 
+
+class HyperLogLogCommands:
     # HYPERLOGLOG COMMANDS
     def pfadd(self, name, *values):
         "Adds the specified elements to the specified HyperLogLog."
@@ -2737,6 +2767,8 @@ class CoreCommands:
         "Merge N different HyperLogLogs into a single one."
         return self.execute_command('PFMERGE', dest, *sources)
 
+
+class HashCommands:
     # HASH COMMANDS
     def hdel(self, name, *keys):
         "Delete ``keys`` from hash ``name``"
@@ -2831,6 +2863,9 @@ class CoreCommands:
         """
         return self.execute_command('HSTRLEN', name, key)
 
+
+class PubSubCommands:
+    # PUBSUB COMMANDS
     def publish(self, channel, message):
         """
         Publish ``message`` on ``channel``.
@@ -2857,19 +2892,9 @@ class CoreCommands:
         """
         return self.execute_command('PUBSUB NUMSUB', *args)
 
-    def cluster(self, cluster_arg, *args):
-        return self.execute_command('CLUSTER %s' % cluster_arg.upper(), *args)
 
-    def replicaof(self, *args):
-        """
-        Update the replication settings of a redis replica, on the fly.
-        Examples of valid arguments include:
-            NO ONE (set no replication)
-            host port (set to the host and port of a redis server)
-        see: https://redis.io/commands/replicaof
-        """
-        return self.execute_command('REPLICAOF', *args)
-
+class ScriptCommands:
+    # SCRIPT COMMANDS
     def eval(self, script, numkeys, *keys_and_args):
         """
         Execute the Lua ``script``, specifying the ``numkeys`` the script
@@ -2941,6 +2966,8 @@ class CoreCommands:
         """
         return Script(self, script)
 
+
+class GeoCommands:
     # GEO COMMANDS
     def geoadd(self, name, values, nx=False, xx=False, ch=False):
         """
@@ -3235,6 +3262,8 @@ class CoreCommands:
 
         return self.execute_command(command, *pieces, **kwargs)
 
+
+class ModuleCommands:
     # MODULE COMMANDS
     def module_load(self, path, *args):
         """
@@ -3257,14 +3286,6 @@ class CoreCommands:
         all loaded modules.
         """
         return self.execute_command('MODULE LIST')
-
-    def command_info(self):
-        raise NotImplementedError(
-            "COMMAND INFO is intentionally not implemented in the client."
-        )
-
-    def command_count(self):
-        return self.execute_command('COMMAND COUNT')
 
 
 class Script:
@@ -3397,3 +3418,22 @@ class BitFieldOperation:
         command = self.command
         self.reset()
         return self.client.execute_command(*command)
+
+
+class DataAccessCommands(BasicKeyCommands, ListCommands,
+                         ScanCommands, SetCommands, StreamsCommands,
+                         SortedSetCommands,
+                         HyperLogLogCommands, HashCommands, GeoCommands,
+                         ):
+    """
+    A class containing all of the implemented data access redis commands.
+    This class is to be used as a mixin.
+    """
+
+
+class CoreCommands(AclCommands, DataAccessCommands, ManagementCommands,
+                   ModuleCommands, PubSubCommands, ScriptCommands):
+    """
+    A class containing all of the implemented redis commands. This class is
+    to be used as a mixin.
+    """

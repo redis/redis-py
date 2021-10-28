@@ -7,7 +7,8 @@ from unittest import mock
 
 from threading import Thread
 from redis.connection import ssl_available, to_bool
-from .conftest import skip_if_server_version_lt, _get_client
+from .conftest import skip_if_server_version_lt, skip_if_cluster_mode,\
+    _get_client
 from .test_pubsub import wait_for_message
 
 
@@ -43,15 +44,15 @@ class TestConnectionPool:
         assert isinstance(connection, DummyConnection)
         assert connection.kwargs == connection_kwargs
 
-    def test_multiple_connections(self, master_host):
-        connection_kwargs = {'host': master_host}
+    def test_multiple_connections(self, master_host, master_port):
+        connection_kwargs = {'host': master_host, 'port': master_port}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
         c1 = pool.get_connection('_')
         c2 = pool.get_connection('_')
         assert c1 != c2
 
-    def test_max_connections(self, master_host):
-        connection_kwargs = {'host': master_host}
+    def test_max_connections(self, master_host, master_port):
+        connection_kwargs = {'host': master_host, 'port': master_port}
         pool = self.get_pool(max_connections=2,
                              connection_kwargs=connection_kwargs)
         pool.get_connection('_')
@@ -59,8 +60,9 @@ class TestConnectionPool:
         with pytest.raises(redis.ConnectionError):
             pool.get_connection('_')
 
-    def test_reuse_previously_released_connection(self, master_host):
-        connection_kwargs = {'host': master_host}
+    def test_reuse_previously_released_connection(self, master_host,
+                                                  master_port):
+        connection_kwargs = {'host': master_host, 'port': master_port}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
         c1 = pool.get_connection('_')
         pool.release(c1)
@@ -463,6 +465,7 @@ class TestSSLConnectionURLParsing:
         assert pool.get_connection('_').check_hostname is True
 
 
+@pytest.mark.filterwarnings("ignore:BaseException")
 class TestConnection:
     def test_on_connect_error(self):
         """
@@ -479,6 +482,7 @@ class TestConnection:
         assert len(pool._available_connections) == 1
         assert not pool._available_connections[0]._sock
 
+    @skip_if_cluster_mode()
     @skip_if_server_version_lt('2.8.8')
     def test_busy_loading_disconnects_socket(self, r):
         """
@@ -489,6 +493,7 @@ class TestConnection:
             r.execute_command('DEBUG', 'ERROR', 'LOADING fake message')
         assert not r.connection._sock
 
+    @skip_if_cluster_mode()
     @skip_if_server_version_lt('2.8.8')
     def test_busy_loading_from_pipeline_immediate_command(self, r):
         """
@@ -504,6 +509,7 @@ class TestConnection:
         assert len(pool._available_connections) == 1
         assert not pool._available_connections[0]._sock
 
+    @skip_if_cluster_mode()
     @skip_if_server_version_lt('2.8.8')
     def test_busy_loading_from_pipeline(self, r):
         """
@@ -519,6 +525,7 @@ class TestConnection:
         assert len(pool._available_connections) == 1
         assert not pool._available_connections[0]._sock
 
+    @pytest.mark.filterwarnings("ignore:ResponseError")
     @skip_if_server_version_lt('2.8.8')
     def test_read_only_error(self, r):
         "READONLY errors get turned in ReadOnlyError exceptions"
@@ -560,6 +567,7 @@ class TestConnection:
             r.execute_command('DEBUG', 'ERROR', 'ERR invalid password')
 
 
+@skip_if_cluster_mode()
 class TestMultiConnectionClient:
     @pytest.fixture()
     def r(self, request):
@@ -573,6 +581,7 @@ class TestMultiConnectionClient:
         assert r.get('a') == b'123'
 
 
+@skip_if_cluster_mode()
 class TestHealthCheck:
     interval = 60
 

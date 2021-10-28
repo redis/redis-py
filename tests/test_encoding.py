@@ -91,6 +91,7 @@ class TestCommandsAreNotEncoded:
         r.set('hello', 'world')
 
 
+@pytest.mark.filterwarnings("ignore:BaseException")
 class TestInvalidUserInput:
     def test_boolean_fails(self, r):
         with pytest.raises(redis.DataError):

@@ -11,6 +11,7 @@ import socket
 import threading
 import warnings
 
+from redis.backoff import NoBackoff
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -28,9 +29,9 @@ from redis.exceptions import (
     TimeoutError,
     ModuleError,
 )
-from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
-from redis.backoff import NoBackoff
+
 from redis.retry import Retry
+from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 
 try:
     import ssl
@@ -506,7 +507,7 @@ class Connection:
                  encoding_errors='strict', decode_responses=False,
                  parser_class=DefaultParser, socket_read_size=65536,
                  health_check_interval=0, client_name=None, username=None,
-                 retry=None):
+                 retry=None, redis_connect_func=None):
         """
         Initialize a new Connection.
         To specify a retry policy, first set `retry_on_timeout` to `True`
@@ -536,8 +537,10 @@ class Connection:
         self.health_check_interval = health_check_interval
         self.next_health_check = 0
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
+        self.redis_connect_func = redis_connect_func
         self._sock = None
-        self._parser = parser_class(socket_read_size=socket_read_size)
+        self._socket_read_size = socket_read_size
+        self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
 
@@ -567,6 +570,9 @@ class Connection:
     def clear_connect_callbacks(self):
         self._connect_callbacks = []
 
+    def set_parser(self, parser_class):
+        self._parser = parser_class(socket_read_size=self._socket_read_size)
+
     def connect(self):
         "Connects to the Redis server if not already connected"
         if self._sock:
@@ -580,7 +586,12 @@ class Connection:
 
         self._sock = sock
         try:
-            self.on_connect()
+            if self.redis_connect_func is None:
+                # Use the default on_connect function
+                self.on_connect()
+            else:
+                # Use the passed function redis_connect_func
+                self.redis_connect_func(self)
         except RedisError:
             # clean up after any error in on_connect
             self.disconnect()
@@ -910,7 +921,8 @@ class UnixDomainSocketConnection(Connection):
         self.next_health_check = 0
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
-        self._parser = parser_class(socket_read_size=socket_read_size)
+        self._socket_read_size = socket_read_size
+        self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
 

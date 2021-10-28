@@ -40,7 +40,10 @@ def tests(c):
     """Run the redis-py test suite against the current python,
     with and without hiredis.
     """
+    print("Starting Redis tests")
     run("tox -e plain -e hiredis")
+    print("Starting RedisCluster tests")
+    run("tox -e plain -e hiredis -- --redis-url=redis://localhost:16379/0")
 
 
 @task

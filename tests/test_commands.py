@@ -8,9 +8,10 @@ from string import ascii_letters
 
 from redis.client import parse_info
 from redis import exceptions
-
+from redis.commands import CommandsParser
 from .conftest import (
     _get_client,
+    skip_if_cluster_mode,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
@@ -46,6 +47,7 @@ def get_stream_message(client, stream, message_id):
 
 
 # RESPONSE CALLBACKS
+@skip_if_cluster_mode()
 class TestResponseCallbacks:
     "Tests for the response callback system"
 
@@ -60,6 +62,7 @@ class TestResponseCallbacks:
         assert r.response_callbacks['del'] == r.response_callbacks['DEL']
 
 
+@skip_if_cluster_mode()
 class TestRedisCommands:
     def test_command_on_invalid_key_type(self, r):
         r.lpush('a', '1')
@@ -122,6 +125,7 @@ class TestRedisCommands:
 
         def teardown():
             r.acl_deluser(username)
+
         request.addfinalizer(teardown)
 
         # test enabled=False
@@ -215,6 +219,7 @@ class TestRedisCommands:
 
         def teardown():
             r.acl_deluser(username)
+
         request.addfinalizer(teardown)
 
         assert r.acl_setuser(username, enabled=False, reset=True)
@@ -262,6 +267,7 @@ class TestRedisCommands:
 
         def teardown():
             r.acl_deluser(username)
+
         request.addfinalizer(teardown)
 
         with pytest.raises(exceptions.DataError):
@@ -273,6 +279,7 @@ class TestRedisCommands:
 
         def teardown():
             r.acl_deluser(username)
+
         request.addfinalizer(teardown)
 
         with pytest.raises(exceptions.DataError):
@@ -284,6 +291,7 @@ class TestRedisCommands:
 
         def teardown():
             r.acl_deluser(username)
+
         request.addfinalizer(teardown)
 
         with pytest.raises(exceptions.DataError):
@@ -593,6 +601,7 @@ class TestRedisCommands:
                     # Complexity info stored as fourth item in list
                     response.insert(3, COMPLEXITY_STATEMENT)
                 return r.response_callbacks[command_name](responses, **options)
+
             r.parse_response = parse_response
 
             # test
@@ -1195,22 +1204,22 @@ class TestRedisCommands:
         # test other labels
         assert r.stralgo('LCS', value1, value2, len=True) == len(res)
         assert r.stralgo('LCS', value1, value2, idx=True) == \
-               {
-                   'len': len(res),
-                   'matches': [[(4, 7), (5, 8)], [(2, 3), (0, 1)]]
-               }
+            {
+            'len': len(res),
+            'matches': [[(4, 7), (5, 8)], [(2, 3), (0, 1)]]
+        }
         assert r.stralgo('LCS', value1, value2,
                          idx=True, withmatchlen=True) == \
-               {
-                   'len': len(res),
-                   'matches': [[4, (4, 7), (5, 8)], [2, (2, 3), (0, 1)]]
-               }
+            {
+            'len': len(res),
+            'matches': [[4, (4, 7), (5, 8)], [2, (2, 3), (0, 1)]]
+        }
         assert r.stralgo('LCS', value1, value2,
                          idx=True, minmatchlen=4, withmatchlen=True) == \
-               {
-                   'len': len(res),
-                   'matches': [[4, (4, 7), (5, 8)]]
-               }
+            {
+            'len': len(res),
+            'matches': [[4, (4, 7), (5, 8)]]
+        }
 
     @skip_if_server_version_lt('6.0.0')
     def test_stralgo_negative(self, r):
@@ -1758,16 +1767,16 @@ class TestRedisCommands:
             r.zinter(['a', 'b', 'c'], aggregate='foo', withscores=True)
         # aggregate with SUM
         assert r.zinter(['a', 'b', 'c'], withscores=True) \
-               == [(b'a3', 8), (b'a1', 9)]
+            == [(b'a3', 8), (b'a1', 9)]
         # aggregate with MAX
         assert r.zinter(['a', 'b', 'c'], aggregate='MAX', withscores=True) \
-               == [(b'a3', 5), (b'a1', 6)]
+            == [(b'a3', 5), (b'a1', 6)]
         # aggregate with MIN
         assert r.zinter(['a', 'b', 'c'], aggregate='MIN', withscores=True) \
-               == [(b'a1', 1), (b'a3', 1)]
+            == [(b'a1', 1), (b'a3', 1)]
         # with weights
         assert r.zinter({'a': 1, 'b': 2, 'c': 3}, withscores=True) \
-               == [(b'a3', 20), (b'a1', 23)]
+            == [(b'a3', 20), (b'a1', 23)]
 
     def test_zinterstore_sum(self, r):
         r.zadd('a', {'a1': 1, 'a2': 1, 'a3': 1})
@@ -2059,14 +2068,14 @@ class TestRedisCommands:
         assert r.zunion(['a', 'b', 'c'], withscores=True) == \
             [(b'a2', 3), (b'a4', 4), (b'a3', 8), (b'a1', 9)]
         # max
-        assert r.zunion(['a', 'b', 'c'], aggregate='MAX', withscores=True)\
-               == [(b'a2', 2), (b'a4', 4), (b'a3', 5), (b'a1', 6)]
+        assert r.zunion(['a', 'b', 'c'], aggregate='MAX', withscores=True) \
+            == [(b'a2', 2), (b'a4', 4), (b'a3', 5), (b'a1', 6)]
         # min
-        assert r.zunion(['a', 'b', 'c'], aggregate='MIN', withscores=True)\
-               == [(b'a1', 1), (b'a2', 1), (b'a3', 1), (b'a4', 4)]
+        assert r.zunion(['a', 'b', 'c'], aggregate='MIN', withscores=True) \
+            == [(b'a1', 1), (b'a2', 1), (b'a3', 1), (b'a4', 4)]
         # with weight
-        assert r.zunion({'a': 1, 'b': 2, 'c': 3}, withscores=True)\
-               == [(b'a2', 5), (b'a4', 12), (b'a3', 20), (b'a1', 23)]
+        assert r.zunion({'a': 1, 'b': 2, 'c': 3}, withscores=True) \
+            == [(b'a2', 5), (b'a4', 12), (b'a3', 20), (b'a1', 23)]
 
     def test_zunionstore_sum(self, r):
         r.zadd('a', {'a1': 1, 'a2': 1, 'a3': 1})
@@ -2927,10 +2936,10 @@ class TestRedisCommands:
         # which only returns message ids
         assert r.xautoclaim(stream, group, consumer1, min_idle_time=0,
                             start_id=0, justid=True) == \
-               [message_id1, message_id2]
+            [message_id1, message_id2]
         assert r.xautoclaim(stream, group, consumer1, min_idle_time=0,
                             start_id=message_id2, justid=True) == \
-               [message_id2]
+            [message_id2]
 
     @skip_if_server_version_lt('6.2.0')
     def test_xautoclaim_negative(self, r):
@@ -3511,51 +3520,51 @@ class TestRedisCommands:
         # comments show affected bits
         bf = r.bitfield('a')
         resp = (bf
-                .set('u8', 8, 255)     # 00000000 11111111
-                .get('u8', 0)          # 00000000
-                .get('u4', 8)                   # 1111
-                .get('u4', 12)                      # 1111
-                .get('u4', 13)                       # 111 0
+                .set('u8', 8, 255)  # 00000000 11111111
+                .get('u8', 0)  # 00000000
+                .get('u4', 8)  # 1111
+                .get('u4', 12)  # 1111
+                .get('u4', 13)  # 111 0
                 .execute())
         assert resp == [0, 0, 15, 15, 14]
 
         # .set() returns the previous value...
         resp = (bf
-                .set('u8', 4, 1)           # 0000 0001
-                .get('u16', 0)         # 00000000 00011111
-                .set('u16', 0, 0)      # 00000000 00000000
+                .set('u8', 4, 1)  # 0000 0001
+                .get('u16', 0)  # 00000000 00011111
+                .set('u16', 0, 0)  # 00000000 00000000
                 .execute())
         assert resp == [15, 31, 31]
 
         # incrby adds to the value
         resp = (bf
                 .incrby('u8', 8, 254)  # 00000000 11111110
-                .incrby('u8', 8, 1)    # 00000000 11111111
-                .get('u16', 0)         # 00000000 11111111
+                .incrby('u8', 8, 1)  # 00000000 11111111
+                .get('u16', 0)  # 00000000 11111111
                 .execute())
         assert resp == [254, 255, 255]
 
         # Verify overflow protection works as a method:
         r.delete('a')
         resp = (bf
-                .set('u8', 8, 254)     # 00000000 11111110
+                .set('u8', 8, 254)  # 00000000 11111110
                 .overflow('fail')
-                .incrby('u8', 8, 2)    # incrby 2 would overflow, None returned
-                .incrby('u8', 8, 1)    # 00000000 11111111
-                .incrby('u8', 8, 1)    # incrby 1 would overflow, None returned
-                .get('u16', 0)         # 00000000 11111111
+                .incrby('u8', 8, 2)  # incrby 2 would overflow, None returned
+                .incrby('u8', 8, 1)  # 00000000 11111111
+                .incrby('u8', 8, 1)  # incrby 1 would overflow, None returned
+                .get('u16', 0)  # 00000000 11111111
                 .execute())
         assert resp == [0, None, 255, None, 255]
 
         # Verify overflow protection works as arg to incrby:
         r.delete('a')
         resp = (bf
-                .set('u8', 8, 255)           # 00000000 11111111
-                .incrby('u8', 8, 1)          # 00000000 00000000  wrap default
-                .set('u8', 8, 255)           # 00000000 11111111
+                .set('u8', 8, 255)  # 00000000 11111111
+                .incrby('u8', 8, 1)  # 00000000 00000000  wrap default
+                .set('u8', 8, 255)  # 00000000 11111111
                 .incrby('u8', 8, 1, 'FAIL')  # 00000000 11111111  fail
-                .incrby('u8', 8, 1)          # 00000000 11111111  still fail
-                .get('u16', 0)               # 00000000 11111111
+                .incrby('u8', 8, 1)  # 00000000 11111111  still fail
+                .get('u16', 0)  # 00000000 11111111
                 .execute())
         assert resp == [0, 0, 0, None, None, 255]
 
@@ -3563,9 +3572,9 @@ class TestRedisCommands:
         r.delete('a')
         bf = r.bitfield('a', default_overflow='FAIL')
         resp = (bf
-                .set('u8', 8, 255)     # 00000000 11111111
-                .incrby('u8', 8, 1)    # 00000000 11111111  fail default
-                .get('u16', 0)         # 00000000 11111111
+                .set('u8', 8, 255)  # 00000000 11111111
+                .incrby('u8', 8, 1)  # 00000000 11111111  fail default
+                .get('u16', 0)  # 00000000 11111111
                 .execute())
         assert resp == [0, None, 255]
 
@@ -3672,6 +3681,7 @@ class TestRedisCommands:
         assert r.replicaof("NO", "ONE")
 
 
+@skip_if_cluster_mode()
 class TestBinarySave:
 
     def test_binary_get_set(self, r):
@@ -3757,3 +3767,60 @@ class TestBinarySave:
         timestamp = 1349673917.939762
         r.zadd('a', {'a1': timestamp})
         assert r.zscore('a', 'a1') == timestamp
+
+
+class TestCommandsParser:
+    def test_init_commands(self, r):
+        commands_parser = CommandsParser(r)
+        assert commands_parser.commands is not None
+        assert 'get' in commands_parser.commands
+
+    def test_get_keys_predetermined_key_location(self, r):
+        commands_parser = CommandsParser(r)
+        args1 = ['GET', 'foo']
+        args2 = ['OBJECT', 'encoding', 'foo']
+        args3 = ['MGET', 'foo', 'bar', 'foobar']
+        assert commands_parser.get_keys(r, *args1) == ['foo']
+        assert commands_parser.get_keys(r, *args2) == ['foo']
+        assert commands_parser.get_keys(r, *args3) == ['foo', 'bar', 'foobar']
+
+    @pytest.mark.filterwarnings("ignore:ResponseError")
+    def test_get_moveable_keys(self, r):
+        commands_parser = CommandsParser(r)
+        args1 = ['EVAL', 'return {KEYS[1],KEYS[2],ARGV[1],ARGV[2]}', 2, 'key1',
+                 'key2', 'first', 'second']
+        args2 = ['XREAD', 'COUNT', 2, b'STREAMS', 'mystream', 'writers', 0, 0]
+        args3 = ['ZUNIONSTORE', 'out', 2, 'zset1', 'zset2', 'WEIGHTS', 2, 3]
+        args4 = ['GEORADIUS', 'Sicily', 15, 37, 200, 'km', 'WITHCOORD',
+                 b'STORE', 'out']
+        args5 = ['MEMORY USAGE', 'foo']
+        args6 = ['MIGRATE', '192.168.1.34', 6379, "", 0, 5000, b'KEYS',
+                 'key1', 'key2', 'key3']
+        args7 = ['MIGRATE', '192.168.1.34', 6379, "key1", 0, 5000]
+        args8 = ['STRALGO', 'LCS', 'STRINGS', 'string_a', 'string_b']
+        args9 = ['STRALGO', 'LCS', 'KEYS', 'key1', 'key2']
+
+        assert commands_parser.get_keys(
+            r, *args1).sort() == ['key1', 'key2'].sort()
+        assert commands_parser.get_keys(
+            r, *args2).sort() == ['mystream', 'writers'].sort()
+        assert commands_parser.get_keys(
+            r, *args3).sort() == ['out', 'zset1', 'zset2'].sort()
+        assert commands_parser.get_keys(
+            r, *args4).sort() == ['Sicily', 'out'].sort()
+        assert commands_parser.get_keys(r, *args5).sort() == ['foo'].sort()
+        assert commands_parser.get_keys(
+            r, *args6).sort() == ['key1', 'key2', 'key3'].sort()
+        assert commands_parser.get_keys(r, *args7).sort() == ['key1'].sort()
+        assert commands_parser.get_keys(r, *args8) is None
+        assert commands_parser.get_keys(
+            r, *args9).sort() == ['key1', 'key2'].sort()
+
+    def test_get_pubsub_keys(self, r):
+        commands_parser = CommandsParser(r)
+        args1 = ['PUBLISH', 'foo', 'bar']
+        args2 = ['PUBSUB NUMSUB', 'foo1', 'foo2', 'foo3']
+        args3 = ['SUBSCRIBE', 'foo1', 'foo2', 'foo3']
+        assert commands_parser.get_keys(r, *args1) == ['foo']
+        assert commands_parser.get_keys(r, *args2) == ['foo1', 'foo2', 'foo3']
+        assert commands_parser.get_keys(r, *args3) == ['foo1', 'foo2', 'foo3']
