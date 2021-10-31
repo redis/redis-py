@@ -42,6 +42,7 @@ class JSON(JSONCommands):
             "JSON.SET": lambda r: r and nativestr(r) == "OK",
             "JSON.NUMINCRBY": self._decode,
             "JSON.NUMMULTBY": self._decode,
+            "JSON.NUMPOWBY": self._decode,
             "JSON.TOGGLE": lambda b: b == b"true",
             "JSON.STRAPPEND": int,
             "JSON.STRLEN": int,
