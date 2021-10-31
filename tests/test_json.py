@@ -233,3 +233,73 @@ def test_objlenshouldsucceed(client):
 #     assert [True, "bar", 1] == p.execute()
 #     assert client.keys() == []
 #     assert client.get("foo") is None
+
+@pytest.mark.redismod
+def test_jsondollardelete(client):
+    doc1 = {"a": 1, "nested": {"a": 2, "b": 3}}
+    assert client.json().set("doc1", "$", doc1)
+    assert client.json().delete("doc1", "$..a") == 2
+    r = client.json().get("doc1", "$")
+    assert r == [{"nested": {"b": 3}}]
+
+
+    doc2 = {"a": {"a": 2, "b": 3}, "b": ["a", "b"], 
+            "nested": {"b":[True, "a","b"]}}
+    assert client.json().set('doc2', '$', doc2)
+    assert client.json().delete("doc2", "$..a") == 1
+    res = client.json().get("doc2", "$")
+    assert res == [{"nested":{"b":[True,"a","b"]},"b":["a","b"]}]
+
+    doc3 = [{"ciao":["non ancora"],"nested":[{"ciao":[1,"a"]}, 
+            {"ciao":[2,"a"]}, 
+            {"ciaoc":[3,"non","ciao"]}, 
+            {"ciao":[4,"a"]}, {"e":[5,"non","ciao"]}]}]
+    assert client.json().set('doc3', '$', doc3)
+    assert client.json().delete('doc3', '$.[0]["nested"]..ciao') == 3
+
+    doc3val = [[{"ciao":["non ancora"],
+                "nested":[{},{},
+                {"ciaoc":[3,"non","ciao"]},{},{"e":[5,"non","ciao"]}]}]]
+    res = client.json().get('doc3', '$')
+    assert res == doc3val
+
+    # Test default path
+    assert client.json().delete("doc3") == 1
+    assert client.json().get("doc3", "$") is None
+
+    client.json().delete("not_a_document", "..a")
+
+@pytest.mark.redismod
+def test_jsondollarforget(client):
+    doc1 = {"a": 1, "nested": {"a": 2, "b": 3}}
+    assert client.json().set("doc1", "$", doc1)
+    assert client.json().forget("doc1", "$..a") == 2
+    r = client.json().get("doc1", "$")
+    assert r == [{"nested": {"b": 3}}]
+
+
+    doc2 = {"a": {"a": 2, "b": 3}, "b": ["a", "b"], 
+            "nested": {"b":[True, "a","b"]}}
+    assert client.json().set('doc2', '$', doc2)
+    assert client.json().forget("doc2", "$..a") == 1
+    res = client.json().get("doc2", "$")
+    assert res == [{"nested":{"b":[True,"a","b"]},"b":["a","b"]}]
+
+    doc3 = [{"ciao":["non ancora"],"nested":[{"ciao":[1,"a"]}, 
+            {"ciao":[2,"a"]}, 
+            {"ciaoc":[3,"non","ciao"]}, 
+            {"ciao":[4,"a"]}, {"e":[5,"non","ciao"]}]}]
+    assert client.json().set('doc3', '$', doc3)
+    assert client.json().forget('doc3', '$.[0]["nested"]..ciao') == 3
+
+    doc3val = [[{"ciao":["non ancora"],
+                "nested":[{},{},
+                {"ciaoc":[3,"non","ciao"]},{},{"e":[5,"non","ciao"]}]}]]
+    res = client.json().get('doc3', '$')
+    assert res == doc3val
+
+    # Test default path
+    assert client.json().forget("doc3") == 1
+    assert client.json().get("doc3", "$") is None
+
+    client.json().forget("not_a_document", "..a")
