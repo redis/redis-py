@@ -110,6 +110,15 @@ def test_nummultbyshouldsucceed(client):
 
 
 @pytest.mark.redismod
+def test_numpowby(client):
+    client.json().set("num", Path.rootPath(), 1)
+    assert 1 == int(client.json().numpowby("num", Path.rootPath(), 1))
+
+    client.json().set("num", Path.rootPath(), 5)
+    assert 3125 == int(client.json().numpowby("num", Path.rootPath(), 5))
+
+
+@pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "ReJSON")  # todo: update after the release
 def test_toggleShouldSucceed(client):
     client.json().set("bool", Path.rootPath(), False)

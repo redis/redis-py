@@ -94,6 +94,14 @@ class JSONCommands:
             "JSON.NUMMULTBY", name, str_path(path), self._encode(number)
         )
 
+    def numpowby(self, name, path, number):
+        """Take the number (integer or floating point) JSON value under
+        ``path`` at key ``name`` and raise it to the power of ``number``.
+        """
+        return self.execute_command(
+            "JSON.NUMPOWBY", name, str_path(path), self._encode(number)
+        )
+
     def clear(self, name, path=Path.rootPath()):
         """
         Empty arrays and objects (to have zero slots/keys without deleting the
