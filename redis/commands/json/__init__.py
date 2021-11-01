@@ -1,6 +1,10 @@
 from json import JSONDecoder, JSONEncoder
 
 from .helpers import bulk_of_jsons
+from .decoders import (
+    decode_list_or_int,
+    decode_toggle
+)
 from ..helpers import nativestr, delist
 from .commands import JSONCommands
 
@@ -42,9 +46,9 @@ class JSON(JSONCommands):
             "JSON.SET": lambda r: r and nativestr(r) == "OK",
             "JSON.NUMINCRBY": self._decode,
             "JSON.NUMMULTBY": self._decode,
-            "JSON.TOGGLE": lambda b: b == b"true",
+            "JSON.TOGGLE": decode_toggle,
             "JSON.STRAPPEND": int,
-            "JSON.STRLEN": int,
+            "JSON.STRLEN": decode_list_or_int,
             "JSON.ARRAPPEND": int,
             "JSON.ARRINDEX": int,
             "JSON.ARRINSERT": int,
@@ -54,7 +58,6 @@ class JSON(JSONCommands):
             "JSON.OBJLEN": int,
             "JSON.OBJKEYS": delist,
             # "JSON.RESP": delist,
-            "JSON.DEBUG": int,
         }
 
         self.client = client
@@ -73,9 +76,14 @@ class JSON(JSONCommands):
             return obj
 
         try:
-            return self.__decoder__.decode(obj)
+            x = self.__decoder__.decode(obj)
+            if x is None:
+                raise TypeError
         except TypeError:
             return self.__decoder__.decode(obj.decode())
+        finally:
+            import json
+            return json.loads(obj.decode())
 
     def _encode(self, obj):
         """Get the encoder."""

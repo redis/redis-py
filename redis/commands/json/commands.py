@@ -83,7 +83,7 @@ class JSONCommands:
         ``path`` at key ``name`` by the provided ``number``.
         """
         return self.execute_command(
-            "JSON.NUMINCRBY", name, str_path(path), self._encode(number)
+            "JSON.NUMINCRBY", name, str_path(path), str(number)
         )
 
     def nummultby(self, name, path, number):
@@ -91,7 +91,7 @@ class JSONCommands:
         ``path`` at key ``name`` with the provided ``number``.
         """
         return self.execute_command(
-            "JSON.NUMMULTBY", name, str_path(path), self._encode(number)
+            "JSON.NUMMULTBY", name, str_path(path), str(number)
         )
 
     def clear(self, name, path=Path.rootPath()):
@@ -189,7 +189,7 @@ class JSONCommands:
             "JSON.STRAPPEND", name, str_path(path), self._encode(string)
         )
 
-    def debug(self, name, path=Path.rootPath()):
+    def debug(self, name,  path=Path.rootPath()):
         """Return the memory usage in bytes of a value under ``path`` from
         key ``name``.
         """

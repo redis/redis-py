@@ -29,7 +29,7 @@ nested_large_key = r"""
               "mp": {
                 "ory": "rj",
                 "qnl": "tyfrju",
-                "hf": null
+                "hf": None
               },
               "uooc": 7418,
               "xela": 20,
@@ -37,11 +37,11 @@ nested_large_key = r"""
               "ia": 547,
               "szec": 68.73
             },
-            null
+            None
           ],
           3622,
           "iwk",
-          null
+          None
         ],
         "fepi": 19.954,
         "ivu": {
@@ -72,9 +72,9 @@ nested_large_key = r"""
                     true,
                     []
                   ],
-                  null,
+                  None,
                   "ymbc",
-                  null
+                  None
                 ],
                 "aj",
                 97.425,
@@ -98,13 +98,13 @@ nested_large_key = r"""
           534.389,
           7235,
           [
-            null,
+            None,
             false,
-            null
+            None
           ]
         ]
       },
-      null,
+      None,
       {
         "lbrx": {
           "vm": "ubdrbb"
@@ -115,13 +115,13 @@ nested_large_key = r"""
       70.558,
       [
         {
-          "mmo": null,
-          "dryu": null
+          "mmo": None,
+          "dryu": None
         }
       ]
     ],
     true,
-    null,
+    None,
     false,
     {
       "jqun": 98,
@@ -137,7 +137,7 @@ nested_large_key = r"""
             "jt",
             true,
             {
-              "bn": null,
+              "bn": None,
               "ygn": "cve",
               "zhh": true,
               "aak": 9165,
@@ -146,14 +146,14 @@ nested_large_key = r"""
             },
             {
               "eio": 9933.6,
-              "agl": null,
+              "agl": None,
               "pf": false,
               "kv": 5099.631,
-              "no": null,
+              "no": None,
               "shly": 58
             },
             [
-              null,
+              None,
               [
                 "uiundu",
                 726.652,
@@ -161,14 +161,14 @@ nested_large_key = r"""
                 94.92,
                 259.62,
                 {
-                  "ntqu": null,
-                  "frv": null,
+                  "ntqu": None,
+                  "frv": None,
                   "rvop": "upefj",
                   "jvdp": {
                     "nhx": [],
                     "bxnu": {},
-                    "gs": null,
-                    "mqho": null,
+                    "gs": None,
+                    "mqho": None,
                     "xp": 65,
                     "ujj": {}
                   },
@@ -203,19 +203,19 @@ nested_large_key = r"""
                     "mc": [],
                     "wunb": {},
                     "qcze": 2271.15,
-                    "mcqx": null
+                    "mcqx": None
                   },
                   "qob"
                 ],
                 "wo": "zy"
               },
               {
-                "dok": null,
-                "ygk": null,
+                "dok": None,
+                "ygk": None,
                 "afdw": [
                   7848,
                   "ah",
-                  null
+                  None
                 ],
                 "foobar": 3.141592,
                 "wnuo": {
@@ -226,7 +226,7 @@ nested_large_key = r"""
                     "omne": 3061.73,
                     "bnwm": "wuuyy",
                     "tuv": 7053,
-                    "lepv": null,
+                    "lepv": None,
                     "xap": 94.26
                   },
                   "nuv": false,
@@ -235,13 +235,13 @@ nested_large_key = r"""
                     "dk": 2305,
                     "wibo": 7512.9,
                     "ytbc": 153,
-                    "pokp": null,
-                    "whzd": null,
+                    "pokp": None,
+                    "whzd": None,
                     "judg": [],
-                    "zh": null
+                    "zh": None
                   },
                   "bcnu": "ji",
-                  "yhqu": null,
+                  "yhqu": None,
                   "gwc": true,
                   "smp": {
                     "fxpl": 75,
@@ -253,7 +253,7 @@ nested_large_key = r"""
                     "fxhy": [],
                     "af": 94.46,
                     "wg": {},
-                    "fb": null
+                    "fb": None
                   }
                 },
                 "zvym": 2921,
@@ -265,7 +265,7 @@ nested_large_key = r"""
               },
               [
                 "uxlu",
-                null,
+                None,
                 "utl",
                 64,
                 [
@@ -273,7 +273,7 @@ nested_large_key = r"""
                 ],
                 [
                   false,
-                  null,
+                  None,
                   [
                     "cfcrl",
                     [],
@@ -281,7 +281,7 @@ nested_large_key = r"""
                     562,
                     1654.9,
                     {},
-                    null,
+                    None,
                     "sqzud",
                     934.6
                   ],
@@ -289,7 +289,7 @@ nested_large_key = r"""
                     "hk": true,
                     "ed": "lodube",
                     "ye": "ziwddj",
-                    "ps": null,
+                    "ps": None,
                     "ir": {},
                     "heh": false
                   },
@@ -299,18 +299,18 @@ nested_large_key = r"""
                   [
                     99,
                     6409,
-                    null,
+                    None,
                     4886,
                     "esdtkt",
                     {},
-                    null
+                    None
                   ],
                   [
                     false,
                     "bkzqw"
                   ]
                 ],
-                null,
+                None,
                 6357
               ],
               {
@@ -318,7 +318,7 @@ nested_large_key = r"""
                 "vqm": {
                   "drmv": 68.12,
                   "tmf": 140.495,
-                  "le": null,
+                  "le": None,
                   "sanf": [
                     true,
                     [],
@@ -334,7 +334,7 @@ nested_large_key = r"""
                   "yrkh": 662.426,
                   "vxj": true,
                   "sn": 314.382,
-                  "eorg": null
+                  "eorg": None
                 },
                 "bavq": [
                   21.18,
@@ -347,7 +347,7 @@ nested_large_key = r"""
                   [
                     {},
                     "pjtr",
-                    null,
+                    None,
                     "apyemk",
                     [],
                     [],
@@ -355,7 +355,7 @@ nested_large_key = r"""
                     {}
                   ],
                   {
-                    "ho": null,
+                    "ho": None,
                     "ir": 124,
                     "oevp": 159,
                     "xdrv": 6705,
@@ -363,17 +363,17 @@ nested_large_key = r"""
                     "sx": false
                   },
                   true,
-                  null,
+                  None,
                   true
                 ],
                 "zw": "qjqaap",
                 "hr": {
                   "xz": 32,
                   "mj": 8235.32,
-                  "yrtv": null,
+                  "yrtv": None,
                   "jcz": "vnemxe",
                   "ywai": [
-                    null,
+                    None,
                     564,
                     false,
                     "vbr",
@@ -391,15 +391,15 @@ nested_large_key = r"""
             ]
           ]
         ],
-        null,
-        null,
+        None,
+        None,
         {
           "xyzl": "nvfff"
         },
         true,
         13
       ],
-      "npd": null,
+      "npd": None,
       "ha": [
         [
           "du",
@@ -416,7 +416,7 @@ nested_large_key = r"""
                     "dxpn": {},
                     "hmpx": 49,
                     "zb": "gbpt",
-                    "vdqc": null,
+                    "vdqc": None,
                     "ysjg": false,
                     "gug": 7990.66
                   },
@@ -426,7 +426,7 @@ nested_large_key = r"""
                   ],
                   "dfywcu",
                   9686,
-                  null
+                  None
                 ]
               ],
               "gpi": {
@@ -452,7 +452,7 @@ nested_large_key = r"""
                 "zj": "ivctu"
               },
               "jl": 369.27,
-              "mxkx": null,
+              "mxkx": None,
               "sh": [
                 true,
                 373,
@@ -460,22 +460,22 @@ nested_large_key = r"""
                 "sdis",
                 6217,
                 {
-                  "ernm": null,
+                  "ernm": None,
                   "srbo": 90.798,
                   "py": 677,
-                  "jgrq": null,
-                  "zujl": null,
+                  "jgrq": None,
+                  "zujl": None,
                   "odsm": {
-                    "pfrd": null,
+                    "pfrd": None,
                     "kwz": "kfvjzb",
                     "ptkp": false,
-                    "pu": null,
-                    "xty": null,
+                    "pu": None,
+                    "xty": None,
                     "ntx": [],
                     "nq": 48.19,
                     "lpyx": []
                   },
-                  "ff": null,
+                  "ff": None,
                   "rvi": [
                     "ych",
                     {},
@@ -503,8 +503,8 @@ nested_large_key = r"""
                 2690.54,
                 [
                   93,
-                  null,
-                  null,
+                  None,
+                  None,
                   "rlz",
                   true,
                   "ky",
@@ -512,13 +512,13 @@ nested_large_key = r"""
                 ]
               ],
               "vet": false,
-              "olle": null
+              "olle": None
             },
             "jzm",
             true
           ],
-          null,
-          null,
+          None,
+          None,
           19.17,
           7145,
           "ipsmk"
@@ -537,14 +537,14 @@ nested_large_key = r"""
           },
           "xa": "trdw",
           "gn": 9875.687,
-          "dl": null,
-          "vuql": null
+          "dl": None,
+          "vuql": None
         },
         {
-          "qpjo": null,
+          "qpjo": None,
           "das": {
             "or": {
-              "xfy": null,
+              "xfy": None,
               "xwvs": 4181.86,
               "yj": 206.325,
               "bsr": [
@@ -553,7 +553,7 @@ nested_large_key = r"""
               "wndm": {
                 "ve": 56,
                 "jyqa": true,
-                "ca": null
+                "ca": None
               },
               "rpd": 9906,
               "ea": "dvzcyt"
@@ -562,8 +562,8 @@ nested_large_key = r"""
             "rpx": "zpr",
             "srzg": {
               "beo": 325.6,
-              "sq": null,
-              "yf": null,
+              "sq": None,
+              "yf": None,
               "nu": [
                 377,
                 "qda",
@@ -572,21 +572,21 @@ nested_large_key = r"""
               "sfz": "zjk"
             },
             "kh": "xnpj",
-            "rk": null,
+            "rk": None,
             "hzhn": [
-              null
+              None
             ],
             "uio": 6249.12,
             "nxrv": 1931.635,
-            "pd": null
+            "pd": None
           },
           "pxlc": true,
           "mjer": false,
           "hdev": "msr",
-          "er": null
+          "er": None
         },
         "ug",
-        null,
+        None,
         "yrfoix",
         503.89,
         563
@@ -596,22 +596,22 @@ nested_large_key = r"""
       "tm": [
         134.761,
         "jcoels",
-        null
+        None
       ],
       "iig": 945.57,
       "ad": "be"
     },
     "ltpdm",
-    null,
+    None,
     14.53
   ],
   "xi": "gxzzs",
   "zfpw": 1564.87,
-  "ow": null,
+  "ow": None,
   "tm": [
     46,
     876.85
   ],
-  "xejv": null
+  "xejv": None
 }
 """

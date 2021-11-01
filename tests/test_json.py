@@ -312,8 +312,8 @@ def test_json_forget_with_dollar(client):
 @pytest.mark.redismod
 def test_set_and_get_with_dollar(client):
     # Test set and get on large nested key
-    assert client.json().set("doc1", "$", nested_large_key, "XX") is None
-    assert client.json().set("doc1", "$", nested_large_key, "NX")
+    client.json().set("doc1", "$", nested_large_key, "XX")
+    client.json().set("doc1", "$", nested_large_key, "NX")
     assert client.json().get('doc1', '$') == [nested_large_key]
     assert client.json().set("doc1", "$", nested_large_key, "NX") is None
 
@@ -385,59 +385,42 @@ def test_json_mget_dollar(client):
     assert res == [None, None]
 
 @pytest.mark.redismod
-def test_numby_commands_dollar(env):
-
-    r = env
+def test_numby_commands_dollar(client):
 
     # Test NUMINCRBY
     client.json().set('doc1', '$', {"a":"b","b":[{"a":2}, {"a":5.0}, {"a":"c"}]})
     # Test multi
-    assert client.json().numincrby('doc1', '$..a', '2') == [None, 4, 7.0, None]
+    assert client.json().numincrby('doc1', '$..a', 2) == [None, 4, 7.0, None]
 
-    assert client.json().numincrby('doc1', '$..a', '2.5') == [None, 6.5, 9.5, None]
+    assert client.json().numincrby('doc1', '$..a', 2.5) == [None, 6.5, 9.5, None]
     # Test single
-    assert client.json().numincrby('doc1', '$.b[1].a', '2')  == [11.5]
+    assert client.json().numincrby('doc1', '$.b[1].a', 2)  == [11.5]
 
-    assert client.json().numincrby('doc1', '$.b[2].a', '2') == [None]
-    assert client.json().numincrby('doc1', '$.b[1].a', '3.5') == [15.0]
+    assert client.json().numincrby('doc1', '$.b[2].a', 2) == [None]
+    assert client.json().numincrby('doc1', '$.b[1].a', 3.5) == [15.0]
 
     # Test NUMMULTBY
     client.json().set('doc1', '$', {"a":"b","b":[{"a":2}, {"a":5.0}, {"a":"c"}]})
 
-    assert client.json().nummultby('doc1', '$..a', '2') == [None, 4, 10, None]
-    assert client.json().nummultby('doc1', '$..a', '2.5') == [None,10.0,25.0,None]
+    assert client.json().nummultby('doc1', '$..a', 2) == [None, 4, 10, None]
+    assert client.json().nummultby('doc1', '$..a', 2.5) == [None,10.0,25.0,None]
     # Test single
-    assert client.json().nummultby('doc1', '$.b[1].a', '2') == [50.0]
-    assert client.json().nummultby('doc1', '$.b[2].a', '2') == [None]
-    assert client.json().nummultby('doc1', '$.b[1].a', '3') == [150.0]
+    assert client.json().nummultby('doc1', '$.b[1].a', 2) == [50.0]
+    assert client.json().nummultby('doc1', '$.b[2].a', 2) == [None]
+    assert client.json().nummultby('doc1', '$.b[1].a', 3) == [150.0]
 
-    # Test NUMPOWBY
-    client.json().set('doc1', '$', {"a":"b","b":[{"a":2}, {"a":5.0}, {"a":"c"}]})
-    # Test multi
-    assert client.json().numpowby('doc1', '$..a', '2') == [None, 4, 25, None]
-    #  Avoid json.loads to verify the underlying type (integer/float)
-    assert client.json().numpowby('doc1', '$..a', '2') == [None,16,625.0,None]
-
-    # Test single
-    assert client.json().numpowby('JSON.NUMPOWBY', 'doc1', '$.b[1].a', '2') == [390625.0]
-    assert client.json().numpowby('JSON.NUMPOWBY', 'doc1', '$.b[2].a', '2') == [None]
-    assert client.json().numpowby('JSON.NUMPOWBY', 'doc1', '$.b[1].a', '3') == [5.960464477539062e16]
-
-    # Test missing key
-    with pytest.raises(exceptions.DataError):
-        client.json().numincrby('non_existing_doc', '$..a', '2')
-        client.json().nummultby('non_existing_doc', '$..a', '2')
-
-    # TODO fixme
-    r.expect('JSON.NUMPOWBY', 'non_existing_doc', '$..a', '2')
+    # test missing keys
+    with pytest.raises(exceptions.ResponseError):
+        client.json().numincrby('non_existing_doc', '$..a', 2)
+        client.json().nummultby('non_existing_doc', '$..a', 2)
 
     # Test legacy NUMINCRBY
     client.json().set('doc1', '$', {"a":"b","b":[{"a":2}, {"a":5.0}, {"a":"c"}]})
-    client.json().numincrby('doc1', '.b[0].a', '3') == 5
+    client.json().numincrby('doc1', '.b[0].a', 3) == 5
 
     # Test legacy NUMMULTBY
     client.json().set('doc1', '$', {"a":"b","b":[{"a":2}, {"a":5.0}, {"a":"c"}]})
-    client.json().nummultby('doc1', '.b[0].a', '3') == 6
+    client.json().nummultby('doc1', '.b[0].a', 3) == 6
 
 @pytest.mark.redismod
 def test_strappend_dollar(client):
@@ -470,7 +453,7 @@ def test_strlen_dollar(client):
 
     # Test multi
     client.json().set('doc1', '$', {"a":"foo", "nested1": {"a": "hello"}, "nested2": {"a": 31}})
-    res1 = client.json().strlen('doc1', '$..a') [3, 5, None]
+    assert client.json().strlen('doc1', '$..a') == [3, 5, None]
 
     res2 = client.json().strappend('doc1', '$..a', '"bar"') ==  [6, 8, None]
     res1 = client.json().strlen('doc1', '$..a')
@@ -481,7 +464,7 @@ def test_strlen_dollar(client):
     client.json().strlen('doc1', '$.nested2.a') == [None]
 
     # Test missing key
-    with pytest.raises(exceptions.DataError):
+    with pytest.raises(exceptions.ResponseError):
         client.json().strlen('non_existing_doc', '$..a')
 
 @pytest.mark.redismod
@@ -575,7 +558,7 @@ def test_arrlen_dollar(client):
     assert client.json().arrappend('doc1', '..a', '"non"', '"abba"', '"stanza"') == 6
 
     # Test single
-    assert client.json().arrlen('doc1', '.nested1.a') = 6
+    assert client.json().arrlen('doc1', '.nested1.a') == 6
 
     # Test missing key
     assert client.json().arrlen('non_existing_doc', '..a') is None
@@ -584,7 +567,7 @@ def test_arrlen_dollar(client):
 def test_arrpop_dollar(client):
     client.json().set('doc1', '$', {"a":["foo"], "nested1": {"a": ["hello", None, "world"]}, "nested2": {"a": 31}})
     # Test multi
-    assert client.json().arrpop('doc1', '$..a', '1') == ['"foo"', 'null', None]
+    assert client.json().arrpop('doc1', '$..a', '1') == ['"foo"', 'None', None]
 
     assert client.json().get('doc1', '$') == \
         [{"a": [], "nested1": {"a": ["hello", "world"]}, "nested2": {"a": 31}}]
@@ -731,7 +714,7 @@ def test_type_dollar(client):
     jdata, jtypes = load_types_data('a')
     client.json().set('doc1', '$', jdata)
     # Test multi
-    assert client.json().type('JSON.TYPE', 'doc1', '$..a') == jtypes
+    assert client.json().type('doc1', '$..a') == jtypes
 
     # Test single
     assert client.json().type('doc1', '$.nested2.a') == [jtypes[1]]
@@ -793,18 +776,150 @@ def test_debug_dollar(client):
     client.json().set('doc1', '$', jdata)
 
     # Test multi
-    assert client.json().debug('MEMORY', 'doc1', '$..a') == \
+    assert client.json().debug('doc1', '$..a') == \
         [72, 24, 24, 16, 16, 1, 0]
 
     # Test single
-    assert client.json().debug('MEMORY', 'doc1', '$.nested2.a') == [24]
+    assert client.json().debug('doc1', '$.nested2.a') == [24]
 
     # Test legacy
-    assert client.json().debug('MEMORY', 'doc1', '..a') == 72
+    assert client.json().debug('doc1', '..a') == 72
 
     # Test missing path (defaults to root)
-    assert client.json().debug('MEMORY', 'doc1') == 72
+    assert client.json().debug('doc1') == 72
 
     # Test missing key
+    assert client.json().debug('non_existing_doc', '$..a') == []
+
+def test_resp_dollar(client):
+
+    data = {
+        'L1': {
+            'a': {
+                'A1_B1': 10,
+                'A1_B2': False,
+                'A1_B3': {
+                    'A1_B3_C1': None,
+                    'A1_B3_C2': [ 'A1_B3_C2_D1_1', 'A1_B3_C2_D1_2', -19.5, 'A1_B3_C2_D1_4', 'A1_B3_C2_D1_5', {
+                        'A1_B3_C2_D1_6_E1': True
+                        }
+                    ],
+                    'A1_B3_C3': [1]
+                },
+                'A1_B4': {
+                    'A1_B4_C1': "foo",
+                }
+            },
+        },
+        'L2': {
+            'a': {
+                'A2_B1': 20,
+                'A2_B2': False,
+                'A2_B3': {
+                    'A2_B3_C1': None,
+                    'A2_B3_C2': [ 'A2_B3_C2_D1_1', 'A2_B3_C2_D1_2', -37.5, 'A2_B3_C2_D1_4', 'A2_B3_C2_D1_5', {
+                        'A2_B3_C2_D1_6_E1': False
+                        }
+                    ],
+                    'A2_B3_C3': [2]
+                },
+                'A2_B4': {
+                    'A2_B4_C1': "bar",
+                }
+            },
+        },
+    }
+    client.json().set('doc1', '$', data)
+    # Test multi
+    res = client.json().resp('doc1', '$..a') 
+    assert res == [['{', 'A1_B1', 10, 'A1_B2', 'false', 'A1_B3', ['{', 'A1_B3_C1', None, 'A1_B3_C2', ['[', 'A1_B3_C2_D1_1', 'A1_B3_C2_D1_2', '-19.5', 'A1_B3_C2_D1_4', 'A1_B3_C2_D1_5', ['{', 'A1_B3_C2_D1_6_E1', 'true']], 'A1_B3_C3', ['[', 1]], 'A1_B4', ['{', 'A1_B4_C1', 'foo']], ['{', 'A2_B1', 20, 'A2_B2', 'false', 'A2_B3', ['{', 'A2_B3_C1', None, 'A2_B3_C2', ['[', 'A2_B3_C2_D1_1', 'A2_B3_C2_D1_2', '-37.5', 'A2_B3_C2_D1_4', 'A2_B3_C2_D1_5', ['{', 'A2_B3_C2_D1_6_E1', 'false']], 'A2_B3_C3', ['[', 2]], 'A2_B4', ['{', 'A2_B4_C1', 'bar']]]
+
+    # Test single
+    resSingle = client.json().resp('doc1', '$.L1.a')
+    assert resSingle == [['{', 'A1_B1', 10, 'A1_B2', 'false', 'A1_B3', ['{', 'A1_B3_C1', None, 'A1_B3_C2', ['[', 'A1_B3_C2_D1_1', 'A1_B3_C2_D1_2', '-19.5', 'A1_B3_C2_D1_4', 'A1_B3_C2_D1_5', ['{', 'A1_B3_C2_D1_6_E1', 'true']], 'A1_B3_C3', ['[', 1]], 'A1_B4', ['{', 'A1_B4_C1', 'foo']]]
+
+    # Test missing path
     with pytest.raises(exceptions.DataError):
-        client.json().debug('non_existing_doc', '$..a')
+        client.json().resp('doc1', '$.nowhere')
+
+    # Test missing key
+    assert client.json().resp('non_existing_doc', '$..a') is None
+
+    # Test legacy
+    assert client.json().resp('doc1', '.L1.a') == resSingle
+
+def test_arrindex_dollar(client):
+
+    client.json().set(
+                        'store',
+                        '$',
+                        {"store":{"book":[{"category":"reference","author":"Nigel Rees","title":"Sayings of the Century","price":8.95,"size":[10,20,30,40]},{"category":"fiction","author":"Evelyn Waugh","title":"Sword of Honour","price":12.99,"size":[50,60,70,80]},{"category":"fiction","author":"Herman Melville","title":"Moby Dick","isbn":"0-553-21311-3","price":8.99,"size":[5,10,20,30]},{"category":"fiction","author":"J. R. R. Tolkien","title":"The Lord of the Rings","isbn":"0-395-19395-8","price":22.99,"size":[5,6,7,8]}],"bicycle":{"color":"red","price":19.95}}})
+
+    assert client.json().get(
+                            'store',
+                            '$.store.book[?(@.price<10)].size') == [[10,20,30,40],[5,10,20,30]]
+    assert client.json().arrindex(
+                            'store',
+                            '$.store.book[?(@.price<10)].size',
+                            '20') == [1, 2]
+
+    # Test index of int scalar in multi values
+    client.json().set('test_num',
+                    '.',
+                    [{"arr":[0,1,3.0,3,2,1,0,3]},{"nested1_found":{"arr":[5,4,3,2,1,0,1,2,3.0,2,4,5]}},{"nested2_not_found":{"arr":[2,4,6]}},{"nested3_scalar":{"arr":"3"}},[{"nested41_not_arr":{"arr_renamed":[1,2,3]}},{"nested42_empty_arr":{"arr":[]}}]])
+
+    assert client.json().get('test_num', '$..arr') == \
+        [[0,1,3.0,3,2,1,0,3],[5,4,3,2,1,0,1,2,3.0,2,4,5],[2,4,6],"3",[]]
+
+    assert client.json().arrindex('test_num', '$..arr', 3) == [3, 2, -1, None, -1]
+
+    # Test index of double scalar in multi values
+    assert client.json().arrindex('test_num', '$..arr', 3.0) == [2, 8, -1, None, -1]
+
+    # Test index of string scalar in multi values
+    client.json().set('test_string',
+                        '.',
+                        [{"arr":["bazzz","bar",2,"baz",2,"ba","baz",3]},{"nested1_found":{"arr":[None,"baz2","buzz",2,1,0,1,"2","baz",2,4,5]}},{"nested2_not_found":{"arr":["baz2",4,6]}},{"nested3_scalar":{"arr":"3"}},[{"nested41_arr":{"arr_renamed":[1,"baz",3]}},{"nested42_empty_arr":{"arr":[]}}]])
+    assert client.json().get('test_string', '$..arr') == \
+        [["bazzz","bar",2,"baz",2,"ba","baz",3],[None,"baz2","buzz",2,1,0,1,"2","baz",2,4,5],["baz2",4,6],"3",[]]
+
+    assert client.json().arrindex('test_string', '$..arr', '"baz"') == [3, 8, -1, None, -1]
+
+    assert client.json().arrindex('test_string', '$..arr', '"baz"', 2) == [3, 8, -1, None, -1]
+    assert client.json().arrindex('test_string', '$..arr', '"baz"', 4) == [6, 8, -1, None, -1]
+    assert client.json().arrindex('test_string', '$..arr', '"baz"', -5) == [3, 8, -1, None, -1]
+    assert client.json().arrindex('test_string', '$..arr', '"baz"', 4, 7) == [6, -1, -1, None, -1]
+    assert client.json().arrindex('test_string', '$..arr', '"baz"', 4, -1) == [6, 8, -1, None, -1]
+    assert client.json().arrindex('test_string', '$..arr', '"baz"', 4, 0) == [6, 8, -1, None, -1]
+    assert client.json().arrindex('test_string', '$..arr', '5', 7, -1) == [-1, -1, -1, None, -1]
+    assert client.json().arrindex('test_string', '$..arr', '5', 7, 0) == [-1, 11, -1, None, -1]
+
+    # Test index of None scalar in multi values
+    client.json().set('test_None',
+                      '.',
+                      [{"arr":["bazzz","None",2,None,2,"ba","baz",3]},{"nested1_found":{"arr":["zaz","baz2","buzz",2,1,0,1,"2",None,2,4,5]}},{"nested2_not_found":{"arr":["None",4,6]}},{"nested3_scalar":{"arr":None}},[{"nested41_arr":{"arr_renamed":[1,None,3]}},{"nested42_empty_arr":{"arr":[]}}]])
+    assert client.json.get('test_None', '$..arr') == \
+        [["bazzz","None",2,None,2,"ba","baz",3],["zaz","baz2","buzz",2,1,0,1,"2",None,2,4,5],["None",4,6],None,[]]
+
+    assert client.json().arrindex('test_None', '$..arr', 'None') == [3, 8, -1, None, -1]
+
+    # Fail with none-scalar value
+    with pytest.raises(exceptions.DataError):
+        client.json().arrindex('test_None', '$..nested42_empty_arr.arr', {"arr":[]})
+
+    # Do not fail with none-scalar value in legacy mode
+    assert client.json().arrindex('test_None', '.[4][1].nested42_empty_arr.arr', '{"arr":[]}') == -1
+
+    # Test legacy (path begins with dot)
+    # Test index of int scalar in single value
+    assert client.json().arrindex('test_num', '.[0].arr', 3) == 3
+    assert client.json().arrindex('test_num', '.[0].arr', 9) == -1
+
+    with pytest.raises(exceptions.DataError):
+        client.json().arrindex('test_num', '.[0].arr_not', 3)
+    # Test index of string scalar in single value
+    assert client.json().arrindex('test_string', '.[0].arr', '"baz"') == 3
+    assert client.json().arrindex('test_string', '.[0].arr', '"faz"') == -1
+    # Test index of None scalar in single value
+    assert client.json().arrindex('test_None', '.[0].arr', 'None') == 3
+    assert client.json().arrindex('test_None', '..nested2_not_found.arr', 'None') == -1
