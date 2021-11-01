@@ -1,5 +1,7 @@
 from .path import Path, str_path
 from .helpers import decode_dict_keys
+from deprecated import deprecated
+from redis.exceptions import DataError
 
 
 class JSONCommands:
@@ -35,10 +37,6 @@ class JSONCommands:
         for o in args:
             pieces.append(self._encode(o))
         return self.execute_command("JSON.ARRINSERT", *pieces)
-
-    def forget(self, name, path=Path.rootPath()):
-        """Alias for jsondel (delete the JSON value)."""
-        return self.execute_command("JSON.FORGET", name, str_path(path))
 
     def arrlen(self, name, path=Path.rootPath()):
         """Return the length of the array JSON value under ``path``
@@ -86,6 +84,7 @@ class JSONCommands:
             "JSON.NUMINCRBY", name, str_path(path), self._encode(number)
         )
 
+    @deprecated(version='4.0.0', reason='deprecated since redisjson 1.0.0')
     def nummultby(self, name, path, number):
         """Multiply the numeric (integer or floating point) JSON value under
         ``path`` at key ``name`` with the provided ``number``.
@@ -104,9 +103,12 @@ class JSONCommands:
         """
         return self.execute_command("JSON.CLEAR", name, str_path(path))
 
-    def delete(self, name, path=Path.rootPath()):
-        """Delete the JSON value stored at key ``name`` under ``path``."""
-        return self.execute_command("JSON.DEL", name, str_path(path))
+    def delete(self, key, path=Path.rootPath()):
+        """Delete the JSON value stored at key ``key`` under ``path``."""
+        return self.execute_command("JSON.DEL", key, str_path(path))
+
+    # forget is an alias for delete
+    forget = delete
 
     def get(self, name, *args, no_escape=False):
         """
@@ -134,12 +136,13 @@ class JSONCommands:
         except TypeError:
             return None
 
-    def mget(self, path, *args):
-        """Get the objects stored as a JSON values under ``path`` from keys
-        ``args``.
+    def mget(self, keys, path):
+        """
+        Get the objects stored as a JSON values under ``path``. ``keys``
+        is a list of one or more keys.
         """
         pieces = []
-        pieces.extend(args)
+        pieces += keys
         pieces.append(str_path(path))
         return self.execute_command("JSON.MGET", *pieces)
 
@@ -181,17 +184,33 @@ class JSONCommands:
         """
         return self.execute_command("JSON.TOGGLE", name, str_path(path))
 
-    def strappend(self, name, string, path=Path.rootPath()):
-        """Append to the string JSON value under ``path`` at key ``name``
-        the provided ``string``.
+    def strappend(self, name, *args):
+        """Append to the string JSON value. If two options are specified after
+        the key name, the path is determined to be the first. If a single
+        option is passed, then the rootpath (i.e Path.rootPath()) is used.
         """
+        pieces = [name]
+        if len(args) == 1:
+            pieces.append(Path.rootPath())
+        for a in args:
+            pieces.append(a)
+
         return self.execute_command(
-            "JSON.STRAPPEND", name, str_path(path), self._encode(string)
+            "JSON.STRAPPEND", *pieces
         )
 
-    def debug(self, name, path=Path.rootPath()):
+    def debug(self, subcommand, key=None, path=Path.rootPath()):
         """Return the memory usage in bytes of a value under ``path`` from
         key ``name``.
         """
-        return self.execute_command("JSON.DEBUG", "MEMORY",
-                                    name, str_path(path))
+        valid_subcommands = ["MEMORY", "HELP"]
+        if subcommand not in valid_subcommands:
+            raise DataError("The only valid subcommands are ",
+                            str(valid_subcommands))
+        pieces = [subcommand]
+        if subcommand == "MEMORY":
+            if key is None:
+                raise DataError("No key specified")
+            pieces.append(key)
+            pieces.append(str_path(path))
+        return self.execute_command("JSON.DEBUG", *pieces)
