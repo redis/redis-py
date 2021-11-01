@@ -849,7 +849,7 @@ class TestRedisCommands:
 
     def test_expireat_no_key(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
-        assert r.expireat('a', expire_at) is True
+        assert r.expireat('a', expire_at) is False
 
     def test_expireat_unixtime(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
