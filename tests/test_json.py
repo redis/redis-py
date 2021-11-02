@@ -689,7 +689,7 @@ def test_arrtrim_dollar(client):
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
-        client.json().arrtrim('non_existing_doc', '..a')
+        client.json().arrtrim('non_existing_doc', '..a', 1, 1)
 
 @pytest.mark.redismod
 def test_objkeys_dollar(client):
