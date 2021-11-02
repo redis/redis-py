@@ -19,3 +19,6 @@ class Path(object):
     def __init__(self, path):
         """Make a new path based on the string representation in `path`."""
         self.strPath = path
+
+    def __repr__(self):
+        return self.strPath

@@ -172,11 +172,14 @@ class JSONCommands:
             pieces.append("XX")
         return self.execute_command("JSON.SET", *pieces)
 
-    def strlen(self, name, path=Path.rootPath()):
+    def strlen(self, name, path=None):
         """Return the length of the string JSON value under ``path`` at key
         ``name``.
         """
-        return self.execute_command("JSON.STRLEN", name, str_path(path))
+        pieces = [name]
+        if path is not None:
+            pieces.append(str_path(path))
+        return self.execute_command("JSON.STRLEN", *pieces)
 
     def toggle(self, name, path=Path.rootPath()):
         """Toggle boolean value under ``path`` at key ``name``.
@@ -184,17 +187,12 @@ class JSONCommands:
         """
         return self.execute_command("JSON.TOGGLE", name, str_path(path))
 
-    def strappend(self, name, *args):
+    def strappend(self, name, value, path=Path.rootPath()):
         """Append to the string JSON value. If two options are specified after
         the key name, the path is determined to be the first. If a single
         option is passed, then the rootpath (i.e Path.rootPath()) is used.
         """
-        pieces = [name]
-        if len(args) == 1:
-            pieces.append(Path.rootPath())
-        for a in args:
-            pieces.append(a)
-
+        pieces = [name, str_path(path), value]
         return self.execute_command(
             "JSON.STRAPPEND", *pieces
         )
