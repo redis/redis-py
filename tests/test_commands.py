@@ -843,9 +843,9 @@ class TestRedisCommands:
         assert 'a' in r
 
     def test_expire(self, r):
-        assert not r.expire('a', 10)
+        assert r.expire('a', 10) is False
         r['a'] = 'foo'
-        assert r.expire('a', 10)
+        assert r.expire('a', 10) is True
         assert 0 < r.ttl('a') <= 10
         assert r.persist('a')
         assert r.ttl('a') == -1
@@ -853,18 +853,18 @@ class TestRedisCommands:
     def test_expireat_datetime(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         r['a'] = 'foo'
-        assert r.expireat('a', expire_at)
+        assert r.expireat('a', expire_at) is True
         assert 0 < r.ttl('a') <= 61
 
     def test_expireat_no_key(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
-        assert not r.expireat('a', expire_at)
+        assert r.expireat('a', expire_at) is False
 
     def test_expireat_unixtime(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         r['a'] = 'foo'
         expire_at_seconds = int(time.mktime(expire_at.timetuple()))
-        assert r.expireat('a', expire_at_seconds)
+        assert r.expireat('a', expire_at_seconds) is True
         assert 0 < r.ttl('a') <= 61
 
     def test_get_and_set(self, r):
@@ -1007,9 +1007,9 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt('2.6.0')
     def test_pexpire(self, r):
-        assert not r.pexpire('a', 60000)
+        assert r.pexpire('a', 60000) is False
         r['a'] = 'foo'
-        assert r.pexpire('a', 60000)
+        assert r.pexpire('a', 60000) is True
         assert 0 < r.pttl('a') <= 60000
         assert r.persist('a')
         assert r.pttl('a') == -1
@@ -1018,20 +1018,20 @@ class TestRedisCommands:
     def test_pexpireat_datetime(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         r['a'] = 'foo'
-        assert r.pexpireat('a', expire_at)
+        assert r.pexpireat('a', expire_at) is True
         assert 0 < r.pttl('a') <= 61000
 
     @skip_if_server_version_lt('2.6.0')
     def test_pexpireat_no_key(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
-        assert not r.pexpireat('a', expire_at)
+        assert r.pexpireat('a', expire_at) is False
 
     @skip_if_server_version_lt('2.6.0')
     def test_pexpireat_unixtime(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         r['a'] = 'foo'
         expire_at_seconds = int(time.mktime(expire_at.timetuple())) * 1000
-        assert r.pexpireat('a', expire_at_seconds)
+        assert r.pexpireat('a', expire_at_seconds) is True
         assert 0 < r.pttl('a') <= 61000
 
     @skip_if_server_version_lt('2.6.0')
@@ -1049,9 +1049,9 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt('2.6.0')
     def test_pttl(self, r):
-        assert not r.pexpire('a', 10000)
+        assert r.pexpire('a', 10000) is False
         r['a'] = '1'
-        assert r.pexpire('a', 10000)
+        assert r.pexpire('a', 10000) is True
         assert 0 < r.pttl('a') <= 10000
         assert r.persist('a')
         assert r.pttl('a') == -1
