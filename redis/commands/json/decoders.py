@@ -9,6 +9,8 @@ def decode_toggle(b):
 def decode_list_or_int(b):
     if isinstance(b, list):
         return b
+    if b is None:
+        return None
     return int(b)
 
 

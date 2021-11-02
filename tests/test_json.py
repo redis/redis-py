@@ -430,11 +430,11 @@ def test_json_mget_dollar(client):
     # Test mget with single path
     client.json().mget('doc1', '$..a') == [1,3,None]
     # Test mget with multi path
-    client.json().mget('doc1', 'doc2', '$..a') == [[1,3,None], [4,6,[None]]]
+    client.json().mget(['doc1', 'doc2'], '$..a') == [[1,3,None], [4,6,[None]]]
 
     # Test missing key
-    client.json().mget('doc1', 'missing_doc', '$..a') == [[1,3,None], None]
-    res = client.json().mget('missing_doc1', 'missing_doc2', '$..a')
+    client.json().mget(['doc1', 'missing_doc'], '$..a') == [[1,3,None], None]
+    res = client.json().mget(['missing_doc1', 'missing_doc2'], '$..a')
     assert res == [None, None]
 
 @pytest.mark.redismod
@@ -480,25 +480,25 @@ def test_strappend_dollar(client):
 
     client.json().set('doc1', '$', {"a":"foo", "nested1": {"a": "hello"}, "nested2": {"a": 31}})
     # Test multi
-    client.json().strappend('doc1', '$..a', '"bar"') == [6, 8, None]
+    client.json().strappend('doc1', '"bar"', '$..a') == [6, 8, None]
 
 
     client.json().get('doc1', '$') == [{"a":"foobar","nested1":{"a":"hellobar"},"nested2":{"a":31}}]
     # Test single
-    client.json().strappend('doc1', '$.nested1.a', '"baz"') == [11]
+    client.json().strappend('doc1', '"baz"', '$.nested1.a') == [11]
 
     client.json().get('doc1', '$') == [{"a":"foobar","nested1":{"a":"hellobarbaz"},"nested2":{"a":31}}]
 
     # Test missing key
-    with pytest.raises(exceptions.DataError):
+    with pytest.raises(exceptions.ResponseError):
         client.json().strappend('non_existing_doc', '$..a', '"err"')
 
     # Test multi
-    client.json().strappend('doc1', '.*.a', '"bar"') == 8
-    client.json.get('doc1', '$') == [{"a":"foo","nested1":{"a":"hellobar"},"nested2":{"a":31}}]
+    client.json().strappend('doc1', '"bar"', '.*.a') == 8
+    client.json().get('doc1', '$') == [{"a":"foo","nested1":{"a":"hellobar"},"nested2":{"a":31}}]
 
     # Test missing path
-    with pytest.raises(exceptions.DataError):
+    with pytest.raises(exceptions.ResponseError):
         client.json().strappend('doc1', '"piu"')
 
 @pytest.mark.redismod
@@ -508,7 +508,7 @@ def test_strlen_dollar(client):
     client.json().set('doc1', '$', {"a":"foo", "nested1": {"a": "hello"}, "nested2": {"a": 31}})
     assert client.json().strlen('doc1', '$..a') == [3, 5, None]
 
-    res2 = client.json().strappend('doc1', '$..a', '"bar"') ==  [6, 8, None]
+    res2 = client.json().strappend('doc1', 'bar', '$..a')
     res1 = client.json().strlen('doc1', '$..a')
     assert res1 == res2
 
@@ -672,15 +672,15 @@ def test_arrtrim_dollar(client):
         [{"a": [], "nested1": {"a": []}, "nested2": {"a": 31}}]
 
     # Test missing key
-    with pytest.raises(exceptions.DataError):
-        client.json().arrtrim('non_existing_doc', '..a', '0')
+    with pytest.raises(exceptions.ResponseError):
+        client.json().arrtrim('non_existing_doc', '..a', '0', 1)
 
     # Test legacy
     client.json().set('doc1', '$', {"a":["foo"], "nested1": {"a": ["hello", None, "world"]}, "nested2": {"a": 31}})
 
     # Test multi (all paths are updated, but return result of last path)
     assert client.json().arrtrim('doc1', '..a', '1', '-1') == 2
-    res = r.execute_command('JSON.GET', 'doc1', '$') == \
+    res = client.json().get('doc1', '$') == \
         [{"a": [], "nested1": {"a": [None, "world"]}, "nested2": {"a": 31}}]
     # Test single
     assert client.json().arrtrim('doc1', '.nested1.a', '1', '1') == 1
@@ -688,7 +688,7 @@ def test_arrtrim_dollar(client):
         [{"a": [], "nested1": {"a": ["world"]}, "nested2": {"a": 31}}]
 
     # Test missing key
-    with pytest.raises(exceptions.DataError):
+    with pytest.raises(exceptions.ResponseError):
         client.json().arrtrim('non_existing_doc', '..a')
 
 @pytest.mark.redismod
@@ -725,7 +725,7 @@ def test_objlen_dollar(client):
     assert client.json().objlen('non_existing_doc', '$..a') is None
 
     # Test missing path
-    with pytest.raises(exceptions.DataError):
+    with pytest.raises(exceptions.ResponseError):
         client.json().objlen('doc1', '$.nowhere')
 
 
@@ -736,10 +736,10 @@ def test_objlen_dollar(client):
     assert client.json().objlen('doc1', '.nested2.a') == 1
 
     # Test missing key
-    assert client.json.objlen('non_existing_doc', '..a') is None
+    assert client.json().objlen('non_existing_doc', '..a') is None
 
     # Test missing path
-    with pytest.raises(exceptions.DataError):
+    with pytest.raises(exceptions.ResponseError):
         client.json().objlen('doc1', '.nowhere')
 
 @pytest.mark.redismod
@@ -801,7 +801,7 @@ def test_clear_dollar(client):
     assert client.json().get('doc1', '$') == [{}]
 
     # Test missing key
-    with pytest.raises(exceptions.DataError):
+    with pytest.raises(exceptions.ResponseError):
         client.json().clear('non_existing_doc', '$..a')
 
 @pytest.mark.redismod

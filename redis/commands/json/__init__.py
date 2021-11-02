@@ -1,14 +1,11 @@
 from json import JSONDecoder, JSONEncoder
 
 from .decoders import (
-    int_or_list,
-    int_or_none
+    decode_list_or_int,
+    decode_toggle,
+    int_or_none,
 )
 from .helpers import bulk_of_jsons
-from .decoders import (
-    decode_list_or_int,
-    decode_toggle
-)
 from ..helpers import nativestr, delist
 from .commands import JSONCommands
 
@@ -51,15 +48,15 @@ class JSON(JSONCommands):
             "JSON.NUMINCRBY": self._decode,
             "JSON.NUMMULTBY": self._decode,
             "JSON.TOGGLE": decode_toggle,
-            "JSON.STRAPPEND": int,
+            "JSON.STRAPPEND": decode_list_or_int,
             "JSON.STRLEN": decode_list_or_int,
-            "JSON.ARRAPPEND": int,
-            "JSON.ARRINDEX": int,
-            "JSON.ARRINSERT": int,
+            "JSON.ARRAPPEND": decode_list_or_int,
+            "JSON.ARRINDEX": decode_list_or_int,
+            "JSON.ARRINSERT": decode_list_or_int,
             "JSON.ARRLEN": int_or_none,
             "JSON.ARRPOP": self._decode,
-            "JSON.ARRTRIM": int,
-            "JSON.OBJLEN": int,
+            "JSON.ARRTRIM": decode_list_or_int,
+            "JSON.OBJLEN": decode_list_or_int,
             "JSON.OBJKEYS": delist,
             # "JSON.RESP": delist,
             "JSON.DEBUG": decode_list_or_int,
