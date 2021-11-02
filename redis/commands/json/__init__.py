@@ -1,5 +1,9 @@
 from json import JSONDecoder, JSONEncoder
 
+from .decoders import (
+    int_or_list,
+    int_or_none
+)
 from .helpers import bulk_of_jsons
 from .decoders import (
     decode_list_or_int,
@@ -52,12 +56,13 @@ class JSON(JSONCommands):
             "JSON.ARRAPPEND": int,
             "JSON.ARRINDEX": int,
             "JSON.ARRINSERT": int,
-            "JSON.ARRLEN": int,
+            "JSON.ARRLEN": int_or_none,
             "JSON.ARRPOP": self._decode,
             "JSON.ARRTRIM": int,
             "JSON.OBJLEN": int,
             "JSON.OBJKEYS": delist,
             # "JSON.RESP": delist,
+            "JSON.DEBUG": decode_list_or_int,
         }
 
         self.client = client
