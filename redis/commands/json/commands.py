@@ -1,4 +1,4 @@
-from .path import Path, str_path
+from .path import Path
 from .helpers import decode_dict_keys
 from deprecated import deprecated
 from redis.exceptions import DataError
@@ -11,7 +11,7 @@ class JSONCommands:
         """Append the objects ``args`` to the array under the
         ``path` in key ``name``.
         """
-        pieces = [name, str_path(path)]
+        pieces = [name, str(path)]
         for o in args:
             pieces.append(self._encode(o))
         return self.execute_command("JSON.ARRAPPEND", *pieces)
@@ -25,7 +25,7 @@ class JSONCommands:
         and exclusive ``stop`` indices.
         """
         return self.execute_command(
-            "JSON.ARRINDEX", name, str_path(path), self._encode(scalar),
+            "JSON.ARRINDEX", name, str(path), self._encode(scalar),
             start, stop
         )
 
@@ -33,7 +33,7 @@ class JSONCommands:
         """Insert the objects ``args`` to the array at index ``index``
         under the ``path` in key ``name``.
         """
-        pieces = [name, str_path(path), index]
+        pieces = [name, str(path), index]
         for o in args:
             pieces.append(self._encode(o))
         return self.execute_command("JSON.ARRINSERT", *pieces)
@@ -42,46 +42,46 @@ class JSONCommands:
         """Return the length of the array JSON value under ``path``
         at key``name``.
         """
-        return self.execute_command("JSON.ARRLEN", name, str_path(path))
+        return self.execute_command("JSON.ARRLEN", name, str(path))
 
     def arrpop(self, name, path=Path.rootPath(), index=-1):
         """Pop the element at ``index`` in the array JSON value under
         ``path`` at key ``name``.
         """
-        return self.execute_command("JSON.ARRPOP", name, str_path(path), index)
+        return self.execute_command("JSON.ARRPOP", name, str(path), index)
 
     def arrtrim(self, name, path, start, stop):
         """Trim the array JSON value under ``path`` at key ``name`` to the
         inclusive range given by ``start`` and ``stop``.
         """
-        return self.execute_command("JSON.ARRTRIM", name, str_path(path),
+        return self.execute_command("JSON.ARRTRIM", name, str(path),
                                     start, stop)
 
     def type(self, name, path=Path.rootPath()):
         """Get the type of the JSON value under ``path`` from key ``name``."""
-        return self.execute_command("JSON.TYPE", name, str_path(path))
+        return self.execute_command("JSON.TYPE", name, str(path))
 
     def resp(self, name, path=Path.rootPath()):
         """Return the JSON value under ``path`` at key ``name``."""
-        return self.execute_command("JSON.RESP", name, str_path(path))
+        return self.execute_command("JSON.RESP", name, str(path))
 
     def objkeys(self, name, path=Path.rootPath()):
         """Return the key names in the dictionary JSON value under ``path`` at
         key ``name``."""
-        return self.execute_command("JSON.OBJKEYS", name, str_path(path))
+        return self.execute_command("JSON.OBJKEYS", name, str(path))
 
     def objlen(self, name, path=Path.rootPath()):
         """Return the length of the dictionary JSON value under ``path`` at key
         ``name``.
         """
-        return self.execute_command("JSON.OBJLEN", name, str_path(path))
+        return self.execute_command("JSON.OBJLEN", name, str(path))
 
     def numincrby(self, name, path, number):
         """Increment the numeric (integer or floating point) JSON value under
         ``path`` at key ``name`` by the provided ``number``.
         """
         return self.execute_command(
-            "JSON.NUMINCRBY", name, str_path(path), self._encode(number)
+            "JSON.NUMINCRBY", name, str(path), self._encode(number)
         )
 
     @deprecated(version='4.0.0', reason='deprecated since redisjson 1.0.0')
@@ -90,7 +90,7 @@ class JSONCommands:
         ``path`` at key ``name`` with the provided ``number``.
         """
         return self.execute_command(
-            "JSON.NUMMULTBY", name, str_path(path), self._encode(number)
+            "JSON.NUMMULTBY", name, str(path), self._encode(number)
         )
 
     def clear(self, name, path=Path.rootPath()):
@@ -101,11 +101,11 @@ class JSONCommands:
         Return the count of cleared paths (ignoring non-array and non-objects
         paths).
         """
-        return self.execute_command("JSON.CLEAR", name, str_path(path))
+        return self.execute_command("JSON.CLEAR", name, str(path))
 
     def delete(self, key, path=Path.rootPath()):
         """Delete the JSON value stored at key ``key`` under ``path``."""
-        return self.execute_command("JSON.DEL", key, str_path(path))
+        return self.execute_command("JSON.DEL", key, str(path))
 
     # forget is an alias for delete
     forget = delete
@@ -127,7 +127,7 @@ class JSONCommands:
 
         else:
             for p in args:
-                pieces.append(str_path(p))
+                pieces.append(str(p))
 
         # Handle case where key doesn't exist. The JSONDecoder would raise a
         # TypeError exception since it can't decode None
@@ -143,7 +143,7 @@ class JSONCommands:
         """
         pieces = []
         pieces += keys
-        pieces.append(str_path(path))
+        pieces.append(str(path))
         return self.execute_command("JSON.MGET", *pieces)
 
     def set(self, name, path, obj, nx=False, xx=False, decode_keys=False):
@@ -158,7 +158,7 @@ class JSONCommands:
         if decode_keys:
             obj = decode_dict_keys(obj)
 
-        pieces = [name, str_path(path), self._encode(obj)]
+        pieces = [name, str(path), self._encode(obj)]
 
         # Handle existential modifiers
         if nx and xx:
@@ -178,21 +178,21 @@ class JSONCommands:
         """
         pieces = [name]
         if path is not None:
-            pieces.append(str_path(path))
+            pieces.append(str(path))
         return self.execute_command("JSON.STRLEN", *pieces)
 
     def toggle(self, name, path=Path.rootPath()):
         """Toggle boolean value under ``path`` at key ``name``.
         returning the new value.
         """
-        return self.execute_command("JSON.TOGGLE", name, str_path(path))
+        return self.execute_command("JSON.TOGGLE", name, str(path))
 
     def strappend(self, name, value, path=Path.rootPath()):
         """Append to the string JSON value. If two options are specified after
         the key name, the path is determined to be the first. If a single
         option is passed, then the rootpath (i.e Path.rootPath()) is used.
         """
-        pieces = [name, str_path(path), value]
+        pieces = [name, str(path), value]
         return self.execute_command(
             "JSON.STRAPPEND", *pieces
         )
@@ -210,5 +210,5 @@ class JSONCommands:
             if key is None:
                 raise DataError("No key specified")
             pieces.append(key)
-            pieces.append(str_path(path))
+            pieces.append(str(path))
         return self.execute_command("JSON.DEBUG", *pieces)

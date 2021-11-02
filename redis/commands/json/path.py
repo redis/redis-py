@@ -1,11 +1,3 @@
-def str_path(p):
-    """Return the string representation of a path if it is of class Path."""
-    if isinstance(p, Path):
-        return p.strPath
-    else:
-        return p
-
-
 class Path(object):
     """This class represents a path in a JSON value."""
 
