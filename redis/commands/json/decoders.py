@@ -53,7 +53,7 @@ def decode_list(b):
     if isinstance(b, list):
         return [nativestr(obj) for obj in b]
     elif isinstance(b, bytes):
-        return nativestr(b)
+        return unstring(nativestr(b))
     elif isinstance(b, str):
         return unstring(b)
     return b

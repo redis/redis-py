@@ -2,6 +2,7 @@ import pytest
 import redis
 from redis.commands.json.path import Path
 from redis import exceptions
+from redis.commands.json.decoders import unstring, decode_list
 from .conftest import skip_ifmodversion_lt
 
 
@@ -1374,3 +1375,13 @@ def test_arrindex_dollar(client):
         "test_None",
         "..nested2_not_found.arr",
         "None") == 0
+
+
+def test_decoders_and_unstring():
+    assert unstring("4") == 4
+    assert unstring("45.55") == 45.55
+    assert unstring("hello world") == "hello world"
+
+    assert decode_list(b"45.55") == 45.55
+    assert decode_list("45.55") == 45.55
+    assert decode_list(['hello', b'world']) == ['hello', 'world']
