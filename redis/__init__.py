@@ -1,4 +1,5 @@
 from redis.client import Redis, StrictRedis
+from redis.cluster import RedisCluster
 from redis.connection import (
     BlockingConnectionPool,
     ConnectionPool,
@@ -49,6 +50,7 @@ __all__ = [
     'PubSubError',
     'ReadOnlyError',
     'Redis',
+    'RedisCluster',
     'RedisError',
     'ResponseError',
     'SSLConnection',

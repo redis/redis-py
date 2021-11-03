@@ -23,6 +23,9 @@ setup(
     author="Redis Inc.",
     author_email="oss@redis.com",
     python_requires=">=3.6",
+    install_requires=[
+        'deprecated'
+    ],
     classifiers=[
         "Development Status :: 5 - Production/Stable",
         "Environment :: Console",

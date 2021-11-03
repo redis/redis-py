@@ -4,21 +4,19 @@ The Python interface to the Redis key-value store.
 
 [![CI](https://github.com/redis/redis-py/workflows/CI/badge.svg?branch=master)](https://github.com/redis/redis-py/actions?query=workflow%3ACI+branch%3Amaster) 
 [![docs](https://readthedocs.org/projects/redis-py/badge/?version=stable&style=flat)](https://redis-py.readthedocs.io/en/stable/) 
+[![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE.txt)
 [![pypi](https://badge.fury.io/py/redis.svg)](https://pypi.org/project/redis/) 
 [![codecov](https://codecov.io/gh/redis/redis-py/branch/master/graph/badge.svg?token=yenl5fzxxr)](https://codecov.io/gh/redis/redis-py)
 [![Total alerts](https://img.shields.io/lgtm/alerts/g/redis/redis-py.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/redis/redis-py/alerts/)
 
+[Installation](##installation) | [Contributing](##contributing) |  [Getting Started](##getting-started) | [Connecting To Redis](##connecting-to-redis)
 
-## Python 2 Compatibility Note
+---------------------------------------------
 
-redis-py 3.5.x will be the last version of redis-py that supports Python
-2. The 3.5.x line will continue to get bug fixes and security patches
-that support Python 2 until August 1, 2020. redis-py 4.0 will be the
-next major version and will require Python 3.5+.
 
 ## Installation
 
-redis-py requires a running Redis server. See [Redis\'s
+redis-py requires a running Redis server. See [Redis's
 quickstart](https://redis.io/topics/quickstart) for installation
 instructions.
 
@@ -45,11 +43,13 @@ $ python setup.py install
 
 ## Contributing
 
-Want to contribute a feature, bug report, or report an issue? Check out
+Want to contribute a feature, bug fix, or report an issue? Check out
 our [guide to
-contributing](https://github.com/redis/redis-py/blob/master/CONTRIBUTING.rst).
+contributing](https://github.com/redis/redis-py/blob/master/CONTRIBUTING.md).
 
 ## Getting Started
+
+redis-py supports Python 3.6+.
 
 ``` pycon
 >>> import redis
@@ -61,118 +61,26 @@ b'bar'
 ```
 
 By default, all responses are returned as bytes in Python
-3 and str in Python 2. The user is responsible for
-decoding to Python 3 strings or Python 2 unicode objects.
+3.
 
 If **all** string responses from a client should be decoded, the user
-can specify decode_responses=True to
-Redis.\_\_init\_\_. In this case, any Redis command that
+can specify *decode_responses=True* in
+```Redis.__init__```. In this case, any Redis command that
 returns a string type will be decoded with the encoding
 specified.
 
-The default encoding is \"utf-8\", but this can be customized with the
-encoding argument to the redis.Redis class.
+The default encoding is utf-8, but this can be customized by specifiying the
+encoding argument for the redis.Redis class.
 The encoding will be used to automatically encode any
-strings passed to commands, such as key names and values. When
-decode_responses=True, string data returned from commands
-will be decoded with the same encoding.
+strings passed to commands, such as key names and values. 
 
-## Upgrading from redis-py 2.X to 3.0
 
-redis-py 3.0 introduces many new features but required a number of
-backwards incompatible changes to be made in the process. This section
-attempts to provide an upgrade path for users migrating from 2.X to 3.0.
-
-### Python Version Support
-
-redis-py supports Python 3.5+.
-
-### Client Classes: Redis and StrictRedis
-
-redis-py 3.0 drops support for the legacy \"Redis\" client class.
-\"StrictRedis\" has been renamed to \"Redis\" and an alias named
-\"StrictRedis\" is provided so that users previously using
-\"StrictRedis\" can continue to run unchanged.
-
-The 2.X \"Redis\" class provided alternative implementations of a few
-commands. This confused users (rightfully so) and caused a number of
-support issues. To make things easier going forward, it was decided to
-drop support for these alternate implementations and instead focus on a
-single client class.
-
-2.X users that are already using StrictRedis don\'t have to change the
-class name. StrictRedis will continue to work for the foreseeable
-future.
-
-2.X users that are using the Redis class will have to make changes if
-they use any of the following commands:
-
--   SETEX: The argument order has changed. The new order is (name, time,
-    value).
--   LREM: The argument order has changed. The new order is (name, num,
-    value).
--   TTL and PTTL: The return value is now always an int and matches the
-    official Redis command (>0 indicates the timeout, -1 indicates that
-    the key exists but that it has no expire time set, -2 indicates that
-    the key does not exist)
-
-### SSL Connections
-
-redis-py 3.0 changes the default value of the
-ssl_cert_reqs option from None to
-\'required\'. See [Issue
-1016](https://github.com/redis/redis-py/issues/1016). This change
-enforces hostname validation when accepting a cert from a remote SSL
-terminator. If the terminator doesn\'t properly set the hostname on the
-cert this will cause redis-py 3.0 to raise a ConnectionError.
-
-This check can be disabled by setting ssl_cert_reqs to
-None. Note that doing so removes the security check. Do so
-at your own risk.
-
-Example with hostname verification using a local certificate bundle
-(linux):
-
-``` pycon
->>> import redis
->>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
-                    ssl=True,
-                    ssl_ca_certs='/etc/ssl/certs/ca-certificates.crt')
->>> r.set('foo', 'bar')
-True
->>> r.get('foo')
-b'bar'
-```
-
-Example with hostname verification using
-[certifi](https://pypi.org/project/certifi/):
-
-``` pycon
->>> import redis, certifi
->>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
-                    ssl=True, ssl_ca_certs=certifi.where())
->>> r.set('foo', 'bar')
-True
->>> r.get('foo')
-b'bar'
-```
-
-Example turning off hostname verification (not recommended):
-
-``` pycon
->>> import redis
->>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
-                    ssl=True, ssl_cert_reqs=None)
->>> r.set('foo', 'bar')
-True
->>> r.get('foo')
-b'bar'
-```
+--------------------
 
 ### MSET, MSETNX and ZADD
 
 These commands all accept a mapping of key/value pairs. In redis-py 2.X
-this mapping could be specified as `*args` or as `**kwargs`. Both of
+this mapping could be specified as **args* or as `**kwargs`. Both of
 these styles caused issues when Redis introduced optional flags to ZADD.
 Relying on `*args` caused issues with the optional argument order,
 especially in Python 2.7. Relying on `**kwargs` caused potential
@@ -229,8 +137,8 @@ supports the Lua-based lock. In doing so, LuaLock has been renamed to
 Lock. This also means that redis-py Lock objects require Redis server
 2.6 or greater.
 
-2.X users that were explicitly referring to \"LuaLock\" will have to now
-refer to \"Lock\" instead.
+2.X users that were explicitly referring to *LuaLock* will have to now
+refer to *Lock* instead.
 
 ### Locks as Context Managers
 
@@ -240,7 +148,7 @@ This is more of a bug fix than a backwards incompatible change. However,
 given an error is now raised where none was before, this might alarm
 some users.
 
-2.X users should make sure they\'re wrapping their lock code in a
+2.X users should make sure they're wrapping their lock code in a
 try/catch like this:
 
 ``` python
@@ -259,8 +167,8 @@ to adhere to the official command syntax. There are a few exceptions:
 
 -   **SELECT**: Not implemented. See the explanation in the Thread
     Safety section below.
--   **DEL**: \'del\' is a reserved keyword in the Python syntax.
-    Therefore redis-py uses \'delete\' instead.
+-   **DEL**: *del* is a reserved keyword in the Python syntax.
+    Therefore redis-py uses *delete* instead.
 -   **MULTI/EXEC**: These are implemented as part of the Pipeline class.
     The pipeline is wrapped with the MULTI and EXEC statements by
     default when it is executed, which can be disabled by specifying
@@ -273,14 +181,44 @@ to adhere to the official command syntax. There are a few exceptions:
     PUBLISH from the Redis client (see [this comment on issue
     #151](https://github.com/redis/redis-py/issues/151#issuecomment-1545015)
     for details).
--   **SCAN/SSCAN/HSCAN/ZSCAN**: The \*SCAN commands are implemented as
+-   **SCAN/SSCAN/HSCAN/ZSCAN**: The *SCAN commands are implemented as
     they exist in the Redis documentation. In addition, each command has
     an equivalent iterator method. These are purely for convenience so
-    the user doesn\'t have to keep track of the cursor while iterating.
+    the user doesn't have to keep track of the cursor while iterating.
     Use the scan_iter/sscan_iter/hscan_iter/zscan_iter methods for this
     behavior.
 
-## More Detail
+## Connecting to Redis
+
+### Client Classes: Redis and StrictRedis
+
+redis-py 3.0 drops support for the legacy *Redis* client class.
+*StrictRedis* has been renamed to *Redis* and an alias named
+*StrictRedis* is provided so that users previously using
+*StrictRedis* can continue to run unchanged.
+
+The 2.X *Redis* class provided alternative implementations of a few
+commands. This confused users (rightfully so) and caused a number of
+support issues. To make things easier going forward, it was decided to
+drop support for these alternate implementations and instead focus on a
+single client class.
+
+2.X users that are already using StrictRedis don\'t have to change the
+class name. StrictRedis will continue to work for the foreseeable
+future.
+
+2.X users that are using the Redis class will have to make changes if
+they use any of the following commands:
+
+-   SETEX: The argument order has changed. The new order is (name, time,
+    value).
+-   LREM: The argument order has changed. The new order is (name, num,
+    value).
+-   TTL and PTTL: The return value is now always an int and matches the
+    official Redis command (>0 indicates the timeout, -1 indicates that
+    the key exists but that it has no expire time set, -2 indicates that
+    the key does not exist)
+
 
 ### Connection Pools
 
@@ -355,13 +293,115 @@ option to a value less than 30.
 
 This option also works on any PubSub connection that is created from a
 client with `health_check_interval` enabled. PubSub users need to ensure
-that `get_message()` or `listen()` are called more frequently than
+that *get_message()* or `listen()` are called more frequently than
 `health_check_interval` seconds. It is assumed that most workloads
 already do this.
 
 If your PubSub use case doesn\'t call `get_message()` or `listen()`
 frequently, you should call `pubsub.check_health()` explicitly on a
 regularly basis.
+
+### SSL Connections
+
+redis-py 3.0 changes the default value of the
+ssl_cert_reqs option from None to
+\'required\'. See [Issue
+1016](https://github.com/redis/redis-py/issues/1016). This change
+enforces hostname validation when accepting a cert from a remote SSL
+terminator. If the terminator doesn\'t properly set the hostname on the
+cert this will cause redis-py 3.0 to raise a ConnectionError.
+
+This check can be disabled by setting ssl_cert_reqs to
+None. Note that doing so removes the security check. Do so
+at your own risk.
+
+Example with hostname verification using a local certificate bundle
+(linux):
+
+``` pycon
+>>> import redis
+>>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
+                    ssl=True,
+                    ssl_ca_certs='/etc/ssl/certs/ca-certificates.crt')
+>>> r.set('foo', 'bar')
+True
+>>> r.get('foo')
+b'bar'
+```
+
+Example with hostname verification using
+[certifi](https://pypi.org/project/certifi/):
+
+``` pycon
+>>> import redis, certifi
+>>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
+                    ssl=True, ssl_ca_certs=certifi.where())
+>>> r.set('foo', 'bar')
+True
+>>> r.get('foo')
+b'bar'
+```
+
+Example turning off hostname verification (not recommended):
+
+``` pycon
+>>> import redis
+>>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
+                    ssl=True, ssl_cert_reqs=None)
+>>> r.set('foo', 'bar')
+True
+>>> r.get('foo')
+b'bar'
+```
+
+### Sentinel support
+
+redis-py can be used together with [Redis
+Sentinel](https://redis.io/topics/sentinel) to discover Redis nodes. You
+need to have at least one Sentinel daemon running in order to use
+redis-py's Sentinel support.
+
+Connecting redis-py to the Sentinel instance(s) is easy. You can use a
+Sentinel connection to discover the master and slaves network addresses:
+
+``` pycon
+>>> from redis.sentinel import Sentinel
+>>> sentinel = Sentinel([('localhost', 26379)], socket_timeout=0.1)
+>>> sentinel.discover_master('mymaster')
+('127.0.0.1', 6379)
+>>> sentinel.discover_slaves('mymaster')
+[('127.0.0.1', 6380)]
+```
+
+You can also create Redis client connections from a Sentinel instance.
+You can connect to either the master (for write operations) or a slave
+(for read-only operations).
+
+``` pycon
+>>> master = sentinel.master_for('mymaster', socket_timeout=0.1)
+>>> slave = sentinel.slave_for('mymaster', socket_timeout=0.1)
+>>> master.set('foo', 'bar')
+>>> slave.get('foo')
+b'bar'
+```
+
+The master and slave objects are normal Redis instances with their
+connection pool bound to the Sentinel instance. When a Sentinel backed
+client attempts to establish a connection, it first queries the Sentinel
+servers to determine an appropriate host to connect to. If no server is
+found, a MasterNotFoundError or SlaveNotFoundError is raised. Both
+exceptions are subclasses of ConnectionError.
+
+When trying to connect to a slave client, the Sentinel connection pool
+will iterate over the list of slaves until it finds one that can be
+connected to. If no slaves can be connected to, a connection will be
+established with the master.
+
+See [Guidelines for Redis clients with support for Redis
+Sentinel](https://redis.io/topics/sentinel-clients) to learn more about
+Redis Sentinel.
+
+--------------------------
 
 ### Parsers
 
@@ -875,52 +915,6 @@ just prior to pipeline execution.
 [True, 25]
 ```
 
-### Sentinel support
-
-redis-py can be used together with [Redis
-Sentinel](https://redis.io/topics/sentinel) to discover Redis nodes. You
-need to have at least one Sentinel daemon running in order to use
-redis-py\'s Sentinel support.
-
-Connecting redis-py to the Sentinel instance(s) is easy. You can use a
-Sentinel connection to discover the master and slaves network addresses:
-
-``` pycon
->>> from redis.sentinel import Sentinel
->>> sentinel = Sentinel([('localhost', 26379)], socket_timeout=0.1)
->>> sentinel.discover_master('mymaster')
-('127.0.0.1', 6379)
->>> sentinel.discover_slaves('mymaster')
-[('127.0.0.1', 6380)]
-```
-
-You can also create Redis client connections from a Sentinel instance.
-You can connect to either the master (for write operations) or a slave
-(for read-only operations).
-
-``` pycon
->>> master = sentinel.master_for('mymaster', socket_timeout=0.1)
->>> slave = sentinel.slave_for('mymaster', socket_timeout=0.1)
->>> master.set('foo', 'bar')
->>> slave.get('foo')
-b'bar'
-```
-
-The master and slave objects are normal Redis instances with their
-connection pool bound to the Sentinel instance. When a Sentinel backed
-client attempts to establish a connection, it first queries the Sentinel
-servers to determine an appropriate host to connect to. If no server is
-found, a MasterNotFoundError or SlaveNotFoundError is raised. Both
-exceptions are subclasses of ConnectionError.
-
-When trying to connect to a slave client, the Sentinel connection pool
-will iterate over the list of slaves until it finds one that can be
-connected to. If no slaves can be connected to, a connection will be
-established with the master.
-
-See [Guidelines for Redis clients with support for Redis
-Sentinel](https://redis.io/topics/sentinel-clients) to learn more about
-Redis Sentinel.
 
 ### Scan Iterators
 
@@ -942,23 +936,241 @@ C 3
 
 ### Cluster Mode
 
-redis-py does not currently support [Cluster
-Mode](https://redis.io/topics/cluster-tutorial).
+redis-py is now supports cluster mode and provides a client for
+[Redis Cluster](<https://redis.io/topics/cluster-tutorial>).
+
+The cluster client is based on [redis-py-cluster](https://github.com/Grokzen/redis-py-cluster)
+by Grokzen, with a lot of added and 
+changed functionality.
+
+**Create RedisCluster:**
+
+Connecting redis-py to the Redis Cluster instance(s) is easy.
+RedisCluster requires at least one node to discover the whole cluster nodes,
+and there is multiple ways of creating a RedisCluster instance:
+
+- Use the 'host' and 'port' arguments:
+
+``` pycon
+    >>> from redis.cluster import RedisCluster as Redis
+    >>> rc = Redis(host='localhost', port=6379)
+    >>> print(rc.get_nodes())
+    [[host=127.0.0.1,port=6379,name=127.0.0.1:6379,server_type=primary,redis_connection=Redis<ConnectionPool<Connection<host=127.0.0.1,port=6379,db=0>>>], [host=127.0.0.1,port=6378,name=127.0.0.1:6378,server_type=primary,redis_connection=Redis<ConnectionPool<Connection<host=127.0.0.1,port=6378,db=0>>>], [host=127.0.0.1,port=6377,name=127.0.0.1:6377,server_type=replica,redis_connection=Redis<ConnectionPool<Connection<host=127.0.0.1,port=6377,db=0>>>]]
+```
+- Use Redis URL:
+
+``` pycon
+    >>> from redis.cluster import RedisCluster as Redis
+    >>> rc = Redis.from_url("redis://localhost:6379/0")
+```
+
+- Use ClusterNode(s):
+
+``` pycon
+    >>> from redis.cluster import RedisCluster as Redis
+    >>> from redis.cluster import ClusterNode
+    >>> nodes = [ClusterNode('localhost', 6379), ClusterNode('localhost', 6378)]
+    >>> rc = Redis(startup_nodes=nodes)
+```
+
+When a RedisCluster instance is being created it first attempts to establish a
+connection to one of the provided startup nodes. If none of the startup nodes
+are reachable, a 'RedisClusterException' will be thrown.
+After a connection to the one of the cluster's nodes is established, the
+RedisCluster instance will be initialized with 3 caches:
+a slots cache which maps each of the 16384 slots to the node/s handling them,
+a nodes cache that contains ClusterNode objects (name, host, port, redis connection)
+for all of the cluster's nodes, and a commands cache contains all the server
+supported commands that were retrieved using the Redis 'COMMAND' output.
+
+RedisCluster instance can be directly used to execute Redis commands. When a
+command is being executed through the cluster instance, the target node(s) will
+be internally determined. When using a key-based command, the target node will
+be the node that holds the key's slot.
+Cluster management commands or other cluster commands have predefined node
+group targets (all-primaries, all-nodes, random-node, all-replicas), which are
+outlined in the command’s function documentation.
+For example, ‘KEYS’ command will be sent to all primaries and return all keys
+in the cluster, and ‘CLUSTER NODES’ command will be sent to a random node.
+Other management commands will require you to pass the target node/s to execute
+the command on.
+
+``` pycon
+    >>> # target-nodes: the node that holds 'foo1's key slot
+    >>> rc.set('foo1', 'bar1')
+    >>> # target-nodes: the node that holds 'foo2's key slot
+    >>> rc.set('foo2', 'bar2')
+    >>> # target-nodes: the node that holds 'foo1's key slot
+    >>> print(rc.get('foo1'))
+    b'bar'
+    >>> # target-nodes: all-primaries
+    >>> print(rc.keys())
+    [b'foo1', b'foo2']
+    >>> # target-nodes: all-nodes
+    >>> rc.flushall()
+```
+
+**Specifying Target Nodes:**
+
+As mentioned above, some RedisCluster commands will require you to provide the
+target node/s that you want to execute the command on, and in other cases, the
+target node will be determined by the client itself. That being said, ALL
+RedisCluster commands can be executed against a specific node or a group of
+nodes by passing the command kwarg `target_nodes`.
+The best practice is to specify target nodes using RedisCluster class's node
+flags: PRIMARIES, REPLICAS, ALL_NODES, RANDOM. When a nodes flag is passed
+along with a command, it will be internally resolved to the relevant node/s.
+If the nodes topology of the cluster changes during the execution of a command,
+the client will be able to resolve the nodes flag again with the new topology
+and attempt to retry executing the command.
+
+``` pycon
+    >>> from redis.cluster import RedisCluster as Redis
+    >>> # run cluster-meet command on all of the cluster's nodes
+    >>> rc.cluster_meet(Redis.ALL_NODES, '127.0.0.1', 6379)
+    >>> # ping all replicas
+    >>> rc.ping(Redis.REPLICAS)
+    >>> # ping a specific node
+    >>> rc.ping(Redis.RANDOM)
+    >>> # ping all nodes in the cluster, default command behavior
+    >>> rc.ping()
+    >>> # execute bgsave in all primaries
+    >>> rc.bgsave(Redis.PRIMARIES)
+```
+
+You could also pass ClusterNodes directly if you want to execute a command on a
+specific node / node group that isn't addressed by the nodes flag. However, if
+the command execution fails due to cluster topology changes, a retry attempt
+will not be made, since the passed target node/s may no longer be valid, and
+the relevant cluster or connection error will be returned.
+
+``` pycon
+    >>> node = rc.get_node('localhost', 6379)
+    >>> # Get the keys only for that specific node
+    >>> rc.keys(node)
+    >>> # get Redis info from a subset of primaries
+    >>> subset_primaries = [node for node in rc.get_primaries() if node.port > 6378]
+    >>> rc.info(subset_primaries)
+```
+
+In addition, you can use the RedisCluster instance to obtain the Redis instance
+of a specific node and execute commands on that node directly. The Redis client,
+however, cannot handle cluster failures and retries.
+
+``` pycon
+    >>> cluster_node = rc.get_node(host='localhost', port=6379)
+    >>> print(cluster_node)
+    [host=127.0.0.1,port=6379,name=127.0.0.1:6379,server_type=primary,redis_connection=Redis<ConnectionPool<Connection<host=127.0.0.1,port=6379,db=0>>>]
+    >>> r = cluster_node.redis_connection
+    >>> r.client_list()
+    [{'id': '276', 'addr': '127.0.0.1:64108', 'fd': '16', 'name': '', 'age': '0', 'idle': '0', 'flags': 'N', 'db': '0', 'sub': '0', 'psub': '0', 'multi': '-1', 'qbuf': '26', 'qbuf-free': '32742', 'argv-mem': '10', 'obl': '0', 'oll': '0', 'omem': '0', 'tot-mem': '54298', 'events': 'r', 'cmd': 'client', 'user': 'default'}]
+    >>> # Get the keys only for that specific node
+    >>> r.keys()
+    [b'foo1']
+```
+
+**Multi-key commands:**
+
+Redis supports multi-key commands in Cluster Mode, such as Set type unions or
+intersections, mset and mget, as long as the keys all hash to the same slot.
+By using RedisCluster client, you can use the known functions (e.g. mget, mset)
+to perform an atomic multi-key operation. However, you must ensure all keys are
+mapped to the same slot, otherwise a RedisClusterException will be thrown.
+Redis Cluster implements a concept called hash tags that can be used in order
+to force certain keys to be stored in the same hash slot, see 
+[Keys hash tag](https://redis.io/topics/cluster-spec#keys-hash-tags).
+You can also use nonatomic for some of the multikey operations, and pass keys
+that aren't mapped to the same slot. The client will then map the keys to the
+relevant slots, sending the commands to the slots' node owners. Non-atomic
+operations batch the keys according to their hash value, and then each batch is
+sent separately to the slot's owner.
+
+``` pycon
+    #  Atomic operations can be used when all keys are mapped to the same slot
+    >>> rc.mset({'{foo}1': 'bar1', '{foo}2': 'bar2'})
+    >>> rc.mget('{foo}1', '{foo}2')
+    [b'bar1', b'bar2']
+    # Non-atomic multi-key operations splits the keys into different slots
+    >>> rc.mset_nonatomic({'foo': 'value1', 'bar': 'value2', 'zzz': 'value3')
+    >>> rc.mget_nonatomic('foo', 'bar', 'zzz')
+    [b'value1', b'value2', b'value3']
+```
+
+**Cluster PubSub:**
+
+When a ClusterPubSub instance is created without specifying a node, a single
+node will be transparently chosen for the pubsub connection on the
+first command execution. The node will be determined by:
+ 1. Hashing the channel name in the request to find its keyslot
+ 2. Selecting a node that handles the keyslot: If read_from_replicas is
+    set to true, a replica can be selected.
+    
+*Known limitations with pubsub:*
+
+Pattern subscribe and publish do not work properly because if we hash a pattern 
+like fo* we will get a keyslot for that string but there is a endless   
+possibilities of channel names based on that pattern that we can’t know in 
+advance. This feature is not limited but the commands is not recommended to use 
+right now. 
+See [redis-py-cluster documentaion](https://redis-py-cluster.readthedocs.io/en/stable/pubsub.html) 
+ for more.
+
+``` pycon
+    >>> p1 = rc.pubsub()
+    # p1 connection will be set to the node that holds 'foo' keyslot
+    >>> p1.subscribe('foo')
+    # p2 connection will be set to node 'localhost:6379'
+    >>> p2 = rc.pubsub(rc.get_node('localhost', 6379))
+```
+
+**Read Only Mode**
+
+By default, Redis Cluster always returns MOVE redirection response on accessing 
+a replica node. You can overcome this limitation and scale read commands with 
+READONLY mode. 
+
+To enable READONLY mode pass read_from_replicas=True to RedisCluster 
+constructor. When set to true, read commands will be assigned between the
+primary and its replications in a Round-Robin manner. 
+
+You could also enable READONLY mode in runtime by running readonly() method,  
+or disable it with readwrite().
+
+``` pycon
+    >>> from cluster import RedisCluster as Redis
+    # Use 'debug' mode to print the node that the command is executed on
+    >>> rc_readonly = Redis(startup_nodes=startup_nodes, 
+                    read_from_replicas=True, debug=True)
+    >>> rc_readonly.set('{foo}1', 'bar1')
+    >>> for i in range(0, 4):
+            # Assigns read command to the slot's hosts in a Round-Robin manner
+    >>>     rc_readonly.get('{foo}1')
+    # set command would be directed only to the slot's primary node
+    >>> rc_readonly.set('{foo}2', 'bar2')
+    # reset READONLY flag
+    >>> rc_readonly.readwrite()
+    # now the get command would be directed only to the slot's primary node
+    >>> rc_readonly.get('{foo}1')
+```
+
+
+
+See [Redis Cluster tutorial](https://redis.io/topics/cluster-tutorial) and
+[Redis Cluster specifications](https://redis.io/topics/cluster-spec)
+to learn more about Redis Cluster.
 
 ### Author
 
-redis-py is developed and maintained by Andy McCurdy
-(<sedrik@gmail.com>). It can be found here:
-<https://github.com/redis/redis-py>
+redis-py is developed and maintained by [Redis Inc](https://redis.com). It can be found [here](
+https://github.com/redis/redis-py), or downloaded from [pypi](https://pypi.org/project/redis/).
 
 Special thanks to:
 
+-   Andy McCurdy (<sedrik@gmail.com>) the original author of redis-py.
 -   Ludovico Magnocavallo, author of the original Python Redis client,
     from which some of the socket code is still used.
 -   Alexander Solovyov for ideas on the generic response callback
     system.
 -   Paul Hubbard for initial packaging support.
-
-### Sponsored by
 
 [![Redis](./docs/logo-redis.png)](https://www.redis.com)

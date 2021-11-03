@@ -3,17 +3,19 @@ from redis.retry import Retry
 import pytest
 import random
 import redis
+import time
 from distutils.version import LooseVersion
 from redis.connection import parse_url
+from redis.exceptions import RedisClusterException
 from unittest.mock import Mock
 from urllib.parse import urlparse
-
 
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/9"
 default_redismod_url = "redis://localhost:36379/9"
 
 default_redismod_url = "redis://localhost:36379"
+default_cluster_nodes = 6
 
 
 def pytest_addoption(parser):
@@ -26,6 +28,12 @@ def pytest_addoption(parser):
                      action="store",
                      help="Connection string to redis server"
                           " with loaded modules,"
+                          " defaults to `%(default)s`")
+
+    parser.addoption('--cluster-nodes', default=default_cluster_nodes,
+                     action="store",
+                     help="The number of cluster nodes that need to be "
+                          "available before the test can start,"
                           " defaults to `%(default)s`")
 
 
@@ -41,13 +49,36 @@ def pytest_sessionstart(session):
     info = _get_info(redis_url)
     version = info["redis_version"]
     arch_bits = info["arch_bits"]
+    cluster_enabled = info["cluster_enabled"]
     REDIS_INFO["version"] = version
     REDIS_INFO["arch_bits"] = arch_bits
+    REDIS_INFO["cluster_enabled"] = cluster_enabled
 
     # module info
     redismod_url = session.config.getoption("--redismod-url")
     info = _get_info(redismod_url)
     REDIS_INFO["modules"] = info["modules"]
+
+    if cluster_enabled:
+        cluster_nodes = session.config.getoption("--cluster-nodes")
+        wait_for_cluster_creation(redis_url, cluster_nodes)
+
+
+def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=20):
+    now = time.time()
+    timeout = now + timeout
+    print("Waiting for {0} cluster nodes to become available".
+          format(cluster_nodes))
+    while now < timeout:
+        try:
+            client = redis.RedisCluster.from_url(redis_url)
+            if len(client.get_nodes()) == cluster_nodes:
+                print("All nodes are available!")
+                break
+        except RedisClusterException:
+            pass
+        time.sleep(1)
+        now = time.time()
 
 
 def skip_if_server_version_lt(min_version):
@@ -86,6 +117,17 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
     raise AttributeError("No redis module named {}".format(module_name))
 
 
+def skip_if_cluster_mode():
+    return pytest.mark.skipif(REDIS_INFO["cluster_enabled"],
+                              reason="This test isn't supported with cluster "
+                                     "mode")
+
+
+def skip_if_not_cluster_mode():
+    return pytest.mark.skipif(not REDIS_INFO["cluster_enabled"],
+                              reason="Cluster-mode is required for this test")
+
+
 def _get_client(cls, request, single_connection_client=True, flushdb=True,
                 from_url=None,
                 **kwargs):
@@ -100,10 +142,14 @@ def _get_client(cls, request, single_connection_client=True, flushdb=True,
         redis_url = request.config.getoption("--redis-url")
     else:
         redis_url = from_url
-    url_options = parse_url(redis_url)
-    url_options.update(kwargs)
-    pool = redis.ConnectionPool(**url_options)
-    client = cls(connection_pool=pool)
+    if REDIS_INFO["cluster_enabled"]:
+        client = redis.RedisCluster.from_url(redis_url, **kwargs)
+        single_connection_client = False
+    else:
+        url_options = parse_url(redis_url)
+        url_options.update(kwargs)
+        pool = redis.ConnectionPool(**url_options)
+        client = cls(connection_pool=pool)
     if single_connection_client:
         client = client.client()
     if request:
@@ -116,7 +162,10 @@ def _get_client(cls, request, single_connection_client=True, flushdb=True,
                     # just manually retry the flushdb
                     client.flushdb()
             client.close()
-            client.connection_pool.disconnect()
+            if REDIS_INFO["cluster_enabled"]:
+                client.disconnect_connection_pools()
+            else:
+                client.connection_pool.disconnect()
         request.addfinalizer(teardown)
     return client
 
@@ -218,6 +267,13 @@ def master_host(request):
     url = request.config.getoption("--redis-url")
     parts = urlparse(url)
     yield parts.hostname
+
+
+@pytest.fixture(scope="session")
+def master_port(request):
+    url = request.config.getoption("--redis-url")
+    parts = urlparse(url)
+    yield parts.port
 
 
 def wait_for_command(client, monitor, command):
