@@ -20,7 +20,6 @@ from redis.exceptions import (
 
 from redis.crc import key_slot
 from .conftest import (
-    skip_if_not_cluster_mode,
     _get_client,
     skip_if_server_version_lt
 )
@@ -176,7 +175,7 @@ def moved_redirection_helper(request, failover=False):
             assert prev_primary.server_type == REPLICA
 
 
-@skip_if_not_cluster_mode()
+@pytest.mark.onlycluster
 class TestRedisClusterObj:
     def test_host_port_startup_node(self):
         """
@@ -559,7 +558,7 @@ class TestRedisClusterObj:
         assert mock.called is True
 
 
-@skip_if_not_cluster_mode()
+@pytest.mark.onlycluster
 class TestClusterRedisCommands:
     def test_case_insensitive_command_names(self, r):
         assert r.cluster_response_callbacks['cluster addslots'] == \
@@ -1081,7 +1080,7 @@ class TestClusterRedisCommands:
         assert clients[0].get('name') == 'redis-py-c1'
 
 
-@skip_if_not_cluster_mode()
+@pytest.mark.onlycluster
 class TestNodesManager:
     def test_load_balancer(self, r):
         n_manager = r.nodes_manager

@@ -5,7 +5,6 @@ import pytest
 from redis import exceptions
 from redis.sentinel import (Sentinel, SentinelConnectionPool,
                             MasterNotFoundError, SlaveNotFoundError)
-from .conftest import skip_if_cluster_mode
 import redis.sentinel
 
 
@@ -14,7 +13,6 @@ def master_ip(master_host):
     yield socket.gethostbyname(master_host)
 
 
-@skip_if_cluster_mode()
 class SentinelTestClient:
     def __init__(self, cluster, id):
         self.cluster = cluster
@@ -55,7 +53,6 @@ def sentinel(request, cluster):
     return Sentinel([('foo', 26379), ('bar', 26379)])
 
 
-@skip_if_cluster_mode()
 class SentinelTestCluster:
     def __init__(self, servisentinel_ce_name='mymaster', ip='127.0.0.1',
                  port=6379):

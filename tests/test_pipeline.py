@@ -1,8 +1,7 @@
 import pytest
 
 import redis
-from .conftest import wait_for_command, skip_if_server_version_lt, \
-    skip_if_cluster_mode
+from .conftest import wait_for_command, skip_if_server_version_lt
 
 
 class TestPipeline:
@@ -60,7 +59,7 @@ class TestPipeline:
             assert r['b'] == b'b1'
             assert r['c'] == b'c1'
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_pipeline_no_transaction_watch(self, r):
         r['a'] = 0
 
@@ -72,7 +71,7 @@ class TestPipeline:
             pipe.set('a', int(a) + 1)
             assert pipe.execute() == [True]
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_pipeline_no_transaction_watch_failure(self, r):
         r['a'] = 0
 
@@ -132,7 +131,7 @@ class TestPipeline:
             assert pipe.set('z', 'zzz').execute() == [True]
             assert r['z'] == b'zzz'
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_transaction_with_empty_error_command(self, r):
         """
         Commands with custom EMPTY_ERROR functionality return their default
@@ -147,7 +146,7 @@ class TestPipeline:
                 assert result[1] == []
                 assert result[2]
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_pipeline_with_empty_error_command(self, r):
         """
         Commands with custom EMPTY_ERROR functionality return their default
@@ -176,7 +175,7 @@ class TestPipeline:
             assert pipe.set('z', 'zzz').execute() == [True]
             assert r['z'] == b'zzz'
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_parse_error_raised_transaction(self, r):
         with r.pipeline() as pipe:
             pipe.multi()
@@ -192,7 +191,7 @@ class TestPipeline:
             assert pipe.set('z', 'zzz').execute() == [True]
             assert r['z'] == b'zzz'
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_watch_succeed(self, r):
         r['a'] = 1
         r['b'] = 2
@@ -210,7 +209,7 @@ class TestPipeline:
             assert pipe.execute() == [True]
             assert not pipe.watching
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_watch_failure(self, r):
         r['a'] = 1
         r['b'] = 2
@@ -225,7 +224,7 @@ class TestPipeline:
 
             assert not pipe.watching
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_watch_failure_in_empty_transaction(self, r):
         r['a'] = 1
         r['b'] = 2
@@ -239,7 +238,7 @@ class TestPipeline:
 
             assert not pipe.watching
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_unwatch(self, r):
         r['a'] = 1
         r['b'] = 2
@@ -252,7 +251,7 @@ class TestPipeline:
             pipe.get('a')
             assert pipe.execute() == [b'1']
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_watch_exec_no_unwatch(self, r):
         r['a'] = 1
         r['b'] = 2
@@ -273,7 +272,7 @@ class TestPipeline:
             unwatch_command = wait_for_command(r, m, 'UNWATCH')
             assert unwatch_command is None, "should not send UNWATCH"
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_watch_reset_unwatch(self, r):
         r['a'] = 1
 
@@ -288,7 +287,7 @@ class TestPipeline:
             assert unwatch_command is not None
             assert unwatch_command['command'] == 'UNWATCH'
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_transaction_callable(self, r):
         r['a'] = 1
         r['b'] = 2
@@ -313,7 +312,7 @@ class TestPipeline:
         assert result == [True]
         assert r['c'] == b'4'
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_transaction_callable_returns_value_from_callable(self, r):
         def callback(pipe):
             # No need to do anything here since we only want the return value
@@ -368,7 +367,7 @@ class TestPipeline:
             assert pipe == pipe2
             assert response == [True, [0, 0, 15, 15, 14], b'1']
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('2.0.0')
     def test_pipeline_discard(self, r):
 

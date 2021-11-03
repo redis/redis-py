@@ -7,8 +7,7 @@ from unittest import mock
 
 from threading import Thread
 from redis.connection import ssl_available, to_bool
-from .conftest import skip_if_server_version_lt, skip_if_cluster_mode,\
-    _get_client
+from .conftest import skip_if_server_version_lt, _get_client
 from .test_pubsub import wait_for_message
 
 
@@ -482,7 +481,7 @@ class TestConnection:
         assert len(pool._available_connections) == 1
         assert not pool._available_connections[0]._sock
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('2.8.8')
     def test_busy_loading_disconnects_socket(self, r):
         """
@@ -493,7 +492,7 @@ class TestConnection:
             r.execute_command('DEBUG', 'ERROR', 'LOADING fake message')
         assert not r.connection._sock
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('2.8.8')
     def test_busy_loading_from_pipeline_immediate_command(self, r):
         """
@@ -509,7 +508,7 @@ class TestConnection:
         assert len(pool._available_connections) == 1
         assert not pool._available_connections[0]._sock
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('2.8.8')
     def test_busy_loading_from_pipeline(self, r):
         """
@@ -567,7 +566,7 @@ class TestConnection:
             r.execute_command('DEBUG', 'ERROR', 'ERR invalid password')
 
 
-@skip_if_cluster_mode()
+@pytest.mark.onlynoncluster
 class TestMultiConnectionClient:
     @pytest.fixture()
     def r(self, request):
@@ -581,7 +580,7 @@ class TestMultiConnectionClient:
         assert r.get('a') == b'123'
 
 
-@skip_if_cluster_mode()
+@pytest.mark.onlynoncluster
 class TestHealthCheck:
     interval = 60
 

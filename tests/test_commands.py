@@ -11,7 +11,6 @@ from redis import exceptions
 from redis.commands import CommandsParser
 from .conftest import (
     _get_client,
-    skip_if_cluster_mode,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
@@ -47,7 +46,7 @@ def get_stream_message(client, stream, message_id):
 
 
 # RESPONSE CALLBACKS
-@skip_if_cluster_mode()
+@pytest.mark.onlynoncluster
 class TestResponseCallbacks:
     "Tests for the response callback system"
 
@@ -62,7 +61,7 @@ class TestResponseCallbacks:
         assert r.response_callbacks['del'] == r.response_callbacks['DEL']
 
 
-@skip_if_cluster_mode()
+@pytest.mark.onlynoncluster
 class TestRedisCommands:
     def test_command_on_invalid_key_type(self, r):
         r.lpush('a', '1')
@@ -3681,7 +3680,7 @@ class TestRedisCommands:
         assert r.replicaof("NO", "ONE")
 
 
-@skip_if_cluster_mode()
+@pytest.mark.onlynoncluster
 class TestBinarySave:
 
     def test_binary_get_set(self, r):

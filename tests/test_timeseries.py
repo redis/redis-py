@@ -1,7 +1,7 @@
 import pytest
 import time
 from time import sleep
-from .conftest import skip_ifmodversion_lt, skip_if_cluster_mode
+from .conftest import skip_ifmodversion_lt
 
 
 @pytest.fixture
@@ -10,7 +10,7 @@ def client(modclient):
     return modclient
 
 
-@skip_if_cluster_mode()
+@pytest.mark.redismod
 class TestTimeseries:
     @pytest.mark.redismod
     def testCreate(self, client):

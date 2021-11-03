@@ -55,9 +55,11 @@ def pytest_sessionstart(session):
     REDIS_INFO["cluster_enabled"] = cluster_enabled
 
     # module info
-    redismod_url = session.config.getoption("--redismod-url")
-    info = _get_info(redismod_url)
-    REDIS_INFO["modules"] = info["modules"]
+    markers = session.config.getoption("-m")
+    if 'redismod' in markers and 'not redismod' not in markers:
+        redismod_url = session.config.getoption("--redismod-url")
+        info = _get_info(redismod_url)
+        REDIS_INFO["modules"] = info["modules"]
 
     if cluster_enabled:
         cluster_nodes = session.config.getoption("--cluster-nodes")
@@ -103,8 +105,8 @@ def skip_unless_arch_bits(arch_bits):
 
 
 def skip_ifmodversion_lt(min_version: str, module_name: str):
-    modules = REDIS_INFO["modules"]
-    if modules == []:
+    modules = REDIS_INFO.get("modules")
+    if modules is None or modules == []:
         return pytest.mark.skipif(True, reason="No redis modules found")
 
     for j in modules:
@@ -115,17 +117,6 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
             return pytest.mark.skipif(check, reason="Redis module version")
 
     raise AttributeError("No redis module named {}".format(module_name))
-
-
-def skip_if_cluster_mode():
-    return pytest.mark.skipif(REDIS_INFO["cluster_enabled"],
-                              reason="This test isn't supported with cluster "
-                                     "mode")
-
-
-def skip_if_not_cluster_mode():
-    return pytest.mark.skipif(not REDIS_INFO["cluster_enabled"],
-                              reason="Cluster-mode is required for this test")
 
 
 def _get_client(cls, request, single_connection_client=True, flushdb=True,

@@ -21,6 +21,13 @@ def devenv(c):
 
 
 @task
+def cluster(c):
+    """Run all Redis Cluster tests."""
+    print("Starting RedisCluster tests")
+    run("tox -e cluster")
+
+
+@task
 def linters(c):
     """Run code linters"""
     run("tox -e linters")
@@ -42,8 +49,6 @@ def tests(c):
     """
     print("Starting Redis tests")
     run("tox -e plain -e hiredis")
-    print("Starting RedisCluster tests")
-    run("tox -e plain -e hiredis -- --redis-url=redis://localhost:16379/0")
 
 
 @task

@@ -7,8 +7,7 @@ import pytest
 import redis
 from redis.exceptions import ConnectionError
 
-from .conftest import _get_client, skip_if_cluster_mode, \
-    skip_if_server_version_lt
+from .conftest import _get_client, skip_if_server_version_lt
 
 
 def wait_for_message(pubsub, timeout=0.1, ignore_subscribe_messages=False):
@@ -120,7 +119,7 @@ class TestPubSubSubscribeUnsubscribe:
         kwargs = make_subscribe_test_data(r.pubsub(), 'channel')
         self._test_resubscribe_on_reconnection(**kwargs)
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_resubscribe_to_patterns_on_reconnection(self, r):
         kwargs = make_subscribe_test_data(r.pubsub(), 'pattern')
         self._test_resubscribe_on_reconnection(**kwargs)
@@ -175,7 +174,7 @@ class TestPubSubSubscribeUnsubscribe:
         kwargs = make_subscribe_test_data(r.pubsub(), 'channel')
         self._test_subscribed_property(**kwargs)
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_subscribe_property_with_patterns(self, r):
         kwargs = make_subscribe_test_data(r.pubsub(), 'pattern')
         self._test_subscribed_property(**kwargs)
@@ -219,7 +218,7 @@ class TestPubSubSubscribeUnsubscribe:
         kwargs = make_subscribe_test_data(r.pubsub(), 'channel')
         self._test_sub_unsub_resub(**kwargs)
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_sub_unsub_resub_patterns(self, r):
         kwargs = make_subscribe_test_data(r.pubsub(), 'pattern')
         self._test_sub_unsub_resub(**kwargs)
@@ -307,7 +306,7 @@ class TestPubSubMessages:
         assert wait_for_message(p) is None
         assert self.message == make_message('message', 'foo', 'test message')
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_pattern_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
         p.psubscribe(**{'f*': self.message_handler})
@@ -327,7 +326,7 @@ class TestPubSubMessages:
         assert wait_for_message(p) is None
         assert self.message == make_message('message', channel, 'test message')
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     # see: https://redis-py-cluster.readthedocs.io/en/stable/pubsub.html
     # #known-limitations-with-pubsub
     def test_unicode_pattern_message_handler(self, r):
@@ -405,7 +404,7 @@ class TestPubSubAutoDecoding:
                                                         self.channel,
                                                         self.data)
 
-    @skip_if_cluster_mode()
+    @pytest.mark.onlynoncluster
     def test_pattern_publish(self, r):
         p = r.pubsub()
         p.psubscribe(self.pattern)
@@ -534,7 +533,7 @@ class TestPubSubPings:
                                                    pattern=None)
 
 
-@skip_if_cluster_mode()
+@pytest.mark.onlynoncluster
 class TestPubSubConnectionKilled:
 
     @skip_if_server_version_lt('3.0.0')
