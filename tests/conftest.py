@@ -126,7 +126,8 @@ def _get_client(cls, request, single_connection_client=True, flushdb=True,
 @pytest.fixture()
 def modclient(request, **kwargs):
     rmurl = request.config.getoption('--redismod-url')
-    with _get_client(redis.Redis, request, from_url=rmurl, **kwargs) as client:
+    with _get_client(redis.Redis, request, from_url=rmurl, 
+                     decode_responses=True, **kwargs) as client:
         yield client
 
 

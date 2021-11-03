@@ -1,5 +1,5 @@
 from .path import Path
-from .helpers import decode_dict_keys
+from .decoders import decode_dict_keys
 from deprecated import deprecated
 from redis.exceptions import DataError
 
