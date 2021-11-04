@@ -1,6 +1,6 @@
 name: Publish tag to Pypi
 
-on: 
+on:
   release:
     types: [published]
 
@@ -17,12 +17,12 @@ jobs:
       - name: Install dev tools
         run: |
           pip install -r dev_requirements.txt
-          pip install twine
+          pip install twine wheel
 
       - name: Build package
         run: |
           python setup.py build
-          python setup.py dist
+          python setup.py dist bdist_wheel
 
       - name: Publish to Pypi
         uses: pypa/gh-action-pypi-publish@release/v1
