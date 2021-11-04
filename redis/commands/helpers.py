@@ -17,7 +17,10 @@ def list_or_args(keys, args):
 
 def nativestr(x):
     """Return the decoded binary string, or a string, depending on type."""
-    return x.decode("utf-8", "replace") if isinstance(x, bytes) else x
+    r = x.decode("utf-8", "replace") if isinstance(x, bytes) else x
+    if r == 'null':
+        return
+    return r
 
 
 def delist(x):

@@ -1,11 +1,10 @@
-from json import JSONDecoder, JSONEncoder
+from json import JSONDecoder, JSONEncoder, JSONDecodeError
 
 from .decoders import (
-    int_or_list,
-    int_or_none
+    decode_list,
+    bulk_of_jsons,
 )
-from .helpers import bulk_of_jsons
-from ..helpers import nativestr, delist
+from ..helpers import nativestr
 from .commands import JSONCommands
 
 
@@ -46,19 +45,19 @@ class JSON(JSONCommands):
             "JSON.SET": lambda r: r and nativestr(r) == "OK",
             "JSON.NUMINCRBY": self._decode,
             "JSON.NUMMULTBY": self._decode,
-            "JSON.TOGGLE": lambda b: b == b"true",
-            "JSON.STRAPPEND": int,
-            "JSON.STRLEN": int,
-            "JSON.ARRAPPEND": int,
-            "JSON.ARRINDEX": int,
-            "JSON.ARRINSERT": int,
-            "JSON.ARRLEN": int_or_none,
+            "JSON.TOGGLE": self._decode,
+            "JSON.STRAPPEND": self._decode,
+            "JSON.STRLEN": self._decode,
+            "JSON.ARRAPPEND": self._decode,
+            "JSON.ARRINDEX": self._decode,
+            "JSON.ARRINSERT": self._decode,
+            "JSON.ARRLEN": self._decode,
             "JSON.ARRPOP": self._decode,
-            "JSON.ARRTRIM": int,
-            "JSON.OBJLEN": int,
-            "JSON.OBJKEYS": delist,
-            # "JSON.RESP": delist,
-            "JSON.DEBUG": int_or_list,
+            "JSON.ARRTRIM": self._decode,
+            "JSON.OBJLEN": self._decode,
+            "JSON.OBJKEYS": self._decode,
+            "JSON.RESP": self._decode,
+            "JSON.DEBUG": self._decode,
         }
 
         self.client = client
@@ -77,9 +76,17 @@ class JSON(JSONCommands):
             return obj
 
         try:
-            return self.__decoder__.decode(obj)
+            x = self.__decoder__.decode(obj)
+            if x is None:
+                raise TypeError
+            return x
         except TypeError:
-            return self.__decoder__.decode(obj.decode())
+            try:
+                return self.__decoder__.decode(obj.decode())
+            except AttributeError:
+                return decode_list(obj)
+        except (AttributeError, JSONDecodeError):
+            return decode_list(obj)
 
     def _encode(self, obj):
         """Get the encoder."""
