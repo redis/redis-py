@@ -1792,6 +1792,14 @@ class SetCommands:
         """Return all members of the set ``name``"""
         return self.execute_command('SMEMBERS', name)
 
+    def smismember(self, name, values, *args):
+        """
+        Return whether each value in ``values`` is a member of the set ``name``
+        as a list of ``bool`` in the order of ``values``
+        """
+        args = list_or_args(values, args)
+        return self.execute_command('SMISMEMBER', name, *args)
+
     def smove(self, src, dst, value):
         """Move ``value`` from set ``src`` to set ``dst`` atomically"""
         return self.execute_command('SMOVE', src, dst, value)

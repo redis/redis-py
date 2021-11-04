@@ -21,13 +21,6 @@ def devenv(c):
 
 
 @task
-def cluster(c):
-    """Run all Redis Cluster tests."""
-    print("Starting RedisCluster tests")
-    run("tox -e cluster")
-
-
-@task
 def linters(c):
     """Run code linters"""
     run("tox -e linters")
@@ -48,7 +41,23 @@ def tests(c):
     with and without hiredis.
     """
     print("Starting Redis tests")
-    run("tox -e plain -e hiredis")
+    run("tox -e '{redis,cluster}'-'{plain,hiredis}'")
+
+
+@task
+def redis_tests(c):
+    """Run all Redis tests against the current python,
+    with and without hiredis."""
+    print("Starting Redis tests")
+    run("tox -e redis-'{plain,hiredis}'")
+
+
+@task
+def cluster_tests(c):
+    """Run all Redis Cluster tests against the current python,
+    with and without hiredis."""
+    print("Starting RedisCluster tests")
+    run("tox -e cluster-'{plain,hiredis}'")
 
 
 @task

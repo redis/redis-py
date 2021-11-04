@@ -15,6 +15,10 @@ logfile /redis.log
 dir /nodes/$PORT
 EOF
   redis-server /nodes/$PORT/redis.conf
+  if [ $? -ne 0 ]; then
+    echo "Redis failed to start, exiting."
+    exit 3
+  fi
   echo 127.0.0.1:$PORT >> /nodes/nodemap
 done
 echo yes | redis-cli --cluster create $(seq -f 127.0.0.1:%g 16379 16384) --cluster-replicas 1
