@@ -87,15 +87,30 @@ class AuthenticationWrongNumberOfArgsError(ResponseError):
 
 
 class RedisClusterException(Exception):
+    """
+    Base exception for the RedisCluster client
+    """
     pass
 
 
 class ClusterError(RedisError):
+    """
+    Cluster errors occurred multiple times, resulting in an exhaustion of the
+    command execution TTL
+    """
     pass
 
 
 class ClusterDownError(ClusterError, ResponseError):
-
+    """
+    Error indicated CLUSTERDOWN error received from cluster.
+    By default Redis Cluster nodes stop accepting queries if they detect there
+    is at least an hash slot uncovered (no available node is serving it).
+    This way if the cluster is partially down (for example a range of hash
+    slots are no longer covered) all the cluster becomes, eventually,
+    unavailable. It automatically returns available as soon as all the slots
+    are covered again.
+    """
     def __init__(self, resp):
         self.args = (resp,)
         self.message = resp
@@ -103,6 +118,11 @@ class ClusterDownError(ClusterError, ResponseError):
 
 class AskError(ResponseError):
     """
+    Error indicated ASK error received from cluster.
+    When a slot is set as MIGRATING, the node will accept all queries that are
+    about this hash slot, but only if the key in question exists, otherwise the
+    query is forwarded using a -ASK redirection to the node that is target of
+    the migration.
     src node: MIGRATING to dst node
         get > ASK error
         ask dst node > ASKING command
@@ -122,20 +142,38 @@ class AskError(ResponseError):
 
 
 class TryAgainError(ResponseError):
-
+    """
+    Error indicated TRYAGAIN error received from cluster.
+    Operations on keys that don't exist or are - during resharding - split
+    between the source and destination nodes, will generate a -TRYAGAIN error.
+    """
     def __init__(self, *args, **kwargs):
         pass
 
 
 class ClusterCrossSlotError(ResponseError):
+    """
+    Error indicated CROSSSLOT error received from cluster.
+    A CROSSSLOT error is generated when keys in a request don't hash to the
+    same slot.
+    """
     message = "Keys in request don't hash to the same slot"
 
 
 class MovedError(AskError):
+    """
+    Error indicated MOVED error received from cluster.
+    A request sent to a node that doesn't serve this key will be replayed with
+    a MOVED error that points to the correct node.
+    """
     pass
 
 
 class MasterDownError(ClusterDownError):
+    """
+    Error indicated MASTERDOWN error received from cluster.
+    Link with MASTER is down and replica-serve-stale-data is set to 'no'.
+    """
     pass
 
 

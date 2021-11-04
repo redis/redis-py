@@ -66,14 +66,13 @@ class CommandsParser:
         return keys
 
     def _get_moveable_keys(self, redis_conn, *args):
+        pieces = []
+        cmd_name = args[0]
+        # The command name should be splitted into separate arguments,
+        # e.g. 'MEMORY USAGE' will be splitted into ['MEMORY', 'USAGE']
+        pieces = pieces + cmd_name.split()
+        pieces = pieces + list(args[1:])
         try:
-            pieces = []
-            cmd_name = args[0]
-            for arg in cmd_name.split():
-                # The command name should be splitted into separate arguments,
-                # e.g. 'MEMORY USAGE' will be splitted into ['MEMORY', 'USAGE']
-                pieces.append(arg)
-            pieces += args[1:]
             keys = redis_conn.execute_command('COMMAND GETKEYS', *pieces)
         except ResponseError as e:
             message = e.__str__()

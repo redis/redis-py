@@ -5,18 +5,14 @@ from binascii import crc_hqx
 REDIS_CLUSTER_HASH_SLOTS = 16384
 
 __all__ = [
-    "crc16",
     "key_slot",
     "REDIS_CLUSTER_HASH_SLOTS"
 ]
 
 
-def crc16(data):
-    return crc_hqx(data, 0)
-
-
 def key_slot(key, bucket=REDIS_CLUSTER_HASH_SLOTS):
     """Calculate key slot for a given key.
+    See Keys distribution model in https://redis.io/topics/cluster-spec
     :param key - bytes
     :param bucket - int
     """
@@ -25,4 +21,4 @@ def key_slot(key, bucket=REDIS_CLUSTER_HASH_SLOTS):
         end = key.find(b"}", start + 1)
         if end > -1 and end != start + 1:
             key = key[start + 1: end]
-    return crc16(key) % bucket
+    return crc_hqx(key, 0) % bucket

@@ -641,6 +641,7 @@ class RedisCluster(ClusterCommands, object):
     def keyslot(self, key):
         """
         Calculate keyslot for a given key.
+        See Keys distribution model in https://redis.io/topics/cluster-spec
         """
         k = self.encoder.encode(key)
         return key_slot(k)

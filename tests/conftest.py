@@ -30,7 +30,7 @@ def pytest_addoption(parser):
                           " with loaded modules,"
                           " defaults to `%(default)s`")
 
-    parser.addoption('--cluster-nodes', default=default_cluster_nodes,
+    parser.addoption('--redis-cluster-nodes', default=default_cluster_nodes,
                      action="store",
                      help="The number of cluster nodes that need to be "
                           "available before the test can start,"
@@ -62,16 +62,25 @@ def pytest_sessionstart(session):
         REDIS_INFO["modules"] = info["modules"]
 
     if cluster_enabled:
-        cluster_nodes = session.config.getoption("--cluster-nodes")
+        cluster_nodes = session.config.getoption("--redis-cluster-nodes")
         wait_for_cluster_creation(redis_url, cluster_nodes)
 
 
 def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=20):
+    """
+    Waits for the cluster creation to complete.
+    As soon as all :cluster_nodes: nodes become available, the cluster will be
+    considered ready.
+    :param redis_url: the cluster's url, e.g. redis://localhost:16379/0
+    :param cluster_nodes: The number of nodes in the cluster
+    :param timeout: the amount of time to wait (in seconds)
+    """
     now = time.time()
-    timeout = now + timeout
+    end_time = now + timeout
+    client = None
     print("Waiting for {0} cluster nodes to become available".
           format(cluster_nodes))
-    while now < timeout:
+    while now < end_time:
         try:
             client = redis.RedisCluster.from_url(redis_url)
             if len(client.get_nodes()) == cluster_nodes:
@@ -81,6 +90,12 @@ def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=20):
             pass
         time.sleep(1)
         now = time.time()
+    if now >= end_time:
+        available_nodes = 0 if client is None else len(client.get_nodes())
+        raise RedisClusterException(
+            "The cluster did not become available after {0} seconds. "
+            "Only {1} nodes out of {2} are available".format(
+                timeout, available_nodes, cluster_nodes))
 
 
 def skip_if_server_version_lt(min_version):
@@ -133,14 +148,14 @@ def _get_client(cls, request, single_connection_client=True, flushdb=True,
         redis_url = request.config.getoption("--redis-url")
     else:
         redis_url = from_url
-    if REDIS_INFO["cluster_enabled"]:
-        client = redis.RedisCluster.from_url(redis_url, **kwargs)
-        single_connection_client = False
-    else:
+    if not REDIS_INFO["cluster_enabled"]:
         url_options = parse_url(redis_url)
         url_options.update(kwargs)
         pool = redis.ConnectionPool(**url_options)
         client = cls(connection_pool=pool)
+    else:
+        client = redis.RedisCluster.from_url(redis_url, **kwargs)
+        single_connection_client = False
     if single_connection_client:
         client = client.client()
     if request:
@@ -153,10 +168,10 @@ def _get_client(cls, request, single_connection_client=True, flushdb=True,
                     # just manually retry the flushdb
                     client.flushdb()
             client.close()
-            if REDIS_INFO["cluster_enabled"]:
-                client.disconnect_connection_pools()
-            else:
+            if not REDIS_INFO["cluster_enabled"]:
                 client.connection_pool.disconnect()
+            else:
+                client.disconnect_connection_pools()
         request.addfinalizer(teardown)
     return client
 

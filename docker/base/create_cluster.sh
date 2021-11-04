@@ -1,6 +1,6 @@
 #! /bin/bash
 mkdir -p /nodes
-echo -n > /nodes/nodemap
+touch /nodes/nodemap
 for PORT in $(seq 16379 16384); do
   mkdir -p /nodes/$PORT
   if [[ -e /redis.conf ]]; then
@@ -10,6 +10,7 @@ for PORT in $(seq 16379 16384); do
   fi
   cat << EOF >> /nodes/$PORT/redis.conf
 port $PORT
+cluster-enabled yes
 daemonize yes
 logfile /redis.log
 dir /nodes/$PORT

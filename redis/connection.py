@@ -571,6 +571,11 @@ class Connection:
         self._connect_callbacks = []
 
     def set_parser(self, parser_class):
+        """
+        Creates a new instance of parser_class with socket size:
+        _socket_read_size and assigns it to the parser for the connection
+        :param parser_class: The required parser class
+        """
         self._parser = parser_class(socket_read_size=self._socket_read_size)
 
     def connect(self):

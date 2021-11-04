@@ -477,8 +477,8 @@ def _parse_node_line(line):
 
 def parse_cluster_nodes(response, **options):
     """
-    @see: http://redis.io/commands/cluster-nodes  # string
-    @see: http://redis.io/commands/cluster-replicas # list of string
+    @see: https://redis.io/commands/cluster-nodes  # string
+    @see: https://redis.io/commands/cluster-replicas # list of string
     """
     if isinstance(response, str):
         response = response.splitlines()
@@ -527,7 +527,7 @@ def parse_command(response, **options):
         cmd_dict = {}
         cmd_name = str_if_bytes(command[0])
         cmd_dict['name'] = cmd_name
-        cmd_dict['arity'] = str_if_bytes(command[1])
+        cmd_dict['arity'] = int(command[1])
         cmd_dict['flags'] = [str_if_bytes(flag) for flag in command[2]]
         cmd_dict['first_key_pos'] = command[3]
         cmd_dict['last_key_pos'] = command[4]
