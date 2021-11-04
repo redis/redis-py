@@ -1585,6 +1585,13 @@ class TestRedisCommands:
         r.sadd('a', '1', '2', '3')
         assert r.smembers('a') == {b'1', b'2', b'3'}
 
+    @skip_if_server_version_lt('6.2.0')
+    def test_smismember(self, r):
+        r.sadd('a', '1', '2', '3')
+        result_list = [True, False, True, True]
+        assert r.smismember('a', '1', '4', '2', '3') == result_list
+        assert r.smismember('a', ['1', '4', '2', '3']) == result_list
+
     def test_smove(self, r):
         r.sadd('a', 'a1', 'a2')
         r.sadd('b', 'b1', 'b2')
