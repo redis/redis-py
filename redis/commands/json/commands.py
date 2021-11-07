@@ -1,5 +1,5 @@
 from .path import Path
-from .helpers import decode_dict_keys
+from .decoders import decode_dict_keys
 from deprecated import deprecated
 from redis.exceptions import DataError
 
@@ -192,7 +192,7 @@ class JSONCommands:
         the key name, the path is determined to be the first. If a single
         option is passed, then the rootpath (i.e Path.rootPath()) is used.
         """
-        pieces = [name, str(path), value]
+        pieces = [name, str(path), self._encode(value)]
         return self.execute_command(
             "JSON.STRAPPEND", *pieces
         )
