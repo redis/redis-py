@@ -10,6 +10,7 @@ import os
 import socket
 import threading
 import warnings
+import weakref
 
 from redis.exceptions import (
     AuthenticationError,
@@ -562,7 +563,7 @@ class Connection:
             pass
 
     def register_connect_callback(self, callback):
-        self._connect_callbacks.append(callback)
+        self._connect_callbacks.append(weakref.WeakMethod(callback))
 
     def clear_connect_callbacks(self):
         self._connect_callbacks = []
@@ -588,8 +589,10 @@ class Connection:
 
         # run any user callbacks. right now the only internal callback
         # is for pubsub channel/pattern resubscription
-        for callback in self._connect_callbacks:
-            callback(self)
+        for ref in self._connect_callbacks:
+            callback = ref()
+            if callback:
+                callback(self)
 
     def _connect(self):
         "Create a TCP socket connection"
