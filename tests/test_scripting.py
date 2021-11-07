@@ -2,6 +2,7 @@ import pytest
 
 from redis import exceptions
 
+
 multiply_script = """
 local value = redis.call('GET', KEYS[1])
 value = tonumber(value)

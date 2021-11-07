@@ -991,6 +991,7 @@ def test_debug_dollar(client):
     assert client.json().debug("MEMORY", "non_existing_doc", "$..a") == []
 
 
+@pytest.mark.redismod
 def test_resp_dollar(client):
 
     data = {
@@ -1137,6 +1138,7 @@ def test_resp_dollar(client):
     assert client.json().resp("non_existing_doc", "$..a") is None
 
 
+@pytest.mark.redismod
 def test_arrindex_dollar(client):
 
     client.json().set(
@@ -1377,6 +1379,7 @@ def test_arrindex_dollar(client):
         "None") == 0
 
 
+@pytest.mark.redismod
 def test_decoders_and_unstring():
     assert unstring("4") == 4
     assert unstring("45.55") == 45.55

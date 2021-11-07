@@ -53,6 +53,7 @@ def sentinel(request, cluster):
     return Sentinel([('foo', 26379), ('bar', 26379)])
 
 
+@pytest.mark.onlynoncluster
 class SentinelTestCluster:
     def __init__(self, servisentinel_ce_name='mymaster', ip='127.0.0.1',
                  port=6379):
