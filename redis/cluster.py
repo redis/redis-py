@@ -49,6 +49,13 @@ def get_connection(redis_node, *args, **options):
     )
 
 
+def parse_scan_result(command, res, **options):
+    keys_list = []
+    for primary_res in res.values():
+        keys_list += primary_res[1]
+    return 0, keys_list
+
+
 def parse_pubsub_numsub(command, res, **options):
     numsub_d = OrderedDict()
     for numsub_tups in res.values():
@@ -211,7 +218,6 @@ class RedisCluster(ClusterCommands, object):
                 "CLIENT LIST",
                 "CLIENT SETNAME",
                 "CLIENT GETNAME",
-                "CONFIG GET",
                 "CONFIG SET",
                 "CONFIG REWRITE",
                 "CONFIG RESETSTAT",
@@ -237,7 +243,6 @@ class RedisCluster(ClusterCommands, object):
                 "SLOWLOG LEN",
                 "SLOWLOG RESET",
                 "WAIT",
-                "TIME",
                 "SAVE",
                 "MEMORY PURGE",
                 "MEMORY MALLOC-STATS",
@@ -270,10 +275,14 @@ class RedisCluster(ClusterCommands, object):
                 "CLUSTER SLOTS",
                 "CLUSTER COUNT-FAILURE-REPORTS",
                 "CLUSTER KEYSLOT",
-                "RANDOMKEY",
                 "COMMAND",
+                "COMMAND COUNT",
                 "COMMAND GETKEYS",
+                "CONFIG GET",
                 "DEBUG",
+                "RANDOMKEY",
+                "STRALGO",
+                "TIME",
             ],
             RANDOM,
         ),
@@ -341,7 +350,10 @@ class RedisCluster(ClusterCommands, object):
             else res),
         list_keys_to_dict([
             "CLIENT UNBLOCK",
-        ], lambda command, res: 1 if sum(res.values()) > 0 else 0)
+        ], lambda command, res: 1 if sum(res.values()) > 0 else 0),
+        list_keys_to_dict([
+            "SCAN",
+        ], parse_scan_result)
     )
 
     def __init__(

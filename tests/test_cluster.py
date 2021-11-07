@@ -1,5 +1,6 @@
-import pytest
+import binascii
 import datetime
+import pytest
 import warnings
 
 from time import sleep
@@ -13,6 +14,7 @@ from redis.utils import str_if_bytes
 from redis.exceptions import (
     AskError,
     ClusterDownError,
+    DataError,
     MovedError,
     RedisClusterException,
     RedisError
@@ -21,7 +23,8 @@ from redis.exceptions import (
 from redis.crc import key_slot
 from .conftest import (
     _get_client,
-    skip_if_server_version_lt
+    skip_if_server_version_lt,
+    skip_unless_arch_bits
 )
 
 default_host = "127.0.0.1"
@@ -58,6 +61,7 @@ def slowlog(request, r):
     def cleanup():
         r.config_set('slowlog-log-slower-than', old_slower_than_value)
         r.config_set('slowlog-max-len', old_max_legnth_value)
+
     request.addfinalizer(cleanup)
 
     # Set the new values
@@ -601,6 +605,19 @@ class TestClusterRedisCommands:
     def test_config_set(self, r):
         assert r.config_set('slowlog-log-slower-than', 0)
 
+    def test_cluster_config_resetstat(self, r):
+        r.ping()
+        all_info = r.info()
+        prior_commands_processed = -1
+        for node_info in all_info.values():
+            prior_commands_processed = node_info['total_commands_processed']
+            assert prior_commands_processed >= 1
+        r.config_resetstat()
+        all_info = r.info()
+        for node_info in all_info.values():
+            reset_commands_processed = node_info['total_commands_processed']
+            assert reset_commands_processed < prior_commands_processed
+
     def test_client_setname(self, r):
         r.client_setname('redis_py_test')
         res = r.client_getname()
@@ -983,19 +1000,12 @@ class TestClusterRedisCommands:
         with pytest.raises(NotImplementedError):
             r.memory_doctor()
 
-    def test_object(self, r):
-        r['a'] = 'foo'
-        assert isinstance(r.object('refcount', 'a'), int)
-        assert isinstance(r.object('idletime', 'a'), int)
-        assert r.object('encoding', 'a') in (b'raw', b'embstr')
-        assert r.object('idletime', 'invalid-key') is None
-
     def test_lastsave(self, r):
         node = r.get_primaries()[0]
         assert isinstance(r.lastsave(target_nodes=node),
                           datetime.datetime)
 
-    def test_echo(self, r):
+    def test_cluster_echo(self, r):
         node = r.get_primaries()[0]
         assert r.echo('foo bar', node) == b'foo bar'
 
@@ -1078,6 +1088,449 @@ class TestClusterRedisCommands:
                    if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
         assert len(clients) == 1
         assert clients[0].get('name') == 'redis-py-c1'
+
+    @skip_if_server_version_lt('2.6.0')
+    def test_cluster_bitop_not_empty_string(self, r):
+        r['{foo}a'] = ''
+        r.bitop('not', '{foo}r', '{foo}a')
+        assert r.get('{foo}r') is None
+
+    @skip_if_server_version_lt('2.6.0')
+    def test_cluster_bitop_not(self, r):
+        test_str = b'\xAA\x00\xFF\x55'
+        correct = ~0xAA00FF55 & 0xFFFFFFFF
+        r['{foo}a'] = test_str
+        r.bitop('not', '{foo}r', '{foo}a')
+        assert int(binascii.hexlify(r['{foo}r']), 16) == correct
+
+    @skip_if_server_version_lt('2.6.0')
+    def test_cluster_bitop_not_in_place(self, r):
+        test_str = b'\xAA\x00\xFF\x55'
+        correct = ~0xAA00FF55 & 0xFFFFFFFF
+        r['{foo}a'] = test_str
+        r.bitop('not', '{foo}a', '{foo}a')
+        assert int(binascii.hexlify(r['{foo}a']), 16) == correct
+
+    @skip_if_server_version_lt('2.6.0')
+    def test_cluster_bitop_single_string(self, r):
+        test_str = b'\x01\x02\xFF'
+        r['{foo}a'] = test_str
+        r.bitop('and', '{foo}res1', '{foo}a')
+        r.bitop('or', '{foo}res2', '{foo}a')
+        r.bitop('xor', '{foo}res3', '{foo}a')
+        assert r['{foo}res1'] == test_str
+        assert r['{foo}res2'] == test_str
+        assert r['{foo}res3'] == test_str
+
+    @skip_if_server_version_lt('2.6.0')
+    def test_cluster_bitop_string_operands(self, r):
+        r['{foo}a'] = b'\x01\x02\xFF\xFF'
+        r['{foo}b'] = b'\x01\x02\xFF'
+        r.bitop('and', '{foo}res1', '{foo}a', '{foo}b')
+        r.bitop('or', '{foo}res2', '{foo}a', '{foo}b')
+        r.bitop('xor', '{foo}res3', '{foo}a', '{foo}b')
+        assert int(binascii.hexlify(r['{foo}res1']), 16) == 0x0102FF00
+        assert int(binascii.hexlify(r['{foo}res2']), 16) == 0x0102FFFF
+        assert int(binascii.hexlify(r['{foo}res3']), 16) == 0x000000FF
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_cluster_copy(self, r):
+        assert r.copy("{foo}a", "{foo}b") == 0
+        r.set("{foo}a", "bar")
+        assert r.copy("{foo}a", "{foo}b") == 1
+        assert r.get("{foo}a") == b"bar"
+        assert r.get("{foo}b") == b"bar"
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_cluster_copy_and_replace(self, r):
+        r.set("{foo}a", "foo1")
+        r.set("{foo}b", "foo2")
+        assert r.copy("{foo}a", "{foo}b") == 0
+        assert r.copy("{foo}a", "{foo}b", replace=True) == 1
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_cluster_lmove(self, r):
+        r.rpush('{foo}a', 'one', 'two', 'three', 'four')
+        assert r.lmove('{foo}a', '{foo}b')
+        assert r.lmove('{foo}a', '{foo}b', 'right', 'left')
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_cluster_blmove(self, r):
+        r.rpush('{foo}a', 'one', 'two', 'three', 'four')
+        assert r.blmove('{foo}a', '{foo}b', 5)
+        assert r.blmove('{foo}a', '{foo}b', 1, 'RIGHT', 'LEFT')
+
+    def test_cluster_msetnx(self, r):
+        d = {'{foo}a': b'1', '{foo}b': b'2', '{foo}c': b'3'}
+        assert r.msetnx(d)
+        d2 = {'{foo}a': b'x', '{foo}d': b'4'}
+        assert not r.msetnx(d2)
+        for k, v in d.items():
+            assert r[k] == v
+        assert r.get('{foo}d') is None
+
+    def test_cluster_rename(self, r):
+        r['{foo}a'] = '1'
+        assert r.rename('{foo}a', '{foo}b')
+        assert r.get('{foo}a') is None
+        assert r['{foo}b'] == b'1'
+
+    def test_cluster_renamenx(self, r):
+        r['{foo}a'] = '1'
+        r['{foo}b'] = '2'
+        assert not r.renamenx('{foo}a', '{foo}b')
+        assert r['{foo}a'] == b'1'
+        assert r['{foo}b'] == b'2'
+
+    # LIST COMMANDS
+    def test_cluster_blpop(self, r):
+        r.rpush('{foo}a', '1', '2')
+        r.rpush('{foo}b', '3', '4')
+        assert r.blpop(['{foo}b', '{foo}a'], timeout=1) == (b'{foo}b', b'3')
+        assert r.blpop(['{foo}b', '{foo}a'], timeout=1) == (b'{foo}b', b'4')
+        assert r.blpop(['{foo}b', '{foo}a'], timeout=1) == (b'{foo}a', b'1')
+        assert r.blpop(['{foo}b', '{foo}a'], timeout=1) == (b'{foo}a', b'2')
+        assert r.blpop(['{foo}b', '{foo}a'], timeout=1) is None
+        r.rpush('{foo}c', '1')
+        assert r.blpop('{foo}c', timeout=1) == (b'{foo}c', b'1')
+
+    def test_cluster_brpop(self, r):
+        r.rpush('{foo}a', '1', '2')
+        r.rpush('{foo}b', '3', '4')
+        assert r.brpop(['{foo}b', '{foo}a'], timeout=1) == (b'{foo}b', b'4')
+        assert r.brpop(['{foo}b', '{foo}a'], timeout=1) == (b'{foo}b', b'3')
+        assert r.brpop(['{foo}b', '{foo}a'], timeout=1) == (b'{foo}a', b'2')
+        assert r.brpop(['{foo}b', '{foo}a'], timeout=1) == (b'{foo}a', b'1')
+        assert r.brpop(['{foo}b', '{foo}a'], timeout=1) is None
+        r.rpush('{foo}c', '1')
+        assert r.brpop('{foo}c', timeout=1) == (b'{foo}c', b'1')
+
+    def test_cluster_brpoplpush(self, r):
+        r.rpush('{foo}a', '1', '2')
+        r.rpush('{foo}b', '3', '4')
+        assert r.brpoplpush('{foo}a', '{foo}b') == b'2'
+        assert r.brpoplpush('{foo}a', '{foo}b') == b'1'
+        assert r.brpoplpush('{foo}a', '{foo}b', timeout=1) is None
+        assert r.lrange('{foo}a', 0, -1) == []
+        assert r.lrange('{foo}b', 0, -1) == [b'1', b'2', b'3', b'4']
+
+    def test_cluster_brpoplpush_empty_string(self, r):
+        r.rpush('{foo}a', '')
+        assert r.brpoplpush('{foo}a', '{foo}b') == b''
+
+    def test_cluster_rpoplpush(self, r):
+        r.rpush('{foo}a', 'a1', 'a2', 'a3')
+        r.rpush('{foo}b', 'b1', 'b2', 'b3')
+        assert r.rpoplpush('{foo}a', '{foo}b') == b'a3'
+        assert r.lrange('{foo}a', 0, -1) == [b'a1', b'a2']
+        assert r.lrange('{foo}b', 0, -1) == [b'a3', b'b1', b'b2', b'b3']
+
+    def test_cluster_sdiff(self, r):
+        r.sadd('{foo}a', '1', '2', '3')
+        assert r.sdiff('{foo}a', '{foo}b') == {b'1', b'2', b'3'}
+        r.sadd('{foo}b', '2', '3')
+        assert r.sdiff('{foo}a', '{foo}b') == {b'1'}
+
+    def test_cluster_sdiffstore(self, r):
+        r.sadd('{foo}a', '1', '2', '3')
+        assert r.sdiffstore('{foo}c', '{foo}a', '{foo}b') == 3
+        assert r.smembers('{foo}c') == {b'1', b'2', b'3'}
+        r.sadd('{foo}b', '2', '3')
+        assert r.sdiffstore('{foo}c', '{foo}a', '{foo}b') == 1
+        assert r.smembers('{foo}c') == {b'1'}
+
+    def test_cluster_sinter(self, r):
+        r.sadd('{foo}a', '1', '2', '3')
+        assert r.sinter('{foo}a', '{foo}b') == set()
+        r.sadd('{foo}b', '2', '3')
+        assert r.sinter('{foo}a', '{foo}b') == {b'2', b'3'}
+
+    def test_cluster_sinterstore(self, r):
+        r.sadd('{foo}a', '1', '2', '3')
+        assert r.sinterstore('{foo}c', '{foo}a', '{foo}b') == 0
+        assert r.smembers('{foo}c') == set()
+        r.sadd('{foo}b', '2', '3')
+        assert r.sinterstore('{foo}c', '{foo}a', '{foo}b') == 2
+        assert r.smembers('{foo}c') == {b'2', b'3'}
+
+    def test_cluster_smove(self, r):
+        r.sadd('{foo}a', 'a1', 'a2')
+        r.sadd('{foo}b', 'b1', 'b2')
+        assert r.smove('{foo}a', '{foo}b', 'a1')
+        assert r.smembers('{foo}a') == {b'a2'}
+        assert r.smembers('{foo}b') == {b'b1', b'b2', b'a1'}
+
+    def test_cluster_sunion(self, r):
+        r.sadd('{foo}a', '1', '2')
+        r.sadd('{foo}b', '2', '3')
+        assert r.sunion('{foo}a', '{foo}b') == {b'1', b'2', b'3'}
+
+    def test_cluster_sunionstore(self, r):
+        r.sadd('{foo}a', '1', '2')
+        r.sadd('{foo}b', '2', '3')
+        assert r.sunionstore('{foo}c', '{foo}a', '{foo}b') == 3
+        assert r.smembers('{foo}c') == {b'1', b'2', b'3'}
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_cluster_zdiff(self, r):
+        r.zadd('{foo}a', {'a1': 1, 'a2': 2, 'a3': 3})
+        r.zadd('{foo}b', {'a1': 1, 'a2': 2})
+        assert r.zdiff(['{foo}a', '{foo}b']) == [b'a3']
+        assert r.zdiff(['{foo}a', '{foo}b'], withscores=True) == [b'a3', b'3']
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_cluster_zdiffstore(self, r):
+        r.zadd('{foo}a', {'a1': 1, 'a2': 2, 'a3': 3})
+        r.zadd('{foo}b', {'a1': 1, 'a2': 2})
+        assert r.zdiffstore("{foo}out", ['{foo}a', '{foo}b'])
+        assert r.zrange("{foo}out", 0, -1) == [b'a3']
+        assert r.zrange("{foo}out", 0, -1, withscores=True) == [(b'a3', 3.0)]
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_cluster_zinter(self, r):
+        r.zadd('{foo}a', {'a1': 1, 'a2': 2, 'a3': 1})
+        r.zadd('{foo}b', {'a1': 2, 'a2': 2, 'a3': 2})
+        r.zadd('{foo}c', {'a1': 6, 'a3': 5, 'a4': 4})
+        assert r.zinter(['{foo}a', '{foo}b', '{foo}c']) == [b'a3', b'a1']
+        # invalid aggregation
+        with pytest.raises(DataError):
+            r.zinter(['{foo}a', '{foo}b', '{foo}c'],
+                     aggregate='foo', withscores=True)
+        # aggregate with SUM
+        assert r.zinter(['{foo}a', '{foo}b', '{foo}c'], withscores=True) \
+               == [(b'a3', 8), (b'a1', 9)]
+        # aggregate with MAX
+        assert r.zinter(['{foo}a', '{foo}b', '{foo}c'], aggregate='MAX',
+                        withscores=True) \
+               == [(b'a3', 5), (b'a1', 6)]
+        # aggregate with MIN
+        assert r.zinter(['{foo}a', '{foo}b', '{foo}c'], aggregate='MIN',
+                        withscores=True) \
+               == [(b'a1', 1), (b'a3', 1)]
+        # with weights
+        assert r.zinter({'{foo}a': 1, '{foo}b': 2, '{foo}c': 3},
+                        withscores=True) \
+               == [(b'a3', 20), (b'a1', 23)]
+
+    def test_cluster_zinterstore_sum(self, r):
+        r.zadd('{foo}a', {'a1': 1, 'a2': 1, 'a3': 1})
+        r.zadd('{foo}b', {'a1': 2, 'a2': 2, 'a3': 2})
+        r.zadd('{foo}c', {'a1': 6, 'a3': 5, 'a4': 4})
+        assert r.zinterstore('{foo}d', ['{foo}a', '{foo}b', '{foo}c']) == 2
+        assert r.zrange('{foo}d', 0, -1, withscores=True) == \
+               [(b'a3', 8), (b'a1', 9)]
+
+    def test_cluster_zinterstore_max(self, r):
+        r.zadd('{foo}a', {'a1': 1, 'a2': 1, 'a3': 1})
+        r.zadd('{foo}b', {'a1': 2, 'a2': 2, 'a3': 2})
+        r.zadd('{foo}c', {'a1': 6, 'a3': 5, 'a4': 4})
+        assert r.zinterstore(
+            '{foo}d', ['{foo}a', '{foo}b', '{foo}c'], aggregate='MAX') == 2
+        assert r.zrange('{foo}d', 0, -1, withscores=True) == \
+               [(b'a3', 5), (b'a1', 6)]
+
+    def test_cluster_zinterstore_min(self, r):
+        r.zadd('{foo}a', {'a1': 1, 'a2': 2, 'a3': 3})
+        r.zadd('{foo}b', {'a1': 2, 'a2': 3, 'a3': 5})
+        r.zadd('{foo}c', {'a1': 6, 'a3': 5, 'a4': 4})
+        assert r.zinterstore(
+            '{foo}d', ['{foo}a', '{foo}b', '{foo}c'], aggregate='MIN') == 2
+        assert r.zrange('{foo}d', 0, -1, withscores=True) == \
+               [(b'a1', 1), (b'a3', 3)]
+
+    def test_cluster_zinterstore_with_weight(self, r):
+        r.zadd('{foo}a', {'a1': 1, 'a2': 1, 'a3': 1})
+        r.zadd('{foo}b', {'a1': 2, 'a2': 2, 'a3': 2})
+        r.zadd('{foo}c', {'a1': 6, 'a3': 5, 'a4': 4})
+        assert r.zinterstore(
+            '{foo}d', {'{foo}a': 1, '{foo}b': 2, '{foo}c': 3}) == 2
+        assert r.zrange('{foo}d', 0, -1, withscores=True) == \
+               [(b'a3', 20), (b'a1', 23)]
+
+    @skip_if_server_version_lt('4.9.0')
+    def test_cluster_bzpopmax(self, r):
+        r.zadd('{foo}a', {'a1': 1, 'a2': 2})
+        r.zadd('{foo}b', {'b1': 10, 'b2': 20})
+        assert r.bzpopmax(['{foo}b', '{foo}a'], timeout=1) == (
+            b'{foo}b', b'b2', 20)
+        assert r.bzpopmax(['{foo}b', '{foo}a'], timeout=1) == (
+            b'{foo}b', b'b1', 10)
+        assert r.bzpopmax(['{foo}b', '{foo}a'], timeout=1) == (
+            b'{foo}a', b'a2', 2)
+        assert r.bzpopmax(['{foo}b', '{foo}a'], timeout=1) == (
+            b'{foo}a', b'a1', 1)
+        assert r.bzpopmax(['{foo}b', '{foo}a'], timeout=1) is None
+        r.zadd('{foo}c', {'c1': 100})
+        assert r.bzpopmax('{foo}c', timeout=1) == (b'{foo}c', b'c1', 100)
+
+    @skip_if_server_version_lt('4.9.0')
+    def test_cluster_bzpopmin(self, r):
+        r.zadd('{foo}a', {'a1': 1, 'a2': 2})
+        r.zadd('{foo}b', {'b1': 10, 'b2': 20})
+        assert r.bzpopmin(['{foo}b', '{foo}a'], timeout=1) == (
+            b'{foo}b', b'b1', 10)
+        assert r.bzpopmin(['{foo}b', '{foo}a'], timeout=1) == (
+            b'{foo}b', b'b2', 20)
+        assert r.bzpopmin(['{foo}b', '{foo}a'], timeout=1) == (
+            b'{foo}a', b'a1', 1)
+        assert r.bzpopmin(['{foo}b', '{foo}a'], timeout=1) == (
+            b'{foo}a', b'a2', 2)
+        assert r.bzpopmin(['{foo}b', '{foo}a'], timeout=1) is None
+        r.zadd('{foo}c', {'c1': 100})
+        assert r.bzpopmin('{foo}c', timeout=1) == (b'{foo}c', b'c1', 100)
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_cluster_zrangestore(self, r):
+        r.zadd('{foo}a', {'a1': 1, 'a2': 2, 'a3': 3})
+        assert r.zrangestore('{foo}b', '{foo}a', 0, 1)
+        assert r.zrange('{foo}b', 0, -1) == [b'a1', b'a2']
+        assert r.zrangestore('{foo}b', '{foo}a', 1, 2)
+        assert r.zrange('{foo}b', 0, -1) == [b'a2', b'a3']
+        assert r.zrange('{foo}b', 0, -1, withscores=True) == \
+               [(b'a2', 2), (b'a3', 3)]
+        # reversed order
+        assert r.zrangestore('{foo}b', '{foo}a', 1, 2, desc=True)
+        assert r.zrange('{foo}b', 0, -1) == [b'a1', b'a2']
+        # by score
+        assert r.zrangestore('{foo}b', '{foo}a', 2, 1, byscore=True,
+                             offset=0, num=1, desc=True)
+        assert r.zrange('{foo}b', 0, -1) == [b'a2']
+        # by lex
+        assert r.zrangestore('{foo}b', '{foo}a', '[a2', '(a3', bylex=True,
+                             offset=0, num=1)
+        assert r.zrange('{foo}b', 0, -1) == [b'a2']
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_cluster_zunion(self, r):
+        r.zadd('{foo}a', {'a1': 1, 'a2': 1, 'a3': 1})
+        r.zadd('{foo}b', {'a1': 2, 'a2': 2, 'a3': 2})
+        r.zadd('{foo}c', {'a1': 6, 'a3': 5, 'a4': 4})
+        # sum
+        assert r.zunion(['{foo}a', '{foo}b', '{foo}c']) == \
+               [b'a2', b'a4', b'a3', b'a1']
+        assert r.zunion(['{foo}a', '{foo}b', '{foo}c'], withscores=True) == \
+               [(b'a2', 3), (b'a4', 4), (b'a3', 8), (b'a1', 9)]
+        # max
+        assert r.zunion(['{foo}a', '{foo}b', '{foo}c'], aggregate='MAX',
+                        withscores=True) \
+               == [(b'a2', 2), (b'a4', 4), (b'a3', 5), (b'a1', 6)]
+        # min
+        assert r.zunion(['{foo}a', '{foo}b', '{foo}c'], aggregate='MIN',
+                        withscores=True) \
+               == [(b'a1', 1), (b'a2', 1), (b'a3', 1), (b'a4', 4)]
+        # with weight
+        assert r.zunion({'{foo}a': 1, '{foo}b': 2, '{foo}c': 3},
+                        withscores=True) \
+               == [(b'a2', 5), (b'a4', 12), (b'a3', 20), (b'a1', 23)]
+
+    def test_cluster_zunionstore_sum(self, r):
+        r.zadd('{foo}a', {'a1': 1, 'a2': 1, 'a3': 1})
+        r.zadd('{foo}b', {'a1': 2, 'a2': 2, 'a3': 2})
+        r.zadd('{foo}c', {'a1': 6, 'a3': 5, 'a4': 4})
+        assert r.zunionstore('{foo}d', ['{foo}a', '{foo}b', '{foo}c']) == 4
+        assert r.zrange('{foo}d', 0, -1, withscores=True) == \
+               [(b'a2', 3), (b'a4', 4), (b'a3', 8), (b'a1', 9)]
+
+    def test_cluster_zunionstore_max(self, r):
+        r.zadd('{foo}a', {'a1': 1, 'a2': 1, 'a3': 1})
+        r.zadd('{foo}b', {'a1': 2, 'a2': 2, 'a3': 2})
+        r.zadd('{foo}c', {'a1': 6, 'a3': 5, 'a4': 4})
+        assert r.zunionstore(
+            '{foo}d', ['{foo}a', '{foo}b', '{foo}c'], aggregate='MAX') == 4
+        assert r.zrange('{foo}d', 0, -1, withscores=True) == \
+               [(b'a2', 2), (b'a4', 4), (b'a3', 5), (b'a1', 6)]
+
+    def test_cluster_zunionstore_min(self, r):
+        r.zadd('{foo}a', {'a1': 1, 'a2': 2, 'a3': 3})
+        r.zadd('{foo}b', {'a1': 2, 'a2': 2, 'a3': 4})
+        r.zadd('{foo}c', {'a1': 6, 'a3': 5, 'a4': 4})
+        assert r.zunionstore(
+            '{foo}d', ['{foo}a', '{foo}b', '{foo}c'], aggregate='MIN') == 4
+        assert r.zrange('{foo}d', 0, -1, withscores=True) == \
+               [(b'a1', 1), (b'a2', 2), (b'a3', 3), (b'a4', 4)]
+
+    def test_cluster_zunionstore_with_weight(self, r):
+        r.zadd('{foo}a', {'a1': 1, 'a2': 1, 'a3': 1})
+        r.zadd('{foo}b', {'a1': 2, 'a2': 2, 'a3': 2})
+        r.zadd('{foo}c', {'a1': 6, 'a3': 5, 'a4': 4})
+        assert r.zunionstore(
+            '{foo}d', {'{foo}a': 1, '{foo}b': 2, '{foo}c': 3}) == 4
+        assert r.zrange('{foo}d', 0, -1, withscores=True) == \
+               [(b'a2', 5), (b'a4', 12), (b'a3', 20), (b'a1', 23)]
+
+    @skip_if_server_version_lt('2.8.9')
+    def test_cluster_pfcount(self, r):
+        members = {b'1', b'2', b'3'}
+        r.pfadd('{foo}a', *members)
+        assert r.pfcount('{foo}a') == len(members)
+        members_b = {b'2', b'3', b'4'}
+        r.pfadd('{foo}b', *members_b)
+        assert r.pfcount('{foo}b') == len(members_b)
+        assert r.pfcount('{foo}a', '{foo}b') == len(members_b.union(members))
+
+    @skip_if_server_version_lt('2.8.9')
+    def test_cluster_pfmerge(self, r):
+        mema = {b'1', b'2', b'3'}
+        memb = {b'2', b'3', b'4'}
+        memc = {b'5', b'6', b'7'}
+        r.pfadd('{foo}a', *mema)
+        r.pfadd('{foo}b', *memb)
+        r.pfadd('{foo}c', *memc)
+        r.pfmerge('{foo}d', '{foo}c', '{foo}a')
+        assert r.pfcount('{foo}d') == 6
+        r.pfmerge('{foo}d', '{foo}b')
+        assert r.pfcount('{foo}d') == 7
+
+    def test_cluster_sort_store(self, r):
+        r.rpush('{foo}a', '2', '3', '1')
+        assert r.sort('{foo}a', store='{foo}sorted_values') == 3
+        assert r.lrange('{foo}sorted_values', 0, -1) == [b'1', b'2', b'3']
+
+    # GEO COMMANDS
+    @skip_if_server_version_lt('6.2.0')
+    def test_cluster_geosearchstore(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') + \
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('{foo}barcelona', values)
+        r.geosearchstore('{foo}places_barcelona', '{foo}barcelona',
+                         longitude=2.191, latitude=41.433, radius=1000)
+        assert r.zrange('{foo}places_barcelona', 0, -1) == [b'place1']
+
+    @skip_unless_arch_bits(64)
+    @skip_if_server_version_lt('6.2.0')
+    def test_geosearchstore_dist(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') + \
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('{foo}barcelona', values)
+        r.geosearchstore('{foo}places_barcelona', '{foo}barcelona',
+                         longitude=2.191, latitude=41.433,
+                         radius=1000, storedist=True)
+        # instead of save the geo score, the distance is saved.
+        assert r.zscore('{foo}places_barcelona', 'place1') == 88.05060698409301
+
+    @skip_if_server_version_lt('3.2.0')
+    def test_cluster_georadius_store(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') + \
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('{foo}barcelona', values)
+        r.georadius('{foo}barcelona', 2.191, 41.433,
+                    1000, store='{foo}places_barcelona')
+        assert r.zrange('{foo}places_barcelona', 0, -1) == [b'place1']
+
+    @skip_unless_arch_bits(64)
+    @skip_if_server_version_lt('3.2.0')
+    def test_cluster_georadius_store_dist(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') + \
+                 (2.1873744593677, 41.406342043777, 'place2')
+
+        r.geoadd('{foo}barcelona', values)
+        r.georadius('{foo}barcelona', 2.191, 41.433, 1000,
+                    store_dist='{foo}places_barcelona')
+        # instead of save the geo score, the distance is saved.
+        assert r.zscore('{foo}places_barcelona', 'place1') == 88.05060698409301
 
 
 @pytest.mark.onlycluster

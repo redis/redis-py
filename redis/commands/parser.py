@@ -33,18 +33,21 @@ class CommandsParser:
             return None
 
         cmd_name = args[0].lower()
-        cmd_name_split = cmd_name.split()
-        if len(cmd_name_split) > 1:
-            # we need to take only the main command, e.g. 'memory' for
-            # 'memory usage'
-            cmd_name = cmd_name_split[0]
         if cmd_name not in self.commands:
-            # We'll try to reinitialize the commands cache, if the engine
-            # version has changed, the commands may not be current
-            self.initialize(redis_conn)
-            if cmd_name not in self.commands:
-                raise RedisError("{0} command doesn't exist in Redis commands".
-                                 format(cmd_name.upper()))
+            # try to split the command name and to take only the main command,
+            # e.g. 'memory' for 'memory usage'
+            cmd_name_split = cmd_name.split()
+            cmd_name = cmd_name_split[0]
+            if cmd_name in self.commands:
+                # save the splitted command to args
+                args = cmd_name_split + list(args[1:])
+            else:
+                # We'll try to reinitialize the commands cache, if the engine
+                # version has changed, the commands may not be current
+                self.initialize(redis_conn)
+                if cmd_name not in self.commands:
+                    raise RedisError("{0} command doesn't exist in Redis "
+                                     "commands".format(cmd_name.upper()))
 
         command = self.commands.get(cmd_name)
         if 'movablekeys' in command['flags']:
@@ -57,8 +60,8 @@ class CommandsParser:
                 # The command doesn't have keys in it
                 return None
             last_key_pos = command['last_key_pos']
-            if last_key_pos == -1:
-                last_key_pos = len(args) - 1
+            if last_key_pos < 0:
+                last_key_pos = len(args) - abs(last_key_pos)
             keys_pos = list(range(command['first_key_pos'], last_key_pos + 1,
                                   command['step_count']))
             keys = [args[pos] for pos in keys_pos]
@@ -95,13 +98,21 @@ class CommandsParser:
             return None
         args = [str_if_bytes(arg) for arg in args]
         command = args[0].upper()
-        if command in ['PUBLISH', 'PUBSUB CHANNELS']:
+        if command == 'PUBSUB':
+            # the second argument is a part of the command name, e.g.
+            # ['PUBSUB', 'NUMSUB', 'foo'].
+            pubsub_type = args[1].upper()
+            if pubsub_type in ['CHANNELS', 'NUMSUB']:
+                keys = args[2:]
+        elif command in ['SUBSCRIBE', 'PSUBSCRIBE', 'UNSUBSCRIBE',
+                         'PUNSUBSCRIBE']:
+            # format example:
+            # SUBSCRIBE channel [channel ...]
+            keys = list(args[1:])
+        elif command == 'PUBLISH':
             # format example:
             # PUBLISH channel message
             keys = [args[1]]
-        elif command in ['SUBSCRIBE', 'PSUBSCRIBE', 'UNSUBSCRIBE',
-                         'PUNSUBSCRIBE', 'PUBSUB NUMSUB']:
-            keys = list(args[1:])
         else:
             keys = None
         return keys

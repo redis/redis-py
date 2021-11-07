@@ -321,8 +321,18 @@ class ClusterManagementCommands:
         return self.execute_command('CLIENT UNPAUSE',
                                     target_nodes=target_nodes)
 
+    def command_count(self):
+        """
+        Returns Integer reply of number of total commands in this Redis server.
+        Send to a random node.
+        """
+        return self.execute_command('COMMAND COUNT')
+
     def config_get(self, pattern="*", target_nodes=None):
-        """Return a dictionary of configuration based on the ``pattern``"""
+        """
+        Return a dictionary of configuration based on the ``pattern``
+        If no target nodes are specified, send to a random node
+        """
         return self.execute_command('CONFIG GET',
                                     pattern,
                                     target_nodes=target_nodes)
@@ -573,6 +583,7 @@ class ClusterManagementCommands:
         """
         Returns the server time as a 2-item tuple of ints:
         (seconds since epoch, microseconds into this second).
+        If target_nodes are not specified, send to a random node
         """
         return self.execute_command('TIME', target_nodes=target_nodes)
 
