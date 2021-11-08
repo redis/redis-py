@@ -6,6 +6,12 @@ from redis.connection import (
     SSLConnection,
     UnixDomainSocketConnection
 )
+from redis.sentinel import (
+    Sentinel,
+    SentinelConnectionPool,
+    SentinelManagedConnection,
+    SentinelManagedSSLConnection,
+)
 from redis.utils import from_url
 from redis.exceptions import (
     AuthenticationError,
@@ -51,6 +57,10 @@ __all__ = [
     'Redis',
     'RedisError',
     'ResponseError',
+    'Sentinel',
+    'SentinelConnectionPool',
+    'SentinelManagedConnection',
+    'SentinelManagedSSLConnection',
     'SSLConnection',
     'StrictRedis',
     'TimeoutError',
