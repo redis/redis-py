@@ -46,3 +46,17 @@ class RedisModuleCommands:
         from .timeseries import TimeSeries
         s = TimeSeries(client=self, version=modversion, index_name=index_name)
         return s
+
+    def graph(self, index_name="idx"):
+        """Access the timeseries namespace, providing support for
+        redis timeseries data.
+        """
+        try:
+            modversion = self.loaded_modules['graph']
+        except IndexError:
+            raise ModuleError("graph is not a loaded in "
+                              "the redis instance.")
+
+        from .graph import Graph
+        g = Graph(client=self, name=index_name)
+        return g

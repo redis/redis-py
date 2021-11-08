@@ -4,7 +4,7 @@ from .exceptions import VersionMismatchException
 from .query_result import QueryResult
 
 
-class GRAPHCommands:
+class GraphCommands:
     def commit(self):
         """
         Create entire graph.

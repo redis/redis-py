@@ -2,22 +2,22 @@ from .node import Node  # noqa
 from .edge import Edge  # noqa
 from .path import Path  # noqa
 
-from redis.client import Redis
 from ..helpers import random_string, quote_string, stringify_param_value
-from .commands import GRAPHCommands
+from .commands import GraphCommands
 
 
-class GRAPH(GRAPHCommands):
+class Graph(GraphCommands):
     """
     Graph, collection of nodes and edges.
     """
 
-    def __init__(self, client: Redis, name=random_string()):
+    def __init__(self, client, name=random_string()):
         """
         Create a new graph.
         """
         self.NAME = name  # Graph key
         self.client = client
+        self.execute_command = client.execute_command
 
         self.nodes = {}
         self.edges = []
