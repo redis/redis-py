@@ -8,9 +8,7 @@ def test_init():
 
     with pytest.raises(AssertionError):
         edge.Edge(None, None, None)
-
         edge.Edge(node.Node(), None, None)
-
         edge.Edge(None, None, node.Node())
 
     assert isinstance(

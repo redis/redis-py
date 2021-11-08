@@ -94,7 +94,10 @@ def test_path(client):
     graph.add_edge(edge01)
     graph.flush()
 
-    path01 = Path.new_empty_path().add_node(node0).add_edge(edge01).add_node(node1)
+    path01 = Path.new_empty_path().\
+        add_node(node0).\
+        add_edge(edge01).\
+        add_node(node1)
     expected_results = [[path01]]
 
     query = "MATCH p=(:L1)-[:R1]->(:L1) RETURN p ORDER BY p"
@@ -243,12 +246,14 @@ def test_optional_match(client):
 def test_cached_execution(client):
     client.graph().query("CREATE ()")
 
-    uncached_result = client.graph().query("MATCH (n) RETURN n, $param", {"param": [0]})
+    uncached_result = client.graph().\
+        query("MATCH (n) RETURN n, $param", {"param": [0]})
     assert uncached_result.cached_execution is False
 
     # loop to make sure the query is cached on each thread on server
     for x in range(0, 64):
-        cached_result = client.graph().query("MATCH (n) RETURN n, $param", {"param": [0]})
+        cached_result = client.graph().\
+            query("MATCH (n) RETURN n, $param", {"param": [0]})
         assert uncached_result.result_set == cached_result.result_set
 
     # should be cached on all threads by now
@@ -266,7 +271,7 @@ def test_explain(client):
         "MATCH (r:Rider)-[:rides]->(t:Team) WHERE t.name = $name RETURN r.name, t.name, $params",
         {"name": "Yehuda"},
     )
-    expected = "Results\n    Project\n        Conditional Traverse | (t:Team)->(r:Rider)\n            Filter\n                Node By Label Scan | (t:Team)"
+    expected = "Results\n    Project\n        Conditional Traverse | (t:Team)->(r:Rider)\n            Filter\n                Node By Label Scan | (t:Team)"  # noqa
     assert result == expected
 
 
@@ -299,7 +304,8 @@ def test_query_timeout(client):
 @pytest.mark.redismod
 def test_read_only_query(client):
     with pytest.raises(Exception):
-        # Issue a write query, specifying read-only true, this call should fail.
+        # Issue a write query, specifying read-only true,
+        # this call should fail.
         client.graph().query("CREATE (p:person {name:'a'})", read_only=True)
         assert False is False
 
@@ -389,8 +395,8 @@ def test_cache_sync(client):
     # Client A should pick up on the changes by comparing graph versions
     # and resyncing its cache.
 
-    A = Graph("cache-sync", self.r)
-    B = Graph("cache-sync", self.r)
+    A = client.graph("cache-sync")
+    B = client.graph("cache-sync")
 
     # Build order:
     # 1. introduce label 'L' and 'K'

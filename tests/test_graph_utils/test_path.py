@@ -83,7 +83,8 @@ def test_compare():
     )
     assert path.Path(nodes=[node_1], edges=[]) != path.Path(nodes=[], edges=[])
     assert path.Path(nodes=[node_1], edges=[]) != path.Path(nodes=[], edges=[])
-    assert path.Path(nodes=[node_1], edges=[]) != path.Path(nodes=[node_2], edges=[])
+    assert path.Path(nodes=[node_1], edges=[]) != \
+           path.Path(nodes=[node_2], edges=[])
     assert path.Path(nodes=[node_1], edges=[edge_1]) != path.Path(
         nodes=[node_1], edges=[]
     )
