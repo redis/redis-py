@@ -2744,7 +2744,7 @@ class TestRedisCommands:
         assert r.georadius('barcelona', 2, 1, 1, unit='km',
                            withdist=True, withcoord=True, withhash=True) == []
 
-    @skip_if_server_version_lt('3.2.0')
+    @skip_if_server_version_lt('6.2.0')
     def test_georadius_count(self, r):
         values = (2.1909389952632, 41.433791470673, 'place1') + \
                  (2.1873744593677, 41.406342043777, 'place2')
@@ -2806,6 +2806,12 @@ class TestRedisCommands:
                  (2.187376320362091, 41.40634178640635)],
                 [b'place1', 0.0, 3471609698139488,
                  (2.1909382939338684, 41.433790281840835)]]
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_georadiusmember_count(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') + \
+                 (2.1873744593677, 41.406342043777, b'\x80place2')
+
         assert r.georadiusbymember('barcelona', 'place1', 4000,
                                    count=1, any=True) == \
                [b'\x80place2']
