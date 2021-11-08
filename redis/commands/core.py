@@ -2621,7 +2621,7 @@ class CoreCommands:
         if (start is not None and num is None) or \
                 (num is not None and start is None):
             raise DataError("``start`` and ``num`` must both be specified")
-        pieces = ['ZRANGEBYSCORE', name, max, min]
+        pieces = ['ZRANGEBYSCORE', name, min, max]
         if start is not None and num is not None:
             pieces.extend(['LIMIT', start, num])
         if withscores:
