@@ -2811,7 +2811,7 @@ class TestRedisCommands:
     def test_georadiusmember_count(self, r):
         values = (2.1909389952632, 41.433791470673, 'place1') + \
                  (2.1873744593677, 41.406342043777, b'\x80place2')
-
+        r.geoadd('barcelona', values)
         assert r.georadiusbymember('barcelona', 'place1', 4000,
                                    count=1, any=True) == \
                [b'\x80place2']
