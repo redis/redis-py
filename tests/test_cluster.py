@@ -652,12 +652,14 @@ class TestClusterRedisCommands:
     def test_pubsub_channels_merge_results(self, r):
         nodes = r.get_nodes()
         channels = []
+        pubsub_nodes = []
         i = 0
         for node in nodes:
             channel = "foo{0}".format(i)
             # We will create different pubsub clients where each one is
             # connected to a different node
             p = r.pubsub(node)
+            pubsub_nodes.append(p)
             p.subscribe(channel)
             b_channel = channel.encode('utf-8')
             channels.append(b_channel)
@@ -677,12 +679,14 @@ class TestClusterRedisCommands:
 
     def test_pubsub_numsub_merge_results(self, r):
         nodes = r.get_nodes()
+        pubsub_nodes = []
         channel = "foo"
         b_channel = channel.encode('utf-8')
         for node in nodes:
             # We will create different pubsub clients where each one is
             # connected to a different node
             p = r.pubsub(node)
+            pubsub_nodes.append(p)
             p.subscribe(channel)
             # Assert that each node returns that only one client is subscribed
             sub_chann_num = node.redis_connection.pubsub_numsub(channel)
@@ -696,11 +700,13 @@ class TestClusterRedisCommands:
 
     def test_pubsub_numpat_merge_results(self, r):
         nodes = r.get_nodes()
+        pubsub_nodes = []
         pattern = "foo*"
         for node in nodes:
             # We will create different pubsub clients where each one is
             # connected to a different node
             p = r.pubsub(node)
+            pubsub_nodes.append(p)
             p.psubscribe(pattern)
             # Assert that each node returns that only one client is subscribed
             sub_num_pat = node.redis_connection.pubsub_numpat()
