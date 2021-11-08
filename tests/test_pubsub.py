@@ -579,3 +579,15 @@ class TestPubSubWorkerThread:
         assert event.wait(timeout=1.0)
         pubsub_thread.join(timeout=1.0)
         assert not pubsub_thread.is_alive()
+
+
+class TestPubSubDeadlock:
+    @pytest.mark.timeout(30, method='thread')
+    def test_pubsub_deadlock(self, master_host):
+        pool = redis.ConnectionPool(host=master_host)
+        r = redis.Redis(connection_pool=pool)
+
+        for i in range(60):
+            p = r.pubsub()
+            p.subscribe("my-channel-1", "my-channel-2")
+            pool.reset()
