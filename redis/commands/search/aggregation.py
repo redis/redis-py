@@ -1,5 +1,3 @@
-from six import string_types
-
 FIELDNAME = object()
 
 
@@ -93,7 +91,7 @@ class Group(object):
         if not reducers:
             raise ValueError("Need at least one reducer")
 
-        fields = [fields] if isinstance(fields, string_types) else fields
+        fields = [fields] if isinstance(fields, str) else fields
         reducers = [reducers] if isinstance(reducers, Reducer) else reducers
 
         self.fields = fields
@@ -299,7 +297,7 @@ class AggregateRequest(object):
             .sort_by(Desc("@paid"), max=10)
         ```
         """
-        if isinstance(fields, (string_types, SortDirection)):
+        if isinstance(fields, (str, SortDirection)):
             fields = [fields]
 
         max = kwargs.get("max", 0)
@@ -318,7 +316,7 @@ class AggregateRequest(object):
         - **fields**: Fields to group by. This can either be a single string,
             or a list of strings.
         """
-        if isinstance(expressions, string_types):
+        if isinstance(expressions, str):
             expressions = [expressions]
 
         for expression in expressions:

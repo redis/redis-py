@@ -680,6 +680,10 @@ def test_alias():
     # update alias and ensure new results
     ftindex2.aliasupdate("spaceballs")
     alias_client2 = getClient().ft("spaceballs")
+
+    if os.environ.get("GITHUB_WORKFLOW", None) is not None:
+        time.sleep(5)
+
     res = alias_client2.search("*").docs[0]
     assert "index2:yogurt" == res.id
 
