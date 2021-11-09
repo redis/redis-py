@@ -613,8 +613,10 @@ class Redis(RedisModuleCommands, CoreCommands, object):
     This abstract class provides a Python interface to all Redis commands
     and an implementation of the Redis protocol.
 
-    Connection and Pipeline derive from this, implementing how
-    the commands are sent and received to the Redis server
+    Pipelines derive from this, implementing how
+    the commands are sent and received to the Redis server. Based on
+    configuration, an instance will either use a ConnectionPool, or
+    Connection object to talk to redis.
     """
     RESPONSE_CALLBACKS = {
         **string_keys_to_dict(
