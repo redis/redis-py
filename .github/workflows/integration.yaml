@@ -14,61 +14,56 @@ on:
 
 jobs:
 
-  lint:
-    name: Code linters
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: install python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.9
-      - name: run code linters
-        run: |
-          pip install -r dev_requirements.txt
-          invoke linters
+   lint:
+     name: Code linters
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@v2
+       - name: install python
+         uses: actions/setup-python@v2
+         with:
+           python-version: 3.9
+       - name: run code linters
+         run: |
+           pip install -r dev_requirements.txt
+           invoke linters
 
-  run-tests:
-    runs-on: ubuntu-latest
-    strategy:
-      max-parallel: 6
-      matrix:
-        python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
-    env:
-      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Python ${{ matrix.python-version }} tests
-    steps:
-      - uses: actions/checkout@v2
-      - name: install python
-        uses: actions/setup-python@v2
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: run tests
-        run: |
-          pip install -r dev_requirements.txt
-          invoke tests
-      - name: Upload codecov coverage
-        uses: codecov/codecov-action@v2
-        with:
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
+   run-tests:
+     runs-on: ubuntu-latest
+     strategy:
+       max-parallel: 6
+       matrix:
+         python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
+     env:
+       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+     name: Python ${{ matrix.python-version }} tests
+     steps:
+       - uses: actions/checkout@v2
+       - name: install python
+         uses: actions/setup-python@v2
+         with:
+           python-version: ${{ matrix.python-version }}
+       - name: run tests
+         run: |
+           pip install -r dev_requirements.txt
+           invoke tests
+       - name: Upload codecov coverage
+         uses: codecov/codecov-action@v2
+         with:
+           fail_ci_if_error: false
+           token: ${{ secrets.CODECOV_TOKEN }}
 
   build_and_test_package:
     name: Validate building and installing the package
     runs-on: ubuntu-latest
+    strategy:
+      extension: ['tar.gz', 'whl']
     steps:
       - uses: actions/checkout@v2
       - name: install python
         uses: actions/setup-python@v2
         with:
           python-version: 3.9
-      - name: Build and pip install package
-        uses: CasperWA/check-sdist-action@v1
       - name: Run installed unit tests
         run: |
-          pip install -r dev_requirements.txt
-          invoke devenv
-          mkdir STAGEAREA
-          cp -Rp tests STAGEAREA
-          cd STAGEAREA
-          pytest
+          bash .github/workflows/install_and_test.sh ${{ matrix.extension }}
