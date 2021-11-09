@@ -1400,6 +1400,7 @@ def test_decoders_and_unstring():
     assert decode_list("45.55") == 45.55
     assert decode_list(['hello', b'world']) == ['hello', 'world']
 
+
 @pytest.mark.redismod
 def test_custom_decoder(client):
     import ujson
