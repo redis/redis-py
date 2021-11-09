@@ -51,7 +51,7 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
-  build_package:
+  build_and_test_package:
     name: Validate building and installing the package
     runs-on: ubuntu-latest
     steps:
@@ -62,5 +62,10 @@ jobs:
           python-version: 3.9
       - name: build and install
         run: |
-          pip install invoke
+          pip install -r dev_requirements.txt
           invoke package
+          invoke devenv
+          pip install dist/*.tar.gz
+          mkdir STAGEAREA
+          cp -Rp tests STAGEAREA
+          pytest
