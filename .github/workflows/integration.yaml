@@ -53,11 +53,12 @@ jobs:
            fail_ci_if_error: false
            token: ${{ secrets.CODECOV_TOKEN }}
 
-  build_and_test_package:
+   build_and_test_package:
     name: Validate building and installing the package
     runs-on: ubuntu-latest
     strategy:
-      extension: ['tar.gz', 'whl']
+      matrix:
+        extension: ['tar.gz', 'whl']
     steps:
       - uses: actions/checkout@v2
       - name: install python
