@@ -1,6 +1,5 @@
 import itertools
 import time
-import six
 
 from .document import Document
 from .result import Result
@@ -308,9 +307,8 @@ class SearchCommands:
         Load a single document by id
         """
         fields = self.client.hgetall(id)
-        if six.PY3:
-            f2 = {to_string(k): to_string(v) for k, v in fields.items()}
-            fields = f2
+        f2 = {to_string(k): to_string(v) for k, v in fields.items()}
+        fields = f2
 
         try:
             del fields["id"]
@@ -337,13 +335,13 @@ class SearchCommands:
         """
 
         res = self.client.execute_command(INFO_CMD, self.index_name)
-        it = six.moves.map(to_string, res)
-        return dict(six.moves.zip(it, it))
+        it = map(to_string, res)
+        return dict(zip(it, it))
 
     def _mk_query_args(self, query):
         args = [self.index_name]
 
-        if isinstance(query, six.string_types):
+        if isinstance(query, str):
             # convert the query from a text to a query object
             query = Query(query)
         if not isinstance(query, Query):
@@ -448,7 +446,7 @@ class SearchCommands:
             return corrections
 
         for _correction in raw:
-            if isinstance(_correction, six.integer_types) and _correction == 0:
+            if isinstance(_correction, int) and _correction == 0:
                 continue
 
             if len(_correction) != 3:
