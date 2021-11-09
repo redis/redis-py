@@ -70,4 +70,5 @@ jobs:
           invoke devenv
           mkdir STAGEAREA
           cp -Rp tests STAGEAREA
+          cd STAGEAREA
           pytest
