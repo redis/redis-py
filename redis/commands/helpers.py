@@ -1,3 +1,7 @@
+import random
+import string
+
+
 def list_or_args(keys, args):
     # returns a single new list combining keys and args
     try:
@@ -42,3 +46,31 @@ def parse_to_list(response):
         except TypeError:
             res.append(None)
     return res
+
+
+def random_string(length=10):
+    """
+    Returns a random N character long string.
+    """
+    return "".join(  # nosec
+        random.choice(string.ascii_lowercase) for x in range(length)
+    )
+
+
+def quote_string(v):
+    """
+    RedisGraph strings must be quoted,
+    quote_string wraps given v with quotes incase
+    v is a string.
+    """
+
+    if isinstance(v, bytes):
+        v = v.decode()
+    elif not isinstance(v, str):
+        return v
+    if len(v) == 0:
+        return '""'
+
+    v = v.replace('"', '\\"')
+
+    return '"{}"'.format(v)

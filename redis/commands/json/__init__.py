@@ -6,6 +6,7 @@ from .decoders import (
 )
 from ..helpers import nativestr
 from .commands import JSONCommands
+import redis
 
 
 class JSON(JSONCommands):
@@ -91,3 +92,29 @@ class JSON(JSONCommands):
     def _encode(self, obj):
         """Get the encoder."""
         return self.__encoder__.encode(obj)
+
+    def pipeline(self, transaction=True, shard_hint=None):
+        """Creates a pipeline for the JSON module, that can be used for executing
+        JSON commands, as well as classic core commands.
+
+        Usage example:
+
+        r = redis.Redis()
+        pipe = r.json().pipeline()
+        pipe.jsonset('foo', '.', {'hello!': 'world'})
+        pipe.jsonget('foo')
+        pipe.jsonget('notakey')
+        """
+        p = Pipeline(
+            connection_pool=self.client.connection_pool,
+            response_callbacks=self.MODULE_CALLBACKS,
+            transaction=transaction,
+            shard_hint=shard_hint,
+        )
+        p._encode = self._encode
+        p._decode = self._decode
+        return p
+
+
+class Pipeline(JSONCommands, redis.client.Pipeline):
+    """Pipeline for the module."""
