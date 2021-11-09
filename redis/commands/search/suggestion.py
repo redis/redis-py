@@ -1,4 +1,3 @@
-from six.moves import xrange
 from ._util import to_string
 
 
@@ -45,7 +44,7 @@ class SuggestionParser(object):
         self._sugs = ret
 
     def __iter__(self):
-        for i in xrange(0, len(self._sugs), self.sugsize):
+        for i in range(0, len(self._sugs), self.sugsize):
             ss = self._sugs[i]
             score = float(self._sugs[i + self._scoreidx]) \
                 if self.with_scores else 1.0
