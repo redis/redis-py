@@ -1221,3 +1221,87 @@ def test_syndump(client):
         "baby": ["id2"],
         "offspring": ["id1"],
     }
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.2.0", "search")
+def test_create_json_with_alias(client):
+    """
+    Create definition with IndexType.JSON as index type (ON JSON) with two fields with aliases,
+    and use json client to test it.
+    """
+    definition = IndexDefinition(prefix=["king:"], index_type=IndexType.JSON)
+    client.ft().create_index((TextField("$.name", as_name="name"),
+                              NumericField("$.num", as_name="num")),
+                            definition=definition
+                            )
+
+    client.json().set("king:1", Path.rootPath(), {"name": "henry", "num": 42})
+    client.json().set("king:2", Path.rootPath(), {"name": "james", "num": 3.14})
+
+    res = client.ft().search("@name:henry")
+    assert res.docs[0].id == "king:1"
+    assert res.docs[0].json == '{"name":"henry","num":42}'
+    assert res.total == 1
+
+    res = client.ft().search("@num:[0 10]")
+    assert res.docs[0].id == "king:2"
+    assert res.docs[0].json == '{"name":"james","num":3.14}'
+    assert res.total == 1
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.2.0", "search")
+def test_json_with_multipath(client):
+    """
+    Create definition with IndexType.JSON as index type (ON JSON),
+    and use json client to test it.
+    """
+    definition = IndexDefinition(prefix=["king:"], index_type=IndexType.JSON)
+    client.ft().create_index((TagField("$..name", as_name="name")),
+                             definition=definition
+                            )
+
+    client.json().set("king:1", Path.rootPath(), {"name": "henry",
+                                                  "country": {"name": "england"}})
+
+    res = client.ft().search("@name:{henry}")
+    assert res.docs[0].id == "king:1"
+    assert res.docs[0].json == '{"name":"henry","country":{"name":"england"}}'
+    assert res.total == 1
+
+    res = client.ft().search("@name:{england}")
+    assert res.docs[0].id == "king:1"
+    assert res.docs[0].json == '{"name":"henry","country":{"name":"england"}}'
+    assert res.total == 1
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.2.0", "search")
+def test_json_with_jsonpath(client):
+    definition = IndexDefinition(index_type=IndexType.JSON)
+    client.ft().create_index((TextField('$["prod:name"]', as_name="name"),
+                             (TextField('$.prod:name', as_name="name_unsupported"))),
+                             definition=definition
+                            )
+
+    client.json().set("doc:1", Path.rootPath(), {"prod:name": "RediSearch"})
+
+    res = client.ft().search(Query("@name:RediSearch"))
+    assert res.total == 1
+    assert res.docs[0].id == "doc:1"
+    assert res.docs[0].json == '{"prod:name":"RediSearch"}'
+
+    res = client.ft().search("@name_unsupported:RediSearch")
+    assert res.total == 0
+
+    res = client.ft().search(Query("@name:RediSearch").return_field("name"))
+    assert res.total == 1
+    assert res.docs[0].id == "doc:1"
+    assert res.docs[0].name == 'RediSearch'
+
+    res = client.ft().search(Query("@name:RediSearch").return_field("name_unsupported"))
+    assert res.total == 1
+    assert res.docs[0].id == "doc:1"
+    with pytest.raises(Exception):
+        res.docs[0].name_unsupported
