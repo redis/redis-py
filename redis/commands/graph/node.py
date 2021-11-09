@@ -12,7 +12,21 @@ class Node:
         """
         self.id = node_id
         self.alias = alias
-        self.label = label
+        if isinstance(label, list):
+            label = [inner_label for inner_label in label if inner_label != ""]
+
+        if label is None or label == "" or (isinstance(label, list) and len(label) == 0):
+            self.label = None
+            self.labels = None
+        elif isinstance(label, str):
+            self.label = label
+            self.labels = [label]
+        elif isinstance(label, list) and all([isinstance(inner_label, str) for inner_label in label]):
+            self.label = label[0]
+            self.labels = label
+        else:
+            raise AssertionError("label should be either None, string or a list of strings")
+
         self.properties = properties or {}
 
     def toString(self):
@@ -30,8 +44,8 @@ class Node:
         res = "("
         if self.alias:
             res += self.alias
-        if self.label:
-            res += ":" + self.label
+        if self.labels:
+            res += ":" + ":".join(self.labels)
         if self.properties:
             props = ",".join(
                 key + ":" + str(quote_string(val))

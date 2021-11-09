@@ -380,6 +380,32 @@ def test_list_keys(client):
 
 
 @pytest.mark.redismod
+def test_multi_label(client):
+    redis_graph = client.graph('g')
+
+    node = Node(label=['l', 'll'])
+    redis_graph.add_node(node)
+    redis_graph.commit()
+
+    query = 'MATCH (n) RETURN n'
+    result = redis_graph.query(query)
+    result_node = result.result_set[0][0]
+    assert result_node == node
+
+    try:
+        Node(label=1)
+        assert False
+    except AssertionError:
+        assert True
+
+    try:
+        Node(label=['l', 1])
+        assert False
+    except AssertionError:
+        assert True
+
+
+@pytest.mark.redismod
 def test_cache_sync(client):
     pass
     return

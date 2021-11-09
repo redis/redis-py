@@ -169,11 +169,13 @@ class QueryResult:
         # [[name, value type, value] X N]
 
         node_id = int(cell[0])
-        label = None
-        if len(cell[1]) != 0:
-            label = self.graph.get_label(cell[1][0])
+        labels = None
+        if len(cell[1]) > 0:
+            labels = []
+            for inner_label in cell[1]:
+                labels.append(self.graph.get_label(inner_label))
         properties = self.parse_entity_properties(cell[2])
-        return Node(node_id=node_id, label=label, properties=properties)
+        return Node(node_id=node_id, label=labels, properties=properties)
 
     def parse_edge(self, cell):
         # Edge ID (integer),
