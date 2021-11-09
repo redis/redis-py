@@ -46,3 +46,63 @@ class RedisModuleCommands:
         from .timeseries import TimeSeries
         s = TimeSeries(client=self, version=modversion, index_name=index_name)
         return s
+
+    def bf(self):
+        """Access the bloom namespace."""
+        try:
+            modversion = self.loaded_modules['bf']
+        except IndexError:
+            raise ModuleError("bloom is not a loaded in "
+                              "the redis instance.")
+
+        from .bf import BFBloom
+        bf = BFBloom(client=self, version=modversion)
+        return bf
+
+    def cf(self):
+        """Access the bloom namespace."""
+        try:
+            modversion = self.loaded_modules['bf']
+        except IndexError:
+            raise ModuleError("bloom is not a loaded in "
+                              "the redis instance.")
+
+        from .bf import CFBloom
+        cf = CFBloom(client=self, version=modversion)
+        return cf
+
+    def cms(self):
+        """Access the bloom namespace."""
+        try:
+            modversion = self.loaded_modules['bf']
+        except IndexError:
+            raise ModuleError("bloom is not a loaded in "
+                              "the redis instance.")
+
+        from .bf import CMSBloom
+        cms = CMSBloom(client=self, version=modversion)
+        return cms
+
+    def topk(self):
+        """Access the bloom namespace."""
+        try:
+            modversion = self.loaded_modules['bf']
+        except IndexError:
+            raise ModuleError("bloom is not a loaded in "
+                              "the redis instance.")
+
+        from .bf import TOPKBloom
+        topk = TOPKBloom(client=self, version=modversion)
+        return topk
+
+    def tdigest(self):
+        """Access the bloom namespace."""
+        try:
+            modversion = self.loaded_modules['bf']
+        except IndexError:
+            raise ModuleError("bloom is not a loaded in "
+                              "the redis instance.")
+
+        from .bf import TDigestBloom
+        tdigest = TDigestBloom(client=self, version=modversion)
+        return tdigest
