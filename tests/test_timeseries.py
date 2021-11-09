@@ -49,10 +49,6 @@ def testAlter(client):
     assert 10 == client.ts().info(1).retention_msecs
 
 
-#     pipe = client.ts().pipeline()
-# assert pipe.create(2)
-
-
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
 def testAlterDiplicatePolicy(client):
@@ -568,20 +564,19 @@ def testQueryIndex(client):
     assert [2] == client.ts().queryindex(["Taste=That"])
 
 
-#
-# @pytest.mark.redismod
-# @pytest.mark.pipeline
-# def testPipeline(client):
-#     pipeline = client.ts().pipeline()
-#     pipeline.create("with_pipeline")
-#     for i in range(100):
-#         pipeline.add("with_pipeline", i, 1.1 * i)
-#     pipeline.execute()
+@pytest.mark.redismod
+@pytest.mark.pipeline
+def test_pipeline(client):
+    pipeline = client.ts().pipeline()
+    pipeline.create("with_pipeline")
+    for i in range(100):
+        pipeline.add("with_pipeline", i, 1.1 * i)
+    pipeline.execute()
 
-#     info = client.ts().info("with_pipeline")
-#     assert info.lastTimeStamp == 99
-#     assert info.total_samples == 100
-#     assert client.ts().get("with_pipeline")[1] == 99 * 1.1
+    info = client.ts().info("with_pipeline")
+    assert info.lastTimeStamp == 99
+    assert info.total_samples == 100
+    assert client.ts().get("with_pipeline")[1] == 99 * 1.1
 
 
 @pytest.mark.redismod

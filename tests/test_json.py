@@ -275,16 +275,28 @@ def test_objlen(client):
     assert len(obj) == client.json().objlen("obj")
 
 
-# @pytest.mark.pipeline
-# @pytest.mark.redismod
-# def test_pipelineshouldsucceed(client):
-#     p = client.json().pipeline()
-#     p.set("foo", Path.rootPath(), "bar")
-#     p.get("foo")
-#     p.delete("foo")
-#     assert [True, "bar", 1] == p.execute()
-#     assert client.keys() == []
-#     assert client.get("foo") is None
+@pytest.mark.pipeline
+@pytest.mark.redismod
+def test_json_commands_in_pipeline(client):
+    p = client.json().pipeline()
+    p.set("foo", Path.rootPath(), "bar")
+    p.get("foo")
+    p.delete("foo")
+    assert [True, "bar", 1] == p.execute()
+    assert client.keys() == []
+    assert client.get("foo") is None
+
+    # now with a true, json object
+    client.flushdb()
+    p = client.json().pipeline()
+    d = {"hello": "world", "oh": "snap"}
+    p.jsonset("foo", Path.rootPath(), d)
+    p.jsonget("foo")
+    p.exists("notarealkey")
+    p.delete("foo")
+    assert [True, d, 0, 1] == p.execute()
+    assert client.keys() == []
+    assert client.get("foo") is None
 
 
 @pytest.mark.redismod
