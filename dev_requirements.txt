@@ -6,3 +6,4 @@ tox-docker==3.1.0
 invoke==1.6.0
 pytest-cov>=3.0.0
 vulture>=2.3.0
+ujson>=4.2.0
