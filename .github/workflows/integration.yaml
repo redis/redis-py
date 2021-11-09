@@ -6,6 +6,8 @@ on:
       - 'docs/**'
       - '**/*.rst'
       - '**/*.md'
+    branches:
+      - master
   pull_request:
     branches:
       - master
@@ -60,12 +62,12 @@ jobs:
         uses: actions/setup-python@v2
         with:
           python-version: 3.9
-      - name: build and install
+      - name: Build and pip install package
+        uses: CasperWA/check-sdist-action@v1
+      - name: Run installed unit tests
         run: |
           pip install -r dev_requirements.txt
-          invoke package
           invoke devenv
-          pip install dist/*.tar.gz
           mkdir STAGEAREA
           cp -Rp tests STAGEAREA
           pytest
