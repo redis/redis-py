@@ -9,11 +9,12 @@ class TestMonitor:
             assert response is None
 
     def test_response_values(self, r):
+        db = r.connection_pool.connection_kwargs.get('db', 0)
         with r.monitor() as m:
             r.ping()
             response = wait_for_command(r, m, 'PING')
             assert isinstance(response['time'], float)
-            assert response['db'] == 9
+            assert response['db'] == db
             assert response['client_type'] in ('tcp', 'unix')
             assert isinstance(response['client_address'], str)
             assert isinstance(response['client_port'], str)
