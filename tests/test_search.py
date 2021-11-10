@@ -651,11 +651,11 @@ def test_alias():
     else:
         time.sleep(5)
 
-    def1 = IndexDefinition(prefix=["index1:"], score_field="name")
-    def2 = IndexDefinition(prefix=["index2:"], score_field="name")
+    def1 = IndexDefinition(prefix=["index1:"])
+    def2 = IndexDefinition(prefix=["index2:"])
 
     ftindex1 = index1.ft("testAlias")
-    ftindex2 = index1.ft("testAlias2")
+    ftindex2 = index2.ft("testAlias2")
     ftindex1.create_index((TextField("name"),), definition=def1)
     ftindex2.create_index((TextField("name"),), definition=def2)
 
