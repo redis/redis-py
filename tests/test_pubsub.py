@@ -575,7 +575,8 @@ class TestPubSubWorkerThread:
 class TestPubSubDeadlock:
     @pytest.mark.timeout(30, method='thread')
     def test_pubsub_deadlock(self, master_host):
-        pool = redis.ConnectionPool(host=master_host)
+        pool = redis.ConnectionPool(host=master_host[0],
+                                    port=master_host[1])
         r = redis.Redis(connection_pool=pool)
 
         for i in range(60):
