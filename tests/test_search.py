@@ -654,6 +654,7 @@ def test_alias():
     ftindex1.create_index((TextField("name"),), definition=def1)
     ftindex2.create_index((TextField("name"),), definition=def2)
 
+    res = ftindex1.search("*").docs[0]
     assert "index1:lonestar" == res.id
 
     # create alias and check for results
