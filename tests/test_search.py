@@ -646,11 +646,6 @@ def test_alias():
     index1.hset("index1:lonestar", mapping={"name": "lonestar"})
     index2.hset("index2:yogurt", mapping={"name": "yogurt"})
 
-    if os.environ.get("GITHUB_WORKFLOW", None) is not None:
-        time.sleep(2)
-    else:
-        time.sleep(5)
-
     def1 = IndexDefinition(prefix=["index1:"])
     def2 = IndexDefinition(prefix=["index2:"])
 
@@ -659,12 +654,6 @@ def test_alias():
     ftindex1.create_index((TextField("name"),), definition=def1)
     ftindex2.create_index((TextField("name"),), definition=def2)
 
-    # CI is slower
-    try:
-        res = ftindex1.search("*").docs[0]
-    except IndexError:
-        time.sleep(5)
-        res = ftindex1.search("*").docs[0]
     assert "index1:lonestar" == res.id
 
     # create alias and check for results
@@ -680,9 +669,6 @@ def test_alias():
     # update alias and ensure new results
     ftindex2.aliasupdate("spaceballs")
     alias_client2 = getClient().ft("spaceballs")
-
-    if os.environ.get("GITHUB_WORKFLOW", None) is not None:
-        time.sleep(5)
 
     res = alias_client2.search("*").docs[0]
     assert "index2:yogurt" == res.id
