@@ -11,7 +11,6 @@ from urllib.parse import urlparse
 
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/9"
-default_redismod_url = "redis://localhost:36379/9"
 
 default_redismod_url = "redis://localhost:36379"
 
@@ -44,10 +43,13 @@ def pytest_sessionstart(session):
     REDIS_INFO["version"] = version
     REDIS_INFO["arch_bits"] = arch_bits
 
-    # module info
-    redismod_url = session.config.getoption("--redismod-url")
-    info = _get_info(redismod_url)
-    REDIS_INFO["modules"] = info["modules"]
+    # module info, if the second redis is running
+    try:
+        redismod_url = session.config.getoption("--redismod-url")
+        info = _get_info(redismod_url)
+        REDIS_INFO["modules"] = info["modules"]
+    except redis.exceptions.ConnectionError:
+        pass
 
 
 def skip_if_server_version_lt(min_version):
@@ -72,7 +74,11 @@ def skip_unless_arch_bits(arch_bits):
 
 
 def skip_ifmodversion_lt(min_version: str, module_name: str):
-    modules = REDIS_INFO["modules"]
+    try:
+        modules = REDIS_INFO["modules"]
+    except KeyError:
+        return pytest.mark.skipif(True,
+                                  reason="Redis server does not have modules")
     if modules == []:
         return pytest.mark.skipif(True, reason="No redis modules found")
 
@@ -218,7 +224,7 @@ def mock_cluster_resp_slaves(request, **kwargs):
 def master_host(request):
     url = request.config.getoption("--redis-url")
     parts = urlparse(url)
-    yield parts.hostname
+    yield parts.hostname, parts.port
 
 
 def wait_for_command(client, monitor, command):
