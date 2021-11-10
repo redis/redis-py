@@ -8,16 +8,18 @@ from redis.commands.helpers import (
     random_string
 )
 
+
 def test_list_or_args():
     k = ["hello, world"]
     a = ["some", "argument", "list"]
     assert list_or_args(k, a) == k+a
-    
+
     for i in ["banana", b"banana"]:
         assert list_or_args(i, a) == [i] + a
 
+
 def test_parse_to_list():
-    r =  ["hello", b"my name", "45", "555.55", "is simon!", None]
+    r = ["hello", b"my name", "45", "555.55", "is simon!", None]
     assert parse_to_list(r) == \
         ["hello", "my name", 45, 555.55, "is simon!", None]
 
