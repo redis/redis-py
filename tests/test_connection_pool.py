@@ -44,14 +44,14 @@ class TestConnectionPool:
         assert connection.kwargs == connection_kwargs
 
     def test_multiple_connections(self, master_host):
-        connection_kwargs = {'host': master_host}
+        connection_kwargs = {'host': master_host[0], 'port': master_host[1]}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
         c1 = pool.get_connection('_')
         c2 = pool.get_connection('_')
         assert c1 != c2
 
     def test_max_connections(self, master_host):
-        connection_kwargs = {'host': master_host}
+        connection_kwargs = {'host': master_host[0], 'port': master_host[1]}
         pool = self.get_pool(max_connections=2,
                              connection_kwargs=connection_kwargs)
         pool.get_connection('_')
@@ -60,7 +60,7 @@ class TestConnectionPool:
             pool.get_connection('_')
 
     def test_reuse_previously_released_connection(self, master_host):
-        connection_kwargs = {'host': master_host}
+        connection_kwargs = {'host': master_host[0], 'port': master_host[1]}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
         c1 = pool.get_connection('_')
         pool.release(c1)
@@ -103,14 +103,15 @@ class TestBlockingConnectionPool:
         return pool
 
     def test_connection_creation(self, master_host):
-        connection_kwargs = {'foo': 'bar', 'biz': 'baz', 'host': master_host}
+        connection_kwargs = {'foo': 'bar', 'biz': 'baz',
+                             'host': master_host[0], 'port': master_host[1]}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
         connection = pool.get_connection('_')
         assert isinstance(connection, DummyConnection)
         assert connection.kwargs == connection_kwargs
 
     def test_multiple_connections(self, master_host):
-        connection_kwargs = {'host': master_host}
+        connection_kwargs = {'host': master_host[0], 'port': master_host[1]}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
         c1 = pool.get_connection('_')
         c2 = pool.get_connection('_')
@@ -118,7 +119,7 @@ class TestBlockingConnectionPool:
 
     def test_connection_pool_blocks_until_timeout(self, master_host):
         "When out of connections, block for timeout seconds, then raise"
-        connection_kwargs = {'host': master_host}
+        connection_kwargs = {'host': master_host[0], 'port': master_host[1]}
         pool = self.get_pool(max_connections=1, timeout=0.1,
                              connection_kwargs=connection_kwargs)
         pool.get_connection('_')
@@ -134,7 +135,7 @@ class TestBlockingConnectionPool:
         When out of connections, block until another connection is released
         to the pool
         """
-        connection_kwargs = {'host': master_host}
+        connection_kwargs = {'host': master_host[0], 'port': master_host[1]}
         pool = self.get_pool(max_connections=1, timeout=2,
                              connection_kwargs=connection_kwargs)
         c1 = pool.get_connection('_')
@@ -149,7 +150,7 @@ class TestBlockingConnectionPool:
         assert time.time() - start >= 0.1
 
     def test_reuse_previously_released_connection(self, master_host):
-        connection_kwargs = {'host': master_host}
+        connection_kwargs = {'host': master_host[0], 'port': master_host[1]}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
         c1 = pool.get_connection('_')
         pool.release(c1)
