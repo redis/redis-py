@@ -42,7 +42,10 @@ def parse_to_list(response):
         try:
             res.append(int(item))
         except ValueError:
-            res.append(nativestr(item))
+            try:
+                res.append(float(item))
+            except ValueError:
+                res.append(nativestr(item))
         except TypeError:
             res.append(None)
     return res
