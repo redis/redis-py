@@ -78,7 +78,7 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
         modules = REDIS_INFO["modules"]
     except KeyError:
         return pytest.mark.skipif(True,
-                                  reason="No redismod-url server running")
+                                  reason="Redis server does not have modules")
     if modules == []:
         return pytest.mark.skipif(True, reason="No redis modules found")
 
