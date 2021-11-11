@@ -3661,7 +3661,8 @@ class TestRedisCommands:
         assert r.restore(key2, 0, dumpdata)
         assert r.ttl(key2) == -1
 
-        # idletime
+    @skip_if_server_version_lt('5.0.0')
+    def test_restore_idletime(self, r):
         key = 'yayakey'
         r.set(key, 'blee!')
         dumpdata = r.dump(key)
@@ -3669,7 +3670,8 @@ class TestRedisCommands:
         assert r.restore(key, 0, dumpdata, idletime=5)
         assert r.get(key) == b'blee!'
 
-        # frequency
+    @skip_if_server_version_lt('5.0.0')
+    def test_restore_frequency(self, r):
         key = 'yayakey'
         r.set(key, 'blee!')
         dumpdata = r.dump(key)
@@ -3679,10 +3681,8 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt('5.0.0')
     def test_replicaof(self, r):
-
         with pytest.raises(redis.ResponseError):
             assert r.replicaof("NO ONE")
-
         assert r.replicaof("NO", "ONE")
 
 
