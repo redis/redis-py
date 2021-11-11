@@ -1867,7 +1867,6 @@ class TestRedisCommands:
         assert r.zrange('a', 0, 1) == [b'a1', b'a2']
         assert r.zrange('a', 1, 2) == [b'a2', b'a3']
         assert r.zrange('a', 0, 2) == [b'a1', b'a2', b'a3']
-        assert r.zrange('a', 0, 2, desc=True) == [b'a3', b'a2', b'a1']
 
         # withscores
         assert r.zrange('a', 0, 1, withscores=True) == \

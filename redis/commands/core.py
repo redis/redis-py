@@ -2520,10 +2520,6 @@ class CoreCommands:
         ``offset`` and ``num`` are specified, then return a slice of the range.
         Can't be provided when using ``bylex``.
         """
-        # Supports old implementation: need to support ``desc`` also for version < 6.2.0
-        if not byscore and not bylex and (offset is None and num is None) and desc:
-            return self.zrevrange(name, start, end, withscores,
-                                  score_cast_func)
         return self._zrange('ZRANGE', None, name, start, end, desc, byscore,
                             bylex, withscores, score_cast_func, offset, num)
 
