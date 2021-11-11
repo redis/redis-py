@@ -20,7 +20,7 @@ def client(modclient):
 
 
 @pytest.mark.redismod
-def testCreate(client):
+def test_create(client):
     """Test CREATE/RESERVE calls"""
     assert client.bf().create("bloom", 0.01, 1000)
     assert client.bf().create("bloom_e", 0.01, 1000, expansion=1)
@@ -37,7 +37,7 @@ def testCreate(client):
 
 # region Test Bloom Filter
 @pytest.mark.redismod
-def testBFAdd(client):
+def test_bf_add(client):
     assert client.bf().create("bloom", 0.01, 1000)
     assert 1 == client.bf().add("bloom", "foo")
     assert 0 == client.bf().add("bloom", "foo")
@@ -50,7 +50,7 @@ def testBFAdd(client):
 
 
 @pytest.mark.redismod
-def testBFInsert(client):
+def test_bf_insert(client):
     assert client.bf().create("bloom", 0.01, 1000)
     assert [1] == intlist(client.bf().insert("bloom", ["foo"]))
     assert [0, 1] == intlist(client.bf().insert("bloom", ["foo", "bar"]))
@@ -66,7 +66,7 @@ def testBFInsert(client):
 
 
 @pytest.mark.redismod
-def testBFDumpLoad(client):
+def test_bf_scandump_and_loadchunk(client):
     # Store a filter
     client.bf().create("myBloom", "0.0001", "1000")
 
@@ -113,7 +113,7 @@ def testBFDumpLoad(client):
 
 
 @pytest.mark.redismod
-def testBFInfo(client):
+def test_bf_info(client):
     expansion = 4
     # Store a filter
     client.bf().create("nonscaling", "0.0001", "1000", noScale=True)
@@ -134,7 +134,7 @@ def testBFInfo(client):
 
 # region Test Cuckoo Filter
 @pytest.mark.redismod
-def testCFAddInsert(client):
+def test_cf_add_and_insert(client):
     assert client.cf().create("cuckoo", 1000)
     assert client.cf().add("cuckoo", "filter")
     assert not client.cf().addnx("cuckoo", "filter")
@@ -154,7 +154,7 @@ def testCFAddInsert(client):
 
 
 @pytest.mark.redismod
-def testCFExistsDel(client):
+def test_cf_exists_and_del(client):
     assert client.cf().create("cuckoo", 1000)
     assert client.cf().add("cuckoo", "filter")
     assert client.cf().exists("cuckoo", "filter")
@@ -167,7 +167,7 @@ def testCFExistsDel(client):
 
 # region Test Count-Min Sketch
 @pytest.mark.redismod
-def testCMS(client):
+def test_cms(client):
     assert client.cms().initbydim("dim", 1000, 5)
     assert client.cms().initbyprob("prob", 0.01, 0.01)
     assert client.cms().incrby("dim", ["foo"], [5])
@@ -182,7 +182,7 @@ def testCMS(client):
 
 
 @pytest.mark.redismod
-def testCMSMerge(client):
+def test_cms_merge(client):
     assert client.cms().initbydim("A", 1000, 5)
     assert client.cms().initbydim("B", 1000, 5)
     assert client.cms().initbydim("C", 1000, 5)
@@ -203,7 +203,7 @@ def testCMSMerge(client):
 
 # region Test Top-K
 @pytest.mark.redismod
-def testTopK(client):
+def test_topk(client):
     # test list with empty buckets
     assert client.topk().reserve("topk", 3, 50, 4, 0.9)
     assert [
@@ -282,7 +282,7 @@ def testTopK(client):
 
 
 @pytest.mark.redismod
-def testTopKincrby(client):
+def test_topk_incrby(client):
     client.flushdb()
     assert client.topk().reserve("topk", 3, 10, 3, 1)
     assert [None, None, None] == client.topk().incrby(
@@ -294,7 +294,7 @@ def testTopKincrby(client):
 
 # region Test T-Digest
 @pytest.mark.redismod
-def testTDigestReset(client):
+def test_tdigest_reset(client):
     assert client.tdigest().create("tDigest", 10)
     # reset on empty histogram
     assert client.tdigest().reset("tDigest")
@@ -307,7 +307,7 @@ def testTDigestReset(client):
 
 
 @pytest.mark.redismod
-def testTDigestMerge(client):
+def test_tdigest_merge(client):
     assert client.tdigest().create("to-tDigest", 10)
     assert client.tdigest().create("from-tDigest", 10)
     # insert data-points into sketch
@@ -322,7 +322,7 @@ def testTDigestMerge(client):
 
 
 @pytest.mark.redismod
-def testTDigestMinMax(client):
+def test_tdigest_min_and_max(client):
     assert client.tdigest().create("tDigest", 100)
     # insert data-points into sketch
     assert client.tdigest().add("tDigest", [1, 2, 3], [1.0] * 3)
@@ -332,7 +332,7 @@ def testTDigestMinMax(client):
 
 
 @pytest.mark.redismod
-def testTDigestQuantile(client):
+def test_tdigest_quantile(client):
     assert client.tdigest().create("tDigest", 500)
     # insert data-points into sketch
     assert client.tdigest().add(
@@ -347,11 +347,10 @@ def testTDigestQuantile(client):
 
 
 @pytest.mark.redismod
-def testTDigestCdf(client):
+def test_tdigest_cdf(client):
     assert client.tdigest().create("tDigest", 100)
     # insert data-points into sketch
     assert client.tdigest().add("tDigest", list(range(1, 10)), [1.0] * 10)
-
     assert 0.1 == round(client.tdigest().cdf("tDigest", 1.0), 1)
     assert 0.9 == round(client.tdigest().cdf("tDigest", 9.0), 1)
 

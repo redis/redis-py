@@ -12,6 +12,16 @@ from ..helpers import parse_to_list
 
 
 class AbstractBloom(object):
+    """
+    The client allows to interact with RedisBloom and use all of
+    it's functionality.
+
+    - BF for Bloom Filter
+    - CF for Cuckoo Filter
+    - CMS for Count-Min Sketch
+    - TOPK for TopK Data Structure
+    - TDIGEST for estimate rank statistics
+    """
     @staticmethod
     def appendItems(params, items):
         """Append ITEMS to params."""
@@ -176,19 +186,6 @@ class TDigestBloom(TDigestCommands, AbstractBloom):
 
 
 class BFBloom(BFCommands, AbstractBloom):
-    """
-    This class subclasses redis-py's `Redis` and implements RedisBloom's commands.
-
-    The client allows to interact with RedisBloom and use all of
-    it's functionality.
-    Prefix is according to the DS used.
-    - BF for Bloom Filter
-    - CF for Cuckoo Filter
-    - CMS for Count-Min Sketch
-    - TOPK for TopK Data Structure
-    - TDIGEST for estimate rank statistics
-    """
-
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
