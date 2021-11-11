@@ -467,7 +467,7 @@ class TestRedisCommands:
         client_2_addr = clients_by_name['redis-py-c2'].get('laddr')
         assert r.client_kill_filter(laddr=client_2_addr)
 
-    @skip_if_server_version_lt('2.8.12')
+    @skip_if_server_version_lt('6.0.0')
     @skip_if_redis_enterprise
     def test_client_kill_filter_by_user(self, r, request):
         killuser = 'user_to_kill'
@@ -1888,6 +1888,7 @@ class TestRedisCommands:
         assert r.zrange('a', 0, 1) == [b'a1', b'a2']
         assert r.zrange('a', 1, 2) == [b'a2', b'a3']
         assert r.zrange('a', 0, 2) == [b'a1', b'a2', b'a3']
+        assert r.zrange('a', 0, 2, desc=True) == [b'a3', b'a2', b'a1']
 
         # withscores
         assert r.zrange('a', 0, 1, withscores=True) == \
@@ -3684,7 +3685,8 @@ class TestRedisCommands:
         assert r.restore(key2, 0, dumpdata)
         assert r.ttl(key2) == -1
 
-        # idletime
+    @skip_if_server_version_lt('5.0.0')
+    def test_restore_idletime(self, r):
         key = 'yayakey'
         r.set(key, 'blee!')
         dumpdata = r.dump(key)
@@ -3692,7 +3694,8 @@ class TestRedisCommands:
         assert r.restore(key, 0, dumpdata, idletime=5)
         assert r.get(key) == b'blee!'
 
-        # frequency
+    @skip_if_server_version_lt('5.0.0')
+    def test_restore_frequency(self, r):
         key = 'yayakey'
         r.set(key, 'blee!')
         dumpdata = r.dump(key)
@@ -3703,10 +3706,8 @@ class TestRedisCommands:
     @skip_if_server_version_lt('5.0.0')
     @skip_if_redis_enterprise
     def test_replicaof(self, r):
-
         with pytest.raises(redis.ResponseError):
             assert r.replicaof("NO ONE")
-
         assert r.replicaof("NO", "ONE")
 
 
