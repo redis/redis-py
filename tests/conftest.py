@@ -31,6 +31,12 @@ def pytest_addoption(parser):
 def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
     info = client.info()
+    try:
+        client.execute_command("CONFIG SET maxmemory 5555555")
+        client.execute_command("CONFIG SET maxmemory 0")
+        info["enterprise"] = False
+    except redis.exceptions.ResponseError:
+        info["enterprise"] = True
     client.connection_pool.disconnect()
     return info
 
@@ -42,6 +48,7 @@ def pytest_sessionstart(session):
     arch_bits = info["arch_bits"]
     REDIS_INFO["version"] = version
     REDIS_INFO["arch_bits"] = arch_bits
+    REDIS_INFO["enterprise"] = info["enterprise"]
 
     # module info, if the second redis is running
     try:
@@ -90,6 +97,11 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
             return pytest.mark.skipif(check, reason="Redis module version")
 
     raise AttributeError("No redis module named {}".format(module_name))
+
+
+def skip_if_redis_enterprise(func):
+    return pytest.mark.skipif(REDIS_INFO["enterprise"] == True,
+                                reason="Redis enterprise")
 
 
 def _get_client(cls, request, single_connection_client=True, flushdb=True,
