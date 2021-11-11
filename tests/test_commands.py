@@ -453,7 +453,7 @@ class TestRedisCommands:
         client_2_addr = clients_by_name['redis-py-c2'].get('laddr')
         assert r.client_kill_filter(laddr=client_2_addr)
 
-    @skip_if_server_version_lt('2.8.12')
+    @skip_if_server_version_lt('6.0.0')
     def test_client_kill_filter_by_user(self, r, request):
         killuser = 'user_to_kill'
         r.acl_setuser(killuser, enabled=True, reset=True,
