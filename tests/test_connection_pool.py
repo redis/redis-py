@@ -8,7 +8,7 @@ from unittest import mock
 from threading import Thread
 from redis.connection import ssl_available, to_bool
 from .conftest import (
-    skip_if_server_version_lt, 
+    skip_if_server_version_lt,
     skip_if_redis_enterprise,
     _get_client
 )

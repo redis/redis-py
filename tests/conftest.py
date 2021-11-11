@@ -100,8 +100,14 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
 
 
 def skip_if_redis_enterprise(func):
-    return pytest.mark.skipif(REDIS_INFO["enterprise"] == True,
-                                reason="Redis enterprise")
+    check = REDIS_INFO["enterprise"] is True
+    return pytest.mark.skipif(check, reason="Redis enterprise"
+                              )
+
+
+def skip_ifnot_redis_enterprise(func):
+    check = REDIS_INFO["enterprise"] is False
+    return pytest.mark.skipif(check, reason="Redis enterprise")
 
 
 def _get_client(cls, request, single_connection_client=True, flushdb=True,

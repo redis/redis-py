@@ -327,7 +327,7 @@ class TestRedisCommands:
         for client_type in ['normal', 'master', 'pubsub']:
             clients = r.client_list(_type=client_type)
             assert isinstance(clients, list)
-            
+
     @skip_if_redis_enterprise
     def test_client_list_replica(self, r):
         clients = r.client_list(_type='replica')
@@ -528,17 +528,12 @@ class TestRedisCommands:
         reset_commands_processed = int(r.info()['total_commands_processed'])
         assert reset_commands_processed < prior_commands_processed
 
+    @skip_if_redis_enterprise
     def test_config_set(self, r):
-        # data = r.config_get()
-        # rdbname = data['dbfilename']
-        # try:
-        #     assert r.config_set('dbfilename', 'redis_py_test.rdb')
-        #     assert r.config_get()['dbfilename'] == 'redis_py_test.rdb'
-        # finally:
-        #     assert r.config_set('dbfilename', rdbname)
-        assert r.config_set('list-max-ziplist-entriies', 1000)
-        assert r.config_get('list-max-ziplist-entries') == 1000
-        r.config_set('list-max-ziplist-entriies', 0)
+        r.config_set('timeout', 70)
+        assert r.config_get()['timeout'] == '70'
+        assert r.config_set('timeout', 0)
+        assert r.config_get()['timeout'] == '0'
 
     def test_dbsize(self, r):
         r['a'] = 'foo'
