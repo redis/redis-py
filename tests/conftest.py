@@ -31,12 +31,10 @@ def pytest_addoption(parser):
 def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
     info = client.info()
-    try:
-        client.execute_command("CONFIG SET maxmemory 5555555")
-        client.execute_command("CONFIG SET maxmemory 0")
-        info["enterprise"] = False
-    except redis.exceptions.ResponseError:
+    if 'dping' in client.__commands__:
         info["enterprise"] = True
+    else:
+        info["enterprise"] = False
     client.connection_pool.disconnect()
     return info
 
@@ -56,6 +54,8 @@ def pytest_sessionstart(session):
         info = _get_info(redismod_url)
         REDIS_INFO["modules"] = info["modules"]
     except redis.exceptions.ConnectionError:
+        pass
+    except KeyError:
         pass
 
 

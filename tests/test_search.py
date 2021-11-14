@@ -649,9 +649,6 @@ def test_alias():
     index1 = getClient()
     index2 = getClient()
 
-    index1.hset("index1:lonestar", mapping={"name": "lonestar"})
-    index2.hset("index2:yogurt", mapping={"name": "yogurt"})
-
     def1 = IndexDefinition(prefix=["index1:"])
     def2 = IndexDefinition(prefix=["index2:"])
 
@@ -659,6 +656,9 @@ def test_alias():
     ftindex2 = index2.ft("testAlias2")
     ftindex1.create_index((TextField("name"),), definition=def1)
     ftindex2.create_index((TextField("name"),), definition=def2)
+
+    index1.hset("index1:lonestar", mapping={"name": "lonestar"})
+    index2.hset("index2:yogurt", mapping={"name": "yogurt"})
 
     res = ftindex1.search("*").docs[0]
     assert "index1:lonestar" == res.id

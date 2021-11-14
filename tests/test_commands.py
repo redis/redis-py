@@ -1208,6 +1208,12 @@ class TestRedisCommands:
         value1 = 'ohmytext'
         value2 = 'mynewtext'
         res = 'mytext'
+
+        if skip_if_redis_enterprise(None).args[0] is True:
+            with pytest.raises(redis.exceptions.ResponseError):
+                assert r.stralgo('LCS', value1, value2) == res
+            return
+
         # test LCS of strings
         assert r.stralgo('LCS', value1, value2) == res
         # test using keys
@@ -1250,6 +1256,12 @@ class TestRedisCommands:
 
     def test_substr(self, r):
         r['a'] = '0123456789'
+
+        if skip_if_redis_enterprise(None).args[0] is True:
+            with pytest.raises(redis.exceptions.ResponseError):
+                assert r.substr('a', 0) == b'0123456789'
+            return
+
         assert r.substr('a', 0) == b'0123456789'
         assert r.substr('a', 2) == b'23456789'
         assert r.substr('a', 3, 5) == b'345'
@@ -3617,6 +3629,11 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt('4.0.0')
     def test_memory_malloc_stats(self, r):
+        if skip_if_redis_enterprise(None).args[0] is True:
+            with pytest.raises(redis.exceptions.ResponseError):
+                assert r.memory_malloc_stats()
+            return
+
         assert r.memory_malloc_stats()
 
     @skip_if_server_version_lt('4.0.0')
@@ -3624,6 +3641,12 @@ class TestRedisCommands:
         # put a key into the current db to make sure that "db.<current-db>"
         # has data
         r.set('foo', 'bar')
+
+        if skip_if_redis_enterprise(None).args[0] is True:
+            with pytest.raises(redis.exceptions.ResponseError):
+                stats = r.memory_stats()
+            return
+
         stats = r.memory_stats()
         assert isinstance(stats, dict)
         for key, value in stats.items():
@@ -3647,6 +3670,14 @@ class TestRedisCommands:
         res = r.command_count()
         assert isinstance(res, int)
         assert res >= 100
+
+    @skip_if_server_version_lt('2.8.13')
+    def test_command(self, r):
+        res = r.command()
+        assert len(res) >= 100
+        cmds = [c[0].decode() for c in res]
+        assert 'set' in cmds
+        assert 'get' in cmds
 
     @skip_if_server_version_lt('4.0.0')
     @skip_if_redis_enterprise
