@@ -703,7 +703,6 @@ class Redis(RedisModuleCommands, CoreCommands, object):
         'CLUSTER SET-CONFIG-EPOCH': bool_ok,
         'CLUSTER SETSLOT': bool_ok,
         'CLUSTER SLAVES': parse_cluster_nodes,
-        'COMMAND': int,
         'COMMAND COUNT': int,
         'CONFIG GET': parse_config_get,
         'CONFIG RESETSTAT': bool_ok,
@@ -891,6 +890,12 @@ class Redis(RedisModuleCommands, CoreCommands, object):
         self.response_callbacks = CaseInsensitiveDict(
             self.__class__.RESPONSE_CALLBACKS)
 
+        # preload our class with the available redis commands
+        try:
+            self.__redis_commands__()
+        except RedisError:
+            pass
+
     def __repr__(self):
         return "%s<%s>" % (type(self).__name__, repr(self.connection_pool))
 
@@ -898,12 +903,12 @@ class Redis(RedisModuleCommands, CoreCommands, object):
         "Set a custom Response Callback"
         self.response_callbacks[command] = callback
 
-    def load_external_module(self, modname, funcname, func):
+    def load_external_module(self, funcname, func,
+                             ):
         """
         This function can be used to add externally defined redis modules,
         and their namespaces to the redis client.
-        modname - A string containing the name of the redis module to look for
-                  in the redis info block.
+
         funcname - A string containing the name of the function to create
         func - The function, being added to this class.
 
@@ -914,31 +919,25 @@ class Redis(RedisModuleCommands, CoreCommands, object):
         from redis import Redis
         from foomodule import F
         r = Redis()
-        r.load_external_module("foomod", "foo", F)
+        r.load_external_module("foo", F)
         r.foo().dothing('your', 'arguments')
 
         For a concrete example see the reimport of the redisjson module in
         tests/test_connection.py::test_loading_external_modules
         """
-        mods = self.loaded_modules
-        if modname.lower() not in mods:
-            raise ModuleError("{} is not loaded in redis.".format(modname))
         setattr(self, funcname, func)
 
-    @property
-    def loaded_modules(self):
-        key = '__redis_modules__'
-        mods = getattr(self, key, None)
-        if mods is not None:
-            return mods
-
+    def __redis_commands__(self):
+        """Store the list of available commands, for our redis instance."""
+        cmds = getattr(self, '__commands__', None)
+        if cmds is not None:
+            return cmds
         try:
-            mods = {f.get('name').lower(): f.get('ver')
-                    for f in self.info().get('modules')}
-        except TypeError:
-            mods = []
-        setattr(self, key, mods)
-        return mods
+            cmds = [c[0].upper().decode() for c in self.command()]
+        except AttributeError:  # if encoded
+            cmds = [c[0].upper() for c in self.command()]
+        self.__commands__ = cmds
+        return cmds
 
     def pipeline(self, transaction=True, shard_hint=None):
         """
