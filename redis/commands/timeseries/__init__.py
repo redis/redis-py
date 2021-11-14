@@ -34,7 +34,7 @@ class TimeSeries(TimeSeriesCommands):
     functionality.
     """
 
-    def __init__(self, client=None, version=None, **kwargs):
+    def __init__(self, client=None, **kwargs):
         """Create a new RedisTimeSeries client."""
         # Set the module commands' callbacks
         self.MODULE_CALLBACKS = {
@@ -55,7 +55,6 @@ class TimeSeries(TimeSeriesCommands):
 
         self.client = client
         self.execute_command = client.execute_command
-        self.MODULE_VERSION = version
 
         for key, value in self.MODULE_CALLBACKS.items():
             self.client.set_response_callback(key, value)

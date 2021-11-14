@@ -3671,6 +3671,14 @@ class TestRedisCommands:
         assert isinstance(res, int)
         assert res >= 100
 
+    @skip_if_server_version_lt('2.8.13')
+    def test_command(self, r):
+        res = r.command()
+        assert len(res) >= 100
+        cmds = [c[0].decode() for c in res]
+        assert 'set' in cmds
+        assert 'get' in cmds
+
     @skip_if_server_version_lt('4.0.0')
     @skip_if_redis_enterprise
     def test_module(self, r):
