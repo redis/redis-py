@@ -378,7 +378,7 @@ class SearchCommands:
         return self.execute_command(EXPLAIN_CMD, *args)
 
     def explain_cli(self, query):  # noqa
-        raise NotImplementedError("EXPLAINCLI is intentionally not implemented.")
+        raise NotImplementedError("EXPLAINCLI will not be implemented.")
 
     def aggregate(self, query):
         """
