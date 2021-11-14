@@ -1,10 +1,8 @@
 version: 2
 
 python:
-  version: 3.7
   install:
-    - method: pip
-      path: ./docs/requirements.txt
+      path: /docs/requirements.txt
 
 build:
   os: ubuntu-20.04
