@@ -17,6 +17,7 @@ ADD_CMD = "FT.ADD"
 ADDHASH_CMD = "FT.ADDHASH"
 DROP_CMD = "FT.DROP"
 EXPLAIN_CMD = "FT.EXPLAIN"
+EXPLAINCLI_CMD = "FT.EXPLAINCLI"
 DEL_CMD = "FT.DEL"
 AGGREGATE_CMD = "FT.AGGREGATE"
 CURSOR_CMD = "FT.CURSOR"
@@ -375,6 +376,9 @@ class SearchCommands:
     def explain(self, query):
         args, query_text = self._mk_query_args(query)
         return self.execute_command(EXPLAIN_CMD, *args)
+
+    def explain_cli(self, query):  # noqa
+        raise NotImplementedError("EXPLAINCLI is intentionally not implemented.")
 
     def aggregate(self, query):
         """

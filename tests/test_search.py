@@ -612,6 +612,12 @@ def test_explain(client):
 
 
 @pytest.mark.redismod
+def test_explaincli(client):
+    with pytest.raises(NotImplementedError):
+        client.ft().explain_cli("foo")
+
+
+@pytest.mark.redismod
 def test_summarize(client):
     createIndex(client.ft())
     waitForIndex(client, "idx")
