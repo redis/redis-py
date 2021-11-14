@@ -3315,6 +3315,9 @@ class CoreCommands:
     def command_count(self):
         return self.execute_command('COMMAND COUNT')
 
+    def command(self):
+        return self.execute_command('COMMAND')
+
 
 class Script:
     "An executable Lua script object returned by ``register_script``"
