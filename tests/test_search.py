@@ -1000,7 +1000,7 @@ def test_aggregations(client):
 
 
 @pytest.mark.redismod
-def test_sortby(client):
+def test_aggregations_sort_by(client):
     client.ft().create_index(
         (
             TextField("t1"),
@@ -1027,14 +1027,14 @@ def test_sortby(client):
     assert res.rows[1] == ['t2', 'b', 't1', 'a']
 
     req = aggregations.AggregateRequest("*")\
-        .sort_by(aggregations.Asc("@t1"))
+        .sort_by("@t1", max=2)
     res = client.ft().aggregate(req)
     assert res.rows[0] == ['t1', 'a']
     assert res.rows[1] == ['t1', 'b']
 
 
 @pytest.mark.redismod
-def test_load(client):
+def test_aggregations_load(client):
     client.ft().create_index(
         (
             TextField("t1"),
