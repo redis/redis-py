@@ -10,9 +10,9 @@ from redis.exceptions import RedisClusterException
 from unittest.mock import Mock
 from urllib.parse import urlparse
 
+
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/9"
-default_redismod_url = "redis://localhost:36379/9"
 
 default_redismod_url = "redis://localhost:36379"
 default_cluster_nodes = 6
@@ -40,6 +40,10 @@ def pytest_addoption(parser):
 def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
     info = client.info()
+    if 'dping' in client.__commands__:
+        info["enterprise"] = True
+    else:
+        info["enterprise"] = False
     client.connection_pool.disconnect()
     return info
 
@@ -53,13 +57,17 @@ def pytest_sessionstart(session):
     REDIS_INFO["version"] = version
     REDIS_INFO["arch_bits"] = arch_bits
     REDIS_INFO["cluster_enabled"] = cluster_enabled
+    REDIS_INFO["enterprise"] = info["enterprise"]
 
-    # module info
-    markers = session.config.getoption("-m")
-    if 'redismod' in markers and 'not redismod' not in markers:
+    # module info, if the second redis is running
+    try:
         redismod_url = session.config.getoption("--redismod-url")
         info = _get_info(redismod_url)
         REDIS_INFO["modules"] = info["modules"]
+    except redis.exceptions.ConnectionError:
+        pass
+    except KeyError:
+        pass
 
     if cluster_enabled:
         cluster_nodes = session.config.getoption("--redis-cluster-nodes")
@@ -120,8 +128,12 @@ def skip_unless_arch_bits(arch_bits):
 
 
 def skip_ifmodversion_lt(min_version: str, module_name: str):
-    modules = REDIS_INFO.get("modules")
-    if modules is None or modules == []:
+    try:
+        modules = REDIS_INFO["modules"]
+    except KeyError:
+        return pytest.mark.skipif(True,
+                                  reason="Redis server does not have modules")
+    if modules == []:
         return pytest.mark.skipif(True, reason="No redis modules found")
 
     for j in modules:
@@ -132,6 +144,17 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
             return pytest.mark.skipif(check, reason="Redis module version")
 
     raise AttributeError("No redis module named {}".format(module_name))
+
+
+def skip_if_redis_enterprise(func):
+    check = REDIS_INFO["enterprise"] is True
+    return pytest.mark.skipif(check, reason="Redis enterprise"
+                              )
+
+
+def skip_ifnot_redis_enterprise(func):
+    check = REDIS_INFO["enterprise"] is False
+    return pytest.mark.skipif(check, reason="Redis enterprise")
 
 
 def _get_client(cls, request, single_connection_client=True, flushdb=True,
@@ -286,14 +309,7 @@ def mock_cluster_resp_slaves(request, **kwargs):
 def master_host(request):
     url = request.config.getoption("--redis-url")
     parts = urlparse(url)
-    yield parts.hostname
-
-
-@pytest.fixture(scope="session")
-def master_port(request):
-    url = request.config.getoption("--redis-url")
-    parts = urlparse(url)
-    yield parts.port
+    yield parts.hostname, parts.port
 
 
 def wait_for_command(client, monitor, command):

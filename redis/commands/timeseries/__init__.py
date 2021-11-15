@@ -1,4 +1,4 @@
-from redis.client import bool_ok
+import redis.client
 
 from .utils import (
     parse_range,
@@ -34,15 +34,15 @@ class TimeSeries(TimeSeriesCommands):
     functionality.
     """
 
-    def __init__(self, client=None, version=None, **kwargs):
+    def __init__(self, client=None, **kwargs):
         """Create a new RedisTimeSeries client."""
         # Set the module commands' callbacks
-        MODULE_CALLBACKS = {
-            CREATE_CMD: bool_ok,
-            ALTER_CMD: bool_ok,
-            CREATERULE_CMD: bool_ok,
+        self.MODULE_CALLBACKS = {
+            CREATE_CMD: redis.client.bool_ok,
+            ALTER_CMD: redis.client.bool_ok,
+            CREATERULE_CMD: redis.client.bool_ok,
             DEL_CMD: int,
-            DELETERULE_CMD: bool_ok,
+            DELETERULE_CMD: redis.client.bool_ok,
             RANGE_CMD: parse_range,
             REVRANGE_CMD: parse_range,
             MRANGE_CMD: parse_m_range,
@@ -55,7 +55,31 @@ class TimeSeries(TimeSeriesCommands):
 
         self.client = client
         self.execute_command = client.execute_command
-        self.MODULE_VERSION = version
 
-        for k in MODULE_CALLBACKS:
-            self.client.set_response_callback(k, MODULE_CALLBACKS[k])
+        for key, value in self.MODULE_CALLBACKS.items():
+            self.client.set_response_callback(key, value)
+
+    def pipeline(self, transaction=True, shard_hint=None):
+        """Creates a pipeline for the TimeSeries module, that can be used
+        for executing only TimeSeries commands and core commands.
+
+        Usage example:
+
+        r = redis.Redis()
+        pipe = r.ts().pipeline()
+        for i in range(100):
+            pipeline.add("with_pipeline", i, 1.1 * i)
+        pipeline.execute()
+
+        """
+        p = Pipeline(
+            connection_pool=self.client.connection_pool,
+            response_callbacks=self.MODULE_CALLBACKS,
+            transaction=transaction,
+            shard_hint=shard_hint,
+        )
+        return p
+
+
+class Pipeline(TimeSeriesCommands, redis.client.Pipeline):
+    """Pipeline for the module."""

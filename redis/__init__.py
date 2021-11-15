@@ -7,6 +7,12 @@ from redis.connection import (
     SSLConnection,
     UnixDomainSocketConnection
 )
+from redis.sentinel import (
+    Sentinel,
+    SentinelConnectionPool,
+    SentinelManagedConnection,
+    SentinelManagedSSLConnection,
+)
 from redis.utils import from_url
 from redis.exceptions import (
     AuthenticationError,
@@ -32,7 +38,7 @@ def int_or_str(value):
         return value
 
 
-__version__ = '4.0.0rc1'
+__version__ = '4.0.0rc2'
 VERSION = tuple(map(int_or_str, __version__.split('.')))
 
 __all__ = [
@@ -53,6 +59,10 @@ __all__ = [
     'RedisCluster',
     'RedisError',
     'ResponseError',
+    'Sentinel',
+    'SentinelConnectionPool',
+    'SentinelManagedConnection',
+    'SentinelManagedSSLConnection',
     'SSLConnection',
     'StrictRedis',
     'TimeoutError',

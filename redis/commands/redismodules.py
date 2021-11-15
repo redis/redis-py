@@ -8,41 +8,41 @@ class RedisModuleCommands:
     """
 
     def json(self, encoder=JSONEncoder(), decoder=JSONDecoder()):
-        """Access the json namespace, providing support for redis json."""
-        try:
-            modversion = self.loaded_modules['rejson']
-        except IndexError:
-            raise ModuleError("rejson is not a loaded in the redis instance.")
+        """Access the json namespace, providing support for redis json.
+        """
+        if 'JSON.SET' not in self.__commands__:
+            raise ModuleError("redisjson is not loaded in redis. "
+                              "For more information visit "
+                              "https://redisjson.io/")
 
         from .json import JSON
         jj = JSON(
                 client=self,
-                version=modversion,
                 encoder=encoder,
                 decoder=decoder)
         return jj
 
     def ft(self, index_name="idx"):
-        """Access the search namespace, providing support for redis search."""
-        try:
-            modversion = self.loaded_modules['search']
-        except IndexError:
-            raise ModuleError("search is not a loaded in the redis instance.")
+        """Access the search namespace, providing support for redis search.
+        """
+        if 'FT.INFO' not in self.__commands__:
+            raise ModuleError("redisearch is not loaded in redis. "
+                              "For more information visit "
+                              "https://redisearch.io/")
 
         from .search import Search
-        s = Search(client=self, version=modversion, index_name=index_name)
+        s = Search(client=self, index_name=index_name)
         return s
 
-    def ts(self, index_name="idx"):
+    def ts(self):
         """Access the timeseries namespace, providing support for
         redis timeseries data.
         """
-        try:
-            modversion = self.loaded_modules['timeseries']
-        except IndexError:
-            raise ModuleError("timeseries is not a loaded in "
-                              "the redis instance.")
+        if 'TS.INFO' not in self.__commands__:
+            raise ModuleError("reditimeseries is not loaded in redis. "
+                              "For more information visit "
+                              "https://redistimeseries.io/")
 
         from .timeseries import TimeSeries
-        s = TimeSeries(client=self, version=modversion, index_name=index_name)
+        s = TimeSeries(client=self)
         return s

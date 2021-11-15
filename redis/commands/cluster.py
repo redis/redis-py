@@ -339,6 +339,12 @@ class ClusterManagementCommands:
         return self.execute_command('CLIENT UNPAUSE',
                                     target_nodes=target_nodes)
 
+    def command(self, target_nodes=None):
+        """
+        Returns dict reply of details about all Redis commands.
+        """
+        return self.execute_command('COMMAND', target_nodes=target_nodes)
+
     def command_count(self, target_nodes=None):
         """
         Returns Integer reply of number of total commands in this Redis server.

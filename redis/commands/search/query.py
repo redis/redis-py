@@ -1,6 +1,3 @@
-import six
-
-
 class Query(object):
     """
     Query is used to build complex queries that have more parameters than just
@@ -66,7 +63,7 @@ class Query(object):
         if not fields:
             return []
         return  \
-            [fields] if isinstance(fields, six.string_types) else list(fields)
+            [fields] if isinstance(fields, str) else list(fields)
 
     def summarize(self, fields=None, context_len=None,
                   num_frags=None, sep=None):
