@@ -1020,12 +1020,14 @@ def test_sortby(client):
         t2="a",
     )
 
-    req = aggregations.AggregateRequest("*").sort_by(aggregations.Asc("@t2"), aggregations.Desc("@t1"))
+    req = aggregations.AggregateRequest("*")\
+        .sort_by(aggregations.Asc("@t2"), aggregations.Desc("@t1"))
     res = client.ft().aggregate(req)
     assert res.rows[0] == ['t2', 'a', 't1', 'b']
     assert res.rows[1] == ['t2', 'b', 't1', 'a']
 
-    req = aggregations.AggregateRequest("*").sort_by(aggregations.Asc("@t1"))
+    req = aggregations.AggregateRequest("*")\
+        .sort_by(aggregations.Asc("@t1"))
     res = client.ft().aggregate(req)
     assert res.rows[0] == ['t1', 'a']
     assert res.rows[1] == ['t1', 'b']
