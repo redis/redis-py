@@ -1011,18 +1011,21 @@ def test_aggregations_sort_by_and_limit(client):
     client.ft().client.hset("doc1", mapping={'t1': 'a', 't2': 'b'})
     client.ft().client.hset("doc2", mapping={'t1': 'b', 't2': 'a'})
 
+    # test sort_by using SortDirection
     req = aggregations.AggregateRequest("*")\
         .sort_by(aggregations.Asc("@t2"), aggregations.Desc("@t1"))
     res = client.ft().aggregate(req)
     assert res.rows[0] == ['t2', 'a', 't1', 'b']
     assert res.rows[1] == ['t2', 'b', 't1', 'a']
 
+    # test sort_by without SortDirection and with max
     req = aggregations.AggregateRequest("*")\
         .sort_by("@t1", max=2)
     res = client.ft().aggregate(req)
     assert res.rows[0] == ['t1', 'a']
     assert res.rows[1] == ['t1', 'b']
 
+    # test limit
     req = aggregations.AggregateRequest("*")\
         .sort_by("@t1").limit(1, 1)
     res = client.ft().aggregate(req)
@@ -1041,10 +1044,12 @@ def test_aggregations_load(client):
 
     client.ft().client.hset("doc1", mapping={'t1': 'hello', 't2': 'world'})
 
+    # load t1
     req = aggregations.AggregateRequest("*").load("t1")
     res = client.ft().aggregate(req)
     assert res.rows[0] == ['t1', 'hello']
 
+    # load t2
     req = aggregations.AggregateRequest("*").load("t2")
     res = client.ft().aggregate(req)
     assert res.rows[0] == ['t2', 'world']
