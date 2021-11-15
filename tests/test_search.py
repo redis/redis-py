@@ -1008,17 +1008,8 @@ def test_aggregations_sort_by(client):
         )
     )
 
-    # Indexing documents
-    client.ft().add_document(
-        "doc1",
-        t1="a",
-        t2="b",
-    )
-    client.ft().add_document(
-        "doc2",
-        t1="b",
-        t2="a",
-    )
+    client.ft().client.hset("doc1", mapping={'t1': 'a', 't2': 'b'})
+    client.ft().client.hset("doc2", mapping={'t1': 'b', 't2': 'a'})
 
     req = aggregations.AggregateRequest("*")\
         .sort_by(aggregations.Asc("@t2"), aggregations.Desc("@t1"))
@@ -1042,6 +1033,25 @@ def test_aggregations_load(client):
         )
     )
 
+    client.ft().client.hset("doc1", mapping={'t1': 'hello', 't2': 'world'})
+
+    req = aggregations.AggregateRequest("*").load("t1")
+    res = client.ft().aggregate(req)
+    assert res.rows[0] == ['t1', 'hello']
+
+    req = aggregations.AggregateRequest("*").load("t2")
+    res = client.ft().aggregate(req)
+    assert res.rows[0] == ['t2', 'world']
+
+
+@pytest.mark.redismod
+def test_aggregations_apply(client):
+    client.ft().create_index(
+        (
+            NumericField("timestamp"),
+        )
+    )
+
     # Indexing a document
     client.ft().add_document(
         "doc1",
@@ -1052,10 +1062,6 @@ def test_aggregations_load(client):
     req = aggregations.AggregateRequest("*").load("t1")
     res = client.ft().aggregate(req)
     assert res.rows[0] == ['t1', 'hello']
-
-    req = aggregations.AggregateRequest("*").load("t2")
-    res = client.ft().aggregate(req)
-    assert res.rows[0] == ['t2', 'world']
 
 
 @pytest.mark.redismod
