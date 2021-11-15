@@ -9,7 +9,7 @@ for PORT in $(seq 16379 16384); do
     touch /nodes/$PORT/redis.conf
   fi
   cat << EOF >> /nodes/$PORT/redis.conf
-port $PORT
+port ${PORT}
 cluster-enabled yes
 daemonize yes
 logfile /redis.log

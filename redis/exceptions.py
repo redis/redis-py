@@ -105,9 +105,9 @@ class ClusterDownError(ClusterError, ResponseError):
     """
     Error indicated CLUSTERDOWN error received from cluster.
     By default Redis Cluster nodes stop accepting queries if they detect there
-    is at least an hash slot uncovered (no available node is serving it).
+    is at least a hash slot uncovered (no available node is serving it).
     This way if the cluster is partially down (for example a range of hash
-    slots are no longer covered) all the cluster becomes, eventually,
+    slots are no longer covered) the entire cluster eventually becomes
     unavailable. It automatically returns available as soon as all the slots
     are covered again.
     """
@@ -119,10 +119,10 @@ class ClusterDownError(ClusterError, ResponseError):
 class AskError(ResponseError):
     """
     Error indicated ASK error received from cluster.
-    When a slot is set as MIGRATING, the node will accept all queries that are
-    about this hash slot, but only if the key in question exists, otherwise the
-    query is forwarded using a -ASK redirection to the node that is target of
-    the migration.
+    When a slot is set as MIGRATING, the node will accept all queries that
+    pertain to this hash slot, but only if the key in question exists,
+    otherwise the query is forwarded using a -ASK redirection to the node that
+    is target of the migration.
     src node: MIGRATING to dst node
         get > ASK error
         ask dst node > ASKING command

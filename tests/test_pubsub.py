@@ -477,6 +477,7 @@ class TestPubSubRedisDown:
 
 class TestPubSubSubcommands:
 
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('2.8.0')
     def test_pubsub_channels(self, r):
         p = r.pubsub()
@@ -486,6 +487,7 @@ class TestPubSubSubcommands:
         expected = [b'bar', b'baz', b'foo', b'quux']
         assert all([channel in r.pubsub_channels() for channel in expected])
 
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('2.8.0')
     def test_pubsub_numsub(self, r):
         p1 = r.pubsub()

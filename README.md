@@ -939,17 +939,19 @@ C 3
 redis-py is now supports cluster mode and provides a client for
 [Redis Cluster](<https://redis.io/topics/cluster-tutorial>).
 
-The cluster client is based on [redis-py-cluster](https://github.com/Grokzen/redis-py-cluster)
-by Grokzen, with a lot of added and 
-changed functionality.
+The cluster client is based on Grokzen's 
+[redis-py-cluster](https://github.com/Grokzen/redis-py-cluster), has added bug 
+fixes, and now supersedes that library. Support for these changes is thanks to 
+his contributions.
+
 
 **Create RedisCluster:**
 
-Connecting redis-py to the Redis Cluster instance(s) is easy.
-RedisCluster requires at least one node to discover the whole cluster nodes,
-and there is multiple ways of creating a RedisCluster instance:
+Connecting redis-py to a Redis Cluster instance(s) requires at a minimum a 
+single node for cluster discovery. There are multiple ways in which a cluster 
+instance can be created:
 
-- Use the 'host' and 'port' arguments:
+- Using 'host' and 'port' arguments:
 
 ``` pycon
     >>> from redis.cluster import RedisCluster as Redis
@@ -957,14 +959,14 @@ and there is multiple ways of creating a RedisCluster instance:
     >>> print(rc.get_nodes())
     [[host=127.0.0.1,port=6379,name=127.0.0.1:6379,server_type=primary,redis_connection=Redis<ConnectionPool<Connection<host=127.0.0.1,port=6379,db=0>>>], [host=127.0.0.1,port=6378,name=127.0.0.1:6378,server_type=primary,redis_connection=Redis<ConnectionPool<Connection<host=127.0.0.1,port=6378,db=0>>>], [host=127.0.0.1,port=6377,name=127.0.0.1:6377,server_type=replica,redis_connection=Redis<ConnectionPool<Connection<host=127.0.0.1,port=6377,db=0>>>]]
 ```
-- Use Redis URL:
+- Using the Redis URL specification:
 
 ``` pycon
     >>> from redis.cluster import RedisCluster as Redis
     >>> rc = Redis.from_url("redis://localhost:6379/0")
 ```
 
-- Use ClusterNode(s):
+- Directly, via the ClusterNode class:
 
 ``` pycon
     >>> from redis.cluster import RedisCluster as Redis
@@ -987,13 +989,17 @@ RedisCluster instance can be directly used to execute Redis commands. When a
 command is being executed through the cluster instance, the target node(s) will
 be internally determined. When using a key-based command, the target node will
 be the node that holds the key's slot.
-Cluster management commands or other cluster commands have predefined node
-group targets (all-primaries, all-nodes, random-node, all-replicas), which are
-outlined in the command’s function documentation.
-For example, ‘KEYS’ command will be sent to all primaries and return all keys
-in the cluster, and ‘CLUSTER NODES’ command will be sent to a random node.
-Other management commands will require you to pass the target node/s to execute
-the command on.
+Cluster management commands and other commands that are not key-based have a 
+parameter called 'target_nodes' where you can specify which nodes to execute 
+the command on. In the absence of target_nodes, the command will be executed 
+on the default cluster node. As part of cluster instance initialization, the 
+cluster's default node is randomly selected from the cluster's primaries, and 
+will be updated upon reinitialization. Using r.get_default_node(), you can 
+get the cluster's default node, or you can change it using the 
+'set_default_node' method.
+
+The 'target_nodes' parameter is explained in the following section, 
+'Specifying Target Nodes'.
 
 ``` pycon
     >>> # target-nodes: the node that holds 'foo1's key slot
@@ -1003,20 +1009,18 @@ the command on.
     >>> # target-nodes: the node that holds 'foo1's key slot
     >>> print(rc.get('foo1'))
     b'bar'
-    >>> # target-nodes: all-primaries
+    >>> # target-node: default-node
     >>> print(rc.keys())
-    [b'foo1', b'foo2']
-    >>> # target-nodes: all-nodes
-    >>> rc.flushall()
+    [b'foo1']
+    >>> # target-node: default-node
+    >>> rc.ping()
 ```
 
 **Specifying Target Nodes:**
 
-As mentioned above, some RedisCluster commands will require you to provide the
-target node/s that you want to execute the command on, and in other cases, the
-target node will be determined by the client itself. That being said, ALL
-RedisCluster commands can be executed against a specific node or a group of
-nodes by passing the command kwarg `target_nodes`.
+As mentioned above, all non key-based RedisCluster commands accept the kwarg 
+parameter 'target_nodes' that specifies the node/nodes that the command should 
+be executed on.
 The best practice is to specify target nodes using RedisCluster class's node
 flags: PRIMARIES, REPLICAS, ALL_NODES, RANDOM. When a nodes flag is passed
 along with a command, it will be internally resolved to the relevant node/s.
@@ -1027,13 +1031,14 @@ and attempt to retry executing the command.
 ``` pycon
     >>> from redis.cluster import RedisCluster as Redis
     >>> # run cluster-meet command on all of the cluster's nodes
-    >>> rc.cluster_meet(Redis.ALL_NODES, '127.0.0.1', 6379)
+    >>> rc.cluster_meet('127.0.0.1', 6379, target_nodes=Redis.ALL_NODES)
     >>> # ping all replicas
-    >>> rc.ping(Redis.REPLICAS)
+    >>> rc.ping(target_nodes=Redis.REPLICAS)
     >>> # ping a specific node
-    >>> rc.ping(Redis.RANDOM)
-    >>> # ping all nodes in the cluster, default command behavior
-    >>> rc.ping()
+    >>> rc.ping(target_nodes=Redis.RANDOM)
+    >>> # get the keys from all cluster nodes
+    >>> rc.keys(target_nodes=Redis.ALL_NODES)
+    [b'foo1', b'foo2']
     >>> # execute bgsave in all primaries
     >>> rc.bgsave(Redis.PRIMARIES)
 ```
@@ -1047,15 +1052,15 @@ the relevant cluster or connection error will be returned.
 ``` pycon
     >>> node = rc.get_node('localhost', 6379)
     >>> # Get the keys only for that specific node
-    >>> rc.keys(node)
+    >>> rc.keys(target_nodes=node)
     >>> # get Redis info from a subset of primaries
     >>> subset_primaries = [node for node in rc.get_primaries() if node.port > 6378]
-    >>> rc.info(subset_primaries)
+    >>> rc.info(target_nodes=subset_primaries)
 ```
 
-In addition, you can use the RedisCluster instance to obtain the Redis instance
-of a specific node and execute commands on that node directly. The Redis client,
-however, cannot handle cluster failures and retries.
+In addition, the RedisCluster instance can query the Redis instance of a 
+specific node and execute commands on that node directly. The Redis client,
+however, does not handle cluster failures and retries.
 
 ``` pycon
     >>> cluster_node = rc.get_node(host='localhost', port=6379)
@@ -1107,12 +1112,12 @@ first command execution. The node will be determined by:
     
 *Known limitations with pubsub:*
 
-Pattern subscribe and publish do not work properly because if we hash a pattern 
-like fo* we will get a keyslot for that string but there is a endless   
-possibilities of channel names based on that pattern that we can’t know in 
-advance. This feature is not limited but the commands is not recommended to use 
-right now. 
-See [redis-py-cluster documentaion](https://redis-py-cluster.readthedocs.io/en/stable/pubsub.html) 
+Pattern subscribe and publish do not currently work properly due to key slots. 
+If we hash a pattern like fo* we will receive a keyslot for that string but 
+there are endless possibilities for channel names based on this pattern - 
+unknowable in advance. This feature is not disabled but the commands are not 
+currently recommended for use.
+See [redis-py-cluster documentation](https://redis-py-cluster.readthedocs.io/en/stable/pubsub.html) 
  for more.
 
 ``` pycon
@@ -1126,19 +1131,20 @@ See [redis-py-cluster documentaion](https://redis-py-cluster.readthedocs.io/en/s
 **Read Only Mode**
 
 By default, Redis Cluster always returns MOVE redirection response on accessing 
-a replica node. You can overcome this limitation and scale read commands with 
-READONLY mode. 
+a replica node. You can overcome this limitation and scale read commands by 
+triggering READONLY mode.
 
 To enable READONLY mode pass read_from_replicas=True to RedisCluster 
 constructor. When set to true, read commands will be assigned between the
 primary and its replications in a Round-Robin manner. 
 
-You could also enable READONLY mode in runtime by running readonly() method,  
-or disable it with readwrite().
+READONLY mode can be set at runtime by calling the readonly() method with 
+target_nodes='replicas', and read-write access can be restored by calling the 
+readwrite() method.
 
 ``` pycon
     >>> from cluster import RedisCluster as Redis
-    # Use 'debug' mode to print the node that the command is executed on
+    # Use 'debug' log level to print the node that the command is executed on
     >>> rc_readonly = Redis(startup_nodes=startup_nodes, 
                     read_from_replicas=True, debug=True)
     >>> rc_readonly.set('{foo}1', 'bar1')
@@ -1148,7 +1154,7 @@ or disable it with readwrite().
     # set command would be directed only to the slot's primary node
     >>> rc_readonly.set('{foo}2', 'bar2')
     # reset READONLY flag
-    >>> rc_readonly.readwrite()
+    >>> rc_readonly.readwrite(target_nodes='replicas')
     # now the get command would be directed only to the slot's primary node
     >>> rc_readonly.get('{foo}1')
 ```

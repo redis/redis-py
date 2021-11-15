@@ -4,6 +4,7 @@ import pytest
 import warnings
 
 from time import sleep
+from tests.test_pubsub import wait_for_message
 from unittest.mock import call, patch, DEFAULT, Mock
 from redis import Redis
 from redis.cluster import get_node_name, ClusterNode, \
@@ -181,6 +182,9 @@ def moved_redirection_helper(request, failover=False):
 
 @pytest.mark.onlycluster
 class TestRedisClusterObj:
+    """
+    Tests for the RedisCluster class
+    """
     def test_host_port_startup_node(self):
         """
         Test that it is possible to use host & port arguments as startup node
@@ -201,7 +205,7 @@ class TestRedisClusterObj:
                          ClusterNode(default_host, port_2)]
         cluster = get_mocked_redis_client(startup_nodes=startup_nodes)
         assert cluster.get_node(host=default_host, port=port_1) is not None \
-            and cluster.get_node(host=default_host, port=port_2) is not None
+               and cluster.get_node(host=default_host, port=port_2) is not None
 
     def test_empty_startup_nodes(self):
         """
@@ -289,6 +293,17 @@ class TestRedisClusterObj:
                 called_count += 1
         assert called_count == 1
 
+    def test_execute_command_default_node(self, r):
+        """
+        Test command execution without node flag is being executed on the
+        default node
+        """
+        def_node = r.get_default_node()
+        mock_node_resp(def_node, 'PONG')
+        assert r.ping() is True
+        conn = def_node.redis_connection.connection
+        assert conn.read_response.called
+
     @pytest.mark.filterwarnings("ignore:AskError")
     def test_ask_redirection(self, r):
         """
@@ -362,6 +377,7 @@ class TestRedisClusterObj:
                     def initialize_mock(self):
                         # start with all slots mapped to 7006
                         self.nodes_cache = {node_7006.name: node_7006}
+                        self.default_node = node_7006
                         self.slots_cache = {}
 
                         for i in range(0, 16383):
@@ -372,6 +388,7 @@ class TestRedisClusterObj:
                         def map_7007(self):
                             self.nodes_cache = {
                                 node_7007.name: node_7007}
+                            self.default_node = node_7007
                             self.slots_cache = {}
 
                             for i in range(0, 16383):
@@ -404,7 +421,7 @@ class TestRedisClusterObj:
                             RedisCluster, request, flushdb=False)
                         assert len(rc.get_nodes()) == 1
                         assert rc.get_node(node_name=node_7006.name) is not \
-                            None
+                               None
 
                         rc.get('foo')
 
@@ -412,7 +429,7 @@ class TestRedisClusterObj:
                         # one failed and one successful call
                         assert len(rc.get_nodes()) == 1
                         assert rc.get_node(node_name=node_7007.name) is not \
-                            None
+                               None
                         assert rc.get_node(node_name=node_7006.name) is None
                         assert parse_response.failed_calls == 1
                         assert parse_response.successful_calls == 1
@@ -482,7 +499,7 @@ class TestRedisClusterObj:
 
     def test_get_node_name(self):
         assert get_node_name(default_host, default_port) == \
-            "{0}:{1}".format(default_host, default_port)
+               "{0}:{1}".format(default_host, default_port)
 
     def test_all_nodes(self, r):
         """
@@ -525,7 +542,7 @@ class TestRedisClusterObj:
             with pytest.raises(ClusterDownError):
                 rc.get("bar")
                 assert execute_command.failed_calls == \
-                    rc.cluster_error_retry_attempts
+                       rc.cluster_error_retry_attempts
 
     @pytest.mark.filterwarnings("ignore:ConnectionError")
     def test_connection_error_overreaches_retry_attempts(self):
@@ -546,7 +563,7 @@ class TestRedisClusterObj:
             with pytest.raises(ConnectionError):
                 rc.get("bar")
                 assert execute_command.failed_calls == \
-                    rc.cluster_error_retry_attempts
+                       rc.cluster_error_retry_attempts
 
     def test_user_on_connect_function(self, request):
         """
@@ -561,12 +578,53 @@ class TestRedisClusterObj:
         _get_client(RedisCluster, request, redis_connect_func=mock)
         assert mock.called is True
 
+    def test_set_default_node_success(self, r):
+        """
+        test successful replacement of the default cluster node
+        """
+        default_node = r.get_default_node()
+        # get a different node
+        new_def_node = None
+        for node in r.get_nodes():
+            if node != default_node:
+                new_def_node = node
+                break
+        assert r.set_default_node(new_def_node) is True
+        assert r.get_default_node() == new_def_node
+
+    def test_set_default_node_failure(self, r):
+        """
+        test failed replacement of the default cluster node
+        """
+        default_node = r.get_default_node()
+        new_def_node = ClusterNode('1.1.1.1', 1111)
+        assert r.set_default_node(None) is False
+        assert r.set_default_node(new_def_node) is False
+        assert r.get_default_node() == default_node
+
+    def test_get_node_from_key(self, r):
+        """
+        Test that get_node_from_key function returns the correct node
+        """
+        key = 'bar'
+        slot = r.keyslot(key)
+        slot_nodes = r.nodes_manager.slots_cache.get(slot)
+        primary = slot_nodes[0]
+        assert r.get_node_from_key(key, replica=False) == primary
+        if len(slot_nodes) > 1:
+            key_node = r.get_node_from_key(key, replica=True)
+            assert key_node.server_type == 'replica'
+            assert key_node in slot_nodes
+
 
 @pytest.mark.onlycluster
 class TestClusterRedisCommands:
+    """
+    Tests for RedisCluster unique commands
+    """
     def test_case_insensitive_command_names(self, r):
         assert r.cluster_response_callbacks['cluster addslots'] == \
-            r.cluster_response_callbacks['CLUSTER ADDSLOTS']
+               r.cluster_response_callbacks['CLUSTER ADDSLOTS']
 
     def test_get_and_set(self, r):
         # get and set can't be tested independently of each other
@@ -597,32 +655,27 @@ class TestClusterRedisCommands:
         for k, v in d.items():
             assert r[k] == v
 
-    def test_dbsize(self, r):
-        d = {'a': b'1', 'b': b'2', 'c': b'3', 'd': b'4'}
-        assert r.mset_nonatomic(d)
-        assert r.dbsize() == len(d)
-
     def test_config_set(self, r):
         assert r.config_set('slowlog-log-slower-than', 0)
 
     def test_cluster_config_resetstat(self, r):
-        r.ping()
-        all_info = r.info()
+        r.ping(target_nodes='all')
+        all_info = r.info(target_nodes='all')
         prior_commands_processed = -1
         for node_info in all_info.values():
             prior_commands_processed = node_info['total_commands_processed']
             assert prior_commands_processed >= 1
-        r.config_resetstat()
-        all_info = r.info()
+        r.config_resetstat(target_nodes='all')
+        all_info = r.info(target_nodes='all')
         for node_info in all_info.values():
             reset_commands_processed = node_info['total_commands_processed']
             assert reset_commands_processed < prior_commands_processed
 
     def test_client_setname(self, r):
-        r.client_setname('redis_py_test')
-        res = r.client_getname()
-        for client_name in res.values():
-            assert client_name == 'redis_py_test'
+        node = r.get_random_node()
+        r.client_setname('redis_py_test', target_nodes=node)
+        client_name = r.client_getname(target_nodes=node)
+        assert client_name == 'redis_py_test'
 
     def test_exists(self, r):
         d = {'a': b'1', 'b': b'2', 'c': b'3', 'd': b'4'}
@@ -673,7 +726,7 @@ class TestClusterRedisCommands:
             i += 1
         # Assert that the cluster's pubsub_channels function returns ALL of
         # the cluster's channels
-        result = r.pubsub_channels()
+        result = r.pubsub_channels(target_nodes='all')
         result.sort()
         assert result == channels
 
@@ -696,7 +749,8 @@ class TestClusterRedisCommands:
             assert sub_chann_num == [(b_channel, 1)]
         # Assert that the cluster's pubsub_numsub function returns ALL clients
         # subscribed to this channel in the entire cluster
-        assert r.pubsub_numsub(channel) == [(b_channel, len(nodes))]
+        assert r.pubsub_numsub(channel, target_nodes='all') == \
+               [(b_channel, len(nodes))]
 
     def test_pubsub_numpat_merge_results(self, r):
         nodes = r.get_nodes()
@@ -716,7 +770,35 @@ class TestClusterRedisCommands:
             assert sub_num_pat == 1
         # Assert that the cluster's pubsub_numsub function returns ALL clients
         # subscribed to this channel in the entire cluster
-        assert r.pubsub_numpat() == len(nodes)
+        assert r.pubsub_numpat(target_nodes='all') == len(nodes)
+
+    @skip_if_server_version_lt('2.8.0')
+    def test_cluster_pubsub_channels(self, r):
+        p = r.pubsub()
+        p.subscribe('foo', 'bar', 'baz', 'quux')
+        for i in range(4):
+            assert wait_for_message(p)['type'] == 'subscribe'
+        expected = [b'bar', b'baz', b'foo', b'quux']
+        assert all([channel in r.pubsub_channels(target_nodes='all')
+                    for channel in expected])
+
+    @skip_if_server_version_lt('2.8.0')
+    def test_cluster_pubsub_numsub(self, r):
+        p1 = r.pubsub()
+        p1.subscribe('foo', 'bar', 'baz')
+        for i in range(3):
+            assert wait_for_message(p1)['type'] == 'subscribe'
+        p2 = r.pubsub()
+        p2.subscribe('bar', 'baz')
+        for i in range(2):
+            assert wait_for_message(p2)['type'] == 'subscribe'
+        p3 = r.pubsub()
+        p3.subscribe('baz')
+        assert wait_for_message(p3)['type'] == 'subscribe'
+
+        channels = [(b'foo', 1), (b'bar', 2), (b'baz', 3)]
+        assert r.pubsub_numsub('foo', 'bar', 'baz', target_nodes='all') \
+               == channels
 
     def test_cluster_slots(self, r):
         mock_all_nodes_resp(r, default_cluster_slots)
@@ -725,7 +807,7 @@ class TestClusterRedisCommands:
         assert len(default_cluster_slots) == len(cluster_slots)
         assert cluster_slots.get((0, 8191)) is not None
         assert cluster_slots.get((0, 8191)).get('primary') == \
-            ('127.0.0.1', 7000)
+               ('127.0.0.1', 7000)
 
     def test_cluster_addslots(self, r):
         node = r.get_random_node()
@@ -780,9 +862,9 @@ class TestClusterRedisCommands:
         assert r.cluster_keyslot('foo') == 12182
 
     def test_cluster_meet(self, r):
-        node = r.get_random_node()
+        node = r.get_default_node()
         mock_node_resp(node, 'OK')
-        assert r.cluster_meet(node, '127.0.0.1', 6379) is True
+        assert r.cluster_meet('127.0.0.1', 6379) is True
 
     def test_cluster_nodes(self, r):
         response = (
@@ -808,7 +890,7 @@ class TestClusterRedisCommands:
         assert len(nodes) == 7
         assert nodes.get('172.17.0.7:7006') is not None
         assert nodes.get('172.17.0.7:7006').get('node_id') == \
-            "c8253bae761cb1ecb2b61857d85dfe455a0fec8b"
+               "c8253bae761cb1ecb2b61857d85dfe455a0fec8b"
 
     def test_cluster_replicate(self, r):
         node = r.get_random_node()
@@ -816,16 +898,17 @@ class TestClusterRedisCommands:
         mock_all_nodes_resp(r, 'OK')
         assert r.cluster_replicate(node, 'c8253bae761cb61857d') is True
         results = r.cluster_replicate(all_replicas, 'c8253bae761cb61857d')
-        for res in results.values():
-            assert res is True
+        if isinstance(results, dict):
+            for res in results.values():
+                assert res is True
+        else:
+            assert results is True
 
     def test_cluster_reset(self, r):
-        node = r.get_random_node()
-        all_nodes = r.get_nodes()
         mock_all_nodes_resp(r, 'OK')
-        assert r.cluster_reset(node) is True
-        assert r.cluster_reset(node, False) is True
-        all_results = r.cluster_reset(all_nodes, False)
+        assert r.cluster_reset() is True
+        assert r.cluster_reset(False) is True
+        all_results = r.cluster_reset(False, target_nodes='all')
         for res in all_results.values():
             assert res is True
 
@@ -846,11 +929,9 @@ class TestClusterRedisCommands:
         assert keys == response
 
     def test_cluster_set_config_epoch(self, r):
-        node = r.get_random_node()
-        all_nodes = r.get_nodes()
         mock_all_nodes_resp(r, 'OK')
-        assert r.cluster_set_config_epoch(node, 3) is True
-        all_results = r.cluster_set_config_epoch(all_nodes, 3)
+        assert r.cluster_set_config_epoch(3) is True
+        all_results = r.cluster_set_config_epoch(3, target_nodes='all')
         for res in all_results.values():
             assert res is True
 
@@ -885,30 +966,26 @@ class TestClusterRedisCommands:
         assert replicas.get('127.0.0.1:6377') is not None
         assert replicas.get('127.0.0.1:6378') is not None
         assert replicas.get('127.0.0.1:6378').get('node_id') == \
-            'r4xfga22229cf3c652b6fca0d09ff69f3e0d4d'
+               'r4xfga22229cf3c652b6fca0d09ff69f3e0d4d'
 
     def test_readonly(self):
         r = get_mocked_redis_client(host=default_host, port=default_port)
-        node = r.get_random_node()
-        all_replicas = r.get_replicas()
         mock_all_nodes_resp(r, 'OK')
-        assert r.readonly(node) is True
-        all_replicas_results = r.readonly()
+        assert r.readonly() is True
+        all_replicas_results = r.readonly(target_nodes='replicas')
         for res in all_replicas_results.values():
             assert res is True
-        for replica in all_replicas:
+        for replica in r.get_replicas():
             assert replica.redis_connection.connection.read_response.called
 
     def test_readwrite(self):
         r = get_mocked_redis_client(host=default_host, port=default_port)
-        node = r.get_random_node()
         mock_all_nodes_resp(r, 'OK')
-        all_replicas = r.get_replicas()
-        assert r.readwrite(node) is True
-        all_replicas_results = r.readwrite()
+        assert r.readwrite() is True
+        all_replicas_results = r.readwrite(target_nodes='replicas')
         for res in all_replicas_results.values():
             assert res is True
-        for replica in all_replicas:
+        for replica in r.get_replicas():
             assert replica.redis_connection.connection.read_response.called
 
     def test_bgsave(self, r):
@@ -929,13 +1006,23 @@ class TestClusterRedisCommands:
         assert isinstance(info, dict)
         assert info['db0']['keys'] == 3
 
-    def test_slowlog_get(self, r, slowlog):
-        assert r.slowlog_reset()
-        unicode_string = chr(3456) + 'abcd' + chr(3421)
-        r.get(unicode_string)
+    def _init_slowlog_test(self, r, node):
+        slowlog_lim = r.config_get('slowlog-log-slower-than',
+                                   target_nodes=node)
+        assert r.config_set('slowlog-log-slower-than', 0, target_nodes=node) \
+               is True
+        return slowlog_lim['slowlog-log-slower-than']
 
-        slot = r.keyslot(unicode_string)
-        node = r.nodes_manager.get_node_from_slot(slot)
+    def _teardown_slowlog_test(self, r, node, prev_limit):
+        assert r.config_set('slowlog-log-slower-than', prev_limit,
+                            target_nodes=node) is True
+
+    def test_slowlog_get(self, r, slowlog):
+        unicode_string = chr(3456) + 'abcd' + chr(3421)
+        node = r.get_node_from_key(unicode_string)
+        slowlog_limit = self._init_slowlog_test(r, node)
+        assert r.slowlog_reset(target_nodes=node)
+        r.get(unicode_string)
         slowlog = r.slowlog_get(target_nodes=node)
         assert isinstance(slowlog, list)
         commands = [log['command'] for log in slowlog]
@@ -953,15 +1040,19 @@ class TestClusterRedisCommands:
         # make sure other attributes are typed correctly
         assert isinstance(slowlog[0]['start_time'], int)
         assert isinstance(slowlog[0]['duration'], int)
+        # rollback the slowlog limit to its original value
+        self._teardown_slowlog_test(r, node, slowlog_limit)
 
     def test_slowlog_get_limit(self, r, slowlog):
         assert r.slowlog_reset()
+        node = r.get_node_from_key('foo')
+        slowlog_limit = self._init_slowlog_test(r, node)
         r.get('foo')
-        node = r.nodes_manager.get_node_from_slot(key_slot(b'foo'))
         slowlog = r.slowlog_get(1, target_nodes=node)
         assert isinstance(slowlog, list)
         # only one command, based on the number we passed to slowlog_get()
         assert len(slowlog) == 1
+        self._teardown_slowlog_test(r, node, slowlog_limit)
 
     def test_slowlog_length(self, r, slowlog):
         r.get('foo')
@@ -1079,9 +1170,9 @@ class TestClusterRedisCommands:
     @skip_if_server_version_lt('2.6.9')
     def test_client_kill(self, r, r2):
         node = r.get_primaries()[0]
-        r.client_setname('redis-py-c1')
-        r2.client_setname('redis-py-c2')
-        clients = [client for client in r.client_list()[node.name]
+        r.client_setname('redis-py-c1', target_nodes='all')
+        r2.client_setname('redis-py-c2', target_nodes='all')
+        clients = [client for client in r.client_list(target_nodes=node)
                    if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
         assert len(clients) == 2
         clients_by_name = dict([(client.get('name'), client)
@@ -1090,7 +1181,7 @@ class TestClusterRedisCommands:
         client_addr = clients_by_name['redis-py-c2'].get('addr')
         assert r.client_kill(client_addr, target_nodes=node) is True
 
-        clients = [client for client in r.client_list()[node.name]
+        clients = [client for client in r.client_list(target_nodes=node)
                    if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
         assert len(clients) == 1
         assert clients[0].get('name') == 'redis-py-c1'
@@ -1538,9 +1629,65 @@ class TestClusterRedisCommands:
         # instead of save the geo score, the distance is saved.
         assert r.zscore('{foo}places_barcelona', 'place1') == 88.05060698409301
 
+    def test_cluster_dbsize(self, r):
+        d = {'a': b'1', 'b': b'2', 'c': b'3', 'd': b'4'}
+        assert r.mset_nonatomic(d)
+        assert r.dbsize(target_nodes='primaries') == len(d)
+
+    def test_cluster_keys(self, r):
+        assert r.keys() == []
+        keys_with_underscores = {b'test_a', b'test_b'}
+        keys = keys_with_underscores.union({b'testc'})
+        for key in keys:
+            r[key] = 1
+        assert set(r.keys(pattern='test_*', target_nodes='primaries')) == \
+               keys_with_underscores
+        assert set(r.keys(pattern='test*', target_nodes='primaries')) == keys
+
+    # SCAN COMMANDS
+    @skip_if_server_version_lt('2.8.0')
+    def test_cluster_scan(self, r):
+        r.set('a', 1)
+        r.set('b', 2)
+        r.set('c', 3)
+        cursor, keys = r.scan(target_nodes='primaries')
+        assert cursor == 0
+        assert set(keys) == {b'a', b'b', b'c'}
+        _, keys = r.scan(match='a', target_nodes='primaries')
+        assert set(keys) == {b'a'}
+
+    @skip_if_server_version_lt("6.0.0")
+    def test_cluster_scan_type(self, r):
+        r.sadd('a-set', 1)
+        r.hset('a-hash', 'foo', 2)
+        r.lpush('a-list', 'aux', 3)
+        _, keys = r.scan(match='a*', _type='SET', target_nodes='primaries')
+        assert set(keys) == {b'a-set'}
+
+    @skip_if_server_version_lt('2.8.0')
+    def test_cluster_scan_iter(self, r):
+        r.set('a', 1)
+        r.set('b', 2)
+        r.set('c', 3)
+        keys = list(r.scan_iter(target_nodes='primaries'))
+        assert set(keys) == {b'a', b'b', b'c'}
+        keys = list(r.scan_iter(match='a', target_nodes='primaries'))
+        assert set(keys) == {b'a'}
+
+    def test_cluster_randomkey(self, r):
+        node = r.get_node_from_key('{foo}')
+        assert r.randomkey(target_nodes=node) is None
+        for key in ('{foo}a', '{foo}b', '{foo}c'):
+            r[key] = 1
+        assert r.randomkey(target_nodes=node) in \
+               (b'{foo}a', b'{foo}b', b'{foo}c')
+
 
 @pytest.mark.onlycluster
 class TestNodesManager:
+    """
+    Tests for the NodesManager class
+    """
     def test_load_balancer(self, r):
         n_manager = r.nodes_manager
         lb = n_manager.read_load_balancer
@@ -1859,3 +2006,76 @@ class TestNodesManager:
                 rc = RedisCluster(startup_nodes=[node_1, node_2])
                 assert rc.get_node(host=default_host, port=7001) is not None
                 assert rc.get_node(host=default_host, port=7002) is not None
+
+
+@pytest.mark.onlycluster
+class TestClusterPubSubObject:
+    """
+    Tests for the ClusterPubSub class
+    """
+    def test_init_pubsub_with_host_and_port(self, r):
+        """
+        Test creation of pubsub instance with passed host and port
+        """
+        node = r.get_default_node()
+        p = r.pubsub(host=node.host, port=node.port)
+        assert p.get_pubsub_node() == node
+
+    def test_init_pubsub_with_node(self, r):
+        """
+        Test creation of pubsub instance with passed node
+        """
+        node = r.get_default_node()
+        p = r.pubsub(node=node)
+        assert p.get_pubsub_node() == node
+
+    def test_init_pubusub_without_specifying_node(self, r):
+        """
+        Test creation of pubsub instance without specifying a node. The node
+        should be determined based on the keyslot of the first command
+        execution.
+        """
+        channel_name = 'foo'
+        node = r.get_node_from_key(channel_name)
+        p = r.pubsub()
+        assert p.get_pubsub_node() is None
+        p.subscribe(channel_name)
+        assert p.get_pubsub_node() == node
+
+    def test_init_pubsub_with_a_non_existent_node(self, r):
+        """
+        Test creation of pubsub instance with node that doesn't exists in the
+        cluster. RedisClusterException should be raised.
+        """
+        node = ClusterNode('1.1.1.1', 1111)
+        with pytest.raises(RedisClusterException):
+            r.pubsub(node)
+
+    def test_init_pubsub_with_a_non_existent_host_port(self, r):
+        """
+        Test creation of pubsub instance with host and port that don't belong
+        to a node in the cluster.
+        RedisClusterException should be raised.
+        """
+        with pytest.raises(RedisClusterException):
+            r.pubsub(host='1.1.1.1', port=1111)
+
+    def test_init_pubsub_host_or_port(self, r):
+        """
+        Test creation of pubsub instance with host but without port, and vice
+        versa. DataError should be raised.
+        """
+        with pytest.raises(DataError):
+            r.pubsub(host='localhost')
+
+        with pytest.raises(DataError):
+            r.pubsub(port=16379)
+
+    def test_get_redis_connection(self, r):
+        """
+        Test that get_redis_connection() returns the redis connection of the
+        set pubsub node
+        """
+        node = r.get_default_node()
+        p = r.pubsub(node=node)
+        assert p.get_redis_connection() == node.redis_connection

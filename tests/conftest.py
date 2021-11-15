@@ -148,7 +148,8 @@ def _get_client(cls, request, single_connection_client=True, flushdb=True,
         redis_url = request.config.getoption("--redis-url")
     else:
         redis_url = from_url
-    if not REDIS_INFO["cluster_enabled"]:
+    cluster_mode = REDIS_INFO["cluster_enabled"]
+    if not cluster_mode:
         url_options = parse_url(redis_url)
         url_options.update(kwargs)
         pool = redis.ConnectionPool(**url_options)
@@ -160,20 +161,32 @@ def _get_client(cls, request, single_connection_client=True, flushdb=True,
         client = client.client()
     if request:
         def teardown():
-            if flushdb:
-                try:
-                    client.flushdb()
-                except redis.ConnectionError:
-                    # handle cases where a test disconnected a client
-                    # just manually retry the flushdb
-                    client.flushdb()
-            client.close()
-            if not REDIS_INFO["cluster_enabled"]:
+            if not cluster_mode:
+                if flushdb:
+                    try:
+                        client.flushdb()
+                    except redis.ConnectionError:
+                        # handle cases where a test disconnected a client
+                        # just manually retry the flushdb
+                        client.flushdb()
+                client.close()
                 client.connection_pool.disconnect()
             else:
-                client.disconnect_connection_pools()
+                cluster_teardown(client, flushdb)
         request.addfinalizer(teardown)
     return client
+
+
+def cluster_teardown(client, flushdb):
+    if flushdb:
+        try:
+            client.flushdb(target_nodes='primaries')
+        except redis.ConnectionError:
+            # handle cases where a test disconnected a client
+            # just manually retry the flushdb
+            client.flushdb(target_nodes='primaries')
+    client.close()
+    client.disconnect_connection_pools()
 
 
 # specifically set to the zero database, because creating

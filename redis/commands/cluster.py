@@ -4,7 +4,7 @@ from redis.exceptions import (
     RedisError,
 )
 from redis.crc import key_slot
-from .core import DataAccessCommands, PubSubCommands
+from .core import DataAccessCommands
 from .helpers import list_or_args
 
 
@@ -148,6 +148,24 @@ class ClusterMultiKeyCommands:
 
 
 class ClusterManagementCommands:
+    """
+    Redis Cluster management commands
+
+    Commands with the 'target_nodes' argument can be executed on specified
+    nodes. By default, if target_nodes is not specified, the command will be
+    executed on the default cluster node.
+
+    :param :target_nodes: type can be one of the followings:
+        - nodes flag: 'all', 'primaries', 'replicas', 'random'
+        - 'ClusterNode'
+        - 'list(ClusterNodes)'
+        - 'dict(any:clusterNodes)'
+
+    for example:
+        primary = r.get_primaries()[0]
+        r.bgsave(target_nodes=primary)
+        r.bgsave(target_nodes='primaries')
+    """
     def bgsave(self, schedule=True, target_nodes=None):
         """
         Tell the Redis server to save its data to disk.  Unlike save(),
@@ -321,17 +339,15 @@ class ClusterManagementCommands:
         return self.execute_command('CLIENT UNPAUSE',
                                     target_nodes=target_nodes)
 
-    def command_count(self):
+    def command_count(self, target_nodes=None):
         """
         Returns Integer reply of number of total commands in this Redis server.
-        Send to a random node.
         """
-        return self.execute_command('COMMAND COUNT')
+        return self.execute_command('COMMAND COUNT', target_nodes=target_nodes)
 
     def config_get(self, pattern="*", target_nodes=None):
         """
         Return a dictionary of configuration based on the ``pattern``
-        If no target nodes are specified, send to a random node
         """
         return self.execute_command('CONFIG GET',
                                     pattern,
@@ -359,8 +375,6 @@ class ClusterManagementCommands:
     def dbsize(self, target_nodes=None):
         """
         Sums the number of keys in the target nodes' DB.
-        If no target nodes are specified, send to the entire cluster and sum
-         the results.
 
         :target_nodes: 'ClusterNode' or 'list(ClusterNodes)'
             The node/s to execute the command on
@@ -385,7 +399,7 @@ class ClusterManagementCommands:
 
     def flushall(self, asynchronous=False, target_nodes=None):
         """
-        Delete all keys in the database on all hosts.
+        Delete all keys in the database.
         In cluster mode this method is the same as flushdb
 
         ``asynchronous`` indicates whether the operation is
@@ -429,6 +443,10 @@ class ClusterManagementCommands:
             return self.execute_command('INFO',
                                         section,
                                         target_nodes=target_nodes)
+
+    def keys(self, pattern='*', target_nodes=None):
+        "Returns a list of keys matching ``pattern``"
+        return self.execute_command('KEYS', pattern, target_nodes=target_nodes)
 
     def lastsave(self, target_nodes=None):
         """
@@ -522,21 +540,71 @@ class ClusterManagementCommands:
         Ping the cluster's servers.
         If no target nodes are specified, sent to all nodes and returns True if
          the ping was successful across all nodes.
-
-        :target_nodes: 'ClusterNode' or 'list(ClusterNodes)'
-            The node/s to execute the command on
         """
         return self.execute_command('PING',
                                     target_nodes=target_nodes)
 
-    def save(self):
+    def randomkey(self, target_nodes=None):
+        """
+        Returns the name of a random key"
+        """
+        return self.execute_command('RANDOMKEY', target_nodes=target_nodes)
+
+    def save(self, target_nodes=None):
         """
         Tell the Redis server to save its data to disk,
         blocking until the save is complete
         """
-        return self.execute_command('SAVE')
+        return self.execute_command('SAVE', target_nodes=target_nodes)
 
-    def shutdown(self, save=False, nosave=False):
+    def scan(self, cursor=0, match=None, count=None, _type=None,
+             target_nodes=None):
+        """
+        Incrementally return lists of key names. Also return a cursor
+        indicating the scan position.
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` provides a hint to Redis about the number of keys to
+            return per batch.
+
+        ``_type`` filters the returned values by a particular Redis type.
+            Stock Redis instances allow for the following types:
+            HASH, LIST, SET, STREAM, STRING, ZSET
+            Additionally, Redis modules can expose other types as well.
+        """
+        pieces = [cursor]
+        if match is not None:
+            pieces.extend([b'MATCH', match])
+        if count is not None:
+            pieces.extend([b'COUNT', count])
+        if _type is not None:
+            pieces.extend([b'TYPE', _type])
+        return self.execute_command('SCAN', *pieces, target_nodes=target_nodes)
+
+    def scan_iter(self, match=None, count=None, _type=None, target_nodes=None):
+        """
+        Make an iterator using the SCAN command so that the client doesn't
+        need to remember the cursor position.
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` provides a hint to Redis about the number of keys to
+            return per batch.
+
+        ``_type`` filters the returned values by a particular Redis type.
+            Stock Redis instances allow for the following types:
+            HASH, LIST, SET, STREAM, STRING, ZSET
+            Additionally, Redis modules can expose other types as well.
+        """
+        cursor = '0'
+        while cursor != 0:
+            cursor, data = self.scan(cursor=cursor, match=match,
+                                     count=count, _type=_type,
+                                     target_nodes=target_nodes)
+            yield from data
+
+    def shutdown(self, save=False, nosave=False, target_nodes=None):
         """Shutdown the Redis server.  If Redis has persistence configured,
         data will be flushed before shutdown.  If the "save" option is set,
         a data flush will be attempted even if there is no persistence
@@ -551,7 +619,7 @@ class ClusterManagementCommands:
         if nosave:
             args.append('NOSAVE')
         try:
-            self.execute_command(*args)
+            self.execute_command(*args, target_nodes=target_nodes)
         except ConnectionError:
             # a ConnectionError here is expected
             return
@@ -579,11 +647,60 @@ class ClusterManagementCommands:
         return self.execute_command('SLOWLOG RESET',
                                     target_nodes=target_nodes)
 
+    def stralgo(self, algo, value1, value2, specific_argument='strings',
+                len=False, idx=False, minmatchlen=None, withmatchlen=False,
+                target_nodes=None):
+        """
+        Implements complex algorithms that operate on strings.
+        Right now the only algorithm implemented is the LCS algorithm
+        (longest common substring). However new algorithms could be
+        implemented in the future.
+
+        ``algo`` Right now must be LCS
+        ``value1`` and ``value2`` Can be two strings or two keys
+        ``specific_argument`` Specifying if the arguments to the algorithm
+        will be keys or strings. strings is the default.
+        ``len`` Returns just the len of the match.
+        ``idx`` Returns the match positions in each string.
+        ``minmatchlen`` Restrict the list of matches to the ones of a given
+        minimal length. Can be provided only when ``idx`` set to True.
+        ``withmatchlen`` Returns the matches with the len of the match.
+        Can be provided only when ``idx`` set to True.
+        """
+        # check validity
+        supported_algo = ['LCS']
+        if algo not in supported_algo:
+            raise DataError("The supported algorithms are: %s"
+                            % (', '.join(supported_algo)))
+        if specific_argument not in ['keys', 'strings']:
+            raise DataError("specific_argument can be only"
+                            " keys or strings")
+        if len and idx:
+            raise DataError("len and idx cannot be provided together.")
+
+        pieces = [algo, specific_argument.upper(), value1, value2]
+        if len:
+            pieces.append(b'LEN')
+        if idx:
+            pieces.append(b'IDX')
+        try:
+            int(minmatchlen)
+            pieces.extend([b'MINMATCHLEN', minmatchlen])
+        except TypeError:
+            pass
+        if withmatchlen:
+            pieces.append(b'WITHMATCHLEN')
+        if specific_argument == 'strings' and target_nodes is None:
+            target_nodes = 'default-node'
+        return self.execute_command('STRALGO', *pieces, len=len, idx=idx,
+                                    minmatchlen=minmatchlen,
+                                    withmatchlen=withmatchlen,
+                                    target_nodes=target_nodes)
+
     def time(self, target_nodes=None):
         """
         Returns the server time as a 2-item tuple of ints:
         (seconds since epoch, microseconds into this second).
-        If target_nodes are not specified, send to a random node
         """
         return self.execute_command('TIME', target_nodes=target_nodes)
 
@@ -594,16 +711,66 @@ class ClusterManagementCommands:
         we finally have at least ``num_replicas``, or when the ``timeout`` was
         reached.
 
-        In cluster mode the WAIT command will be sent to all primaries
-        and the result will be summed up
+        If more than one target node are passed the result will be summed up
         """
         return self.execute_command('WAIT', num_replicas,
                                     timeout,
                                     target_nodes=target_nodes)
 
 
+class ClusterPubSubCommands:
+    """
+    Redis PubSub commands for RedisCluster use.
+    see https://redis.io/topics/pubsub
+    """
+    def publish(self, channel, message, target_nodes=None):
+        """
+        Publish ``message`` on ``channel``.
+        Returns the number of subscribers the message was delivered to.
+        """
+        return self.execute_command('PUBLISH', channel, message,
+                                    target_nodes=target_nodes)
+
+    def pubsub_channels(self, pattern='*', target_nodes=None):
+        """
+        Return a list of channels that have at least one subscriber
+        """
+        return self.execute_command('PUBSUB CHANNELS', pattern,
+                                    target_nodes=target_nodes)
+
+    def pubsub_numpat(self, target_nodes=None):
+        """
+        Returns the number of subscriptions to patterns
+        """
+        return self.execute_command('PUBSUB NUMPAT', target_nodes=target_nodes)
+
+    def pubsub_numsub(self, *args, target_nodes=None):
+        """
+        Return a list of (channel, number of subscribers) tuples
+        for each channel given in ``*args``
+        """
+        return self.execute_command('PUBSUB NUMSUB', *args,
+                                    target_nodes=target_nodes)
+
+
 class ClusterCommands(ClusterManagementCommands, ClusterMultiKeyCommands,
-                      DataAccessCommands, PubSubCommands):
+                      ClusterPubSubCommands, DataAccessCommands):
+    """
+    Redis Cluster commands
+
+    Commands with the 'target_nodes' argument can be executed on specified
+    nodes. By default, if target_nodes is not specified, the command will be
+    executed on the default cluster node.
+
+    :param :target_nodes: type can be one of the followings:
+        - nodes flag: 'all', 'primaries', 'replicas', 'random'
+        - 'ClusterNode'
+        - 'list(ClusterNodes)'
+        - 'dict(any:clusterNodes)'
+
+    for example:
+        r.cluster_info(target_nodes='all')
+    """
     def cluster_addslots(self, target_node, *slots):
         """
         Assign new hash slots to receiving node. Sends to specified node.
@@ -660,16 +827,13 @@ class ClusterCommands(ClusterManagementCommands, ClusterMultiKeyCommands,
             return self.execute_command('CLUSTER FAILOVER',
                                         target_nodes=target_node)
 
-    def cluster_info(self, target_node=None):
+    def cluster_info(self, target_nodes=None):
         """
         Provides info about Redis Cluster node state.
         The command will be sent to a random node in the cluster if no target
         node is specified.
-
-        :target_node: 'ClusterNode'
-            The node to execute the command on
         """
-        return self.execute_command('CLUSTER INFO', target_nodes=target_node)
+        return self.execute_command('CLUSTER INFO', target_nodes=target_nodes)
 
     def cluster_keyslot(self, key):
         """
@@ -678,13 +842,10 @@ class ClusterCommands(ClusterManagementCommands, ClusterMultiKeyCommands,
         """
         return self.execute_command('CLUSTER KEYSLOT', key)
 
-    def cluster_meet(self, target_nodes, host, port):
+    def cluster_meet(self, host, port, target_nodes=None):
         """
         Force a node cluster to handshake with another node.
         Sends to specified node.
-
-        :target_nodes: 'ClusterNode' or 'list(ClusterNodes)'
-            The node/s to execute the command on
         """
         return self.execute_command('CLUSTER MEET', host, port,
                                     target_nodes=target_nodes)
@@ -700,33 +861,24 @@ class ClusterCommands(ClusterManagementCommands, ClusterMultiKeyCommands,
     def cluster_replicate(self, target_nodes, node_id):
         """
         Reconfigure a node as a slave of the specified master node
-
-        :target_nodes: 'ClusterNode' or 'list(ClusterNodes)'
-            The node/s to execute the command on
         """
         return self.execute_command('CLUSTER REPLICATE', node_id,
                                     target_nodes=target_nodes)
 
-    def cluster_reset(self, target_nodes, soft=True):
+    def cluster_reset(self, soft=True, target_nodes=None):
         """
         Reset a Redis Cluster node
 
         If 'soft' is True then it will send 'SOFT' argument
         If 'soft' is False then it will send 'HARD' argument
-
-        :target_nodes: 'ClusterNode' or 'list(ClusterNodes)'
-            The node/s to execute the command on
         """
         return self.execute_command('CLUSTER RESET',
                                     b'SOFT' if soft else b'HARD',
                                     target_nodes=target_nodes)
 
-    def cluster_save_config(self, target_nodes):
+    def cluster_save_config(self, target_nodes=None):
         """
         Forces the node to save cluster state on disk
-
-        :target_nodes: 'ClusterNode' or 'list(ClusterNodes)'
-            The node/s to execute the command on
         """
         return self.execute_command('CLUSTER SAVECONFIG',
                                     target_nodes=target_nodes)
@@ -737,12 +889,9 @@ class ClusterCommands(ClusterManagementCommands, ClusterMultiKeyCommands,
         """
         return self.execute_command('CLUSTER GETKEYSINSLOT', slot, num_keys)
 
-    def cluster_set_config_epoch(self, target_nodes, epoch):
+    def cluster_set_config_epoch(self, epoch, target_nodes=None):
         """
         Set the configuration epoch in a new node
-
-        :target_nodes: 'ClusterNode' or 'list(ClusterNodes)'
-            The node/s to execute the command on
         """
         return self.execute_command('CLUSTER SET-CONFIG-EPOCH', epoch,
                                     target_nodes=target_nodes)
@@ -770,42 +919,37 @@ class ClusterCommands(ClusterManagementCommands, ClusterMultiKeyCommands,
         """
         return self.execute_command('CLUSTER SETSLOT', slot_id, 'STABLE')
 
-    def cluster_replicas(self, node_id):
+    def cluster_replicas(self, node_id, target_nodes=None):
         """
         Provides a list of replica nodes replicating from the specified primary
         target node.
-        Sends to random node in the cluster.
         """
-        return self.execute_command('CLUSTER REPLICAS', node_id)
+        return self.execute_command('CLUSTER REPLICAS', node_id,
+                                    target_nodes=target_nodes)
 
-    def cluster_slots(self):
+    def cluster_slots(self, target_nodes=None):
         """
         Get array of Cluster slot to node mappings
-
-        Sends to random node in the cluster
         """
-        return self.execute_command('CLUSTER SLOTS')
+        return self.execute_command('CLUSTER SLOTS', target_nodes=target_nodes)
 
     def readonly(self, target_nodes=None):
         """
         Enables read queries.
-        The command will be sent to all replica nodes if target_nodes is not
-        specified.
-
-        :target_nodes: 'ClusterNode' or 'list(ClusterNodes)'
-            The node/s to execute the command on
+        The command will be sent to the default cluster node if target_nodes is
+        not specified.
          """
-        self.read_from_replicas = True
+        if target_nodes == 'replicas' or target_nodes == 'all':
+            # read_from_replicas will only be enabled if the READONLY command
+            # is sent to all replicas
+            self.read_from_replicas = True
         return self.execute_command('READONLY', target_nodes=target_nodes)
 
     def readwrite(self, target_nodes=None):
         """
         Disables read queries.
-        The command will be sent to all replica nodes if target_nodes is not
-        specified.
-
-        :target_nodes: 'ClusterNode' or 'list(ClusterNodes)'
-            The node/s to execute the command on
+        The command will be sent to the default cluster node if target_nodes is
+        not specified.
         """
         # Reset read from replicas flag
         self.read_from_replicas = False

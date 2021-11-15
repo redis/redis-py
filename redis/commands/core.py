@@ -12,8 +12,11 @@ from redis.exceptions import (
 )
 
 
-class AclCommands:
-    # ACL methods
+class ACLCommands:
+    """
+    Redis Access Control List (ACL) commands.
+    see: https://redis.io/topics/acl
+    """
     def acl_cat(self, category=None):
         """
         Returns a list of categories or commands within a category.
@@ -262,6 +265,9 @@ class AclCommands:
 
 
 class ManagementCommands:
+    """
+    Redis management commands
+    """
     def bgrewriteaof(self):
         "Tell the Redis server to rewrite the AOF file from data in memory."
         return self.execute_command('BGREWRITEAOF')
@@ -716,7 +722,9 @@ class ManagementCommands:
 
 
 class BasicKeyCommands:
-    # BASIC KEY COMMANDS
+    """
+    Redis basic key-based commands
+    """
     def append(self, key, value):
         """
         Appends the string ``value`` to the value at ``key``. If ``key``
@@ -1344,7 +1352,10 @@ class BasicKeyCommands:
 
 
 class ListCommands:
-    # LIST COMMANDS
+    """
+    Redis commands for List data type.
+    see: https://redis.io/topics/data-types#lists
+    """
     def blpop(self, keys, timeout=0):
         """
         LPOP a value off of the first non-empty list
@@ -1598,7 +1609,10 @@ class ListCommands:
 
 
 class ScanCommands:
-    # SCAN COMMANDS
+    """
+    Redis SCAN commands.
+    see: https://redis.io/commands/scan
+    """
     def scan(self, cursor=0, match=None, count=None, _type=None):
         """
         Incrementally return lists of key names. Also return a cursor
@@ -1747,7 +1761,10 @@ class ScanCommands:
 
 
 class SetCommands:
-    # SET COMMANDS
+    """
+    Redis commands for Set data type.
+    see: https://redis.io/topics/data-types#sets
+    """
     def sadd(self, name, *values):
         """Add ``value(s)`` to set ``name``"""
         return self.execute_command('SADD', name, *values)
@@ -1838,8 +1855,11 @@ class SetCommands:
         return self.execute_command('SUNIONSTORE', dest, *args)
 
 
-class StreamsCommands:
-    # STREAMS COMMANDS
+class StreamCommands:
+    """
+    Redis commands for Stream data type.
+    see: https://redis.io/topics/streams-intro
+    """
     def xack(self, name, groupname, *ids):
         """
         Acknowledges the successful processing of one or more messages.
@@ -2279,7 +2299,10 @@ class StreamsCommands:
 
 
 class SortedSetCommands:
-    # SORTED SET COMMANDS
+    """
+    Redis commands for Sorted Sets data type.
+    see: https://redis.io/topics/data-types-intro#redis-sorted-sets
+    """
     def zadd(self, name, mapping, nx=False, xx=False, ch=False, incr=False,
              gt=None, lt=None):
         """
@@ -2758,8 +2781,11 @@ class SortedSetCommands:
         return self.execute_command(*pieces, **options)
 
 
-class HyperLogLogCommands:
-    # HYPERLOGLOG COMMANDS
+class HyperlogCommands:
+    """
+    Redis commands of HyperLogLogs data type.
+    see: https://redis.io/topics/data-types-intro#hyperloglogs
+    """
     def pfadd(self, name, *values):
         "Adds the specified elements to the specified HyperLogLog."
         return self.execute_command('PFADD', name, *values)
@@ -2777,7 +2803,10 @@ class HyperLogLogCommands:
 
 
 class HashCommands:
-    # HASH COMMANDS
+    """
+    Redis commands for Hash data type.
+    see: https://redis.io/topics/data-types-intro#redis-hashes
+    """
     def hdel(self, name, *keys):
         "Delete ``keys`` from hash ``name``"
         return self.execute_command('HDEL', name, *keys)
@@ -2873,7 +2902,10 @@ class HashCommands:
 
 
 class PubSubCommands:
-    # PUBSUB COMMANDS
+    """
+    Redis PubSub commands.
+    see https://redis.io/topics/pubsub
+    """
     def publish(self, channel, message):
         """
         Publish ``message`` on ``channel``.
@@ -2902,7 +2934,10 @@ class PubSubCommands:
 
 
 class ScriptCommands:
-    # SCRIPT COMMANDS
+    """
+    Redis Lua script commands. see:
+    https://redis.com/ebook/part-3-next-steps/chapter-11-scripting-redis-with-lua/
+    """
     def eval(self, script, numkeys, *keys_and_args):
         """
         Execute the Lua ``script``, specifying the ``numkeys`` the script
@@ -2976,7 +3011,10 @@ class ScriptCommands:
 
 
 class GeoCommands:
-    # GEO COMMANDS
+    """
+    Redis Geospatial commands.
+    see: https://redis.com/redis-best-practices/indexing-patterns/geospatial/
+    """
     def geoadd(self, name, values, nx=False, xx=False, ch=False):
         """
         Add the specified geospatial items to the specified key identified
@@ -3272,7 +3310,10 @@ class GeoCommands:
 
 
 class ModuleCommands:
-    # MODULE COMMANDS
+    """
+    Redis Module commands.
+    see: https://redis.io/topics/modules-intro
+    """
     def module_load(self, path, *args):
         """
         Loads the module from ``path``.
@@ -3297,7 +3338,9 @@ class ModuleCommands:
 
 
 class Script:
-    "An executable Lua script object returned by ``register_script``"
+    """
+    An executable Lua script object returned by ``register_script``
+    """
 
     def __init__(self, registered_client, script):
         self.registered_client = registered_client
@@ -3429,9 +3472,9 @@ class BitFieldOperation:
 
 
 class DataAccessCommands(BasicKeyCommands, ListCommands,
-                         ScanCommands, SetCommands, StreamsCommands,
+                         ScanCommands, SetCommands, StreamCommands,
                          SortedSetCommands,
-                         HyperLogLogCommands, HashCommands, GeoCommands,
+                         HyperlogCommands, HashCommands, GeoCommands,
                          ):
     """
     A class containing all of the implemented data access redis commands.
@@ -3439,7 +3482,7 @@ class DataAccessCommands(BasicKeyCommands, ListCommands,
     """
 
 
-class CoreCommands(AclCommands, DataAccessCommands, ManagementCommands,
+class CoreCommands(ACLCommands, DataAccessCommands, ManagementCommands,
                    ModuleCommands, PubSubCommands, ScriptCommands):
     """
     A class containing all of the implemented redis commands. This class is
