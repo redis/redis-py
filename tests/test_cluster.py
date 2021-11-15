@@ -117,6 +117,13 @@ def mock_node_resp(node, response):
     return node
 
 
+def mock_node_resp_func(node, func):
+    connection = Mock()
+    connection.read_response.side_effect = func
+    node.redis_connection.connection = connection
+    return node
+
+
 def mock_all_nodes_resp(rc, response):
     for node in rc.get_nodes():
         mock_node_resp(node, response)
@@ -307,7 +314,6 @@ class TestRedisClusterObj:
         conn = def_node.redis_connection.connection
         assert conn.read_response.called
 
-    @pytest.mark.filterwarnings("ignore:AskError")
     def test_ask_redirection(self, r):
         """
         Test that the server handles ASK response.
@@ -334,21 +340,18 @@ class TestRedisClusterObj:
 
             assert r.execute_command("SET", "foo", "bar") == "MOCK_OK"
 
-    @pytest.mark.filterwarnings("ignore:MovedError")
     def test_moved_redirection(self, request):
         """
         Test that the client handles MOVED response.
         """
         moved_redirection_helper(request, failover=False)
 
-    @pytest.mark.filterwarnings("ignore:MovedError")
     def test_moved_redirection_after_failover(self, request):
         """
         Test that the client handles MOVED response after a failover.
         """
         moved_redirection_helper(request, failover=True)
 
-    @pytest.mark.filterwarnings("ignore:ClusterDownError")
     def test_refresh_using_specific_nodes(self, request):
         """
         Test making calls on specific nodes when the cluster has failed over to
@@ -526,7 +529,6 @@ class TestRedisClusterObj:
         for node in r.get_primaries():
             assert node in nodes
 
-    @pytest.mark.filterwarnings("ignore:ClusterDownError")
     def test_cluster_down_overreaches_retry_attempts(self):
         """
         When ClusterDownError is thrown, test that we retry executing the
@@ -549,7 +551,6 @@ class TestRedisClusterObj:
                 assert execute_command.failed_calls == \
                        rc.cluster_error_retry_attempts
 
-    @pytest.mark.filterwarnings("ignore:ConnectionError")
     def test_connection_error_overreaches_retry_attempts(self):
         """
         When ConnectionError is thrown, test that we retry executing the
@@ -616,10 +617,10 @@ class TestRedisClusterObj:
         slot_nodes = r.nodes_manager.slots_cache.get(slot)
         primary = slot_nodes[0]
         assert r.get_node_from_key(key, replica=False) == primary
-        if len(slot_nodes) > 1:
-            key_node = r.get_node_from_key(key, replica=True)
-            assert key_node.server_type == 'replica'
-            assert key_node in slot_nodes
+        replica = r.get_node_from_key(key, replica=True)
+        if replica is not None:
+            assert replica.server_type == REPLICA
+            assert replica in slot_nodes
 
 
 @pytest.mark.onlycluster
@@ -2087,3 +2088,397 @@ class TestClusterPubSubObject:
         node = r.get_default_node()
         p = r.pubsub(node=node)
         assert p.get_redis_connection() == node.redis_connection
+
+
+@pytest.mark.onlycluster
+class TestClusterPipeline:
+    """
+    Tests for the ClusterPipeline class
+    """
+
+    def test_blocked_methods(self, r):
+        """
+        Currently some method calls on a Cluster pipeline
+        is blocked when using in cluster mode.
+        They maybe implemented in the future.
+        """
+        pipe = r.pipeline()
+        with pytest.raises(RedisClusterException):
+            pipe.multi()
+
+        with pytest.raises(RedisClusterException):
+            pipe.immediate_execute_command()
+
+        with pytest.raises(RedisClusterException):
+            pipe._execute_transaction(None, None, None)
+
+        with pytest.raises(RedisClusterException):
+            pipe.load_scripts()
+
+        with pytest.raises(RedisClusterException):
+            pipe.watch()
+
+        with pytest.raises(RedisClusterException):
+            pipe.unwatch()
+
+        with pytest.raises(RedisClusterException):
+            pipe.script_load_for_pipeline(None)
+
+        with pytest.raises(RedisClusterException):
+            pipe.eval()
+
+    def test_blocked_arguments(self, r):
+        """
+        Currently some arguments is blocked when using in cluster mode.
+        They maybe implemented in the future.
+        """
+        with pytest.raises(RedisClusterException) as ex:
+            r.pipeline(transaction=True)
+
+        assert str(ex.value).startswith(
+            "transaction is deprecated in cluster mode") is True
+
+        with pytest.raises(RedisClusterException) as ex:
+            r.pipeline(shard_hint=True)
+
+        assert str(ex.value).startswith(
+            "shard_hint is deprecated in cluster mode") is True
+
+    def test_redis_cluster_pipeline(self, r):
+        """
+        Test that we can use a pipeline with the RedisCluster class
+        """
+        with r.pipeline() as pipe:
+            pipe.set("foo", "bar")
+            pipe.get("foo")
+            assert pipe.execute() == [True, b'bar']
+
+    def test_mget_disabled(self, r):
+        """
+        Test that mget is disabled for ClusterPipeline
+        """
+        with r.pipeline() as pipe:
+            with pytest.raises(RedisClusterException):
+                pipe.mget(['a'])
+
+    def test_mset_disabled(self, r):
+        """
+        Test that mset is disabled for ClusterPipeline
+        """
+        with r.pipeline() as pipe:
+            with pytest.raises(RedisClusterException):
+                pipe.mset({'a': 1, 'b': 2})
+
+    def test_rename_disabled(self, r):
+        """
+        Test that rename is disabled for ClusterPipeline
+        """
+        with r.pipeline(transaction=False) as pipe:
+            with pytest.raises(RedisClusterException):
+                pipe.rename('a', 'b')
+
+    def test_renamenx_disabled(self, r):
+        """
+        Test that renamenx is disabled for ClusterPipeline
+        """
+        with r.pipeline(transaction=False) as pipe:
+            with pytest.raises(RedisClusterException):
+                pipe.renamenx('a', 'b')
+
+    def test_delete_single(self, r):
+        """
+        Test a single delete operation
+        """
+        r['a'] = 1
+        with r.pipeline(transaction=False) as pipe:
+            pipe.delete('a')
+            assert pipe.execute() == [1]
+
+    def test_multi_delete_unsupported(self, r):
+        """
+        Test that multi delete operation is unsupported
+        """
+        with r.pipeline(transaction=False) as pipe:
+            r['a'] = 1
+            r['b'] = 2
+            with pytest.raises(RedisClusterException):
+                pipe.delete('a', 'b')
+
+    def test_brpoplpush_disabled(self, r):
+        """
+        Test that brpoplpush is disabled for ClusterPipeline
+        """
+        with r.pipeline(transaction=False) as pipe:
+            with pytest.raises(RedisClusterException):
+                pipe.brpoplpush()
+
+    def test_rpoplpush_disabled(self, r):
+        """
+        Test that rpoplpush is disabled for ClusterPipeline
+        """
+        with r.pipeline(transaction=False) as pipe:
+            with pytest.raises(RedisClusterException):
+                pipe.rpoplpush()
+
+    def test_sort_disabled(self, r):
+        """
+        Test that sort is disabled for ClusterPipeline
+        """
+        with r.pipeline(transaction=False) as pipe:
+            with pytest.raises(RedisClusterException):
+                pipe.sort()
+
+    def test_sdiff_disabled(self, r):
+        """
+        Test that sdiff is disabled for ClusterPipeline
+        """
+        with r.pipeline(transaction=False) as pipe:
+            with pytest.raises(RedisClusterException):
+                pipe.sdiff()
+
+    def test_sdiffstore_disabled(self, r):
+        """
+        Test that sdiffstore is disabled for ClusterPipeline
+        """
+        with r.pipeline(transaction=False) as pipe:
+            with pytest.raises(RedisClusterException):
+                pipe.sdiffstore()
+
+    def test_sinter_disabled(self, r):
+        """
+        Test that sinter is disabled for ClusterPipeline
+        """
+        with r.pipeline(transaction=False) as pipe:
+            with pytest.raises(RedisClusterException):
+                pipe.sinter()
+
+    def test_sinterstore_disabled(self, r):
+        """
+        Test that sinterstore is disabled for ClusterPipeline
+        """
+        with r.pipeline(transaction=False) as pipe:
+            with pytest.raises(RedisClusterException):
+                pipe.sinterstore()
+
+    def test_smove_disabled(self, r):
+        """
+        Test that move is disabled for ClusterPipeline
+        """
+        with r.pipeline(transaction=False) as pipe:
+            with pytest.raises(RedisClusterException):
+                pipe.smove()
+
+    def test_sunion_disabled(self, r):
+        """
+        Test that sunion is disabled for ClusterPipeline
+        """
+        with r.pipeline(transaction=False) as pipe:
+            with pytest.raises(RedisClusterException):
+                pipe.sunion()
+
+    def test_sunionstore_disabled(self, r):
+        """
+        Test that sunionstore is disabled for ClusterPipeline
+        """
+        with r.pipeline(transaction=False) as pipe:
+            with pytest.raises(RedisClusterException):
+                pipe.sunionstore()
+
+    def test_spfmerge_disabled(self, r):
+        """
+        Test that spfmerge is disabled for ClusterPipeline
+        """
+        with r.pipeline(transaction=False) as pipe:
+            with pytest.raises(RedisClusterException):
+                pipe.pfmerge()
+
+    def test_multi_key_operation_with_a_single_slot(self, r):
+        """
+        Test multi key operation with a single slot
+        """
+        pipe = r.pipeline(transaction=False)
+        pipe.set('a{foo}', 1)
+        pipe.set('b{foo}', 2)
+        pipe.set('c{foo}', 3)
+        pipe.get('a{foo}')
+        pipe.get('b{foo}')
+        pipe.get('c{foo}')
+
+        res = pipe.execute()
+        assert res == [True, True, True, b'1', b'2', b'3']
+
+    def test_multi_key_operation_with_multi_slots(self, r):
+        """
+        Test multi key operation with more than one slot
+        """
+        pipe = r.pipeline(transaction=False)
+        pipe.set('a{foo}', 1)
+        pipe.set('b{foo}', 2)
+        pipe.set('c{foo}', 3)
+        pipe.set('bar', 4)
+        pipe.set('bazz', 5)
+        pipe.get('a{foo}')
+        pipe.get('b{foo}')
+        pipe.get('c{foo}')
+        pipe.get('bar')
+        pipe.get('bazz')
+        res = pipe.execute()
+        assert res == [True, True, True, True, True, b'1', b'2', b'3', b'4',
+                       b'5']
+
+    def test_connection_error_not_raised(self, r):
+        """
+        Test that the pipeline doesn't raise an error on connection error when
+        raise_on_error=False
+        """
+        key = 'foo'
+        node = r.get_node_from_key(key, False)
+
+        def raise_connection_error():
+            e = ConnectionError("error")
+            return e
+
+        with r.pipeline() as pipe:
+            mock_node_resp_func(node, raise_connection_error)
+            res = pipe.get(key).get(key).execute(raise_on_error=False)
+            assert node.redis_connection.connection.read_response.called
+            assert isinstance(res[0], ConnectionError)
+
+    def test_connection_error_raised(self, r):
+        """
+        Test that the pipeline raises an error on connection error when
+        raise_on_error=True
+        """
+        key = 'foo'
+        node = r.get_node_from_key(key, False)
+
+        def raise_connection_error():
+            e = ConnectionError("error")
+            return e
+
+        with r.pipeline() as pipe:
+            mock_node_resp_func(node, raise_connection_error)
+            with pytest.raises(ConnectionError):
+                pipe.get(key).get(key).execute(raise_on_error=True)
+
+    def test_asking_error(self, r):
+        """
+        Test redirection on ASK error
+        """
+        key = 'foo'
+        first_node = r.get_node_from_key(key, False)
+        ask_node = None
+        for node in r.get_nodes():
+            if node != first_node:
+                ask_node = node
+                break
+        if ask_node is None:
+            warnings.warn("skipping this test since the cluster has only one "
+                          "node")
+            return
+        ask_msg = "{0} {1}:{2}".format(r.keyslot(key), ask_node.host,
+                                       ask_node.port)
+
+        def raise_ask_error():
+            raise AskError(ask_msg)
+
+        with r.pipeline() as pipe:
+            mock_node_resp_func(first_node, raise_ask_error)
+            mock_node_resp(ask_node, 'MOCK_OK')
+            res = pipe.get(key).execute()
+            assert first_node.redis_connection.connection.read_response.called
+            assert ask_node.redis_connection.connection.read_response.called
+            assert res == ['MOCK_OK']
+
+    def test_empty_stack(self, r):
+        """
+        If pipeline is executed with no commands it should
+        return a empty list.
+        """
+        p = r.pipeline()
+        result = p.execute()
+        assert result == []
+
+
+@pytest.mark.onlycluster
+class TestReadOnlyPipeline:
+    """
+    Tests for ClusterPipeline class in readonly mode
+    """
+
+    def test_pipeline_readonly(self, r):
+        """
+        On readonly mode, we supports get related stuff only.
+        """
+        r.readonly(target_nodes='all')
+        r.set('foo71', 'a1')  # we assume this key is set on 127.0.0.1:7001
+        r.zadd('foo88',
+               {'z1': 1})  # we assume this key is set on 127.0.0.1:7002
+        r.zadd('foo88', {'z2': 4})
+
+        with r.pipeline() as readonly_pipe:
+            readonly_pipe.get('foo71').zrange('foo88', 0, 5, withscores=True)
+            assert readonly_pipe.execute() == [
+                b'a1',
+                [(b'z1', 1.0), (b'z2', 4)],
+            ]
+
+    def test_moved_redirection_on_slave_with_default(self, r):
+        """
+        On Pipeline, we redirected once and finally get from master with
+        readonly client when data is completely moved.
+        """
+        key = 'bar'
+        r.set(key, 'foo')
+        # set read_from_replicas to True
+        r.read_from_replicas = True
+        primary = r.get_node_from_key(key, False)
+        replica = r.get_node_from_key(key, True)
+        with r.pipeline() as readwrite_pipe:
+            mock_node_resp(primary, "MOCK_FOO")
+            if replica is not None:
+                moved_error = "{0} {1}:{2}".format(r.keyslot(key),
+                                                   primary.host,
+                                                   primary.port)
+
+                def raise_moved_error():
+                    raise MovedError(moved_error)
+
+                mock_node_resp_func(replica, raise_moved_error)
+            assert readwrite_pipe.reinitialize_counter == 0
+            readwrite_pipe.get(key).get(key)
+            assert readwrite_pipe.execute() == ["MOCK_FOO", "MOCK_FOO"]
+            if replica is not None:
+                # the slot has a replica as well, so MovedError should have
+                # occurred. If MovedError occurs, we should see the
+                # reinitialize_counter increase.
+                assert readwrite_pipe.reinitialize_counter == 1
+                conn = replica.redis_connection.connection
+                assert conn.read_response.called is True
+
+    def test_readonly_pipeline_from_readonly_client(self, request):
+        """
+        Test that the pipeline is initialized with readonly mode if the client
+        has it enabled
+        """
+        # Create a cluster with reading from replications
+        ro = _get_client(RedisCluster, request, read_from_replicas=True)
+        key = 'bar'
+        ro.set(key, 'foo')
+        import time
+        time.sleep(0.2)
+        with ro.pipeline() as readonly_pipe:
+            mock_all_nodes_resp(ro, 'MOCK_OK')
+            assert readonly_pipe.read_from_replicas is True
+            assert readonly_pipe.get(key).get(
+                key).execute() == ['MOCK_OK', 'MOCK_OK']
+            slot_nodes = ro.nodes_manager.slots_cache[ro.keyslot(key)]
+            if len(slot_nodes) > 1:
+                executed_on_replica = False
+                for node in slot_nodes:
+                    if node.server_type == REPLICA:
+                        conn = node.redis_connection.connection
+                        executed_on_replica = conn.read_response.called
+                        if executed_on_replica:
+                            break
+                assert executed_on_replica is True

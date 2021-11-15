@@ -1171,6 +1171,44 @@ readwrite() method.
     >>> rc_readonly.get('{foo}1')
 ```
 
+**Cluster Pipeline**
+
+ClusterPipeline is a subclass of RedisCluster that provides support for Redis 
+pipelines in cluster mode. 
+When calling the execute() command, all the commands are grouped by the node 
+on which they will be executed, and are then executed by the respective nodes 
+in parallel. The pipeline instance will wait for all the nodes to respond 
+before returning the result to the caller. Command responses are returned as a 
+list sorted in the same order in which they were sent.
+Pipelines can be used to dramatically increase the throughput of Redis Cluster 
+by significantly reducing the the number of network round trips between the 
+client and the server.
+
+``` pycon
+    >>> with rc.pipeline() as pipe:
+    >>>     pipe.set('foo', 'value1')
+    >>>     pipe.set('bar', 'value2')
+    >>>     pipe.get('foo')
+    >>>     pipe.get('bar')
+    >>>     print(pipe.execute())
+    [True, True, b'value1', b'value2']
+    >>>     pipe.set('foo1', 'bar1').get('foo1').execute()
+    [True, b'bar1']
+```
+Please note:
+- RedisCluster pipelines currently only support key-based commands.
+- The pipeline gets its 'read_from_replicas' value from the cluster's parameter.
+Thus, if read from replications is enabled in the cluster instance, the pipeline 
+will also direct read commands to replicas.
+- The 'transcation' option is NOT supported in cluster-mode. In non-cluster mode, 
+the 'transaction' option is available when executing pipelines. This wraps the 
+pipeline commands with MULTI/EXEC commands, and effectively turns the pipeline 
+commands into a single transaction block. This means that all commands are 
+executed sequentially without any interruptions from other clients. However, 
+in cluster-mode this is not possible, because commands are partitioned 
+according to their respective destination nodes. This means that we can not 
+turn the pipeline commands into one transaction block, because in most cases 
+they are split up into several smaller pipelines.
 
 
 See [Redis Cluster tutorial](https://redis.io/topics/cluster-tutorial) and

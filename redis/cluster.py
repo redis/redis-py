@@ -592,7 +592,9 @@ class RedisCluster(ClusterCommands, object):
 
     def get_node_from_key(self, key, replica=False):
         """
-        Get the node that holds the key's slot
+        Get the node that holds the key's slot.
+        If replica set to True but the slot doesn't have any replicas, None is
+        returned.
         """
         slot = self.keyslot(key)
         slot_cache = self.nodes_manager.slots_cache.get(slot)
@@ -600,9 +602,13 @@ class RedisCluster(ClusterCommands, object):
             raise SlotNotCoveredError(
                 'Slot "{0}" is not covered by the cluster.'.format(slot)
             )
-        node_idx = 0
-        if replica and len(self.nodes_manager.slots_cache[slot]) > 1:
+        if replica and len(self.nodes_manager.slots_cache[slot]) < 2:
+            return None
+        elif replica:
             node_idx = 1
+        else:
+            # primary
+            node_idx = 0
 
         return slot_cache[node_idx]
 
@@ -633,8 +639,7 @@ class RedisCluster(ClusterCommands, object):
         """
         return ClusterPubSub(self, node=node, host=host, port=port, **kwargs)
 
-    def pipeline(self, transaction=None,
-                 shard_hint=None, read_from_replicas=False):
+    def pipeline(self, transaction=None, shard_hint=None):
         """
         Cluster impl:
             Pipelines do not work in cluster mode the same way they
@@ -657,7 +662,8 @@ class RedisCluster(ClusterCommands, object):
             result_callbacks=self.result_callbacks,
             cluster_response_callbacks=self.cluster_response_callbacks,
             cluster_error_retry_attempts=self.cluster_error_retry_attempts,
-            read_from_replicas=read_from_replicas,
+            read_from_replicas=self.read_from_replicas,
+            reinitialize_steps=self.reinitialize_steps
         )
 
     def _determine_nodes(self, *args, **kwargs):
@@ -1235,6 +1241,7 @@ class NodesManager:
         :startup_nodes:
             Responsible for discovering other nodes in the cluster
         """
+        log.debug("Initializing the nodes' topology of the cluster")
         self.reset()
         tmp_nodes_cache = {}
         tmp_slots = {}
@@ -1546,7 +1553,7 @@ class ClusterPipeline(RedisCluster):
     def __init__(self, nodes_manager, result_callbacks=None,
                  cluster_response_callbacks=None, startup_nodes=None,
                  read_from_replicas=False, cluster_error_retry_attempts=3,
-                 **kwargs):
+                 reinitialize_steps=10, **kwargs):
         """
         """
         log.info("Creating new instance of ClusterPipeline")
@@ -1560,7 +1567,8 @@ class ClusterPipeline(RedisCluster):
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.cluster_response_callbacks = cluster_response_callbacks
         self.cluster_error_retry_attempts = cluster_error_retry_attempts
-
+        self.reinitialize_counter = 0
+        self.reinitialize_steps = reinitialize_steps
         self.encoder = Encoder(
             kwargs.get("encoding", "utf-8"),
             kwargs.get("encoding_errors", "strict"),
@@ -1825,8 +1833,15 @@ class ClusterPipeline(RedisCluster):
             # If a lot of commands have failed, we'll be setting the
             # flag to rebuild the slots table from scratch.
             # So MOVED errors should correct themselves fairly quickly.
-            self.connection_pool.nodes. \
-                increment_reinitialize_counter(len(attempt))
+            msg = 'An exception occurred during pipeline execution. ' \
+                  'args: {0}, error: {1} {2}'.\
+                format(attempt[-1].args,
+                       type(attempt[-1].result).__name__,
+                       str(attempt[-1].result))
+            log.exception(msg)
+            self.reinitialize_counter += 1
+            if self._should_reinitialized():
+                self.nodes_manager.initialize()
             for c in attempt:
                 try:
                     # send each command individually like we
@@ -1851,6 +1866,11 @@ class ClusterPipeline(RedisCluster):
         if not allow_redirections:
             raise RedisClusterException(
                 "ASK & MOVED redirection not allowed in this pipeline")
+
+    def eval(self):
+        """
+        """
+        raise RedisClusterException("method eval() is not implemented")
 
     def multi(self):
         """
@@ -1951,6 +1971,8 @@ ClusterPipeline.smove = block_pipeline_command(RedisCluster.smove)
 ClusterPipeline.sort = block_pipeline_command(RedisCluster.sort)
 ClusterPipeline.sunion = block_pipeline_command(RedisCluster.sunion)
 ClusterPipeline.sunionstore = block_pipeline_command(RedisCluster.sunionstore)
+ClusterPipeline.readwrite = block_pipeline_command(RedisCluster.readwrite)
+ClusterPipeline.readonly = block_pipeline_command(RedisCluster.readonly)
 
 
 class PipelineCommand(object):
