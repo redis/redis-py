@@ -998,6 +998,29 @@ def test_aggregations(client):
     assert "RediSearch" == res[23]
     assert 2 == len(res[25])
 
+@pytest.mark.redismod
+def test_load(client):
+    client.ft().create_index(
+        (
+            TextField("t1"),
+            TextField("t2"),
+        )
+    )
+
+    # Indexing a document
+    client.ft().add_document(
+        "doc1",
+        t1="hello",
+        t2="world",
+    )
+
+    req = aggregations.AggregateRequest("*").load("t1")
+    res = client.ft().aggregate(req)
+    assert res.rows[0] == ['t1', 'hello']
+
+    req = aggregations.AggregateRequest("*").load("t2")
+    res = client.ft().aggregate(req)
+    assert res.rows[0] == ['t2', 'world']
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
