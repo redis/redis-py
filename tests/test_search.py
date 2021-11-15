@@ -1018,12 +1018,18 @@ def test_aggregations_sort_by_and_limit(client):
     assert res.rows[0] == ['t2', 'a', 't1', 'b']
     assert res.rows[1] == ['t2', 'b', 't1', 'a']
 
-    # test sort_by without SortDirection and with max
+    # test sort_by without SortDirection
     req = aggregations.AggregateRequest("*")\
-        .sort_by("@t1", max=2)
+        .sort_by("@t1")
     res = client.ft().aggregate(req)
     assert res.rows[0] == ['t1', 'a']
     assert res.rows[1] == ['t1', 'b']
+
+    # test sort_by with max
+    req = aggregations.AggregateRequest("*")\
+        .sort_by("@t1", max=1)
+    res = client.ft().aggregate(req)
+    assert len(res.rows) == 1
 
     # test limit
     req = aggregations.AggregateRequest("*")\
