@@ -192,8 +192,8 @@ def test_client(client):
     )
     both_total = (
         client.ft()
-            .search(Query("henry").no_content().limit_fields("play", "txt"))
-            .total
+        .search(Query("henry").no_content().limit_fields("play", "txt"))
+        .total
     )
     assert 129 == txt_total
     assert 494 == play_total
@@ -336,9 +336,9 @@ def test_filters(client):
     q1 = Query("foo").add_filter(NumericFilter("num", 0, 2)).no_content()
     q2 = (
         Query("foo")
-            .add_filter(
+        .add_filter(
             NumericFilter("num", 2, NumericFilter.INF, minExclusive=True))
-            .no_content()
+        .no_content()
     )
     res1, res2 = client.ft().search(q1), client.ft().search(q2)
 
@@ -873,8 +873,7 @@ def test_scorer(client):
     )
     client.ft().add_document(
         "doc2",
-        description="Quick alice was beginning to get very tired of sitting by her quick sister on the bank, and of having nothing to do.",
-        # noqa
+        description="Quick alice was beginning to get very tired of sitting by her quick sister on the bank, and of having nothing to do.", # noqa
     )
 
     # default scorer is TFIDF
@@ -910,12 +909,12 @@ def test_get(client):
     )
 
     assert [
-               ["f1", "some valid content dd2", "f2", "this is sample text ff2"]
-           ] == client.ft().get("doc2")
+        ["f1", "some valid content dd2", "f2", "this is sample text ff2"]
+    ] == client.ft().get("doc2")
     assert [
-               ["f1", "some valid content dd1", "f2", "this is sample text ff1"],
-               ["f1", "some valid content dd2", "f2", "this is sample text ff2"],
-           ] == client.ft().get("doc1", "doc2")
+        ["f1", "some valid content dd1", "f2", "this is sample text ff1"],
+        ["f1", "some valid content dd2", "f2", "this is sample text ff2"],
+    ] == client.ft().get("doc1", "doc2")
 
 
 @pytest.mark.redismod
