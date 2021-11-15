@@ -1,5 +1,3 @@
-from six.moves import xrange, zip as izip
-
 from .document import Document
 from ._util import to_string
 
@@ -32,7 +30,7 @@ class Result(object):
 
         offset = 2 if with_scores else 1
 
-        for i in xrange(1, len(res), step):
+        for i in range(1, len(res), step):
             id = to_string(res[i])
             payload = to_string(res[i + offset]) if has_payload else None
             # fields_offset = 2 if has_payload else 1
@@ -44,7 +42,7 @@ class Result(object):
                 fields = (
                     dict(
                         dict(
-                            izip(
+                            zip(
                                 map(to_string, res[i + fields_offset][::2]),
                                 map(to_string, res[i + fields_offset][1::2]),
                             )

@@ -275,16 +275,28 @@ def test_objlen(client):
     assert len(obj) == client.json().objlen("obj")
 
 
-# @pytest.mark.pipeline
-# @pytest.mark.redismod
-# def test_pipelineshouldsucceed(client):
-#     p = client.json().pipeline()
-#     p.set("foo", Path.rootPath(), "bar")
-#     p.get("foo")
-#     p.delete("foo")
-#     assert [True, "bar", 1] == p.execute()
-#     assert client.keys() == []
-#     assert client.get("foo") is None
+@pytest.mark.pipeline
+@pytest.mark.redismod
+def test_json_commands_in_pipeline(client):
+    p = client.json().pipeline()
+    p.set("foo", Path.rootPath(), "bar")
+    p.get("foo")
+    p.delete("foo")
+    assert [True, "bar", 1] == p.execute()
+    assert client.keys() == []
+    assert client.get("foo") is None
+
+    # now with a true, json object
+    client.flushdb()
+    p = client.json().pipeline()
+    d = {"hello": "world", "oh": "snap"}
+    p.jsonset("foo", Path.rootPath(), d)
+    p.jsonget("foo")
+    p.exists("notarealkey")
+    p.delete("foo")
+    assert [True, d, 0, 1] == p.execute()
+    assert client.keys() == []
+    assert client.get("foo") is None
 
 
 @pytest.mark.redismod
@@ -1388,3 +1400,18 @@ def test_decoders_and_unstring():
     assert decode_list(b"45.55") == 45.55
     assert decode_list("45.55") == 45.55
     assert decode_list(['hello', b'world']) == ['hello', 'world']
+
+
+@pytest.mark.redismod
+def test_custom_decoder(client):
+    import ujson
+    import json
+
+    cj = client.json(encoder=ujson, decoder=ujson)
+    assert cj.set("foo", Path.rootPath(), "bar")
+    assert "bar" == cj.get("foo")
+    assert cj.get("baz") is None
+    assert 1 == cj.delete("foo")
+    assert client.exists("foo") == 0
+    assert not isinstance(cj.__encoder__, json.JSONEncoder)
+    assert not isinstance(cj.__decoder__, json.JSONDecoder)

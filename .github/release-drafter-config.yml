@@ -15,7 +15,7 @@ autolabeler:
     branch:
       - '/feature-.+'
 categories:
-  - title: 'Breaking Changes'
+  - title: '🔥 Breaking Changes'
     labels:
       - 'breakingchange'
   - title: '🚀 New Features'

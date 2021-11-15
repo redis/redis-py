@@ -1,6 +1,3 @@
-import six
-
-
 class Document(object):
     """
     Represents a single document in a result set
@@ -9,7 +6,7 @@ class Document(object):
     def __init__(self, id, payload=None, **fields):
         self.id = id
         self.payload = payload
-        for k, v in six.iteritems(fields):
+        for k, v in fields.items():
             setattr(self, k, v)
 
     def __repr__(self):

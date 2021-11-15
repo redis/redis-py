@@ -1,3 +1,7 @@
+ignore:
+  - "benchmarks/**"
+  - "tasks.py"
+
 codecov:
   require_ci_to_pass: yes
 

@@ -365,12 +365,24 @@ Connecting redis-py to the Sentinel instance(s) is easy. You can use a
 Sentinel connection to discover the master and slaves network addresses:
 
 ``` pycon
->>> from redis.sentinel import Sentinel
+>>> from redis import Sentinel
 >>> sentinel = Sentinel([('localhost', 26379)], socket_timeout=0.1)
 >>> sentinel.discover_master('mymaster')
 ('127.0.0.1', 6379)
 >>> sentinel.discover_slaves('mymaster')
 [('127.0.0.1', 6380)]
+```
+
+To connect to a sentinel which uses SSL ([see SSL
+connections](#ssl-connections) for more examples of SSL configurations):
+
+``` pycon
+>>> from redis import Sentinel
+>>> sentinel = Sentinel([('localhost', 26379)],
+                        ssl=True,
+                        ssl_ca_certs='/etc/ssl/certs/ca-certificates.crt')
+>>> sentinel.discover_master('mymaster')
+('127.0.0.1', 6379)
 ```
 
 You can also create Redis client connections from a Sentinel instance.

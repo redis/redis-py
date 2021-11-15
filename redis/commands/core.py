@@ -2571,6 +2571,13 @@ class SortedSetCommands:
         ``offset`` and ``num`` are specified, then return a slice of the range.
         Can't be provided when using ``bylex``.
         """
+        # Need to support ``desc`` also when using old redis version
+        # because it was supported in 3.5.3 (of redis-py)
+        if not byscore and not bylex and (offset is None and num is None) \
+                and desc:
+            return self.zrevrange(name, start, end, withscores,
+                                  score_cast_func)
+
         return self._zrange('ZRANGE', None, name, start, end, desc, byscore,
                             bylex, withscores, score_cast_func, offset, num)
 
@@ -2587,9 +2594,14 @@ class SortedSetCommands:
 
         ``score_cast_func`` a callable used to cast the score return value
         """
-        return self.zrange(name, start, end, desc=True,
-                           withscores=withscores,
-                           score_cast_func=score_cast_func)
+        pieces = ['ZREVRANGE', name, start, end]
+        if withscores:
+            pieces.append(b'WITHSCORES')
+        options = {
+            'withscores': withscores,
+            'score_cast_func': score_cast_func
+        }
+        return self.execute_command(*pieces, **options)
 
     def zrangestore(self, dest, name, start, end,
                     byscore=False, bylex=False, desc=False,
@@ -2626,7 +2638,13 @@ class SortedSetCommands:
         If ``start`` and ``num`` are specified, then return a slice of the
         range.
         """
-        return self.zrange(name, min, max, bylex=True, offset=start, num=num)
+        if (start is not None and num is None) or \
+                (num is not None and start is None):
+            raise DataError("``start`` and ``num`` must both be specified")
+        pieces = ['ZRANGEBYLEX', name, min, max]
+        if start is not None and num is not None:
+            pieces.extend([b'LIMIT', start, num])
+        return self.execute_command(*pieces)
 
     def zrevrangebylex(self, name, max, min, start=None, num=None):
         """
@@ -2636,8 +2654,13 @@ class SortedSetCommands:
         If ``start`` and ``num`` are specified, then return a slice of the
         range.
         """
-        return self.zrange(name, max, min, desc=True,
-                           bylex=True, offset=start, num=num)
+        if (start is not None and num is None) or \
+                (num is not None and start is None):
+            raise DataError("``start`` and ``num`` must both be specified")
+        pieces = ['ZREVRANGEBYLEX', name, max, min]
+        if start is not None and num is not None:
+            pieces.extend(['LIMIT', start, num])
+        return self.execute_command(*pieces)
 
     def zrangebyscore(self, name, min, max, start=None, num=None,
                       withscores=False, score_cast_func=float):
@@ -2653,10 +2676,19 @@ class SortedSetCommands:
 
         `score_cast_func`` a callable used to cast the score return value
         """
-        return self.zrange(name, min, max, byscore=True,
-                           offset=start, num=num,
-                           withscores=withscores,
-                           score_cast_func=score_cast_func)
+        if (start is not None and num is None) or \
+                (num is not None and start is None):
+            raise DataError("``start`` and ``num`` must both be specified")
+        pieces = ['ZRANGEBYSCORE', name, min, max]
+        if start is not None and num is not None:
+            pieces.extend(['LIMIT', start, num])
+        if withscores:
+            pieces.append('WITHSCORES')
+        options = {
+            'withscores': withscores,
+            'score_cast_func': score_cast_func
+        }
+        return self.execute_command(*pieces, **options)
 
     def zrevrangebyscore(self, name, max, min, start=None, num=None,
                          withscores=False, score_cast_func=float):
@@ -2672,10 +2704,19 @@ class SortedSetCommands:
 
         ``score_cast_func`` a callable used to cast the score return value
         """
-        return self.zrange(name, max, min, desc=True,
-                           byscore=True, offset=start,
-                           num=num, withscores=withscores,
-                           score_cast_func=score_cast_func)
+        if (start is not None and num is None) or \
+                (num is not None and start is None):
+            raise DataError("``start`` and ``num`` must both be specified")
+        pieces = ['ZREVRANGEBYSCORE', name, max, min]
+        if start is not None and num is not None:
+            pieces.extend(['LIMIT', start, num])
+        if withscores:
+            pieces.append('WITHSCORES')
+        options = {
+            'withscores': withscores,
+            'score_cast_func': score_cast_func
+        }
+        return self.execute_command(*pieces, **options)
 
     def zrank(self, name, value):
         """
@@ -3335,6 +3376,17 @@ class ModuleCommands:
         all loaded modules.
         """
         return self.execute_command('MODULE LIST')
+
+    def command_info(self):
+        raise NotImplementedError(
+            "COMMAND INFO is intentionally not implemented in the client."
+        )
+
+    def command_count(self):
+        return self.execute_command('COMMAND COUNT')
+
+    def command(self):
+        return self.execute_command('COMMAND')
 
 
 class Script:

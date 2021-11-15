@@ -1,6 +1,3 @@
-from six import string_types, integer_types
-
-
 def tags(*t):
     """
     Indicate that the values should be matched to a tag field
@@ -186,7 +183,7 @@ class Node(object):
         kvparams = {}
         for k, v in kwparams.items():
             curvals = kvparams.setdefault(k, [])
-            if isinstance(v, (string_types, integer_types, float)):
+            if isinstance(v, (str, int, float)):
                 curvals.append(Value.make_value(v))
             elif isinstance(v, Value):
                 curvals.append(v)

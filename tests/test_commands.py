@@ -8,10 +8,12 @@ from string import ascii_letters
 
 from redis.client import parse_info
 from redis import exceptions
+
 from .conftest import (
     _get_client,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
+    skip_if_redis_enterprise,
     skip_unless_arch_bits,
 )
 
@@ -83,6 +85,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
+    @skip_if_redis_enterprise
     def test_acl_deluser(self, r, request):
         username = 'redis-py-user'
 
@@ -108,6 +111,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
+    @skip_if_redis_enterprise
     def test_acl_genpass(self, r):
         password = r.acl_genpass()
         assert isinstance(password, str)
@@ -122,12 +126,12 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
+    @skip_if_redis_enterprise
     def test_acl_getuser_setuser(self, r, request):
         username = 'redis-py-user'
 
         def teardown():
             r.acl_deluser(username)
-
         request.addfinalizer(teardown)
 
         # test enabled=False
@@ -218,12 +222,12 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
+    @skip_if_redis_enterprise
     def test_acl_list(self, r, request):
         username = 'redis-py-user'
 
         def teardown():
             r.acl_deluser(username)
-
         request.addfinalizer(teardown)
 
         assert r.acl_setuser(username, enabled=False, reset=True)
@@ -232,6 +236,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
+    @skip_if_redis_enterprise
     def test_acl_log(self, r, request):
         username = 'redis-py-user'
 
@@ -268,12 +273,12 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
+    @skip_if_redis_enterprise
     def test_acl_setuser_categories_without_prefix_fails(self, r, request):
         username = 'redis-py-user'
 
         def teardown():
             r.acl_deluser(username)
-
         request.addfinalizer(teardown)
 
         with pytest.raises(exceptions.DataError):
@@ -281,12 +286,12 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
+    @skip_if_redis_enterprise
     def test_acl_setuser_commands_without_prefix_fails(self, r, request):
         username = 'redis-py-user'
 
         def teardown():
             r.acl_deluser(username)
-
         request.addfinalizer(teardown)
 
         with pytest.raises(exceptions.DataError):
@@ -294,12 +299,12 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
+    @skip_if_redis_enterprise
     def test_acl_setuser_add_passwords_and_nopass_fails(self, r, request):
         username = 'redis-py-user'
 
         def teardown():
             r.acl_deluser(username)
-
         request.addfinalizer(teardown)
 
         with pytest.raises(exceptions.DataError):
@@ -333,12 +338,17 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('5.0.0')
-    def test_client_list_type(self, r):
+    def test_client_list_types_not_replica(self, r):
         with pytest.raises(exceptions.RedisError):
             r.client_list(_type='not a client type')
-        for client_type in ['normal', 'master', 'replica', 'pubsub']:
+        for client_type in ['normal', 'master', 'pubsub']:
             clients = r.client_list(_type=client_type)
             assert isinstance(clients, list)
+
+    @skip_if_redis_enterprise
+    def test_client_list_replica(self, r):
+        clients = r.client_list(_type='replica')
+        assert isinstance(clients, list)
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('6.2.0')
@@ -487,7 +497,8 @@ class TestRedisCommands:
         assert r.client_kill_filter(laddr=client_2_addr)
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt('2.8.12')
+    @skip_if_server_version_lt('6.0.0')
+    @skip_if_redis_enterprise
     def test_client_kill_filter_by_user(self, r, request):
         killuser = 'user_to_kill'
         r.acl_setuser(killuser, enabled=True, reset=True,
@@ -502,6 +513,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('2.9.50')
+    @skip_if_redis_enterprise
     def test_client_pause(self, r):
         assert r.client_pause(1)
         assert r.client_pause(timeout=1)
@@ -510,6 +522,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('6.2.0')
+    @skip_if_redis_enterprise
     def test_client_unpause(self, r):
         assert r.client_unpause() == b'OK'
 
@@ -529,16 +542,19 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('6.0.0')
+    @skip_if_redis_enterprise
     def test_client_getredir(self, r):
         assert isinstance(r.client_getredir(), int)
         assert r.client_getredir() == -1
 
     def test_config_get(self, r):
         data = r.config_get()
-        assert 'maxmemory' in data
-        assert data['maxmemory'].isdigit()
+        assert len(data.keys()) > 10
+        # # assert 'maxmemory' in data
+        # assert data['maxmemory'].isdigit()
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise
     def test_config_resetstat(self, r):
         r.ping()
         prior_commands_processed = int(r.info()['total_commands_processed'])
@@ -547,14 +563,12 @@ class TestRedisCommands:
         reset_commands_processed = int(r.info()['total_commands_processed'])
         assert reset_commands_processed < prior_commands_processed
 
+    @skip_if_redis_enterprise
     def test_config_set(self, r):
-        data = r.config_get()
-        rdbname = data['dbfilename']
-        try:
-            assert r.config_set('dbfilename', 'redis_py_test.rdb')
-            assert r.config_get()['dbfilename'] == 'redis_py_test.rdb'
-        finally:
-            assert r.config_set('dbfilename', rdbname)
+        r.config_set('timeout', 70)
+        assert r.config_get()['timeout'] == '70'
+        assert r.config_set('timeout', 0)
+        assert r.config_get()['timeout'] == '0'
 
     @pytest.mark.onlynoncluster
     def test_dbsize(self, r):
@@ -572,9 +586,11 @@ class TestRedisCommands:
         r['b'] = 'bar'
         info = r.info()
         assert isinstance(info, dict)
-        assert info['db9']['keys'] == 2
+        assert 'arch_bits' in info.keys()
+        assert 'redis_version' in info.keys()
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise
     def test_lastsave(self, r):
         assert isinstance(r.lastsave(), datetime.datetime)
 
@@ -674,6 +690,7 @@ class TestRedisCommands:
         assert isinstance(t[0], int)
         assert isinstance(t[1], int)
 
+    @skip_if_redis_enterprise
     def test_bgsave(self, r):
         assert r.bgsave()
         time.sleep(0.3)
@@ -1254,6 +1271,12 @@ class TestRedisCommands:
         value1 = 'ohmytext'
         value2 = 'mynewtext'
         res = 'mytext'
+
+        if skip_if_redis_enterprise(None).args[0] is True:
+            with pytest.raises(redis.exceptions.ResponseError):
+                assert r.stralgo('LCS', value1, value2) == res
+            return
+
         # test LCS of strings
         assert r.stralgo('LCS', value1, value2) == res
         # test using keys
@@ -1262,22 +1285,22 @@ class TestRedisCommands:
         # test other labels
         assert r.stralgo('LCS', value1, value2, len=True) == len(res)
         assert r.stralgo('LCS', value1, value2, idx=True) == \
-            {
-            'len': len(res),
-            'matches': [[(4, 7), (5, 8)], [(2, 3), (0, 1)]]
-        }
+               {
+                   'len': len(res),
+                   'matches': [[(4, 7), (5, 8)], [(2, 3), (0, 1)]]
+               }
         assert r.stralgo('LCS', value1, value2,
                          idx=True, withmatchlen=True) == \
-            {
-            'len': len(res),
-            'matches': [[4, (4, 7), (5, 8)], [2, (2, 3), (0, 1)]]
-        }
+               {
+                   'len': len(res),
+                   'matches': [[4, (4, 7), (5, 8)], [2, (2, 3), (0, 1)]]
+               }
         assert r.stralgo('LCS', value1, value2,
                          idx=True, minmatchlen=4, withmatchlen=True) == \
-            {
-            'len': len(res),
-            'matches': [[4, (4, 7), (5, 8)]]
-        }
+               {
+                   'len': len(res),
+                   'matches': [[4, (4, 7), (5, 8)]]
+               }
 
     @skip_if_server_version_lt('6.0.0')
     def test_stralgo_negative(self, r):
@@ -1296,6 +1319,12 @@ class TestRedisCommands:
 
     def test_substr(self, r):
         r['a'] = '0123456789'
+
+        if skip_if_redis_enterprise(None).args[0] is True:
+            with pytest.raises(redis.exceptions.ResponseError):
+                assert r.substr('a', 0) == b'0123456789'
+            return
+
         assert r.substr('a', 0) == b'0123456789'
         assert r.substr('a', 2) == b'23456789'
         assert r.substr('a', 3, 5) == b'345'
@@ -1851,16 +1880,16 @@ class TestRedisCommands:
             r.zinter(['a', 'b', 'c'], aggregate='foo', withscores=True)
         # aggregate with SUM
         assert r.zinter(['a', 'b', 'c'], withscores=True) \
-            == [(b'a3', 8), (b'a1', 9)]
+               == [(b'a3', 8), (b'a1', 9)]
         # aggregate with MAX
         assert r.zinter(['a', 'b', 'c'], aggregate='MAX', withscores=True) \
-            == [(b'a3', 5), (b'a1', 6)]
+               == [(b'a3', 5), (b'a1', 6)]
         # aggregate with MIN
         assert r.zinter(['a', 'b', 'c'], aggregate='MIN', withscores=True) \
-            == [(b'a1', 1), (b'a3', 1)]
+               == [(b'a1', 1), (b'a3', 1)]
         # with weights
         assert r.zinter({'a': 1, 'b': 2, 'c': 3}, withscores=True) \
-            == [(b'a3', 20), (b'a1', 23)]
+               == [(b'a3', 20), (b'a1', 23)]
 
     @pytest.mark.onlynoncluster
     def test_zinterstore_sum(self, r):
@@ -1958,6 +1987,7 @@ class TestRedisCommands:
         r.zadd('a', {'a1': 1, 'a2': 2, 'a3': 3})
         assert r.zrange('a', 0, 1) == [b'a1', b'a2']
         assert r.zrange('a', 1, 2) == [b'a2', b'a3']
+        assert r.zrange('a', 0, 2) == [b'a1', b'a2', b'a3']
         assert r.zrange('a', 0, 2, desc=True) == [b'a3', b'a2', b'a1']
 
         # withscores
@@ -2160,14 +2190,14 @@ class TestRedisCommands:
         assert r.zunion(['a', 'b', 'c'], withscores=True) == \
             [(b'a2', 3), (b'a4', 4), (b'a3', 8), (b'a1', 9)]
         # max
-        assert r.zunion(['a', 'b', 'c'], aggregate='MAX', withscores=True) \
-            == [(b'a2', 2), (b'a4', 4), (b'a3', 5), (b'a1', 6)]
+        assert r.zunion(['a', 'b', 'c'], aggregate='MAX', withscores=True)\
+               == [(b'a2', 2), (b'a4', 4), (b'a3', 5), (b'a1', 6)]
         # min
-        assert r.zunion(['a', 'b', 'c'], aggregate='MIN', withscores=True) \
-            == [(b'a1', 1), (b'a2', 1), (b'a3', 1), (b'a4', 4)]
+        assert r.zunion(['a', 'b', 'c'], aggregate='MIN', withscores=True)\
+               == [(b'a1', 1), (b'a2', 1), (b'a3', 1), (b'a4', 4)]
         # with weight
-        assert r.zunion({'a': 1, 'b': 2, 'c': 3}, withscores=True) \
-            == [(b'a2', 5), (b'a4', 12), (b'a3', 20), (b'a1', 23)]
+        assert r.zunion({'a': 1, 'b': 2, 'c': 3}, withscores=True)\
+               == [(b'a2', 5), (b'a4', 12), (b'a3', 20), (b'a1', 23)]
 
     @pytest.mark.onlynoncluster
     def test_zunionstore_sum(self, r):
@@ -2558,6 +2588,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('3.0.0')
+    @skip_if_redis_enterprise
     def test_readwrite(self, r):
         assert r.readwrite()
 
@@ -2874,7 +2905,7 @@ class TestRedisCommands:
         assert r.georadius('barcelona', 2, 1, 1, unit='km',
                            withdist=True, withcoord=True, withhash=True) == []
 
-    @skip_if_server_version_lt('3.2.0')
+    @skip_if_server_version_lt('6.2.0')
     def test_georadius_count(self, r):
         values = (2.1909389952632, 41.433791470673, 'place1') + \
                  (2.1873744593677, 41.406342043777, 'place2')
@@ -2938,6 +2969,12 @@ class TestRedisCommands:
                  (2.187376320362091, 41.40634178640635)],
                 [b'place1', 0.0, 3471609698139488,
                  (2.1909382939338684, 41.433790281840835)]]
+
+    @skip_if_server_version_lt('6.2.0')
+    def test_georadiusmember_count(self, r):
+        values = (2.1909389952632, 41.433791470673, 'place1') + \
+                 (2.1873744593677, 41.406342043777, b'\x80place2')
+        r.geoadd('barcelona', values)
         assert r.georadiusbymember('barcelona', 'place1', 4000,
                                    count=1, any=True) == \
                [b'\x80place2']
@@ -3066,10 +3103,10 @@ class TestRedisCommands:
         # which only returns message ids
         assert r.xautoclaim(stream, group, consumer1, min_idle_time=0,
                             start_id=0, justid=True) == \
-            [message_id1, message_id2]
+               [message_id1, message_id2]
         assert r.xautoclaim(stream, group, consumer1, min_idle_time=0,
                             start_id=message_id2, justid=True) == \
-            [message_id2]
+               [message_id2]
 
     @skip_if_server_version_lt('6.2.0')
     def test_xautoclaim_negative(self, r):
@@ -3650,51 +3687,51 @@ class TestRedisCommands:
         # comments show affected bits
         bf = r.bitfield('a')
         resp = (bf
-                .set('u8', 8, 255)  # 00000000 11111111
-                .get('u8', 0)  # 00000000
-                .get('u4', 8)  # 1111
-                .get('u4', 12)  # 1111
-                .get('u4', 13)  # 111 0
+                .set('u8', 8, 255)     # 00000000 11111111
+                .get('u8', 0)          # 00000000
+                .get('u4', 8)                   # 1111
+                .get('u4', 12)                      # 1111
+                .get('u4', 13)                       # 111 0
                 .execute())
         assert resp == [0, 0, 15, 15, 14]
 
         # .set() returns the previous value...
         resp = (bf
-                .set('u8', 4, 1)  # 0000 0001
-                .get('u16', 0)  # 00000000 00011111
-                .set('u16', 0, 0)  # 00000000 00000000
+                .set('u8', 4, 1)           # 0000 0001
+                .get('u16', 0)         # 00000000 00011111
+                .set('u16', 0, 0)      # 00000000 00000000
                 .execute())
         assert resp == [15, 31, 31]
 
         # incrby adds to the value
         resp = (bf
                 .incrby('u8', 8, 254)  # 00000000 11111110
-                .incrby('u8', 8, 1)  # 00000000 11111111
-                .get('u16', 0)  # 00000000 11111111
+                .incrby('u8', 8, 1)    # 00000000 11111111
+                .get('u16', 0)         # 00000000 11111111
                 .execute())
         assert resp == [254, 255, 255]
 
         # Verify overflow protection works as a method:
         r.delete('a')
         resp = (bf
-                .set('u8', 8, 254)  # 00000000 11111110
+                .set('u8', 8, 254)     # 00000000 11111110
                 .overflow('fail')
-                .incrby('u8', 8, 2)  # incrby 2 would overflow, None returned
-                .incrby('u8', 8, 1)  # 00000000 11111111
-                .incrby('u8', 8, 1)  # incrby 1 would overflow, None returned
-                .get('u16', 0)  # 00000000 11111111
+                .incrby('u8', 8, 2)    # incrby 2 would overflow, None returned
+                .incrby('u8', 8, 1)    # 00000000 11111111
+                .incrby('u8', 8, 1)    # incrby 1 would overflow, None returned
+                .get('u16', 0)         # 00000000 11111111
                 .execute())
         assert resp == [0, None, 255, None, 255]
 
         # Verify overflow protection works as arg to incrby:
         r.delete('a')
         resp = (bf
-                .set('u8', 8, 255)  # 00000000 11111111
-                .incrby('u8', 8, 1)  # 00000000 00000000  wrap default
-                .set('u8', 8, 255)  # 00000000 11111111
+                .set('u8', 8, 255)           # 00000000 11111111
+                .incrby('u8', 8, 1)          # 00000000 00000000  wrap default
+                .set('u8', 8, 255)           # 00000000 11111111
                 .incrby('u8', 8, 1, 'FAIL')  # 00000000 11111111  fail
-                .incrby('u8', 8, 1)  # 00000000 11111111  still fail
-                .get('u16', 0)  # 00000000 11111111
+                .incrby('u8', 8, 1)          # 00000000 11111111  still fail
+                .get('u16', 0)               # 00000000 11111111
                 .execute())
         assert resp == [0, 0, 0, None, None, 255]
 
@@ -3702,9 +3739,9 @@ class TestRedisCommands:
         r.delete('a')
         bf = r.bitfield('a', default_overflow='FAIL')
         resp = (bf
-                .set('u8', 8, 255)  # 00000000 11111111
-                .incrby('u8', 8, 1)  # 00000000 11111111  fail default
-                .get('u16', 0)  # 00000000 11111111
+                .set('u8', 8, 255)     # 00000000 11111111
+                .incrby('u8', 8, 1)    # 00000000 11111111  fail default
+                .get('u16', 0)         # 00000000 11111111
                 .execute())
         assert resp == [0, None, 255]
 
@@ -3720,6 +3757,11 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt('4.0.0')
     def test_memory_malloc_stats(self, r):
+        if skip_if_redis_enterprise(None).args[0] is True:
+            with pytest.raises(redis.exceptions.ResponseError):
+                assert r.memory_malloc_stats()
+            return
+
         assert r.memory_malloc_stats()
 
     @skip_if_server_version_lt('4.0.0')
@@ -3727,6 +3769,12 @@ class TestRedisCommands:
         # put a key into the current db to make sure that "db.<current-db>"
         # has data
         r.set('foo', 'bar')
+
+        if skip_if_redis_enterprise(None).args[0] is True:
+            with pytest.raises(redis.exceptions.ResponseError):
+                stats = r.memory_stats()
+            return
+
         stats = r.memory_stats()
         assert isinstance(stats, dict)
         for key, value in stats.items():
@@ -3740,6 +3788,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('4.0.0')
+    @skip_if_redis_enterprise
     def test_module_list(self, r):
         assert isinstance(r.module_list(), list)
         for x in r.module_list():
@@ -3751,8 +3800,17 @@ class TestRedisCommands:
         assert isinstance(res, int)
         assert res >= 100
 
+    @skip_if_server_version_lt('2.8.13')
+    def test_command(self, r):
+        res = r.command()
+        assert len(res) >= 100
+        cmds = list(res.keys())
+        assert 'set' in cmds
+        assert 'get' in cmds
+
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('4.0.0')
+    @skip_if_redis_enterprise
     def test_module(self, r):
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
             r.module_load('/some/fake/path')
@@ -3788,7 +3846,8 @@ class TestRedisCommands:
         assert r.restore(key2, 0, dumpdata)
         assert r.ttl(key2) == -1
 
-        # idletime
+    @skip_if_server_version_lt('5.0.0')
+    def test_restore_idletime(self, r):
         key = 'yayakey'
         r.set(key, 'blee!')
         dumpdata = r.dump(key)
@@ -3796,7 +3855,8 @@ class TestRedisCommands:
         assert r.restore(key, 0, dumpdata, idletime=5)
         assert r.get(key) == b'blee!'
 
-        # frequency
+    @skip_if_server_version_lt('5.0.0')
+    def test_restore_frequency(self, r):
         key = 'yayakey'
         r.set(key, 'blee!')
         dumpdata = r.dump(key)
@@ -3806,11 +3866,10 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('5.0.0')
+    @skip_if_redis_enterprise
     def test_replicaof(self, r):
-
         with pytest.raises(redis.ResponseError):
             assert r.replicaof("NO ONE")
-
         assert r.replicaof("NO", "ONE")
 
 
@@ -3885,6 +3944,7 @@ class TestBinarySave:
         assert '6' in parsed['allocation_stats']
         assert '>=256' in parsed['allocation_stats']
 
+    @skip_if_redis_enterprise
     def test_large_responses(self, r):
         "The PythonParser has some special cases for return values > 1MB"
         # load up 5MB of data into a key
