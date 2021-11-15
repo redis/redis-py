@@ -31,6 +31,10 @@ def pytest_addoption(parser):
 def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
     info = client.info()
+    if 'dping' in client.__commands__:
+        info["enterprise"] = True
+    else:
+        info["enterprise"] = False
     client.connection_pool.disconnect()
     return info
 
@@ -42,6 +46,7 @@ def pytest_sessionstart(session):
     arch_bits = info["arch_bits"]
     REDIS_INFO["version"] = version
     REDIS_INFO["arch_bits"] = arch_bits
+    REDIS_INFO["enterprise"] = info["enterprise"]
 
     # module info, if the second redis is running
     try:
@@ -49,6 +54,8 @@ def pytest_sessionstart(session):
         info = _get_info(redismod_url)
         REDIS_INFO["modules"] = info["modules"]
     except redis.exceptions.ConnectionError:
+        pass
+    except KeyError:
         pass
 
 
@@ -90,6 +97,17 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
             return pytest.mark.skipif(check, reason="Redis module version")
 
     raise AttributeError("No redis module named {}".format(module_name))
+
+
+def skip_if_redis_enterprise(func):
+    check = REDIS_INFO["enterprise"] is True
+    return pytest.mark.skipif(check, reason="Redis enterprise"
+                              )
+
+
+def skip_ifnot_redis_enterprise(func):
+    check = REDIS_INFO["enterprise"] is False
+    return pytest.mark.skipif(check, reason="Redis enterprise")
 
 
 def _get_client(cls, request, single_connection_client=True, flushdb=True,
