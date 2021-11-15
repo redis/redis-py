@@ -1093,6 +1093,43 @@ def test_aggregations_apply(client):
 
 
 @pytest.mark.redismod
+def test_aggregations_filter(client):
+    client.ft().create_index(
+        (
+            TextField("name", sortable=True),
+            NumericField("age", sortable=True),
+        )
+    )
+
+    client.ft().client.hset(
+        "doc1",
+        mapping={
+            'name': 'bar',
+            'age': '25'
+        }
+    )
+    client.ft().client.hset(
+        "doc2",
+        mapping={
+            'name': 'foo',
+            'age': '19'
+        }
+    )
+
+    req = aggregations.AggregateRequest("*")\
+        .filter("@name=='foo' && @age < 20")
+    res = client.ft().aggregate(req)
+    assert len(res.rows) == 1
+    assert res.rows[0] == ['name', 'foo', 'age', '19']
+
+    req = aggregations.AggregateRequest("*")\
+        .filter("@age > 15").sort_by("@age")
+    res = client.ft().aggregate(req)
+    assert len(res.rows) == 2
+    assert res.rows[0] == ['age', '19']
+    assert res.rows[1] == ['age', '25']
+
+@pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
 def test_index_definition(client):
     """
