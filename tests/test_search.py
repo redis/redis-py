@@ -1048,20 +1048,31 @@ def test_aggregations_load(client):
 def test_aggregations_apply(client):
     client.ft().create_index(
         (
-            NumericField("timestamp"),
+            TextField("PrimaryKey", sortable=True),
+            NumericField("CreatedDateTimeUTC", sortable=True),
         )
     )
 
-    # Indexing a document
-    client.ft().add_document(
+    client.ft().client.hset(
         "doc1",
-        t1="hello",
-        t2="world",
+        mapping={
+            'PrimaryKey': '9::362330',
+            'CreatedDateTimeUTC': '637387878524969984'
+        }
+    )
+    client.ft().client.hset(
+        "doc2",
+        mapping={
+            'PrimaryKey': '9::362329',
+            'CreatedDateTimeUTC': '637387875859270016'
+        }
     )
 
-    req = aggregations.AggregateRequest("*").load("t1")
+    req = aggregations.AggregateRequest("*")\
+        .apply(CreatedDateTimeUTC='@CreatedDateTimeUTC * 10')
     res = client.ft().aggregate(req)
-    assert res.rows[0] == ['t1', 'hello']
+    assert res.rows[0] == ['CreatedDateTimeUTC', '6373878785249699840']
+    assert res.rows[1] == ['CreatedDateTimeUTC', '6373878758592700416']
 
 
 @pytest.mark.redismod
