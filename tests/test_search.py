@@ -1129,6 +1129,7 @@ def test_aggregations_filter(client):
     assert res.rows[0] == ['age', '19']
     assert res.rows[1] == ['age', '25']
 
+
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
 def test_index_definition(client):
