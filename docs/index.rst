@@ -31,6 +31,15 @@ Contents:
 .. automodule:: redis.commands
    :members:
 
+.. automodule:: redis.commands.json
+   :members:
+
+.. automodule:: redis.commands.search
+   :members:
+
+.. automodule:: redis.commands.timeseries
+   :members:
+
 .. automodule:: redis.exceptions
    :members:
 
@@ -39,4 +48,3 @@ Contents:
 
 .. automodule:: redis.sentinel
    :members:
-

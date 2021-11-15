@@ -77,7 +77,9 @@ class SearchCommands:
         allow searching in specific fields
         - **stopwords**: If not None, we create the index with this custom
         stopword list. The list can be empty
-        """
+
+        For more information: https://oss.redis.com/redisearch/Commands/#ftcreate
+        """  # noqa
 
         args = [CREATE_CMD, self.index_name]
         if definition is not None:
@@ -107,7 +109,9 @@ class SearchCommands:
         ### Parameters:
 
         - **fields**: a list of Field objects to add for the index
-        """
+
+        For more information: https://oss.redis.com/redisearch/Commands/#ftalter_schema_add
+        """  # noqa
 
         args = [ALTER_CMD, self.index_name, "SCHEMA", "ADD"]
         try:
@@ -116,17 +120,6 @@ class SearchCommands:
             args += fields.redis_args()
 
         return self.execute_command(*args)
-
-    def drop_index(self, delete_documents=True):
-        """
-        Drop the index if it exists. Deprecated from RediSearch 2.0.
-
-        ### Parameters:
-
-        - **delete_documents**: If `True`, all documents will be deleted.
-        """
-        keep_str = "" if delete_documents else "KEEPDOCS"
-        return self.execute_command(DROP_CMD, self.index_name, keep_str)
 
     def dropindex(self, delete_documents=False):
         """
@@ -137,7 +130,8 @@ class SearchCommands:
         ### Parameters:
 
         - **delete_documents**: If `True`, all documents will be deleted.
-        """
+        For more information: https://oss.redis.com/redisearch/Commands/#ftdropindex
+        """  # noqa
         keep_str = "" if delete_documents else "KEEPDOCS"
         return self.execute_command(DROP_CMD, self.index_name, keep_str)
 
@@ -244,7 +238,9 @@ class SearchCommands:
         - **fields** kwargs dictionary of the document fields to be saved
                          and/or indexed.
                      NOTE: Geo points shoule be encoded as strings of "lon,lat"
-        """
+
+        For more information: https://oss.redis.com/redisearch/Commands/#ftadd
+        """  # noqa
         return self._add_document(
             doc_id,
             conn=None,
@@ -276,7 +272,9 @@ class SearchCommands:
         - **replace**: if True, and the document already is in the index, we
                       perform an update and reindex the document
         - **language**: Specify the language used for document tokenization.
-        """
+        
+        For more information: https://oss.redis.com/redisearch/Commands/#ftaddhash
+        """  # noqa
         return self._add_document_hash(
             doc_id,
             conn=None,
@@ -294,7 +292,9 @@ class SearchCommands:
 
         - **delete_actual_document**: if set to True, RediSearch also delete
                                       the actual document if it is in the index
-        """
+                                      
+        For more information: https://oss.redis.com/redisearch/Commands/#ftdel
+        """  # noqa
         args = [DEL_CMD, self.index_name, doc_id]
         if conn is None:
             conn = self.client
@@ -325,6 +325,8 @@ class SearchCommands:
         ### Parameters
 
         - **ids**: the ids of the saved documents.
+
+        For more information https://oss.redis.com/redisearch/Commands/#ftget
         """
 
         return self.client.execute_command(MGET_CMD, self.index_name, *ids)
@@ -333,6 +335,8 @@ class SearchCommands:
         """
         Get info an stats about the the current index, including the number of
         documents, memory consumption, etc
+
+        For more information https://oss.redis.com/redisearch/Commands/#ftinfo
         """
 
         res = self.client.execute_command(INFO_CMD, self.index_name)
@@ -360,7 +364,9 @@ class SearchCommands:
         - **query**: the search query. Either a text for simple queries with
                      default parameters, or a Query object for complex queries.
                      See RediSearch's documentation on query format
-        """
+
+        For more information: https://oss.redis.com/redisearch/Commands/#ftsearch
+        """  # noqa
         args, query = self._mk_query_args(query)
         st = time.time()
         res = self.execute_command(SEARCH_CMD, *args)
@@ -374,6 +380,10 @@ class SearchCommands:
         )
 
     def explain(self, query):
+        """Returns the execution plan for a complex query.
+
+        For more information: https://oss.redis.com/redisearch/Commands/#ftexplain
+        """  # noqa
         args, query_text = self._mk_query_args(query)
         return self.execute_command(EXPLAIN_CMD, *args)
 
@@ -390,7 +400,9 @@ class SearchCommands:
 
         An `AggregateResult` object is returned. You can access the rows from
         its `rows` property, which will always yield the rows of the result.
-        """
+
+        Fpr more information: https://oss.redis.com/redisearch/Commands/#ftaggregate
+        """  # noqa
         if isinstance(query, AggregateRequest):
             has_cursor = bool(query._cursor)
             cmd = [AGGREGATE_CMD, self.index_name] + query.build_args()
@@ -432,7 +444,9 @@ class SearchCommands:
                        suggestions (default: 1, max: 4).
         **include**: specifies an inclusion custom dictionary.
         **exclude**: specifies an exclusion custom dictionary.
-        """
+
+        For more information: https://oss.redis.com/redisearch/Commands/#ftspellcheck
+        """  # noqa
         cmd = [SPELLCHECK_CMD, self.index_name, query]
         if distance:
             cmd.extend(["DISTANCE", distance])
@@ -489,7 +503,9 @@ class SearchCommands:
 
         - **name**: Dictionary name.
         - **terms**: List of items for adding to the dictionary.
-        """
+
+        For more information: https://oss.redis.com/redisearch/Commands/#ftdictadd
+        """  # noqa
         cmd = [DICT_ADD_CMD, name]
         cmd.extend(terms)
         return self.execute_command(*cmd)
@@ -501,7 +517,9 @@ class SearchCommands:
 
         - **name**: Dictionary name.
         - **terms**: List of items for removing from the dictionary.
-        """
+
+        For more information: https://oss.redis.com/redisearch/Commands/#ftdictdel
+        """  # noqa
         cmd = [DICT_DEL_CMD, name]
         cmd.extend(terms)
         return self.execute_command(*cmd)
@@ -512,7 +530,9 @@ class SearchCommands:
         ### Parameters
 
         - **name**: Dictionary name.
-        """
+
+        For more information: https://oss.redis.com/redisearch/Commands/#ftdictdump
+        """  # noqa
         cmd = [DICT_DUMP_CMD, name]
         return self.execute_command(*cmd)
 
@@ -523,7 +543,9 @@ class SearchCommands:
 
         - **option**: the name of the configuration option.
         - **value**: a value for the configuration option.
-        """
+
+        For more information: https://oss.redis.com/redisearch/Commands/#ftconfig
+        """  # noqa
         cmd = [CONFIG_CMD, "SET", option, value]
         raw = self.execute_command(*cmd)
         return raw == "OK"
@@ -534,7 +556,9 @@ class SearchCommands:
         ### Parameters
 
         - **option**: the name of the configuration option.
-        """
+
+        For more information: https://oss.redis.com/redisearch/Commands/#ftconfig
+        """  # noqa
         cmd = [CONFIG_CMD, "GET", option]
         res = {}
         raw = self.execute_command(*cmd)
@@ -550,7 +574,9 @@ class SearchCommands:
         ### Parameters
 
         - **tagfield**: Tag field name
-        """
+
+        For more information: https://oss.redis.com/redisearch/Commands/#fttagvals
+        """  # noqa
 
         return self.execute_command(TAGVALS_CMD, self.index_name, tagfield)
 
@@ -561,7 +587,9 @@ class SearchCommands:
         ### Parameters
 
         - **alias**: Name of the alias to create
-        """
+
+        For more information: https://oss.redis.com/redisearch/Commands/#ftaliasadd
+        """  # noqa
 
         return self.execute_command(ALIAS_ADD_CMD, alias, self.index_name)
 
@@ -572,7 +600,9 @@ class SearchCommands:
         ### Parameters
 
         - **alias**: Name of the alias to create
-        """
+
+        For more information: https://oss.redis.com/redisearch/Commands/#ftaliasupdate
+        """  # noqa
 
         return self.execute_command(ALIAS_UPDATE_CMD, alias, self.index_name)
 
@@ -583,7 +613,9 @@ class SearchCommands:
         ### Parameters
 
         - **alias**: Name of the alias to delete
-        """
+
+        For more information: https://oss.redis.com/redisearch/Commands/#ftaliasdel
+        """  # noqa
         return self.execute_command(ALIAS_DEL_CMD, alias)
 
     def sugadd(self, key, *suggestions, **kwargs):
@@ -592,8 +624,9 @@ class SearchCommands:
         a score and string.
         If kwargs["increment"] is true and the terms are already in the
         server's dictionary, we increment their scores.
-        More information `here <https://oss.redis.com/redisearch/master/Commands/#ftsugadd>`_.  # noqa
-        """
+
+        For more information: https://oss.redis.com/redisearch/master/Commands/#ftsugadd
+        """  # noqa
         # If Transaction is not False it will MULTI/EXEC which will error
         pipe = self.pipeline(transaction=False)
         for sug in suggestions:
@@ -611,16 +644,18 @@ class SearchCommands:
     def suglen(self, key):
         """
         Return the number of entries in the AutoCompleter index.
-        More information `here <https://oss.redis.com/redisearch/master/Commands/#ftsuglen>`_.  # noqa
-        """
+
+        For more information https://oss.redis.com/redisearch/master/Commands/#ftsuglen
+        """  # noqa
         return self.execute_command(SUGLEN_COMMAND, key)
 
     def sugdel(self, key, string):
         """
         Delete a string from the AutoCompleter index.
         Returns 1 if the string was found and deleted, 0 otherwise.
-        More information `here <https://oss.redis.com/redisearch/master/Commands/#ftsugdel>`_.  # noqa
-        """
+
+        For more information: https://oss.redis.com/redisearch/master/Commands/#ftsugdel
+        """  # noqa
         return self.execute_command(SUGDEL_COMMAND, key, string)
 
     def sugget(
@@ -629,7 +664,6 @@ class SearchCommands:
     ):
         """
         Get a list of suggestions from the AutoCompleter, for a given prefix.
-        More information `here <https://oss.redis.com/redisearch/master/Commands/#ftsugget>`_.  # noqa
 
         Parameters:
 
@@ -656,7 +690,9 @@ class SearchCommands:
         list:
              A list of Suggestion objects. If with_scores was False, the
              score of all suggestions is 1.
-        """
+
+        For more information: https://oss.redis.com/redisearch/master/Commands/#ftsugget
+        """  # noqa
         args = [SUGGET_COMMAND, key, prefix, "MAX", num]
         if fuzzy:
             args.append(FUZZY)
@@ -688,7 +724,9 @@ class SearchCommands:
             If set to true, we do not scan and index.
         terms :
             The terms.
-        """
+            
+        For more information: https://oss.redis.com/redisearch/Commands/#ftsynupdate
+        """  # noqa
         cmd = [SYNUPDATE_CMD, self.index_name, groupid]
         if skipinitial:
             cmd.extend(["SKIPINITIALSCAN"])
@@ -701,6 +739,8 @@ class SearchCommands:
 
         The command is used to dump the synonyms data structure.
         Returns a list of synonym terms and their synonym group ids.
-        """
+
+        For more information: https://oss.redis.com/redisearch/Commands/#ftsyndump
+        """  # noqa
         raw = self.execute_command(SYNDUMP_CMD, self.index_name)
         return {raw[i]: raw[i + 1] for i in range(0, len(raw), 2)}
