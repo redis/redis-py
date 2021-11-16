@@ -38,4 +38,8 @@ cd ${TESTDIR}
 
 # install, run tests
 pip install ${PKG}
-pytest
+# Redis tests
+pytest -m 'not onlycluster and not redismod'
+# RedisCluster tests
+CLUSTER_URL="redis://localhost:16379/0"
+pytest -m 'not onlynoncluster and not redismod' --redis-url=${CLUSTER_URL}
