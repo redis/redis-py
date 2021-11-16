@@ -46,14 +46,15 @@ master_doc = "index"
 
 # General information about the project.
 project = "redis-py"
-copyright = "2021, Redis Inc."
+copyright = "2021, Redis Inc"
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
 # built documents.
 #
 # The short X.Y version.
-version = "4.0.9"
+version = "4.0"
+
 # The full version, including alpha/beta/rc tags.
 release = "4.0.0"
 
