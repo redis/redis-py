@@ -80,7 +80,7 @@ class CoreCommands:
     def acl_list(self):
         """
         Return a list of all ACLs on the server
-        
+
         For more information check https://redis.io/commands/acl-list
         """
         return self.execute_command('ACL LIST')
@@ -285,21 +285,21 @@ class CoreCommands:
 
     def acl_users(self):
         """Returns a list of all registered users on the server.
-        
+
         For more information check https://redis.io/commands/acl-users
         """
         return self.execute_command('ACL USERS')
 
     def acl_whoami(self):
         """Get the username for the current connection
-        
+
         For more information check https://redis.io/commands/acl-whoami
         """
         return self.execute_command('ACL WHOAMI')
 
     def bgrewriteaof(self):
         """Tell the Redis server to rewrite the AOF file from data in memory.
-        
+
         For more information check https://redis.io/commands/bgrewriteaof
         """
         return self.execute_command('BGREWRITEAOF')
@@ -318,7 +318,7 @@ class CoreCommands:
 
     def client_kill(self, address):
         """Disconnects the client at ``address`` (ip:port)
-        
+
         For more information check https://redis.io/commands/client-kill
         """
         return self.execute_command('CLIENT KILL', address)
@@ -401,7 +401,7 @@ class CoreCommands:
     def client_getname(self):
         """
         Returns the current connection name
-        
+
         For more information check https://redis.io/commands/client-getname
         """
         return self.execute_command('CLIENT GETNAME')
@@ -439,7 +439,7 @@ class CoreCommands:
     def client_id(self):
         """
         Returns the current connection id
-        
+
         For more information check https://redis.io/commands/client-id
         """
         return self.execute_command('CLIENT ID')
@@ -456,7 +456,7 @@ class CoreCommands:
     def client_setname(self, name):
         """
         Sets the current connection name
-        
+
         For more information check https://redis.io/commands/client-setname
         """
         return self.execute_command('CLIENT SETNAME', name)
@@ -505,7 +505,7 @@ class CoreCommands:
     def readonly(self):
         """
         Enables read queries for a connection to a Redis Cluster replica node.
-        
+
         For more information check https://redis.io/commands/readonly
         """
         return self.execute_command('READONLY')
@@ -513,14 +513,14 @@ class CoreCommands:
     def config_get(self, pattern="*"):
         """
         Return a dictionary of configuration based on the ``pattern``
-        
+
         For more information check https://redis.io/commands/config-get
         """
         return self.execute_command('CONFIG GET', pattern)
 
     def config_set(self, name, value):
         """Set config item ``name`` with ``value``
-        
+
         For more information check https://redis.io/commands/config-set
         """
         return self.execute_command('CONFIG SET', name, value)
@@ -528,7 +528,7 @@ class CoreCommands:
     def config_resetstat(self):
         """
         Reset runtime statistics
-        
+
         For more information check https://redis.io/commands/config-resetstat
         """
         return self.execute_command('CONFIG RESETSTAT')
@@ -544,7 +544,7 @@ class CoreCommands:
     def dbsize(self):
         """
         Returns the number of keys in the current database
-        
+
         For more information check https://redis.io/commands/dbsize
         """
         return self.execute_command('DBSIZE')
@@ -552,7 +552,7 @@ class CoreCommands:
     def debug_object(self, key):
         """
         Returns version specific meta information about a given key
-        
+
         For more information check https://redis.io/commands/debug-object
         """
         return self.execute_command('DEBUG OBJECT', key)
@@ -561,7 +561,7 @@ class CoreCommands:
         raise NotImplementedError(
             """
             DEBUG SEGFAULT is intentionally not implemented in the client.
-            
+
             For more information check https://redis.io/commands/debug-segfault
             """
         )
@@ -569,7 +569,7 @@ class CoreCommands:
     def echo(self, value):
         """
         Echo the string back from the server
-        
+
         For more information check https://redis.io/commands/echo
         """
         return self.execute_command('ECHO', value)
@@ -605,7 +605,7 @@ class CoreCommands:
     def swapdb(self, first, second):
         """
         Swap two databases
-        
+
         For more information check https://redis.io/commands/swapdb
         """
         return self.execute_command('SWAPDB', first, second)
@@ -694,7 +694,7 @@ class CoreCommands:
         raise NotImplementedError(
             """
             MEMORY DOCTOR is intentionally not implemented in the client.
-            
+
             For more information check https://redis.io/commands/memory-doctor
             """
         )
@@ -703,7 +703,7 @@ class CoreCommands:
         raise NotImplementedError(
             """
             MEMORY HELP is intentionally not implemented in the client.
-            
+
             For more information check https://redis.io/commands/memory-help
             """
         )
@@ -711,7 +711,7 @@ class CoreCommands:
     def memory_stats(self):
         """
         Return a dictionary of memory stats
-        
+
         For more information check https://redis.io/commands/memory-stats
         """
         return self.execute_command('MEMORY STATS')
@@ -719,8 +719,8 @@ class CoreCommands:
     def memory_malloc_stats(self):
         """
         Return an internal statistics report from the memory allocator.
-        
-        For more information check https://redis.io/commands/memory-malloc-stats
+
+        See: https://redis.io/commands/memory-malloc-stats
         """
         return self.execute_command('MEMORY MALLOC-STATS')
 
@@ -743,7 +743,7 @@ class CoreCommands:
     def memory_purge(self):
         """
         Attempts to purge dirty pages for reclamation by allocator
-        
+
         For more information check https://redis.io/commands/memory-purge
         """
         return self.execute_command('MEMORY PURGE')
@@ -751,7 +751,7 @@ class CoreCommands:
     def ping(self):
         """
         Ping the Redis server
-        
+
         For more information check https://redis.io/commands/ping
         """
         return self.execute_command('PING')
@@ -825,7 +825,7 @@ class CoreCommands:
     def slowlog_len(self):
         """
         Get the number of items in the slowlog
-        
+
         For more information check https://redis.io/commands/slowlog-len
         """
         return self.execute_command('SLOWLOG LEN')
@@ -833,7 +833,7 @@ class CoreCommands:
     def slowlog_reset(self):
         """
         Remove all items in the slowlog
-        
+
         For more information check https://redis.io/commands/slowlog-reset
         """
         return self.execute_command('SLOWLOG RESET')
@@ -986,7 +986,7 @@ class CoreCommands:
     def exists(self, *names):
         """
         Returns the number of ``names`` that exist
-        
+
         For more information check https://redis.io/commands/exists
         """
         return self.execute_command('EXISTS', *names)
@@ -1095,8 +1095,6 @@ class CoreCommands:
         """
         Return the value at key ``name``, raises a KeyError if the key
         doesn't exist.
-
-        For more information check 
         """
         value = self.get(name)
         if value is not None:
@@ -1106,7 +1104,7 @@ class CoreCommands:
     def getbit(self, name, offset):
         """
         Returns a boolean indicating the value of ``offset`` in ``name``
-        
+
         For more information check https://redis.io/commands/getbit
         """
         return self.execute_command('GETBIT', name, offset)
@@ -1164,7 +1162,7 @@ class CoreCommands:
     def keys(self, pattern='*'):
         """
         Returns a list of keys matching ``pattern``
-        
+
         For more information check https://redis.io/commands/keys
         """
         return self.execute_command('KEYS', pattern)
@@ -1233,7 +1231,7 @@ class CoreCommands:
     def move(self, name, db):
         """
         Moves the key ``name`` to a different Redis database ``db``
-        
+
         For more information check https://redis.io/commands/move
         """
         return self.execute_command('MOVE', name, db)
@@ -1241,7 +1239,7 @@ class CoreCommands:
     def persist(self, name):
         """
         Removes an expiration on ``name``
-        
+
         For more information check https://redis.io/commands/persist
         """
         return self.execute_command('PERSIST', name)
@@ -1286,7 +1284,7 @@ class CoreCommands:
     def pttl(self, name):
         """
         Returns the number of milliseconds until the key ``name`` will expire
-        
+
         For more information check https://redis.io/commands/pttl
         """
         return self.execute_command('PTTL', name)
@@ -1316,8 +1314,8 @@ class CoreCommands:
     def randomkey(self):
         """
         Returns the name of a random key
-        
-        For more information check 
+
+        For more information check https://redis.io/commands/randomkey
         """
         return self.execute_command('RANDOMKEY')
 
@@ -1325,14 +1323,14 @@ class CoreCommands:
         """
         Rename key ``src`` to ``dst``
 
-        For more information check https://redis.io/commands/randomkey
+        For more information check https://redis.io/commands/rename
         """
         return self.execute_command('RENAME', src, dst)
 
     def renamenx(self, src, dst):
         """
         Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist
-        
+
         For more information check https://redis.io/commands/renamenx
         """
         return self.execute_command('RENAMENX', src, dst)
@@ -1482,7 +1480,7 @@ class CoreCommands:
     def setnx(self, name, value):
         """
         Set the value of key ``name`` to ``value`` if key doesn't exist
-        
+
         For more information check https://redis.io/commands/setnx
         """
         return self.execute_command('SETNX', name, value)
@@ -1554,7 +1552,7 @@ class CoreCommands:
     def strlen(self, name):
         """
         Return the number of bytes stored in the value of ``name``
-        
+
         For more information check https://redis.io/commands/strlen
         """
         return self.execute_command('STRLEN', name)
@@ -1578,7 +1576,7 @@ class CoreCommands:
     def ttl(self, name):
         """
         Returns the number of seconds until the key ``name`` will expire
-        
+
         For more information check https://redis.io/commands/ttl
         """
         return self.execute_command('TTL', name)
@@ -1586,7 +1584,7 @@ class CoreCommands:
     def type(self, name):
         """
         Returns the type of key ``name``
-        
+
         For more information check https://redis.io/commands/type
         """
         return self.execute_command('TYPE', name)
@@ -1611,7 +1609,7 @@ class CoreCommands:
     def unlink(self, *names):
         """
         Unlink one or more keys specified by ``names``
-        
+
         For more information check https://redis.io/commands/unlink
         """
         return self.execute_command('UNLINK', *names)
@@ -1696,7 +1694,7 @@ class CoreCommands:
     def llen(self, name):
         """
         Return the length of the list ``name``
-        
+
         For more information check https://redis.io/commands/llen
         """
         return self.execute_command('LLEN', name)
@@ -1719,7 +1717,7 @@ class CoreCommands:
     def lpush(self, name, *values):
         """
         Push ``values`` onto the head of the list ``name``
-        
+
         For more information check https://redis.io/commands/lpush
         """
         return self.execute_command('LPUSH', name, *values)
@@ -1727,7 +1725,7 @@ class CoreCommands:
     def lpushx(self, name, *values):
         """
         Push ``value`` onto the head of the list ``name`` if ``name`` exists
-        
+
         For more information check https://redis.io/commands/lpushx
         """
         return self.execute_command('LPUSHX', name, *values)
@@ -1761,7 +1759,7 @@ class CoreCommands:
     def lset(self, name, index, value):
         """
         Set ``position`` of list ``name`` to ``value``
-        
+
         For more information check https://redis.io/commands/lset
         """
         return self.execute_command('LSET', name, index, value)
@@ -1805,7 +1803,7 @@ class CoreCommands:
     def rpush(self, name, *values):
         """
         Push ``values`` onto the tail of the list ``name``
-        
+
         For more information check https://redis.io/commands/rpush
         """
         return self.execute_command('RPUSH', name, *values)
@@ -1813,7 +1811,7 @@ class CoreCommands:
     def rpushx(self, name, value):
         """
         Push ``value`` onto the tail of the list ``name`` if ``name`` exists
-        
+
         For more information check https://redis.io/commands/rpushx
         """
         return self.execute_command('RPUSHX', name, value)
@@ -2076,7 +2074,7 @@ class CoreCommands:
     def sadd(self, name, *values):
         """
         Add ``value(s)`` to set ``name``
-        
+
         For more information check https://redis.io/commands/sadd
         """
         return self.execute_command('SADD', name, *values)
@@ -2084,7 +2082,7 @@ class CoreCommands:
     def scard(self, name):
         """
         Return the number of elements in set ``name``
-        
+
         For more information check https://redis.io/commands/scard
         """
         return self.execute_command('SCARD', name)
@@ -2092,7 +2090,7 @@ class CoreCommands:
     def sdiff(self, keys, *args):
         """
         Return the difference of sets specified by ``keys``
-        
+
         For more information check https://redis.io/commands/sdiff
         """
         args = list_or_args(keys, args)
@@ -2111,7 +2109,7 @@ class CoreCommands:
     def sinter(self, keys, *args):
         """
         Return the intersection of sets specified by ``keys``
-        
+
         For more information check https://redis.io/commands/sinter
         """
         args = list_or_args(keys, args)
@@ -2138,7 +2136,7 @@ class CoreCommands:
     def smembers(self, name):
         """
         Return all members of the set ``name``
-        
+
         For more information check https://redis.io/commands/smembers
         """
         return self.execute_command('SMEMBERS', name)
@@ -2156,7 +2154,7 @@ class CoreCommands:
     def smove(self, src, dst, value):
         """
         Move ``value`` from set ``src`` to set ``dst`` atomically
-        
+
         For more information check https://redis.io/commands/smove
         """
         return self.execute_command('SMOVE', src, dst, value)
@@ -2164,7 +2162,7 @@ class CoreCommands:
     def spop(self, name, count=None):
         """
         Remove and return a random member of set ``name``
-        
+
         For more information check https://redis.io/commands/spop
         """
         args = (count is not None) and [count] or []
@@ -2428,7 +2426,7 @@ class CoreCommands:
         groupname: name of the consumer group.
         consumername: name of consumer to create.
 
-        For more information check https://redis.io/commands/xgroup-createconsumer
+        See: https://redis.io/commands/xgroup-createconsumer
         """
         return self.execute_command('XGROUP CREATECONSUMER', name, groupname,
                                     consumername)
@@ -2756,7 +2754,7 @@ class CoreCommands:
     def zcard(self, name):
         """
         Return the number of elements in the sorted set ``name``
-        
+
         For more information check https://redis.io/commands/zcard
         """
         return self.execute_command('ZCARD', name)
@@ -2795,7 +2793,7 @@ class CoreCommands:
     def zincrby(self, name, amount, value):
         """
         Increment the score of ``value`` in sorted set ``name`` by ``amount``
-        
+
         For more information check https://redis.io/commands/zincrby
         """
         return self.execute_command('ZINCRBY', name, amount, value)
@@ -3160,7 +3158,7 @@ class CoreCommands:
     def zrem(self, name, *values):
         """
         Remove member ``values`` from sorted set ``name``
-        
+
         For more information check https://redis.io/commands/zrem
         """
         return self.execute_command('ZREM', name, *values)
@@ -3208,7 +3206,7 @@ class CoreCommands:
     def zscore(self, name, value):
         """
         Return the score of element ``value`` in sorted set ``name``
-        
+
         For more information check https://redis.io/commands/zscore
         """
         return self.execute_command('ZSCORE', name, value)
@@ -3279,7 +3277,7 @@ class CoreCommands:
     def pfadd(self, name, *values):
         """
         Adds the specified elements to the specified HyperLogLog.
-        
+
         For more information check https://redis.io/commands/pfadd
         """
         return self.execute_command('PFADD', name, *values)
@@ -3296,7 +3294,7 @@ class CoreCommands:
     def pfmerge(self, dest, *sources):
         """
         Merge N different HyperLogLogs into a single one.
-        
+
         For more information check https://redis.io/commands/pfmerge
         """
         return self.execute_command('PFMERGE', dest, *sources)
@@ -3305,7 +3303,7 @@ class CoreCommands:
     def hdel(self, name, *keys):
         """
         Delete ``keys`` from hash ``name``
-        
+
         For more information check https://redis.io/commands/hdel
         """
         return self.execute_command('HDEL', name, *keys)
@@ -3313,7 +3311,7 @@ class CoreCommands:
     def hexists(self, name, key):
         """
         Returns a boolean indicating if ``key`` exists within hash ``name``
-        
+
         For more information check https://redis.io/commands/hexists
         """
         return self.execute_command('HEXISTS', name, key)
@@ -3321,7 +3319,7 @@ class CoreCommands:
     def hget(self, name, key):
         """
         Return the value of ``key`` within the hash ``name``
-        
+
         For more information check https://redis.io/commands/hget
         """
         return self.execute_command('HGET', name, key)
@@ -3329,7 +3327,7 @@ class CoreCommands:
     def hgetall(self, name):
         """
         Return a Python dict of the hash's name/value pairs
-        
+
         For more information check https://redis.io/commands/hgetall
         """
         return self.execute_command('HGETALL', name)
@@ -3337,7 +3335,7 @@ class CoreCommands:
     def hincrby(self, name, key, amount=1):
         """
         Increment the value of ``key`` in hash ``name`` by ``amount``
-        
+
         For more information check https://redis.io/commands/hincrby
         """
         return self.execute_command('HINCRBY', name, key, amount)
@@ -3353,7 +3351,7 @@ class CoreCommands:
     def hkeys(self, name):
         """
         Return the list of keys within hash ``name``
-        
+
         For more information check https://redis.io/commands/hkeys
         """
         return self.execute_command('HKEYS', name)
@@ -3361,7 +3359,7 @@ class CoreCommands:
     def hlen(self, name):
         """
         Return the number of elements in hash ``name``
-        
+
         For more information check https://redis.io/commands/hlen
         """
         return self.execute_command('HLEN', name)
@@ -3418,7 +3416,7 @@ class CoreCommands:
     def hmget(self, name, keys, *args):
         """
         Returns a list of values ordered identically to ``keys``
-        
+
         For more information check https://redis.io/commands/hmget
         """
         args = list_or_args(keys, args)
@@ -3427,7 +3425,7 @@ class CoreCommands:
     def hvals(self, name):
         """
         Return the list of values within hash ``name``
-        
+
         For more information check https://redis.io/commands/hvals
         """
         return self.execute_command('HVALS', name)
@@ -3552,7 +3550,7 @@ class CoreCommands:
     def script_kill(self):
         """
         Kill the currently executing Lua script
-        
+
         For more information check https://redis.io/commands/script-kill
         """
         return self.execute_command('SCRIPT KILL')
@@ -3560,7 +3558,7 @@ class CoreCommands:
     def script_load(self, script):
         """
         Load a Lua ``script`` into the script cache. Returns the SHA.
-        
+
         For more information check https://redis.io/commands/script-load
         """
         return self.execute_command('SCRIPT LOAD', script)
