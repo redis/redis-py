@@ -890,12 +890,6 @@ class Redis(RedisModuleCommands, CoreCommands, object):
         self.response_callbacks = CaseInsensitiveDict(
             self.__class__.RESPONSE_CALLBACKS)
 
-        # preload our class with the available redis commands
-        try:
-            self.__redis_commands__()
-        except RedisError:
-            pass
-
     def __repr__(self):
         return "%s<%s>" % (type(self).__name__, repr(self.connection_pool))
 
@@ -926,18 +920,6 @@ class Redis(RedisModuleCommands, CoreCommands, object):
         tests/test_connection.py::test_loading_external_modules
         """
         setattr(self, funcname, func)
-
-    def __redis_commands__(self):
-        """Store the list of available commands, for our redis instance."""
-        cmds = getattr(self, '__commands__', None)
-        if cmds is not None:
-            return cmds
-        try:
-            cmds = [c[0].upper().decode() for c in self.command()]
-        except AttributeError:  # if encoded
-            cmds = [c[0].upper() for c in self.command()]
-        self.__commands__ = cmds
-        return cmds
 
     def pipeline(self, transaction=True, shard_hint=None):
         """
