@@ -436,7 +436,9 @@ class RedisCluster(ClusterCommands, object):
                     "A ``db`` querystring option can only be 0 in cluster mode"
                 )
             kwargs.update(url_options)
-            startup_nodes.append(ClusterNode(kwargs['host'], kwargs['port']))
+            host = kwargs.get('host')
+            port = kwargs.get('port', port)
+            startup_nodes.append(ClusterNode(host, port))
         elif host is not None and port is not None:
             startup_nodes.append(ClusterNode(host, port))
         elif len(startup_nodes) == 0:
