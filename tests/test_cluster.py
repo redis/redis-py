@@ -361,8 +361,7 @@ class TestRedisClusterObj:
                                 server_type=PRIMARY)
         node_7007 = ClusterNode(host=default_host, port=7007,
                                 server_type=PRIMARY)
-        with patch.multiple(Redis, parse_response=DEFAULT,
-                            __redis_commands__=DEFAULT) as r_mocks:
+        with patch.object(Redis, 'parse_response') as parse_response:
             with patch.object(NodesManager, 'initialize', autospec=True) as \
                     initialize:
                 with patch.multiple(Connection,
@@ -373,13 +372,13 @@ class TestRedisClusterObj:
                     def parse_response_mock(connection, command_name,
                                             **options):
                         if connection.port == 7006:
-                            r_mocks['parse_response'].failed_calls += 1
+                            parse_response.failed_calls += 1
                             raise ClusterDownError(
                                 'CLUSTERDOWN The cluster is '
                                 'down. Use CLUSTER INFO for '
                                 'more information')
                         elif connection.port == 7007:
-                            r_mocks['parse_response'].successful_calls += 1
+                            parse_response.successful_calls += 1
 
                     def initialize_mock(self):
                         # start with all slots mapped to 7006
@@ -404,10 +403,9 @@ class TestRedisClusterObj:
                         # Change initialize side effect for the second call
                         initialize.side_effect = map_7007
 
-                    r_mocks['parse_response'].side_effect = parse_response_mock
-                    r_mocks['parse_response'].successful_calls = 0
-                    r_mocks['parse_response'].failed_calls = 0
-                    r_mocks['__redis_commands__'].return_value = {'get': []}
+                    parse_response.side_effect = parse_response_mock
+                    parse_response.successful_calls = 0
+                    parse_response.failed_calls = 0
                     initialize.side_effect = initialize_mock
                     mocks['can_read'].return_value = False
                     mocks['send_command'].return_value = "MOCK_OK"
@@ -439,8 +437,8 @@ class TestRedisClusterObj:
                         assert rc.get_node(node_name=node_7007.name) is not \
                                None
                         assert rc.get_node(node_name=node_7006.name) is None
-                        assert r_mocks['parse_response'].failed_calls == 1
-                        assert r_mocks['parse_response'].successful_calls == 1
+                        assert parse_response.failed_calls == 1
+                        assert parse_response.successful_calls == 1
 
     def test_reading_from_replicas_in_round_robin(self):
         with patch.multiple(Connection, send_command=DEFAULT,

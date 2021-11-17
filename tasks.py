@@ -49,7 +49,7 @@ def redis_tests(c):
     """Run all Redis tests against the current python,
     with and without hiredis."""
     print("Starting Redis tests")
-    run("tox -e redis-'{plain,hiredis}'")
+    run("tox -e redis-'{hiredis}'")
 
 
 @task
