@@ -1,7 +1,7 @@
 ignore:
   - "benchmarks/**"
   - "tasks.py"
-  - "test_*.py"
+  - "tests/test_*.py"
 
 codecov:
   require_ci_to_pass: yes
