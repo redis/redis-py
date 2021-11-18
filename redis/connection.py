@@ -9,7 +9,6 @@ import io
 import os
 import socket
 import threading
-import warnings
 import weakref
 
 from redis.exceptions import (
