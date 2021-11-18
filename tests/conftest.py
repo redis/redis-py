@@ -31,7 +31,8 @@ def pytest_addoption(parser):
 def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
     info = client.info()
-    if 'dping' in client.__commands__:
+    cmds = [c[0].upper().decode() for c in client.command()]
+    if 'dping' in cmds:
         info["enterprise"] = True
     else:
         info["enterprise"] = False
