@@ -7,6 +7,7 @@ from .query import Query
 from ._util import to_string
 from .aggregation import AggregateRequest, AggregateResult, Cursor
 from .suggestion import SuggestionParser
+from ..helpers import parse_to_dict
 
 NUMERIC = "NUMERIC"
 
@@ -20,6 +21,7 @@ EXPLAIN_CMD = "FT.EXPLAIN"
 EXPLAINCLI_CMD = "FT.EXPLAINCLI"
 DEL_CMD = "FT.DEL"
 AGGREGATE_CMD = "FT.AGGREGATE"
+PROFILE_CMD = "FT.PROFILE"
 CURSOR_CMD = "FT.CURSOR"
 SPELLCHECK_CMD = "FT.SPELLCHECK"
 DICT_ADD_CMD = "FT.DICTADD"
@@ -382,11 +384,11 @@ class SearchCommands:
 
     def aggregate(self, query):
         """
-        Issue an aggregation query
+        Issue an aggregation query.
 
         ### Parameters
 
-        **query**: This can be either an `AggeregateRequest`, or a `Cursor`
+        **query**: This can be either an `AggregateRequest`, or a `Cursor`
 
         An `AggregateResult` object is returned. You can access the rows from
         its `rows` property, which will always yield the rows of the result.
@@ -401,6 +403,10 @@ class SearchCommands:
             raise ValueError("Bad query", query)
 
         raw = self.execute_command(*cmd)
+        return self._get_AggregateResult(raw, query, has_cursor)
+
+    def _get_AggregateResult(self, raw, query, has_cursor):
+        # has_cursor = bool(query._cursor)
         if has_cursor:
             if isinstance(query, Cursor):
                 query.cid = raw[1]
@@ -418,8 +424,51 @@ class SearchCommands:
             schema = None
             rows = raw[1:]
 
-        res = AggregateResult(rows, cursor, schema)
-        return res
+        return AggregateResult(rows, cursor, schema)
+
+    def profile(self, query, limited=False):
+        """
+        Performs a search or aggregate command and collects performance
+        information.
+
+        ### Parameters
+
+        **query**: This can be either an `AggregateRequest`, `Query` or
+        string.
+        **limited**: If set to True, removes details of reader iterator.
+
+        """
+        st = time.time()
+        cmd = [PROFILE_CMD, self.index_name, ""]
+        if limited:
+            cmd.append("LIMITED")
+        cmd.append('QUERY')
+
+        if isinstance(query, AggregateRequest):
+            cmd[2] = "AGGREGATE"
+            cmd += query.build_args()
+        elif isinstance(query, Query):
+            cmd[2] = "SEARCH"
+            cmd += query.get_args()
+        elif isinstance(query, str):
+            cmd[2] = "SEARCH"
+            cmd.append(query)
+        else:
+            raise ValueError("Must provide AggregateRequest object, "
+                             "Query object or str.")
+
+        res = self.execute_command(*cmd)
+
+        if isinstance(query, AggregateRequest):
+            result = self._get_AggregateResult(res[0], query, query._cursor)
+        else:
+            result = Result(res[0],
+                            not query._no_content,
+                            duration=(time.time() - st) * 1000.0,
+                            has_payload=query._with_payloads,
+                            with_scores=query._with_scores,)
+
+        return result, parse_to_dict(res[1])
 
     def spellcheck(self, query, distance=None, include=None, exclude=None):
         """

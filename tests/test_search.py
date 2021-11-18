@@ -1313,3 +1313,28 @@ def test_json_with_jsonpath(client):
     assert res.docs[0].id == "doc:1"
     with pytest.raises(Exception):
         res.docs[0].name_unsupported
+
+
+@pytest.mark.redismod
+def test_profile(client):
+    client.ft().create_index((TextField('t'),))
+    client.ft().client.hset('1', 't', 'hello')
+    client.ft().client.hset('2', 't', 'world')
+
+    # check using Query
+    q = Query('hello|world').no_content()
+    res, det = client.ft().profile(q)
+    assert det['Iterators profile']['Counter'] == 2.0
+    assert len(det['Iterators profile']['Child iterators']) == 2
+    assert det['Iterators profile']['Type'] == 'UNION'
+    assert det['Parsing time'] < 0.3
+    assert len(res.docs) == 2  # check also the search result
+
+    # check using AggregateRequest
+    req = aggregations.AggregateRequest("*").load("t")\
+        .apply(prefix="startswith(@t, 'hel')")
+    res, det = client.ft().profile(req)
+    assert det['Iterators profile']['Counter'] == 2.0
+    assert det['Iterators profile']['Type'] == 'WILDCARD'
+    assert det['Parsing time'] < 0.3
+    assert len(res.rows) == 2  # check also the search result
