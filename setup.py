@@ -14,6 +14,7 @@ setup(
         include=[
             "redis",
             "redis.commands",
+            "redis.commands.bf",
             "redis.commands.json",
             "redis.commands.search",
             "redis.commands.timeseries",
