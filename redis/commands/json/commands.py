@@ -154,6 +154,9 @@ class JSONCommands:
         ``xx`` if set to True, set ``value`` only if it exists.
         ``decode_keys`` If set to True, the keys of ``obj`` will be decoded
         with utf-8.
+
+        For the purpose of using this within a pipeline, this command is also
+        aliased to jsonset.
         """
         if decode_keys:
             obj = decode_dict_keys(obj)
@@ -212,3 +215,18 @@ class JSONCommands:
             pieces.append(key)
             pieces.append(str(path))
         return self.execute_command("JSON.DEBUG", *pieces)
+
+    @deprecated(version='4.0.0',
+                reason='redisjson-py supported this, call get directly.')
+    def jsonget(self, *args, **kwargs):
+        return self.get(*args, **kwargs)
+
+    @deprecated(version='4.0.0',
+                reason='redisjson-py supported this, call get directly.')
+    def jsonmget(self, *args, **kwargs):
+        return self.mget(*args, **kwargs)
+
+    @deprecated(version='4.0.0',
+                reason='redisjson-py supported this, call get directly.')
+    def jsonset(self, *args, **kwargs):
+        return self.set(*args, **kwargs)

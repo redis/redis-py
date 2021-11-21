@@ -2,7 +2,7 @@ from unittest import mock
 import types
 import pytest
 
-from redis.exceptions import InvalidResponse, ModuleError
+from redis.exceptions import InvalidResponse
 from redis.utils import HIREDIS_AVAILABLE
 from .conftest import skip_if_server_version_lt
 
@@ -18,29 +18,21 @@ def test_invalid_response(r):
 
 
 @skip_if_server_version_lt('4.0.0')
-def test_loaded_modules(r, modclient):
-    assert r.loaded_modules == []
-    assert 'rejson' in modclient.loaded_modules.keys()
-
-
-@skip_if_server_version_lt('4.0.0')
-def test_loading_external_modules(r, modclient):
+@pytest.mark.redismod
+def test_loading_external_modules(modclient):
     def inner():
         pass
 
-    with pytest.raises(ModuleError):
-        r.load_external_module('rejson', 'myfuncname', inner)
-
-    modclient.load_external_module('rejson', 'myfuncname', inner)
+    modclient.load_external_module('myfuncname', inner)
     assert getattr(modclient, 'myfuncname') == inner
     assert isinstance(getattr(modclient, 'myfuncname'), types.FunctionType)
 
     # and call it
     from redis.commands import RedisModuleCommands
     j = RedisModuleCommands.json
-    modclient.load_external_module('rejson', 'sometestfuncname', j)
+    modclient.load_external_module('sometestfuncname', j)
 
-    d = {'hello': 'world!'}
-    mod = j(modclient)
-    mod.set("fookey", ".", d)
-    assert mod.get('fookey') == d
+    # d = {'hello': 'world!'}
+    # mod = j(modclient)
+    # mod.set("fookey", ".", d)
+    # assert mod.get('fookey') == d

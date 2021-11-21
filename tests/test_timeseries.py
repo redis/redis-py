@@ -11,7 +11,7 @@ def client(modclient):
 
 
 @pytest.mark.redismod
-def testCreate(client):
+def test_create(client):
     assert client.ts().create(1)
     assert client.ts().create(2, retention_msecs=5)
     assert client.ts().create(3, labels={"Redis": "Labs"})
@@ -28,7 +28,7 @@ def testCreate(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
-def testCreateDuplicatePolicy(client):
+def test_create_duplicate_policy(client):
     # Test for duplicate policy
     for duplicate_policy in ["block", "last", "first", "min", "max"]:
         ts_name = "time-serie-ooo-{0}".format(duplicate_policy)
@@ -38,7 +38,7 @@ def testCreateDuplicatePolicy(client):
 
 
 @pytest.mark.redismod
-def testAlter(client):
+def test_alter(client):
     assert client.ts().create(1)
     assert 0 == client.ts().info(1).retention_msecs
     assert client.ts().alter(1, retention_msecs=10)
@@ -49,13 +49,9 @@ def testAlter(client):
     assert 10 == client.ts().info(1).retention_msecs
 
 
-#     pipe = client.ts().pipeline()
-# assert pipe.create(2)
-
-
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
-def testAlterDiplicatePolicy(client):
+def test_alter_diplicate_policy(client):
     assert client.ts().create(1)
     info = client.ts().info(1)
     assert info.duplicate_policy is None
@@ -65,7 +61,7 @@ def testAlterDiplicatePolicy(client):
 
 
 @pytest.mark.redismod
-def testAdd(client):
+def test_add(client):
     assert 1 == client.ts().add(1, 1, 1)
     assert 2 == client.ts().add(2, 2, 3, retention_msecs=10)
     assert 3 == client.ts().add(3, 3, 2, labels={"Redis": "Labs"})
@@ -87,7 +83,7 @@ def testAdd(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
-def testAddDuplicatePolicy(client):
+def test_add_duplicate_policy(client):
 
     # Test for duplicate policy BLOCK
     assert 1 == client.ts().add("time-serie-add-ooo-block", 1, 5.0)
@@ -129,14 +125,14 @@ def testAddDuplicatePolicy(client):
 
 
 @pytest.mark.redismod
-def testMAdd(client):
+def test_madd(client):
     client.ts().create("a")
     assert [1, 2, 3] == \
         client.ts().madd([("a", 1, 5), ("a", 2, 10), ("a", 3, 15)])
 
 
 @pytest.mark.redismod
-def testIncrbyDecrby(client):
+def test_incrby_decrby(client):
     for _ in range(100):
         assert client.ts().incrby(1, 1)
         sleep(0.001)
@@ -165,7 +161,7 @@ def testIncrbyDecrby(client):
 
 
 @pytest.mark.redismod
-def testCreateAndDeleteRule(client):
+def test_create_and_delete_rule(client):
     # test rule creation
     time = 100
     client.ts().create(1)
@@ -187,7 +183,7 @@ def testCreateAndDeleteRule(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
-def testDelRange(client):
+def test_del_range(client):
     try:
         client.ts().delete("test", 0, 100)
     except Exception as e:
@@ -201,7 +197,7 @@ def testDelRange(client):
 
 
 @pytest.mark.redismod
-def testRange(client):
+def test_range(client):
     for i in range(100):
         client.ts().add(1, i, i % 7)
     assert 100 == len(client.ts().range(1, 0, 200))
@@ -223,7 +219,7 @@ def testRange(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
-def testRangeAdvanced(client):
+def test_range_advanced(client):
     for i in range(100):
         client.ts().add(1, i, i % 7)
         client.ts().add(1, i + 200, i % 7)
@@ -248,7 +244,7 @@ def testRangeAdvanced(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
-def testRevRange(client):
+def test_rev_range(client):
     for i in range(100):
         client.ts().add(1, i, i % 7)
     assert 100 == len(client.ts().range(1, 0, 200))
@@ -322,7 +318,7 @@ def testMultiRange(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
-def testMultiRangeAdvanced(client):
+def test_multi_range_advanced(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
     client.ts().create(
         2,
@@ -403,7 +399,7 @@ def testMultiRangeAdvanced(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
-def testMultiReverseRange(client):
+def test_multi_reverse_range(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
     client.ts().create(
         2,
@@ -500,7 +496,7 @@ def testMultiReverseRange(client):
 
 
 @pytest.mark.redismod
-def testGet(client):
+def test_get(client):
     name = "test"
     client.ts().create(name)
     assert client.ts().get(name) is None
@@ -511,7 +507,7 @@ def testGet(client):
 
 
 @pytest.mark.redismod
-def testMGet(client):
+def test_mget(client):
     client.ts().create(1, labels={"Test": "This"})
     client.ts().create(2, labels={"Test": "This", "Taste": "That"})
     act_res = client.ts().mget(["Test=This"])
@@ -532,7 +528,7 @@ def testMGet(client):
 
 
 @pytest.mark.redismod
-def testInfo(client):
+def test_info(client):
     client.ts().create(
         1,
         retention_msecs=5,
@@ -560,7 +556,7 @@ def testInfoDuplicatePolicy(client):
 
 
 @pytest.mark.redismod
-def testQueryIndex(client):
+def test_query_index(client):
     client.ts().create(1, labels={"Test": "This"})
     client.ts().create(2, labels={"Test": "This", "Taste": "That"})
     assert 2 == len(client.ts().queryindex(["Test=This"]))
@@ -568,24 +564,23 @@ def testQueryIndex(client):
     assert [2] == client.ts().queryindex(["Taste=That"])
 
 
-#
-# @pytest.mark.redismod
-# @pytest.mark.pipeline
-# def testPipeline(client):
-#     pipeline = client.ts().pipeline()
-#     pipeline.create("with_pipeline")
-#     for i in range(100):
-#         pipeline.add("with_pipeline", i, 1.1 * i)
-#     pipeline.execute()
+@pytest.mark.redismod
+@pytest.mark.pipeline
+def test_pipeline(client):
+    pipeline = client.ts().pipeline()
+    pipeline.create("with_pipeline")
+    for i in range(100):
+        pipeline.add("with_pipeline", i, 1.1 * i)
+    pipeline.execute()
 
-#     info = client.ts().info("with_pipeline")
-#     assert info.lastTimeStamp == 99
-#     assert info.total_samples == 100
-#     assert client.ts().get("with_pipeline")[1] == 99 * 1.1
+    info = client.ts().info("with_pipeline")
+    assert info.lastTimeStamp == 99
+    assert info.total_samples == 100
+    assert client.ts().get("with_pipeline")[1] == 99 * 1.1
 
 
 @pytest.mark.redismod
-def testUncompressed(client):
+def test_uncompressed(client):
     client.ts().create("compressed")
     client.ts().create("uncompressed", uncompressed=True)
     compressed_info = client.ts().info("compressed")
