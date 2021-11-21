@@ -782,7 +782,7 @@ class TestClusterRedisCommands:
         p = r.pubsub()
         p.subscribe('foo', 'bar', 'baz', 'quux')
         for i in range(4):
-            assert wait_for_message(p)['type'] == 'subscribe'
+            assert wait_for_message(p, timeout=0.5)['type'] == 'subscribe'
         expected = [b'bar', b'baz', b'foo', b'quux']
         assert all([channel in r.pubsub_channels(target_nodes='all')
                     for channel in expected])
@@ -792,14 +792,14 @@ class TestClusterRedisCommands:
         p1 = r.pubsub()
         p1.subscribe('foo', 'bar', 'baz')
         for i in range(3):
-            assert wait_for_message(p1)['type'] == 'subscribe'
+            assert wait_for_message(p1, timeout=0.5)['type'] == 'subscribe'
         p2 = r.pubsub()
         p2.subscribe('bar', 'baz')
         for i in range(2):
-            assert wait_for_message(p2)['type'] == 'subscribe'
+            assert wait_for_message(p2, timeout=0.5)['type'] == 'subscribe'
         p3 = r.pubsub()
         p3.subscribe('baz')
-        assert wait_for_message(p3)['type'] == 'subscribe'
+        assert wait_for_message(p3, timeout=0.5)['type'] == 'subscribe'
 
         channels = [(b'foo', 1), (b'bar', 2), (b'baz', 3)]
         assert r.pubsub_numsub('foo', 'bar', 'baz', target_nodes='all') \
