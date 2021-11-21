@@ -1,5 +1,7 @@
+black==21.11b1
 flake8>=3.9.2
 flynt~=0.69.0
+isort==5.10.1
 pytest==6.2.5
 pytest-timeout==2.0.1
 tox==3.24.4

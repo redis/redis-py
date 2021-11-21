@@ -1,12 +1,10 @@
-from json import JSONDecoder, JSONEncoder, JSONDecodeError
+from json import JSONDecodeError, JSONDecoder, JSONEncoder
 
-from .decoders import (
-    decode_list,
-    bulk_of_jsons,
-)
+import redis
+
 from ..helpers import nativestr
 from .commands import JSONCommands
-import redis
+from .decoders import bulk_of_jsons, decode_list
 
 
 class JSON(JSONCommands):

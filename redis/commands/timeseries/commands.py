@@ -1,6 +1,5 @@
 from redis.exceptions import DataError
 
-
 ADD_CMD = "TS.ADD"
 ALTER_CMD = "TS.ALTER"
 CREATERULE_CMD = "TS.CREATERULE"
@@ -276,13 +275,7 @@ class TimeSeriesCommands:
         """  # noqa
         return self.execute_command(DEL_CMD, key, from_time, to_time)
 
-    def createrule(
-        self,
-        source_key,
-        dest_key,
-        aggregation_type,
-        bucket_size_msec
-    ):
+    def createrule(self, source_key, dest_key, aggregation_type, bucket_size_msec):
         """
         Create a compaction rule from values added to `source_key` into `dest_key`.
         Aggregating for `bucket_size_msec` where an `aggregation_type` can be
@@ -321,11 +314,7 @@ class TimeSeriesCommands:
         """Create TS.RANGE and TS.REVRANGE arguments."""
         params = [key, from_time, to_time]
         self._appendFilerByTs(params, filter_by_ts)
-        self._appendFilerByValue(
-            params,
-            filter_by_min_value,
-            filter_by_max_value
-        )
+        self._appendFilerByValue(params, filter_by_min_value, filter_by_max_value)
         self._appendCount(params, count)
         self._appendAlign(params, align)
         self._appendAggregation(params, aggregation_type, bucket_size_msec)
@@ -471,11 +460,7 @@ class TimeSeriesCommands:
         """Create TS.MRANGE and TS.MREVRANGE arguments."""
         params = [from_time, to_time]
         self._appendFilerByTs(params, filter_by_ts)
-        self._appendFilerByValue(
-            params,
-            filter_by_min_value,
-            filter_by_max_value
-        )
+        self._appendFilerByValue(params, filter_by_min_value, filter_by_max_value)
         self._appendCount(params, count)
         self._appendAlign(params, align)
         self._appendAggregation(params, aggregation_type, bucket_size_msec)
@@ -654,7 +639,7 @@ class TimeSeriesCommands:
         return self.execute_command(MREVRANGE_CMD, *params)
 
     def get(self, key):
-        """ # noqa
+        """# noqa
         Get the last sample of `key`.
 
         For more information: https://oss.redis.com/redistimeseries/master/commands/#tsget
@@ -662,7 +647,7 @@ class TimeSeriesCommands:
         return self.execute_command(GET_CMD, key)
 
     def mget(self, filters, with_labels=False):
-        """ # noqa
+        """# noqa
         Get the last samples matching the specific `filter`.
 
         For more information: https://oss.redis.com/redistimeseries/master/commands/#tsmget
@@ -674,7 +659,7 @@ class TimeSeriesCommands:
         return self.execute_command(MGET_CMD, *params)
 
     def info(self, key):
-        """  # noqa
+        """# noqa
         Get information of `key`.
 
         For more information: https://oss.redis.com/redistimeseries/master/commands/#tsinfo
@@ -682,7 +667,7 @@ class TimeSeriesCommands:
         return self.execute_command(INFO_CMD, key)
 
     def queryindex(self, filters):
-        """  # noqa
+        """# noqa
         Get all the keys matching the `filter` list.
 
         For more information: https://oss.redis.com/redistimeseries/master/commands/#tsqueryindex

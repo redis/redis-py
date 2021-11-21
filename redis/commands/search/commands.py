@@ -1,11 +1,11 @@
 import itertools
 import time
 
-from .document import Document
-from .result import Result
-from .query import Query
 from ._util import to_string
 from .aggregation import AggregateRequest, AggregateResult, Cursor
+from .document import Document
+from .query import Query
+from .result import Result
 from .suggestion import SuggestionParser
 from ..helpers import parse_to_dict
 
@@ -148,7 +148,7 @@ class SearchCommands:
         partial=False,
         language=None,
         no_create=False,
-        **fields
+        **fields,
     ):
         """
         Internal add_document used for both batch and single doc indexing
@@ -211,7 +211,7 @@ class SearchCommands:
         partial=False,
         language=None,
         no_create=False,
-        **fields
+        **fields,
     ):
         """
         Add a single document to the index.
@@ -253,7 +253,7 @@ class SearchCommands:
             partial=partial,
             language=language,
             no_create=no_create,
-            **fields
+            **fields,
         )
 
     def add_document_hash(
@@ -535,8 +535,7 @@ class SearchCommands:
             #     ]
             # }
             corrections[_correction[1]] = [
-                {"score": _item[0], "suggestion": _item[1]}
-                for _item in _correction[2]
+                {"score": _item[0], "suggestion": _item[1]} for _item in _correction[2]
             ]
 
         return corrections
@@ -704,8 +703,7 @@ class SearchCommands:
         return self.execute_command(SUGDEL_COMMAND, key, string)
 
     def sugget(
-        self, key, prefix, fuzzy=False, num=10, with_scores=False,
-        with_payloads=False
+        self, key, prefix, fuzzy=False, num=10, with_scores=False, with_payloads=False
     ):
         """
         Get a list of suggestions from the AutoCompleter, for a given prefix.
