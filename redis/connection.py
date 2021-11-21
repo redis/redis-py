@@ -9,7 +9,6 @@ import io
 import os
 import socket
 import threading
-import warnings
 import weakref
 
 from redis.backoff import NoBackoff
@@ -68,9 +67,6 @@ if HIREDIS_AVAILABLE:
     # only use byte buffer if hiredis supports it
     if not HIREDIS_SUPPORTS_BYTE_BUFFER:
         HIREDIS_USE_BYTE_BUFFER = False
-else:
-    msg = "redis-py works best with hiredis. Please consider installing"
-    warnings.warn(msg)
 
 SYM_STAR = b'*'
 SYM_DOLLAR = b'$'
