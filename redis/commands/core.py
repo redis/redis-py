@@ -2184,7 +2184,7 @@ class CoreCommands:
     def srem(self, name, *values):
         """
         Remove ``values`` from set ``name``
-        
+
         For more information check https://redis.io/commands/srem
         """
         return self.execute_command('SREM', name, *values)
@@ -2192,7 +2192,7 @@ class CoreCommands:
     def sunion(self, keys, *args):
         """
         Return the union of sets specified by ``keys``
-        
+
         For more information check https://redis.io/commands/sunion
         """
         args = list_or_args(keys, args)
