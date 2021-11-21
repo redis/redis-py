@@ -450,12 +450,9 @@ class SearchCommands:
         elif isinstance(query, Query):
             cmd[2] = "SEARCH"
             cmd += query.get_args()
-        elif isinstance(query, str):
-            cmd[2] = "SEARCH"
-            cmd.append(query)
         else:
-            raise ValueError("Must provide AggregateRequest object, "
-                             "Query object or str.")
+            raise ValueError("Must provide AggregateRequest object or "
+                             "Query object.")
 
         res = self.execute_command(*cmd)
 

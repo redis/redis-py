@@ -37,6 +37,10 @@ def delist(x):
 def parse_to_list(response):
     """Optimistically parse the response to a list."""
     res = []
+
+    if response is None:
+        return res
+
     for item in response:
         try:
             res.append(int(item))
