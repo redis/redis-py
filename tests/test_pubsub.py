@@ -7,7 +7,11 @@ import pytest
 import redis
 from redis.exceptions import ConnectionError
 
-from .conftest import _get_client, skip_if_server_version_lt
+from .conftest import (
+    _get_client,
+    skip_if_redis_enterprise,
+    skip_if_server_version_lt
+)
 
 
 def wait_for_message(pubsub, timeout=0.1, ignore_subscribe_messages=False):
@@ -528,6 +532,7 @@ class TestPubSubPings:
 class TestPubSubConnectionKilled:
 
     @skip_if_server_version_lt('3.0.0')
+    @skip_if_redis_enterprise
     def test_connection_error_raised_when_connection_dies(self, r):
         p = r.pubsub()
         p.subscribe('foo')
@@ -575,7 +580,8 @@ class TestPubSubWorkerThread:
 class TestPubSubDeadlock:
     @pytest.mark.timeout(30, method='thread')
     def test_pubsub_deadlock(self, master_host):
-        pool = redis.ConnectionPool(host=master_host)
+        pool = redis.ConnectionPool(host=master_host[0],
+                                    port=master_host[1])
         r = redis.Redis(connection_pool=pool)
 
         for i in range(60):

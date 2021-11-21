@@ -1,4 +1,8 @@
-from .conftest import wait_for_command
+from .conftest import (
+    skip_if_redis_enterprise,
+    skip_ifnot_redis_enterprise,
+    wait_for_command
+)
 
 
 class TestMonitor:
@@ -9,11 +13,12 @@ class TestMonitor:
             assert response is None
 
     def test_response_values(self, r):
+        db = r.connection_pool.connection_kwargs.get('db', 0)
         with r.monitor() as m:
             r.ping()
             response = wait_for_command(r, m, 'PING')
             assert isinstance(response['time'], float)
-            assert response['db'] == 9
+            assert response['db'] == db
             assert response['client_type'] in ('tcp', 'unix')
             assert isinstance(response['client_address'], str)
             assert isinstance(response['client_port'], str)
@@ -39,6 +44,7 @@ class TestMonitor:
             response = wait_for_command(r, m, 'GET foo\\\\x92')
             assert response['command'] == 'GET foo\\\\x92'
 
+    @skip_if_redis_enterprise
     def test_lua_script(self, r):
         with r.monitor() as m:
             script = 'return redis.call("GET", "foo")'
@@ -48,3 +54,11 @@ class TestMonitor:
             assert response['client_type'] == 'lua'
             assert response['client_address'] == 'lua'
             assert response['client_port'] == ''
+
+    @skip_ifnot_redis_enterprise
+    def test_lua_script_in_enterprise(self, r):
+        with r.monitor() as m:
+            script = 'return redis.call("GET", "foo")'
+            assert r.eval(script, 0) is None
+            response = wait_for_command(r, m, 'GET foo')
+            assert response is None

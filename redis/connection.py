@@ -9,7 +9,6 @@ import io
 import os
 import socket
 import threading
-import warnings
 import weakref
 
 from redis.exceptions import (
@@ -63,18 +62,10 @@ if HIREDIS_AVAILABLE:
     HIREDIS_SUPPORTS_ENCODING_ERRORS = \
         hiredis_version >= LooseVersion('1.0.0')
 
-    if not HIREDIS_SUPPORTS_BYTE_BUFFER:
-        msg = ("redis-py works best with hiredis >= 0.1.4. You're running "
-               "hiredis %s. Please consider upgrading." % hiredis.__version__)
-        warnings.warn(msg)
-
     HIREDIS_USE_BYTE_BUFFER = True
     # only use byte buffer if hiredis supports it
     if not HIREDIS_SUPPORTS_BYTE_BUFFER:
         HIREDIS_USE_BYTE_BUFFER = False
-else:
-    msg = "redis-py works best with hiredis. Please consider installing"
-    warnings.warn(msg)
 
 SYM_STAR = b'*'
 SYM_DOLLAR = b'$'

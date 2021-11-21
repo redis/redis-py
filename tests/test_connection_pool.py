@@ -7,7 +7,11 @@ from unittest import mock
 
 from threading import Thread
 from redis.connection import ssl_available, to_bool
-from .conftest import skip_if_server_version_lt, _get_client
+from .conftest import (
+    skip_if_server_version_lt,
+    skip_if_redis_enterprise,
+    _get_client
+)
 from .test_pubsub import wait_for_message
 
 
@@ -44,14 +48,14 @@ class TestConnectionPool:
         assert connection.kwargs == connection_kwargs
 
     def test_multiple_connections(self, master_host):
-        connection_kwargs = {'host': master_host}
+        connection_kwargs = {'host': master_host[0], 'port': master_host[1]}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
         c1 = pool.get_connection('_')
         c2 = pool.get_connection('_')
         assert c1 != c2
 
     def test_max_connections(self, master_host):
-        connection_kwargs = {'host': master_host}
+        connection_kwargs = {'host': master_host[0], 'port': master_host[1]}
         pool = self.get_pool(max_connections=2,
                              connection_kwargs=connection_kwargs)
         pool.get_connection('_')
@@ -60,7 +64,7 @@ class TestConnectionPool:
             pool.get_connection('_')
 
     def test_reuse_previously_released_connection(self, master_host):
-        connection_kwargs = {'host': master_host}
+        connection_kwargs = {'host': master_host[0], 'port': master_host[1]}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
         c1 = pool.get_connection('_')
         pool.release(c1)
@@ -103,14 +107,15 @@ class TestBlockingConnectionPool:
         return pool
 
     def test_connection_creation(self, master_host):
-        connection_kwargs = {'foo': 'bar', 'biz': 'baz', 'host': master_host}
+        connection_kwargs = {'foo': 'bar', 'biz': 'baz',
+                             'host': master_host[0], 'port': master_host[1]}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
         connection = pool.get_connection('_')
         assert isinstance(connection, DummyConnection)
         assert connection.kwargs == connection_kwargs
 
     def test_multiple_connections(self, master_host):
-        connection_kwargs = {'host': master_host}
+        connection_kwargs = {'host': master_host[0], 'port': master_host[1]}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
         c1 = pool.get_connection('_')
         c2 = pool.get_connection('_')
@@ -118,7 +123,7 @@ class TestBlockingConnectionPool:
 
     def test_connection_pool_blocks_until_timeout(self, master_host):
         "When out of connections, block for timeout seconds, then raise"
-        connection_kwargs = {'host': master_host}
+        connection_kwargs = {'host': master_host[0], 'port': master_host[1]}
         pool = self.get_pool(max_connections=1, timeout=0.1,
                              connection_kwargs=connection_kwargs)
         pool.get_connection('_')
@@ -134,7 +139,7 @@ class TestBlockingConnectionPool:
         When out of connections, block until another connection is released
         to the pool
         """
-        connection_kwargs = {'host': master_host}
+        connection_kwargs = {'host': master_host[0], 'port': master_host[1]}
         pool = self.get_pool(max_connections=1, timeout=2,
                              connection_kwargs=connection_kwargs)
         c1 = pool.get_connection('_')
@@ -149,7 +154,7 @@ class TestBlockingConnectionPool:
         assert time.time() - start >= 0.1
 
     def test_reuse_previously_released_connection(self, master_host):
-        connection_kwargs = {'host': master_host}
+        connection_kwargs = {'host': master_host[0], 'port': master_host[1]}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
         c1 = pool.get_connection('_')
         pool.release(c1)
@@ -480,6 +485,7 @@ class TestConnection:
         assert not pool._available_connections[0]._sock
 
     @skip_if_server_version_lt('2.8.8')
+    @skip_if_redis_enterprise
     def test_busy_loading_disconnects_socket(self, r):
         """
         If Redis raises a LOADING error, the connection should be
@@ -490,6 +496,7 @@ class TestConnection:
         assert not r.connection._sock
 
     @skip_if_server_version_lt('2.8.8')
+    @skip_if_redis_enterprise
     def test_busy_loading_from_pipeline_immediate_command(self, r):
         """
         BusyLoadingErrors should raise from Pipelines that execute a
@@ -505,6 +512,7 @@ class TestConnection:
         assert not pool._available_connections[0]._sock
 
     @skip_if_server_version_lt('2.8.8')
+    @skip_if_redis_enterprise
     def test_busy_loading_from_pipeline(self, r):
         """
         BusyLoadingErrors should be raised from a pipeline execution
@@ -520,6 +528,7 @@ class TestConnection:
         assert not pool._available_connections[0]._sock
 
     @skip_if_server_version_lt('2.8.8')
+    @skip_if_redis_enterprise
     def test_read_only_error(self, r):
         "READONLY errors get turned in ReadOnlyError exceptions"
         with pytest.raises(redis.ReadOnlyError):
@@ -545,6 +554,7 @@ class TestConnection:
             'path=/path/to/socket,db=0',
         )
 
+    @skip_if_redis_enterprise
     def test_connect_no_auth_supplied_when_required(self, r):
         """
         AuthenticationError should be raised when the server requires a
@@ -554,6 +564,7 @@ class TestConnection:
             r.execute_command('DEBUG', 'ERROR',
                               'ERR Client sent AUTH, but no password is set')
 
+    @skip_if_redis_enterprise
     def test_connect_invalid_password_supplied(self, r):
         "AuthenticationError should be raised when sending the wrong password"
         with pytest.raises(redis.AuthenticationError):

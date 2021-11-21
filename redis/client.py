@@ -6,7 +6,8 @@ import re
 import threading
 import time
 import warnings
-from redis.commands import CoreCommands, RedisModuleCommands, list_or_args
+from redis.commands import (CoreCommands, RedisModuleCommands,
+                            SentinelCommands, list_or_args)
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
                               SSLConnection)
 from redis.lock import Lock
@@ -606,7 +607,7 @@ def parse_set_result(response, **options):
     return response and str_if_bytes(response) == 'OK'
 
 
-class Redis(RedisModuleCommands, CoreCommands, object):
+class Redis(RedisModuleCommands, CoreCommands, SentinelCommands, object):
     """
     Implementation of the Redis protocol.
 
@@ -703,7 +704,6 @@ class Redis(RedisModuleCommands, CoreCommands, object):
         'CLUSTER SET-CONFIG-EPOCH': bool_ok,
         'CLUSTER SETSLOT': bool_ok,
         'CLUSTER SLAVES': parse_cluster_nodes,
-        'COMMAND': int,
         'COMMAND COUNT': int,
         'CONFIG GET': parse_config_get,
         'CONFIG RESETSTAT': bool_ok,
@@ -898,12 +898,12 @@ class Redis(RedisModuleCommands, CoreCommands, object):
         "Set a custom Response Callback"
         self.response_callbacks[command] = callback
 
-    def load_external_module(self, modname, funcname, func):
+    def load_external_module(self, funcname, func,
+                             ):
         """
         This function can be used to add externally defined redis modules,
         and their namespaces to the redis client.
-        modname - A string containing the name of the redis module to look for
-                  in the redis info block.
+
         funcname - A string containing the name of the function to create
         func - The function, being added to this class.
 
@@ -914,31 +914,13 @@ class Redis(RedisModuleCommands, CoreCommands, object):
         from redis import Redis
         from foomodule import F
         r = Redis()
-        r.load_external_module("foomod", "foo", F)
+        r.load_external_module("foo", F)
         r.foo().dothing('your', 'arguments')
 
         For a concrete example see the reimport of the redisjson module in
         tests/test_connection.py::test_loading_external_modules
         """
-        mods = self.loaded_modules
-        if modname.lower() not in mods:
-            raise ModuleError("{} is not loaded in redis.".format(modname))
         setattr(self, funcname, func)
-
-    @property
-    def loaded_modules(self):
-        key = '__redis_modules__'
-        mods = getattr(self, key, None)
-        if mods is not None:
-            return mods
-
-        try:
-            mods = {f.get('name').lower(): f.get('ver')
-                    for f in self.info().get('modules')}
-        except TypeError:
-            mods = []
-        setattr(self, key, mods)
-        return mods
 
     def pipeline(self, transaction=True, shard_hint=None):
         """

@@ -22,5 +22,21 @@ Contents:
 .. automodule:: redis
    :members:
 
+.. automodule:: redis.backoff
+   :members:
+
+.. automodule:: redis.connection
+   :members:
+
+.. automodule:: redis.commands
+   :members:
+
+.. automodule:: redis.exceptions
+   :members:
+
+.. automodule:: redis.lock
+   :members:
+
 .. automodule:: redis.sentinel
    :members:
+

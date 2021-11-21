@@ -612,6 +612,12 @@ def test_explain(client):
 
 
 @pytest.mark.redismod
+def test_explaincli(client):
+    with pytest.raises(NotImplementedError):
+        client.ft().explain_cli("foo")
+
+
+@pytest.mark.redismod
 def test_summarize(client):
     createIndex(client.ft())
     waitForIndex(client, "idx")
@@ -643,28 +649,18 @@ def test_alias():
     index1 = getClient()
     index2 = getClient()
 
-    index1.hset("index1:lonestar", mapping={"name": "lonestar"})
-    index2.hset("index2:yogurt", mapping={"name": "yogurt"})
-
-    if os.environ.get("GITHUB_WORKFLOW", None) is not None:
-        time.sleep(2)
-    else:
-        time.sleep(5)
-
-    def1 = IndexDefinition(prefix=["index1:"], score_field="name")
-    def2 = IndexDefinition(prefix=["index2:"], score_field="name")
+    def1 = IndexDefinition(prefix=["index1:"])
+    def2 = IndexDefinition(prefix=["index2:"])
 
     ftindex1 = index1.ft("testAlias")
-    ftindex2 = index1.ft("testAlias2")
+    ftindex2 = index2.ft("testAlias2")
     ftindex1.create_index((TextField("name"),), definition=def1)
     ftindex2.create_index((TextField("name"),), definition=def2)
 
-    # CI is slower
-    try:
-        res = ftindex1.search("*").docs[0]
-    except IndexError:
-        time.sleep(5)
-        res = ftindex1.search("*").docs[0]
+    index1.hset("index1:lonestar", mapping={"name": "lonestar"})
+    index2.hset("index2:yogurt", mapping={"name": "yogurt"})
+
+    res = ftindex1.search("*").docs[0]
     assert "index1:lonestar" == res.id
 
     # create alias and check for results
@@ -680,9 +676,6 @@ def test_alias():
     # update alias and ensure new results
     ftindex2.aliasupdate("spaceballs")
     alias_client2 = getClient().ft("spaceballs")
-
-    if os.environ.get("GITHUB_WORKFLOW", None) is not None:
-        time.sleep(5)
 
     res = alias_client2.search("*").docs[0]
     assert "index2:yogurt" == res.id
@@ -1221,3 +1214,102 @@ def test_syndump(client):
         "baby": ["id2"],
         "offspring": ["id1"],
     }
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.2.0", "search")
+def test_create_json_with_alias(client):
+    """
+    Create definition with IndexType.JSON as index type (ON JSON) with two
+    fields with aliases, and use json client to test it.
+    """
+    definition = IndexDefinition(prefix=["king:"], index_type=IndexType.JSON)
+    client.ft().create_index(
+        (TextField("$.name", as_name="name"),
+         NumericField("$.num", as_name="num")),
+        definition=definition
+    )
+
+    client.json().set("king:1", Path.rootPath(), {"name": "henry",
+                                                  "num": 42})
+    client.json().set("king:2", Path.rootPath(), {"name": "james",
+                                                  "num": 3.14})
+
+    res = client.ft().search("@name:henry")
+    assert res.docs[0].id == "king:1"
+    assert res.docs[0].json == '{"name":"henry","num":42}'
+    assert res.total == 1
+
+    res = client.ft().search("@num:[0 10]")
+    assert res.docs[0].id == "king:2"
+    assert res.docs[0].json == '{"name":"james","num":3.14}'
+    assert res.total == 1
+
+    # Tests returns an error if path contain special characters (user should
+    # use an alias)
+    with pytest.raises(Exception):
+        client.ft().search("@$.name:henry")
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.2.0", "search")
+def test_json_with_multipath(client):
+    """
+    Create definition with IndexType.JSON as index type (ON JSON),
+    and use json client to test it.
+    """
+    definition = IndexDefinition(prefix=["king:"], index_type=IndexType.JSON)
+    client.ft().create_index(
+        (TagField("$..name", as_name="name")),
+        definition=definition
+    )
+
+    client.json().set("king:1", Path.rootPath(),
+                      {"name": "henry", "country": {"name": "england"}})
+
+    res = client.ft().search("@name:{henry}")
+    assert res.docs[0].id == "king:1"
+    assert res.docs[0].json == '{"name":"henry","country":{"name":"england"}}'
+    assert res.total == 1
+
+    res = client.ft().search("@name:{england}")
+    assert res.docs[0].id == "king:1"
+    assert res.docs[0].json == '{"name":"henry","country":{"name":"england"}}'
+    assert res.total == 1
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.2.0", "search")
+def test_json_with_jsonpath(client):
+    definition = IndexDefinition(index_type=IndexType.JSON)
+    client.ft().create_index(
+        (TextField('$["prod:name"]', as_name="name"),
+         TextField('$.prod:name', as_name="name_unsupported")),
+        definition=definition
+    )
+
+    client.json().set("doc:1", Path.rootPath(), {"prod:name": "RediSearch"})
+
+    # query for a supported field succeeds
+    res = client.ft().search(Query("@name:RediSearch"))
+    assert res.total == 1
+    assert res.docs[0].id == "doc:1"
+    assert res.docs[0].json == '{"prod:name":"RediSearch"}'
+
+    # query for an unsupported field fails
+    res = client.ft().search("@name_unsupported:RediSearch")
+    assert res.total == 0
+
+    # return of a supported field succeeds
+    res = client.ft().search(Query("@name:RediSearch").return_field("name"))
+    assert res.total == 1
+    assert res.docs[0].id == "doc:1"
+    assert res.docs[0].name == 'RediSearch'
+
+    # return of an unsupported field fails
+    res = client.ft().search(Query("@name:RediSearch")
+                             .return_field("name_unsupported"))
+    assert res.total == 1
+    assert res.docs[0].id == "doc:1"
+    with pytest.raises(Exception):
+        res.docs[0].name_unsupported
