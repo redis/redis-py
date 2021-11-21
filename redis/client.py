@@ -1241,6 +1241,7 @@ class PubSub:
         self.pending_unsubscribe_channels = set()
         self.patterns = {}
         self.pending_unsubscribe_patterns = set()
+        self.cmd_execution_health_check = True
 
     def close(self):
         self.reset()
@@ -1284,8 +1285,11 @@ class PubSub:
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
         connection = self.connection
-        kwargs = {'check_health': not self.subscribed}
+        kwargs = {'check_health': self.cmd_execution_health_check}
         self._execute(connection, connection.send_command, *args, **kwargs)
+        if self.cmd_execution_health_check is True:
+            # Run a health check only on the first command execution
+            self.cmd_execution_health_check = False
 
     def _disconnect_raise_connect(self, conn, error):
         """
@@ -1437,6 +1441,10 @@ class PubSub:
         before returning. Timeout should be specified as a floating point
         number.
         """
+        if self.cmd_execution_health_check is True:
+            # Health checks will be done within the parse_response method,
+            # cancel health checks from the command_execution method
+            self.cmd_execution_health_check = False
         response = self.parse_response(block=False, timeout=timeout)
         if response:
             return self.handle_message(response, ignore_subscribe_messages)
