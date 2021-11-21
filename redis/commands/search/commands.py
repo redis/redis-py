@@ -406,7 +406,6 @@ class SearchCommands:
         return self._get_AggregateResult(raw, query, has_cursor)
 
     def _get_AggregateResult(self, raw, query, has_cursor):
-        # has_cursor = bool(query._cursor)
         if has_cursor:
             if isinstance(query, Cursor):
                 query.cid = raw[1]
@@ -450,12 +449,9 @@ class SearchCommands:
         elif isinstance(query, Query):
             cmd[2] = "SEARCH"
             cmd += query.get_args()
-        elif isinstance(query, str):
-            cmd[2] = "SEARCH"
-            cmd.append(query)
         else:
-            raise ValueError("Must provide AggregateRequest object, "
-                             "Query object or str.")
+            raise ValueError("Must provide AggregateRequest object or "
+                             "Query object.")
 
         res = self.execute_command(*cmd)
 

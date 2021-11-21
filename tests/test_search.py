@@ -1338,3 +1338,21 @@ def test_profile(client):
     assert det['Iterators profile']['Type'] == 'WILDCARD'
     assert det['Parsing time'] < 0.3
     assert len(res.rows) == 2  # check also the search result
+
+
+@pytest.mark.redismod
+def test_profile_limited(client):
+    client.ft().create_index((TextField('t'),))
+    client.ft().client.hset('1', 't', 'hello')
+    client.ft().client.hset('2', 't', 'hell')
+    client.ft().client.hset('3', 't', 'help')
+    client.ft().client.hset('4', 't', 'helowa')
+
+    q = Query('%hell% hel*')
+    res, det = client.ft().profile(q, limited=True)
+    assert det['Iterators profile']['Child iterators'][0]['Child iterators'] \
+           == 'The number of iterators in the union is 3'
+    assert det['Iterators profile']['Child iterators'][1]['Child iterators'] \
+           == 'The number of iterators in the union is 4'
+    assert det['Iterators profile']['Type'] == 'INTERSECT'
+    assert len(res.docs) == 3  # check also the search result
