@@ -1,6 +1,6 @@
+import pytest
 from redis.commands.graph import Node, Edge, Path
 from redis.exceptions import ResponseError
-import pytest
 
 
 @pytest.fixture
