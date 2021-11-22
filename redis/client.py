@@ -1241,7 +1241,6 @@ class PubSub:
         self.pending_unsubscribe_channels = set()
         self.patterns = {}
         self.pending_unsubscribe_patterns = set()
-        self.cmd_execution_health_check = True
 
     def close(self):
         self.reset()
@@ -1285,11 +1284,8 @@ class PubSub:
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
         connection = self.connection
-        kwargs = {'check_health': self.cmd_execution_health_check}
+        kwargs = {'check_health': not self.subscribed}
         self._execute(connection, connection.send_command, *args, **kwargs)
-        if self.cmd_execution_health_check is True:
-            # Run a health check only on the first command execution
-            self.cmd_execution_health_check = False
 
     def _disconnect_raise_connect(self, conn, error):
         """
@@ -1440,15 +1436,30 @@ class PubSub:
         If timeout is specified, the system will wait for `timeout` seconds
         before returning. Timeout should be specified as a floating point
         number.
+
+        if not self.subscribed and \
+                self.wait_for_subscription(timeout) is False:
+            # The connection isn't subscribed to any channels or patterns, so
+            # no messages are available
+            return None
         """
-        if self.cmd_execution_health_check is True:
-            # Health checks will be done within the parse_response method,
-            # cancel health checks from the command_execution method
-            self.cmd_execution_health_check = False
         response = self.parse_response(block=False, timeout=timeout)
         if response:
             return self.handle_message(response, ignore_subscribe_messages)
         return None
+
+    def wait_for_subscription(self, timeout, period=0.25):
+        """
+        Wait until this pubsub connection has been subscribed.
+        Return True if the connection was subscribed during the timeout
+        frametime. Otherwise, return False.
+        """
+        mustend = time.time() + timeout
+        while time.time() < mustend:
+            if self.subscribed:
+                return True
+            time.sleep(period)
+        return False
 
     def ping(self, message=None):
         """
@@ -1721,7 +1732,7 @@ class Pipeline(Redis):
         return self
 
     def _execute_transaction(self, connection, commands, raise_on_error):
-        cmds = chain([(('MULTI', ), {})], commands, [(('EXEC', ), {})])
+        cmds = chain([(('MULTI',), {})], commands, [(('EXEC',), {})])
         all_cmds = connection.pack_commands([args for args, options in cmds
                                              if EMPTY_RESPONSE not in options])
         connection.send_packed_command(all_cmds)
