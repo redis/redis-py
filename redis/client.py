@@ -1508,10 +1508,29 @@ class PubSub:
         before returning. Timeout should be specified as a floating point
         number.
         """
+        if not self.subscribed and \
+                self.wait_for_subscription(timeout) is False:
+            # The connection isn't subscribed to any channels or patterns, so
+            # no messages are available
+            return None
+
         response = self.parse_response(block=False, timeout=timeout)
         if response:
             return self.handle_message(response, ignore_subscribe_messages)
         return None
+
+    def wait_for_subscription(self, timeout, period=0.25):
+        """
+        Wait until this pubsub connection has been subscribed.
+        Return True if the connection was subscribed during the timeout
+        frametime. Otherwise, return False.
+        """
+        mustend = time.time() + timeout
+        while time.time() < mustend:
+            if self.subscribed:
+                return True
+            time.sleep(period)
+        return False
 
     def ping(self, message=None):
         """
