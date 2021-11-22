@@ -98,7 +98,7 @@ def test_bf_scandump_and_loadchunk(client):
     prev_info = client.bf().execute_command("bf.debug", "myBloom")
 
     # Remove the filter
-    client.bf().execute_command("del", "myBloom")
+    client.bf().client.delete("myBloom")
 
     # Now, load all the commands:
     for cmd in cmds:
@@ -108,7 +108,7 @@ def test_bf_scandump_and_loadchunk(client):
     assert prev_info == cur_info
     do_verify()
 
-    client.bf().execute_command("del", "myBloom")
+    client.bf().client.delete("myBloom")
     client.bf().create("myBloom", "0.0001", "10000000")
 
 
