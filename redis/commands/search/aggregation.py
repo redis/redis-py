@@ -187,7 +187,7 @@ class AggregateRequest(object):
         ### Parameters
 
         - **fields**: If fields not specified, all the fields will be loaded.
-        Otherwise, should be given one or more fields in the format of `@field`.
+        Otherwise, fields should be given in the format of `@field`.
         """
         if fields:
             self._loadfields.extend(fields)
