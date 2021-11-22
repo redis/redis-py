@@ -5,7 +5,8 @@ from redis.commands.helpers import (
     nativestr,
     parse_to_list,
     quote_string,
-    random_string, parse_to_dict
+    random_string,
+    parse_to_dict
 )
 
 
@@ -31,12 +32,12 @@ def test_parse_to_dict():
          ['Some string', 'hello'],
          ['Child iterators',
           ['Time', '0.2089', 'Counter', 3, 'Child iterators',
-           ['Type', 'bar', 'Time', '0.072', 'Counter', 3],
+           ['Type', 'bar', 'Time', '0.0729', 'Counter', 3],
            ['Type', 'barbar', 'Time', '0.058', 'Counter', 3]]]]
     assert parse_to_dict(r) == {
         'Child iterators': {
             'Child iterators': [
-                {'Counter': 3.0, 'Time': 0.072, 'Type': 'bar'},
+                {'Counter': 3.0, 'Time': 0.0729, 'Type': 'bar'},
                 {'Counter': 3.0, 'Time': 0.058, 'Type': 'barbar'}
             ],
             'Counter': 3.0,
