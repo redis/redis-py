@@ -21,11 +21,13 @@ class Node:
         elif isinstance(label, str):
             self.label = label
             self.labels = [label]
-        elif isinstance(label, list) and all([isinstance(inner_label, str) for inner_label in label]):
+        elif isinstance(label, list) and \
+                all([isinstance(inner_label, str) for inner_label in label]):
             self.label = label[0]
             self.labels = label
         else:
-            raise AssertionError("label should be either None, string or a list of strings")
+            raise AssertionError("label should be either None, "
+                                 "string or a list of strings")
 
         self.properties = properties or {}
 

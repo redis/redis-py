@@ -96,7 +96,8 @@ class QueryResult:
                 error = VersionMismatchException(version)
             raise error
 
-        # If we encountered a run-time error, the last response element will be an exception.
+        # If we encountered a run-time error, the last response
+        # element will be an exception
         if isinstance(response[-1], ResponseError):
             raise response[-1]
 
@@ -190,7 +191,11 @@ class QueryResult:
         dest_node_id = int(cell[3])
         properties = self.parse_entity_properties(cell[4])
         return Edge(
-            src_node_id, relation, dest_node_id, edge_id=edge_id, properties=properties
+            src_node_id,
+            relation,
+            dest_node_id,
+            edge_id=edge_id,
+            properties=properties
         )
 
     def parse_path(self, cell):

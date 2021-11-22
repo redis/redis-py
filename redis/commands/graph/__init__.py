@@ -128,7 +128,8 @@ class Graph(GraphCommands):
         """
         Adds an edge to the graph.
         """
-        if not (self.nodes[edge.src_node.alias] and self.nodes[edge.dest_node.alias]):
+        if not (self.nodes[edge.src_node.alias] and
+                self.nodes[edge.dest_node.alias]):
             raise AssertionError("Both edge's end must be in the graph")
 
         self.edges.append(edge)
@@ -139,7 +140,8 @@ class Graph(GraphCommands):
         # Header starts with "CYPHER"
         params_header = "CYPHER "
         for key, value in params.items():
-            params_header += str(key) + "=" + stringify_param_value(value) + " "
+            params_header += \
+                str(key) + "=" + stringify_param_value(value) + " "
         return params_header
 
     # Procedures.
@@ -154,10 +156,13 @@ class Graph(GraphCommands):
         return self.query(q, read_only=read_only)
 
     def labels(self):
-        return self.call_procedure("db.labels", read_only=True).result_set
+        return self.call_procedure("db.labels", read_only=True)\
+            .result_set
 
     def relationshipTypes(self):
-        return self.call_procedure("db.relationshipTypes", read_only=True).result_set
+        return self.call_procedure("db.relationshipTypes", read_only=True)\
+            .result_set
 
     def propertyKeys(self):
-        return self.call_procedure("db.propertyKeys", read_only=True).result_set
+        return self.call_procedure("db.propertyKeys", read_only=True)\
+            .result_set

@@ -188,11 +188,11 @@ def test_stringify_query_result(client):
 
     assert (
             str(john)
-            == """(a:person{age:33,gender:"male",name:"John Doe",status:"single"})"""
+            == """(a:person{age:33,gender:"male",name:"John Doe",status:"single"})"""  # noqa
     )
     assert (
             str(edge)
-            == """(a:person{age:33,gender:"male",name:"John Doe",status:"single"})"""
+            == """(a:person{age:33,gender:"male",name:"John Doe",status:"single"})"""  # noqa
             + """-[:visited{purpose:"pleasure"}]->"""
             + """(b:country{name:"Japan"})"""
     )
@@ -210,7 +210,7 @@ def test_stringify_query_result(client):
 
     assert (
             str(person)
-            == """(:person{age:33,gender:"male",name:"John Doe",status:"single"})"""
+            == """(:person{age:33,gender:"male",name:"John Doe",status:"single"})"""  # noqa
     )
     assert str(visit) == """()-[:visited{purpose:"pleasure"}]->()"""
     assert str(country) == """(:country{name:"Japan"})"""
@@ -232,8 +232,9 @@ def test_optional_match(client):
     graph.add_edge(edge01)
     graph.flush()
 
-    # Issue a query that collects all outgoing edges from both nodes (the second has none).
-    query = """MATCH (a) OPTIONAL MATCH (a)-[e]->(b) RETURN a, e, b ORDER BY a.value"""
+    # Issue a query that collects all outgoing edges from both nodes
+    # (the second has none)
+    query = """MATCH (a) OPTIONAL MATCH (a)-[e]->(b) RETURN a, e, b ORDER BY a.value"""  # noqa
     expected_results = [[node0, edge01, node1], [node1, None, None]]
 
     result = client.graph().query(query)
@@ -268,7 +269,7 @@ def test_explain(client):
     client.graph().query(create_query)
 
     result = client.graph().explain(
-        "MATCH (r:Rider)-[:rides]->(t:Team) WHERE t.name = $name RETURN r.name, t.name, $params",
+        "MATCH (r:Rider)-[:rides]->(t:Team) WHERE t.name = $name RETURN r.name, t.name, $params",  # noqa
         {"name": "Yehuda"},
     )
     expected = "Results\n    Project\n        Conditional Traverse | (t:Team)->(r:Rider)\n            Filter\n                Node By Label Scan | (t:Team)"  # noqa
