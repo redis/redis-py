@@ -416,7 +416,6 @@ class TestRedisCommands:
         assert len(clients) == 1
         assert clients[0].get('name') == 'redis-py-c1'
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('2.8.12')
     def test_client_kill_filter_invalid_params(self, r):
         # empty
@@ -473,7 +472,6 @@ class TestRedisCommands:
         assert len(clients) == 1
         assert clients[0].get('name') == 'redis-py-c1'
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('2.6.9')
     def test_client_list_after_client_setname(self, r):
         r.client_setname('redis_py_test')
@@ -481,7 +479,6 @@ class TestRedisCommands:
         # we don't know which client ours will be
         assert 'redis_py_test' in [c['name'] for c in clients]
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('6.2.0')
     def test_client_kill_filter_by_laddr(self, r, r2):
         r.client_setname('redis-py-c1')
@@ -496,7 +493,6 @@ class TestRedisCommands:
         client_2_addr = clients_by_name['redis-py-c2'].get('laddr')
         assert r.client_kill_filter(laddr=client_2_addr)
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('6.0.0')
     @skip_if_redis_enterprise
     def test_client_kill_filter_by_user(self, r, request):

@@ -256,7 +256,7 @@ class RedisCluster(ClusterCommands, object):
                 "CLIENT REPLY",
                 "CLIENT GETREDIR",
                 "CLIENT INFO",
-                "CLIENT KILL"
+                "CLIENT KILL",
                 "READONLY",
                 "READWRITE",
                 "CLUSTER INFO",
