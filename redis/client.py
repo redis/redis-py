@@ -1415,10 +1415,6 @@ class PubSub:
         before returning. Timeout should be specified as a floating point
         number.
         """
-        if self.cmd_execution_health_check is True:
-            # Health checks will be done within the parse_response method,
-            # cancel health checks from the command_execution method
-            self.cmd_execution_health_check = False
         response = self.parse_response(block=False, timeout=timeout)
         if response:
             return self.handle_message(response, ignore_subscribe_messages)
