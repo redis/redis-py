@@ -579,8 +579,8 @@ class TestRedisCommands:
     @skip_if_server_version_lt('2.8.12')
     def test_role(self, r):
         assert r.role()[0] == b'master'
-        assert r.role()[1] == 0
-        assert r.role()[2] == []
+        assert isinstance(r.role()[1], int)
+        assert isinstance(r.role()[2], list)
 
     def test_slowlog_get(self, r, slowlog):
         assert r.slowlog_reset()
