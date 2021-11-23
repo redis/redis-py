@@ -27,6 +27,9 @@ from redis.utils import safe_str, str_if_bytes
 SYM_EMPTY = b''
 EMPTY_RESPONSE = 'EMPTY_RESPONSE'
 
+# some responses (ie. dump) are binary, and just meant to never be decoded
+NEVER_DECODE = 'NEVER_DECODE'
+
 
 def timestamp_to_datetime(response):
     "Converts a unix timestamp to a Python datetime object"
@@ -1081,7 +1084,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands, object):
     def parse_response(self, connection, command_name, **options):
         "Parses a response from the Redis server"
         try:
-            response = connection.read_response()
+            if NEVER_DECODE in options:
+                response = connection.read_response(disable_decoding=True)
+            else:
+                response = connection.read_response()
         except ResponseError:
             if EMPTY_RESPONSE in options:
                 return options[EMPTY_RESPONSE]

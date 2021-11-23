@@ -981,7 +981,10 @@ class CoreCommands:
 
         For more information check https://redis.io/commands/dump
         """
-        return self.execute_command('DUMP', name)
+        from redis.client import NEVER_DECODE
+        options = {}
+        options[NEVER_DECODE] = []
+        return self.execute_command('DUMP', name, **options)
 
     def exists(self, *names):
         """

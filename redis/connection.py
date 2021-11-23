@@ -314,7 +314,7 @@ class PythonParser(BaseParser):
     def can_read(self, timeout):
         return self._buffer and self._buffer.can_read(timeout)
 
-    def read_response(self):
+    def read_response(self, disable_decoding=False):
         raw = self._buffer.readline()
         if not raw:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
@@ -354,8 +354,9 @@ class PythonParser(BaseParser):
             length = int(response)
             if length == -1:
                 return None
-            response = [self.read_response() for i in range(length)]
-        if isinstance(response, bytes):
+            response = [self.read_response(disable_decoding=disable_decoding)
+                        for i in range(length)]
+        if isinstance(response, bytes) and disable_decoding is False:
             response = self.encoder.decode(response)
         return response
 
@@ -449,7 +450,7 @@ class HiredisParser(BaseParser):
             if custom_timeout:
                 sock.settimeout(self._socket_timeout)
 
-    def read_response(self):
+    def read_response(self, disable_decoding=False):
         if not self._reader:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
@@ -742,10 +743,12 @@ class Connection:
             self.connect()
         return self._parser.can_read(timeout)
 
-    def read_response(self):
+    def read_response(self, disable_decoding=False):
         """Read the response from a previously sent command"""
         try:
-            response = self._parser.read_response()
+            response = self._parser.read_response(
+                disable_decoding=disable_decoding
+            )
         except socket.timeout:
             self.disconnect()
             raise TimeoutError("Timeout reading from %s:%s" %
