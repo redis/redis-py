@@ -36,10 +36,10 @@ class ResultSetColumnTypes:
     COLUMN_UNKNOWN = 0
     COLUMN_SCALAR = 1
     COLUMN_NODE = (
-        2  # Unused as of RedisGraph v2.1.0, retained for backwards compatibility.
+        2  # Unused as of RedisGraph v2.1.0, retained for backwards compatibility. # noqa
     )
     COLUMN_RELATION = (
-        3  # Unused as of RedisGraph v2.1.0, retained for backwards compatibility.
+        3  # Unused as of RedisGraph v2.1.0, retained for backwards compatibility. # noqa
     )
 
 
@@ -134,11 +134,11 @@ class QueryResult:
         for row in result_set:
             record = []
             for idx, cell in enumerate(row):
-                if self.header[idx][0] == ResultSetColumnTypes.COLUMN_SCALAR:
+                if self.header[idx][0] == ResultSetColumnTypes.COLUMN_SCALAR: # noqa
                     record.append(self.parse_scalar(cell))
-                elif self.header[idx][0] == ResultSetColumnTypes.COLUMN_NODE:
+                elif self.header[idx][0] == ResultSetColumnTypes.COLUMN_NODE: # noqa
                     record.append(self.parse_node(cell))
-                elif self.header[idx][0] == ResultSetColumnTypes.COLUMN_RELATION:
+                elif self.header[idx][0] == ResultSetColumnTypes.COLUMN_RELATION: # noqa
                     record.append(self.parse_edge(cell))
                 else:
                     print("Unknown column type.\n")
@@ -219,7 +219,7 @@ class QueryResult:
     def parse_point(self, cell):
         p = {}
         # A point is received an array of the form: [latitude, longitude]
-        # It is returned as a map of the form: {"latitude": latitude, "longitude": longitude}
+        # It is returned as a map of the form: {"latitude": latitude, "longitude": longitude} # noqa
         p["latitude"] = float(cell[0])
         p["longitude"] = float(cell[1])
         return p
@@ -277,12 +277,15 @@ class QueryResult:
         return scalar
 
     def parse_profile(self, response):
-        self.result_set = [x[0 : x.index(",")].strip() for x in response]
+        self.result_set = \
+            [x[0: x.index(",")].strip() for x in response]
 
     # """Prints the data from the query response:
-    #    1. First row result_set contains the columns names. Thus the first row in PrettyTable
-    #       will contain the columns.
-    #    2. The row after that will contain the data returned, or 'No Data returned' if there is none.
+    #    1. First row result_set contains the columns names.
+    #       Thus the first row in PrettyTable will contain the
+    #       columns.
+    #    2. The row after that will contain the data returned,
+    #       or 'No Data returned' if there is none.
     #    3. Prints the statistics of the query.
     # """
 

@@ -8,7 +8,7 @@ class GraphCommands:
     def commit(self):
         """
         Create entire graph.
-        For more information see `CREATE <https://oss.redis.com/redisgraph/master/commands/#create>`_.
+        For more information see `CREATE <https://oss.redis.com/redisgraph/master/commands/#create>`_. # noqa
         """
         if len(self.nodes) == 0 and len(self.edges) == 0:
             return None
@@ -25,10 +25,11 @@ class GraphCommands:
 
         return self.query(query)
 
-    def query(self, q, params=None, timeout=None, read_only=False, profile=False):
+    def query(self, q, params=None, timeout=None, read_only=False,
+              profile=False):
         """
         Executes a query against the graph.
-        For more information see `GRAPH.QUERY <https://oss.redis.com/redisgraph/master/commands/#graphquery>`_.
+        For more information see `GRAPH.QUERY <https://oss.redis.com/redisgraph/master/commands/#graphquery>`_. # noqa
 
         Args:
 
@@ -42,7 +43,8 @@ class GraphCommands:
         read_only : bool
             Executes a readonly query if set to True.
         profile : bool
-            Return details on results produced by and time spent in each operation.
+            Return details on results produced by and time
+            spent in each operation.
         """
 
         # maintain original 'q'
@@ -73,7 +75,7 @@ class GraphCommands:
             return QueryResult(self, response, profile)
         except ResponseError as e:
             if "wrong number of arguments" in str(e):
-                print("Note: RedisGraph Python requires server version 2.2.8 or above")
+                print("Note: RedisGraph Python requires server version 2.2.8 or above") # noqa
             if "unknown command" in str(e) and read_only:
                 # `GRAPH.RO_QUERY` is unavailable in older versions.
                 return self.query(q, params, timeout, read_only=False)
@@ -89,7 +91,7 @@ class GraphCommands:
     def merge(self, pattern):
         """
         Merge pattern.
-        For more information see `MERGE <https://oss.redis.com/redisgraph/master/commands/#merge>`_.
+        For more information see `MERGE <https://oss.redis.com/redisgraph/master/commands/#merge>`_. # noqa
         """
         query = "MERGE "
         query += str(pattern)
@@ -99,7 +101,7 @@ class GraphCommands:
     def delete(self):
         """
         Deletes graph.
-        For more information see `DELETE <https://oss.redis.com/redisgraph/master/commands/#delete>`_.
+        For more information see `DELETE <https://oss.redis.com/redisgraph/master/commands/#delete>`_. # noqa
         """
         self._clear_schema()
         return self.execute_command("GRAPH.DELETE", self.name)
@@ -117,7 +119,7 @@ class GraphCommands:
         """
         Get the execution plan for given query,
         Returns an array of operations.
-        For more information see `GRAPH.EXPLAIN <https://oss.redis.com/redisgraph/master/commands/#graphexplain>`_.
+        For more information see `GRAPH.EXPLAIN <https://oss.redis.com/redisgraph/master/commands/#graphexplain>`_. # noqa
 
         Args:
 
@@ -136,7 +138,8 @@ class GraphCommands:
     def bulk(self, **kwargs):
         """Internal only. Not supported."""
         raise NotImplementedError(
-            "GRAPH.BULK is internal only. Use https://github.com/redisgraph/redisgraph-bulk-loader."
+            "GRAPH.BULK is internal only. "
+            "Use https://github.com/redisgraph/redisgraph-bulk-loader."
         )
 
     def profile(self, query):
@@ -145,14 +148,15 @@ class GraphCommands:
         for each operation's execution. Return a string representation of a
         query execution plan, with details on results produced by and time
         spent in each operation.
-        For more information see `GRAPH.PROFILE <https://oss.redis.com/redisgraph/master/commands/#graphprofile>`_.
+        For more information see `GRAPH.PROFILE <https://oss.redis.com/redisgraph/master/commands/#graphprofile>`_. # noqa
         """
         return self.query(query, profile=True)
 
     def slowlog(self):
         """
-        Get a list containing up to 10 of the slowest queries issued against the given graph ID.
-        For more information see `GRAPH.SLOWLOG <https://oss.redis.com/redisgraph/master/commands/#graphslowlog>`_.
+        Get a list containing up to 10 of the slowest queries issued
+        against the given graph ID.
+        For more information see `GRAPH.SLOWLOG <https://oss.redis.com/redisgraph/master/commands/#graphslowlog>`_. # noqa
 
         Each item in the list has the following structure:
         1. A unix timestamp at which the log entry was processed.
@@ -165,7 +169,7 @@ class GraphCommands:
     def config(self, name, value=None, set=False):
         """
         Retrieve or update a RedisGraph configuration.
-        For more information see `GRAPH.CONFIG <https://oss.redis.com/redisgraph/master/commands/#graphconfig>`_.
+        For more information see `GRAPH.CONFIG <https://oss.redis.com/redisgraph/master/commands/#graphconfig>`_. # noqa
 
         Args:
 
@@ -181,12 +185,12 @@ class GraphCommands:
             if set:
                 params.append(value)
             else:
-                raise DataError("``value`` can be provided only when ``set`` is True")
+                raise DataError("``value`` can be provided only when ``set`` is True")  # noqa
         return self.execute_command("GRAPH.CONFIG", *params)
 
     def list_keys(self):
         """
         Lists all graph keys in the keyspace.
-        For more information see `GRAPH.LIST <https://oss.redis.com/redisgraph/master/commands/#graphlist>`_.
+        For more information see `GRAPH.LIST <https://oss.redis.com/redisgraph/master/commands/#graphlist>`_. # noqa
         """
         return self.execute_command("GRAPH.LIST")
