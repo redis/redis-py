@@ -558,7 +558,7 @@ class TestPubSubTimeouts:
         assert p.subscribed is False
         assert p.get_message() is None
         assert p.get_message(timeout=0.1) is None
-        with patch.object(PubSub, 'wait_for_subscription') as mock:
+        with patch.object(threading.Event, 'wait') as mock:
             mock.return_value = False
             assert p.get_message(timeout=0.01) is None
             assert mock.called
@@ -581,7 +581,7 @@ class TestPubSubTimeouts:
     def test_get_message_wait_for_subscription_not_being_called(self, r):
         p = r.pubsub()
         p.subscribe('foo')
-        with patch.object(PubSub, 'wait_for_subscription') as mock:
+        with patch.object(threading.Event, 'wait') as mock:
             assert p.subscribed is True
             assert wait_for_message(p) == make_message('subscribe', 'foo', 1)
             assert mock.called is False
