@@ -1282,12 +1282,14 @@ class PubSub:
         self.encoder = encoder
         if self.encoder is None:
             self.encoder = self.connection_pool.get_encoder()
+        self.health_check_response_b = self.encoder.encode(
+            self.HEALTH_CHECK_MESSAGE)
         if self.encoder.decode_responses:
             self.health_check_response = ["pong", self.HEALTH_CHECK_MESSAGE]
         else:
             self.health_check_response = [
                 b"pong",
-                self.encoder.encode(self.HEALTH_CHECK_MESSAGE),
+                self.health_check_response_b
             ]
         self.reset()
 
@@ -1401,7 +1403,14 @@ class PubSub:
             return None
         response = self._execute(conn, conn.read_response)
 
-        if conn.health_check_interval and response == self.health_check_response:
+        if conn.health_check_interval and \
+                response in [
+                self.health_check_response,  # If there was a subscription
+                self.health_check_response_b  # If there wasn't
+                ]:
+            # If there are no subscriptions redis responds to PING command with
+            # a bulk response, instead of a multi-bulk with "pong" and the
+            # response.
             # ignore the health check message as user might not expect it
             return None
         return response
