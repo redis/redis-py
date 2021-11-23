@@ -1518,12 +1518,12 @@ class PubSub:
         """
         if not self.subscribed:
             # Wait for subscription
-            deadline = time.time() + timeout
+            start_time = time.time()
             if self.subscribed_event.wait(timeout) is True:
                 # The connection was subscribed during the timeout frametime.
-                # The timeout should be adjusted for the time spent waiting
-                # for subscription
-                time_spent = deadline - time.time()
+                # The timeout should be adjusted based on the time spent
+                # waiting for the subscription
+                time_spent = time.time() - start_time
                 timeout = timeout - time_spent
             else:
                 # The connection isn't subscribed to any channels or patterns,
