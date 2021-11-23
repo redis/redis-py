@@ -1,4 +1,4 @@
-from distutils.version import StrictVersion
+from distutils.version import LooseVersion
 from itertools import chain
 from time import time
 from queue import LifoQueue, Empty, Full
@@ -9,7 +9,7 @@ import io
 import os
 import socket
 import threading
-import warnings
+import weakref
 
 from redis.exceptions import (
     AuthenticationError,
@@ -54,18 +54,13 @@ NONBLOCKING_EXCEPTIONS = tuple(NONBLOCKING_EXCEPTION_ERROR_NUMBERS.keys())
 if HIREDIS_AVAILABLE:
     import hiredis
 
-    hiredis_version = StrictVersion(hiredis.__version__)
+    hiredis_version = LooseVersion(hiredis.__version__)
     HIREDIS_SUPPORTS_CALLABLE_ERRORS = \
-        hiredis_version >= StrictVersion('0.1.3')
+        hiredis_version >= LooseVersion('0.1.3')
     HIREDIS_SUPPORTS_BYTE_BUFFER = \
-        hiredis_version >= StrictVersion('0.1.4')
+        hiredis_version >= LooseVersion('0.1.4')
     HIREDIS_SUPPORTS_ENCODING_ERRORS = \
-        hiredis_version >= StrictVersion('1.0.0')
-
-    if not HIREDIS_SUPPORTS_BYTE_BUFFER:
-        msg = ("redis-py works best with hiredis >= 0.1.4. You're running "
-               "hiredis %s. Please consider upgrading." % hiredis.__version__)
-        warnings.warn(msg)
+        hiredis_version >= LooseVersion('1.0.0')
 
     HIREDIS_USE_BYTE_BUFFER = True
     # only use byte buffer if hiredis supports it
@@ -559,7 +554,7 @@ class Connection:
             pass
 
     def register_connect_callback(self, callback):
-        self._connect_callbacks.append(callback)
+        self._connect_callbacks.append(weakref.WeakMethod(callback))
 
     def clear_connect_callbacks(self):
         self._connect_callbacks = []
@@ -585,8 +580,10 @@ class Connection:
 
         # run any user callbacks. right now the only internal callback
         # is for pubsub channel/pattern resubscription
-        for callback in self._connect_callbacks:
-            callback(self)
+        for ref in self._connect_callbacks:
+            callback = ref()
+            if callback:
+                callback(self)
 
     def _connect(self):
         "Create a TCP socket connection"
@@ -743,7 +740,6 @@ class Connection:
         sock = self._sock
         if not sock:
             self.connect()
-            sock = self._sock
         return self._parser.can_read(timeout)
 
     def read_response(self):
@@ -880,7 +876,13 @@ class UnixDomainSocketConnection(Connection):
                  encoding_errors='strict', decode_responses=False,
                  retry_on_timeout=False,
                  parser_class=DefaultParser, socket_read_size=65536,
-                 health_check_interval=0, client_name=None):
+                 health_check_interval=0, client_name=None,
+                 retry=None):
+        """
+        Initialize a new UnixDomainSocketConnection.
+        To specify a retry policy, first set `retry_on_timeout` to `True`
+        then set `retry` to a valid `Retry` object
+        """
         self.pid = os.getpid()
         self.path = path
         self.db = db
@@ -889,6 +891,14 @@ class UnixDomainSocketConnection(Connection):
         self.password = password
         self.socket_timeout = socket_timeout
         self.retry_on_timeout = retry_on_timeout
+        if retry_on_timeout:
+            if retry is None:
+                self.retry = Retry(NoBackoff(), 1)
+            else:
+                # deep-copy the Retry object as it is mutable
+                self.retry = copy.deepcopy(retry)
+        else:
+            self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
         self.next_health_check = 0
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
