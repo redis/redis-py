@@ -18,7 +18,8 @@ def devenv(c):
     for d in dockers:
         cmd += " --docker-dont-stop={}".format(d)
     run(cmd)
-    
+
+
 @task
 def build_docs(c):
     """Generates the sphinx documentation."""
