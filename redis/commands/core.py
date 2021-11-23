@@ -475,7 +475,7 @@ class CoreCommands:
             args.append(b'ERROR')
         return self.execute_command(*args)
 
-    def client_pause(self, timeout):
+    def client_pause(self, timeout, all=True):
         """
         Suspend all the Redis clients for the specified amount of time
         :param timeout: milliseconds to pause clients

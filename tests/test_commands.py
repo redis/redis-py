@@ -490,6 +490,14 @@ class TestRedisCommands:
             r.client_pause(timeout='not an integer')
 
     @skip_if_server_version_lt('6.2.0')
+    def test_client_pause_all(self, r, r2):
+        assert r.client_pause(1, all=False)
+        assert r2.set('foo', 'bar')
+        assert r2.get('foo') == b'bar'
+        assert r.get('foo') == b'bar'
+
+
+    @skip_if_server_version_lt('6.2.0')
     @skip_if_redis_enterprise
     def test_client_unpause(self, r):
         assert r.client_unpause() == b'OK'
