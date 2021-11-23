@@ -2,6 +2,8 @@ import pytest
 
 from redis import exceptions
 
+from tests.conftest import skip_if_server_version_lt
+
 
 multiply_script = """
 local value = redis.call('GET', KEYS[1])
@@ -30,7 +32,8 @@ class TestScripting:
         # 2 * 3 == 6
         assert r.eval(multiply_script, 1, 'a', 3) == 6
 
-    def test_script_flush(self, r):
+    @skip_if_server_version_lt('6.2.0')
+    def test_script_flush_620(self, r):
         r.set('a', 2)
         r.script_load(multiply_script)
         r.script_flush('ASYNC')
@@ -42,6 +45,16 @@ class TestScripting:
         r.set('a', 2)
         r.script_load(multiply_script)
         r.script_flush()
+
+        with pytest.raises(exceptions.DataError):
+            r.set('a', 2)
+            r.script_load(multiply_script)
+            r.script_flush("NOTREAL")
+
+    def test_script_flush(self, r):
+        r.set('a', 2)
+        r.script_load(multiply_script)
+        r.script_flush(None)
 
         with pytest.raises(exceptions.DataError):
             r.set('a', 2)

@@ -76,14 +76,14 @@ class Lock:
         Create a new Lock instance named ``name`` using the Redis client
         supplied by ``redis``.
 
-        ``timeout`` indicates a maximum life for the lock.
+        ``timeout`` indicates a maximum life for the lock in seconds.
         By default, it will remain locked until release() is called.
         ``timeout`` can be specified as a float or integer, both representing
         the number of seconds to wait.
 
-        ``sleep`` indicates the amount of time to sleep per loop iteration
-        when the lock is in blocking mode and another client is currently
-        holding the lock.
+        ``sleep`` indicates the amount of time to sleep in seconds per loop
+        iteration when the lock is in blocking mode and another client is
+        currently holding the lock.
 
         ``blocking`` indicates whether calling ``acquire`` should block until
         the lock has been acquired or to fail immediately, causing ``acquire``

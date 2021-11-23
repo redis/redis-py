@@ -6,10 +6,8 @@ import re
 import threading
 import time
 import warnings
-from redis.commands import (
-    list_or_args,
-    Commands
-)
+from redis.commands import (CoreCommands, RedisModuleCommands,
+                            SentinelCommands, list_or_args)
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
                               SSLConnection)
 from redis.lock import Lock
@@ -308,14 +306,24 @@ def parse_xautoclaim(response, **options):
     return parse_stream_list(response[1])
 
 
-def parse_xinfo_stream(response):
+def parse_xinfo_stream(response, **options):
     data = pairs_to_dict(response, decode_keys=True)
-    first = data['first-entry']
-    if first is not None:
-        data['first-entry'] = (first[0], pairs_to_dict(first[1]))
-    last = data['last-entry']
-    if last is not None:
-        data['last-entry'] = (last[0], pairs_to_dict(last[1]))
+    if not options.get('full', False):
+        first = data['first-entry']
+        if first is not None:
+            data['first-entry'] = (first[0], pairs_to_dict(first[1]))
+        last = data['last-entry']
+        if last is not None:
+            data['last-entry'] = (last[0], pairs_to_dict(last[1]))
+    else:
+        data['entries'] = {
+            _id: pairs_to_dict(entry)
+            for _id, entry in data['entries']
+        }
+        data['groups'] = [
+            pairs_to_dict(group, decode_keys=True)
+            for group in data['groups']
+        ]
     return data
 
 
@@ -599,19 +607,22 @@ def parse_set_result(response, **options):
     return response and str_if_bytes(response) == 'OK'
 
 
-class Redis(Commands, object):
+class Redis(RedisModuleCommands, CoreCommands, SentinelCommands, object):
     """
     Implementation of the Redis protocol.
 
     This abstract class provides a Python interface to all Redis commands
     and an implementation of the Redis protocol.
 
-    Connection and Pipeline derive from this, implementing how
-    the commands are sent and received to the Redis server
+    Pipelines derive from this, implementing how
+    the commands are sent and received to the Redis server. Based on
+    configuration, an instance will either use a ConnectionPool, or
+    Connection object to talk to redis.
     """
     RESPONSE_CALLBACKS = {
         **string_keys_to_dict(
-            'AUTH COPY EXPIRE EXPIREAT HEXISTS HMSET LMOVE BLMOVE MOVE '
+            'AUTH COPY EXPIRE EXPIREAT PEXPIRE PEXPIREAT '
+            'HEXISTS HMSET LMOVE BLMOVE MOVE '
             'MSETNX PERSIST PSETEX RENAMENX SISMEMBER SMOVE SETEX SETNX',
             bool
         ),
@@ -675,6 +686,7 @@ class Redis(Commands, object):
         'CLIENT SETNAME': bool_ok,
         'CLIENT UNBLOCK': lambda r: r and int(r) == 1 or False,
         'CLIENT PAUSE': bool_ok,
+        'CLIENT GETREDIR': int,
         'CLIENT TRACKINGINFO': lambda r: list(map(str_if_bytes, r)),
         'CLUSTER ADDSLOTS': bool_ok,
         'CLUSTER COUNT-FAILURE-REPORTS': lambda x: int(x),
@@ -692,7 +704,6 @@ class Redis(Commands, object):
         'CLUSTER SET-CONFIG-EPOCH': bool_ok,
         'CLUSTER SETSLOT': bool_ok,
         'CLUSTER SLAVES': parse_cluster_nodes,
-        'COMMAND': int,
         'COMMAND COUNT': int,
         'CONFIG GET': parse_config_get,
         'CONFIG RESETSTAT': bool_ok,
@@ -886,6 +897,30 @@ class Redis(Commands, object):
     def set_response_callback(self, command, callback):
         "Set a custom Response Callback"
         self.response_callbacks[command] = callback
+
+    def load_external_module(self, funcname, func,
+                             ):
+        """
+        This function can be used to add externally defined redis modules,
+        and their namespaces to the redis client.
+
+        funcname - A string containing the name of the function to create
+        func - The function, being added to this class.
+
+        ex: Assume that one has a custom redis module named foomod that
+        creates command named 'foo.dothing' and 'foo.anotherthing' in redis.
+        To load function functions into this namespace:
+
+        from redis import Redis
+        from foomodule import F
+        r = Redis()
+        r.load_external_module("foo", F)
+        r.foo().dothing('your', 'arguments')
+
+        For a concrete example see the reimport of the redisjson module in
+        tests/test_connection.py::test_loading_external_modules
+        """
+        setattr(self, funcname, func)
 
     def pipeline(self, transaction=True, shard_hint=None):
         """
@@ -1862,100 +1897,3 @@ class Script:
             # Overwrite the sha just in case there was a discrepancy.
             self.sha = client.script_load(self.script)
             return client.evalsha(self.sha, len(keys), *args)
-
-
-class BitFieldOperation:
-    """
-    Command builder for BITFIELD commands.
-    """
-    def __init__(self, client, key, default_overflow=None):
-        self.client = client
-        self.key = key
-        self._default_overflow = default_overflow
-        self.reset()
-
-    def reset(self):
-        """
-        Reset the state of the instance to when it was constructed
-        """
-        self.operations = []
-        self._last_overflow = 'WRAP'
-        self.overflow(self._default_overflow or self._last_overflow)
-
-    def overflow(self, overflow):
-        """
-        Update the overflow algorithm of successive INCRBY operations
-        :param overflow: Overflow algorithm, one of WRAP, SAT, FAIL. See the
-            Redis docs for descriptions of these algorithmsself.
-        :returns: a :py:class:`BitFieldOperation` instance.
-        """
-        overflow = overflow.upper()
-        if overflow != self._last_overflow:
-            self._last_overflow = overflow
-            self.operations.append(('OVERFLOW', overflow))
-        return self
-
-    def incrby(self, fmt, offset, increment, overflow=None):
-        """
-        Increment a bitfield by a given amount.
-        :param fmt: format-string for the bitfield being updated, e.g. 'u8'
-            for an unsigned 8-bit integer.
-        :param offset: offset (in number of bits). If prefixed with a
-            '#', this is an offset multiplier, e.g. given the arguments
-            fmt='u8', offset='#2', the offset will be 16.
-        :param int increment: value to increment the bitfield by.
-        :param str overflow: overflow algorithm. Defaults to WRAP, but other
-            acceptable values are SAT and FAIL. See the Redis docs for
-            descriptions of these algorithms.
-        :returns: a :py:class:`BitFieldOperation` instance.
-        """
-        if overflow is not None:
-            self.overflow(overflow)
-
-        self.operations.append(('INCRBY', fmt, offset, increment))
-        return self
-
-    def get(self, fmt, offset):
-        """
-        Get the value of a given bitfield.
-        :param fmt: format-string for the bitfield being read, e.g. 'u8' for
-            an unsigned 8-bit integer.
-        :param offset: offset (in number of bits). If prefixed with a
-            '#', this is an offset multiplier, e.g. given the arguments
-            fmt='u8', offset='#2', the offset will be 16.
-        :returns: a :py:class:`BitFieldOperation` instance.
-        """
-        self.operations.append(('GET', fmt, offset))
-        return self
-
-    def set(self, fmt, offset, value):
-        """
-        Set the value of a given bitfield.
-        :param fmt: format-string for the bitfield being read, e.g. 'u8' for
-            an unsigned 8-bit integer.
-        :param offset: offset (in number of bits). If prefixed with a
-            '#', this is an offset multiplier, e.g. given the arguments
-            fmt='u8', offset='#2', the offset will be 16.
-        :param int value: value to set at the given position.
-        :returns: a :py:class:`BitFieldOperation` instance.
-        """
-        self.operations.append(('SET', fmt, offset, value))
-        return self
-
-    @property
-    def command(self):
-        cmd = ['BITFIELD', self.key]
-        for ops in self.operations:
-            cmd.extend(ops)
-        return cmd
-
-    def execute(self):
-        """
-        Execute the operation(s) in a single BITFIELD command. The return value
-        is a list of values corresponding to each operation. If the client
-        used to create this instance was a pipeline, the list of values
-        will be present within the pipeline's execute.
-        """
-        command = self.command
-        self.reset()
-        return self.client.execute_command(*command)

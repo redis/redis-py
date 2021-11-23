@@ -3,7 +3,7 @@ import weakref
 
 from redis.client import Redis
 from redis.commands import SentinelCommands
-from redis.connection import ConnectionPool, Connection
+from redis.connection import ConnectionPool, Connection, SSLConnection
 from redis.exceptions import (ConnectionError, ResponseError, ReadOnlyError,
                               TimeoutError)
 from redis.utils import str_if_bytes
@@ -66,6 +66,10 @@ class SentinelManagedConnection(Connection):
             raise
 
 
+class SentinelManagedSSLConnection(SentinelManagedConnection, SSLConnection):
+    pass
+
+
 class SentinelConnectionPool(ConnectionPool):
     """
     Sentinel backed connection pool.
@@ -76,7 +80,9 @@ class SentinelConnectionPool(ConnectionPool):
 
     def __init__(self, service_name, sentinel_manager, **kwargs):
         kwargs['connection_class'] = kwargs.get(
-            'connection_class', SentinelManagedConnection)
+            'connection_class',
+            SentinelManagedSSLConnection if kwargs.pop('ssl', False)
+            else SentinelManagedConnection)
         self.is_master = kwargs.pop('is_master', True)
         self.check_connection = kwargs.pop('check_connection', False)
         super().__init__(**kwargs)

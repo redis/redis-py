@@ -10,7 +10,7 @@ import redis.sentinel
 
 @pytest.fixture(scope="module")
 def master_ip(master_host):
-    yield socket.gethostbyname(master_host)
+    yield socket.gethostbyname(master_host[0])
 
 
 class SentinelTestClient:
