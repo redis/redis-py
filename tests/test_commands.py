@@ -496,7 +496,6 @@ class TestRedisCommands:
         assert r2.get('foo') == b'bar'
         assert r.get('foo') == b'bar'
 
-
     @skip_if_server_version_lt('6.2.0')
     @skip_if_redis_enterprise
     def test_client_unpause(self, r):
