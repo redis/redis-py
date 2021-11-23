@@ -3491,10 +3491,16 @@ class CoreCommands:
         return self.execute_command('REPLICAOF', *args)
 
     def sync(self):
-        return self.execute_command('SYNC')
+        from redis.client import NEVER_DECODE
+        options = {}
+        options[NEVER_DECODE] = []
+        return self.execute_command('SYNC', **options)
 
     def psync(self, replicationid, offset):
-        return self.execute_command('PSYNC', replicationid, offset)
+        from redis.client import NEVER_DECODE
+        options = {}
+        options[NEVER_DECODE] = []
+        return self.execute_command('PSYNC', replicationid, offset, **options)
 
     def eval(self, script, numkeys, *keys_and_args):
         """
