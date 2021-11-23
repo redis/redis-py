@@ -6,7 +6,6 @@ from unittest import mock
 import pytest
 
 import redis
-from redis.client import PubSub
 from redis.exceptions import ConnectionError
 
 from .conftest import (
