@@ -1276,6 +1276,7 @@ class PubSub:
         self.shard_hint = shard_hint
         self.ignore_subscribe_messages = ignore_subscribe_messages
         self.connection = None
+        self.subscribed_event = threading.Event()
         # we need to know the encoding options for this connection in order
         # to lookup channel and pattern names for callback handlers.
         self.encoder = encoder
@@ -1315,6 +1316,7 @@ class PubSub:
         self.pending_unsubscribe_channels = set()
         self.patterns = {}
         self.pending_unsubscribe_patterns = set()
+        self.subscribed_event.clear()
 
     def close(self):
         self.reset()
@@ -1340,7 +1342,7 @@ class PubSub:
     @property
     def subscribed(self):
         "Indicates if there are subscriptions to any channels or patterns"
-        return bool(self.channels or self.patterns)
+        return self.subscribed_event.is_set()
 
     def execute_command(self, *args):
         "Execute a publish/subscribe command"
@@ -1443,6 +1445,9 @@ class PubSub:
         # for the reconnection.
         new_patterns = self._normalize_keys(new_patterns)
         self.patterns.update(new_patterns)
+        if not self.subscribed:
+            # Set the subscribed_event flag to True
+            self.subscribed_event.set()
         self.pending_unsubscribe_patterns.difference_update(new_patterns)
         return ret_val
 
@@ -1477,6 +1482,9 @@ class PubSub:
         # for the reconnection.
         new_channels = self._normalize_keys(new_channels)
         self.channels.update(new_channels)
+        if not self.subscribed:
+            # Set the subscribed_event flag to True
+            self.subscribed_event.set()
         self.pending_unsubscribe_channels.difference_update(new_channels)
         return ret_val
 
@@ -1508,29 +1516,24 @@ class PubSub:
         before returning. Timeout should be specified as a floating point
         number.
         """
-        if not self.subscribed and \
-                self.wait_for_subscription(timeout) is False:
-            # The connection isn't subscribed to any channels or patterns, so
-            # no messages are available
-            return None
+        if not self.subscribed:
+            # Wait for subscription
+            deadline = time.time() + timeout
+            if self.subscribed_event.wait(timeout) is True:
+                # The connection was subscribed during the timeout frametime.
+                # The timeout should be adjusted for the time spent waiting
+                # for subscription
+                time_spent = deadline - time.time()
+                timeout = timeout - time_spent
+            else:
+                # The connection isn't subscribed to any channels or patterns,
+                # so no messages are available
+                return None
 
         response = self.parse_response(block=False, timeout=timeout)
         if response:
             return self.handle_message(response, ignore_subscribe_messages)
         return None
-
-    def wait_for_subscription(self, timeout, period=0.25):
-        """
-        Wait until this pubsub connection has been subscribed.
-        Return True if the connection was subscribed during the timeout
-        frametime. Otherwise, return False.
-        """
-        mustend = time.time() + timeout
-        while time.time() < mustend:
-            if self.subscribed:
-                return True
-            time.sleep(period)
-        return False
 
     def ping(self, message=None):
         """
@@ -1580,6 +1583,10 @@ class PubSub:
                 if channel in self.pending_unsubscribe_channels:
                     self.pending_unsubscribe_channels.remove(channel)
                     self.channels.pop(channel, None)
+            if not self.channels and not self.patterns:
+                # There are no subscriptions anymore, set subscribed_event flag
+                # to false
+                self.subscribed_event.clear()
 
         if message_type in self.PUBLISH_MESSAGE_TYPES:
             # if there's a message handler, invoke it
