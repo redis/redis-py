@@ -3487,6 +3487,12 @@ class CoreCommands:
         """
         return self.execute_command('REPLICAOF', *args)
 
+    def sync(self):
+        return self.execute_command('SYNC')
+
+    def psync(self, replicationid, offset):
+        return self.execute_command('PSYNC', replicationid, offset)
+
     def eval(self, script, numkeys, *keys_and_args):
         """
         Execute the Lua ``script``, specifying the ``numkeys`` the script
