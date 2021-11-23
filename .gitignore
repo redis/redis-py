@@ -14,3 +14,4 @@ vagrant/.vagrant
 env
 venv
 coverage.xml
+.venv

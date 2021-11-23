@@ -6,10 +6,8 @@ import re
 import threading
 import time
 import warnings
-from redis.commands import (
-    list_or_args,
-    Commands
-)
+from redis.commands import (CoreCommands, RedisModuleCommands,
+                            SentinelCommands, list_or_args)
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
                               SSLConnection)
 from redis.lock import Lock
@@ -308,14 +306,24 @@ def parse_xautoclaim(response, **options):
     return parse_stream_list(response[1])
 
 
-def parse_xinfo_stream(response):
+def parse_xinfo_stream(response, **options):
     data = pairs_to_dict(response, decode_keys=True)
-    first = data['first-entry']
-    if first is not None:
-        data['first-entry'] = (first[0], pairs_to_dict(first[1]))
-    last = data['last-entry']
-    if last is not None:
-        data['last-entry'] = (last[0], pairs_to_dict(last[1]))
+    if not options.get('full', False):
+        first = data['first-entry']
+        if first is not None:
+            data['first-entry'] = (first[0], pairs_to_dict(first[1]))
+        last = data['last-entry']
+        if last is not None:
+            data['last-entry'] = (last[0], pairs_to_dict(last[1]))
+    else:
+        data['entries'] = {
+            _id: pairs_to_dict(entry)
+            for _id, entry in data['entries']
+        }
+        data['groups'] = [
+            pairs_to_dict(group, decode_keys=True)
+            for group in data['groups']
+        ]
     return data
 
 
@@ -390,19 +398,58 @@ def parse_zscan(response, **options):
     return int(cursor), list(zip(it, map(score_cast_func, it)))
 
 
+def parse_zmscore(response, **options):
+    # zmscore: list of scores (double precision floating point number) or nil
+    return [float(score) if score is not None else None for score in response]
+
+
 def parse_slowlog_get(response, **options):
     space = ' ' if options.get('decode_responses', False) else b' '
-    return [{
-        'id': item[0],
-        'start_time': int(item[1]),
-        'duration': int(item[2]),
-        'command':
-            # Redis Enterprise injects another entry at index [3], which has
-            # the complexity info (i.e. the value N in case the command has
-            # an O(N) complexity) instead of the command.
-            space.join(item[3]) if isinstance(item[3], list) else
-            space.join(item[4])
-    } for item in response]
+
+    def parse_item(item):
+        result = {
+            'id': item[0],
+            'start_time': int(item[1]),
+            'duration': int(item[2]),
+        }
+        # Redis Enterprise injects another entry at index [3], which has
+        # the complexity info (i.e. the value N in case the command has
+        # an O(N) complexity) instead of the command.
+        if isinstance(item[3], list):
+            result['command'] = space.join(item[3])
+        else:
+            result['complexity'] = item[3]
+            result['command'] = space.join(item[4])
+        return result
+    return [parse_item(item) for item in response]
+
+
+def parse_stralgo(response, **options):
+    """
+    Parse the response from `STRALGO` command.
+    Without modifiers the returned value is string.
+    When LEN is given the command returns the length of the result
+    (i.e integer).
+    When IDX is given the command returns a dictionary with the LCS
+    length and all the ranges in both the strings, start and end
+    offset for each string, where there are matches.
+    When WITHMATCHLEN is given, each array representing a match will
+    also have the length of the match at the beginning of the array.
+    """
+    if options.get('len', False):
+        return int(response)
+    if options.get('idx', False):
+        if options.get('withmatchlen', False):
+            matches = [[(int(match[-1]))] + list(map(tuple, match[:-1]))
+                       for match in response[1]]
+        else:
+            matches = [list(map(tuple, match))
+                       for match in response[1]]
+        return {
+            str_if_bytes(response[0]): matches,
+            str_if_bytes(response[2]): int(response[3])
+        }
+    return str_if_bytes(response)
 
 
 def parse_cluster_info(response, **options):
@@ -433,10 +480,15 @@ def parse_cluster_nodes(response, **options):
     return dict(_parse_node_line(line) for line in raw_lines)
 
 
-def parse_georadius_generic(response, **options):
+def parse_geosearch_generic(response, **options):
+    """
+    Parse the response of 'GEOSEARCH', GEORADIUS' and 'GEORADIUSBYMEMBER'
+    commands according to 'withdist', 'withhash' and 'withcoord' labels.
+    """
     if options['store'] or options['store_dist']:
-        # `store` and `store_diff` cant be combined
+        # `store` and `store_dist` cant be combined
         # with other command arguments.
+        # relevant to 'GEORADIUS' and 'GEORADIUSBYMEMBER'
         return response
 
     if type(response) != list:
@@ -444,7 +496,7 @@ def parse_georadius_generic(response, **options):
     else:
         response_list = response
 
-    if not options['withdist'] and not options['withcoord']\
+    if not options['withdist'] and not options['withcoord'] \
             and not options['withhash']:
         # just a bunch of places
         return response_list
@@ -555,19 +607,22 @@ def parse_set_result(response, **options):
     return response and str_if_bytes(response) == 'OK'
 
 
-class Redis(Commands, object):
+class Redis(RedisModuleCommands, CoreCommands, SentinelCommands, object):
     """
     Implementation of the Redis protocol.
 
     This abstract class provides a Python interface to all Redis commands
     and an implementation of the Redis protocol.
 
-    Connection and Pipeline derive from this, implementing how
-    the commands are sent and received to the Redis server
+    Pipelines derive from this, implementing how
+    the commands are sent and received to the Redis server. Based on
+    configuration, an instance will either use a ConnectionPool, or
+    Connection object to talk to redis.
     """
     RESPONSE_CALLBACKS = {
         **string_keys_to_dict(
-            'AUTH COPY EXPIRE EXPIREAT HEXISTS HMSET LMOVE BLMOVE MOVE '
+            'AUTH COPY EXPIRE EXPIREAT PEXPIRE PEXPIREAT '
+            'HEXISTS HMSET LMOVE BLMOVE MOVE '
             'MSETNX PERSIST PSETEX RENAMENX SISMEMBER SMOVE SETEX SETNX',
             bool
         ),
@@ -615,6 +670,7 @@ class Redis(Commands, object):
         'ACL DELUSER': int,
         'ACL GENPASS': str_if_bytes,
         'ACL GETUSER': parse_acl_getuser,
+        'ACL HELP': lambda r: list(map(str_if_bytes, r)),
         'ACL LIST': lambda r: list(map(str_if_bytes, r)),
         'ACL LOAD': bool_ok,
         'ACL LOG': parse_acl_log,
@@ -630,6 +686,8 @@ class Redis(Commands, object):
         'CLIENT SETNAME': bool_ok,
         'CLIENT UNBLOCK': lambda r: r and int(r) == 1 or False,
         'CLIENT PAUSE': bool_ok,
+        'CLIENT GETREDIR': int,
+        'CLIENT TRACKINGINFO': lambda r: list(map(str_if_bytes, r)),
         'CLUSTER ADDSLOTS': bool_ok,
         'CLUSTER COUNT-FAILURE-REPORTS': lambda x: int(x),
         'CLUSTER COUNTKEYSINSLOT': lambda x: int(x),
@@ -646,6 +704,7 @@ class Redis(Commands, object):
         'CLUSTER SET-CONFIG-EPOCH': bool_ok,
         'CLUSTER SETSLOT': bool_ok,
         'CLUSTER SLAVES': parse_cluster_nodes,
+        'COMMAND COUNT': int,
         'CONFIG GET': parse_config_get,
         'CONFIG RESETSTAT': bool_ok,
         'CONFIG SET': bool_ok,
@@ -654,8 +713,9 @@ class Redis(Commands, object):
         'GEOPOS': lambda r: list(map(lambda ll: (float(ll[0]),
                                      float(ll[1]))
                                      if ll is not None else None, r)),
-        'GEORADIUS': parse_georadius_generic,
-        'GEORADIUSBYMEMBER': parse_georadius_generic,
+        'GEOSEARCH': parse_geosearch_generic,
+        'GEORADIUS': parse_geosearch_generic,
+        'GEORADIUSBYMEMBER': parse_geosearch_generic,
         'HGETALL': lambda r: r and pairs_to_dict(r) or {},
         'HSCAN': parse_hscan,
         'INFO': parse_info,
@@ -668,6 +728,8 @@ class Redis(Commands, object):
         'MODULE LIST': lambda r: [pairs_to_dict(m) for m in r],
         'OBJECT': parse_object,
         'PING': lambda r: str_if_bytes(r) == 'PONG',
+        'QUIT': bool_ok,
+        'STRALGO': parse_stralgo,
         'PUBSUB NUMSUB': parse_pubsub_numsub,
         'RANDOMKEY': lambda r: r and r or None,
         'SCAN': parse_scan,
@@ -675,10 +737,14 @@ class Redis(Commands, object):
         'SCRIPT FLUSH': bool_ok,
         'SCRIPT KILL': bool_ok,
         'SCRIPT LOAD': str_if_bytes,
+        'SENTINEL CKQUORUM': bool_ok,
+        'SENTINEL FAILOVER': bool_ok,
+        'SENTINEL FLUSHCONFIG': bool_ok,
         'SENTINEL GET-MASTER-ADDR-BY-NAME': parse_sentinel_get_master,
         'SENTINEL MASTER': parse_sentinel_master,
         'SENTINEL MASTERS': parse_sentinel_masters,
         'SENTINEL MONITOR': bool_ok,
+        'SENTINEL RESET': bool_ok,
         'SENTINEL REMOVE': bool_ok,
         'SENTINEL SENTINELS': parse_sentinel_slaves_and_sentinels,
         'SENTINEL SET': bool_ok,
@@ -701,6 +767,7 @@ class Redis(Commands, object):
         'XPENDING': parse_xpending,
         'ZADD': parse_zadd,
         'ZSCAN': parse_zscan,
+        'ZMSCORE': parse_zmscore,
     }
 
     @classmethod
@@ -830,6 +897,30 @@ class Redis(Commands, object):
     def set_response_callback(self, command, callback):
         "Set a custom Response Callback"
         self.response_callbacks[command] = callback
+
+    def load_external_module(self, funcname, func,
+                             ):
+        """
+        This function can be used to add externally defined redis modules,
+        and their namespaces to the redis client.
+
+        funcname - A string containing the name of the function to create
+        func - The function, being added to this class.
+
+        ex: Assume that one has a custom redis module named foomod that
+        creates command named 'foo.dothing' and 'foo.anotherthing' in redis.
+        To load function functions into this namespace:
+
+        from redis import Redis
+        from foomodule import F
+        r = Redis()
+        r.load_external_module("foo", F)
+        r.foo().dothing('your', 'arguments')
+
+        For a concrete example see the reimport of the redisjson module in
+        tests/test_connection.py::test_loading_external_modules
+        """
+        setattr(self, funcname, func)
 
     def pipeline(self, transaction=True, shard_hint=None):
         """
@@ -1203,7 +1294,10 @@ class PubSub:
 
         self.check_health()
 
-        if not block and not conn.can_read(timeout=timeout):
+        if(
+                not block
+                and not self._execute(conn, conn.can_read, timeout=timeout)
+        ):
             return None
         response = self._execute(conn, conn.read_response)
 
@@ -1754,6 +1848,12 @@ class Pipeline(Redis):
         finally:
             self.reset()
 
+    def discard(self):
+        """Flushes all previously queued commands
+        See: https://redis.io/commands/DISCARD
+        """
+        self.execute_command("DISCARD")
+
     def watch(self, *names):
         "Watches the values at keys ``names``"
         if self.explicit_transaction:
@@ -1797,100 +1897,3 @@ class Script:
             # Overwrite the sha just in case there was a discrepancy.
             self.sha = client.script_load(self.script)
             return client.evalsha(self.sha, len(keys), *args)
-
-
-class BitFieldOperation:
-    """
-    Command builder for BITFIELD commands.
-    """
-    def __init__(self, client, key, default_overflow=None):
-        self.client = client
-        self.key = key
-        self._default_overflow = default_overflow
-        self.reset()
-
-    def reset(self):
-        """
-        Reset the state of the instance to when it was constructed
-        """
-        self.operations = []
-        self._last_overflow = 'WRAP'
-        self.overflow(self._default_overflow or self._last_overflow)
-
-    def overflow(self, overflow):
-        """
-        Update the overflow algorithm of successive INCRBY operations
-        :param overflow: Overflow algorithm, one of WRAP, SAT, FAIL. See the
-            Redis docs for descriptions of these algorithmsself.
-        :returns: a :py:class:`BitFieldOperation` instance.
-        """
-        overflow = overflow.upper()
-        if overflow != self._last_overflow:
-            self._last_overflow = overflow
-            self.operations.append(('OVERFLOW', overflow))
-        return self
-
-    def incrby(self, fmt, offset, increment, overflow=None):
-        """
-        Increment a bitfield by a given amount.
-        :param fmt: format-string for the bitfield being updated, e.g. 'u8'
-            for an unsigned 8-bit integer.
-        :param offset: offset (in number of bits). If prefixed with a
-            '#', this is an offset multiplier, e.g. given the arguments
-            fmt='u8', offset='#2', the offset will be 16.
-        :param int increment: value to increment the bitfield by.
-        :param str overflow: overflow algorithm. Defaults to WRAP, but other
-            acceptable values are SAT and FAIL. See the Redis docs for
-            descriptions of these algorithms.
-        :returns: a :py:class:`BitFieldOperation` instance.
-        """
-        if overflow is not None:
-            self.overflow(overflow)
-
-        self.operations.append(('INCRBY', fmt, offset, increment))
-        return self
-
-    def get(self, fmt, offset):
-        """
-        Get the value of a given bitfield.
-        :param fmt: format-string for the bitfield being read, e.g. 'u8' for
-            an unsigned 8-bit integer.
-        :param offset: offset (in number of bits). If prefixed with a
-            '#', this is an offset multiplier, e.g. given the arguments
-            fmt='u8', offset='#2', the offset will be 16.
-        :returns: a :py:class:`BitFieldOperation` instance.
-        """
-        self.operations.append(('GET', fmt, offset))
-        return self
-
-    def set(self, fmt, offset, value):
-        """
-        Set the value of a given bitfield.
-        :param fmt: format-string for the bitfield being read, e.g. 'u8' for
-            an unsigned 8-bit integer.
-        :param offset: offset (in number of bits). If prefixed with a
-            '#', this is an offset multiplier, e.g. given the arguments
-            fmt='u8', offset='#2', the offset will be 16.
-        :param int value: value to set at the given position.
-        :returns: a :py:class:`BitFieldOperation` instance.
-        """
-        self.operations.append(('SET', fmt, offset, value))
-        return self
-
-    @property
-    def command(self):
-        cmd = ['BITFIELD', self.key]
-        for ops in self.operations:
-            cmd.extend(ops)
-        return cmd
-
-    def execute(self):
-        """
-        Execute the operation(s) in a single BITFIELD command. The return value
-        is a list of values corresponding to each operation. If the client
-        used to create this instance was a pipeline, the list of values
-        will be present within the pipeline's execute.
-        """
-        command = self.command
-        self.reset()
-        return self.client.execute_command(*command)
