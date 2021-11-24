@@ -9,7 +9,7 @@ The Python interface to the Redis key-value store.
 [![codecov](https://codecov.io/gh/redis/redis-py/branch/master/graph/badge.svg?token=yenl5fzxxr)](https://codecov.io/gh/redis/redis-py)
 [![Total alerts](https://img.shields.io/lgtm/alerts/g/redis/redis-py.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/redis/redis-py/alerts/)
 
-[Installation](##installation) | [Contributing](##contributing) |  [Getting Started](##getting-started) | [Connecting To Redis](##connecting-to-redis)
+[Installation](#installation) | [Contributing](#contributing) |  [Getting Started](#getting-started) | [Connecting To Redis](#connecting-to-redis)
 
 ---------------------------------------------
 
