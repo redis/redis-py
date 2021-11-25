@@ -21,6 +21,12 @@ def devenv(c):
 
 
 @task
+def build_docs(c):
+    """Generates the sphinx documentation."""
+    run("tox -e docs")
+
+
+@task
 def linters(c):
     """Run code linters"""
     run("tox -e linters")
