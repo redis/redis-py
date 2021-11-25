@@ -3796,6 +3796,7 @@ class TestRedisCommands:
         assert isinstance(res, int)
         assert res >= 100
 
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('2.8.13')
     def test_command_getkeys(self, r):
         res = r.command_getkeys('MSET', 'a', 'b', 'c', 'd', 'e', 'f')

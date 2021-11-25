@@ -41,15 +41,15 @@ def tests(c):
     with and without hiredis.
     """
     print("Starting Redis tests")
-    run("tox -e '{redis,cluster}'-'{plain,hiredis}'")
+    run("tox -e '{standalone,cluster}'-'{plain,hiredis}'")
 
 
 @task
-def redis_tests(c):
+def standalone_tests(c):
     """Run all Redis tests against the current python,
     with and without hiredis."""
     print("Starting Redis tests")
-    run("tox -e redis-'{hiredis}'")
+    run("tox -e standalone-'{hiredis}'")
 
 
 @task
