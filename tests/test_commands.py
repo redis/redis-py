@@ -3797,6 +3797,15 @@ class TestRedisCommands:
         assert res >= 100
 
     @skip_if_server_version_lt('2.8.13')
+    def test_command_getkeys(self, r):
+        res = r.command_getkeys('MSET', 'a', 'b', 'c', 'd', 'e', 'f')
+        assert res == [b'a', b'c', b'e']
+        res = r.command_getkeys('EVAL', '"not consulted"',
+                                '3', 'key1', 'key2', 'key3',
+                                'arg1', 'arg2', 'arg3', 'argN')
+        assert res == [b'key1', b'key2', b'key3']
+
+    @skip_if_server_version_lt('2.8.13')
     def test_command(self, r):
         res = r.command()
         assert len(res) >= 100

@@ -3989,6 +3989,9 @@ class ModuleCommands:
     def command_count(self):
         return self.execute_command('COMMAND COUNT')
 
+    def command_getkeys(self, *args):
+        return self.execute_command('COMMAND GETKEYS', *args)
+
     def command(self):
         return self.execute_command('COMMAND')
 
