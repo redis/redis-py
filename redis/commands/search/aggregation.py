@@ -345,12 +345,6 @@ class AggregateRequest(object):
         self._cursor = args
         return self
 
-    def _limit_2_args(self, limit):
-        if limit[1]:
-            return ["LIMIT"] + [str(x) for x in limit]
-        else:
-            return []
-
     def build_args(self):
         # @foo:bar ...
         ret = [self._query]

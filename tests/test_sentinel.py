@@ -81,16 +81,19 @@ def sentinel(request, cluster):
     return Sentinel([('foo', 26379), ('bar', 26379)])
 
 
+@pytest.mark.onlynoncluster
 def test_discover_master(sentinel, master_ip):
     address = sentinel.discover_master('mymaster')
     assert address == (master_ip, 6379)
 
 
+@pytest.mark.onlynoncluster
 def test_discover_master_error(sentinel):
     with pytest.raises(MasterNotFoundError):
         sentinel.discover_master('xxx')
 
 
+@pytest.mark.onlynoncluster
 def test_discover_master_sentinel_down(cluster, sentinel, master_ip):
     # Put first sentinel 'foo' down
     cluster.nodes_down.add(('foo', 26379))
@@ -100,6 +103,7 @@ def test_discover_master_sentinel_down(cluster, sentinel, master_ip):
     assert sentinel.sentinels[0].id == ('bar', 26379)
 
 
+@pytest.mark.onlynoncluster
 def test_discover_master_sentinel_timeout(cluster, sentinel, master_ip):
     # Put first sentinel 'foo' down
     cluster.nodes_timeout.add(('foo', 26379))
@@ -109,6 +113,7 @@ def test_discover_master_sentinel_timeout(cluster, sentinel, master_ip):
     assert sentinel.sentinels[0].id == ('bar', 26379)
 
 
+@pytest.mark.onlynoncluster
 def test_master_min_other_sentinels(cluster, master_ip):
     sentinel = Sentinel([('foo', 26379)], min_other_sentinels=1)
     # min_other_sentinels
@@ -119,18 +124,21 @@ def test_master_min_other_sentinels(cluster, master_ip):
     assert address == (master_ip, 6379)
 
 
+@pytest.mark.onlynoncluster
 def test_master_odown(cluster, sentinel):
     cluster.master['is_odown'] = True
     with pytest.raises(MasterNotFoundError):
         sentinel.discover_master('mymaster')
 
 
+@pytest.mark.onlynoncluster
 def test_master_sdown(cluster, sentinel):
     cluster.master['is_sdown'] = True
     with pytest.raises(MasterNotFoundError):
         sentinel.discover_master('mymaster')
 
 
+@pytest.mark.onlynoncluster
 def test_discover_slaves(cluster, sentinel):
     assert sentinel.discover_slaves('mymaster') == []
 
@@ -165,6 +173,7 @@ def test_discover_slaves(cluster, sentinel):
         ('slave0', 1234), ('slave1', 1234)]
 
 
+@pytest.mark.onlynoncluster
 def test_master_for(cluster, sentinel, master_ip):
     master = sentinel.master_for('mymaster', db=9)
     assert master.ping()
@@ -175,6 +184,7 @@ def test_master_for(cluster, sentinel, master_ip):
     assert master.ping()
 
 
+@pytest.mark.onlynoncluster
 def test_slave_for(cluster, sentinel):
     cluster.slaves = [
         {'ip': '127.0.0.1', 'port': 6379,
@@ -184,6 +194,7 @@ def test_slave_for(cluster, sentinel):
     assert slave.ping()
 
 
+@pytest.mark.onlynoncluster
 def test_slave_for_slave_not_found_error(cluster, sentinel):
     cluster.master['is_odown'] = True
     slave = sentinel.slave_for('mymaster', db=9)
@@ -191,6 +202,7 @@ def test_slave_for_slave_not_found_error(cluster, sentinel):
         slave.ping()
 
 
+@pytest.mark.onlynoncluster
 def test_slave_round_robin(cluster, sentinel, master_ip):
     cluster.slaves = [
         {'ip': 'slave0', 'port': 6379, 'is_odown': False, 'is_sdown': False},
@@ -206,14 +218,17 @@ def test_slave_round_robin(cluster, sentinel, master_ip):
         next(rotator)
 
 
+@pytest.mark.onlynoncluster
 def test_ckquorum(cluster, sentinel):
     assert sentinel.sentinel_ckquorum("mymaster")
 
 
+@pytest.mark.onlynoncluster
 def test_flushconfig(cluster, sentinel):
     assert sentinel.sentinel_flushconfig()
 
 
+@pytest.mark.onlynoncluster
 def test_reset(cluster, sentinel):
     cluster.master['is_odown'] = True
     assert sentinel.sentinel_reset('mymaster')
