@@ -68,6 +68,14 @@ configuration](https://redis.io/topics/sentinel).
 
 ## Testing
 
+Call `invoke tests` to run all tests, or `invoke all-tests` to run linters 
+tests as well. With the 'tests' and 'all-tests' targets, all Redis and 
+RedisCluster tests will be run. 
+
+It is possible to run only Redis client tests (with cluster mode disabled) by 
+using `invoke redis-tests`; similarly, RedisCluster tests can be run by using 
+`invoke cluster-tests`.
+
 Each run of tox starts and stops the various dockers required. Sometimes
 things get stuck, an `invoke clean` can help.
 

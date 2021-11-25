@@ -484,6 +484,7 @@ class TestConnection:
         assert len(pool._available_connections) == 1
         assert not pool._available_connections[0]._sock
 
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('2.8.8')
     @skip_if_redis_enterprise
     def test_busy_loading_disconnects_socket(self, r):
@@ -495,6 +496,7 @@ class TestConnection:
             r.execute_command('DEBUG', 'ERROR', 'LOADING fake message')
         assert not r.connection._sock
 
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('2.8.8')
     @skip_if_redis_enterprise
     def test_busy_loading_from_pipeline_immediate_command(self, r):
@@ -511,6 +513,7 @@ class TestConnection:
         assert len(pool._available_connections) == 1
         assert not pool._available_connections[0]._sock
 
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('2.8.8')
     @skip_if_redis_enterprise
     def test_busy_loading_from_pipeline(self, r):
@@ -571,6 +574,7 @@ class TestConnection:
             r.execute_command('DEBUG', 'ERROR', 'ERR invalid password')
 
 
+@pytest.mark.onlynoncluster
 class TestMultiConnectionClient:
     @pytest.fixture()
     def r(self, request):
@@ -584,6 +588,7 @@ class TestMultiConnectionClient:
         assert r.get('a') == b'123'
 
 
+@pytest.mark.onlynoncluster
 class TestHealthCheck:
     interval = 60
 
