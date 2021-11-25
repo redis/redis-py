@@ -1,7 +1,6 @@
 from itertools import chain
 import copy
 import datetime
-import hashlib
 import re
 import threading
 import time
@@ -15,7 +14,6 @@ from redis.exceptions import (
     ConnectionError,
     ExecAbortError,
     ModuleError,
-    NoScriptError,
     PubSubError,
     RedisError,
     ResponseError,
@@ -1896,37 +1894,3 @@ class Pipeline(Redis):
     def unwatch(self):
         "Unwatches all previously specified keys"
         return self.watching and self.execute_command('UNWATCH') or True
-
-
-class Script:
-    "An executable Lua script object returned by ``register_script``"
-
-    def __init__(self, registered_client, script):
-        self.registered_client = registered_client
-        self.script = script
-        # Precalculate and store the SHA1 hex digest of the script.
-
-        if isinstance(script, str):
-            # We need the encoding from the client in order to generate an
-            # accurate byte representation of the script
-            encoder = registered_client.connection_pool.get_encoder()
-            script = encoder.encode(script)
-        self.sha = hashlib.sha1(script).hexdigest()
-
-    def __call__(self, keys=[], args=[], client=None):
-        "Execute the script, passing any required ``args``"
-        if client is None:
-            client = self.registered_client
-        args = tuple(keys) + tuple(args)
-        # make sure the Redis server knows about the script
-        if isinstance(client, Pipeline):
-            # Make sure the pipeline can register the script before executing.
-            client.scripts.add(self)
-        try:
-            return client.evalsha(self.sha, len(keys), *args)
-        except NoScriptError:
-            # Maybe the client is pointed to a different server than the client
-            # that created this instance?
-            # Overwrite the sha just in case there was a discrepancy.
-            self.sha = client.script_load(self.script)
-            return client.evalsha(self.sha, len(keys), *args)
