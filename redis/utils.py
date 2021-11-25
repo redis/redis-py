@@ -36,3 +36,39 @@ def str_if_bytes(value):
 
 def safe_str(value):
     return str(str_if_bytes(value))
+
+
+def dict_merge(*dicts):
+    """
+    Merge all provided dicts into 1 dict.
+    *dicts : `dict`
+        dictionaries to merge
+    """
+    merged = {}
+
+    for d in dicts:
+        merged.update(d)
+
+    return merged
+
+
+def list_keys_to_dict(key_list, callback):
+    return dict.fromkeys(key_list, callback)
+
+
+def merge_result(command, res):
+    """
+    Merge all items in `res` into a list.
+
+    This command is used when sending a command to multiple nodes
+    and they result from each node should be merged into a single list.
+
+    res : 'dict'
+    """
+    result = set()
+
+    for v in res.values():
+        for value in v:
+            result.add(value)
+
+    return list(result)
