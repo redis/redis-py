@@ -275,7 +275,6 @@ def test_objlen(client):
     assert len(obj) == client.json().objlen("obj")
 
 
-@pytest.mark.pipeline
 @pytest.mark.redismod
 def test_json_commands_in_pipeline(client):
     p = client.json().pipeline()
@@ -290,8 +289,9 @@ def test_json_commands_in_pipeline(client):
     client.flushdb()
     p = client.json().pipeline()
     d = {"hello": "world", "oh": "snap"}
-    p.jsonset("foo", Path.rootPath(), d)
-    p.jsonget("foo")
+    with pytest.deprecated_call():
+        p.jsonset("foo", Path.rootPath(), d)
+        p.jsonget("foo")
     p.exists("notarealkey")
     p.delete("foo")
     assert [True, d, 0, 1] == p.execute()
@@ -463,14 +463,18 @@ def test_numby_commands_dollar(client):
     client.json().set("doc1", "$", {"a": "b", "b": [
         {"a": 2}, {"a": 5.0}, {"a": "c"}]})
 
-    assert client.json().nummultby("doc1", "$..a", 2) == \
-        [None, 4, 10, None]
-    assert client.json().nummultby("doc1", "$..a", 2.5) == \
-        [None, 10.0, 25.0, None]
+    # test list
+    with pytest.deprecated_call():
+        assert client.json().nummultby("doc1", "$..a", 2) == \
+            [None, 4, 10, None]
+        assert client.json().nummultby("doc1", "$..a", 2.5) == \
+            [None, 10.0, 25.0, None]
+
     # Test single
-    assert client.json().nummultby("doc1", "$.b[1].a", 2) == [50.0]
-    assert client.json().nummultby("doc1", "$.b[2].a", 2) == [None]
-    assert client.json().nummultby("doc1", "$.b[1].a", 3) == [150.0]
+    with pytest.deprecated_call():
+        assert client.json().nummultby("doc1", "$.b[1].a", 2) == [50.0]
+        assert client.json().nummultby("doc1", "$.b[2].a", 2) == [None]
+        assert client.json().nummultby("doc1", "$.b[1].a", 3) == [150.0]
 
     # test missing keys
     with pytest.raises(exceptions.ResponseError):
@@ -485,7 +489,9 @@ def test_numby_commands_dollar(client):
     # Test legacy NUMMULTBY
     client.json().set("doc1", "$", {"a": "b", "b": [
         {"a": 2}, {"a": 5.0}, {"a": "c"}]})
-    client.json().nummultby("doc1", ".b[0].a", 3) == 6
+
+    with pytest.deprecated_call():
+        client.json().nummultby("doc1", ".b[0].a", 3) == 6
 
 
 @pytest.mark.redismod
@@ -824,9 +830,11 @@ def test_objkeys_dollar(client):
     # Test missing key
     assert client.json().objkeys("non_existing_doc", "..a") is None
 
-    # Test missing key
+    # Test non existing doc
     with pytest.raises(exceptions.ResponseError):
-        client.json().objkeys("doc1", "$.nowhere")
+        assert client.json().objkeys("non_existing_doc", "$..a") == []
+
+    assert client.json().objkeys("doc1", "$..nowhere") == []
 
 
 @pytest.mark.redismod
@@ -845,12 +853,11 @@ def test_objlen_dollar(client):
     # Test single
     assert client.json().objlen("doc1", "$.nested1.a") == [2]
 
-    # Test missing key
-    assert client.json().objlen("non_existing_doc", "$..a") is None
-
-    # Test missing path
+    # Test missing key, and path
     with pytest.raises(exceptions.ResponseError):
-        client.json().objlen("doc1", "$.nowhere")
+        client.json().objlen("non_existing_doc", "$..a")
+
+    assert client.json().objlen("doc1", "$.nowhere") == []
 
     # Test legacy
     assert client.json().objlen("doc1", ".*.a") == 2
@@ -862,8 +869,8 @@ def test_objlen_dollar(client):
     assert client.json().objlen("non_existing_doc", "..a") is None
 
     # Test missing path
-    with pytest.raises(exceptions.ResponseError):
-        client.json().objlen("doc1", ".nowhere")
+    # with pytest.raises(exceptions.ResponseError):
+    client.json().objlen("doc1", ".nowhere")
 
 
 @pytest.mark.redismod
@@ -1143,11 +1150,11 @@ def test_resp_dollar(client):
     ]
 
     # Test missing path
-    with pytest.raises(exceptions.ResponseError):
-        client.json().resp("doc1", "$.nowhere")
+    client.json().resp("doc1", "$.nowhere")
 
     # Test missing key
-    assert client.json().resp("non_existing_doc", "$..a") is None
+    # with pytest.raises(exceptions.ResponseError):
+    client.json().resp("non_existing_doc", "$..a")
 
 
 @pytest.mark.redismod

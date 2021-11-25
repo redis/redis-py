@@ -565,7 +565,6 @@ def test_query_index(client):
 
 
 @pytest.mark.redismod
-@pytest.mark.pipeline
 def test_pipeline(client):
     pipeline = client.ts().pipeline()
     pipeline.create("with_pipeline")
