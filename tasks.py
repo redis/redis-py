@@ -21,6 +21,12 @@ def devenv(c):
 
 
 @task
+def build_docs(c):
+    """Generates the sphinx documentation."""
+    run("tox -e docs")
+
+
+@task
 def linters(c):
     """Run code linters"""
     run("tox -e linters")
@@ -40,7 +46,24 @@ def tests(c):
     """Run the redis-py test suite against the current python,
     with and without hiredis.
     """
-    run("tox -e plain -e hiredis")
+    print("Starting Redis tests")
+    run("tox -e '{standalone,cluster}'-'{plain,hiredis}'")
+
+
+@task
+def standalone_tests(c):
+    """Run all Redis tests against the current python,
+    with and without hiredis."""
+    print("Starting Redis tests")
+    run("tox -e standalone-'{hiredis}'")
+
+
+@task
+def cluster_tests(c):
+    """Run all Redis Cluster tests against the current python,
+    with and without hiredis."""
+    print("Starting RedisCluster tests")
+    run("tox -e cluster-'{plain,hiredis}'")
 
 
 @task
