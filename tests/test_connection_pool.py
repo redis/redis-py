@@ -430,6 +430,15 @@ class TestConnectionPoolUnixSocketURLParsing:
             'b': '2'
         }
 
+    def test_connection_class_override(self):
+        class MyConnection(redis.UnixDomainSocketConnection):
+            pass
+
+        pool = redis.ConnectionPool.from_url(
+            'unix:///socket', connection_class=MyConnection
+        )
+        assert pool.connection_class == MyConnection
+
 
 @pytest.mark.skipif(not ssl_available, reason="SSL not installed")
 class TestSSLConnectionURLParsing:
@@ -439,6 +448,15 @@ class TestSSLConnectionURLParsing:
         assert pool.connection_kwargs == {
             'host': 'my.host',
         }
+
+    def test_connection_class_override(self):
+        class MyConnection(redis.SSLConnection):
+            pass
+
+        pool = redis.ConnectionPool.from_url(
+            'rediss://my.host', connection_class=MyConnection
+        )
+        assert pool.connection_class == MyConnection
 
     def test_cert_reqs_options(self):
         import ssl
