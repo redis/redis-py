@@ -502,7 +502,7 @@ class Connection:
                  encoding_errors='strict', decode_responses=False,
                  parser_class=DefaultParser, socket_read_size=65536,
                  health_check_interval=0, client_name=None, username=None,
-                 retry=None):
+                 retry=None, custom=False):
         """
         Initialize a new Connection.
         To specify a retry policy, first set `retry_on_timeout` to `True`
@@ -536,6 +536,7 @@ class Connection:
         self._parser = parser_class(socket_read_size=socket_read_size)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
+        self._custom = custom
 
     def __repr__(self):
         repr_args = ','.join(['%s=%s' % (k, v) for k, v in self.repr_pieces()])
@@ -881,7 +882,7 @@ class UnixDomainSocketConnection(Connection):
                  retry_on_timeout=False,
                  parser_class=DefaultParser, socket_read_size=65536,
                  health_check_interval=0, client_name=None,
-                 retry=None):
+                 retry=None, custom=False):
         """
         Initialize a new UnixDomainSocketConnection.
         To specify a retry policy, first set `retry_on_timeout` to `True`
@@ -910,6 +911,7 @@ class UnixDomainSocketConnection(Connection):
         self._parser = parser_class(socket_read_size=socket_read_size)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
+        self._custom = custom
 
     def repr_pieces(self):
         pieces = [
@@ -1166,10 +1168,13 @@ class ConnectionPool:
         "Get a connection from the pool"
         self._checkpid()
         with self._lock:
-            try:
-                connection = self._available_connections.pop()
-            except IndexError:
-                connection = self.make_connection()
+            if options == {}:
+                try:
+                    connection = self._available_connections.pop()
+                except IndexError:
+                    connection = self.make_connection()
+            else:
+                connection = self.make_connection(**options)
             self._in_use_connections.add(connection)
 
         try:
@@ -1204,12 +1209,14 @@ class ConnectionPool:
             decode_responses=kwargs.get('decode_responses', False)
         )
 
-    def make_connection(self):
+    def make_connection(self, **options):
         "Create a new connection"
         if self._created_connections >= self.max_connections:
             raise ConnectionError("Too many connections")
         self._created_connections += 1
-        return self.connection_class(**self.connection_kwargs)
+        kwargs = self.connection_kwargs
+        kwargs.update(options)
+        return self.connection_class(custom=options != {}, **kwargs)
 
     def release(self, connection):
         "Releases the connection back to the pool"
@@ -1233,7 +1240,7 @@ class ConnectionPool:
                 return
 
     def owns_connection(self, connection):
-        return connection.pid == self.pid
+        return connection.pid == self.pid and connection._custom is False
 
     def disconnect(self, inuse_connections=True):
         """
@@ -1323,9 +1330,11 @@ class BlockingConnectionPool(ConnectionPool):
         # reset() and they will immediately release _fork_lock and continue on.
         self.pid = os.getpid()
 
-    def make_connection(self):
+    def make_connection(self, **options):
         "Make a fresh connection."
-        connection = self.connection_class(**self.connection_kwargs)
+        kwargs = self.connection_kwargs
+        kwargs.update(options)
+        connection = self.connection_class(**kwargs)
         self._connections.append(connection)
         return connection
 
@@ -1357,7 +1366,7 @@ class BlockingConnectionPool(ConnectionPool):
         # If the ``connection`` is actually ``None`` then that's a cue to make
         # a new connection to add to the pool.
         if connection is None:
-            connection = self.make_connection()
+            connection = self.make_connection(**options)
 
         try:
             # ensure this connection is connected to Redis

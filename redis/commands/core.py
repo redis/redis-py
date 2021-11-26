@@ -801,7 +801,7 @@ class CoreCommands:
         Return a serialized version of the value stored at the specified key.
         If key does not exist a nil bulk reply is returned.
         """
-        return self.execute_command('DUMP', name)
+        return self.execute_command('DUMP', name, decode_responses=False)
 
     def exists(self, *names):
         "Returns the number of ``names`` that exist"
