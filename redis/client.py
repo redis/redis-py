@@ -1092,7 +1092,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands, object):
         pool = self.connection_pool
         command_name = args[0]
         need_custom = options != {} and options.keys() != ['decode_responses']
-        conn = self.connection and not need_custom or pool.get_connection(command_name, **options)
+        conn = self.connection and not need_custom or
+               pool.get_connection(command_name, **options)
 
         try:
             return conn.retry.call_with_retry(
@@ -1109,7 +1110,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands, object):
         "Parses a response from the Redis server"
         try:
             if 'decode_responses' in options:
-                response = connection.read_response(decode_responses=options['decode_responses'])
+                response = connection.read_response(decode_responses=
+                                                    options['decode_responses'])
             else:
                 response = connection.read_response()
         except ResponseError:
