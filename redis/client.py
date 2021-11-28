@@ -26,7 +26,7 @@ SYM_EMPTY = b''
 EMPTY_RESPONSE = 'EMPTY_RESPONSE'
 
 # some responses (ie. dump) are binary, and just meant to never be decoded
-NEVER_DECODE = 'NEVER_DECODE'
+# NEVER_DECODE = 'NEVER_DECODE'
 
 
 def timestamp_to_datetime(response):
@@ -1091,7 +1091,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands, object):
         "Execute a command and return a parsed response"
         pool = self.connection_pool
         command_name = args[0]
-        conn = self.connection and options == {} or pool.get_connection(command_name, **options)
+        need_custom = options != {} and options.keys() != ['decode_responses']
+        conn = self.connection and not need_custom or pool.get_connection(command_name, **options)
 
         try:
             return conn.retry.call_with_retry(
@@ -1107,8 +1108,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands, object):
     def parse_response(self, connection, command_name, **options):
         "Parses a response from the Redis server"
         try:
-            if NEVER_DECODE in options:
-                response = connection.read_response(disable_decoding=True)
+            if 'decode_responses' in options:
+                response = connection.read_response(decode_responses=options['decode_responses'])
             else:
                 response = connection.read_response()
         except ResponseError:
