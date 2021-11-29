@@ -740,7 +740,7 @@ class RedisCluster(ClusterCommands):
             raise RedisClusterException(
                 "No way to dispatch this command to Redis Cluster. "
                 "Missing key.\nYou can execute the command by specifying "
-                "target nodes.\nCommand: {}".format(args)
+                f"target nodes.\nCommand: {args}"
             )
 
         if len(keys) > 1:
@@ -748,8 +748,9 @@ class RedisCluster(ClusterCommands):
             # the same slot
             slots = {self.keyslot(key) for key in keys}
             if len(slots) != 1:
-                raise RedisClusterException("{} - all keys must map to the "
-                                            "same key slot".format(args[0]))
+                raise RedisClusterException(
+                    f"{args[0]} - all keys must map to the same key slot"
+                )
             return slots.pop()
         else:
             # single key command
@@ -774,12 +775,12 @@ class RedisCluster(ClusterCommands):
             # rc.cluster_save_config(rc.get_primaries())
             nodes = target_nodes.values()
         else:
-            raise TypeError("target_nodes type can be one of the "
-                            "followings: node_flag (PRIMARIES, "
-                            "REPLICAS, RANDOM, ALL_NODES),"
-                            "ClusterNode, list<ClusterNode>, or "
-                            "dict<any, ClusterNode>. The passed type is {0}".
-                            format(type(target_nodes)))
+            raise TypeError(
+                "target_nodes type can be one of the following: "
+                "node_flag (PRIMARIES, REPLICAS, RANDOM, ALL_NODES),"
+                "ClusterNode, list<ClusterNode>, or dict<any, ClusterNode>. "
+                f"The passed type is {type(target_nodes)}"
+            )
         return nodes
 
     def execute_command(self, *args, **kwargs):
@@ -866,9 +867,10 @@ class RedisCluster(ClusterCommands):
                                            command in READ_COMMANDS)
                     moved = False
 
-                log.debug("Executing command {0} on target node: {1} {2}".
-                          format(command, target_node.server_type,
-                                 target_node.name))
+                log.debug(
+                    f"Executing command {command} on target node: "
+                    f"{target_node.server_type} {target_node.name}"
+                )
                 redis_node = self.get_redis_connection(target_node)
                 connection = get_connection(redis_node, *args, **kwargs)
                 if asking:
@@ -1005,13 +1007,13 @@ class ClusterNode:
         self.redis_connection = redis_connection
 
     def __repr__(self):
-        return '[host={},port={},' \
-               'name={},server_type={},redis_connection={}]' \
-            .format(self.host,
-                    self.port,
-                    self.name,
-                    self.server_type,
-                    self.redis_connection)
+        return (
+            f'[host={self.host},'
+            f'port={self.port},'
+            f'name={self.name},'
+            f'server_type={self.server_type},'
+            f'redis_connection={self.redis_connection}]'
+        )
 
     def __eq__(self, obj):
         return isinstance(obj, ClusterNode) and obj.name == self.name
@@ -1133,9 +1135,8 @@ class NodesManager:
         if self.slots_cache.get(slot) is None or \
                 len(self.slots_cache[slot]) == 0:
             raise SlotNotCoveredError(
-                'Slot "{}" not covered by the cluster. '
-                '"require_full_coverage={}"'.format(
-                    slot, self._require_full_coverage)
+                f'Slot "{slot}" not covered by the cluster. '
+                f'"require_full_coverage={self._require_full_coverage}"'
             )
 
         if read_from_replicas is True:
@@ -1194,7 +1195,7 @@ class NodesManager:
             except Exception as e:
                 raise RedisClusterException(
                     'ERROR sending "config get cluster-require-full-coverage"'
-                    ' command to redis server: {}, {}'.format(node.name, e)
+                    f' command to redis server: {node.name}, {e}'
                 )
 
         # at least one node should have cluster-require-full-coverage yes
@@ -1267,7 +1268,7 @@ class NodesManager:
                 msg = e.__str__
                 log.exception('An exception occurred while trying to'
                               ' initialize the cluster using the seed node'
-                              ' {}:\n{}'.format(startup_node.name, msg))
+                              f' {startup_node.name}:\n{msg}')
                 continue
             except ResponseError as e:
                 log.exception(
@@ -1281,15 +1282,13 @@ class NodesManager:
                 else:
                     raise RedisClusterException(
                         'ERROR sending "cluster slots" command to redis '
-                        'server: {}. error: {}'.format(
-                            startup_node, message)
+                        f'server: {startup_node}. error: {message}'
                     )
             except Exception as e:
                 message = e.__str__()
                 raise RedisClusterException(
                     'ERROR sending "cluster slots" command to redis '
-                    'server: {}. error: {}'.format(
-                        startup_node, message)
+                    f'server: {startup_node}. error: {message}'
                 )
 
             # CLUSTER SLOTS command results in the following output:
@@ -1340,17 +1339,16 @@ class NodesManager:
                     else:
                         # Validate that 2 nodes want to use the same slot cache
                         # setup
-                        if tmp_slots[i][0].name != target_node.name:
+                        tmp_slot = tmp_slots[i][0]
+                        if tmp_slot.name != target_node.name:
                             disagreements.append(
-                                '{} vs {} on slot: {}'.format(
-                                    tmp_slots[i][0].name, target_node.name, i)
+                                f'{tmp_slot.name} vs {target_node.name} on slot: {i}'
                             )
 
                             if len(disagreements) > 5:
                                 raise RedisClusterException(
-                                    'startup_nodes could not agree on a valid'
-                                    ' slots cache: {}'.format(
-                                        ", ".join(disagreements))
+                                    f'startup_nodes could not agree on a valid '
+                                    f'slots cache: {", ".join(disagreements)}'
                                 )
 
         if not startup_nodes_reachable:
@@ -1368,9 +1366,8 @@ class NodesManager:
             # Despite the requirement that the slots be covered, there
             # isn't a full coverage
             raise RedisClusterException(
-                'All slots are not covered after query all startup_nodes.'
-                ' {} of {} covered...'.format(
-                    len(self.slots_cache), REDIS_CLUSTER_HASH_SLOTS)
+                f'All slots are not covered after query all startup_nodes. '
+                f'{len(self.slots_cache)} of {REDIS_CLUSTER_HASH_SLOTS} covered...'
             )
         elif not fully_covered and not self._require_full_coverage:
             # The user set require_full_coverage to False.
@@ -1387,8 +1384,7 @@ class NodesManager:
                     'cluster-require-full-coverage configuration to no on '
                     'all of the cluster nodes if you wish the cluster to '
                     'be able to serve without being fully covered.'
-                    ' {} of {} covered...'.format(
-                        len(self.slots_cache), REDIS_CLUSTER_HASH_SLOTS)
+                    f'{len(self.slots_cache)} of {REDIS_CLUSTER_HASH_SLOTS} covered...'
                 )
 
         # Set the tmp variables to the real variables
@@ -1642,8 +1638,10 @@ class ClusterPipeline(RedisCluster):
         Provides extra context to the exception prior to it being handled
         """
         cmd = ' '.join(map(safe_str, command))
-        msg = 'Command # %d (%s) of pipeline caused error: %s' % (
-            number, cmd, exception.args[0])
+        msg = (
+            f'Command # {number} ({cmd}) of pipeline '
+            f'caused error: {exception.args[0]}'
+        )
         exception.args = (msg,) + exception.args[1:]
 
     def execute(self, raise_on_error=True):
@@ -1832,12 +1830,12 @@ class ClusterPipeline(RedisCluster):
             # If a lot of commands have failed, we'll be setting the
             # flag to rebuild the slots table from scratch.
             # So MOVED errors should correct themselves fairly quickly.
-            msg = 'An exception occurred during pipeline execution. ' \
-                  'args: {0}, error: {1} {2}'.\
-                format(attempt[-1].args,
-                       type(attempt[-1].result).__name__,
-                       str(attempt[-1].result))
-            log.exception(msg)
+            log.exception(
+                f'An exception occurred during pipeline execution. '
+                f'args: {attempt[-1].args}, '
+                f'error: {type(attempt[-1].result).__name__} '
+                f'{str(attempt[-1].result)}'
+            )
             self.reinitialize_counter += 1
             if self._should_reinitialized():
                 self.nodes_manager.initialize()
@@ -1929,8 +1927,8 @@ def block_pipeline_command(func):
 
     def inner(*args, **kwargs):
         raise RedisClusterException(
-            "ERROR: Calling pipelined function {} is blocked when "
-            "running redis in cluster mode...".format(func.__name__))
+            f"ERROR: Calling pipelined function {func.__name__} is blocked when "
+            f"running redis in cluster mode...")
 
     return inner
 

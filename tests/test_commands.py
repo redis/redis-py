@@ -99,7 +99,7 @@ class TestRedisCommands:
         assert r.acl_deluser(username) == 1
 
         # now, a group of users
-        users = ['bogususer_%d' % r for r in range(0, 5)]
+        users = [f'bogususer_{r}' for r in range(0, 5)]
         for u in users:
             r.acl_setuser(u, enabled=False, reset=True)
         assert r.acl_deluser(*users) > 1

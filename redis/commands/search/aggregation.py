@@ -392,9 +392,8 @@ class AggregateResult:
         self.schema = schema
 
     def __repr__(self):
-        return "<{} at 0x{:x} Rows={}, Cursor={}>".format(
-            self.__class__.__name__,
-            id(self),
-            len(self.rows),
-            self.cursor.cid if self.cursor else -1,
+        cid = self.cursor.cid if self.cursor else -1
+        return (
+            f"<{self.__class__.__name__} at 0x{id(self):x} "
+            f"Rows={len(self.rows)}, Cursor={cid}>"
         )

@@ -107,8 +107,8 @@ class Encoder:
         elif not isinstance(value, str):
             # a value we don't know how to deal with. throw an error
             typename = type(value).__name__
-            raise DataError("Invalid input of type: '%s'. Convert to a "
-                            "bytes, string, int or float first." % typename)
+            raise DataError(f"Invalid input of type: '{typename}'. "
+                            f"Convert to a bytes, string, int or float first.")
         if isinstance(value, str):
             value = value.encode(self.encoding, self.encoding_errors)
         return value
@@ -646,8 +646,10 @@ class Connection:
         if len(exception.args) == 1:
             return f"Error connecting to {self.host}:{self.port}. {exception.args[0]}."
         else:
-            return "Error %s connecting to %s:%s. %s." % \
-                (exception.args[0], self.host, self.port, exception.args[1])
+            return (
+                f"Error {exception.args[0]} connecting to "
+                f"{self.host}:{self.port}. {exception.args[1]}."
+            )
 
     def on_connect(self):
         "Initialize the connection, authenticate and select a database"
@@ -766,8 +768,9 @@ class Connection:
             raise TimeoutError(f"Timeout reading from {self.host}:{self.port}")
         except OSError as e:
             self.disconnect()
-            raise ConnectionError("Error while reading from %s:%s : %s" %
-                                  (self.host, self.port, e.args))
+            raise ConnectionError(
+                f"Error while reading from {self.host}:{self.port}"
+                f" : {e.args}")
         except BaseException:
             self.disconnect()
             raise
@@ -943,8 +946,10 @@ class UnixDomainSocketConnection(Connection):
         if len(exception.args) == 1:
             return f"Error connecting to unix socket: {self.path}. {exception.args[0]}."
         else:
-            return "Error %s connecting to unix socket: %s. %s." % \
-                (exception.args[0], self.path, exception.args[1])
+            return (
+                f"Error {exception.args[0]} connecting to unix socket: "
+                f"{self.path}. {exception.args[1]}."
+            )
 
 
 FALSE_STRINGS = ('0', 'F', 'FALSE', 'N', 'NO')
@@ -1016,9 +1021,8 @@ def parse_url(url):
         if url.scheme == 'rediss':
             kwargs['connection_class'] = SSLConnection
     else:
-        valid_schemes = 'redis://, rediss://, unix://'
         raise ValueError('Redis URL must specify one of the following '
-                         'schemes (%s)' % valid_schemes)
+                         'schemes (redis://, rediss://, unix://)')
 
     return kwargs
 
@@ -1102,9 +1106,9 @@ class ConnectionPool:
         self.reset()
 
     def __repr__(self):
-        return "{}<{}>".format(
-            type(self).__name__,
-            repr(self.connection_class(**self.connection_kwargs)),
+        return (
+            f"{type(self).__name__}"
+            f"<{repr(self.connection_class(**self.connection_kwargs))}>"
         )
 
     def reset(self):

@@ -46,8 +46,9 @@ class CommandsParser:
                 # version has changed, the commands may not be current
                 self.initialize(redis_conn)
                 if cmd_name not in self.commands:
-                    raise RedisError("{} command doesn't exist in Redis "
-                                     "commands".format(cmd_name.upper()))
+                    raise RedisError(
+                        f"{cmd_name.upper()} command doesn't exist in Redis commands"
+                    )
 
         command = self.commands.get(cmd_name)
         if 'movablekeys' in command['flags']:

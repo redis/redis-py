@@ -101,9 +101,8 @@ def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=20):
     if now >= end_time:
         available_nodes = 0 if client is None else len(client.get_nodes())
         raise RedisClusterException(
-            "The cluster did not become available after {} seconds. "
-            "Only {} nodes out of {} are available".format(
-                timeout, available_nodes, cluster_nodes))
+            f"The cluster did not become available after {timeout} seconds. "
+            f"Only {available_nodes} nodes out of {cluster_nodes} are available")
 
 
 def skip_if_server_version_lt(min_version):

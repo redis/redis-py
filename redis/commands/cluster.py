@@ -638,11 +638,10 @@ class ClusterManagementCommands:
         # check validity
         supported_algo = ['LCS']
         if algo not in supported_algo:
-            raise DataError("The supported algorithms are: %s"
-                            % (', '.join(supported_algo)))
+            supported_algos_str = ', '.join(supported_algo)
+            raise DataError(f"The supported algorithms are: {supported_algos_str}")
         if specific_argument not in ['keys', 'strings']:
-            raise DataError("specific_argument can be only"
-                            " keys or strings")
+            raise DataError("specific_argument can be only keys or strings")
         if len and idx:
             raise DataError("len and idx cannot be provided together.")
 

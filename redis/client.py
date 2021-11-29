@@ -1805,8 +1805,10 @@ class Pipeline(Redis):
 
     def annotate_exception(self, exception, number, command):
         cmd = ' '.join(map(safe_str, command))
-        msg = 'Command # %d (%s) of pipeline caused error: %s' % (
-            number, cmd, exception.args[0])
+        msg = (
+            f'Command # {number} ({cmd}) of pipeline '
+            f'caused error: {exception.args[0]}'
+        )
         exception.args = (msg,) + exception.args[1:]
 
     def parse_response(self, connection, command_name, **options):

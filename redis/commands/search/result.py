@@ -70,4 +70,4 @@ class Result:
             self.docs.append(doc)
 
     def __repr__(self):
-        return "Result{%d total, docs: %s}" % (self.total, self.docs)
+        return f"Result{{{self.total} total, docs: {self.docs}}}"
