@@ -8,6 +8,7 @@ from .conftest import skip_if_server_version_lt
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason='PythonParser only')
+@pytest.mark.onlynoncluster
 def test_invalid_response(r):
     raw = b'x'
     parser = r.connection._parser

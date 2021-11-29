@@ -24,7 +24,8 @@ setup(
     author_email="oss@redis.com",
     python_requires=">=3.6",
     install_requires=[
-        'deprecated'
+        'deprecated==1.2.3',
+        'packaging==21.3',
     ],
     classifiers=[
         "Development Status :: 5 - Production/Stable",
