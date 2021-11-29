@@ -1,3 +1,4 @@
+import pytest
 from .conftest import (
     skip_if_redis_enterprise,
     skip_ifnot_redis_enterprise,
@@ -5,6 +6,7 @@ from .conftest import (
 )
 
 
+@pytest.mark.onlynoncluster
 class TestMonitor:
     def test_wait_command_not_found(self, r):
         "Make sure the wait_for_command func works when command is not found"
