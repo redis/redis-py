@@ -220,6 +220,18 @@ class RedisCluster(ClusterCommands, object):
     COMMAND_FLAGS = dict_merge(
         list_keys_to_dict(
             [
+                "ACL CAT",
+                "ACL DELUSER",
+                "ACL GENPASS",
+                "ACL GETUSER",
+                "ACL HELP",
+                "ACL LIST",
+                "ACL LOG",
+                "ACL LOAD",
+                "ACL SAVE",
+                "ACL SETUSER",
+                "ACL USERS",
+                "ACL WHOAMI",
                 "CLIENT LIST",
                 "CLIENT SETNAME",
                 "CLIENT GETNAME",
