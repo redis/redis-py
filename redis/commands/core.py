@@ -3568,11 +3568,37 @@ class PubSubCommands:
         return self.execute_command('PUBSUB NUMSUB', *args)
 
 
+<<<<<<<<< Temporary merge branch 1
+    def sync(self):
+        """
+        Initiates a replication stream from the master.
+
+        For more information check  https://redis.io/commands/sync
+        """
+        from redis.client import NEVER_DECODE
+        options = {}
+        options[NEVER_DECODE] = []
+        return self.execute_command('SYNC', **options)
+
+    def psync(self, replicationid, offset):
+        """
+        Initiates a replication stream from the master.
+        Newer version for `sync`.
+
+        For more information check  https://redis.io/commands/sync
+        """
+        from redis.client import NEVER_DECODE
+        options = {}
+        options[NEVER_DECODE] = []
+        return self.execute_command('PSYNC', replicationid, offset, **options)
+
+=========
 class ScriptCommands:
     """
     Redis Lua script commands. see:
     https://redis.com/ebook/part-3-next-steps/chapter-11-scripting-redis-with-lua/
     """
+>>>>>>>>> Temporary merge branch 2
     def eval(self, script, numkeys, *keys_and_args):
         """
         Execute the Lua ``script``, specifying the ``numkeys`` the script
