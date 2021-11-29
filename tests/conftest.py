@@ -147,12 +147,12 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
     raise AttributeError("No redis module named {}".format(module_name))
 
 
-def skip_if_redis_enterprise(func):
+def skip_if_redis_enterprise():
     check = REDIS_INFO["enterprise"] is True
     return pytest.mark.skipif(check, reason="Redis enterprise")
 
 
-def skip_ifnot_redis_enterprise(func):
+def skip_ifnot_redis_enterprise():
     check = REDIS_INFO["enterprise"] is False
     return pytest.mark.skipif(check, reason="Not running in redis enterprise")
 

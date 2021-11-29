@@ -51,7 +51,7 @@ class ClusterACLCommands:
         For more information check https://redis.io/commands/acl-deluser
         """
         return self.execute_command('ACL DELUSER', *username,
-                                    target_nodes=None)
+                                    target_nodes=target_nodes)
 
     def acl_genpass(self, bits=None, target_nodes=None):
         """Generate a random password value.
@@ -96,7 +96,7 @@ class ClusterACLCommands:
 
         For more information check https://redis.io/commands/acl-list
         """
-        return self.execute_command('ACL LIST', target_nodes)
+        return self.execute_command('ACL LIST', target_nodes=target_nodes)
 
     def acl_log(self, count=None, target_nodes=None):
         """
@@ -214,7 +214,7 @@ class ClusterACLCommands:
 
         For more information check https://redis.io/commands/acl-setuser
         """
-        encoder = self.connection_pool.get_encoder()
+        encoder = self.encoder
         pieces = [username]
 
         if reset:

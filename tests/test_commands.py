@@ -81,9 +81,8 @@ class TestRedisCommands:
         assert isinstance(commands, list)
         assert 'get' in commands
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_acl_deluser(self, r, request):
         username = 'redis-py-user'
 
@@ -108,7 +107,7 @@ class TestRedisCommands:
         assert r.acl_getuser(users[4]) is None
 
     @skip_if_server_version_lt("6.0.0")
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_acl_genpass(self, r):
         password = r.acl_genpass()
         assert isinstance(password, str)
@@ -122,7 +121,7 @@ class TestRedisCommands:
         assert isinstance(password, str)
 
     @skip_if_server_version_lt("6.0.0")
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_acl_getuser_setuser(self, r, request):
         username = 'redis-py-user'
 
@@ -216,7 +215,7 @@ class TestRedisCommands:
         assert len(res) != 0
 
     @skip_if_server_version_lt("6.0.0")
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_acl_list(self, r, request):
         username = 'redis-py-user'
 
@@ -229,7 +228,8 @@ class TestRedisCommands:
         assert len(users) == 2
 
     @skip_if_server_version_lt("6.0.0")
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
+    @pytest.mark.onlynoncluster
     def test_acl_log(self, r, request):
         username = 'redis-py-user'
 
@@ -265,7 +265,7 @@ class TestRedisCommands:
         assert r.acl_log_reset()
 
     @skip_if_server_version_lt("6.0.0")
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_acl_setuser_categories_without_prefix_fails(self, r, request):
         username = 'redis-py-user'
 
@@ -277,7 +277,7 @@ class TestRedisCommands:
             r.acl_setuser(username, categories=['list'])
 
     @skip_if_server_version_lt("6.0.0")
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_acl_setuser_commands_without_prefix_fails(self, r, request):
         username = 'redis-py-user'
 
@@ -289,7 +289,7 @@ class TestRedisCommands:
             r.acl_setuser(username, commands=['get'])
 
     @skip_if_server_version_lt("6.0.0")
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_acl_setuser_add_passwords_and_nopass_fails(self, r, request):
         username = 'redis-py-user'
 
@@ -333,7 +333,7 @@ class TestRedisCommands:
             clients = r.client_list(_type=client_type)
             assert isinstance(clients, list)
 
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_client_list_replica(self, r):
         clients = r.client_list(_type='replica')
         assert isinstance(clients, list)
@@ -482,11 +482,12 @@ class TestRedisCommands:
         assert r.client_kill_filter(laddr=client_2_addr)
 
     @skip_if_server_version_lt('6.0.0')
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_client_kill_filter_by_user(self, r, request):
         killuser = 'user_to_kill'
         r.acl_setuser(killuser, enabled=True, reset=True,
-                      commands=['+get', '+set', '+select'],
+                      commands=['+get', '+set', '+select', '+cluster',
+                                '+command'],
                       keys=['cache:*'], nopass=True)
         _get_client(redis.Redis, request, flushdb=False, username=killuser)
         r.client_kill_filter(user=killuser)
@@ -497,7 +498,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('2.9.50')
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_client_pause(self, r):
         assert r.client_pause(1)
         assert r.client_pause(timeout=1)
@@ -506,7 +507,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('6.2.0')
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_client_unpause(self, r):
         assert r.client_unpause() == b'OK'
 
@@ -526,7 +527,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('6.0.0')
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_client_getredir(self, r):
         assert isinstance(r.client_getredir(), int)
         assert r.client_getredir() == -1
@@ -538,7 +539,7 @@ class TestRedisCommands:
         # assert data['maxmemory'].isdigit()
 
     @pytest.mark.onlynoncluster
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_config_resetstat(self, r):
         r.ping()
         prior_commands_processed = int(r.info()['total_commands_processed'])
@@ -547,7 +548,7 @@ class TestRedisCommands:
         reset_commands_processed = int(r.info()['total_commands_processed'])
         assert reset_commands_processed < prior_commands_processed
 
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_config_set(self, r):
         r.config_set('timeout', 70)
         assert r.config_get()['timeout'] == '70'
@@ -574,7 +575,7 @@ class TestRedisCommands:
         assert 'redis_version' in info.keys()
 
     @pytest.mark.onlynoncluster
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_lastsave(self, r):
         assert isinstance(r.lastsave(), datetime.datetime)
 
@@ -674,7 +675,7 @@ class TestRedisCommands:
         assert isinstance(t[0], int)
         assert isinstance(t[1], int)
 
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_bgsave(self, r):
         assert r.bgsave()
         time.sleep(0.3)
@@ -1256,7 +1257,7 @@ class TestRedisCommands:
         value2 = 'mynewtext'
         res = 'mytext'
 
-        if skip_if_redis_enterprise(None).args[0] is True:
+        if skip_if_redis_enterprise().args[0] is True:
             with pytest.raises(redis.exceptions.ResponseError):
                 assert r.stralgo('LCS', value1, value2) == res
             return
@@ -1304,7 +1305,7 @@ class TestRedisCommands:
     def test_substr(self, r):
         r['a'] = '0123456789'
 
-        if skip_if_redis_enterprise(None).args[0] is True:
+        if skip_if_redis_enterprise().args[0] is True:
             with pytest.raises(redis.exceptions.ResponseError):
                 assert r.substr('a', 0) == b'0123456789'
             return
@@ -2572,7 +2573,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('3.0.0')
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_readwrite(self, r):
         assert r.readwrite()
 
@@ -3741,7 +3742,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt('4.0.0')
     def test_memory_malloc_stats(self, r):
-        if skip_if_redis_enterprise(None).args[0] is True:
+        if skip_if_redis_enterprise().args[0] is True:
             with pytest.raises(redis.exceptions.ResponseError):
                 assert r.memory_malloc_stats()
             return
@@ -3754,7 +3755,7 @@ class TestRedisCommands:
         # has data
         r.set('foo', 'bar')
 
-        if skip_if_redis_enterprise(None).args[0] is True:
+        if skip_if_redis_enterprise().args[0] is True:
             with pytest.raises(redis.exceptions.ResponseError):
                 stats = r.memory_stats()
             return
@@ -3772,7 +3773,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('4.0.0')
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_module_list(self, r):
         assert isinstance(r.module_list(), list)
         for x in r.module_list():
@@ -3804,7 +3805,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('4.0.0')
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_module(self, r):
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
             r.module_load('/some/fake/path')
@@ -3860,7 +3861,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt('5.0.0')
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_replicaof(self, r):
         with pytest.raises(redis.ResponseError):
             assert r.replicaof("NO ONE")
@@ -3938,7 +3939,7 @@ class TestBinarySave:
         assert '6' in parsed['allocation_stats']
         assert '>=256' in parsed['allocation_stats']
 
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_large_responses(self, r):
         "The PythonParser has some special cases for return values > 1MB"
         # load up 5MB of data into a key

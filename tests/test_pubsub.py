@@ -543,7 +543,7 @@ class TestPubSubPings:
 class TestPubSubConnectionKilled:
 
     @skip_if_server_version_lt('3.0.0')
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_connection_error_raised_when_connection_dies(self, r):
         p = r.pubsub()
         p.subscribe('foo')

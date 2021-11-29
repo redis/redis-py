@@ -17,6 +17,7 @@ from redis.exceptions import (
     ClusterDownError,
     DataError,
     MovedError,
+    NoPermissionError,
     RedisClusterException,
     RedisError
 )
@@ -24,6 +25,7 @@ from redis.exceptions import (
 from redis.crc import key_slot
 from .conftest import (
     _get_client,
+    skip_if_redis_enterprise,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
     wait_for_command
@@ -1687,6 +1689,45 @@ class TestClusterRedisCommands:
             r[key] = 1
         assert r.randomkey(target_nodes=node) in \
                (b'{foo}a', b'{foo}b', b'{foo}c')
+
+    @skip_if_server_version_lt("6.0.0")
+    @skip_if_redis_enterprise()
+    def test_acl_log(self, r, request):
+        key = '{cache}:'
+        node = r.get_node_from_key(key)
+        username = 'redis-py-user'
+
+        def teardown():
+            r.acl_deluser(username, target_nodes='primaries')
+
+        request.addfinalizer(teardown)
+        r.acl_setuser(username, enabled=True, reset=True,
+                      commands=['+get', '+set', '+select', '+cluster',
+                                '+command'], keys=['{cache}:*'], nopass=True,
+                      target_nodes='primaries')
+        r.acl_log_reset(target_nodes=node)
+
+        user_client = _get_client(RedisCluster, request, flushdb=False,
+                                  username=username)
+
+        # Valid operation and key
+        assert user_client.set('{cache}:0', 1)
+        assert user_client.get('{cache}:0') == b'1'
+
+        # Invalid key
+        with pytest.raises(NoPermissionError):
+            user_client.get('{cache}violated_cache:0')
+
+        # Invalid operation
+        with pytest.raises(NoPermissionError):
+            user_client.hset('{cache}:0', 'hkey', 'hval')
+
+        assert isinstance(r.acl_log(target_nodes=node), list)
+        assert len(r.acl_log(target_nodes=node)) == 2
+        assert len(r.acl_log(count=1, target_nodes=node)) == 1
+        assert isinstance(r.acl_log(target_nodes=node)[0], dict)
+        assert 'client-info' in r.acl_log(count=1, target_nodes=node)[0]
+        assert r.acl_log_reset(target_nodes=node)
 
 
 @pytest.mark.onlycluster

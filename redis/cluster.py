@@ -100,6 +100,7 @@ REDIS_ALLOWED_KEYS = (
     "charset",
     "connection_class",
     "connection_pool",
+    "client_name",
     "db",
     "decode_responses",
     "encoding",
