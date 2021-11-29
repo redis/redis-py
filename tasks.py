@@ -73,7 +73,7 @@ def clean(c):
         shutil.rmtree("build")
     if os.path.isdir("dist"):
         shutil.rmtree("dist")
-    run("docker rm -f {}".format(' '.join(dockers)))
+    run(f"docker rm -f {' '.join(dockers)}")
 
 
 @task

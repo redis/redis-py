@@ -214,8 +214,7 @@ class SocketBuffer:
             allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
             if not raise_on_timeout and ex.errno == allowed:
                 return False
-            raise ConnectionError("Error while reading from socket: %s" %
-                                  (ex.args,))
+            raise ConnectionError(f"Error while reading from socket: {ex.args}")
         finally:
             if custom_timeout:
                 sock.settimeout(self.socket_timeout)
@@ -323,7 +322,7 @@ class PythonParser(BaseParser):
         byte, response = raw[:1], raw[1:]
 
         if byte not in (b'-', b'+', b':', b'$', b'*'):
-            raise InvalidResponse("Protocol Error: %r" % raw)
+            raise InvalidResponse(f"Protocol Error: {raw!r}")
 
         # server returned an error
         if byte == b'-':
@@ -445,8 +444,7 @@ class HiredisParser(BaseParser):
             allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
             if not raise_on_timeout and ex.errno == allowed:
                 return False
-            raise ConnectionError("Error while reading from socket: %s" %
-                                  (ex.args,))
+            raise ConnectionError(f"Error while reading from socket: {ex.args}")
         finally:
             if custom_timeout:
                 sock.settimeout(self._socket_timeout)
@@ -646,8 +644,7 @@ class Connection:
         # args for socket.error can either be (errno, "message")
         # or just "message"
         if len(exception.args) == 1:
-            return "Error connecting to %s:%s. %s." % \
-                (self.host, self.port, exception.args[0])
+            return f"Error connecting to {self.host}:{self.port}. {exception.args[0]}."
         else:
             return "Error %s connecting to %s:%s. %s." % \
                 (exception.args[0], self.host, self.port, exception.args[1])
@@ -741,8 +738,7 @@ class Connection:
             else:
                 errno = e.args[0]
                 errmsg = e.args[1]
-            raise ConnectionError("Error %s while writing to socket. %s." %
-                                  (errno, errmsg))
+            raise ConnectionError(f"Error {errno} while writing to socket. {errmsg}.")
         except BaseException:
             self.disconnect()
             raise
@@ -767,8 +763,7 @@ class Connection:
             )
         except socket.timeout:
             self.disconnect()
-            raise TimeoutError("Timeout reading from %s:%s" %
-                               (self.host, self.port))
+            raise TimeoutError(f"Timeout reading from {self.host}:{self.port}")
         except OSError as e:
             self.disconnect()
             raise ConnectionError("Error while reading from %s:%s : %s" %
@@ -867,8 +862,7 @@ class SSLConnection(Connection):
             }
             if ssl_cert_reqs not in CERT_REQS:
                 raise RedisError(
-                    "Invalid SSL Certificate Requirements Flag: %s" %
-                    ssl_cert_reqs)
+                    f"Invalid SSL Certificate Requirements Flag: {ssl_cert_reqs}")
             ssl_cert_reqs = CERT_REQS[ssl_cert_reqs]
         self.cert_reqs = ssl_cert_reqs
         self.ca_certs = ssl_ca_certs
@@ -947,8 +941,7 @@ class UnixDomainSocketConnection(Connection):
         # args for socket.error can either be (errno, "message")
         # or just "message"
         if len(exception.args) == 1:
-            return "Error connecting to unix socket: %s. %s." % \
-                (self.path, exception.args[0])
+            return f"Error connecting to unix socket: {self.path}. {exception.args[0]}."
         else:
             return "Error %s connecting to unix socket: %s. %s." % \
                 (exception.args[0], self.path, exception.args[1])
@@ -990,7 +983,7 @@ def parse_url(url):
                     kwargs[name] = parser(value)
                 except (TypeError, ValueError):
                     raise ValueError(
-                        "Invalid value for `%s` in connection URL." % name
+                        f"Invalid value for `{name}` in connection URL."
                     )
             else:
                 kwargs[name] = value

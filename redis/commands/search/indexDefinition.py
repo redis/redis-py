@@ -38,8 +38,7 @@ class IndexDefinition:
         elif index_type is IndexType.JSON:
             self.args.extend(["ON", "JSON"])
         elif index_type is not None:
-            raise RuntimeError("index_type must be one of {}".
-                               format(list(IndexType)))
+            raise RuntimeError(f"index_type must be one of {list(IndexType)}")
 
     def _appendPrefix(self, prefix):
         """Append PREFIX."""

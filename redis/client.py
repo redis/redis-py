@@ -1141,7 +1141,7 @@ class Monitor:
         # check that monitor returns 'OK', but don't return it to user
         response = self.connection.read_response()
         if not bool_ok(response):
-            raise RedisError('MONITOR failed: %s' % response)
+            raise RedisError(f'MONITOR failed: {response}')
         return self
 
     def __exit__(self, *args):
@@ -1517,12 +1517,10 @@ class PubSub:
                       exception_handler=None):
         for channel, handler in self.channels.items():
             if handler is None:
-                raise PubSubError("Channel: '%s' has no handler registered" %
-                                  channel)
+                raise PubSubError(f"Channel: '{channel}' has no handler registered")
         for pattern, handler in self.patterns.items():
             if handler is None:
-                raise PubSubError("Pattern: '%s' has no handler registered" %
-                                  pattern)
+                raise PubSubError(f"Pattern: '{pattern}' has no handler registered")
 
         thread = PubSubWorkerThread(
             self,

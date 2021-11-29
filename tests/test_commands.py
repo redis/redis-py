@@ -1805,11 +1805,11 @@ class TestRedisCommands:
     def test_zadd_gt_lt(self, r):
 
         for i in range(1, 20):
-            r.zadd('a', {'a%s' % i: i})
+            r.zadd('a', {f'a{i}': i})
         assert r.zadd('a', {'a20': 5}, gt=3) == 1
 
         for i in range(1, 20):
-            r.zadd('a', {'a%s' % i: i})
+            r.zadd('a', {f'a{i}': i})
         assert r.zadd('a', {'a2': 5}, lt=1) == 0
 
         # cannot use both nx and xx options

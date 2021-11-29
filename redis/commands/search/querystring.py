@@ -199,11 +199,9 @@ class Node:
         if len(vals) == 1:
             return [BaseNode(f"@{key}:{vals[0].to_string()}")]
         if not vals[0].combinable:
-            return [BaseNode("@{}:{}".format(key,
-                                             v.to_string())) for v in vals]
+            return [BaseNode(f"@{key}:{v.to_string()}") for v in vals]
         s = BaseNode(
-            "@{}:({})".format(key,
-                              self.JOINSTR.join(v.to_string() for v in vals))
+            f"@{key}:({self.JOINSTR.join(v.to_string() for v in vals)})"
         )
         return [s]
 
@@ -220,9 +218,7 @@ class Node:
     def to_string(self, with_parens=None):
         with_parens = self._should_use_paren(with_parens)
         pre, post = ("(", ")") if with_parens else ("", "")
-        return "{}{}{}".format(
-            pre, self.JOINSTR.join(n.to_string() for n in self.params), post
-        )
+        return f"{pre}{self.JOINSTR.join(n.to_string() for n in self.params)}{post}"
 
     def _should_use_paren(self, optval):
         if optval is not None:

@@ -678,8 +678,7 @@ class RedisCluster(ClusterCommands):
             # get the nodes group for this command if it was predefined
             command_flag = self.command_flags.get(command)
         if command_flag:
-            log.debug("Target node/s for {0}: {1}".
-                      format(command, command_flag))
+            log.debug(f"Target node/s for {command}: {command_flag}")
         if command_flag == self.__class__.RANDOM:
             # return a random node
             return [self.get_random_node()]
@@ -824,8 +823,7 @@ class RedisCluster(ClusterCommands):
                         *args, **kwargs, nodes_flag=target_nodes)
                     if not target_nodes:
                         raise RedisClusterException(
-                            "No targets were found to execute"
-                            " {} command on".format(args))
+                            f"No targets were found to execute {args} command on")
                 for node in target_nodes:
                     res[node.name] = self._execute_command(
                         node, *args, **kwargs)
@@ -1495,8 +1493,7 @@ class ClusterPubSub(PubSub):
         """
         if node is None or redis_cluster.get_node(node_name=node.name) is None:
             raise RedisClusterException(
-                "Node {}:{} doesn't exist in the cluster"
-                .format(host, port))
+                f"Node {host}:{port} doesn't exist in the cluster")
 
     def execute_command(self, *args, **kwargs):
         """

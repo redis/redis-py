@@ -342,8 +342,7 @@ class ManagementCommands:
         if _type is not None:
             client_types = ('normal', 'master', 'slave', 'pubsub')
             if str(_type).lower() not in client_types:
-                raise DataError("CLIENT KILL type must be one of {!r}".format(
-                                client_types))
+                raise DataError(f"CLIENT KILL type must be one of {client_types!r}")
             args.extend((b'TYPE', _type))
         if skipme is not None:
             if not isinstance(skipme, bool):
@@ -388,8 +387,7 @@ class ManagementCommands:
         if _type is not None:
             client_types = ('normal', 'master', 'replica', 'pubsub')
             if str(_type).lower() not in client_types:
-                raise DataError("CLIENT LIST _type must be one of {!r}".format(
-                                client_types))
+                raise DataError(f"CLIENT LIST _type must be one of {client_types!r}")
             args.append(b'TYPE')
             args.append(_type)
         if not isinstance(client_id, list):
@@ -434,7 +432,7 @@ class ManagementCommands:
         """
         replies = ['ON', 'OFF', 'SKIP']
         if reply not in replies:
-            raise DataError('CLIENT REPLY must be one of %r' % replies)
+            raise DataError(f'CLIENT REPLY must be one of {replies!r}')
         return self.execute_command("CLIENT REPLY", reply)
 
     def client_id(self):
@@ -551,7 +549,7 @@ class ManagementCommands:
         return self.execute_command('CONFIG REWRITE')
 
     def cluster(self, cluster_arg, *args):
-        return self.execute_command('CLUSTER %s' % cluster_arg.upper(), *args)
+        return self.execute_command(f'CLUSTER {cluster_arg.upper()}', *args)
 
     def dbsize(self):
         """

@@ -15,7 +15,7 @@ def test_invalid_response(r):
     with mock.patch.object(parser._buffer, 'readline', return_value=raw):
         with pytest.raises(InvalidResponse) as cm:
             parser.read_response()
-    assert str(cm.value) == 'Protocol Error: %r' % raw
+    assert str(cm.value) == f'Protocol Error: {raw!r}'
 
 
 @skip_if_server_version_lt('4.0.0')

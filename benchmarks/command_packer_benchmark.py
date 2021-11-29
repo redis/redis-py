@@ -16,8 +16,7 @@ class StringJoiningConnection(Connection):
                 _errno, errmsg = 'UNKNOWN', e.args[0]
             else:
                 _errno, errmsg = e.args
-            raise ConnectionError("Error %s while writing to socket. %s." %
-                                  (_errno, errmsg))
+            raise ConnectionError(f"Error {_errno} while writing to socket. {errmsg}.")
         except Exception:
             self.disconnect()
             raise
@@ -48,8 +47,7 @@ class ListJoiningConnection(Connection):
                 _errno, errmsg = 'UNKNOWN', e.args[0]
             else:
                 _errno, errmsg = e.args
-            raise ConnectionError("Error %s while writing to socket. %s." %
-                                  (_errno, errmsg))
+            raise ConnectionError(f"Error {_errno} while writing to socket. {errmsg}.")
         except Exception:
             self.disconnect()
             raise

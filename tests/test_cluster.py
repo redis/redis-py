@@ -333,8 +333,7 @@ class TestRedisClusterObj:
                     return "MOCK_OK"
 
                 parse_response.side_effect = ok_response
-                raise AskError("12182 {}:{}".format(redirect_node.host,
-                                                      redirect_node.port))
+                raise AskError(f"12182 {redirect_node.host}:{redirect_node.port}")
 
             parse_response.side_effect = ask_redirect_effect
 
@@ -2373,8 +2372,7 @@ class TestClusterPipeline:
             warnings.warn("skipping this test since the cluster has only one "
                           "node")
             return
-        ask_msg = "{} {}:{}".format(r.keyslot(key), ask_node.host,
-                                       ask_node.port)
+        ask_msg = f"{r.keyslot(key)} {ask_node.host}:{ask_node.port}"
 
         def raise_ask_error():
             raise AskError(ask_msg)
@@ -2434,9 +2432,7 @@ class TestReadOnlyPipeline:
         with r.pipeline() as readwrite_pipe:
             mock_node_resp(primary, "MOCK_FOO")
             if replica is not None:
-                moved_error = "{} {}:{}".format(r.keyslot(key),
-                                                   primary.host,
-                                                   primary.port)
+                moved_error = f"{r.keyslot(key)} {primary.host}:{primary.port}"
 
                 def raise_moved_error():
                     raise MovedError(moved_error)

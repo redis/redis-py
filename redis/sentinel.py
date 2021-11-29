@@ -136,7 +136,7 @@ class SentinelConnectionPool(ConnectionPool):
             yield self.get_master_address()
         except MasterNotFoundError:
             pass
-        raise SlaveNotFoundError('No slave found for %r' % (self.service_name))
+        raise SlaveNotFoundError(f'No slave found for {self.service_name!r}')
 
 
 class Sentinel(SentinelCommands):

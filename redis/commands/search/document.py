@@ -10,4 +10,4 @@ class Document:
             setattr(self, k, v)
 
     def __repr__(self):
-        return "Document %s" % self.__dict__
+        return f"Document {self.__dict__}"
