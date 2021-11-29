@@ -660,7 +660,7 @@ class RedisCluster(ClusterCommands, object):
         if target_node.redis_connection is None:
             raise RedisClusterException(
                 "Cluster Node {0} has no redis_connection".
-                    format(target_node.name))
+                format(target_node.name))
         return target_node.redis_connection.monitor()
 
     def pubsub(self, node=None, host=None, port=None, **kwargs):
