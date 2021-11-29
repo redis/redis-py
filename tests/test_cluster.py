@@ -25,7 +25,8 @@ from redis.crc import key_slot
 from .conftest import (
     _get_client,
     skip_if_server_version_lt,
-    skip_unless_arch_bits
+    skip_unless_arch_bits,
+    wait_for_command
 )
 
 default_host = "127.0.0.1"
@@ -2480,3 +2481,54 @@ class TestReadOnlyPipeline:
                         if executed_on_replica:
                             break
                 assert executed_on_replica is True
+
+
+@pytest.mark.onlycluster
+class TestClusterMonitor:
+    def test_wait_command_not_found(self, r):
+        "Make sure the wait_for_command func works when command is not found"
+        key = 'foo'
+        node = r.get_node_from_key(key)
+        with r.monitor(target_node=node) as m:
+            response = wait_for_command(r, m, 'nothing', key=key)
+            assert response is None
+
+    def test_response_values(self, r):
+        db = 0
+        key = 'foo'
+        node = r.get_node_from_key(key)
+        with r.monitor(target_node=node) as m:
+            r.ping(target_nodes=node)
+            response = wait_for_command(r, m, 'PING', key=key)
+            assert isinstance(response['time'], float)
+            assert response['db'] == db
+            assert response['client_type'] in ('tcp', 'unix')
+            assert isinstance(response['client_address'], str)
+            assert isinstance(response['client_port'], str)
+            assert response['command'] == 'PING'
+
+    def test_command_with_quoted_key(self, r):
+        key = '{foo}1'
+        node = r.get_node_from_key(key)
+        with r.monitor(node) as m:
+            r.get('{foo}"bar')
+            response = wait_for_command(r, m, 'GET {foo}"bar', key=key)
+            assert response['command'] == 'GET {foo}"bar'
+
+    def test_command_with_binary_data(self, r):
+        key = '{foo}1'
+        node = r.get_node_from_key(key)
+        with r.monitor(target_node=node) as m:
+            byte_string = b'{foo}bar\x92'
+            r.get(byte_string)
+            response = wait_for_command(r, m, 'GET {foo}bar\\x92', key=key)
+            assert response['command'] == 'GET {foo}bar\\x92'
+
+    def test_command_with_escaped_data(self, r):
+        key = '{foo}1'
+        node = r.get_node_from_key(key)
+        with r.monitor(target_node=node) as m:
+            byte_string = b'{foo}bar\\x92'
+            r.get(byte_string)
+            response = wait_for_command(r, m, 'GET {foo}bar\\\\x92', key=key)
+            assert response['command'] == 'GET {foo}bar\\\\x92'

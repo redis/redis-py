@@ -312,16 +312,18 @@ def master_host(request):
     yield parts.hostname, parts.port
 
 
-def wait_for_command(client, monitor, command):
+def wait_for_command(client, monitor, command, key=None):
     # issue a command with a key name that's local to this process.
     # if we find a command with our key before the command we're waiting
     # for, something went wrong
-    redis_version = REDIS_INFO["version"]
-    if LooseVersion(redis_version) >= LooseVersion('5.0.0'):
-        id_str = str(client.client_id())
-    else:
-        id_str = '%08x' % random.randrange(2**32)
-    key = '__REDIS-PY-%s__' % id_str
+    if key is None:
+        # generate key
+        redis_version = REDIS_INFO["version"]
+        if LooseVersion(redis_version) >= LooseVersion('5.0.0'):
+            id_str = str(client.client_id())
+        else:
+            id_str = '%08x' % random.randrange(2**32)
+        key = '__REDIS-PY-%s__' % id_str
     client.get(key)
     while True:
         monitor_response = monitor.next_command()

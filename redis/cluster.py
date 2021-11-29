@@ -646,6 +646,23 @@ class RedisCluster(ClusterCommands, object):
         log.info("Changed the default cluster node to {0}".format(node))
         return True
 
+    def monitor(self, target_node=None):
+        """
+        Returns a Monitor object for the specified target node.
+        The default cluster node will be selected if no target node was
+        specified.
+        Monitor is useful for handling the MONITOR command to the redis server.
+        next_command() method returns one command from monitor
+        listen() method yields commands from monitor.
+        """
+        if target_node is None:
+            target_node = self.get_default_node()
+        if target_node.redis_connection is None:
+            raise RedisClusterException(
+                "Cluster Node {0} has no redis_connection".
+                    format(target_node.name))
+        return target_node.redis_connection.monitor()
+
     def pubsub(self, node=None, host=None, port=None, **kwargs):
         """
         Allows passing a ClusterNode, or host&port, to get a pubsub instance
