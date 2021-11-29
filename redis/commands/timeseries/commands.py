@@ -26,7 +26,6 @@ class TimeSeriesCommands:
     def create(self, key, **kwargs):
         """
         Create a new time-series.
-        For more information see
 
         Args:
 

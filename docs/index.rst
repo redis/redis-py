@@ -6,45 +6,71 @@
 Welcome to redis-py's documentation!
 ====================================
 
-Indices and tables
-------------------
+Getting Started
+****************
 
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+`redis-py <https://pypi.org/project/redis>`_ requires a running Redis server, and Python 3.6+. See the `Redis
+quickstart <https://redis.io/topics/quickstart>`_ for Redis installation instructions.
 
-Contents:
----------
+redis-py can be installed using pip via ``pip install redis``.
 
+
+Quickly connecting to redis
+************
+
+There are two quick ways to connect to Redis.
+
+Assuming you run Redis on localhost:6379 (the default)::
+   import redis
+   r = redis.Redis()
+   r.ping()
+
+Running redis on foo.bar.com, port 12345::
+   import redis
+   r = redis.Redis(host='foo.bar.com', port=12345)
+   r.ping()
+
+Another example with foo.bar.com, port 12345::
+   import redis
+   r = redis.from_url('redis://foo.bar.com:12345')
+   r.ping()
+
+After that, you probably want to `run redis commands <redis_core_commands.html>`_.
+
+.. toctree::
+   :hidden:
+
+   genindex
+
+Redis Command Functions
+***********************
 .. toctree::
    :maxdepth: 2
 
-.. automodule:: redis
-   :members:
+   redis_core_commands
+   sentinel_commands
+   redismodules
 
-.. automodule:: redis.backoff
-   :members:
+Module Documentation
+********************
+.. toctree::
+   :maxdepth: 1
 
-.. automodule:: redis.connection
-   :members:
+   backoff
+   connections
+   exceptions
+   lock
+   retry
 
-.. automodule:: redis.commands
-   :members:
+Contributing
+*************
 
-.. automodule:: redis.commands.json
-   :members:
+- `How to contribute <https://github.com/redis/redis-py/blob/master/CONTRIBUTING.md>`_
+- `Issue Tracker <https://github.com/redis/redis-py/issues>`_
+- `Source Code <https://github.com/redis/redis-py/>`_
+- `Release History <https://github.com/redis/redis-py/releases/>`_
 
-.. automodule:: redis.commands.search
-   :members:
+License
+*******
 
-.. automodule:: redis.commands.timeseries
-   :members:
-
-.. automodule:: redis.exceptions
-   :members:
-
-.. automodule:: redis.lock
-   :members:
-
-.. automodule:: redis.sentinel
-   :members:
+This projectis licensed under the `MIT license <https://github.com/redis/redis-py/blob/master/LICENSE>`_.
