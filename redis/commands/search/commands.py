@@ -1,13 +1,13 @@
 import itertools
 import time
 
+from ..helpers import parse_to_dict
 from ._util import to_string
 from .aggregation import AggregateRequest, AggregateResult, Cursor
 from .document import Document
 from .query import Query
 from .result import Result
 from .suggestion import SuggestionParser
-from ..helpers import parse_to_dict
 
 NUMERIC = "NUMERIC"
 
@@ -453,7 +453,7 @@ class SearchCommands:
         cmd = [PROFILE_CMD, self.index_name, ""]
         if limited:
             cmd.append("LIMITED")
-        cmd.append('QUERY')
+        cmd.append("QUERY")
 
         if isinstance(query, AggregateRequest):
             cmd[2] = "AGGREGATE"
@@ -462,19 +462,20 @@ class SearchCommands:
             cmd[2] = "SEARCH"
             cmd += query.get_args()
         else:
-            raise ValueError("Must provide AggregateRequest object or "
-                             "Query object.")
+            raise ValueError("Must provide AggregateRequest object or " "Query object.")
 
         res = self.execute_command(*cmd)
 
         if isinstance(query, AggregateRequest):
             result = self._get_AggregateResult(res[0], query, query._cursor)
         else:
-            result = Result(res[0],
-                            not query._no_content,
-                            duration=(time.time() - st) * 1000.0,
-                            has_payload=query._with_payloads,
-                            with_scores=query._with_scores,)
+            result = Result(
+                res[0],
+                not query._no_content,
+                duration=(time.time() - st) * 1000.0,
+                has_payload=query._with_payloads,
+                with_scores=query._with_scores,
+            )
 
         return result, parse_to_dict(res[1])
 

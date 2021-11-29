@@ -91,6 +91,7 @@ class RedisClusterException(Exception):
     """
     Base exception for the RedisCluster client
     """
+
     pass
 
 
@@ -99,6 +100,7 @@ class ClusterError(RedisError):
     Cluster errors occurred multiple times, resulting in an exhaustion of the
     command execution TTL
     """
+
     pass
 
 
@@ -112,6 +114,7 @@ class ClusterDownError(ClusterError, ResponseError):
     unavailable. It automatically returns available as soon as all the slots
     are covered again.
     """
+
     def __init__(self, resp):
         self.args = (resp,)
         self.message = resp
@@ -136,8 +139,8 @@ class AskError(ResponseError):
         """should only redirect to master node"""
         self.args = (resp,)
         self.message = resp
-        slot_id, new_node = resp.split(' ')
-        host, port = new_node.rsplit(':', 1)
+        slot_id, new_node = resp.split(" ")
+        host, port = new_node.rsplit(":", 1)
         self.slot_id = int(slot_id)
         self.node_addr = self.host, self.port = host, int(port)
 
@@ -148,6 +151,7 @@ class TryAgainError(ResponseError):
     Operations on keys that don't exist or are - during resharding - split
     between the source and destination nodes, will generate a -TRYAGAIN error.
     """
+
     def __init__(self, *args, **kwargs):
         pass
 
@@ -158,6 +162,7 @@ class ClusterCrossSlotError(ResponseError):
     A CROSSSLOT error is generated when keys in a request don't hash to the
     same slot.
     """
+
     message = "Keys in request don't hash to the same slot"
 
 
@@ -167,6 +172,7 @@ class MovedError(AskError):
     A request sent to a node that doesn't serve this key will be replayed with
     a MOVED error that points to the correct node.
     """
+
     pass
 
 
@@ -175,6 +181,7 @@ class MasterDownError(ClusterDownError):
     Error indicated MASTERDOWN error received from cluster.
     Link with MASTER is down and replica-serve-stale-data is set to 'no'.
     """
+
     pass
 
 
@@ -186,4 +193,5 @@ class SlotNotCoveredError(RedisClusterException):
     If this error is raised the client should drop the current node layout and
     attempt to reconnect and refresh the node layout again
     """
+
     pass
