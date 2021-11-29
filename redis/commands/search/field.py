@@ -1,4 +1,4 @@
-class Field(object):
+class Field:
 
     NUMERIC = "NUMERIC"
     TEXT = "TEXT"

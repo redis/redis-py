@@ -46,7 +46,7 @@ class CommandsParser:
                 # version has changed, the commands may not be current
                 self.initialize(redis_conn)
                 if cmd_name not in self.commands:
-                    raise RedisError("{0} command doesn't exist in Redis "
+                    raise RedisError("{} command doesn't exist in Redis "
                                      "commands".format(cmd_name.upper()))
 
         command = self.commands.get(cmd_name)

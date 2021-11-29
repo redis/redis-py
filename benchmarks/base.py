@@ -34,7 +34,7 @@ class Benchmark:
         group_values = [group['values'] for group in self.ARGUMENTS]
         for value_set in itertools.product(*group_values):
             pairs = list(zip(group_names, value_set))
-            arg_string = ', '.join(['%s=%s' % (p[0], p[1]) for p in pairs])
+            arg_string = ', '.join(f'{p[0]}={p[1]}' for p in pairs)
             sys.stdout.write('Benchmark: %s... ' % arg_string)
             sys.stdout.flush()
             kwargs = dict(pairs)

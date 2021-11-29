@@ -24,9 +24,9 @@ class SentinelManagedConnection(Connection):
 
     def __repr__(self):
         pool = self.connection_pool
-        s = '%s<service=%s%%s>' % (type(self).__name__, pool.service_name)
+        s = f'{type(self).__name__}<service={pool.service_name}%s>'
         if self.host:
-            host_info = ',host=%s,port=%s' % (self.host, self.port)
+            host_info = f',host={self.host},port={self.port}'
             s = s % host_info
         return s
 
@@ -91,7 +91,7 @@ class SentinelConnectionPool(ConnectionPool):
         self.sentinel_manager = sentinel_manager
 
     def __repr__(self):
-        return "%s<service=%s(%s)" % (
+        return "{}<service={}({})".format(
             type(self).__name__,
             self.service_name,
             self.is_master and 'master' or 'slave',
@@ -106,7 +106,7 @@ class SentinelConnectionPool(ConnectionPool):
         check = not self.is_master or \
                 (self.is_master and
                  self.master_address == (connection.host, connection.port))
-        parent = super(SentinelConnectionPool, self)
+        parent = super()
         return check and parent.owns_connection(connection)
 
     def get_master_address(self):
@@ -139,7 +139,7 @@ class SentinelConnectionPool(ConnectionPool):
         raise SlaveNotFoundError('No slave found for %r' % (self.service_name))
 
 
-class Sentinel(SentinelCommands, object):
+class Sentinel(SentinelCommands):
     """
     Redis Sentinel cluster client
 
@@ -205,11 +205,11 @@ class Sentinel(SentinelCommands, object):
     def __repr__(self):
         sentinel_addresses = []
         for sentinel in self.sentinels:
-            sentinel_addresses.append('%s:%s' % (
+            sentinel_addresses.append('{}:{}'.format(
                 sentinel.connection_pool.connection_kwargs['host'],
                 sentinel.connection_pool.connection_kwargs['port'],
             ))
-        return '%s<sentinels=[%s]>' % (
+        return '{}<sentinels=[{}]>'.format(
             type(self).__name__,
             ','.join(sentinel_addresses))
 
@@ -240,7 +240,7 @@ class Sentinel(SentinelCommands, object):
                 self.sentinels[0], self.sentinels[sentinel_no] = (
                     sentinel, self.sentinels[0])
                 return state['ip'], state['port']
-        raise MasterNotFoundError("No master found for %r" % (service_name,))
+        raise MasterNotFoundError(f"No master found for {service_name!r}")
 
     def filter_slaves(self, slaves):
         "Remove slaves that are in an ODOWN or SDOWN state"

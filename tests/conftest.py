@@ -102,8 +102,8 @@ def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=20):
     if now >= end_time:
         available_nodes = 0 if client is None else len(client.get_nodes())
         raise RedisClusterException(
-            "The cluster did not become available after {0} seconds. "
-            "Only {1} nodes out of {2} are available".format(
+            "The cluster did not become available after {} seconds. "
+            "Only {} nodes out of {} are available".format(
                 timeout, available_nodes, cluster_nodes))
 
 
@@ -112,7 +112,7 @@ def skip_if_server_version_lt(min_version):
     check = LooseVersion(redis_version) < LooseVersion(min_version)
     return pytest.mark.skipif(
         check,
-        reason="Redis version required >= {}".format(min_version))
+        reason=f"Redis version required >= {min_version}")
 
 
 def skip_if_server_version_gte(min_version):
@@ -120,12 +120,12 @@ def skip_if_server_version_gte(min_version):
     check = LooseVersion(redis_version) >= LooseVersion(min_version)
     return pytest.mark.skipif(
         check,
-        reason="Redis version required < {}".format(min_version))
+        reason=f"Redis version required < {min_version}")
 
 
 def skip_unless_arch_bits(arch_bits):
     return pytest.mark.skipif(REDIS_INFO["arch_bits"] != arch_bits,
-                              reason="server is not {}-bit".format(arch_bits))
+                              reason=f"server is not {arch_bits}-bit")
 
 
 def skip_ifmodversion_lt(min_version: str, module_name: str):
@@ -144,7 +144,7 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
             check = version < mv
             return pytest.mark.skipif(check, reason="Redis module version")
 
-    raise AttributeError("No redis module named {}".format(module_name))
+    raise AttributeError(f"No redis module named {module_name}")
 
 
 def skip_if_redis_enterprise(func):

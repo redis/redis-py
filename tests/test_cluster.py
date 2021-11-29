@@ -178,7 +178,7 @@ def moved_redirection_helper(request, failover=False):
                 return "MOCK_OK"
 
             parse_response.side_effect = ok_response
-            raise MovedError("{0} {1}:{2}".format(slot, r_host, r_port))
+            raise MovedError(f"{slot} {r_host}:{r_port}")
 
         parse_response.side_effect = moved_redirect_effect
         assert rc.execute_command("SET", "foo", "bar") == "MOCK_OK"
@@ -229,7 +229,7 @@ class TestRedisClusterObj:
             "cluster"), str_if_bytes(ex.value)
 
     def test_from_url(self, r):
-        redis_url = "redis://{0}:{1}/0".format(default_host, default_port)
+        redis_url = f"redis://{default_host}:{default_port}/0"
         with patch.object(RedisCluster, 'from_url') as from_url:
             def from_url_mocked(_url, **_kwargs):
                 return get_mocked_redis_client(url=_url, **_kwargs)
@@ -333,7 +333,7 @@ class TestRedisClusterObj:
                     return "MOCK_OK"
 
                 parse_response.side_effect = ok_response
-                raise AskError("12182 {0}:{1}".format(redirect_node.host,
+                raise AskError("12182 {}:{}".format(redirect_node.host,
                                                       redirect_node.port))
 
             parse_response.side_effect = ask_redirect_effect
@@ -498,14 +498,14 @@ class TestRedisClusterObj:
         assert r.keyslot(125) == r.keyslot(b"125")
         assert r.keyslot(125) == r.keyslot("\x31\x32\x35")
         assert r.keyslot("大奖") == r.keyslot(b"\xe5\xa4\xa7\xe5\xa5\x96")
-        assert r.keyslot(u"大奖") == r.keyslot(b"\xe5\xa4\xa7\xe5\xa5\x96")
+        assert r.keyslot("大奖") == r.keyslot(b"\xe5\xa4\xa7\xe5\xa5\x96")
         assert r.keyslot(1337.1234) == r.keyslot("1337.1234")
         assert r.keyslot(1337) == r.keyslot("1337")
         assert r.keyslot(b"abc") == r.keyslot("abc")
 
     def test_get_node_name(self):
         assert get_node_name(default_host, default_port) == \
-               "{0}:{1}".format(default_host, default_port)
+               f"{default_host}:{default_port}"
 
     def test_all_nodes(self, r):
         """
@@ -713,7 +713,7 @@ class TestClusterRedisCommands:
         pubsub_nodes = []
         i = 0
         for node in nodes:
-            channel = "foo{0}".format(i)
+            channel = f"foo{i}"
             # We will create different pubsub clients where each one is
             # connected to a different node
             p = r.pubsub(node)
@@ -1180,8 +1180,7 @@ class TestClusterRedisCommands:
         clients = [client for client in r.client_list(target_nodes=node)
                    if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
         assert len(clients) == 2
-        clients_by_name = dict([(client.get('name'), client)
-                                for client in clients])
+        clients_by_name = {client.get('name'): client for client in clients}
 
         client_addr = clients_by_name['redis-py-c2'].get('addr')
         assert r.client_kill(client_addr, target_nodes=node) is True
@@ -2374,7 +2373,7 @@ class TestClusterPipeline:
             warnings.warn("skipping this test since the cluster has only one "
                           "node")
             return
-        ask_msg = "{0} {1}:{2}".format(r.keyslot(key), ask_node.host,
+        ask_msg = "{} {}:{}".format(r.keyslot(key), ask_node.host,
                                        ask_node.port)
 
         def raise_ask_error():
@@ -2435,7 +2434,7 @@ class TestReadOnlyPipeline:
         with r.pipeline() as readwrite_pipe:
             mock_node_resp(primary, "MOCK_FOO")
             if replica is not None:
-                moved_error = "{0} {1}:{2}".format(r.keyslot(key),
+                moved_error = "{} {}:{}".format(r.keyslot(key),
                                                    primary.host,
                                                    primary.port)
 

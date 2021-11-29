@@ -2,7 +2,7 @@ from .document import Document
 from ._util import to_string
 
 
-class Result(object):
+class Result:
     """
     Represents the result of a search query, and has an array of Document
     objects

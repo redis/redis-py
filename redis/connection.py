@@ -538,8 +538,8 @@ class Connection:
         self._buffer_cutoff = 6000
 
     def __repr__(self):
-        repr_args = ','.join(['%s=%s' % (k, v) for k, v in self.repr_pieces()])
-        return '%s<%s>' % (self.__class__.__name__, repr_args)
+        repr_args = ','.join([f'{k}={v}' for k, v in self.repr_pieces()])
+        return f'{self.__class__.__name__}<{repr_args}>'
 
     def repr_pieces(self):
         pieces = [
@@ -579,7 +579,7 @@ class Connection:
             sock = self._connect()
         except socket.timeout:
             raise TimeoutError("Timeout connecting to server")
-        except socket.error as e:
+        except OSError as e:
             raise ConnectionError(self._error_message(e))
 
         self._sock = sock
@@ -734,7 +734,7 @@ class Connection:
         except socket.timeout:
             self.disconnect()
             raise TimeoutError("Timeout writing to socket")
-        except socket.error as e:
+        except OSError as e:
             self.disconnect()
             if len(e.args) == 1:
                 errno, errmsg = 'UNKNOWN', e.args[0]
@@ -769,7 +769,7 @@ class Connection:
             self.disconnect()
             raise TimeoutError("Timeout reading from %s:%s" %
                                (self.host, self.port))
-        except socket.error as e:
+        except OSError as e:
             self.disconnect()
             raise ConnectionError("Error while reading from %s:%s : %s" %
                                   (self.host, self.port, e.args))
@@ -1109,7 +1109,7 @@ class ConnectionPool:
         self.reset()
 
     def __repr__(self):
-        return "%s<%s>" % (
+        return "{}<{}>".format(
             type(self).__name__,
             repr(self.connection_class(**self.connection_kwargs)),
         )

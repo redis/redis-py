@@ -61,7 +61,7 @@ def geo(lat, lon, radius, unit="km"):
     return GeoValue(lat, lon, radius, unit)
 
 
-class Value(object):
+class Value:
     @property
     def combinable(self):
         """
@@ -134,7 +134,7 @@ class GeoValue(Value):
         self.unit = unit
 
 
-class Node(object):
+class Node:
     def __init__(self, *children, **kwparams):
         """
         Create a node
@@ -197,7 +197,7 @@ class Node(object):
 
     def join_fields(self, key, vals):
         if len(vals) == 1:
-            return [BaseNode("@{}:{}".format(key, vals[0].to_string()))]
+            return [BaseNode(f"@{key}:{vals[0].to_string()}")]
         if not vals[0].combinable:
             return [BaseNode("@{}:{}".format(key,
                                              v.to_string())) for v in vals]
@@ -235,7 +235,7 @@ class Node(object):
 
 class BaseNode(Node):
     def __init__(self, s):
-        super(BaseNode, self).__init__()
+        super().__init__()
         self.s = str(s)
 
     def to_string(self, with_parens=None):
@@ -268,7 +268,7 @@ class DisjunctNode(IntersectNode):
 
     def to_string(self, with_parens=None):
         with_parens = self._should_use_paren(with_parens)
-        ret = super(DisjunctNode, self).to_string(with_parens=False)
+        ret = super().to_string(with_parens=False)
         if with_parens:
             return "(-" + ret + ")"
         else:
@@ -294,7 +294,7 @@ class OptionalNode(IntersectNode):
 
     def to_string(self, with_parens=None):
         with_parens = self._should_use_paren(with_parens)
-        ret = super(OptionalNode, self).to_string(with_parens=False)
+        ret = super().to_string(with_parens=False)
         if with_parens:
             return "(~" + ret + ")"
         else:

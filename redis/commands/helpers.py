@@ -113,4 +113,4 @@ def quote_string(v):
 
     v = v.replace('"', '\\"')
 
-    return '"{}"'.format(v)
+    return f'"{v}"'

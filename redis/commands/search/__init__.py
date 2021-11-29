@@ -7,7 +7,7 @@ class Search(SearchCommands):
     It abstracts the API of the module and lets you just use the engine.
     """
 
-    class BatchIndexer(object):
+    class BatchIndexer:
         """
         A batch indexer allows you to automatically batch
         document indexing in pipelines, flushing it every N documents.

@@ -629,7 +629,7 @@ def parse_set_result(response, **options):
     return response and str_if_bytes(response) == 'OK'
 
 
-class Redis(RedisModuleCommands, CoreCommands, SentinelCommands, object):
+class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     """
     Implementation of the Redis protocol.
 
@@ -918,7 +918,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands, object):
             self.__class__.RESPONSE_CALLBACKS)
 
     def __repr__(self):
-        return "%s<%s>" % (type(self).__name__, repr(self.connection_pool))
+        return f"{type(self).__name__}<{repr(self.connection_pool)}>"
 
     def set_response_callback(self, command, callback):
         "Set a custom Response Callback"

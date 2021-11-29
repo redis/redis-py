@@ -99,7 +99,7 @@ def createIndex(client, num_docs=100, definition=None):
         play, chapter, _, text = \
             line[1], line[2], line[4], line[5]
 
-        key = "{}:{}".format(play, chapter).lower()
+        key = f"{play}:{chapter}".lower()
         d = chapters.setdefault(key, {})
         d["play"] = play
         d["txt"] = d.get("txt", "") + " " + text
@@ -861,7 +861,7 @@ def test_phonetic_matcher(client):
 
     res = client.ft().search(Query("Jon"))
     assert 2 == len(res.docs)
-    assert ["John", "Jon"] == sorted([d.name for d in res.docs])
+    assert ["John", "Jon"] == sorted(d.name for d in res.docs)
 
 
 @pytest.mark.redismod

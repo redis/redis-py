@@ -16,7 +16,7 @@ def devenv(c):
     clean(c)
     cmd = 'tox -e devenv'
     for d in dockers:
-        cmd += " --docker-dont-stop={}".format(d)
+        cmd += f" --docker-dont-stop={d}"
     run(cmd)
 
 

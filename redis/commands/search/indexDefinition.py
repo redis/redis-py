@@ -8,7 +8,7 @@ class IndexType(Enum):
     JSON = 2
 
 
-class IndexDefinition(object):
+class IndexDefinition:
     """IndexDefinition is used to define a index definition for automatic
     indexing on Hash or Json update."""
 

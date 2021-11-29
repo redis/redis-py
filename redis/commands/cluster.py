@@ -228,8 +228,8 @@ class ClusterManagementCommands:
         if _type is not None:
             client_types = ('normal', 'master', 'slave', 'pubsub')
             if str(_type).lower() not in client_types:
-                raise DataError("CLIENT KILL type must be one of %r" % (
-                    client_types,))
+                raise DataError("CLIENT KILL type must be one of {!r}".format(
+                    client_types))
             args.extend((b'TYPE', _type))
         if skipme is not None:
             if not isinstance(skipme, bool):
@@ -267,8 +267,8 @@ class ClusterManagementCommands:
         if _type is not None:
             client_types = ('normal', 'master', 'replica', 'pubsub')
             if str(_type).lower() not in client_types:
-                raise DataError("CLIENT LIST _type must be one of %r" % (
-                    client_types,))
+                raise DataError("CLIENT LIST _type must be one of {!r}".format(
+                    client_types))
             return self.execute_command('CLIENT LIST',
                                         b'TYPE',
                                         _type,
@@ -788,7 +788,7 @@ class ClusterCommands(ClusterManagementCommands, ClusterMultiKeyCommands,
         if option:
             if option.upper() not in ['FORCE', 'TAKEOVER']:
                 raise RedisError(
-                    'Invalid option for CLUSTER FAILOVER command: {0}'.format(
+                    'Invalid option for CLUSTER FAILOVER command: {}'.format(
                         option))
             else:
                 return self.execute_command('CLUSTER FAILOVER', option,
@@ -880,7 +880,7 @@ class ClusterCommands(ClusterManagementCommands, ClusterMultiKeyCommands,
             raise RedisError('For "stable" state please use '
                              'cluster_setslot_stable')
         else:
-            raise RedisError('Invalid slot state: {0}'.format(state))
+            raise RedisError(f'Invalid slot state: {state}')
 
     def cluster_setslot_stable(self, slot_id):
         """

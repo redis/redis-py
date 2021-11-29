@@ -1,4 +1,4 @@
-class Document(object):
+class Document:
     """
     Represents a single document in a result set
     """

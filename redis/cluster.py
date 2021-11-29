@@ -42,7 +42,7 @@ log = logging.getLogger(__name__)
 
 
 def get_node_name(host, port):
-    return '{0}:{1}'.format(host, port)
+    return f'{host}:{port}'
 
 
 def get_connection(redis_node, *args, **options):
@@ -200,7 +200,7 @@ class ClusterParser(DefaultParser):
         })
 
 
-class RedisCluster(ClusterCommands, object):
+class RedisCluster(ClusterCommands):
     RedisClusterRequestTTL = 16
 
     PRIMARIES = "primaries"
@@ -451,7 +451,7 @@ class RedisCluster(ClusterCommands, object):
                 "2. list of startup nodes, for example:\n"
                 " RedisCluster(startup_nodes=[ClusterNode('localhost', 6379),"
                 " ClusterNode('localhost', 6378)])")
-        log.debug("startup_nodes : {0}".format(startup_nodes))
+        log.debug(f"startup_nodes : {startup_nodes}")
         # Update the connection arguments
         # Whenever a new connection is established, RedisCluster's on_connect
         # method should be run
@@ -602,7 +602,7 @@ class RedisCluster(ClusterCommands, object):
         slot_cache = self.nodes_manager.slots_cache.get(slot)
         if slot_cache is None or len(slot_cache) == 0:
             raise SlotNotCoveredError(
-                'Slot "{0}" is not covered by the cluster.'.format(slot)
+                f'Slot "{slot}" is not covered by the cluster.'
             )
         if replica and len(self.nodes_manager.slots_cache[slot]) < 2:
             return None
@@ -631,7 +631,7 @@ class RedisCluster(ClusterCommands, object):
                      "the default node was not changed.")
             return False
         self.nodes_manager.default_node = node
-        log.info("Changed the default cluster node to {0}".format(node))
+        log.info(f"Changed the default cluster node to {node}")
         return True
 
     def pubsub(self, node=None, host=None, port=None, **kwargs):
@@ -700,7 +700,7 @@ class RedisCluster(ClusterCommands, object):
             slot = self.determine_slot(*args)
             node = self.nodes_manager.get_node_from_slot(
                 slot, self.read_from_replicas and command in READ_COMMANDS)
-            log.debug("Target for {0}: slot {1}".format(args, slot))
+            log.debug(f"Target for {args}: slot {slot}")
             return [node]
 
     def _should_reinitialized(self):
@@ -741,7 +741,7 @@ class RedisCluster(ClusterCommands, object):
             raise RedisClusterException(
                 "No way to dispatch this command to Redis Cluster. "
                 "Missing key.\nYou can execute the command by specifying "
-                "target nodes.\nCommand: {0}".format(args)
+                "target nodes.\nCommand: {}".format(args)
             )
 
         if len(keys) > 1:
@@ -749,7 +749,7 @@ class RedisCluster(ClusterCommands, object):
             # the same slot
             slots = {self.keyslot(key) for key in keys}
             if len(slots) != 1:
-                raise RedisClusterException("{0} - all keys must map to the "
+                raise RedisClusterException("{} - all keys must map to the "
                                             "same key slot".format(args[0]))
             return slots.pop()
         else:
@@ -952,7 +952,7 @@ class RedisCluster(ClusterCommands, object):
                 raise e
             except ResponseError as e:
                 message = e.__str__()
-                log.exception("ResponseError: {0}".format(message))
+                log.exception(f"ResponseError: {message}")
                 raise e
             except BaseException as e:
                 log.exception("BaseException")
@@ -995,7 +995,7 @@ class RedisCluster(ClusterCommands, object):
             return res
 
 
-class ClusterNode(object):
+class ClusterNode:
     def __init__(self, host, port, server_type=None, redis_connection=None):
         if host == 'localhost':
             host = socket.gethostbyname(host)
@@ -1007,8 +1007,8 @@ class ClusterNode(object):
         self.redis_connection = redis_connection
 
     def __repr__(self):
-        return '[host={0},port={1},' \
-               'name={2},server_type={3},redis_connection={4}]' \
+        return '[host={},port={},' \
+               'name={},server_type={},redis_connection={}]' \
             .format(self.host,
                     self.port,
                     self.name,
@@ -1135,8 +1135,8 @@ class NodesManager:
         if self.slots_cache.get(slot) is None or \
                 len(self.slots_cache[slot]) == 0:
             raise SlotNotCoveredError(
-                'Slot "{0}" not covered by the cluster. '
-                '"require_full_coverage={1}"'.format(
+                'Slot "{}" not covered by the cluster. '
+                '"require_full_coverage={}"'.format(
                     slot, self._require_full_coverage)
             )
 
@@ -1196,7 +1196,7 @@ class NodesManager:
             except Exception as e:
                 raise RedisClusterException(
                     'ERROR sending "config get cluster-require-full-coverage"'
-                    ' command to redis server: {0}, {1}'.format(node.name, e)
+                    ' command to redis server: {}, {}'.format(node.name, e)
                 )
 
         # at least one node should have cluster-require-full-coverage yes
@@ -1269,7 +1269,7 @@ class NodesManager:
                 msg = e.__str__
                 log.exception('An exception occurred while trying to'
                               ' initialize the cluster using the seed node'
-                              ' {0}:\n{1}'.format(startup_node.name, msg))
+                              ' {}:\n{}'.format(startup_node.name, msg))
                 continue
             except ResponseError as e:
                 log.exception(
@@ -1283,14 +1283,14 @@ class NodesManager:
                 else:
                     raise RedisClusterException(
                         'ERROR sending "cluster slots" command to redis '
-                        'server: {0}. error: {1}'.format(
+                        'server: {}. error: {}'.format(
                             startup_node, message)
                     )
             except Exception as e:
                 message = e.__str__()
                 raise RedisClusterException(
                     'ERROR sending "cluster slots" command to redis '
-                    'server: {0}. error: {1}'.format(
+                    'server: {}. error: {}'.format(
                         startup_node, message)
                 )
 
@@ -1344,14 +1344,14 @@ class NodesManager:
                         # setup
                         if tmp_slots[i][0].name != target_node.name:
                             disagreements.append(
-                                '{0} vs {1} on slot: {2}'.format(
+                                '{} vs {} on slot: {}'.format(
                                     tmp_slots[i][0].name, target_node.name, i)
                             )
 
                             if len(disagreements) > 5:
                                 raise RedisClusterException(
                                     'startup_nodes could not agree on a valid'
-                                    ' slots cache: {0}'.format(
+                                    ' slots cache: {}'.format(
                                         ", ".join(disagreements))
                                 )
 
@@ -1371,7 +1371,7 @@ class NodesManager:
             # isn't a full coverage
             raise RedisClusterException(
                 'All slots are not covered after query all startup_nodes.'
-                ' {0} of {1} covered...'.format(
+                ' {} of {} covered...'.format(
                     len(self.slots_cache), REDIS_CLUSTER_HASH_SLOTS)
             )
         elif not fully_covered and not self._require_full_coverage:
@@ -1389,7 +1389,7 @@ class NodesManager:
                     'cluster-require-full-coverage configuration to no on '
                     'all of the cluster nodes if you wish the cluster to '
                     'be able to serve without being fully covered.'
-                    ' {0} of {1} covered...'.format(
+                    ' {} of {} covered...'.format(
                         len(self.slots_cache), REDIS_CLUSTER_HASH_SLOTS)
                 )
 
@@ -1495,7 +1495,7 @@ class ClusterPubSub(PubSub):
         """
         if node is None or redis_cluster.get_node(node_name=node.name) is None:
             raise RedisClusterException(
-                "Node {0}:{1} doesn't exist in the cluster"
+                "Node {}:{} doesn't exist in the cluster"
                 .format(host, port))
 
     def execute_command(self, *args, **kwargs):
@@ -1585,7 +1585,7 @@ class ClusterPipeline(RedisCluster):
     def __repr__(self):
         """
         """
-        return "{0}".format(type(self).__name__)
+        return f"{type(self).__name__}"
 
     def __enter__(self):
         """
@@ -1813,8 +1813,8 @@ class ClusterPipeline(RedisCluster):
         # if we have more commands to attempt, we've run into problems.
         # collect all the commands we are allowed to retry.
         # (MOVED, ASK, or connection errors or timeout errors)
-        attempt = sorted([c for c in attempt
-                          if isinstance(c.result, ERRORS_ALLOW_RETRY)],
+        attempt = sorted((c for c in attempt
+                          if isinstance(c.result, ERRORS_ALLOW_RETRY)),
                          key=lambda x: x.position)
         if attempt and allow_redirections:
             # RETRY MAGIC HAPPENS HERE!
@@ -1848,8 +1848,7 @@ class ClusterPipeline(RedisCluster):
                 try:
                     # send each command individually like we
                     # do in the main client.
-                    c.result = super(ClusterPipeline, self). \
-                        execute_command(*c.args, **c.options)
+                    c.result = super().execute_command(*c.args, **c.options)
                 except RedisError as e:
                     c.result = e
 
@@ -1933,7 +1932,7 @@ def block_pipeline_command(func):
 
     def inner(*args, **kwargs):
         raise RedisClusterException(
-            "ERROR: Calling pipelined function {0} is blocked when "
+            "ERROR: Calling pipelined function {} is blocked when "
             "running redis in cluster mode...".format(func.__name__))
 
     return inner
@@ -1977,7 +1976,7 @@ ClusterPipeline.readwrite = block_pipeline_command(RedisCluster.readwrite)
 ClusterPipeline.readonly = block_pipeline_command(RedisCluster.readonly)
 
 
-class PipelineCommand(object):
+class PipelineCommand:
     """
     """
 
@@ -1992,7 +1991,7 @@ class PipelineCommand(object):
         self.asking = False
 
 
-class NodeCommands(object):
+class NodeCommands:
     """
     """
 

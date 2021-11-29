@@ -342,8 +342,8 @@ class ManagementCommands:
         if _type is not None:
             client_types = ('normal', 'master', 'slave', 'pubsub')
             if str(_type).lower() not in client_types:
-                raise DataError("CLIENT KILL type must be one of %r" % (
-                                client_types,))
+                raise DataError("CLIENT KILL type must be one of {!r}".format(
+                                client_types))
             args.extend((b'TYPE', _type))
         if skipme is not None:
             if not isinstance(skipme, bool):
@@ -388,8 +388,8 @@ class ManagementCommands:
         if _type is not None:
             client_types = ('normal', 'master', 'replica', 'pubsub')
             if str(_type).lower() not in client_types:
-                raise DataError("CLIENT LIST _type must be one of %r" % (
-                                client_types,))
+                raise DataError("CLIENT LIST _type must be one of {!r}".format(
+                                client_types))
             args.append(b'TYPE')
             args.append(_type)
         if not isinstance(client_id, list):
@@ -1086,7 +1086,7 @@ class BasicKeyCommands:
         For more information check https://redis.io/commands/getex
         """
 
-        opset = set([ex, px, exat, pxat])
+        opset = {ex, px, exat, pxat}
         if len(opset) > 2 or len(opset) > 1 and persist:
             raise DataError("``ex``, ``px``, ``exat``, ``pxat``, "
                             "and ``persist`` are mutually exclusive.")
