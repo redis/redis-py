@@ -57,7 +57,7 @@ class TimeSeriesCommands:
             - 'min': only override if the value is lower than the existing value.
             - 'max': only override if the value is higher than the existing value.
             When this is not set, the server-wide default will be used.
-            
+
         For more information: https://oss.redis.com/redistimeseries/commands/#tscreate
         """  # noqa
         retention_msecs = kwargs.get("retention_msecs", None)
@@ -80,7 +80,7 @@ class TimeSeriesCommands:
         For more information see
 
         The parameters are the same as TS.CREATE.
-        
+
         For more information: https://oss.redis.com/redistimeseries/commands/#tsalter
         """  # noqa
         retention_msecs = kwargs.get("retention_msecs", None)
@@ -128,7 +128,7 @@ class TimeSeriesCommands:
             - 'min': only override if the value is lower than the existing value.
             - 'max': only override if the value is higher than the existing value.
             When this is not set, the server-wide default will be used.
-            
+
         For more information: https://oss.redis.com/redistimeseries/master/commands/#tsadd
         """  # noqa
         retention_msecs = kwargs.get("retention_msecs", None)

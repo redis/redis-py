@@ -274,7 +274,7 @@ class SearchCommands:
         - **replace**: if True, and the document already is in the index, we
                       perform an update and reindex the document
         - **language**: Specify the language used for document tokenization.
-        
+
         For more information: https://oss.redis.com/redisearch/Commands/#ftaddhash
         """  # noqa
         return self._add_document_hash(
@@ -294,7 +294,7 @@ class SearchCommands:
 
         - **delete_actual_document**: if set to True, RediSearch also delete
                                       the actual document if it is in the index
-                                      
+
         For more information: https://oss.redis.com/redisearch/Commands/#ftdel
         """  # noqa
         args = [DEL_CMD, self.index_name, doc_id]
@@ -768,7 +768,7 @@ class SearchCommands:
             If set to true, we do not scan and index.
         terms :
             The terms.
-            
+
         For more information: https://oss.redis.com/redisearch/Commands/#ftsynupdate
         """  # noqa
         cmd = [SYNUPDATE_CMD, self.index_name, groupid]
