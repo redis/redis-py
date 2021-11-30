@@ -1366,7 +1366,6 @@ class PubSub:
             self.clean_health_check_responses()
         self._execute(connection, connection.send_command, *args, **kwargs)
 
-
     def clean_health_check_responses(self):
         """
         If any health check responses are present, clean them
