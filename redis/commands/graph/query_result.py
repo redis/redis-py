@@ -1,11 +1,12 @@
-from .node import Node
-from .edge import Edge
-from .path import Path
-from .exceptions import VersionMismatchException
+from collections import OrderedDict
 
 # from prettytable import PrettyTable
 from redis import ResponseError
-from collections import OrderedDict
+
+from .edge import Edge
+from .exceptions import VersionMismatchException
+from .node import Node
+from .path import Path
 
 LABELS_ADDED = "Labels added"
 NODES_CREATED = "Nodes created"
@@ -35,12 +36,8 @@ STATS = [
 class ResultSetColumnTypes:
     COLUMN_UNKNOWN = 0
     COLUMN_SCALAR = 1
-    COLUMN_NODE = (
-        2  # Unused as of RedisGraph v2.1.0, retained for backwards compatibility. # noqa
-    )
-    COLUMN_RELATION = (
-        3  # Unused as of RedisGraph v2.1.0, retained for backwards compatibility. # noqa
-    )
+    COLUMN_NODE = 2  # Unused as of RedisGraph v2.1.0, retained for backwards compatibility. # noqa
+    COLUMN_RELATION = 3  # Unused as of RedisGraph v2.1.0, retained for backwards compatibility. # noqa
 
 
 class ResultSetScalarTypes:
@@ -134,11 +131,13 @@ class QueryResult:
         for row in result_set:
             record = []
             for idx, cell in enumerate(row):
-                if self.header[idx][0] == ResultSetColumnTypes.COLUMN_SCALAR: # noqa
+                if self.header[idx][0] == ResultSetColumnTypes.COLUMN_SCALAR:  # noqa
                     record.append(self.parse_scalar(cell))
-                elif self.header[idx][0] == ResultSetColumnTypes.COLUMN_NODE: # noqa
+                elif self.header[idx][0] == ResultSetColumnTypes.COLUMN_NODE:  # noqa
                     record.append(self.parse_node(cell))
-                elif self.header[idx][0] == ResultSetColumnTypes.COLUMN_RELATION: # noqa
+                elif (
+                    self.header[idx][0] == ResultSetColumnTypes.COLUMN_RELATION
+                ):  # noqa
                     record.append(self.parse_edge(cell))
                 else:
                     print("Unknown column type.\n")
@@ -191,11 +190,7 @@ class QueryResult:
         dest_node_id = int(cell[3])
         properties = self.parse_entity_properties(cell[4])
         return Edge(
-            src_node_id,
-            relation,
-            dest_node_id,
-            edge_id=edge_id,
-            properties=properties
+            src_node_id, relation, dest_node_id, edge_id=edge_id, properties=properties
         )
 
     def parse_path(self, cell):
@@ -277,8 +272,7 @@ class QueryResult:
         return scalar
 
     def parse_profile(self, response):
-        self.result_set = \
-            [x[0: x.index(",")].strip() for x in response]
+        self.result_set = [x[0 : x.index(",")].strip() for x in response]
 
     # """Prints the data from the query response:
     #    1. First row result_set contains the columns names.

@@ -1,6 +1,6 @@
-from redis.commands.graph import edge
-from redis.commands.graph import node
 import pytest
+
+from redis.commands.graph import edge, node
 
 
 @pytest.mark.redismod

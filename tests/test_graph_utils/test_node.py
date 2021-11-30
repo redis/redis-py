@@ -1,5 +1,6 @@
-from redis.commands.graph import node
 import pytest
+
+from redis.commands.graph import node
 
 
 @pytest.fixture

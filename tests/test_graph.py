@@ -1,5 +1,6 @@
 import pytest
-from redis.commands.graph import Node, Edge, Path
+
+from redis.commands.graph import Edge, Node, Path
 from redis.exceptions import ResponseError
 
 
@@ -94,10 +95,7 @@ def test_path(client):
     graph.add_edge(edge01)
     graph.flush()
 
-    path01 = Path.new_empty_path().\
-        add_node(node0).\
-        add_edge(edge01).\
-        add_node(node1)
+    path01 = Path.new_empty_path().add_node(node0).add_edge(edge01).add_node(node1)
     expected_results = [[path01]]
 
     query = "MATCH p=(:L1)-[:R1]->(:L1) RETURN p ORDER BY p"
@@ -187,14 +185,14 @@ def test_stringify_query_result(client):
     graph.add_edge(edge)
 
     assert (
-            str(john)
-            == """(a:person{age:33,gender:"male",name:"John Doe",status:"single"})"""  # noqa
+        str(john)
+        == """(a:person{age:33,gender:"male",name:"John Doe",status:"single"})"""  # noqa
     )
     assert (
-            str(edge)
-            == """(a:person{age:33,gender:"male",name:"John Doe",status:"single"})"""  # noqa
-            + """-[:visited{purpose:"pleasure"}]->"""
-            + """(b:country{name:"Japan"})"""
+        str(edge)
+        == """(a:person{age:33,gender:"male",name:"John Doe",status:"single"})"""  # noqa
+        + """-[:visited{purpose:"pleasure"}]->"""
+        + """(b:country{name:"Japan"})"""
     )
     assert str(japan) == """(b:country{name:"Japan"})"""
 
@@ -209,8 +207,8 @@ def test_stringify_query_result(client):
     country = result.result_set[0][2]
 
     assert (
-            str(person)
-            == """(:person{age:33,gender:"male",name:"John Doe",status:"single"})"""  # noqa
+        str(person)
+        == """(:person{age:33,gender:"male",name:"John Doe",status:"single"})"""  # noqa
     )
     assert str(visit) == """()-[:visited{purpose:"pleasure"}]->()"""
     assert str(country) == """(:country{name:"Japan"})"""
@@ -247,14 +245,14 @@ def test_optional_match(client):
 def test_cached_execution(client):
     client.graph().query("CREATE ()")
 
-    uncached_result = client.graph().\
-        query("MATCH (n) RETURN n, $param", {"param": [0]})
+    uncached_result = client.graph().query("MATCH (n) RETURN n, $param", {"param": [0]})
     assert uncached_result.cached_execution is False
 
     # loop to make sure the query is cached on each thread on server
     for x in range(0, 64):
-        cached_result = client.graph().\
-            query("MATCH (n) RETURN n, $param", {"param": [0]})
+        cached_result = client.graph().query(
+            "MATCH (n) RETURN n, $param", {"param": [0]}
+        )
         assert uncached_result.result_set == cached_result.result_set
 
     # should be cached on all threads by now
@@ -382,13 +380,13 @@ def test_list_keys(client):
 
 @pytest.mark.redismod
 def test_multi_label(client):
-    redis_graph = client.graph('g')
+    redis_graph = client.graph("g")
 
-    node = Node(label=['l', 'll'])
+    node = Node(label=["l", "ll"])
     redis_graph.add_node(node)
     redis_graph.commit()
 
-    query = 'MATCH (n) RETURN n'
+    query = "MATCH (n) RETURN n"
     result = redis_graph.query(query)
     result_node = result.result_set[0][0]
     assert result_node == node
@@ -400,7 +398,7 @@ def test_multi_label(client):
         assert True
 
     try:
-        Node(label=['l', 1])
+        Node(label=["l", 1])
         assert False
     except AssertionError:
         assert True

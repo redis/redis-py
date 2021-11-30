@@ -1,5 +1,6 @@
 from redis import DataError
 from redis.exceptions import ResponseError
+
 from .exceptions import VersionMismatchException
 from .query_result import QueryResult
 
@@ -25,8 +26,7 @@ class GraphCommands:
 
         return self.query(query)
 
-    def query(self, q, params=None, timeout=None, read_only=False,
-              profile=False):
+    def query(self, q, params=None, timeout=None, read_only=False, profile=False):
         """
         Executes a query against the graph.
         For more information see `GRAPH.QUERY <https://oss.redis.com/redisgraph/master/commands/#graphquery>`_. # noqa
@@ -75,7 +75,9 @@ class GraphCommands:
             return QueryResult(self, response, profile)
         except ResponseError as e:
             if "wrong number of arguments" in str(e):
-                print("Note: RedisGraph Python requires server version 2.2.8 or above") # noqa
+                print(
+                    "Note: RedisGraph Python requires server version 2.2.8 or above"
+                )  # noqa
             if "unknown command" in str(e) and read_only:
                 # `GRAPH.RO_QUERY` is unavailable in older versions.
                 return self.query(q, params, timeout, read_only=False)
@@ -185,7 +187,9 @@ class GraphCommands:
             if set:
                 params.append(value)
             else:
-                raise DataError("``value`` can be provided only when ``set`` is True")  # noqa
+                raise DataError(
+                    "``value`` can be provided only when ``set`` is True"
+                )  # noqa
         return self.execute_command("GRAPH.CONFIG", *params)
 
     def list_keys(self):

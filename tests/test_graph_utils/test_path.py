@@ -1,7 +1,6 @@
-from redis.commands.graph import edge
-from redis.commands.graph import node
-from redis.commands.graph import path
 import pytest
+
+from redis.commands.graph import edge, node, path
 
 
 @pytest.mark.redismod
@@ -83,8 +82,7 @@ def test_compare():
     )
     assert path.Path(nodes=[node_1], edges=[]) != path.Path(nodes=[], edges=[])
     assert path.Path(nodes=[node_1], edges=[]) != path.Path(nodes=[], edges=[])
-    assert path.Path(nodes=[node_1], edges=[]) != \
-           path.Path(nodes=[node_2], edges=[])
+    assert path.Path(nodes=[node_1], edges=[]) != path.Path(nodes=[node_2], edges=[])
     assert path.Path(nodes=[node_1], edges=[edge_1]) != path.Path(
         nodes=[node_1], edges=[]
     )

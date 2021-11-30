@@ -23,7 +23,7 @@ def list_or_args(keys, args):
 def nativestr(x):
     """Return the decoded binary string, or a string, depending on type."""
     r = x.decode("utf-8", "replace") if isinstance(x, bytes) else x
-    if r == 'null':
+    if r == "null":
         return
     return r
 
@@ -59,14 +59,14 @@ def parse_list_to_dict(response):
     res = {}
     for i in range(0, len(response), 2):
         if isinstance(response[i], list):
-            res['Child iterators'].append(parse_list_to_dict(response[i]))
-        elif isinstance(response[i+1], list):
-            res['Child iterators'] = [parse_list_to_dict(response[i+1])]
+            res["Child iterators"].append(parse_list_to_dict(response[i]))
+        elif isinstance(response[i + 1], list):
+            res["Child iterators"] = [parse_list_to_dict(response[i + 1])]
         else:
             try:
-                res[response[i]] = float(response[i+1])
+                res[response[i]] = float(response[i + 1])
             except (TypeError, ValueError):
-                res[response[i]] = response[i+1]
+                res[response[i]] = response[i + 1]
     return res
 
 
@@ -114,7 +114,7 @@ def quote_string(v):
 
     v = v.replace('"', '\\"')
 
-    return '"{}"'.format(v)
+    return f'"{v}"'
 
 
 def decodeDictKeys(obj):

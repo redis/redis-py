@@ -1,9 +1,8 @@
-from .node import Node  # noqa
-from .edge import Edge  # noqa
-from .path import Path  # noqa
-
-from ..helpers import random_string, quote_string, stringify_param_value
+from ..helpers import quote_string, random_string, stringify_param_value
 from .commands import GraphCommands
+from .edge import Edge  # noqa
+from .node import Node  # noqa
+from .path import Path  # noqa
 
 
 class Graph(GraphCommands):
@@ -128,8 +127,7 @@ class Graph(GraphCommands):
         """
         Adds an edge to the graph.
         """
-        if not (self.nodes[edge.src_node.alias] and
-                self.nodes[edge.dest_node.alias]):
+        if not (self.nodes[edge.src_node.alias] and self.nodes[edge.dest_node.alias]):
             raise AssertionError("Both edge's end must be in the graph")
 
         self.edges.append(edge)
@@ -140,29 +138,25 @@ class Graph(GraphCommands):
         # Header starts with "CYPHER"
         params_header = "CYPHER "
         for key, value in params.items():
-            params_header += \
-                str(key) + "=" + stringify_param_value(value) + " "
+            params_header += str(key) + "=" + stringify_param_value(value) + " "
         return params_header
 
     # Procedures.
     def call_procedure(self, procedure, *args, read_only=False, **kwagrs):
         args = [quote_string(arg) for arg in args]
-        q = "CALL %s(%s)" % (procedure, ",".join(args))
+        q = f"CALL {procedure}({','.join(args)})"
 
         y = kwagrs.get("y", None)
         if y:
-            q += " YIELD %s" % ",".join(y)
+            q += f" YIELD {','.join(y)}"
 
         return self.query(q, read_only=read_only)
 
     def labels(self):
-        return self.call_procedure("db.labels", read_only=True)\
-            .result_set
+        return self.call_procedure("db.labels", read_only=True).result_set
 
     def relationshipTypes(self):
-        return self.call_procedure("db.relationshipTypes", read_only=True)\
-            .result_set
+        return self.call_procedure("db.relationshipTypes", read_only=True).result_set
 
     def propertyKeys(self):
-        return self.call_procedure("db.propertyKeys", read_only=True)\
-            .result_set
+        return self.call_procedure("db.propertyKeys", read_only=True).result_set

@@ -1,6 +1,5 @@
 from redis.exceptions import DataError
 
-
 ADD_CMD = "TS.ADD"
 ALTER_CMD = "TS.ALTER"
 CREATERULE_CMD = "TS.CREATERULE"
@@ -26,8 +25,6 @@ class TimeSeriesCommands:
     def create(self, key, **kwargs):
         """
         Create a new time-series.
-        For more information see
-        `TS.CREATE <https://oss.redis.com/redistimeseries/master/commands/#tscreate>`_.
 
         Args:
 
@@ -60,6 +57,8 @@ class TimeSeriesCommands:
             - 'min': only override if the value is lower than the existing value.
             - 'max': only override if the value is higher than the existing value.
             When this is not set, the server-wide default will be used.
+
+        For more information: https://oss.redis.com/redistimeseries/commands/#tscreate
         """  # noqa
         retention_msecs = kwargs.get("retention_msecs", None)
         uncompressed = kwargs.get("uncompressed", False)
@@ -79,9 +78,10 @@ class TimeSeriesCommands:
         """
         Update the retention, labels of an existing key.
         For more information see
-        `TS.ALTER <https://oss.redis.com/redistimeseries/master/commands/#tsalter>`_.
 
         The parameters are the same as TS.CREATE.
+
+        For more information: https://oss.redis.com/redistimeseries/commands/#tsalter
         """  # noqa
         retention_msecs = kwargs.get("retention_msecs", None)
         labels = kwargs.get("labels", {})
@@ -97,7 +97,6 @@ class TimeSeriesCommands:
         """
         Append (or create and append) a new sample to the series.
         For more information see
-        `TS.ADD <https://oss.redis.com/redistimeseries/master/commands/#tsadd>`_.
 
         Args:
 
@@ -129,6 +128,8 @@ class TimeSeriesCommands:
             - 'min': only override if the value is lower than the existing value.
             - 'max': only override if the value is higher than the existing value.
             When this is not set, the server-wide default will be used.
+
+        For more information: https://oss.redis.com/redistimeseries/master/commands/#tsadd
         """  # noqa
         retention_msecs = kwargs.get("retention_msecs", None)
         uncompressed = kwargs.get("uncompressed", False)
@@ -150,8 +151,8 @@ class TimeSeriesCommands:
         `key` with `timestamp`.
         Expects a list of `tuples` as (`key`,`timestamp`, `value`).
         Return value is an array with timestamps of insertions.
-        For more information see
-        `TS.MADD <https://oss.redis.com/redistimeseries/master/commands/#tsmadd>`_.
+
+        For more information: https://oss.redis.com/redistimeseries/master/commands/#tsmadd
         """  # noqa
         params = []
         for ktv in ktv_tuples:
@@ -166,8 +167,6 @@ class TimeSeriesCommands:
         sample's of a series.
         This command can be used as a counter or gauge that automatically gets
         history as a time series.
-        For more information see
-        `TS.INCRBY <https://oss.redis.com/redistimeseries/master/commands/#tsincrbytsdecrby>`_.
 
         Args:
 
@@ -189,6 +188,8 @@ class TimeSeriesCommands:
         chunk_size:
             Each time-series uses chunks of memory of fixed size for time series samples.
             You can alter the default TSDB chunk size by passing the chunk_size argument (in Bytes).
+
+        For more information: https://oss.redis.com/redistimeseries/master/commands/#tsincrbytsdecrby
         """  # noqa
         timestamp = kwargs.get("timestamp", None)
         retention_msecs = kwargs.get("retention_msecs", None)
@@ -210,8 +211,6 @@ class TimeSeriesCommands:
         latest sample's of a series.
         This command can be used as a counter or gauge that
         automatically gets history as a time series.
-        For more information see
-        `TS.DECRBY <https://oss.redis.com/redistimeseries/master/commands/#tsincrbytsdecrby>`_.
 
         Args:
 
@@ -237,6 +236,8 @@ class TimeSeriesCommands:
         chunk_size:
             Each time-series uses chunks of memory of fixed size for time series samples.
             You can alter the default TSDB chunk size by passing the chunk_size argument (in Bytes).
+
+        For more information: https://oss.redis.com/redistimeseries/master/commands/#tsincrbytsdecrby
         """  # noqa
         timestamp = kwargs.get("timestamp", None)
         retention_msecs = kwargs.get("retention_msecs", None)
@@ -260,7 +261,6 @@ class TimeSeriesCommands:
         and end data points will also be deleted.
         Return the count for deleted items.
         For more information see
-        `TS.DEL <https://oss.redis.com/redistimeseries/master/commands/#tsdel>`_.
 
         Args:
 
@@ -270,23 +270,19 @@ class TimeSeriesCommands:
             Start timestamp for the range deletion.
         to_time:
             End timestamp for the range deletion.
+
+        For more information: https://oss.redis.com/redistimeseries/master/commands/#tsdel
         """  # noqa
         return self.execute_command(DEL_CMD, key, from_time, to_time)
 
-    def createrule(
-        self,
-        source_key,
-        dest_key,
-        aggregation_type,
-        bucket_size_msec
-    ):
+    def createrule(self, source_key, dest_key, aggregation_type, bucket_size_msec):
         """
         Create a compaction rule from values added to `source_key` into `dest_key`.
         Aggregating for `bucket_size_msec` where an `aggregation_type` can be
         [`avg`, `sum`, `min`, `max`, `range`, `count`, `first`, `last`,
         `std.p`, `std.s`, `var.p`, `var.s`]
-        For more information see
-        `TS.CREATERULE <https://oss.redis.com/redistimeseries/master/commands/#tscreaterule>`_.
+
+        For more information: https://oss.redis.com/redistimeseries/master/commands/#tscreaterule
         """  # noqa
         params = [source_key, dest_key]
         self._appendAggregation(params, aggregation_type, bucket_size_msec)
@@ -297,7 +293,8 @@ class TimeSeriesCommands:
         """
         Delete a compaction rule.
         For more information see
-        `TS.DELETERULE <https://oss.redis.com/redistimeseries/master/commands/#tsdeleterule>`_.
+
+        For more information: https://oss.redis.com/redistimeseries/master/commands/#tsdeleterule
         """  # noqa
         return self.execute_command(DELETERULE_CMD, source_key, dest_key)
 
@@ -317,11 +314,7 @@ class TimeSeriesCommands:
         """Create TS.RANGE and TS.REVRANGE arguments."""
         params = [key, from_time, to_time]
         self._appendFilerByTs(params, filter_by_ts)
-        self._appendFilerByValue(
-            params,
-            filter_by_min_value,
-            filter_by_max_value
-        )
+        self._appendFilerByValue(params, filter_by_min_value, filter_by_max_value)
         self._appendCount(params, count)
         self._appendAlign(params, align)
         self._appendAggregation(params, aggregation_type, bucket_size_msec)
@@ -343,8 +336,6 @@ class TimeSeriesCommands:
     ):
         """
         Query a range in forward direction for a specific time-serie.
-        For more information see
-        `TS.RANGE <https://oss.redis.com/redistimeseries/master/commands/#tsrangetsrevrange>`_.
 
         Args:
 
@@ -374,6 +365,8 @@ class TimeSeriesCommands:
             by_min_value).
         align:
             Timestamp for alignment control for aggregation.
+
+        For more information: https://oss.redis.com/redistimeseries/master/commands/#tsrangetsrevrange
         """  # noqa
         params = self.__range_params(
             key,
@@ -404,8 +397,6 @@ class TimeSeriesCommands:
     ):
         """
         Query a range in reverse direction for a specific time-series.
-        For more information see
-        `TS.REVRANGE <https://oss.redis.com/redistimeseries/master/commands/#tsrangetsrevrange>`_.
 
         **Note**: This command is only available since RedisTimeSeries >= v1.4
 
@@ -432,6 +423,8 @@ class TimeSeriesCommands:
             Filter result by maximum value (must mention also filter_by_min_value).
         align:
             Timestamp for alignment control for aggregation.
+
+        For more information: https://oss.redis.com/redistimeseries/master/commands/#tsrangetsrevrange
         """  # noqa
         params = self.__range_params(
             key,
@@ -467,11 +460,7 @@ class TimeSeriesCommands:
         """Create TS.MRANGE and TS.MREVRANGE arguments."""
         params = [from_time, to_time]
         self._appendFilerByTs(params, filter_by_ts)
-        self._appendFilerByValue(
-            params,
-            filter_by_min_value,
-            filter_by_max_value
-        )
+        self._appendFilerByValue(params, filter_by_min_value, filter_by_max_value)
         self._appendCount(params, count)
         self._appendAlign(params, align)
         self._appendAggregation(params, aggregation_type, bucket_size_msec)
@@ -500,8 +489,6 @@ class TimeSeriesCommands:
     ):
         """
         Query a range across multiple time-series by filters in forward direction.
-        For more information see
-        `TS.MRANGE <https://oss.redis.com/redistimeseries/master/commands/#tsmrangetsmrevrange>`_.
 
         Args:
 
@@ -544,6 +531,8 @@ class TimeSeriesCommands:
             pair labels of a series.
         align:
             Timestamp for alignment control for aggregation.
+
+        For more information: https://oss.redis.com/redistimeseries/master/commands/#tsmrangetsmrevrange
         """  # noqa
         params = self.__mrange_params(
             aggregation_type,
@@ -583,8 +572,6 @@ class TimeSeriesCommands:
     ):
         """
         Query a range across multiple time-series by filters in reverse direction.
-        For more information see
-        `TS.MREVRANGE <https://oss.redis.com/redistimeseries/master/commands/#tsmrangetsmrevrange>`_.
 
         Args:
 
@@ -629,6 +616,8 @@ class TimeSeriesCommands:
             labels of a series.
         align:
             Timestamp for alignment control for aggregation.
+
+        For more information: https://oss.redis.com/redistimeseries/master/commands/#tsmrangetsmrevrange
         """  # noqa
         params = self.__mrange_params(
             aggregation_type,
@@ -650,16 +639,18 @@ class TimeSeriesCommands:
         return self.execute_command(MREVRANGE_CMD, *params)
 
     def get(self, key):
-        """ # noqa
+        """# noqa
         Get the last sample of `key`.
-        For more information see `TS.GET <https://oss.redis.com/redistimeseries/master/commands/#tsget>`_.
+
+        For more information: https://oss.redis.com/redistimeseries/master/commands/#tsget
         """  # noqa
         return self.execute_command(GET_CMD, key)
 
     def mget(self, filters, with_labels=False):
-        """ # noqa
+        """# noqa
         Get the last samples matching the specific `filter`.
-        For more information see `TS.MGET <https://oss.redis.com/redistimeseries/master/commands/#tsmget>`_.
+
+        For more information: https://oss.redis.com/redistimeseries/master/commands/#tsmget
         """  # noqa
         params = []
         self._appendWithLabels(params, with_labels)
@@ -668,17 +659,19 @@ class TimeSeriesCommands:
         return self.execute_command(MGET_CMD, *params)
 
     def info(self, key):
-        """  # noqa
+        """# noqa
         Get information of `key`.
-        For more information see `TS.INFO <https://oss.redis.com/redistimeseries/master/commands/#tsinfo>`_.
+
+        For more information: https://oss.redis.com/redistimeseries/master/commands/#tsinfo
         """  # noqa
         return self.execute_command(INFO_CMD, key)
 
     def queryindex(self, filters):
-        """  # noqa
+        """# noqa
         Get all the keys matching the `filter` list.
-        For more information see `TS.QUERYINDEX <https://oss.redis.com/redistimeseries/master/commands/#tsqueryindex>`_.
-        """  # noqa
+
+        For more information: https://oss.redis.com/redistimeseries/master/commands/#tsqueryindex
+        """  # noq
         return self.execute_command(QUERYINDEX_CMD, *filters)
 
     @staticmethod

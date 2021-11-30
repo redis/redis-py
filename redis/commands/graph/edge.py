@@ -1,5 +1,5 @@
-from .node import Node
 from ..helpers import quote_string
+from .node import Node
 
 
 class Edge:
@@ -7,8 +7,7 @@ class Edge:
     An edge connecting two nodes.
     """
 
-    def __init__(self, src_node, relation, dest_node, edge_id=None,
-                 properties=None):
+    def __init__(self, src_node, relation, dest_node, edge_id=None, properties=None):
         """
         Create a new edge.
         """

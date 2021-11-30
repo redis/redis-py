@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
+
 import redis
 
 setup(
@@ -24,8 +25,8 @@ setup(
     author_email="oss@redis.com",
     python_requires=">=3.6",
     install_requires=[
-        'deprecated==1.2.3',
-        'packaging==21.3',
+        "deprecated==1.2.3",
+        "packaging==21.3",
     ],
     classifiers=[
         "Development Status :: 5 - Production/Stable",
