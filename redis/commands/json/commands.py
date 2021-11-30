@@ -1,7 +1,9 @@
-from .path import Path
-from .decoders import decode_dict_keys
 from deprecated import deprecated
+
 from redis.exceptions import DataError
+
+from .decoders import decode_dict_keys
+from .path import Path
 
 
 class JSONCommands:
@@ -29,8 +31,7 @@ class JSONCommands:
         For more information: https://oss.redis.com/redisjson/commands/#jsonarrindex
         """  # noqa
         return self.execute_command(
-            "JSON.ARRINDEX", name, str(path), self._encode(scalar),
-            start, stop
+            "JSON.ARRINDEX", name, str(path), self._encode(scalar), start, stop
         )
 
     def arrinsert(self, name, path, index, *args):
@@ -66,8 +67,7 @@ class JSONCommands:
 
         For more information: https://oss.redis.com/redisjson/commands/#jsonarrtrim
         """  # noqa
-        return self.execute_command("JSON.ARRTRIM", name, str(path),
-                                    start, stop)
+        return self.execute_command("JSON.ARRTRIM", name, str(path), start, stop)
 
     def type(self, name, path=Path.rootPath()):
         """Get the type of the JSON value under ``path`` from key ``name``.
@@ -109,7 +109,7 @@ class JSONCommands:
             "JSON.NUMINCRBY", name, str(path), self._encode(number)
         )
 
-    @deprecated(version='4.0.0', reason='deprecated since redisjson 1.0.0')
+    @deprecated(version="4.0.0", reason="deprecated since redisjson 1.0.0")
     def nummultby(self, name, path, number):
         """Multiply the numeric (integer or floating point) JSON value under
         ``path`` at key ``name`` with the provided ``number``.
@@ -218,7 +218,7 @@ class JSONCommands:
         ``name``.
 
         For more information: https://oss.redis.com/redisjson/commands/#jsonstrlen
-        """   # noqa
+        """  # noqa
         pieces = [name]
         if path is not None:
             pieces.append(str(path))
@@ -240,9 +240,7 @@ class JSONCommands:
         For more information: https://oss.redis.com/redisjson/commands/#jsonstrappend
         """  # noqa
         pieces = [name, str(path), self._encode(value)]
-        return self.execute_command(
-            "JSON.STRAPPEND", *pieces
-        )
+        return self.execute_command("JSON.STRAPPEND", *pieces)
 
     def debug(self, subcommand, key=None, path=Path.rootPath()):
         """Return the memory usage in bytes of a value under ``path`` from
@@ -252,8 +250,7 @@ class JSONCommands:
         """  # noqa
         valid_subcommands = ["MEMORY", "HELP"]
         if subcommand not in valid_subcommands:
-            raise DataError("The only valid subcommands are ",
-                            str(valid_subcommands))
+            raise DataError("The only valid subcommands are ", str(valid_subcommands))
         pieces = [subcommand]
         if subcommand == "MEMORY":
             if key is None:
@@ -262,17 +259,20 @@ class JSONCommands:
             pieces.append(str(path))
         return self.execute_command("JSON.DEBUG", *pieces)
 
-    @deprecated(version='4.0.0',
-                reason='redisjson-py supported this, call get directly.')
+    @deprecated(
+        version="4.0.0", reason="redisjson-py supported this, call get directly."
+    )
     def jsonget(self, *args, **kwargs):
         return self.get(*args, **kwargs)
 
-    @deprecated(version='4.0.0',
-                reason='redisjson-py supported this, call get directly.')
+    @deprecated(
+        version="4.0.0", reason="redisjson-py supported this, call get directly."
+    )
     def jsonmget(self, *args, **kwargs):
         return self.mget(*args, **kwargs)
 
-    @deprecated(version='4.0.0',
-                reason='redisjson-py supported this, call get directly.')
+    @deprecated(
+        version="4.0.0", reason="redisjson-py supported this, call get directly."
+    )
     def jsonset(self, *args, **kwargs):
         return self.set(*args, **kwargs)

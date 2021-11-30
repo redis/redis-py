@@ -55,7 +55,8 @@ copyright = "2021, Redis Inc"
 #
 # The short X.Y version.
 import redis
-version = '.'.join(redis.__version__.split(".")[0:2])
+
+version = ".".join(redis.__version__.split(".")[0:2])
 
 # The full version, including alpha/beta/rc tags.
 release = redis.__version__
@@ -108,13 +109,13 @@ html_theme = "sphinx_rtd_theme"
 # further.  For a list of options available for each theme, see the
 # documentation.
 html_theme_options = {
-    'display_version': True,
-    'prev_next_buttons_location': 'bottom',
-    'style_external_links': False,
+    "display_version": True,
+    "prev_next_buttons_location": "bottom",
+    "style_external_links": False,
     # Toc options
-    'collapse_navigation': True,
-    'sticky_navigation': True,
-    'navigation_depth': 4,
+    "collapse_navigation": True,
+    "sticky_navigation": True,
+    "navigation_depth": 4,
 }
 
 # Add any paths that contain custom themes here, relative to this directory.
@@ -201,11 +202,7 @@ latex_elements = {
 # (source start file, target name, title, author, documentclass
 # [howto/manual]).
 latex_documents = [
-    ("index",
-        "redis-py.tex",
-        "redis-py Documentation",
-        "Redis Inc",
-        "manual"),
+    ("index", "redis-py.tex", "redis-py Documentation", "Redis Inc", "manual"),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of
@@ -233,11 +230,7 @@ latex_documents = [
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [(
-    "index",
-    "redis-py",
-    "redis-py Documentation",
-    ["Andy McCurdy"], 1)]
+man_pages = [("index", "redis-py", "redis-py Documentation", ["Andy McCurdy"], 1)]
 
 # If true, show URL addresses after external links.
 # man_show_urls = False

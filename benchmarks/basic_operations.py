@@ -1,24 +1,27 @@
-import redis
 import time
-from functools import wraps
 from argparse import ArgumentParser
+from functools import wraps
+
+import redis
 
 
 def parse_args():
     parser = ArgumentParser()
-    parser.add_argument('-n',
-                        type=int,
-                        help='Total number of requests (default 100000)',
-                        default=100000)
-    parser.add_argument('-P',
-                        type=int,
-                        help=('Pipeline <numreq> requests.'
-                              ' Default 1 (no pipeline).'),
-                        default=1)
-    parser.add_argument('-s',
-                        type=int,
-                        help='Data size of SET/GET value in bytes (default 2)',
-                        default=2)
+    parser.add_argument(
+        "-n", type=int, help="Total number of requests (default 100000)", default=100000
+    )
+    parser.add_argument(
+        "-P",
+        type=int,
+        help=("Pipeline <numreq> requests." " Default 1 (no pipeline)."),
+        default=1,
+    )
+    parser.add_argument(
+        "-s",
+        type=int,
+        help="Data size of SET/GET value in bytes (default 2)",
+        default=2,
+    )
 
     args = parser.parse_args()
     return args
@@ -45,15 +48,16 @@ def timer(func):
         start = time.monotonic()
         ret = func(*args, **kwargs)
         duration = time.monotonic() - start
-        if 'num' in kwargs:
-            count = kwargs['num']
+        if "num" in kwargs:
+            count = kwargs["num"]
         else:
             count = args[1]
-        print(f'{func.__name__} - {count} Requests')
-        print(f'Duration  = {duration}')
-        print(f'Rate = {count/duration}')
+        print(f"{func.__name__} - {count} Requests")
+        print(f"Duration  = {duration}")
+        print(f"Rate = {count/duration}")
         print()
         return ret
+
     return wrapper
 
 
@@ -62,9 +66,9 @@ def set_str(conn, num, pipeline_size, data_size):
     if pipeline_size > 1:
         conn = conn.pipeline()
 
-    set_data = 'a'.ljust(data_size, '0')
+    set_data = "a".ljust(data_size, "0")
     for i in range(num):
-        conn.set(f'set_str:{i}', set_data)
+        conn.set(f"set_str:{i}", set_data)
         if pipeline_size > 1 and i % pipeline_size == 0:
             conn.execute()
 
@@ -79,7 +83,7 @@ def set_int(conn, num, pipeline_size, data_size):
 
     set_data = 10 ** (data_size - 1)
     for i in range(num):
-        conn.set(f'set_int:{i}', set_data)
+        conn.set(f"set_int:{i}", set_data)
         if pipeline_size > 1 and i % pipeline_size == 0:
             conn.execute()
 
@@ -93,7 +97,7 @@ def get_str(conn, num, pipeline_size, data_size):
         conn = conn.pipeline()
 
     for i in range(num):
-        conn.get(f'set_str:{i}')
+        conn.get(f"set_str:{i}")
         if pipeline_size > 1 and i % pipeline_size == 0:
             conn.execute()
 
@@ -107,7 +111,7 @@ def get_int(conn, num, pipeline_size, data_size):
         conn = conn.pipeline()
 
     for i in range(num):
-        conn.get(f'set_int:{i}')
+        conn.get(f"set_int:{i}")
         if pipeline_size > 1 and i % pipeline_size == 0:
             conn.execute()
 
@@ -121,7 +125,7 @@ def incr(conn, num, pipeline_size, *args, **kwargs):
         conn = conn.pipeline()
 
     for i in range(num):
-        conn.incr('incr_key')
+        conn.incr("incr_key")
         if pipeline_size > 1 and i % pipeline_size == 0:
             conn.execute()
 
@@ -136,7 +140,7 @@ def lpush(conn, num, pipeline_size, data_size):
 
     set_data = 10 ** (data_size - 1)
     for i in range(num):
-        conn.lpush('lpush_key', set_data)
+        conn.lpush("lpush_key", set_data)
         if pipeline_size > 1 and i % pipeline_size == 0:
             conn.execute()
 
@@ -150,7 +154,7 @@ def lrange_300(conn, num, pipeline_size, data_size):
         conn = conn.pipeline()
 
     for i in range(num):
-        conn.lrange('lpush_key', i, i+300)
+        conn.lrange("lpush_key", i, i + 300)
         if pipeline_size > 1 and i % pipeline_size == 0:
             conn.execute()
 
@@ -163,7 +167,7 @@ def lpop(conn, num, pipeline_size, data_size):
     if pipeline_size > 1:
         conn = conn.pipeline()
     for i in range(num):
-        conn.lpop('lpush_key')
+        conn.lpop("lpush_key")
         if pipeline_size > 1 and i % pipeline_size == 0:
             conn.execute()
     if pipeline_size > 1:
@@ -175,11 +179,9 @@ def hmset(conn, num, pipeline_size, data_size):
     if pipeline_size > 1:
         conn = conn.pipeline()
 
-    set_data = {'str_value': 'string',
-                'int_value': 123456,
-                'float_value': 123456.0}
+    set_data = {"str_value": "string", "int_value": 123456, "float_value": 123456.0}
     for i in range(num):
-        conn.hmset('hmset_key', set_data)
+        conn.hmset("hmset_key", set_data)
         if pipeline_size > 1 and i % pipeline_size == 0:
             conn.execute()
 
@@ -187,5 +189,5 @@ def hmset(conn, num, pipeline_size, data_size):
         conn.execute()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run()

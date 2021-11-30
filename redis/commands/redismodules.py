@@ -1,4 +1,4 @@
-from json import JSONEncoder, JSONDecoder
+from json import JSONDecoder, JSONEncoder
 
 
 class RedisModuleCommands:
@@ -7,21 +7,18 @@ class RedisModuleCommands:
     """
 
     def json(self, encoder=JSONEncoder(), decoder=JSONDecoder()):
-        """Access the json namespace, providing support for redis json.
-        """
+        """Access the json namespace, providing support for redis json."""
 
         from .json import JSON
-        jj = JSON(
-                client=self,
-                encoder=encoder,
-                decoder=decoder)
+
+        jj = JSON(client=self, encoder=encoder, decoder=decoder)
         return jj
 
     def ft(self, index_name="idx"):
-        """Access the search namespace, providing support for redis search.
-        """
+        """Access the search namespace, providing support for redis search."""
 
         from .search import Search
+
         s = Search(client=self, index_name=index_name)
         return s
 
@@ -31,5 +28,6 @@ class RedisModuleCommands:
         """
 
         from .timeseries import TimeSeries
+
         s = TimeSeries(client=self)
         return s

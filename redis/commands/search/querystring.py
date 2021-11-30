@@ -15,8 +15,7 @@ def between(a, b, inclusive_min=True, inclusive_max=True):
     """
     Indicate that value is a numeric range
     """
-    return RangeValue(a, b, inclusive_min=inclusive_min,
-                      inclusive_max=inclusive_max)
+    return RangeValue(a, b, inclusive_min=inclusive_min, inclusive_max=inclusive_max)
 
 
 def equal(n):
@@ -200,9 +199,7 @@ class Node:
             return [BaseNode(f"@{key}:{vals[0].to_string()}")]
         if not vals[0].combinable:
             return [BaseNode(f"@{key}:{v.to_string()}") for v in vals]
-        s = BaseNode(
-            f"@{key}:({self.JOINSTR.join(v.to_string() for v in vals)})"
-        )
+        s = BaseNode(f"@{key}:({self.JOINSTR.join(v.to_string() for v in vals)})")
         return [s]
 
     @classmethod

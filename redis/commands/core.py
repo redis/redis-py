@@ -1,15 +1,11 @@
 import datetime
+import hashlib
 import time
 import warnings
-import hashlib
+
+from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 
 from .helpers import list_or_args
-from redis.exceptions import (
-    ConnectionError,
-    DataError,
-    NoScriptError,
-    RedisError,
-)
 
 
 class ACLCommands:
@@ -17,6 +13,7 @@ class ACLCommands:
     Redis Access Control List (ACL) commands.
     see: https://redis.io/topics/acl
     """
+
     def acl_cat(self, category=None):
         """
         Returns a list of categories or commands within a category.
@@ -28,7 +25,7 @@ class ACLCommands:
         For more information check https://redis.io/commands/acl-cat
         """
         pieces = [category] if category else []
-        return self.execute_command('ACL CAT', *pieces)
+        return self.execute_command("ACL CAT", *pieces)
 
     def acl_deluser(self, *username):
         """
@@ -36,7 +33,7 @@ class ACLCommands:
 
         For more information check https://redis.io/commands/acl-deluser
         """
-        return self.execute_command('ACL DELUSER', *username)
+        return self.execute_command("ACL DELUSER", *username)
 
     def acl_genpass(self, bits=None):
         """Generate a random password value.
@@ -51,9 +48,10 @@ class ACLCommands:
                 if b < 0 or b > 4096:
                     raise ValueError
             except ValueError:
-                raise DataError('genpass optionally accepts a bits argument, '
-                                'between 0 and 4096.')
-        return self.execute_command('ACL GENPASS', *pieces)
+                raise DataError(
+                    "genpass optionally accepts a bits argument, " "between 0 and 4096."
+                )
+        return self.execute_command("ACL GENPASS", *pieces)
 
     def acl_getuser(self, username):
         """
@@ -63,7 +61,7 @@ class ACLCommands:
 
         For more information check https://redis.io/commands/acl-getuser
         """
-        return self.execute_command('ACL GETUSER', username)
+        return self.execute_command("ACL GETUSER", username)
 
     def acl_help(self):
         """The ACL HELP command returns helpful text describing
@@ -71,7 +69,7 @@ class ACLCommands:
 
         For more information check https://redis.io/commands/acl-help
         """
-        return self.execute_command('ACL HELP')
+        return self.execute_command("ACL HELP")
 
     def acl_list(self):
         """
@@ -79,7 +77,7 @@ class ACLCommands:
 
         For more information check https://redis.io/commands/acl-list
         """
-        return self.execute_command('ACL LIST')
+        return self.execute_command("ACL LIST")
 
     def acl_log(self, count=None):
         """
@@ -92,11 +90,10 @@ class ACLCommands:
         args = []
         if count is not None:
             if not isinstance(count, int):
-                raise DataError('ACL LOG count must be an '
-                                'integer')
+                raise DataError("ACL LOG count must be an " "integer")
             args.append(count)
 
-        return self.execute_command('ACL LOG', *args)
+        return self.execute_command("ACL LOG", *args)
 
     def acl_log_reset(self):
         """
@@ -105,8 +102,8 @@ class ACLCommands:
 
         For more information check https://redis.io/commands/acl-log
         """
-        args = [b'RESET']
-        return self.execute_command('ACL LOG', *args)
+        args = [b"RESET"]
+        return self.execute_command("ACL LOG", *args)
 
     def acl_load(self):
         """
@@ -117,7 +114,7 @@ class ACLCommands:
 
         For more information check https://redis.io/commands/acl-load
         """
-        return self.execute_command('ACL LOAD')
+        return self.execute_command("ACL LOAD")
 
     def acl_save(self):
         """
@@ -128,12 +125,22 @@ class ACLCommands:
 
         For more information check https://redis.io/commands/acl-save
         """
-        return self.execute_command('ACL SAVE')
+        return self.execute_command("ACL SAVE")
 
-    def acl_setuser(self, username, enabled=False, nopass=False,
-                    passwords=None, hashed_passwords=None, categories=None,
-                    commands=None, keys=None, reset=False, reset_keys=False,
-                    reset_passwords=False):
+    def acl_setuser(
+        self,
+        username,
+        enabled=False,
+        nopass=False,
+        passwords=None,
+        hashed_passwords=None,
+        categories=None,
+        commands=None,
+        keys=None,
+        reset=False,
+        reset_keys=False,
+        reset_passwords=False,
+    ):
         """
         Create or update an ACL user.
 
@@ -199,22 +206,23 @@ class ACLCommands:
         pieces = [username]
 
         if reset:
-            pieces.append(b'reset')
+            pieces.append(b"reset")
 
         if reset_keys:
-            pieces.append(b'resetkeys')
+            pieces.append(b"resetkeys")
 
         if reset_passwords:
-            pieces.append(b'resetpass')
+            pieces.append(b"resetpass")
 
         if enabled:
-            pieces.append(b'on')
+            pieces.append(b"on")
         else:
-            pieces.append(b'off')
+            pieces.append(b"off")
 
         if (passwords or hashed_passwords) and nopass:
-            raise DataError('Cannot set \'nopass\' and supply '
-                            '\'passwords\' or \'hashed_passwords\'')
+            raise DataError(
+                "Cannot set 'nopass' and supply " "'passwords' or 'hashed_passwords'"
+            )
 
         if passwords:
             # as most users will have only one password, allow remove_passwords
@@ -222,13 +230,15 @@ class ACLCommands:
             passwords = list_or_args(passwords, [])
             for i, password in enumerate(passwords):
                 password = encoder.encode(password)
-                if password.startswith(b'+'):
-                    pieces.append(b'>%s' % password[1:])
-                elif password.startswith(b'-'):
-                    pieces.append(b'<%s' % password[1:])
+                if password.startswith(b"+"):
+                    pieces.append(b">%s" % password[1:])
+                elif password.startswith(b"-"):
+                    pieces.append(b"<%s" % password[1:])
                 else:
-                    raise DataError(f'Password {i} must be prefixed with a '
-                                    f'"+" to add or a "-" to remove')
+                    raise DataError(
+                        f"Password {i} must be prefixed with a "
+                        f'"+" to add or a "-" to remove'
+                    )
 
         if hashed_passwords:
             # as most users will have only one password, allow remove_passwords
@@ -236,29 +246,31 @@ class ACLCommands:
             hashed_passwords = list_or_args(hashed_passwords, [])
             for i, hashed_password in enumerate(hashed_passwords):
                 hashed_password = encoder.encode(hashed_password)
-                if hashed_password.startswith(b'+'):
-                    pieces.append(b'#%s' % hashed_password[1:])
-                elif hashed_password.startswith(b'-'):
-                    pieces.append(b'!%s' % hashed_password[1:])
+                if hashed_password.startswith(b"+"):
+                    pieces.append(b"#%s" % hashed_password[1:])
+                elif hashed_password.startswith(b"-"):
+                    pieces.append(b"!%s" % hashed_password[1:])
                 else:
-                    raise DataError(f'Hashed password {i} must be prefixed with a '
-                                    f'"+" to add or a "-" to remove')
+                    raise DataError(
+                        f"Hashed password {i} must be prefixed with a "
+                        f'"+" to add or a "-" to remove'
+                    )
 
         if nopass:
-            pieces.append(b'nopass')
+            pieces.append(b"nopass")
 
         if categories:
             for category in categories:
                 category = encoder.encode(category)
                 # categories can be prefixed with one of (+@, +, -@, -)
-                if category.startswith(b'+@'):
+                if category.startswith(b"+@"):
                     pieces.append(category)
-                elif category.startswith(b'+'):
-                    pieces.append(b'+@%s' % category[1:])
-                elif category.startswith(b'-@'):
+                elif category.startswith(b"+"):
+                    pieces.append(b"+@%s" % category[1:])
+                elif category.startswith(b"-@"):
                     pieces.append(category)
-                elif category.startswith(b'-'):
-                    pieces.append(b'-@%s' % category[1:])
+                elif category.startswith(b"-"):
+                    pieces.append(b"-@%s" % category[1:])
                 else:
                     raise DataError(
                         f'Category "{encoder.decode(category, force=True)}" '
@@ -267,7 +279,7 @@ class ACLCommands:
         if commands:
             for cmd in commands:
                 cmd = encoder.encode(cmd)
-                if not cmd.startswith(b'+') and not cmd.startswith(b'-'):
+                if not cmd.startswith(b"+") and not cmd.startswith(b"-"):
                     raise DataError(
                         f'Command "{encoder.decode(cmd, force=True)}" '
                         'must be prefixed with "+" or "-"'
@@ -277,35 +289,36 @@ class ACLCommands:
         if keys:
             for key in keys:
                 key = encoder.encode(key)
-                pieces.append(b'~%s' % key)
+                pieces.append(b"~%s" % key)
 
-        return self.execute_command('ACL SETUSER', *pieces)
+        return self.execute_command("ACL SETUSER", *pieces)
 
     def acl_users(self):
         """Returns a list of all registered users on the server.
 
         For more information check https://redis.io/commands/acl-users
         """
-        return self.execute_command('ACL USERS')
+        return self.execute_command("ACL USERS")
 
     def acl_whoami(self):
         """Get the username for the current connection
 
         For more information check https://redis.io/commands/acl-whoami
         """
-        return self.execute_command('ACL WHOAMI')
+        return self.execute_command("ACL WHOAMI")
 
 
 class ManagementCommands:
     """
     Redis management commands
     """
+
     def bgrewriteaof(self):
         """Tell the Redis server to rewrite the AOF file from data in memory.
 
         For more information check https://redis.io/commands/bgrewriteaof
         """
-        return self.execute_command('BGREWRITEAOF')
+        return self.execute_command("BGREWRITEAOF")
 
     def bgsave(self, schedule=True):
         """
@@ -317,17 +330,18 @@ class ManagementCommands:
         pieces = []
         if schedule:
             pieces.append("SCHEDULE")
-        return self.execute_command('BGSAVE', *pieces)
+        return self.execute_command("BGSAVE", *pieces)
 
     def client_kill(self, address):
         """Disconnects the client at ``address`` (ip:port)
 
         For more information check https://redis.io/commands/client-kill
         """
-        return self.execute_command('CLIENT KILL', address)
+        return self.execute_command("CLIENT KILL", address)
 
-    def client_kill_filter(self, _id=None, _type=None, addr=None,
-                           skipme=None, laddr=None, user=None):
+    def client_kill_filter(
+        self, _id=None, _type=None, addr=None, skipme=None, laddr=None, user=None
+    ):
         """
         Disconnects client(s) using a variety of filter options
         :param id: Kills a client by its unique ID field
@@ -342,29 +356,31 @@ class ManagementCommands:
         """
         args = []
         if _type is not None:
-            client_types = ('normal', 'master', 'slave', 'pubsub')
+            client_types = ("normal", "master", "slave", "pubsub")
             if str(_type).lower() not in client_types:
                 raise DataError(f"CLIENT KILL type must be one of {client_types!r}")
-            args.extend((b'TYPE', _type))
+            args.extend((b"TYPE", _type))
         if skipme is not None:
             if not isinstance(skipme, bool):
                 raise DataError("CLIENT KILL skipme must be a bool")
             if skipme:
-                args.extend((b'SKIPME', b'YES'))
+                args.extend((b"SKIPME", b"YES"))
             else:
-                args.extend((b'SKIPME', b'NO'))
+                args.extend((b"SKIPME", b"NO"))
         if _id is not None:
-            args.extend((b'ID', _id))
+            args.extend((b"ID", _id))
         if addr is not None:
-            args.extend((b'ADDR', addr))
+            args.extend((b"ADDR", addr))
         if laddr is not None:
-            args.extend((b'LADDR', laddr))
+            args.extend((b"LADDR", laddr))
         if user is not None:
-            args.extend((b'USER', user))
+            args.extend((b"USER", user))
         if not args:
-            raise DataError("CLIENT KILL <filter> <value> ... ... <filter> "
-                            "<value> must specify at least one filter")
-        return self.execute_command('CLIENT KILL', *args)
+            raise DataError(
+                "CLIENT KILL <filter> <value> ... ... <filter> "
+                "<value> must specify at least one filter"
+            )
+        return self.execute_command("CLIENT KILL", *args)
 
     def client_info(self):
         """
@@ -373,7 +389,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/client-info
         """
-        return self.execute_command('CLIENT INFO')
+        return self.execute_command("CLIENT INFO")
 
     def client_list(self, _type=None, client_id=[]):
         """
@@ -387,17 +403,17 @@ class ManagementCommands:
         """
         args = []
         if _type is not None:
-            client_types = ('normal', 'master', 'replica', 'pubsub')
+            client_types = ("normal", "master", "replica", "pubsub")
             if str(_type).lower() not in client_types:
                 raise DataError(f"CLIENT LIST _type must be one of {client_types!r}")
-            args.append(b'TYPE')
+            args.append(b"TYPE")
             args.append(_type)
         if not isinstance(client_id, list):
             raise DataError("client_id must be a list")
         if client_id != []:
             args.append(b"ID")
-            args.append(' '.join(client_id))
-        return self.execute_command('CLIENT LIST', *args)
+            args.append(" ".join(client_id))
+        return self.execute_command("CLIENT LIST", *args)
 
     def client_getname(self):
         """
@@ -405,7 +421,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/client-getname
         """
-        return self.execute_command('CLIENT GETNAME')
+        return self.execute_command("CLIENT GETNAME")
 
     def client_getredir(self):
         """
@@ -414,7 +430,7 @@ class ManagementCommands:
 
         see: https://redis.io/commands/client-getredir
         """
-        return self.execute_command('CLIENT GETREDIR')
+        return self.execute_command("CLIENT GETREDIR")
 
     def client_reply(self, reply):
         """
@@ -432,9 +448,9 @@ class ManagementCommands:
 
         See https://redis.io/commands/client-reply
         """
-        replies = ['ON', 'OFF', 'SKIP']
+        replies = ["ON", "OFF", "SKIP"]
         if reply not in replies:
-            raise DataError(f'CLIENT REPLY must be one of {replies!r}')
+            raise DataError(f"CLIENT REPLY must be one of {replies!r}")
         return self.execute_command("CLIENT REPLY", reply)
 
     def client_id(self):
@@ -443,7 +459,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/client-id
         """
-        return self.execute_command('CLIENT ID')
+        return self.execute_command("CLIENT ID")
 
     def client_trackinginfo(self):
         """
@@ -452,7 +468,7 @@ class ManagementCommands:
 
         See https://redis.io/commands/client-trackinginfo
         """
-        return self.execute_command('CLIENT TRACKINGINFO')
+        return self.execute_command("CLIENT TRACKINGINFO")
 
     def client_setname(self, name):
         """
@@ -460,7 +476,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/client-setname
         """
-        return self.execute_command('CLIENT SETNAME', name)
+        return self.execute_command("CLIENT SETNAME", name)
 
     def client_unblock(self, client_id, error=False):
         """
@@ -471,9 +487,9 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/client-unblock
         """
-        args = ['CLIENT UNBLOCK', int(client_id)]
+        args = ["CLIENT UNBLOCK", int(client_id)]
         if error:
-            args.append(b'ERROR')
+            args.append(b"ERROR")
         return self.execute_command(*args)
 
     def client_pause(self, timeout):
@@ -485,7 +501,7 @@ class ManagementCommands:
         """
         if not isinstance(timeout, int):
             raise DataError("CLIENT PAUSE timeout must be an integer")
-        return self.execute_command('CLIENT PAUSE', str(timeout))
+        return self.execute_command("CLIENT PAUSE", str(timeout))
 
     def client_unpause(self):
         """
@@ -493,7 +509,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/client-unpause
         """
-        return self.execute_command('CLIENT UNPAUSE')
+        return self.execute_command("CLIENT UNPAUSE")
 
     def command_info(self):
         raise NotImplementedError(
@@ -501,7 +517,7 @@ class ManagementCommands:
         )
 
     def command_count(self):
-        return self.execute_command('COMMAND COUNT')
+        return self.execute_command("COMMAND COUNT")
 
     def readwrite(self):
         """
@@ -509,7 +525,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/readwrite
         """
-        return self.execute_command('READWRITE')
+        return self.execute_command("READWRITE")
 
     def readonly(self):
         """
@@ -517,7 +533,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/readonly
         """
-        return self.execute_command('READONLY')
+        return self.execute_command("READONLY")
 
     def config_get(self, pattern="*"):
         """
@@ -525,14 +541,14 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/config-get
         """
-        return self.execute_command('CONFIG GET', pattern)
+        return self.execute_command("CONFIG GET", pattern)
 
     def config_set(self, name, value):
         """Set config item ``name`` with ``value``
 
         For more information check https://redis.io/commands/config-set
         """
-        return self.execute_command('CONFIG SET', name, value)
+        return self.execute_command("CONFIG SET", name, value)
 
     def config_resetstat(self):
         """
@@ -540,7 +556,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/config-resetstat
         """
-        return self.execute_command('CONFIG RESETSTAT')
+        return self.execute_command("CONFIG RESETSTAT")
 
     def config_rewrite(self):
         """
@@ -548,10 +564,10 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/config-rewrite
         """
-        return self.execute_command('CONFIG REWRITE')
+        return self.execute_command("CONFIG REWRITE")
 
     def cluster(self, cluster_arg, *args):
-        return self.execute_command(f'CLUSTER {cluster_arg.upper()}', *args)
+        return self.execute_command(f"CLUSTER {cluster_arg.upper()}", *args)
 
     def dbsize(self):
         """
@@ -559,7 +575,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/dbsize
         """
-        return self.execute_command('DBSIZE')
+        return self.execute_command("DBSIZE")
 
     def debug_object(self, key):
         """
@@ -567,7 +583,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/debug-object
         """
-        return self.execute_command('DEBUG OBJECT', key)
+        return self.execute_command("DEBUG OBJECT", key)
 
     def debug_segfault(self):
         raise NotImplementedError(
@@ -584,7 +600,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/echo
         """
-        return self.execute_command('ECHO', value)
+        return self.execute_command("ECHO", value)
 
     def flushall(self, asynchronous=False):
         """
@@ -597,8 +613,8 @@ class ManagementCommands:
         """
         args = []
         if asynchronous:
-            args.append(b'ASYNC')
-        return self.execute_command('FLUSHALL', *args)
+            args.append(b"ASYNC")
+        return self.execute_command("FLUSHALL", *args)
 
     def flushdb(self, asynchronous=False):
         """
@@ -611,8 +627,8 @@ class ManagementCommands:
         """
         args = []
         if asynchronous:
-            args.append(b'ASYNC')
-        return self.execute_command('FLUSHDB', *args)
+            args.append(b"ASYNC")
+        return self.execute_command("FLUSHDB", *args)
 
     def swapdb(self, first, second):
         """
@@ -620,7 +636,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/swapdb
         """
-        return self.execute_command('SWAPDB', first, second)
+        return self.execute_command("SWAPDB", first, second)
 
     def info(self, section=None):
         """
@@ -635,9 +651,9 @@ class ManagementCommands:
         For more information check https://redis.io/commands/info
         """
         if section is None:
-            return self.execute_command('INFO')
+            return self.execute_command("INFO")
         else:
-            return self.execute_command('INFO', section)
+            return self.execute_command("INFO", section)
 
     def lastsave(self):
         """
@@ -646,7 +662,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/lastsave
         """
-        return self.execute_command('LASTSAVE')
+        return self.execute_command("LASTSAVE")
 
     def lolwut(self, *version_numbers):
         """
@@ -655,12 +671,21 @@ class ManagementCommands:
         See: https://redis.io/commands/lolwut
         """
         if version_numbers:
-            return self.execute_command('LOLWUT VERSION', *version_numbers)
+            return self.execute_command("LOLWUT VERSION", *version_numbers)
         else:
-            return self.execute_command('LOLWUT')
+            return self.execute_command("LOLWUT")
 
-    def migrate(self, host, port, keys, destination_db, timeout,
-                copy=False, replace=False, auth=None):
+    def migrate(
+        self,
+        host,
+        port,
+        keys,
+        destination_db,
+        timeout,
+        copy=False,
+        replace=False,
+        auth=None,
+    ):
         """
         Migrate 1 or more keys from the current Redis server to a different
         server specified by the ``host``, ``port`` and ``destination_db``.
@@ -682,25 +707,26 @@ class ManagementCommands:
         """
         keys = list_or_args(keys, [])
         if not keys:
-            raise DataError('MIGRATE requires at least one key')
+            raise DataError("MIGRATE requires at least one key")
         pieces = []
         if copy:
-            pieces.append(b'COPY')
+            pieces.append(b"COPY")
         if replace:
-            pieces.append(b'REPLACE')
+            pieces.append(b"REPLACE")
         if auth:
-            pieces.append(b'AUTH')
+            pieces.append(b"AUTH")
             pieces.append(auth)
-        pieces.append(b'KEYS')
+        pieces.append(b"KEYS")
         pieces.extend(keys)
-        return self.execute_command('MIGRATE', host, port, '', destination_db,
-                                    timeout, *pieces)
+        return self.execute_command(
+            "MIGRATE", host, port, "", destination_db, timeout, *pieces
+        )
 
     def object(self, infotype, key):
         """
         Return the encoding, idletime, or refcount about the key
         """
-        return self.execute_command('OBJECT', infotype, key, infotype=infotype)
+        return self.execute_command("OBJECT", infotype, key, infotype=infotype)
 
     def memory_doctor(self):
         raise NotImplementedError(
@@ -726,7 +752,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/memory-stats
         """
-        return self.execute_command('MEMORY STATS')
+        return self.execute_command("MEMORY STATS")
 
     def memory_malloc_stats(self):
         """
@@ -734,7 +760,7 @@ class ManagementCommands:
 
         See: https://redis.io/commands/memory-malloc-stats
         """
-        return self.execute_command('MEMORY MALLOC-STATS')
+        return self.execute_command("MEMORY MALLOC-STATS")
 
     def memory_usage(self, key, samples=None):
         """
@@ -749,8 +775,8 @@ class ManagementCommands:
         """
         args = []
         if isinstance(samples, int):
-            args.extend([b'SAMPLES', samples])
-        return self.execute_command('MEMORY USAGE', key, *args)
+            args.extend([b"SAMPLES", samples])
+        return self.execute_command("MEMORY USAGE", key, *args)
 
     def memory_purge(self):
         """
@@ -758,7 +784,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/memory-purge
         """
-        return self.execute_command('MEMORY PURGE')
+        return self.execute_command("MEMORY PURGE")
 
     def ping(self):
         """
@@ -766,7 +792,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/ping
         """
-        return self.execute_command('PING')
+        return self.execute_command("PING")
 
     def quit(self):
         """
@@ -774,7 +800,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/quit
         """
-        return self.execute_command('QUIT')
+        return self.execute_command("QUIT")
 
     def replicaof(self, *args):
         """
@@ -785,7 +811,7 @@ class ManagementCommands:
 
         For more information check  https://redis.io/commands/replicaof
         """
-        return self.execute_command('REPLICAOF', *args)
+        return self.execute_command("REPLICAOF", *args)
 
     def save(self):
         """
@@ -794,7 +820,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/save
         """
-        return self.execute_command('SAVE')
+        return self.execute_command("SAVE")
 
     def shutdown(self, save=False, nosave=False):
         """Shutdown the Redis server.  If Redis has persistence configured,
@@ -806,12 +832,12 @@ class ManagementCommands:
         For more information check https://redis.io/commands/shutdown
         """
         if save and nosave:
-            raise DataError('SHUTDOWN save and nosave cannot both be set')
-        args = ['SHUTDOWN']
+            raise DataError("SHUTDOWN save and nosave cannot both be set")
+        args = ["SHUTDOWN"]
         if save:
-            args.append('SAVE')
+            args.append("SAVE")
         if nosave:
-            args.append('NOSAVE')
+            args.append("NOSAVE")
         try:
             self.execute_command(*args)
         except ConnectionError:
@@ -828,8 +854,8 @@ class ManagementCommands:
         For more information check https://redis.io/commands/slaveof
         """
         if host is None and port is None:
-            return self.execute_command('SLAVEOF', b'NO', b'ONE')
-        return self.execute_command('SLAVEOF', host, port)
+            return self.execute_command("SLAVEOF", b"NO", b"ONE")
+        return self.execute_command("SLAVEOF", host, port)
 
     def slowlog_get(self, num=None):
         """
@@ -838,11 +864,12 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/slowlog-get
         """
-        args = ['SLOWLOG GET']
+        args = ["SLOWLOG GET"]
         if num is not None:
             args.append(num)
         decode_responses = self.connection_pool.connection_kwargs.get(
-            'decode_responses', False)
+            "decode_responses", False
+        )
         return self.execute_command(*args, decode_responses=decode_responses)
 
     def slowlog_len(self):
@@ -851,7 +878,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/slowlog-len
         """
-        return self.execute_command('SLOWLOG LEN')
+        return self.execute_command("SLOWLOG LEN")
 
     def slowlog_reset(self):
         """
@@ -859,7 +886,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/slowlog-reset
         """
-        return self.execute_command('SLOWLOG RESET')
+        return self.execute_command("SLOWLOG RESET")
 
     def time(self):
         """
@@ -868,7 +895,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/time
         """
-        return self.execute_command('TIME')
+        return self.execute_command("TIME")
 
     def wait(self, num_replicas, timeout):
         """
@@ -879,13 +906,14 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/wait
         """
-        return self.execute_command('WAIT', num_replicas, timeout)
+        return self.execute_command("WAIT", num_replicas, timeout)
 
 
 class BasicKeyCommands:
     """
     Redis basic key-based commands
     """
+
     def append(self, key, value):
         """
         Appends the string ``value`` to the value at ``key``. If ``key``
@@ -894,7 +922,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/append
         """
-        return self.execute_command('APPEND', key, value)
+        return self.execute_command("APPEND", key, value)
 
     def bitcount(self, key, start=None, end=None):
         """
@@ -907,10 +935,9 @@ class BasicKeyCommands:
         if start is not None and end is not None:
             params.append(start)
             params.append(end)
-        elif (start is not None and end is None) or \
-                (end is not None and start is None):
+        elif (start is not None and end is None) or (end is not None and start is None):
             raise DataError("Both start and end must be specified")
-        return self.execute_command('BITCOUNT', *params)
+        return self.execute_command("BITCOUNT", *params)
 
     def bitfield(self, key, default_overflow=None):
         """
@@ -928,7 +955,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/bitop
         """
-        return self.execute_command('BITOP', operation, dest, *keys)
+        return self.execute_command("BITOP", operation, dest, *keys)
 
     def bitpos(self, key, bit, start=None, end=None):
         """
@@ -940,7 +967,7 @@ class BasicKeyCommands:
         For more information check https://redis.io/commands/bitpos
         """
         if bit not in (0, 1):
-            raise DataError('bit must be 0 or 1')
+            raise DataError("bit must be 0 or 1")
         params = [key, bit]
 
         start is not None and params.append(start)
@@ -948,9 +975,8 @@ class BasicKeyCommands:
         if start is not None and end is not None:
             params.append(end)
         elif start is None and end is not None:
-            raise DataError("start argument is not set, "
-                            "when end is specified")
-        return self.execute_command('BITPOS', *params)
+            raise DataError("start argument is not set, " "when end is specified")
+        return self.execute_command("BITPOS", *params)
 
     def copy(self, source, destination, destination_db=None, replace=False):
         """
@@ -970,7 +996,7 @@ class BasicKeyCommands:
             params.extend(["DB", destination_db])
         if replace:
             params.append("REPLACE")
-        return self.execute_command('COPY', *params)
+        return self.execute_command("COPY", *params)
 
     def decr(self, name, amount=1):
         """
@@ -990,13 +1016,13 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/decrby
         """
-        return self.execute_command('DECRBY', name, amount)
+        return self.execute_command("DECRBY", name, amount)
 
     def delete(self, *names):
         """
         Delete one or more keys specified by ``names``
         """
-        return self.execute_command('DEL', *names)
+        return self.execute_command("DEL", *names)
 
     def __delitem__(self, name):
         self.delete(name)
@@ -1009,9 +1035,10 @@ class BasicKeyCommands:
         For more information check https://redis.io/commands/dump
         """
         from redis.client import NEVER_DECODE
+
         options = {}
         options[NEVER_DECODE] = []
-        return self.execute_command('DUMP', name, **options)
+        return self.execute_command("DUMP", name, **options)
 
     def exists(self, *names):
         """
@@ -1019,7 +1046,8 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/exists
         """
-        return self.execute_command('EXISTS', *names)
+        return self.execute_command("EXISTS", *names)
+
     __contains__ = exists
 
     def expire(self, name, time):
@@ -1031,7 +1059,7 @@ class BasicKeyCommands:
         """
         if isinstance(time, datetime.timedelta):
             time = int(time.total_seconds())
-        return self.execute_command('EXPIRE', name, time)
+        return self.execute_command("EXPIRE", name, time)
 
     def expireat(self, name, when):
         """
@@ -1042,7 +1070,7 @@ class BasicKeyCommands:
         """
         if isinstance(when, datetime.datetime):
             when = int(time.mktime(when.timetuple()))
-        return self.execute_command('EXPIREAT', name, when)
+        return self.execute_command("EXPIREAT", name, when)
 
     def get(self, name):
         """
@@ -1050,7 +1078,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/get
         """
-        return self.execute_command('GET', name)
+        return self.execute_command("GET", name)
 
     def getdel(self, name):
         """
@@ -1061,10 +1089,9 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/getdel
         """
-        return self.execute_command('GETDEL', name)
+        return self.execute_command("GETDEL", name)
 
-    def getex(self, name,
-              ex=None, px=None, exat=None, pxat=None, persist=False):
+    def getex(self, name, ex=None, px=None, exat=None, pxat=None, persist=False):
         """
         Get the value of key and optionally set its expiration.
         GETEX is similar to GET, but is a write command with
@@ -1088,38 +1115,40 @@ class BasicKeyCommands:
 
         opset = {ex, px, exat, pxat}
         if len(opset) > 2 or len(opset) > 1 and persist:
-            raise DataError("``ex``, ``px``, ``exat``, ``pxat``, "
-                            "and ``persist`` are mutually exclusive.")
+            raise DataError(
+                "``ex``, ``px``, ``exat``, ``pxat``, "
+                "and ``persist`` are mutually exclusive."
+            )
 
         pieces = []
         # similar to set command
         if ex is not None:
-            pieces.append('EX')
+            pieces.append("EX")
             if isinstance(ex, datetime.timedelta):
                 ex = int(ex.total_seconds())
             pieces.append(ex)
         if px is not None:
-            pieces.append('PX')
+            pieces.append("PX")
             if isinstance(px, datetime.timedelta):
                 px = int(px.total_seconds() * 1000)
             pieces.append(px)
         # similar to pexpireat command
         if exat is not None:
-            pieces.append('EXAT')
+            pieces.append("EXAT")
             if isinstance(exat, datetime.datetime):
                 s = int(exat.microsecond / 1000000)
                 exat = int(time.mktime(exat.timetuple())) + s
             pieces.append(exat)
         if pxat is not None:
-            pieces.append('PXAT')
+            pieces.append("PXAT")
             if isinstance(pxat, datetime.datetime):
                 ms = int(pxat.microsecond / 1000)
                 pxat = int(time.mktime(pxat.timetuple())) * 1000 + ms
             pieces.append(pxat)
         if persist:
-            pieces.append('PERSIST')
+            pieces.append("PERSIST")
 
-        return self.execute_command('GETEX', name, *pieces)
+        return self.execute_command("GETEX", name, *pieces)
 
     def __getitem__(self, name):
         """
@@ -1137,7 +1166,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/getbit
         """
-        return self.execute_command('GETBIT', name, offset)
+        return self.execute_command("GETBIT", name, offset)
 
     def getrange(self, key, start, end):
         """
@@ -1146,7 +1175,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/getrange
         """
-        return self.execute_command('GETRANGE', key, start, end)
+        return self.execute_command("GETRANGE", key, start, end)
 
     def getset(self, name, value):
         """
@@ -1158,7 +1187,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/getset
         """
-        return self.execute_command('GETSET', name, value)
+        return self.execute_command("GETSET", name, value)
 
     def incr(self, name, amount=1):
         """
@@ -1178,7 +1207,7 @@ class BasicKeyCommands:
         """
         # An alias for ``incr()``, because it is already implemented
         # as INCRBY redis command.
-        return self.execute_command('INCRBY', name, amount)
+        return self.execute_command("INCRBY", name, amount)
 
     def incrbyfloat(self, name, amount=1.0):
         """
@@ -1187,15 +1216,15 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/incrbyfloat
         """
-        return self.execute_command('INCRBYFLOAT', name, amount)
+        return self.execute_command("INCRBYFLOAT", name, amount)
 
-    def keys(self, pattern='*'):
+    def keys(self, pattern="*"):
         """
         Returns a list of keys matching ``pattern``
 
         For more information check https://redis.io/commands/keys
         """
-        return self.execute_command('KEYS', pattern)
+        return self.execute_command("KEYS", pattern)
 
     def lmove(self, first_list, second_list, src="LEFT", dest="RIGHT"):
         """
@@ -1208,8 +1237,7 @@ class BasicKeyCommands:
         params = [first_list, second_list, src, dest]
         return self.execute_command("LMOVE", *params)
 
-    def blmove(self, first_list, second_list, timeout,
-               src="LEFT", dest="RIGHT"):
+    def blmove(self, first_list, second_list, timeout, src="LEFT", dest="RIGHT"):
         """
         Blocking version of lmove.
 
@@ -1225,11 +1253,12 @@ class BasicKeyCommands:
         For more information check https://redis.io/commands/mget
         """
         from redis.client import EMPTY_RESPONSE
+
         args = list_or_args(keys, args)
         options = {}
         if not args:
             options[EMPTY_RESPONSE] = []
-        return self.execute_command('MGET', *args, **options)
+        return self.execute_command("MGET", *args, **options)
 
     def mset(self, mapping):
         """
@@ -1242,7 +1271,7 @@ class BasicKeyCommands:
         items = []
         for pair in mapping.items():
             items.extend(pair)
-        return self.execute_command('MSET', *items)
+        return self.execute_command("MSET", *items)
 
     def msetnx(self, mapping):
         """
@@ -1256,7 +1285,7 @@ class BasicKeyCommands:
         items = []
         for pair in mapping.items():
             items.extend(pair)
-        return self.execute_command('MSETNX', *items)
+        return self.execute_command("MSETNX", *items)
 
     def move(self, name, db):
         """
@@ -1264,7 +1293,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/move
         """
-        return self.execute_command('MOVE', name, db)
+        return self.execute_command("MOVE", name, db)
 
     def persist(self, name):
         """
@@ -1272,7 +1301,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/persist
         """
-        return self.execute_command('PERSIST', name)
+        return self.execute_command("PERSIST", name)
 
     def pexpire(self, name, time):
         """
@@ -1284,7 +1313,7 @@ class BasicKeyCommands:
         """
         if isinstance(time, datetime.timedelta):
             time = int(time.total_seconds() * 1000)
-        return self.execute_command('PEXPIRE', name, time)
+        return self.execute_command("PEXPIRE", name, time)
 
     def pexpireat(self, name, when):
         """
@@ -1297,7 +1326,7 @@ class BasicKeyCommands:
         if isinstance(when, datetime.datetime):
             ms = int(when.microsecond / 1000)
             when = int(time.mktime(when.timetuple())) * 1000 + ms
-        return self.execute_command('PEXPIREAT', name, when)
+        return self.execute_command("PEXPIREAT", name, when)
 
     def psetex(self, name, time_ms, value):
         """
@@ -1309,7 +1338,7 @@ class BasicKeyCommands:
         """
         if isinstance(time_ms, datetime.timedelta):
             time_ms = int(time_ms.total_seconds() * 1000)
-        return self.execute_command('PSETEX', name, time_ms, value)
+        return self.execute_command("PSETEX", name, time_ms, value)
 
     def pttl(self, name):
         """
@@ -1317,7 +1346,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/pttl
         """
-        return self.execute_command('PTTL', name)
+        return self.execute_command("PTTL", name)
 
     def hrandfield(self, key, count=None, withvalues=False):
         """
@@ -1347,7 +1376,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/randomkey
         """
-        return self.execute_command('RANDOMKEY')
+        return self.execute_command("RANDOMKEY")
 
     def rename(self, src, dst):
         """
@@ -1355,7 +1384,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/rename
         """
-        return self.execute_command('RENAME', src, dst)
+        return self.execute_command("RENAME", src, dst)
 
     def renamenx(self, src, dst):
         """
@@ -1363,10 +1392,18 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/renamenx
         """
-        return self.execute_command('RENAMENX', src, dst)
+        return self.execute_command("RENAMENX", src, dst)
 
-    def restore(self, name, ttl, value, replace=False, absttl=False,
-                idletime=None, frequency=None):
+    def restore(
+        self,
+        name,
+        ttl,
+        value,
+        replace=False,
+        absttl=False,
+        idletime=None,
+        frequency=None,
+    ):
         """
         Create a key using the provided serialized value, previously obtained
         using DUMP.
@@ -1388,28 +1425,38 @@ class BasicKeyCommands:
         """
         params = [name, ttl, value]
         if replace:
-            params.append('REPLACE')
+            params.append("REPLACE")
         if absttl:
-            params.append('ABSTTL')
+            params.append("ABSTTL")
         if idletime is not None:
-            params.append('IDLETIME')
+            params.append("IDLETIME")
             try:
                 params.append(int(idletime))
             except ValueError:
                 raise DataError("idletimemust be an integer")
 
         if frequency is not None:
-            params.append('FREQ')
+            params.append("FREQ")
             try:
                 params.append(int(frequency))
             except ValueError:
                 raise DataError("frequency must be an integer")
 
-        return self.execute_command('RESTORE', *params)
+        return self.execute_command("RESTORE", *params)
 
-    def set(self, name, value,
-            ex=None, px=None, nx=False, xx=False, keepttl=False, get=False,
-            exat=None, pxat=None):
+    def set(
+        self,
+        name,
+        value,
+        ex=None,
+        px=None,
+        nx=False,
+        xx=False,
+        keepttl=False,
+        get=False,
+        exat=None,
+        pxat=None,
+    ):
         """
         Set the value at key ``name`` to ``value``
 
@@ -1441,7 +1488,7 @@ class BasicKeyCommands:
         pieces = [name, value]
         options = {}
         if ex is not None:
-            pieces.append('EX')
+            pieces.append("EX")
             if isinstance(ex, datetime.timedelta):
                 pieces.append(int(ex.total_seconds()))
             elif isinstance(ex, int):
@@ -1449,7 +1496,7 @@ class BasicKeyCommands:
             else:
                 raise DataError("ex must be datetime.timedelta or int")
         if px is not None:
-            pieces.append('PX')
+            pieces.append("PX")
             if isinstance(px, datetime.timedelta):
                 pieces.append(int(px.total_seconds() * 1000))
             elif isinstance(px, int):
@@ -1457,30 +1504,30 @@ class BasicKeyCommands:
             else:
                 raise DataError("px must be datetime.timedelta or int")
         if exat is not None:
-            pieces.append('EXAT')
+            pieces.append("EXAT")
             if isinstance(exat, datetime.datetime):
                 s = int(exat.microsecond / 1000000)
                 exat = int(time.mktime(exat.timetuple())) + s
             pieces.append(exat)
         if pxat is not None:
-            pieces.append('PXAT')
+            pieces.append("PXAT")
             if isinstance(pxat, datetime.datetime):
                 ms = int(pxat.microsecond / 1000)
                 pxat = int(time.mktime(pxat.timetuple())) * 1000 + ms
             pieces.append(pxat)
         if keepttl:
-            pieces.append('KEEPTTL')
+            pieces.append("KEEPTTL")
 
         if nx:
-            pieces.append('NX')
+            pieces.append("NX")
         if xx:
-            pieces.append('XX')
+            pieces.append("XX")
 
         if get:
-            pieces.append('GET')
+            pieces.append("GET")
             options["get"] = True
 
-        return self.execute_command('SET', *pieces, **options)
+        return self.execute_command("SET", *pieces, **options)
 
     def __setitem__(self, name, value):
         self.set(name, value)
@@ -1493,7 +1540,7 @@ class BasicKeyCommands:
         For more information check https://redis.io/commands/setbit
         """
         value = value and 1 or 0
-        return self.execute_command('SETBIT', name, offset, value)
+        return self.execute_command("SETBIT", name, offset, value)
 
     def setex(self, name, time, value):
         """
@@ -1505,7 +1552,7 @@ class BasicKeyCommands:
         """
         if isinstance(time, datetime.timedelta):
             time = int(time.total_seconds())
-        return self.execute_command('SETEX', name, time, value)
+        return self.execute_command("SETEX", name, time, value)
 
     def setnx(self, name, value):
         """
@@ -1513,7 +1560,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/setnx
         """
-        return self.execute_command('SETNX', name, value)
+        return self.execute_command("SETNX", name, value)
 
     def setrange(self, name, offset, value):
         """
@@ -1528,10 +1575,19 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/setrange
         """
-        return self.execute_command('SETRANGE', name, offset, value)
+        return self.execute_command("SETRANGE", name, offset, value)
 
-    def stralgo(self, algo, value1, value2, specific_argument='strings',
-                len=False, idx=False, minmatchlen=None, withmatchlen=False):
+    def stralgo(
+        self,
+        algo,
+        value1,
+        value2,
+        specific_argument="strings",
+        len=False,
+        idx=False,
+        minmatchlen=None,
+        withmatchlen=False,
+    ):
         """
         Implements complex algorithms that operate on strings.
         Right now the only algorithm implemented is the LCS algorithm
@@ -1552,31 +1608,36 @@ class BasicKeyCommands:
         For more information check https://redis.io/commands/stralgo
         """
         # check validity
-        supported_algo = ['LCS']
+        supported_algo = ["LCS"]
         if algo not in supported_algo:
-            supported_algos_str = ', '.join(supported_algo)
+            supported_algos_str = ", ".join(supported_algo)
             raise DataError(f"The supported algorithms are: {supported_algos_str}")
-        if specific_argument not in ['keys', 'strings']:
+        if specific_argument not in ["keys", "strings"]:
             raise DataError("specific_argument can be only keys or strings")
         if len and idx:
             raise DataError("len and idx cannot be provided together.")
 
         pieces = [algo, specific_argument.upper(), value1, value2]
         if len:
-            pieces.append(b'LEN')
+            pieces.append(b"LEN")
         if idx:
-            pieces.append(b'IDX')
+            pieces.append(b"IDX")
         try:
             int(minmatchlen)
-            pieces.extend([b'MINMATCHLEN', minmatchlen])
+            pieces.extend([b"MINMATCHLEN", minmatchlen])
         except TypeError:
             pass
         if withmatchlen:
-            pieces.append(b'WITHMATCHLEN')
+            pieces.append(b"WITHMATCHLEN")
 
-        return self.execute_command('STRALGO', *pieces, len=len, idx=idx,
-                                    minmatchlen=minmatchlen,
-                                    withmatchlen=withmatchlen)
+        return self.execute_command(
+            "STRALGO",
+            *pieces,
+            len=len,
+            idx=idx,
+            minmatchlen=minmatchlen,
+            withmatchlen=withmatchlen,
+        )
 
     def strlen(self, name):
         """
@@ -1584,14 +1645,14 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/strlen
         """
-        return self.execute_command('STRLEN', name)
+        return self.execute_command("STRLEN", name)
 
     def substr(self, name, start, end=-1):
         """
         Return a substring of the string at key ``name``. ``start`` and ``end``
         are 0-based integers specifying the portion of the string to return.
         """
-        return self.execute_command('SUBSTR', name, start, end)
+        return self.execute_command("SUBSTR", name, start, end)
 
     def touch(self, *args):
         """
@@ -1600,7 +1661,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/touch
         """
-        return self.execute_command('TOUCH', *args)
+        return self.execute_command("TOUCH", *args)
 
     def ttl(self, name):
         """
@@ -1608,7 +1669,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/ttl
         """
-        return self.execute_command('TTL', name)
+        return self.execute_command("TTL", name)
 
     def type(self, name):
         """
@@ -1616,7 +1677,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/type
         """
-        return self.execute_command('TYPE', name)
+        return self.execute_command("TYPE", name)
 
     def watch(self, *names):
         """
@@ -1624,7 +1685,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/type
         """
-        warnings.warn(DeprecationWarning('Call WATCH from a Pipeline object'))
+        warnings.warn(DeprecationWarning("Call WATCH from a Pipeline object"))
 
     def unwatch(self):
         """
@@ -1632,8 +1693,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/unwatch
         """
-        warnings.warn(
-            DeprecationWarning('Call UNWATCH from a Pipeline object'))
+        warnings.warn(DeprecationWarning("Call UNWATCH from a Pipeline object"))
 
     def unlink(self, *names):
         """
@@ -1641,7 +1701,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/unlink
         """
-        return self.execute_command('UNLINK', *names)
+        return self.execute_command("UNLINK", *names)
 
 
 class ListCommands:
@@ -1649,6 +1709,7 @@ class ListCommands:
     Redis commands for List data type.
     see: https://redis.io/topics/data-types#lists
     """
+
     def blpop(self, keys, timeout=0):
         """
         LPOP a value off of the first non-empty list
@@ -1666,7 +1727,7 @@ class ListCommands:
             timeout = 0
         keys = list_or_args(keys, None)
         keys.append(timeout)
-        return self.execute_command('BLPOP', *keys)
+        return self.execute_command("BLPOP", *keys)
 
     def brpop(self, keys, timeout=0):
         """
@@ -1685,7 +1746,7 @@ class ListCommands:
             timeout = 0
         keys = list_or_args(keys, None)
         keys.append(timeout)
-        return self.execute_command('BRPOP', *keys)
+        return self.execute_command("BRPOP", *keys)
 
     def brpoplpush(self, src, dst, timeout=0):
         """
@@ -1700,7 +1761,7 @@ class ListCommands:
         """
         if timeout is None:
             timeout = 0
-        return self.execute_command('BRPOPLPUSH', src, dst, timeout)
+        return self.execute_command("BRPOPLPUSH", src, dst, timeout)
 
     def lindex(self, name, index):
         """
@@ -1711,7 +1772,7 @@ class ListCommands:
 
         For more information check https://redis.io/commands/lindex
         """
-        return self.execute_command('LINDEX', name, index)
+        return self.execute_command("LINDEX", name, index)
 
     def linsert(self, name, where, refvalue, value):
         """
@@ -1723,7 +1784,7 @@ class ListCommands:
 
         For more information check https://redis.io/commands/linsert
         """
-        return self.execute_command('LINSERT', name, where, refvalue, value)
+        return self.execute_command("LINSERT", name, where, refvalue, value)
 
     def llen(self, name):
         """
@@ -1731,7 +1792,7 @@ class ListCommands:
 
         For more information check https://redis.io/commands/llen
         """
-        return self.execute_command('LLEN', name)
+        return self.execute_command("LLEN", name)
 
     def lpop(self, name, count=None):
         """
@@ -1744,9 +1805,9 @@ class ListCommands:
         For more information check https://redis.io/commands/lpop
         """
         if count is not None:
-            return self.execute_command('LPOP', name, count)
+            return self.execute_command("LPOP", name, count)
         else:
-            return self.execute_command('LPOP', name)
+            return self.execute_command("LPOP", name)
 
     def lpush(self, name, *values):
         """
@@ -1754,7 +1815,7 @@ class ListCommands:
 
         For more information check https://redis.io/commands/lpush
         """
-        return self.execute_command('LPUSH', name, *values)
+        return self.execute_command("LPUSH", name, *values)
 
     def lpushx(self, name, *values):
         """
@@ -1762,7 +1823,7 @@ class ListCommands:
 
         For more information check https://redis.io/commands/lpushx
         """
-        return self.execute_command('LPUSHX', name, *values)
+        return self.execute_command("LPUSHX", name, *values)
 
     def lrange(self, name, start, end):
         """
@@ -1774,7 +1835,7 @@ class ListCommands:
 
         For more information check https://redis.io/commands/lrange
         """
-        return self.execute_command('LRANGE', name, start, end)
+        return self.execute_command("LRANGE", name, start, end)
 
     def lrem(self, name, count, value):
         """
@@ -1788,7 +1849,7 @@ class ListCommands:
 
             For more information check https://redis.io/commands/lrem
         """
-        return self.execute_command('LREM', name, count, value)
+        return self.execute_command("LREM", name, count, value)
 
     def lset(self, name, index, value):
         """
@@ -1796,7 +1857,7 @@ class ListCommands:
 
         For more information check https://redis.io/commands/lset
         """
-        return self.execute_command('LSET', name, index, value)
+        return self.execute_command("LSET", name, index, value)
 
     def ltrim(self, name, start, end):
         """
@@ -1808,7 +1869,7 @@ class ListCommands:
 
         For more information check https://redis.io/commands/ltrim
         """
-        return self.execute_command('LTRIM', name, start, end)
+        return self.execute_command("LTRIM", name, start, end)
 
     def rpop(self, name, count=None):
         """
@@ -1821,9 +1882,9 @@ class ListCommands:
         For more information check https://redis.io/commands/rpop
         """
         if count is not None:
-            return self.execute_command('RPOP', name, count)
+            return self.execute_command("RPOP", name, count)
         else:
-            return self.execute_command('RPOP', name)
+            return self.execute_command("RPOP", name)
 
     def rpoplpush(self, src, dst):
         """
@@ -1832,7 +1893,7 @@ class ListCommands:
 
         For more information check https://redis.io/commands/rpoplpush
         """
-        return self.execute_command('RPOPLPUSH', src, dst)
+        return self.execute_command("RPOPLPUSH", src, dst)
 
     def rpush(self, name, *values):
         """
@@ -1840,7 +1901,7 @@ class ListCommands:
 
         For more information check https://redis.io/commands/rpush
         """
-        return self.execute_command('RPUSH', name, *values)
+        return self.execute_command("RPUSH", name, *values)
 
     def rpushx(self, name, value):
         """
@@ -1848,7 +1909,7 @@ class ListCommands:
 
         For more information check https://redis.io/commands/rpushx
         """
-        return self.execute_command('RPUSHX', name, value)
+        return self.execute_command("RPUSHX", name, value)
 
     def lpos(self, name, value, rank=None, count=None, maxlen=None):
         """
@@ -1878,18 +1939,28 @@ class ListCommands:
         """
         pieces = [name, value]
         if rank is not None:
-            pieces.extend(['RANK', rank])
+            pieces.extend(["RANK", rank])
 
         if count is not None:
-            pieces.extend(['COUNT', count])
+            pieces.extend(["COUNT", count])
 
         if maxlen is not None:
-            pieces.extend(['MAXLEN', maxlen])
+            pieces.extend(["MAXLEN", maxlen])
 
-        return self.execute_command('LPOS', *pieces)
+        return self.execute_command("LPOS", *pieces)
 
-    def sort(self, name, start=None, num=None, by=None, get=None,
-             desc=False, alpha=False, store=None, groups=False):
+    def sort(
+        self,
+        name,
+        start=None,
+        num=None,
+        by=None,
+        get=None,
+        desc=False,
+        alpha=False,
+        store=None,
+        groups=False,
+    ):
         """
         Sort and return the list, set or sorted set at ``name``.
 
@@ -1915,39 +1986,40 @@ class ListCommands:
 
         For more information check https://redis.io/commands/sort
         """
-        if (start is not None and num is None) or \
-                (num is not None and start is None):
+        if (start is not None and num is None) or (num is not None and start is None):
             raise DataError("``start`` and ``num`` must both be specified")
 
         pieces = [name]
         if by is not None:
-            pieces.extend([b'BY', by])
+            pieces.extend([b"BY", by])
         if start is not None and num is not None:
-            pieces.extend([b'LIMIT', start, num])
+            pieces.extend([b"LIMIT", start, num])
         if get is not None:
             # If get is a string assume we want to get a single value.
             # Otherwise assume it's an interable and we want to get multiple
             # values. We can't just iterate blindly because strings are
             # iterable.
             if isinstance(get, (bytes, str)):
-                pieces.extend([b'GET', get])
+                pieces.extend([b"GET", get])
             else:
                 for g in get:
-                    pieces.extend([b'GET', g])
+                    pieces.extend([b"GET", g])
         if desc:
-            pieces.append(b'DESC')
+            pieces.append(b"DESC")
         if alpha:
-            pieces.append(b'ALPHA')
+            pieces.append(b"ALPHA")
         if store is not None:
-            pieces.extend([b'STORE', store])
+            pieces.extend([b"STORE", store])
         if groups:
             if not get or isinstance(get, (bytes, str)) or len(get) < 2:
-                raise DataError('when using "groups" the "get" argument '
-                                'must be specified and contain at least '
-                                'two keys')
+                raise DataError(
+                    'when using "groups" the "get" argument '
+                    "must be specified and contain at least "
+                    "two keys"
+                )
 
-        options = {'groups': len(get) if groups else None}
-        return self.execute_command('SORT', *pieces, **options)
+        options = {"groups": len(get) if groups else None}
+        return self.execute_command("SORT", *pieces, **options)
 
 
 class ScanCommands:
@@ -1955,6 +2027,7 @@ class ScanCommands:
     Redis SCAN commands.
     see: https://redis.io/commands/scan
     """
+
     def scan(self, cursor=0, match=None, count=None, _type=None):
         """
         Incrementally return lists of key names. Also return a cursor
@@ -1974,12 +2047,12 @@ class ScanCommands:
         """
         pieces = [cursor]
         if match is not None:
-            pieces.extend([b'MATCH', match])
+            pieces.extend([b"MATCH", match])
         if count is not None:
-            pieces.extend([b'COUNT', count])
+            pieces.extend([b"COUNT", count])
         if _type is not None:
-            pieces.extend([b'TYPE', _type])
-        return self.execute_command('SCAN', *pieces)
+            pieces.extend([b"TYPE", _type])
+        return self.execute_command("SCAN", *pieces)
 
     def scan_iter(self, match=None, count=None, _type=None):
         """
@@ -1996,10 +2069,11 @@ class ScanCommands:
             HASH, LIST, SET, STREAM, STRING, ZSET
             Additionally, Redis modules can expose other types as well.
         """
-        cursor = '0'
+        cursor = "0"
         while cursor != 0:
-            cursor, data = self.scan(cursor=cursor, match=match,
-                                     count=count, _type=_type)
+            cursor, data = self.scan(
+                cursor=cursor, match=match, count=count, _type=_type
+            )
             yield from data
 
     def sscan(self, name, cursor=0, match=None, count=None):
@@ -2015,10 +2089,10 @@ class ScanCommands:
         """
         pieces = [name, cursor]
         if match is not None:
-            pieces.extend([b'MATCH', match])
+            pieces.extend([b"MATCH", match])
         if count is not None:
-            pieces.extend([b'COUNT', count])
-        return self.execute_command('SSCAN', *pieces)
+            pieces.extend([b"COUNT", count])
+        return self.execute_command("SSCAN", *pieces)
 
     def sscan_iter(self, name, match=None, count=None):
         """
@@ -2029,10 +2103,9 @@ class ScanCommands:
 
         ``count`` allows for hint the minimum number of returns
         """
-        cursor = '0'
+        cursor = "0"
         while cursor != 0:
-            cursor, data = self.sscan(name, cursor=cursor,
-                                      match=match, count=count)
+            cursor, data = self.sscan(name, cursor=cursor, match=match, count=count)
             yield from data
 
     def hscan(self, name, cursor=0, match=None, count=None):
@@ -2048,10 +2121,10 @@ class ScanCommands:
         """
         pieces = [name, cursor]
         if match is not None:
-            pieces.extend([b'MATCH', match])
+            pieces.extend([b"MATCH", match])
         if count is not None:
-            pieces.extend([b'COUNT', count])
-        return self.execute_command('HSCAN', *pieces)
+            pieces.extend([b"COUNT", count])
+        return self.execute_command("HSCAN", *pieces)
 
     def hscan_iter(self, name, match=None, count=None):
         """
@@ -2062,14 +2135,12 @@ class ScanCommands:
 
         ``count`` allows for hint the minimum number of returns
         """
-        cursor = '0'
+        cursor = "0"
         while cursor != 0:
-            cursor, data = self.hscan(name, cursor=cursor,
-                                      match=match, count=count)
+            cursor, data = self.hscan(name, cursor=cursor, match=match, count=count)
             yield from data.items()
 
-    def zscan(self, name, cursor=0, match=None, count=None,
-              score_cast_func=float):
+    def zscan(self, name, cursor=0, match=None, count=None, score_cast_func=float):
         """
         Incrementally return lists of elements in a sorted set. Also return a
         cursor indicating the scan position.
@@ -2084,14 +2155,13 @@ class ScanCommands:
         """
         pieces = [name, cursor]
         if match is not None:
-            pieces.extend([b'MATCH', match])
+            pieces.extend([b"MATCH", match])
         if count is not None:
-            pieces.extend([b'COUNT', count])
-        options = {'score_cast_func': score_cast_func}
-        return self.execute_command('ZSCAN', *pieces, **options)
+            pieces.extend([b"COUNT", count])
+        options = {"score_cast_func": score_cast_func}
+        return self.execute_command("ZSCAN", *pieces, **options)
 
-    def zscan_iter(self, name, match=None, count=None,
-                   score_cast_func=float):
+    def zscan_iter(self, name, match=None, count=None, score_cast_func=float):
         """
         Make an iterator using the ZSCAN command so that the client doesn't
         need to remember the cursor position.
@@ -2102,11 +2172,15 @@ class ScanCommands:
 
         ``score_cast_func`` a callable used to cast the score return value
         """
-        cursor = '0'
+        cursor = "0"
         while cursor != 0:
-            cursor, data = self.zscan(name, cursor=cursor, match=match,
-                                      count=count,
-                                      score_cast_func=score_cast_func)
+            cursor, data = self.zscan(
+                name,
+                cursor=cursor,
+                match=match,
+                count=count,
+                score_cast_func=score_cast_func,
+            )
             yield from data
 
 
@@ -2115,13 +2189,14 @@ class SetCommands:
     Redis commands for Set data type.
     see: https://redis.io/topics/data-types#sets
     """
+
     def sadd(self, name, *values):
         """
         Add ``value(s)`` to set ``name``
 
         For more information check https://redis.io/commands/sadd
         """
-        return self.execute_command('SADD', name, *values)
+        return self.execute_command("SADD", name, *values)
 
     def scard(self, name):
         """
@@ -2129,7 +2204,7 @@ class SetCommands:
 
         For more information check https://redis.io/commands/scard
         """
-        return self.execute_command('SCARD', name)
+        return self.execute_command("SCARD", name)
 
     def sdiff(self, keys, *args):
         """
@@ -2138,7 +2213,7 @@ class SetCommands:
         For more information check https://redis.io/commands/sdiff
         """
         args = list_or_args(keys, args)
-        return self.execute_command('SDIFF', *args)
+        return self.execute_command("SDIFF", *args)
 
     def sdiffstore(self, dest, keys, *args):
         """
@@ -2148,7 +2223,7 @@ class SetCommands:
         For more information check https://redis.io/commands/sdiffstore
         """
         args = list_or_args(keys, args)
-        return self.execute_command('SDIFFSTORE', dest, *args)
+        return self.execute_command("SDIFFSTORE", dest, *args)
 
     def sinter(self, keys, *args):
         """
@@ -2157,7 +2232,7 @@ class SetCommands:
         For more information check https://redis.io/commands/sinter
         """
         args = list_or_args(keys, args)
-        return self.execute_command('SINTER', *args)
+        return self.execute_command("SINTER", *args)
 
     def sinterstore(self, dest, keys, *args):
         """
@@ -2167,7 +2242,7 @@ class SetCommands:
         For more information check https://redis.io/commands/sinterstore
         """
         args = list_or_args(keys, args)
-        return self.execute_command('SINTERSTORE', dest, *args)
+        return self.execute_command("SINTERSTORE", dest, *args)
 
     def sismember(self, name, value):
         """
@@ -2175,7 +2250,7 @@ class SetCommands:
 
         For more information check https://redis.io/commands/sismember
         """
-        return self.execute_command('SISMEMBER', name, value)
+        return self.execute_command("SISMEMBER", name, value)
 
     def smembers(self, name):
         """
@@ -2183,7 +2258,7 @@ class SetCommands:
 
         For more information check https://redis.io/commands/smembers
         """
-        return self.execute_command('SMEMBERS', name)
+        return self.execute_command("SMEMBERS", name)
 
     def smismember(self, name, values, *args):
         """
@@ -2193,7 +2268,7 @@ class SetCommands:
         For more information check https://redis.io/commands/smismember
         """
         args = list_or_args(values, args)
-        return self.execute_command('SMISMEMBER', name, *args)
+        return self.execute_command("SMISMEMBER", name, *args)
 
     def smove(self, src, dst, value):
         """
@@ -2201,7 +2276,7 @@ class SetCommands:
 
         For more information check https://redis.io/commands/smove
         """
-        return self.execute_command('SMOVE', src, dst, value)
+        return self.execute_command("SMOVE", src, dst, value)
 
     def spop(self, name, count=None):
         """
@@ -2210,7 +2285,7 @@ class SetCommands:
         For more information check https://redis.io/commands/spop
         """
         args = (count is not None) and [count] or []
-        return self.execute_command('SPOP', name, *args)
+        return self.execute_command("SPOP", name, *args)
 
     def srandmember(self, name, number=None):
         """
@@ -2223,7 +2298,7 @@ class SetCommands:
         For more information check https://redis.io/commands/srandmember
         """
         args = (number is not None) and [number] or []
-        return self.execute_command('SRANDMEMBER', name, *args)
+        return self.execute_command("SRANDMEMBER", name, *args)
 
     def srem(self, name, *values):
         """
@@ -2231,7 +2306,7 @@ class SetCommands:
 
         For more information check https://redis.io/commands/srem
         """
-        return self.execute_command('SREM', name, *values)
+        return self.execute_command("SREM", name, *values)
 
     def sunion(self, keys, *args):
         """
@@ -2240,7 +2315,7 @@ class SetCommands:
         For more information check https://redis.io/commands/sunion
         """
         args = list_or_args(keys, args)
-        return self.execute_command('SUNION', *args)
+        return self.execute_command("SUNION", *args)
 
     def sunionstore(self, dest, keys, *args):
         """
@@ -2250,7 +2325,7 @@ class SetCommands:
         For more information check https://redis.io/commands/sunionstore
         """
         args = list_or_args(keys, args)
-        return self.execute_command('SUNIONSTORE', dest, *args)
+        return self.execute_command("SUNIONSTORE", dest, *args)
 
 
 class StreamCommands:
@@ -2258,6 +2333,7 @@ class StreamCommands:
     Redis commands for Stream data type.
     see: https://redis.io/topics/streams-intro
     """
+
     def xack(self, name, groupname, *ids):
         """
         Acknowledges the successful processing of one or more messages.
@@ -2267,10 +2343,19 @@ class StreamCommands:
 
         For more information check https://redis.io/commands/xack
         """
-        return self.execute_command('XACK', name, groupname, *ids)
+        return self.execute_command("XACK", name, groupname, *ids)
 
-    def xadd(self, name, fields, id='*', maxlen=None, approximate=True,
-             nomkstream=False, minid=None, limit=None):
+    def xadd(
+        self,
+        name,
+        fields,
+        id="*",
+        maxlen=None,
+        approximate=True,
+        nomkstream=False,
+        minid=None,
+        limit=None,
+    ):
         """
         Add to a stream.
         name: name of the stream
@@ -2288,34 +2373,43 @@ class StreamCommands:
         """
         pieces = []
         if maxlen is not None and minid is not None:
-            raise DataError("Only one of ```maxlen``` or ```minid``` "
-                            "may be specified")
+            raise DataError(
+                "Only one of ```maxlen``` or ```minid``` " "may be specified"
+            )
 
         if maxlen is not None:
             if not isinstance(maxlen, int) or maxlen < 1:
-                raise DataError('XADD maxlen must be a positive integer')
-            pieces.append(b'MAXLEN')
+                raise DataError("XADD maxlen must be a positive integer")
+            pieces.append(b"MAXLEN")
             if approximate:
-                pieces.append(b'~')
+                pieces.append(b"~")
             pieces.append(str(maxlen))
         if minid is not None:
-            pieces.append(b'MINID')
+            pieces.append(b"MINID")
             if approximate:
-                pieces.append(b'~')
+                pieces.append(b"~")
             pieces.append(minid)
         if limit is not None:
-            pieces.extend([b'LIMIT', limit])
+            pieces.extend([b"LIMIT", limit])
         if nomkstream:
-            pieces.append(b'NOMKSTREAM')
+            pieces.append(b"NOMKSTREAM")
         pieces.append(id)
         if not isinstance(fields, dict) or len(fields) == 0:
-            raise DataError('XADD fields must be a non-empty dict')
+            raise DataError("XADD fields must be a non-empty dict")
         for pair in fields.items():
             pieces.extend(pair)
-        return self.execute_command('XADD', name, *pieces)
+        return self.execute_command("XADD", name, *pieces)
 
-    def xautoclaim(self, name, groupname, consumername, min_idle_time,
-                   start_id=0, count=None, justid=False):
+    def xautoclaim(
+        self,
+        name,
+        groupname,
+        consumername,
+        min_idle_time,
+        start_id=0,
+        count=None,
+        justid=False,
+    ):
         """
         Transfers ownership of pending stream entries that match the specified
         criteria. Conceptually, equivalent to calling XPENDING and then XCLAIM,
@@ -2336,8 +2430,9 @@ class StreamCommands:
         """
         try:
             if int(min_idle_time) < 0:
-                raise DataError("XAUTOCLAIM min_idle_time must be a non"
-                                "negative integer")
+                raise DataError(
+                    "XAUTOCLAIM min_idle_time must be a non" "negative integer"
+                )
         except TypeError:
             pass
 
@@ -2347,18 +2442,28 @@ class StreamCommands:
         try:
             if int(count) < 0:
                 raise DataError("XPENDING count must be a integer >= 0")
-            pieces.extend([b'COUNT', count])
+            pieces.extend([b"COUNT", count])
         except TypeError:
             pass
         if justid:
-            pieces.append(b'JUSTID')
-            kwargs['parse_justid'] = True
+            pieces.append(b"JUSTID")
+            kwargs["parse_justid"] = True
 
-        return self.execute_command('XAUTOCLAIM', *pieces, **kwargs)
+        return self.execute_command("XAUTOCLAIM", *pieces, **kwargs)
 
-    def xclaim(self, name, groupname, consumername, min_idle_time, message_ids,
-               idle=None, time=None, retrycount=None, force=False,
-               justid=False):
+    def xclaim(
+        self,
+        name,
+        groupname,
+        consumername,
+        min_idle_time,
+        message_ids,
+        idle=None,
+        time=None,
+        retrycount=None,
+        force=False,
+        justid=False,
+    ):
         """
         Changes the ownership of a pending message.
         name: name of the stream.
@@ -2384,11 +2489,12 @@ class StreamCommands:
          For more information check https://redis.io/commands/xclaim
         """
         if not isinstance(min_idle_time, int) or min_idle_time < 0:
-            raise DataError("XCLAIM min_idle_time must be a non negative "
-                            "integer")
+            raise DataError("XCLAIM min_idle_time must be a non negative " "integer")
         if not isinstance(message_ids, (list, tuple)) or not message_ids:
-            raise DataError("XCLAIM message_ids must be a non empty list or "
-                            "tuple of message IDs to claim")
+            raise DataError(
+                "XCLAIM message_ids must be a non empty list or "
+                "tuple of message IDs to claim"
+            )
 
         kwargs = {}
         pieces = [name, groupname, consumername, str(min_idle_time)]
@@ -2397,26 +2503,26 @@ class StreamCommands:
         if idle is not None:
             if not isinstance(idle, int):
                 raise DataError("XCLAIM idle must be an integer")
-            pieces.extend((b'IDLE', str(idle)))
+            pieces.extend((b"IDLE", str(idle)))
         if time is not None:
             if not isinstance(time, int):
                 raise DataError("XCLAIM time must be an integer")
-            pieces.extend((b'TIME', str(time)))
+            pieces.extend((b"TIME", str(time)))
         if retrycount is not None:
             if not isinstance(retrycount, int):
                 raise DataError("XCLAIM retrycount must be an integer")
-            pieces.extend((b'RETRYCOUNT', str(retrycount)))
+            pieces.extend((b"RETRYCOUNT", str(retrycount)))
 
         if force:
             if not isinstance(force, bool):
                 raise DataError("XCLAIM force must be a boolean")
-            pieces.append(b'FORCE')
+            pieces.append(b"FORCE")
         if justid:
             if not isinstance(justid, bool):
                 raise DataError("XCLAIM justid must be a boolean")
-            pieces.append(b'JUSTID')
-            kwargs['parse_justid'] = True
-        return self.execute_command('XCLAIM', *pieces, **kwargs)
+            pieces.append(b"JUSTID")
+            kwargs["parse_justid"] = True
+        return self.execute_command("XCLAIM", *pieces, **kwargs)
 
     def xdel(self, name, *ids):
         """
@@ -2426,9 +2532,9 @@ class StreamCommands:
 
         For more information check https://redis.io/commands/xdel
         """
-        return self.execute_command('XDEL', name, *ids)
+        return self.execute_command("XDEL", name, *ids)
 
-    def xgroup_create(self, name, groupname, id='$', mkstream=False):
+    def xgroup_create(self, name, groupname, id="$", mkstream=False):
         """
         Create a new consumer group associated with a stream.
         name: name of the stream.
@@ -2437,9 +2543,9 @@ class StreamCommands:
 
         For more information check https://redis.io/commands/xgroup-create
         """
-        pieces = ['XGROUP CREATE', name, groupname, id]
+        pieces = ["XGROUP CREATE", name, groupname, id]
         if mkstream:
-            pieces.append(b'MKSTREAM')
+            pieces.append(b"MKSTREAM")
         return self.execute_command(*pieces)
 
     def xgroup_delconsumer(self, name, groupname, consumername):
@@ -2453,8 +2559,7 @@ class StreamCommands:
 
         For more information check https://redis.io/commands/xgroup-delconsumer
         """
-        return self.execute_command('XGROUP DELCONSUMER', name, groupname,
-                                    consumername)
+        return self.execute_command("XGROUP DELCONSUMER", name, groupname, consumername)
 
     def xgroup_destroy(self, name, groupname):
         """
@@ -2464,7 +2569,7 @@ class StreamCommands:
 
         For more information check https://redis.io/commands/xgroup-destroy
         """
-        return self.execute_command('XGROUP DESTROY', name, groupname)
+        return self.execute_command("XGROUP DESTROY", name, groupname)
 
     def xgroup_createconsumer(self, name, groupname, consumername):
         """
@@ -2477,8 +2582,9 @@ class StreamCommands:
 
         See: https://redis.io/commands/xgroup-createconsumer
         """
-        return self.execute_command('XGROUP CREATECONSUMER', name, groupname,
-                                    consumername)
+        return self.execute_command(
+            "XGROUP CREATECONSUMER", name, groupname, consumername
+        )
 
     def xgroup_setid(self, name, groupname, id):
         """
@@ -2489,7 +2595,7 @@ class StreamCommands:
 
         For more information check https://redis.io/commands/xgroup-setid
         """
-        return self.execute_command('XGROUP SETID', name, groupname, id)
+        return self.execute_command("XGROUP SETID", name, groupname, id)
 
     def xinfo_consumers(self, name, groupname):
         """
@@ -2499,7 +2605,7 @@ class StreamCommands:
 
         For more information check https://redis.io/commands/xinfo-consumers
         """
-        return self.execute_command('XINFO CONSUMERS', name, groupname)
+        return self.execute_command("XINFO CONSUMERS", name, groupname)
 
     def xinfo_groups(self, name):
         """
@@ -2508,7 +2614,7 @@ class StreamCommands:
 
         For more information check https://redis.io/commands/xinfo-groups
         """
-        return self.execute_command('XINFO GROUPS', name)
+        return self.execute_command("XINFO GROUPS", name)
 
     def xinfo_stream(self, name, full=False):
         """
@@ -2521,9 +2627,9 @@ class StreamCommands:
         pieces = [name]
         options = {}
         if full:
-            pieces.append(b'FULL')
-            options = {'full': full}
-        return self.execute_command('XINFO STREAM', *pieces, **options)
+            pieces.append(b"FULL")
+            options = {"full": full}
+        return self.execute_command("XINFO STREAM", *pieces, **options)
 
     def xlen(self, name):
         """
@@ -2531,7 +2637,7 @@ class StreamCommands:
 
         For more information check https://redis.io/commands/xlen
         """
-        return self.execute_command('XLEN', name)
+        return self.execute_command("XLEN", name)
 
     def xpending(self, name, groupname):
         """
@@ -2541,11 +2647,18 @@ class StreamCommands:
 
         For more information check https://redis.io/commands/xpending
         """
-        return self.execute_command('XPENDING', name, groupname)
+        return self.execute_command("XPENDING", name, groupname)
 
-    def xpending_range(self, name, groupname, idle=None,
-                       min=None, max=None, count=None,
-                       consumername=None):
+    def xpending_range(
+        self,
+        name,
+        groupname,
+        idle=None,
+        min=None,
+        max=None,
+        count=None,
+        consumername=None,
+    ):
         """
         Returns information about pending messages, in a range.
 
@@ -2560,20 +2673,24 @@ class StreamCommands:
         """
         if {min, max, count} == {None}:
             if idle is not None or consumername is not None:
-                raise DataError("if XPENDING is provided with idle time"
-                                " or consumername, it must be provided"
-                                " with min, max and count parameters")
+                raise DataError(
+                    "if XPENDING is provided with idle time"
+                    " or consumername, it must be provided"
+                    " with min, max and count parameters"
+                )
             return self.xpending(name, groupname)
 
         pieces = [name, groupname]
         if min is None or max is None or count is None:
-            raise DataError("XPENDING must be provided with min, max "
-                            "and count parameters, or none of them.")
+            raise DataError(
+                "XPENDING must be provided with min, max "
+                "and count parameters, or none of them."
+            )
         # idle
         try:
             if int(idle) < 0:
                 raise DataError("XPENDING idle must be a integer >= 0")
-            pieces.extend(['IDLE', idle])
+            pieces.extend(["IDLE", idle])
         except TypeError:
             pass
         # count
@@ -2587,9 +2704,9 @@ class StreamCommands:
         if consumername:
             pieces.append(consumername)
 
-        return self.execute_command('XPENDING', *pieces, parse_detail=True)
+        return self.execute_command("XPENDING", *pieces, parse_detail=True)
 
-    def xrange(self, name, min='-', max='+', count=None):
+    def xrange(self, name, min="-", max="+", count=None):
         """
         Read stream values within an interval.
         name: name of the stream.
@@ -2605,11 +2722,11 @@ class StreamCommands:
         pieces = [min, max]
         if count is not None:
             if not isinstance(count, int) or count < 1:
-                raise DataError('XRANGE count must be a positive integer')
-            pieces.append(b'COUNT')
+                raise DataError("XRANGE count must be a positive integer")
+            pieces.append(b"COUNT")
             pieces.append(str(count))
 
-        return self.execute_command('XRANGE', name, *pieces)
+        return self.execute_command("XRANGE", name, *pieces)
 
     def xread(self, streams, count=None, block=None):
         """
@@ -2625,24 +2742,25 @@ class StreamCommands:
         pieces = []
         if block is not None:
             if not isinstance(block, int) or block < 0:
-                raise DataError('XREAD block must be a non-negative integer')
-            pieces.append(b'BLOCK')
+                raise DataError("XREAD block must be a non-negative integer")
+            pieces.append(b"BLOCK")
             pieces.append(str(block))
         if count is not None:
             if not isinstance(count, int) or count < 1:
-                raise DataError('XREAD count must be a positive integer')
-            pieces.append(b'COUNT')
+                raise DataError("XREAD count must be a positive integer")
+            pieces.append(b"COUNT")
             pieces.append(str(count))
         if not isinstance(streams, dict) or len(streams) == 0:
-            raise DataError('XREAD streams must be a non empty dict')
-        pieces.append(b'STREAMS')
+            raise DataError("XREAD streams must be a non empty dict")
+        pieces.append(b"STREAMS")
         keys, values = zip(*streams.items())
         pieces.extend(keys)
         pieces.extend(values)
-        return self.execute_command('XREAD', *pieces)
+        return self.execute_command("XREAD", *pieces)
 
-    def xreadgroup(self, groupname, consumername, streams, count=None,
-                   block=None, noack=False):
+    def xreadgroup(
+        self, groupname, consumername, streams, count=None, block=None, noack=False
+    ):
         """
         Read from a stream via a consumer group.
         groupname: name of the consumer group.
@@ -2656,28 +2774,27 @@ class StreamCommands:
 
         For more information check https://redis.io/commands/xreadgroup
         """
-        pieces = [b'GROUP', groupname, consumername]
+        pieces = [b"GROUP", groupname, consumername]
         if count is not None:
             if not isinstance(count, int) or count < 1:
                 raise DataError("XREADGROUP count must be a positive integer")
-            pieces.append(b'COUNT')
+            pieces.append(b"COUNT")
             pieces.append(str(count))
         if block is not None:
             if not isinstance(block, int) or block < 0:
-                raise DataError("XREADGROUP block must be a non-negative "
-                                "integer")
-            pieces.append(b'BLOCK')
+                raise DataError("XREADGROUP block must be a non-negative " "integer")
+            pieces.append(b"BLOCK")
             pieces.append(str(block))
         if noack:
-            pieces.append(b'NOACK')
+            pieces.append(b"NOACK")
         if not isinstance(streams, dict) or len(streams) == 0:
-            raise DataError('XREADGROUP streams must be a non empty dict')
-        pieces.append(b'STREAMS')
+            raise DataError("XREADGROUP streams must be a non empty dict")
+        pieces.append(b"STREAMS")
         pieces.extend(streams.keys())
         pieces.extend(streams.values())
-        return self.execute_command('XREADGROUP', *pieces)
+        return self.execute_command("XREADGROUP", *pieces)
 
-    def xrevrange(self, name, max='+', min='-', count=None):
+    def xrevrange(self, name, max="+", min="-", count=None):
         """
         Read stream values within an interval, in reverse order.
         name: name of the stream
@@ -2693,14 +2810,13 @@ class StreamCommands:
         pieces = [max, min]
         if count is not None:
             if not isinstance(count, int) or count < 1:
-                raise DataError('XREVRANGE count must be a positive integer')
-            pieces.append(b'COUNT')
+                raise DataError("XREVRANGE count must be a positive integer")
+            pieces.append(b"COUNT")
             pieces.append(str(count))
 
-        return self.execute_command('XREVRANGE', name, *pieces)
+        return self.execute_command("XREVRANGE", name, *pieces)
 
-    def xtrim(self, name, maxlen=None, approximate=True, minid=None,
-              limit=None):
+    def xtrim(self, name, maxlen=None, approximate=True, minid=None, limit=None):
         """
         Trims old messages from a stream.
         name: name of the stream.
@@ -2715,15 +2831,14 @@ class StreamCommands:
         """
         pieces = []
         if maxlen is not None and minid is not None:
-            raise DataError("Only one of ``maxlen`` or ``minid`` "
-                            "may be specified")
+            raise DataError("Only one of ``maxlen`` or ``minid`` " "may be specified")
 
         if maxlen is not None:
-            pieces.append(b'MAXLEN')
+            pieces.append(b"MAXLEN")
         if minid is not None:
-            pieces.append(b'MINID')
+            pieces.append(b"MINID")
         if approximate:
-            pieces.append(b'~')
+            pieces.append(b"~")
         if maxlen is not None:
             pieces.append(maxlen)
         if minid is not None:
@@ -2732,7 +2847,7 @@ class StreamCommands:
             pieces.append(b"LIMIT")
             pieces.append(limit)
 
-        return self.execute_command('XTRIM', name, *pieces)
+        return self.execute_command("XTRIM", name, *pieces)
 
 
 class SortedSetCommands:
@@ -2740,8 +2855,10 @@ class SortedSetCommands:
     Redis commands for Sorted Sets data type.
     see: https://redis.io/topics/data-types-intro#redis-sorted-sets
     """
-    def zadd(self, name, mapping, nx=False, xx=False, ch=False, incr=False,
-             gt=None, lt=None):
+
+    def zadd(
+        self, name, mapping, nx=False, xx=False, ch=False, incr=False, gt=None, lt=None
+    ):
         """
         Set any number of element-name, score pairs to the key ``name``. Pairs
         are specified as a dict of element-names keys to score values.
@@ -2780,30 +2897,32 @@ class SortedSetCommands:
         if nx and xx:
             raise DataError("ZADD allows either 'nx' or 'xx', not both")
         if incr and len(mapping) != 1:
-            raise DataError("ZADD option 'incr' only works when passing a "
-                            "single element/score pair")
+            raise DataError(
+                "ZADD option 'incr' only works when passing a "
+                "single element/score pair"
+            )
         if nx is True and (gt is not None or lt is not None):
             raise DataError("Only one of 'nx', 'lt', or 'gr' may be defined.")
 
         pieces = []
         options = {}
         if nx:
-            pieces.append(b'NX')
+            pieces.append(b"NX")
         if xx:
-            pieces.append(b'XX')
+            pieces.append(b"XX")
         if ch:
-            pieces.append(b'CH')
+            pieces.append(b"CH")
         if incr:
-            pieces.append(b'INCR')
-            options['as_score'] = True
+            pieces.append(b"INCR")
+            options["as_score"] = True
         if gt:
-            pieces.append(b'GT')
+            pieces.append(b"GT")
         if lt:
-            pieces.append(b'LT')
+            pieces.append(b"LT")
         for pair in mapping.items():
             pieces.append(pair[1])
             pieces.append(pair[0])
-        return self.execute_command('ZADD', name, *pieces, **options)
+        return self.execute_command("ZADD", name, *pieces, **options)
 
     def zcard(self, name):
         """
@@ -2811,7 +2930,7 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zcard
         """
-        return self.execute_command('ZCARD', name)
+        return self.execute_command("ZCARD", name)
 
     def zcount(self, name, min, max):
         """
@@ -2820,7 +2939,7 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zcount
         """
-        return self.execute_command('ZCOUNT', name, min, max)
+        return self.execute_command("ZCOUNT", name, min, max)
 
     def zdiff(self, keys, withscores=False):
         """
@@ -2850,7 +2969,7 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zincrby
         """
-        return self.execute_command('ZINCRBY', name, amount, value)
+        return self.execute_command("ZINCRBY", name, amount, value)
 
     def zinter(self, keys, aggregate=None, withscores=False):
         """
@@ -2864,8 +2983,7 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zinter
         """
-        return self._zaggregate('ZINTER', None, keys, aggregate,
-                                withscores=withscores)
+        return self._zaggregate("ZINTER", None, keys, aggregate, withscores=withscores)
 
     def zinterstore(self, dest, keys, aggregate=None):
         """
@@ -2879,7 +2997,7 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zinterstore
         """
-        return self._zaggregate('ZINTERSTORE', dest, keys, aggregate)
+        return self._zaggregate("ZINTERSTORE", dest, keys, aggregate)
 
     def zlexcount(self, name, min, max):
         """
@@ -2888,7 +3006,7 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zlexcount
         """
-        return self.execute_command('ZLEXCOUNT', name, min, max)
+        return self.execute_command("ZLEXCOUNT", name, min, max)
 
     def zpopmax(self, name, count=None):
         """
@@ -2898,10 +3016,8 @@ class SortedSetCommands:
         For more information check https://redis.io/commands/zpopmax
         """
         args = (count is not None) and [count] or []
-        options = {
-            'withscores': True
-        }
-        return self.execute_command('ZPOPMAX', name, *args, **options)
+        options = {"withscores": True}
+        return self.execute_command("ZPOPMAX", name, *args, **options)
 
     def zpopmin(self, name, count=None):
         """
@@ -2911,10 +3027,8 @@ class SortedSetCommands:
         For more information check https://redis.io/commands/zpopmin
         """
         args = (count is not None) and [count] or []
-        options = {
-            'withscores': True
-        }
-        return self.execute_command('ZPOPMIN', name, *args, **options)
+        options = {"withscores": True}
+        return self.execute_command("ZPOPMIN", name, *args, **options)
 
     def zrandmember(self, key, count=None, withscores=False):
         """
@@ -2957,7 +3071,7 @@ class SortedSetCommands:
             timeout = 0
         keys = list_or_args(keys, None)
         keys.append(timeout)
-        return self.execute_command('BZPOPMAX', *keys)
+        return self.execute_command("BZPOPMAX", *keys)
 
     def bzpopmin(self, keys, timeout=0):
         """
@@ -2976,43 +3090,63 @@ class SortedSetCommands:
             timeout = 0
         keys = list_or_args(keys, None)
         keys.append(timeout)
-        return self.execute_command('BZPOPMIN', *keys)
+        return self.execute_command("BZPOPMIN", *keys)
 
-    def _zrange(self, command, dest, name, start, end, desc=False,
-                byscore=False, bylex=False, withscores=False,
-                score_cast_func=float, offset=None, num=None):
+    def _zrange(
+        self,
+        command,
+        dest,
+        name,
+        start,
+        end,
+        desc=False,
+        byscore=False,
+        bylex=False,
+        withscores=False,
+        score_cast_func=float,
+        offset=None,
+        num=None,
+    ):
         if byscore and bylex:
-            raise DataError("``byscore`` and ``bylex`` can not be "
-                            "specified together.")
-        if (offset is not None and num is None) or \
-                (num is not None and offset is None):
+            raise DataError(
+                "``byscore`` and ``bylex`` can not be " "specified together."
+            )
+        if (offset is not None and num is None) or (num is not None and offset is None):
             raise DataError("``offset`` and ``num`` must both be specified.")
         if bylex and withscores:
-            raise DataError("``withscores`` not supported in combination "
-                            "with ``bylex``.")
+            raise DataError(
+                "``withscores`` not supported in combination " "with ``bylex``."
+            )
         pieces = [command]
         if dest:
             pieces.append(dest)
         pieces.extend([name, start, end])
         if byscore:
-            pieces.append('BYSCORE')
+            pieces.append("BYSCORE")
         if bylex:
-            pieces.append('BYLEX')
+            pieces.append("BYLEX")
         if desc:
-            pieces.append('REV')
+            pieces.append("REV")
         if offset is not None and num is not None:
-            pieces.extend(['LIMIT', offset, num])
+            pieces.extend(["LIMIT", offset, num])
         if withscores:
-            pieces.append('WITHSCORES')
-        options = {
-            'withscores': withscores,
-            'score_cast_func': score_cast_func
-        }
+            pieces.append("WITHSCORES")
+        options = {"withscores": withscores, "score_cast_func": score_cast_func}
         return self.execute_command(*pieces, **options)
 
-    def zrange(self, name, start, end, desc=False, withscores=False,
-               score_cast_func=float, byscore=False, bylex=False,
-               offset=None, num=None):
+    def zrange(
+        self,
+        name,
+        start,
+        end,
+        desc=False,
+        withscores=False,
+        score_cast_func=float,
+        byscore=False,
+        bylex=False,
+        offset=None,
+        num=None,
+    ):
         """
         Return a range of values from sorted set ``name`` between
         ``start`` and ``end`` sorted in ascending order.
@@ -3043,16 +3177,25 @@ class SortedSetCommands:
         """
         # Need to support ``desc`` also when using old redis version
         # because it was supported in 3.5.3 (of redis-py)
-        if not byscore and not bylex and (offset is None and num is None) \
-                and desc:
-            return self.zrevrange(name, start, end, withscores,
-                                  score_cast_func)
+        if not byscore and not bylex and (offset is None and num is None) and desc:
+            return self.zrevrange(name, start, end, withscores, score_cast_func)
 
-        return self._zrange('ZRANGE', None, name, start, end, desc, byscore,
-                            bylex, withscores, score_cast_func, offset, num)
+        return self._zrange(
+            "ZRANGE",
+            None,
+            name,
+            start,
+            end,
+            desc,
+            byscore,
+            bylex,
+            withscores,
+            score_cast_func,
+            offset,
+            num,
+        )
 
-    def zrevrange(self, name, start, end, withscores=False,
-                  score_cast_func=float):
+    def zrevrange(self, name, start, end, withscores=False, score_cast_func=float):
         """
         Return a range of values from sorted set ``name`` between
         ``start`` and ``end`` sorted in descending order.
@@ -3066,18 +3209,24 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zrevrange
         """
-        pieces = ['ZREVRANGE', name, start, end]
+        pieces = ["ZREVRANGE", name, start, end]
         if withscores:
-            pieces.append(b'WITHSCORES')
-        options = {
-            'withscores': withscores,
-            'score_cast_func': score_cast_func
-        }
+            pieces.append(b"WITHSCORES")
+        options = {"withscores": withscores, "score_cast_func": score_cast_func}
         return self.execute_command(*pieces, **options)
 
-    def zrangestore(self, dest, name, start, end,
-                    byscore=False, bylex=False, desc=False,
-                    offset=None, num=None):
+    def zrangestore(
+        self,
+        dest,
+        name,
+        start,
+        end,
+        byscore=False,
+        bylex=False,
+        desc=False,
+        offset=None,
+        num=None,
+    ):
         """
         Stores in ``dest`` the result of a range of values from sorted set
         ``name`` between ``start`` and ``end`` sorted in ascending order.
@@ -3101,8 +3250,20 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zrangestore
         """
-        return self._zrange('ZRANGESTORE', dest, name, start, end, desc,
-                            byscore, bylex, False, None, offset, num)
+        return self._zrange(
+            "ZRANGESTORE",
+            dest,
+            name,
+            start,
+            end,
+            desc,
+            byscore,
+            bylex,
+            False,
+            None,
+            offset,
+            num,
+        )
 
     def zrangebylex(self, name, min, max, start=None, num=None):
         """
@@ -3114,12 +3275,11 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zrangebylex
         """
-        if (start is not None and num is None) or \
-                (num is not None and start is None):
+        if (start is not None and num is None) or (num is not None and start is None):
             raise DataError("``start`` and ``num`` must both be specified")
-        pieces = ['ZRANGEBYLEX', name, min, max]
+        pieces = ["ZRANGEBYLEX", name, min, max]
         if start is not None and num is not None:
-            pieces.extend([b'LIMIT', start, num])
+            pieces.extend([b"LIMIT", start, num])
         return self.execute_command(*pieces)
 
     def zrevrangebylex(self, name, max, min, start=None, num=None):
@@ -3132,16 +3292,23 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zrevrangebylex
         """
-        if (start is not None and num is None) or \
-                (num is not None and start is None):
+        if (start is not None and num is None) or (num is not None and start is None):
             raise DataError("``start`` and ``num`` must both be specified")
-        pieces = ['ZREVRANGEBYLEX', name, max, min]
+        pieces = ["ZREVRANGEBYLEX", name, max, min]
         if start is not None and num is not None:
-            pieces.extend(['LIMIT', start, num])
+            pieces.extend(["LIMIT", start, num])
         return self.execute_command(*pieces)
 
-    def zrangebyscore(self, name, min, max, start=None, num=None,
-                      withscores=False, score_cast_func=float):
+    def zrangebyscore(
+        self,
+        name,
+        min,
+        max,
+        start=None,
+        num=None,
+        withscores=False,
+        score_cast_func=float,
+    ):
         """
         Return a range of values from the sorted set ``name`` with scores
         between ``min`` and ``max``.
@@ -3156,22 +3323,26 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zrangebyscore
         """
-        if (start is not None and num is None) or \
-                (num is not None and start is None):
+        if (start is not None and num is None) or (num is not None and start is None):
             raise DataError("``start`` and ``num`` must both be specified")
-        pieces = ['ZRANGEBYSCORE', name, min, max]
+        pieces = ["ZRANGEBYSCORE", name, min, max]
         if start is not None and num is not None:
-            pieces.extend(['LIMIT', start, num])
+            pieces.extend(["LIMIT", start, num])
         if withscores:
-            pieces.append('WITHSCORES')
-        options = {
-            'withscores': withscores,
-            'score_cast_func': score_cast_func
-        }
+            pieces.append("WITHSCORES")
+        options = {"withscores": withscores, "score_cast_func": score_cast_func}
         return self.execute_command(*pieces, **options)
 
-    def zrevrangebyscore(self, name, max, min, start=None, num=None,
-                         withscores=False, score_cast_func=float):
+    def zrevrangebyscore(
+        self,
+        name,
+        max,
+        min,
+        start=None,
+        num=None,
+        withscores=False,
+        score_cast_func=float,
+    ):
         """
         Return a range of values from the sorted set ``name`` with scores
         between ``min`` and ``max`` in descending order.
@@ -3186,18 +3357,14 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zrevrangebyscore
         """
-        if (start is not None and num is None) or \
-                (num is not None and start is None):
+        if (start is not None and num is None) or (num is not None and start is None):
             raise DataError("``start`` and ``num`` must both be specified")
-        pieces = ['ZREVRANGEBYSCORE', name, max, min]
+        pieces = ["ZREVRANGEBYSCORE", name, max, min]
         if start is not None and num is not None:
-            pieces.extend(['LIMIT', start, num])
+            pieces.extend(["LIMIT", start, num])
         if withscores:
-            pieces.append('WITHSCORES')
-        options = {
-            'withscores': withscores,
-            'score_cast_func': score_cast_func
-        }
+            pieces.append("WITHSCORES")
+        options = {"withscores": withscores, "score_cast_func": score_cast_func}
         return self.execute_command(*pieces, **options)
 
     def zrank(self, name, value):
@@ -3207,7 +3374,7 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zrank
         """
-        return self.execute_command('ZRANK', name, value)
+        return self.execute_command("ZRANK", name, value)
 
     def zrem(self, name, *values):
         """
@@ -3215,7 +3382,7 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zrem
         """
-        return self.execute_command('ZREM', name, *values)
+        return self.execute_command("ZREM", name, *values)
 
     def zremrangebylex(self, name, min, max):
         """
@@ -3226,7 +3393,7 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zremrangebylex
         """
-        return self.execute_command('ZREMRANGEBYLEX', name, min, max)
+        return self.execute_command("ZREMRANGEBYLEX", name, min, max)
 
     def zremrangebyrank(self, name, min, max):
         """
@@ -3237,7 +3404,7 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zremrangebyrank
         """
-        return self.execute_command('ZREMRANGEBYRANK', name, min, max)
+        return self.execute_command("ZREMRANGEBYRANK", name, min, max)
 
     def zremrangebyscore(self, name, min, max):
         """
@@ -3246,7 +3413,7 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zremrangebyscore
         """
-        return self.execute_command('ZREMRANGEBYSCORE', name, min, max)
+        return self.execute_command("ZREMRANGEBYSCORE", name, min, max)
 
     def zrevrank(self, name, value):
         """
@@ -3255,7 +3422,7 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zrevrank
         """
-        return self.execute_command('ZREVRANK', name, value)
+        return self.execute_command("ZREVRANK", name, value)
 
     def zscore(self, name, value):
         """
@@ -3263,7 +3430,7 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zscore
         """
-        return self.execute_command('ZSCORE', name, value)
+        return self.execute_command("ZSCORE", name, value)
 
     def zunion(self, keys, aggregate=None, withscores=False):
         """
@@ -3274,8 +3441,7 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zunion
         """
-        return self._zaggregate('ZUNION', None, keys, aggregate,
-                                withscores=withscores)
+        return self._zaggregate("ZUNION", None, keys, aggregate, withscores=withscores)
 
     def zunionstore(self, dest, keys, aggregate=None):
         """
@@ -3285,7 +3451,7 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zunionstore
         """
-        return self._zaggregate('ZUNIONSTORE', dest, keys, aggregate)
+        return self._zaggregate("ZUNIONSTORE", dest, keys, aggregate)
 
     def zmscore(self, key, members):
         """
@@ -3299,12 +3465,11 @@ class SortedSetCommands:
         For more information check https://redis.io/commands/zmscore
         """
         if not members:
-            raise DataError('ZMSCORE members must be a non-empty list')
+            raise DataError("ZMSCORE members must be a non-empty list")
         pieces = [key] + members
-        return self.execute_command('ZMSCORE', *pieces)
+        return self.execute_command("ZMSCORE", *pieces)
 
-    def _zaggregate(self, command, dest, keys, aggregate=None,
-                    **options):
+    def _zaggregate(self, command, dest, keys, aggregate=None, **options):
         pieces = [command]
         if dest is not None:
             pieces.append(dest)
@@ -3315,16 +3480,16 @@ class SortedSetCommands:
             weights = None
         pieces.extend(keys)
         if weights:
-            pieces.append(b'WEIGHTS')
+            pieces.append(b"WEIGHTS")
             pieces.extend(weights)
         if aggregate:
-            if aggregate.upper() in ['SUM', 'MIN', 'MAX']:
-                pieces.append(b'AGGREGATE')
+            if aggregate.upper() in ["SUM", "MIN", "MAX"]:
+                pieces.append(b"AGGREGATE")
                 pieces.append(aggregate)
             else:
                 raise DataError("aggregate can be sum, min or max.")
-        if options.get('withscores', False):
-            pieces.append(b'WITHSCORES')
+        if options.get("withscores", False):
+            pieces.append(b"WITHSCORES")
         return self.execute_command(*pieces, **options)
 
 
@@ -3333,13 +3498,14 @@ class HyperlogCommands:
     Redis commands of HyperLogLogs data type.
     see: https://redis.io/topics/data-types-intro#hyperloglogs
     """
+
     def pfadd(self, name, *values):
         """
         Adds the specified elements to the specified HyperLogLog.
 
         For more information check https://redis.io/commands/pfadd
         """
-        return self.execute_command('PFADD', name, *values)
+        return self.execute_command("PFADD", name, *values)
 
     def pfcount(self, *sources):
         """
@@ -3348,7 +3514,7 @@ class HyperlogCommands:
 
         For more information check https://redis.io/commands/pfcount
         """
-        return self.execute_command('PFCOUNT', *sources)
+        return self.execute_command("PFCOUNT", *sources)
 
     def pfmerge(self, dest, *sources):
         """
@@ -3356,7 +3522,7 @@ class HyperlogCommands:
 
         For more information check https://redis.io/commands/pfmerge
         """
-        return self.execute_command('PFMERGE', dest, *sources)
+        return self.execute_command("PFMERGE", dest, *sources)
 
 
 class HashCommands:
@@ -3364,13 +3530,14 @@ class HashCommands:
     Redis commands for Hash data type.
     see: https://redis.io/topics/data-types-intro#redis-hashes
     """
+
     def hdel(self, name, *keys):
         """
         Delete ``keys`` from hash ``name``
 
         For more information check https://redis.io/commands/hdel
         """
-        return self.execute_command('HDEL', name, *keys)
+        return self.execute_command("HDEL", name, *keys)
 
     def hexists(self, name, key):
         """
@@ -3378,7 +3545,7 @@ class HashCommands:
 
         For more information check https://redis.io/commands/hexists
         """
-        return self.execute_command('HEXISTS', name, key)
+        return self.execute_command("HEXISTS", name, key)
 
     def hget(self, name, key):
         """
@@ -3386,7 +3553,7 @@ class HashCommands:
 
         For more information check https://redis.io/commands/hget
         """
-        return self.execute_command('HGET', name, key)
+        return self.execute_command("HGET", name, key)
 
     def hgetall(self, name):
         """
@@ -3394,7 +3561,7 @@ class HashCommands:
 
         For more information check https://redis.io/commands/hgetall
         """
-        return self.execute_command('HGETALL', name)
+        return self.execute_command("HGETALL", name)
 
     def hincrby(self, name, key, amount=1):
         """
@@ -3402,7 +3569,7 @@ class HashCommands:
 
         For more information check https://redis.io/commands/hincrby
         """
-        return self.execute_command('HINCRBY', name, key, amount)
+        return self.execute_command("HINCRBY", name, key, amount)
 
     def hincrbyfloat(self, name, key, amount=1.0):
         """
@@ -3410,7 +3577,7 @@ class HashCommands:
 
         For more information check https://redis.io/commands/hincrbyfloat
         """
-        return self.execute_command('HINCRBYFLOAT', name, key, amount)
+        return self.execute_command("HINCRBYFLOAT", name, key, amount)
 
     def hkeys(self, name):
         """
@@ -3418,7 +3585,7 @@ class HashCommands:
 
         For more information check https://redis.io/commands/hkeys
         """
-        return self.execute_command('HKEYS', name)
+        return self.execute_command("HKEYS", name)
 
     def hlen(self, name):
         """
@@ -3426,7 +3593,7 @@ class HashCommands:
 
         For more information check https://redis.io/commands/hlen
         """
-        return self.execute_command('HLEN', name)
+        return self.execute_command("HLEN", name)
 
     def hset(self, name, key=None, value=None, mapping=None):
         """
@@ -3446,7 +3613,7 @@ class HashCommands:
             for pair in mapping.items():
                 items.extend(pair)
 
-        return self.execute_command('HSET', name, *items)
+        return self.execute_command("HSET", name, *items)
 
     def hsetnx(self, name, key, value):
         """
@@ -3455,7 +3622,7 @@ class HashCommands:
 
         For more information check https://redis.io/commands/hsetnx
         """
-        return self.execute_command('HSETNX', name, key, value)
+        return self.execute_command("HSETNX", name, key, value)
 
     def hmset(self, name, mapping):
         """
@@ -3465,8 +3632,8 @@ class HashCommands:
         For more information check https://redis.io/commands/hmset
         """
         warnings.warn(
-            f'{self.__class__.__name__}.hmset() is deprecated. '
-            f'Use {self.__class__.__name__}.hset() instead.',
+            f"{self.__class__.__name__}.hmset() is deprecated. "
+            f"Use {self.__class__.__name__}.hset() instead.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -3475,7 +3642,7 @@ class HashCommands:
         items = []
         for pair in mapping.items():
             items.extend(pair)
-        return self.execute_command('HMSET', name, *items)
+        return self.execute_command("HMSET", name, *items)
 
     def hmget(self, name, keys, *args):
         """
@@ -3484,7 +3651,7 @@ class HashCommands:
         For more information check https://redis.io/commands/hmget
         """
         args = list_or_args(keys, args)
-        return self.execute_command('HMGET', name, *args)
+        return self.execute_command("HMGET", name, *args)
 
     def hvals(self, name):
         """
@@ -3492,7 +3659,7 @@ class HashCommands:
 
         For more information check https://redis.io/commands/hvals
         """
-        return self.execute_command('HVALS', name)
+        return self.execute_command("HVALS", name)
 
     def hstrlen(self, name, key):
         """
@@ -3501,7 +3668,7 @@ class HashCommands:
 
         For more information check https://redis.io/commands/hstrlen
         """
-        return self.execute_command('HSTRLEN', name, key)
+        return self.execute_command("HSTRLEN", name, key)
 
 
 class PubSubCommands:
@@ -3509,6 +3676,7 @@ class PubSubCommands:
     Redis PubSub commands.
     see https://redis.io/topics/pubsub
     """
+
     def publish(self, channel, message):
         """
         Publish ``message`` on ``channel``.
@@ -3516,15 +3684,15 @@ class PubSubCommands:
 
         For more information check https://redis.io/commands/publish
         """
-        return self.execute_command('PUBLISH', channel, message)
+        return self.execute_command("PUBLISH", channel, message)
 
-    def pubsub_channels(self, pattern='*'):
+    def pubsub_channels(self, pattern="*"):
         """
         Return a list of channels that have at least one subscriber
 
         For more information check https://redis.io/commands/pubsub-channels
         """
-        return self.execute_command('PUBSUB CHANNELS', pattern)
+        return self.execute_command("PUBSUB CHANNELS", pattern)
 
     def pubsub_numpat(self):
         """
@@ -3532,7 +3700,7 @@ class PubSubCommands:
 
         For more information check https://redis.io/commands/pubsub-numpat
         """
-        return self.execute_command('PUBSUB NUMPAT')
+        return self.execute_command("PUBSUB NUMPAT")
 
     def pubsub_numsub(self, *args):
         """
@@ -3541,7 +3709,7 @@ class PubSubCommands:
 
         For more information check https://redis.io/commands/pubsub-numsub
         """
-        return self.execute_command('PUBSUB NUMSUB', *args)
+        return self.execute_command("PUBSUB NUMSUB", *args)
 
 
 class ScriptCommands:
@@ -3549,6 +3717,7 @@ class ScriptCommands:
     Redis Lua script commands. see:
     https://redis.com/ebook/part-3-next-steps/chapter-11-scripting-redis-with-lua/
     """
+
     def eval(self, script, numkeys, *keys_and_args):
         """
         Execute the Lua ``script``, specifying the ``numkeys`` the script
@@ -3560,7 +3729,7 @@ class ScriptCommands:
 
         For more information check  https://redis.io/commands/eval
         """
-        return self.execute_command('EVAL', script, numkeys, *keys_and_args)
+        return self.execute_command("EVAL", script, numkeys, *keys_and_args)
 
     def evalsha(self, sha, numkeys, *keys_and_args):
         """
@@ -3574,7 +3743,7 @@ class ScriptCommands:
 
         For more information check  https://redis.io/commands/evalsha
         """
-        return self.execute_command('EVALSHA', sha, numkeys, *keys_and_args)
+        return self.execute_command("EVALSHA", sha, numkeys, *keys_and_args)
 
     def script_exists(self, *args):
         """
@@ -3584,7 +3753,7 @@ class ScriptCommands:
 
         For more information check  https://redis.io/commands/script-exists
         """
-        return self.execute_command('SCRIPT EXISTS', *args)
+        return self.execute_command("SCRIPT EXISTS", *args)
 
     def script_debug(self, *args):
         raise NotImplementedError(
@@ -3600,14 +3769,16 @@ class ScriptCommands:
 
         # Redis pre 6 had no sync_type.
         if sync_type not in ["SYNC", "ASYNC", None]:
-            raise DataError("SCRIPT FLUSH defaults to SYNC in redis > 6.2, or "
-                            "accepts SYNC/ASYNC. For older versions, "
-                            "of redis leave as None.")
+            raise DataError(
+                "SCRIPT FLUSH defaults to SYNC in redis > 6.2, or "
+                "accepts SYNC/ASYNC. For older versions, "
+                "of redis leave as None."
+            )
         if sync_type is None:
             pieces = []
         else:
             pieces = [sync_type]
-        return self.execute_command('SCRIPT FLUSH', *pieces)
+        return self.execute_command("SCRIPT FLUSH", *pieces)
 
     def script_kill(self):
         """
@@ -3615,7 +3786,7 @@ class ScriptCommands:
 
         For more information check https://redis.io/commands/script-kill
         """
-        return self.execute_command('SCRIPT KILL')
+        return self.execute_command("SCRIPT KILL")
 
     def script_load(self, script):
         """
@@ -3623,7 +3794,7 @@ class ScriptCommands:
 
         For more information check https://redis.io/commands/script-load
         """
-        return self.execute_command('SCRIPT LOAD', script)
+        return self.execute_command("SCRIPT LOAD", script)
 
     def register_script(self, script):
         """
@@ -3640,6 +3811,7 @@ class GeoCommands:
     Redis Geospatial commands.
     see: https://redis.com/redis-best-practices/indexing-patterns/geospatial/
     """
+
     def geoadd(self, name, values, nx=False, xx=False, ch=False):
         """
         Add the specified geospatial items to the specified key identified
@@ -3664,17 +3836,16 @@ class GeoCommands:
         if nx and xx:
             raise DataError("GEOADD allows either 'nx' or 'xx', not both")
         if len(values) % 3 != 0:
-            raise DataError("GEOADD requires places with lon, lat and name"
-                            " values")
+            raise DataError("GEOADD requires places with lon, lat and name" " values")
         pieces = [name]
         if nx:
-            pieces.append('NX')
+            pieces.append("NX")
         if xx:
-            pieces.append('XX')
+            pieces.append("XX")
         if ch:
-            pieces.append('CH')
+            pieces.append("CH")
         pieces.extend(values)
-        return self.execute_command('GEOADD', *pieces)
+        return self.execute_command("GEOADD", *pieces)
 
     def geodist(self, name, place1, place2, unit=None):
         """
@@ -3686,11 +3857,11 @@ class GeoCommands:
         For more information check https://redis.io/commands/geodist
         """
         pieces = [name, place1, place2]
-        if unit and unit not in ('m', 'km', 'mi', 'ft'):
+        if unit and unit not in ("m", "km", "mi", "ft"):
             raise DataError("GEODIST invalid unit")
         elif unit:
             pieces.append(unit)
-        return self.execute_command('GEODIST', *pieces)
+        return self.execute_command("GEODIST", *pieces)
 
     def geohash(self, name, *values):
         """
@@ -3699,7 +3870,7 @@ class GeoCommands:
 
         For more information check https://redis.io/commands/geohash
         """
-        return self.execute_command('GEOHASH', name, *values)
+        return self.execute_command("GEOHASH", name, *values)
 
     def geopos(self, name, *values):
         """
@@ -3709,11 +3880,24 @@ class GeoCommands:
 
         For more information check https://redis.io/commands/geopos
         """
-        return self.execute_command('GEOPOS', name, *values)
+        return self.execute_command("GEOPOS", name, *values)
 
-    def georadius(self, name, longitude, latitude, radius, unit=None,
-                  withdist=False, withcoord=False, withhash=False, count=None,
-                  sort=None, store=None, store_dist=None, any=False):
+    def georadius(
+        self,
+        name,
+        longitude,
+        latitude,
+        radius,
+        unit=None,
+        withdist=False,
+        withcoord=False,
+        withhash=False,
+        count=None,
+        sort=None,
+        store=None,
+        store_dist=None,
+        any=False,
+    ):
         """
         Return the members of the specified key identified by the
         ``name`` argument which are within the borders of the area specified
@@ -3744,17 +3928,38 @@ class GeoCommands:
 
         For more information check https://redis.io/commands/georadius
         """
-        return self._georadiusgeneric('GEORADIUS',
-                                      name, longitude, latitude, radius,
-                                      unit=unit, withdist=withdist,
-                                      withcoord=withcoord, withhash=withhash,
-                                      count=count, sort=sort, store=store,
-                                      store_dist=store_dist, any=any)
+        return self._georadiusgeneric(
+            "GEORADIUS",
+            name,
+            longitude,
+            latitude,
+            radius,
+            unit=unit,
+            withdist=withdist,
+            withcoord=withcoord,
+            withhash=withhash,
+            count=count,
+            sort=sort,
+            store=store,
+            store_dist=store_dist,
+            any=any,
+        )
 
-    def georadiusbymember(self, name, member, radius, unit=None,
-                          withdist=False, withcoord=False, withhash=False,
-                          count=None, sort=None, store=None, store_dist=None,
-                          any=False):
+    def georadiusbymember(
+        self,
+        name,
+        member,
+        radius,
+        unit=None,
+        withdist=False,
+        withcoord=False,
+        withhash=False,
+        count=None,
+        sort=None,
+        store=None,
+        store_dist=None,
+        any=False,
+    ):
         """
         This command is exactly like ``georadius`` with the sole difference
         that instead of taking, as the center of the area to query, a longitude
@@ -3763,61 +3968,85 @@ class GeoCommands:
 
         For more information check https://redis.io/commands/georadiusbymember
         """
-        return self._georadiusgeneric('GEORADIUSBYMEMBER',
-                                      name, member, radius, unit=unit,
-                                      withdist=withdist, withcoord=withcoord,
-                                      withhash=withhash, count=count,
-                                      sort=sort, store=store,
-                                      store_dist=store_dist, any=any)
+        return self._georadiusgeneric(
+            "GEORADIUSBYMEMBER",
+            name,
+            member,
+            radius,
+            unit=unit,
+            withdist=withdist,
+            withcoord=withcoord,
+            withhash=withhash,
+            count=count,
+            sort=sort,
+            store=store,
+            store_dist=store_dist,
+            any=any,
+        )
 
     def _georadiusgeneric(self, command, *args, **kwargs):
         pieces = list(args)
-        if kwargs['unit'] and kwargs['unit'] not in ('m', 'km', 'mi', 'ft'):
+        if kwargs["unit"] and kwargs["unit"] not in ("m", "km", "mi", "ft"):
             raise DataError("GEORADIUS invalid unit")
-        elif kwargs['unit']:
-            pieces.append(kwargs['unit'])
+        elif kwargs["unit"]:
+            pieces.append(kwargs["unit"])
         else:
-            pieces.append('m',)
+            pieces.append(
+                "m",
+            )
 
-        if kwargs['any'] and kwargs['count'] is None:
+        if kwargs["any"] and kwargs["count"] is None:
             raise DataError("``any`` can't be provided without ``count``")
 
         for arg_name, byte_repr in (
-                ('withdist', 'WITHDIST'),
-                ('withcoord', 'WITHCOORD'),
-                ('withhash', 'WITHHASH')):
+            ("withdist", "WITHDIST"),
+            ("withcoord", "WITHCOORD"),
+            ("withhash", "WITHHASH"),
+        ):
             if kwargs[arg_name]:
                 pieces.append(byte_repr)
 
-        if kwargs['count'] is not None:
-            pieces.extend(['COUNT', kwargs['count']])
-            if kwargs['any']:
-                pieces.append('ANY')
+        if kwargs["count"] is not None:
+            pieces.extend(["COUNT", kwargs["count"]])
+            if kwargs["any"]:
+                pieces.append("ANY")
 
-        if kwargs['sort']:
-            if kwargs['sort'] == 'ASC':
-                pieces.append('ASC')
-            elif kwargs['sort'] == 'DESC':
-                pieces.append('DESC')
+        if kwargs["sort"]:
+            if kwargs["sort"] == "ASC":
+                pieces.append("ASC")
+            elif kwargs["sort"] == "DESC":
+                pieces.append("DESC")
             else:
                 raise DataError("GEORADIUS invalid sort")
 
-        if kwargs['store'] and kwargs['store_dist']:
-            raise DataError("GEORADIUS store and store_dist cant be set"
-                            " together")
+        if kwargs["store"] and kwargs["store_dist"]:
+            raise DataError("GEORADIUS store and store_dist cant be set" " together")
 
-        if kwargs['store']:
-            pieces.extend([b'STORE', kwargs['store']])
+        if kwargs["store"]:
+            pieces.extend([b"STORE", kwargs["store"]])
 
-        if kwargs['store_dist']:
-            pieces.extend([b'STOREDIST', kwargs['store_dist']])
+        if kwargs["store_dist"]:
+            pieces.extend([b"STOREDIST", kwargs["store_dist"]])
 
         return self.execute_command(command, *pieces, **kwargs)
 
-    def geosearch(self, name, member=None, longitude=None, latitude=None,
-                  unit='m', radius=None, width=None, height=None, sort=None,
-                  count=None, any=False, withcoord=False,
-                  withdist=False, withhash=False):
+    def geosearch(
+        self,
+        name,
+        member=None,
+        longitude=None,
+        latitude=None,
+        unit="m",
+        radius=None,
+        width=None,
+        height=None,
+        sort=None,
+        count=None,
+        any=False,
+        withcoord=False,
+        withdist=False,
+        withhash=False,
+    ):
         """
         Return the members of specified key identified by the
         ``name`` argument, which are within the borders of the
@@ -3853,19 +4082,42 @@ class GeoCommands:
         For more information check https://redis.io/commands/geosearch
         """
 
-        return self._geosearchgeneric('GEOSEARCH',
-                                      name, member=member, longitude=longitude,
-                                      latitude=latitude, unit=unit,
-                                      radius=radius, width=width,
-                                      height=height, sort=sort, count=count,
-                                      any=any, withcoord=withcoord,
-                                      withdist=withdist, withhash=withhash,
-                                      store=None, store_dist=None)
+        return self._geosearchgeneric(
+            "GEOSEARCH",
+            name,
+            member=member,
+            longitude=longitude,
+            latitude=latitude,
+            unit=unit,
+            radius=radius,
+            width=width,
+            height=height,
+            sort=sort,
+            count=count,
+            any=any,
+            withcoord=withcoord,
+            withdist=withdist,
+            withhash=withhash,
+            store=None,
+            store_dist=None,
+        )
 
-    def geosearchstore(self, dest, name, member=None, longitude=None,
-                       latitude=None, unit='m', radius=None, width=None,
-                       height=None, sort=None, count=None, any=False,
-                       storedist=False):
+    def geosearchstore(
+        self,
+        dest,
+        name,
+        member=None,
+        longitude=None,
+        latitude=None,
+        unit="m",
+        radius=None,
+        width=None,
+        height=None,
+        sort=None,
+        count=None,
+        any=False,
+        storedist=False,
+    ):
         """
         This command is like GEOSEARCH, but stores the result in
         ``dest``. By default, it stores the results in the destination
@@ -3876,74 +4128,86 @@ class GeoCommands:
 
         For more information check https://redis.io/commands/geosearchstore
         """
-        return self._geosearchgeneric('GEOSEARCHSTORE',
-                                      dest, name, member=member,
-                                      longitude=longitude, latitude=latitude,
-                                      unit=unit, radius=radius, width=width,
-                                      height=height, sort=sort, count=count,
-                                      any=any, withcoord=None,
-                                      withdist=None, withhash=None,
-                                      store=None, store_dist=storedist)
+        return self._geosearchgeneric(
+            "GEOSEARCHSTORE",
+            dest,
+            name,
+            member=member,
+            longitude=longitude,
+            latitude=latitude,
+            unit=unit,
+            radius=radius,
+            width=width,
+            height=height,
+            sort=sort,
+            count=count,
+            any=any,
+            withcoord=None,
+            withdist=None,
+            withhash=None,
+            store=None,
+            store_dist=storedist,
+        )
 
     def _geosearchgeneric(self, command, *args, **kwargs):
         pieces = list(args)
 
         # FROMMEMBER or FROMLONLAT
-        if kwargs['member'] is None:
-            if kwargs['longitude'] is None or kwargs['latitude'] is None:
-                raise DataError("GEOSEARCH must have member or"
-                                " longitude and latitude")
-        if kwargs['member']:
-            if kwargs['longitude'] or kwargs['latitude']:
-                raise DataError("GEOSEARCH member and longitude or latitude"
-                                " cant be set together")
-            pieces.extend([b'FROMMEMBER', kwargs['member']])
-        if kwargs['longitude'] and kwargs['latitude']:
-            pieces.extend([b'FROMLONLAT',
-                           kwargs['longitude'], kwargs['latitude']])
+        if kwargs["member"] is None:
+            if kwargs["longitude"] is None or kwargs["latitude"] is None:
+                raise DataError(
+                    "GEOSEARCH must have member or" " longitude and latitude"
+                )
+        if kwargs["member"]:
+            if kwargs["longitude"] or kwargs["latitude"]:
+                raise DataError(
+                    "GEOSEARCH member and longitude or latitude" " cant be set together"
+                )
+            pieces.extend([b"FROMMEMBER", kwargs["member"]])
+        if kwargs["longitude"] and kwargs["latitude"]:
+            pieces.extend([b"FROMLONLAT", kwargs["longitude"], kwargs["latitude"]])
 
         # BYRADIUS or BYBOX
-        if kwargs['radius'] is None:
-            if kwargs['width'] is None or kwargs['height'] is None:
-                raise DataError("GEOSEARCH must have radius or"
-                                " width and height")
-        if kwargs['unit'] is None:
+        if kwargs["radius"] is None:
+            if kwargs["width"] is None or kwargs["height"] is None:
+                raise DataError("GEOSEARCH must have radius or" " width and height")
+        if kwargs["unit"] is None:
             raise DataError("GEOSEARCH must have unit")
-        if kwargs['unit'].lower() not in ('m', 'km', 'mi', 'ft'):
+        if kwargs["unit"].lower() not in ("m", "km", "mi", "ft"):
             raise DataError("GEOSEARCH invalid unit")
-        if kwargs['radius']:
-            if kwargs['width'] or kwargs['height']:
-                raise DataError("GEOSEARCH radius and width or height"
-                                " cant be set together")
-            pieces.extend([b'BYRADIUS', kwargs['radius'], kwargs['unit']])
-        if kwargs['width'] and kwargs['height']:
-            pieces.extend([b'BYBOX',
-                           kwargs['width'], kwargs['height'], kwargs['unit']])
+        if kwargs["radius"]:
+            if kwargs["width"] or kwargs["height"]:
+                raise DataError(
+                    "GEOSEARCH radius and width or height" " cant be set together"
+                )
+            pieces.extend([b"BYRADIUS", kwargs["radius"], kwargs["unit"]])
+        if kwargs["width"] and kwargs["height"]:
+            pieces.extend([b"BYBOX", kwargs["width"], kwargs["height"], kwargs["unit"]])
 
         # sort
-        if kwargs['sort']:
-            if kwargs['sort'].upper() == 'ASC':
-                pieces.append(b'ASC')
-            elif kwargs['sort'].upper() == 'DESC':
-                pieces.append(b'DESC')
+        if kwargs["sort"]:
+            if kwargs["sort"].upper() == "ASC":
+                pieces.append(b"ASC")
+            elif kwargs["sort"].upper() == "DESC":
+                pieces.append(b"DESC")
             else:
                 raise DataError("GEOSEARCH invalid sort")
 
         # count any
-        if kwargs['count']:
-            pieces.extend([b'COUNT', kwargs['count']])
-            if kwargs['any']:
-                pieces.append(b'ANY')
-        elif kwargs['any']:
-            raise DataError("GEOSEARCH ``any`` can't be provided "
-                            "without count")
+        if kwargs["count"]:
+            pieces.extend([b"COUNT", kwargs["count"]])
+            if kwargs["any"]:
+                pieces.append(b"ANY")
+        elif kwargs["any"]:
+            raise DataError("GEOSEARCH ``any`` can't be provided " "without count")
 
         # other properties
         for arg_name, byte_repr in (
-                ('withdist', b'WITHDIST'),
-                ('withcoord', b'WITHCOORD'),
-                ('withhash', b'WITHHASH'),
-                ('store_dist', b'STOREDIST')):
+            ("withdist", b"WITHDIST"),
+            ("withcoord", b"WITHCOORD"),
+            ("withhash", b"WITHHASH"),
+            ("store_dist", b"STOREDIST"),
+        ):
             if kwargs[arg_name]:
                 pieces.append(byte_repr)
 
@@ -3955,6 +4219,7 @@ class ModuleCommands:
     Redis Module commands.
     see: https://redis.io/topics/modules-intro
     """
+
     def module_load(self, path, *args):
         """
         Loads the module from ``path``.
@@ -3963,7 +4228,7 @@ class ModuleCommands:
 
         For more information check https://redis.io/commands/module-load
         """
-        return self.execute_command('MODULE LOAD', path, *args)
+        return self.execute_command("MODULE LOAD", path, *args)
 
     def module_unload(self, name):
         """
@@ -3972,7 +4237,7 @@ class ModuleCommands:
 
         For more information check https://redis.io/commands/module-unload
         """
-        return self.execute_command('MODULE UNLOAD', name)
+        return self.execute_command("MODULE UNLOAD", name)
 
     def module_list(self):
         """
@@ -3981,7 +4246,7 @@ class ModuleCommands:
 
         For more information check https://redis.io/commands/module-list
         """
-        return self.execute_command('MODULE LIST')
+        return self.execute_command("MODULE LIST")
 
     def command_info(self):
         raise NotImplementedError(
@@ -3989,13 +4254,13 @@ class ModuleCommands:
         )
 
     def command_count(self):
-        return self.execute_command('COMMAND COUNT')
+        return self.execute_command("COMMAND COUNT")
 
     def command_getkeys(self, *args):
-        return self.execute_command('COMMAND GETKEYS', *args)
+        return self.execute_command("COMMAND GETKEYS", *args)
 
     def command(self):
-        return self.execute_command('COMMAND')
+        return self.execute_command("COMMAND")
 
 
 class Script:
@@ -4022,6 +4287,7 @@ class Script:
         args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
         from redis.client import Pipeline
+
         if isinstance(client, Pipeline):
             # Make sure the pipeline can register the script before executing.
             client.scripts.add(self)
@@ -4039,6 +4305,7 @@ class BitFieldOperation:
     """
     Command builder for BITFIELD commands.
     """
+
     def __init__(self, client, key, default_overflow=None):
         self.client = client
         self.key = key
@@ -4050,7 +4317,7 @@ class BitFieldOperation:
         Reset the state of the instance to when it was constructed
         """
         self.operations = []
-        self._last_overflow = 'WRAP'
+        self._last_overflow = "WRAP"
         self.overflow(self._default_overflow or self._last_overflow)
 
     def overflow(self, overflow):
@@ -4063,7 +4330,7 @@ class BitFieldOperation:
         overflow = overflow.upper()
         if overflow != self._last_overflow:
             self._last_overflow = overflow
-            self.operations.append(('OVERFLOW', overflow))
+            self.operations.append(("OVERFLOW", overflow))
         return self
 
     def incrby(self, fmt, offset, increment, overflow=None):
@@ -4083,7 +4350,7 @@ class BitFieldOperation:
         if overflow is not None:
             self.overflow(overflow)
 
-        self.operations.append(('INCRBY', fmt, offset, increment))
+        self.operations.append(("INCRBY", fmt, offset, increment))
         return self
 
     def get(self, fmt, offset):
@@ -4096,7 +4363,7 @@ class BitFieldOperation:
             fmt='u8', offset='#2', the offset will be 16.
         :returns: a :py:class:`BitFieldOperation` instance.
         """
-        self.operations.append(('GET', fmt, offset))
+        self.operations.append(("GET", fmt, offset))
         return self
 
     def set(self, fmt, offset, value):
@@ -4110,12 +4377,12 @@ class BitFieldOperation:
         :param int value: value to set at the given position.
         :returns: a :py:class:`BitFieldOperation` instance.
         """
-        self.operations.append(('SET', fmt, offset, value))
+        self.operations.append(("SET", fmt, offset, value))
         return self
 
     @property
     def command(self):
-        cmd = ['BITFIELD', self.key]
+        cmd = ["BITFIELD", self.key]
         for ops in self.operations:
             cmd.extend(ops)
         return cmd
@@ -4132,19 +4399,31 @@ class BitFieldOperation:
         return self.client.execute_command(*command)
 
 
-class DataAccessCommands(BasicKeyCommands, ListCommands,
-                         ScanCommands, SetCommands, StreamCommands,
-                         SortedSetCommands,
-                         HyperlogCommands, HashCommands, GeoCommands,
-                         ):
+class DataAccessCommands(
+    BasicKeyCommands,
+    ListCommands,
+    ScanCommands,
+    SetCommands,
+    StreamCommands,
+    SortedSetCommands,
+    HyperlogCommands,
+    HashCommands,
+    GeoCommands,
+):
     """
     A class containing all of the implemented data access redis commands.
     This class is to be used as a mixin.
     """
 
 
-class CoreCommands(ACLCommands, DataAccessCommands, ManagementCommands,
-                   ModuleCommands, PubSubCommands, ScriptCommands):
+class CoreCommands(
+    ACLCommands,
+    DataAccessCommands,
+    ManagementCommands,
+    ModuleCommands,
+    PubSubCommands,
+    ScriptCommands,
+):
     """
     A class containing all of the implemented redis commands. This class is
     to be used as a mixin.

@@ -1,5 +1,5 @@
-from .document import Document
 from ._util import to_string
+from .document import Document
 
 
 class Result:

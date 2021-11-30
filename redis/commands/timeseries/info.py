@@ -1,5 +1,5 @@
-from .utils import list_to_dict
 from ..helpers import nativestr
+from .utils import list_to_dict
 
 
 class TSInfo:
