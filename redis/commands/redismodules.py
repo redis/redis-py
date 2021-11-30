@@ -31,3 +31,13 @@ class RedisModuleCommands:
 
         s = TimeSeries(client=self)
         return s
+
+    def graph(self, index_name="idx"):
+        """Access the timeseries namespace, providing support for
+        redis timeseries data.
+        """
+
+        from .graph import Graph
+
+        g = Graph(client=self, name=index_name)
+        return g
