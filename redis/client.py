@@ -629,7 +629,7 @@ def parse_set_result(response, **options):
     return response and str_if_bytes(response) == 'OK'
 
 
-class Redis(RedisModuleCommands, CoreCommands, SentinelCommands, object):
+class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     """
     Implementation of the Redis protocol.
 
@@ -918,7 +918,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands, object):
             self.__class__.RESPONSE_CALLBACKS)
 
     def __repr__(self):
-        return "%s<%s>" % (type(self).__name__, repr(self.connection_pool))
+        return f"{type(self).__name__}<{repr(self.connection_pool)}>"
 
     def set_response_callback(self, command, callback):
         "Set a custom Response Callback"
@@ -1141,7 +1141,7 @@ class Monitor:
         # check that monitor returns 'OK', but don't return it to user
         response = self.connection.read_response()
         if not bool_ok(response):
-            raise RedisError('MONITOR failed: %s' % response)
+            raise RedisError(f'MONITOR failed: {response}')
         return self
 
     def __exit__(self, *args):
@@ -1517,12 +1517,10 @@ class PubSub:
                       exception_handler=None):
         for channel, handler in self.channels.items():
             if handler is None:
-                raise PubSubError("Channel: '%s' has no handler registered" %
-                                  channel)
+                raise PubSubError(f"Channel: '{channel}' has no handler registered")
         for pattern, handler in self.patterns.items():
             if handler is None:
-                raise PubSubError("Pattern: '%s' has no handler registered" %
-                                  pattern)
+                raise PubSubError(f"Pattern: '{pattern}' has no handler registered")
 
         thread = PubSubWorkerThread(
             self,
@@ -1807,8 +1805,10 @@ class Pipeline(Redis):
 
     def annotate_exception(self, exception, number, command):
         cmd = ' '.join(map(safe_str, command))
-        msg = 'Command # %d (%s) of pipeline caused error: %s' % (
-            number, cmd, exception.args[0])
+        msg = (
+            f'Command # {number} ({cmd}) of pipeline '
+            f'caused error: {exception.args[0]}'
+        )
         exception.args = (msg,) + exception.args[1:]
 
     def parse_response(self, connection, command_name, **options):

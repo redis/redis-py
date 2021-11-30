@@ -227,8 +227,8 @@ class ACLCommands:
                 elif password.startswith(b'-'):
                     pieces.append(b'<%s' % password[1:])
                 else:
-                    raise DataError('Password %d must be prefixeed with a '
-                                    '"+" to add or a "-" to remove' % i)
+                    raise DataError(f'Password {i} must be prefixed with a '
+                                    f'"+" to add or a "-" to remove')
 
         if hashed_passwords:
             # as most users will have only one password, allow remove_passwords
@@ -241,8 +241,8 @@ class ACLCommands:
                 elif hashed_password.startswith(b'-'):
                     pieces.append(b'!%s' % hashed_password[1:])
                 else:
-                    raise DataError('Hashed %d password must be prefixeed '
-                                    'with a "+" to add or a "-" to remove' % i)
+                    raise DataError(f'Hashed password {i} must be prefixed with a '
+                                    f'"+" to add or a "-" to remove')
 
         if nopass:
             pieces.append(b'nopass')
@@ -260,16 +260,18 @@ class ACLCommands:
                 elif category.startswith(b'-'):
                     pieces.append(b'-@%s' % category[1:])
                 else:
-                    raise DataError('Category "%s" must be prefixed with '
-                                    '"+" or "-"'
-                                    % encoder.decode(category, force=True))
+                    raise DataError(
+                        f'Category "{encoder.decode(category, force=True)}" '
+                        'must be prefixed with "+" or "-"'
+                    )
         if commands:
             for cmd in commands:
                 cmd = encoder.encode(cmd)
                 if not cmd.startswith(b'+') and not cmd.startswith(b'-'):
-                    raise DataError('Command "%s" must be prefixed with '
-                                    '"+" or "-"'
-                                    % encoder.decode(cmd, force=True))
+                    raise DataError(
+                        f'Command "{encoder.decode(cmd, force=True)}" '
+                        'must be prefixed with "+" or "-"'
+                    )
                 pieces.append(cmd)
 
         if keys:
@@ -342,8 +344,7 @@ class ManagementCommands:
         if _type is not None:
             client_types = ('normal', 'master', 'slave', 'pubsub')
             if str(_type).lower() not in client_types:
-                raise DataError("CLIENT KILL type must be one of %r" % (
-                                client_types,))
+                raise DataError(f"CLIENT KILL type must be one of {client_types!r}")
             args.extend((b'TYPE', _type))
         if skipme is not None:
             if not isinstance(skipme, bool):
@@ -388,8 +389,7 @@ class ManagementCommands:
         if _type is not None:
             client_types = ('normal', 'master', 'replica', 'pubsub')
             if str(_type).lower() not in client_types:
-                raise DataError("CLIENT LIST _type must be one of %r" % (
-                                client_types,))
+                raise DataError(f"CLIENT LIST _type must be one of {client_types!r}")
             args.append(b'TYPE')
             args.append(_type)
         if not isinstance(client_id, list):
@@ -434,7 +434,7 @@ class ManagementCommands:
         """
         replies = ['ON', 'OFF', 'SKIP']
         if reply not in replies:
-            raise DataError('CLIENT REPLY must be one of %r' % replies)
+            raise DataError(f'CLIENT REPLY must be one of {replies!r}')
         return self.execute_command("CLIENT REPLY", reply)
 
     def client_id(self):
@@ -551,7 +551,7 @@ class ManagementCommands:
         return self.execute_command('CONFIG REWRITE')
 
     def cluster(self, cluster_arg, *args):
-        return self.execute_command('CLUSTER %s' % cluster_arg.upper(), *args)
+        return self.execute_command(f'CLUSTER {cluster_arg.upper()}', *args)
 
     def dbsize(self):
         """
@@ -1086,7 +1086,7 @@ class BasicKeyCommands:
         For more information check https://redis.io/commands/getex
         """
 
-        opset = set([ex, px, exat, pxat])
+        opset = {ex, px, exat, pxat}
         if len(opset) > 2 or len(opset) > 1 and persist:
             raise DataError("``ex``, ``px``, ``exat``, ``pxat``, "
                             "and ``persist`` are mutually exclusive.")
@@ -1554,11 +1554,10 @@ class BasicKeyCommands:
         # check validity
         supported_algo = ['LCS']
         if algo not in supported_algo:
-            raise DataError("The supported algorithms are: %s"
-                            % (', '.join(supported_algo)))
+            supported_algos_str = ', '.join(supported_algo)
+            raise DataError(f"The supported algorithms are: {supported_algos_str}")
         if specific_argument not in ['keys', 'strings']:
-            raise DataError("specific_argument can be only"
-                            " keys or strings")
+            raise DataError("specific_argument can be only keys or strings")
         if len and idx:
             raise DataError("len and idx cannot be provided together.")
 
@@ -3466,8 +3465,8 @@ class HashCommands:
         For more information check https://redis.io/commands/hmset
         """
         warnings.warn(
-            '%s.hmset() is deprecated. Use %s.hset() instead.'
-            % (self.__class__.__name__, self.__class__.__name__),
+            f'{self.__class__.__name__}.hmset() is deprecated. '
+            f'Use {self.__class__.__name__}.hset() instead.',
             DeprecationWarning,
             stacklevel=2,
         )

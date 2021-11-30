@@ -228,8 +228,7 @@ class ClusterManagementCommands:
         if _type is not None:
             client_types = ('normal', 'master', 'slave', 'pubsub')
             if str(_type).lower() not in client_types:
-                raise DataError("CLIENT KILL type must be one of %r" % (
-                    client_types,))
+                raise DataError(f"CLIENT KILL type must be one of {client_types!r}")
             args.extend((b'TYPE', _type))
         if skipme is not None:
             if not isinstance(skipme, bool):
@@ -267,8 +266,7 @@ class ClusterManagementCommands:
         if _type is not None:
             client_types = ('normal', 'master', 'replica', 'pubsub')
             if str(_type).lower() not in client_types:
-                raise DataError("CLIENT LIST _type must be one of %r" % (
-                    client_types,))
+                raise DataError(f"CLIENT LIST _type must be one of {client_types!r}")
             return self.execute_command('CLIENT LIST',
                                         b'TYPE',
                                         _type,
@@ -302,7 +300,7 @@ class ClusterManagementCommands:
         """
         replies = ['ON', 'OFF', 'SKIP']
         if reply not in replies:
-            raise DataError('CLIENT REPLY must be one of %r' % replies)
+            raise DataError(f'CLIENT REPLY must be one of {replies!r}')
         return self.execute_command("CLIENT REPLY", reply,
                                     target_nodes=target_nodes)
 
@@ -640,11 +638,10 @@ class ClusterManagementCommands:
         # check validity
         supported_algo = ['LCS']
         if algo not in supported_algo:
-            raise DataError("The supported algorithms are: %s"
-                            % (', '.join(supported_algo)))
+            supported_algos_str = ', '.join(supported_algo)
+            raise DataError(f"The supported algorithms are: {supported_algos_str}")
         if specific_argument not in ['keys', 'strings']:
-            raise DataError("specific_argument can be only"
-                            " keys or strings")
+            raise DataError("specific_argument can be only keys or strings")
         if len and idx:
             raise DataError("len and idx cannot be provided together.")
 
@@ -788,8 +785,7 @@ class ClusterCommands(ClusterManagementCommands, ClusterMultiKeyCommands,
         if option:
             if option.upper() not in ['FORCE', 'TAKEOVER']:
                 raise RedisError(
-                    'Invalid option for CLUSTER FAILOVER command: {0}'.format(
-                        option))
+                    f'Invalid option for CLUSTER FAILOVER command: {option}')
             else:
                 return self.execute_command('CLUSTER FAILOVER', option,
                                             target_nodes=target_node)
@@ -880,7 +876,7 @@ class ClusterCommands(ClusterManagementCommands, ClusterMultiKeyCommands,
             raise RedisError('For "stable" state please use '
                              'cluster_setslot_stable')
         else:
-            raise RedisError('Invalid slot state: {0}'.format(state))
+            raise RedisError(f'Invalid slot state: {state}')
 
     def cluster_setslot_stable(self, slot_id):
         """

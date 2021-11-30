@@ -107,8 +107,8 @@ class Encoder:
         elif not isinstance(value, str):
             # a value we don't know how to deal with. throw an error
             typename = type(value).__name__
-            raise DataError("Invalid input of type: '%s'. Convert to a "
-                            "bytes, string, int or float first." % typename)
+            raise DataError(f"Invalid input of type: '{typename}'. "
+                            f"Convert to a bytes, string, int or float first.")
         if isinstance(value, str):
             value = value.encode(self.encoding, self.encoding_errors)
         return value
@@ -214,8 +214,7 @@ class SocketBuffer:
             allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
             if not raise_on_timeout and ex.errno == allowed:
                 return False
-            raise ConnectionError("Error while reading from socket: %s" %
-                                  (ex.args,))
+            raise ConnectionError(f"Error while reading from socket: {ex.args}")
         finally:
             if custom_timeout:
                 sock.settimeout(self.socket_timeout)
@@ -323,7 +322,7 @@ class PythonParser(BaseParser):
         byte, response = raw[:1], raw[1:]
 
         if byte not in (b'-', b'+', b':', b'$', b'*'):
-            raise InvalidResponse("Protocol Error: %r" % raw)
+            raise InvalidResponse(f"Protocol Error: {raw!r}")
 
         # server returned an error
         if byte == b'-':
@@ -445,8 +444,7 @@ class HiredisParser(BaseParser):
             allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
             if not raise_on_timeout and ex.errno == allowed:
                 return False
-            raise ConnectionError("Error while reading from socket: %s" %
-                                  (ex.args,))
+            raise ConnectionError(f"Error while reading from socket: {ex.args}")
         finally:
             if custom_timeout:
                 sock.settimeout(self._socket_timeout)
@@ -538,8 +536,8 @@ class Connection:
         self._buffer_cutoff = 6000
 
     def __repr__(self):
-        repr_args = ','.join(['%s=%s' % (k, v) for k, v in self.repr_pieces()])
-        return '%s<%s>' % (self.__class__.__name__, repr_args)
+        repr_args = ','.join([f'{k}={v}' for k, v in self.repr_pieces()])
+        return f'{self.__class__.__name__}<{repr_args}>'
 
     def repr_pieces(self):
         pieces = [
@@ -579,7 +577,7 @@ class Connection:
             sock = self._connect()
         except socket.timeout:
             raise TimeoutError("Timeout connecting to server")
-        except socket.error as e:
+        except OSError as e:
             raise ConnectionError(self._error_message(e))
 
         self._sock = sock
@@ -646,11 +644,12 @@ class Connection:
         # args for socket.error can either be (errno, "message")
         # or just "message"
         if len(exception.args) == 1:
-            return "Error connecting to %s:%s. %s." % \
-                (self.host, self.port, exception.args[0])
+            return f"Error connecting to {self.host}:{self.port}. {exception.args[0]}."
         else:
-            return "Error %s connecting to %s:%s. %s." % \
-                (exception.args[0], self.host, self.port, exception.args[1])
+            return (
+                f"Error {exception.args[0]} connecting to "
+                f"{self.host}:{self.port}. {exception.args[1]}."
+            )
 
     def on_connect(self):
         "Initialize the connection, authenticate and select a database"
@@ -734,15 +733,14 @@ class Connection:
         except socket.timeout:
             self.disconnect()
             raise TimeoutError("Timeout writing to socket")
-        except socket.error as e:
+        except OSError as e:
             self.disconnect()
             if len(e.args) == 1:
                 errno, errmsg = 'UNKNOWN', e.args[0]
             else:
                 errno = e.args[0]
                 errmsg = e.args[1]
-            raise ConnectionError("Error %s while writing to socket. %s." %
-                                  (errno, errmsg))
+            raise ConnectionError(f"Error {errno} while writing to socket. {errmsg}.")
         except BaseException:
             self.disconnect()
             raise
@@ -767,12 +765,12 @@ class Connection:
             )
         except socket.timeout:
             self.disconnect()
-            raise TimeoutError("Timeout reading from %s:%s" %
-                               (self.host, self.port))
-        except socket.error as e:
+            raise TimeoutError(f"Timeout reading from {self.host}:{self.port}")
+        except OSError as e:
             self.disconnect()
-            raise ConnectionError("Error while reading from %s:%s : %s" %
-                                  (self.host, self.port, e.args))
+            raise ConnectionError(
+                f"Error while reading from {self.host}:{self.port}"
+                f" : {e.args}")
         except BaseException:
             self.disconnect()
             raise
@@ -867,8 +865,7 @@ class SSLConnection(Connection):
             }
             if ssl_cert_reqs not in CERT_REQS:
                 raise RedisError(
-                    "Invalid SSL Certificate Requirements Flag: %s" %
-                    ssl_cert_reqs)
+                    f"Invalid SSL Certificate Requirements Flag: {ssl_cert_reqs}")
             ssl_cert_reqs = CERT_REQS[ssl_cert_reqs]
         self.cert_reqs = ssl_cert_reqs
         self.ca_certs = ssl_ca_certs
@@ -947,11 +944,12 @@ class UnixDomainSocketConnection(Connection):
         # args for socket.error can either be (errno, "message")
         # or just "message"
         if len(exception.args) == 1:
-            return "Error connecting to unix socket: %s. %s." % \
-                (self.path, exception.args[0])
+            return f"Error connecting to unix socket: {self.path}. {exception.args[0]}."
         else:
-            return "Error %s connecting to unix socket: %s. %s." % \
-                (exception.args[0], self.path, exception.args[1])
+            return (
+                f"Error {exception.args[0]} connecting to unix socket: "
+                f"{self.path}. {exception.args[1]}."
+            )
 
 
 FALSE_STRINGS = ('0', 'F', 'FALSE', 'N', 'NO')
@@ -990,7 +988,7 @@ def parse_url(url):
                     kwargs[name] = parser(value)
                 except (TypeError, ValueError):
                     raise ValueError(
-                        "Invalid value for `%s` in connection URL." % name
+                        f"Invalid value for `{name}` in connection URL."
                     )
             else:
                 kwargs[name] = value
@@ -1023,9 +1021,8 @@ def parse_url(url):
         if url.scheme == 'rediss':
             kwargs['connection_class'] = SSLConnection
     else:
-        valid_schemes = 'redis://, rediss://, unix://'
         raise ValueError('Redis URL must specify one of the following '
-                         'schemes (%s)' % valid_schemes)
+                         'schemes (redis://, rediss://, unix://)')
 
     return kwargs
 
@@ -1109,9 +1106,9 @@ class ConnectionPool:
         self.reset()
 
     def __repr__(self):
-        return "%s<%s>" % (
-            type(self).__name__,
-            repr(self.connection_class(**self.connection_kwargs)),
+        return (
+            f"{type(self).__name__}"
+            f"<{repr(self.connection_class(**self.connection_kwargs))}>"
         )
 
     def reset(self):

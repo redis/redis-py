@@ -348,7 +348,7 @@ class SearchCommands:
             # convert the query from a text to a query object
             query = Query(query)
         if not isinstance(query, Query):
-            raise ValueError("Bad query type %s" % type(query))
+            raise ValueError(f"Bad query type {type(query)}")
 
         args += query.get_args()
         return args, query

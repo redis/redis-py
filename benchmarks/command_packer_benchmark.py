@@ -1,4 +1,3 @@
-import socket
 from redis.connection import (Connection, SYM_STAR, SYM_DOLLAR, SYM_EMPTY,
                               SYM_CRLF)
 from base import Benchmark
@@ -11,14 +10,13 @@ class StringJoiningConnection(Connection):
             self.connect()
         try:
             self._sock.sendall(command)
-        except socket.error as e:
+        except OSError as e:
             self.disconnect()
             if len(e.args) == 1:
                 _errno, errmsg = 'UNKNOWN', e.args[0]
             else:
                 _errno, errmsg = e.args
-            raise ConnectionError("Error %s while writing to socket. %s." %
-                                  (_errno, errmsg))
+            raise ConnectionError(f"Error {_errno} while writing to socket. {errmsg}.")
         except Exception:
             self.disconnect()
             raise
@@ -43,14 +41,13 @@ class ListJoiningConnection(Connection):
                 command = [command]
             for item in command:
                 self._sock.sendall(item)
-        except socket.error as e:
+        except OSError as e:
             self.disconnect()
             if len(e.args) == 1:
                 _errno, errmsg = 'UNKNOWN', e.args[0]
             else:
                 _errno, errmsg = e.args
-            raise ConnectionError("Error %s while writing to socket. %s." %
-                                  (_errno, errmsg))
+            raise ConnectionError(f"Error {_errno} while writing to socket. {errmsg}.")
         except Exception:
             self.disconnect()
             raise

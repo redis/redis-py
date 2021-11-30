@@ -345,7 +345,7 @@ class TestPipeline:
             with pytest.raises(redis.ResponseError) as ex:
                 pipe.execute()
 
-            expected = 'Command # 1 (LLEN %s) of pipeline caused error: ' % key
+            expected = f'Command # 1 (LLEN {key}) of pipeline caused error: '
             assert str(ex.value).startswith(expected)
 
         assert r[key] == b'1'

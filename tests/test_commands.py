@@ -35,7 +35,7 @@ def slowlog(request, r):
 
 def redis_server_time(client):
     seconds, milliseconds = client.time()
-    timestamp = float('%s.%s' % (seconds, milliseconds))
+    timestamp = float(f'{seconds}.{milliseconds}')
     return datetime.datetime.fromtimestamp(timestamp)
 
 
@@ -99,7 +99,7 @@ class TestRedisCommands:
         assert r.acl_deluser(username) == 1
 
         # now, a group of users
-        users = ['bogususer_%d' % r for r in range(0, 5)]
+        users = [f'bogususer_{r}' for r in range(0, 5)]
         for u in users:
             r.acl_setuser(u, enabled=False, reset=True)
         assert r.acl_deluser(*users) > 1
@@ -162,11 +162,11 @@ class TestRedisCommands:
                              commands=['+get', '+mget', '-hset'],
                              keys=['cache:*', 'objects:*'])
         acl = r.acl_getuser(username)
-        assert set(acl['categories']) == set(['-@all', '+@set', '+@hash'])
-        assert set(acl['commands']) == set(['+get', '+mget', '-hset'])
+        assert set(acl['categories']) == {'-@all', '+@set', '+@hash'}
+        assert set(acl['commands']) == {'+get', '+mget', '-hset'}
         assert acl['enabled'] is True
         assert 'on' in acl['flags']
-        assert set(acl['keys']) == set([b'cache:*', b'objects:*'])
+        assert set(acl['keys']) == {b'cache:*', b'objects:*'}
         assert len(acl['passwords']) == 2
 
         # test reset=False keeps existing ACL and applies new ACL on top
@@ -181,11 +181,11 @@ class TestRedisCommands:
                              commands=['+mget'],
                              keys=['objects:*'])
         acl = r.acl_getuser(username)
-        assert set(acl['categories']) == set(['-@all', '+@set', '+@hash'])
-        assert set(acl['commands']) == set(['+get', '+mget'])
+        assert set(acl['categories']) == {'-@all', '+@set', '+@hash'}
+        assert set(acl['commands']) == {'+get', '+mget'}
         assert acl['enabled'] is True
         assert 'on' in acl['flags']
-        assert set(acl['keys']) == set([b'cache:*', b'objects:*'])
+        assert set(acl['keys']) == {b'cache:*', b'objects:*'}
         assert len(acl['passwords']) == 2
 
         # test removal of passwords
@@ -405,8 +405,7 @@ class TestRedisCommands:
                    if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
         assert len(clients) == 2
 
-        clients_by_name = dict([(client.get('name'), client)
-                                for client in clients])
+        clients_by_name = {client.get('name'): client for client in clients}
 
         client_addr = clients_by_name['redis-py-c2'].get('addr')
         assert r.client_kill(client_addr) is True
@@ -439,8 +438,7 @@ class TestRedisCommands:
                    if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
         assert len(clients) == 2
 
-        clients_by_name = dict([(client.get('name'), client)
-                                for client in clients])
+        clients_by_name = {client.get('name'): client for client in clients}
 
         client_2_id = clients_by_name['redis-py-c2'].get('id')
         resp = r.client_kill_filter(_id=client_2_id)
@@ -460,8 +458,7 @@ class TestRedisCommands:
                    if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
         assert len(clients) == 2
 
-        clients_by_name = dict([(client.get('name'), client)
-                                for client in clients])
+        clients_by_name = {client.get('name'): client for client in clients}
 
         client_2_addr = clients_by_name['redis-py-c2'].get('addr')
         resp = r.client_kill_filter(addr=client_2_addr)
@@ -487,8 +484,7 @@ class TestRedisCommands:
                    if client.get('name') in ['redis-py-c1', 'redis-py-c2']]
         assert len(clients) == 2
 
-        clients_by_name = dict([(client.get('name'), client)
-                                for client in clients])
+        clients_by_name = {client.get('name'): client for client in clients}
 
         client_2_addr = clients_by_name['redis-py-c2'].get('laddr')
         assert r.client_kill_filter(laddr=client_2_addr)
@@ -1809,11 +1805,11 @@ class TestRedisCommands:
     def test_zadd_gt_lt(self, r):
 
         for i in range(1, 20):
-            r.zadd('a', {'a%s' % i: i})
+            r.zadd('a', {f'a{i}': i})
         assert r.zadd('a', {'a20': 5}, gt=3) == 1
 
         for i in range(1, 20):
-            r.zadd('a', {'a%s' % i: i})
+            r.zadd('a', {f'a{i}': i})
         assert r.zadd('a', {'a2': 5}, lt=1) == 0
 
         # cannot use both nx and xx options

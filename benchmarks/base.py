@@ -34,12 +34,12 @@ class Benchmark:
         group_values = [group['values'] for group in self.ARGUMENTS]
         for value_set in itertools.product(*group_values):
             pairs = list(zip(group_names, value_set))
-            arg_string = ', '.join(['%s=%s' % (p[0], p[1]) for p in pairs])
-            sys.stdout.write('Benchmark: %s... ' % arg_string)
+            arg_string = ', '.join(f'{p[0]}={p[1]}' for p in pairs)
+            sys.stdout.write(f'Benchmark: {arg_string}... ')
             sys.stdout.flush()
             kwargs = dict(pairs)
             setup = functools.partial(self.setup, **kwargs)
             run = functools.partial(self.run, **kwargs)
             t = timeit.timeit(stmt=run, setup=setup, number=1000)
-            sys.stdout.write('%f\n' % t)
+            sys.stdout.write(f'{t:f}\n')
             sys.stdout.flush()
