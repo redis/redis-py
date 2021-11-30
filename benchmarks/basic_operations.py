@@ -49,9 +49,9 @@ def timer(func):
             count = kwargs['num']
         else:
             count = args[1]
-        print('{} - {} Requests'.format(func.__name__, count))
-        print('Duration  = {}'.format(duration))
-        print('Rate = {}'.format(count/duration))
+        print(f'{func.__name__} - {count} Requests')
+        print(f'Duration  = {duration}')
+        print(f'Rate = {count/duration}')
         print()
         return ret
     return wrapper
@@ -62,10 +62,9 @@ def set_str(conn, num, pipeline_size, data_size):
     if pipeline_size > 1:
         conn = conn.pipeline()
 
-    format_str = '{:0<%d}' % data_size
-    set_data = format_str.format('a')
+    set_data = 'a'.ljust(data_size, '0')
     for i in range(num):
-        conn.set('set_str:%d' % i, set_data)
+        conn.set(f'set_str:{i}', set_data)
         if pipeline_size > 1 and i % pipeline_size == 0:
             conn.execute()
 
@@ -78,10 +77,9 @@ def set_int(conn, num, pipeline_size, data_size):
     if pipeline_size > 1:
         conn = conn.pipeline()
 
-    format_str = '{:0<%d}' % data_size
-    set_data = int(format_str.format('1'))
+    set_data = 10 ** (data_size - 1)
     for i in range(num):
-        conn.set('set_int:%d' % i, set_data)
+        conn.set(f'set_int:{i}', set_data)
         if pipeline_size > 1 and i % pipeline_size == 0:
             conn.execute()
 
@@ -95,7 +93,7 @@ def get_str(conn, num, pipeline_size, data_size):
         conn = conn.pipeline()
 
     for i in range(num):
-        conn.get('set_str:%d' % i)
+        conn.get(f'set_str:{i}')
         if pipeline_size > 1 and i % pipeline_size == 0:
             conn.execute()
 
@@ -109,7 +107,7 @@ def get_int(conn, num, pipeline_size, data_size):
         conn = conn.pipeline()
 
     for i in range(num):
-        conn.get('set_int:%d' % i)
+        conn.get(f'set_int:{i}')
         if pipeline_size > 1 and i % pipeline_size == 0:
             conn.execute()
 
@@ -136,8 +134,7 @@ def lpush(conn, num, pipeline_size, data_size):
     if pipeline_size > 1:
         conn = conn.pipeline()
 
-    format_str = '{:0<%d}' % data_size
-    set_data = int(format_str.format('1'))
+    set_data = 10 ** (data_size - 1)
     for i in range(num):
         conn.lpush('lpush_key', set_data)
         if pipeline_size > 1 and i % pipeline_size == 0:

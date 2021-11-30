@@ -16,8 +16,14 @@ def devenv(c):
     clean(c)
     cmd = 'tox -e devenv'
     for d in dockers:
-        cmd += " --docker-dont-stop={}".format(d)
+        cmd += f" --docker-dont-stop={d}"
     run(cmd)
+
+
+@task
+def build_docs(c):
+    """Generates the sphinx documentation."""
+    run("tox -e docs")
 
 
 @task
@@ -40,7 +46,24 @@ def tests(c):
     """Run the redis-py test suite against the current python,
     with and without hiredis.
     """
-    run("tox -e plain -e hiredis")
+    print("Starting Redis tests")
+    run("tox -e '{standalone,cluster}'-'{plain,hiredis}'")
+
+
+@task
+def standalone_tests(c):
+    """Run all Redis tests against the current python,
+    with and without hiredis."""
+    print("Starting Redis tests")
+    run("tox -e standalone-'{hiredis}'")
+
+
+@task
+def cluster_tests(c):
+    """Run all Redis Cluster tests against the current python,
+    with and without hiredis."""
+    print("Starting RedisCluster tests")
+    run("tox -e cluster-'{plain,hiredis}'")
 
 
 @task
@@ -50,7 +73,7 @@ def clean(c):
         shutil.rmtree("build")
     if os.path.isdir("dist"):
         shutil.rmtree("dist")
-    run("docker rm -f {}".format(' '.join(dockers)))
+    run(f"docker rm -f {' '.join(dockers)}")
 
 
 @task

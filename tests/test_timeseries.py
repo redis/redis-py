@@ -31,7 +31,7 @@ def test_create(client):
 def test_create_duplicate_policy(client):
     # Test for duplicate policy
     for duplicate_policy in ["block", "last", "first", "min", "max"]:
-        ts_name = "time-serie-ooo-{0}".format(duplicate_policy)
+        ts_name = f"time-serie-ooo-{duplicate_policy}"
         assert client.ts().create(ts_name, duplicate_policy=duplicate_policy)
         info = client.ts().info(ts_name)
         assert duplicate_policy == info.duplicate_policy
@@ -565,7 +565,6 @@ def test_query_index(client):
 
 
 @pytest.mark.redismod
-@pytest.mark.pipeline
 def test_pipeline(client):
     pipeline = client.ts().pipeline()
     pipeline.create("with_pipeline")

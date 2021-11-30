@@ -1,7 +1,7 @@
 from ._util import to_string
 
 
-class Suggestion(object):
+class Suggestion:
     """
     Represents a single suggestion being sent or returned from the
     autocomplete server
@@ -16,7 +16,7 @@ class Suggestion(object):
         return self.string
 
 
-class SuggestionParser(object):
+class SuggestionParser:
     """
     Internal class used to parse results from the `SUGGET` command.
     This needs to consume either 1, 2, or 3 values at a time from

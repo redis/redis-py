@@ -89,9 +89,7 @@ class TestMultiprocessing:
         A child will create its own connections when using a pool created
         by a parent.
         """
-        pool = ConnectionPool.from_url('redis://{}:{}'.format(master_host[0],
-                                                              master_host[1],
-                                                              ),
+        pool = ConnectionPool.from_url(f'redis://{master_host[0]}:{master_host[1]}',
                                        max_connections=max_connections)
 
         conn = pool.get_connection('ping')
@@ -126,8 +124,7 @@ class TestMultiprocessing:
         A child process that uses the same pool as its parent isn't affected
         when the parent disconnects all connections within the pool.
         """
-        pool = ConnectionPool.from_url('redis://{}:{}'.format(master_host[0],
-                                                              master_host[1]),
+        pool = ConnectionPool.from_url(f'redis://{master_host[0]}:{master_host[1]}',
                                        max_connections=max_connections)
 
         conn = pool.get_connection('ping')

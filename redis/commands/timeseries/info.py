@@ -2,7 +2,7 @@ from .utils import list_to_dict
 from ..helpers import nativestr
 
 
-class TSInfo(object):
+class TSInfo:
     """
     Hold information and statistics on the time-series.
     Can be created using ``tsinfo`` command

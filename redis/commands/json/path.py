@@ -1,4 +1,4 @@
-class Path(object):
+class Path:
     """This class represents a path in a JSON value."""
 
     strPath = ""

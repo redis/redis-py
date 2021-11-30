@@ -15,3 +15,5 @@ env
 venv
 coverage.xml
 .venv
+*.xml
+.coverage*

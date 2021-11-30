@@ -13,7 +13,7 @@ jobs:
       - name: install python
         uses: actions/setup-python@v2
         with:
-          python-version: 3.0
+          python-version: 3.9
       - name: Install dev tools
         run: |
           pip install -r dev_requirements.txt
@@ -22,7 +22,7 @@ jobs:
       - name: Build package
         run: |
           python setup.py build
-          python setup.py dist bdist_wheel
+          python setup.py sdist bdist_wheel
 
       - name: Publish to Pypi
         uses: pypa/gh-action-pypi-publish@release/v1

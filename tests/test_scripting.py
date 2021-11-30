@@ -22,6 +22,7 @@ return "hello " .. name
 """
 
 
+@pytest.mark.onlynoncluster
 class TestScripting:
     @pytest.fixture(autouse=True)
     def reset_scripts(self, r):

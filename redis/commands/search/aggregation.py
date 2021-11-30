@@ -1,7 +1,7 @@
 FIELDNAME = object()
 
 
-class Limit(object):
+class Limit:
     def __init__(self, offset=0, count=0):
         self.offset = offset
         self.count = count
@@ -13,7 +13,7 @@ class Limit(object):
             return []
 
 
-class Reducer(object):
+class Reducer:
     """
     Base reducer object for all reducers.
 
@@ -55,7 +55,7 @@ class Reducer(object):
         return self._args
 
 
-class SortDirection(object):
+class SortDirection:
     """
     This special class is used to indicate sort direction.
     """
@@ -82,7 +82,7 @@ class Desc(SortDirection):
     DIRSTRING = "DESC"
 
 
-class Group(object):
+class Group:
     """
     This object automatically created in the `AggregateRequest.group_by()`
     """
@@ -109,7 +109,7 @@ class Group(object):
         return ret
 
 
-class Projection(object):
+class Projection:
     """
     This object automatically created in the `AggregateRequest.apply()`
     """
@@ -126,7 +126,7 @@ class Projection(object):
         return ret
 
 
-class SortBy(object):
+class SortBy:
     """
     This object automatically created in the `AggregateRequest.sort_by()`
     """
@@ -151,7 +151,7 @@ class SortBy(object):
         return ret
 
 
-class AggregateRequest(object):
+class AggregateRequest:
     """
     Aggregation request which can be passed to `Client.aggregate`.
     """
@@ -345,12 +345,6 @@ class AggregateRequest(object):
         self._cursor = args
         return self
 
-    def _limit_2_args(self, limit):
-        if limit[1]:
-            return ["LIMIT"] + [str(x) for x in limit]
-        else:
-            return []
-
     def build_args(self):
         # @foo:bar ...
         ret = [self._query]
@@ -376,7 +370,7 @@ class AggregateRequest(object):
         return ret
 
 
-class Cursor(object):
+class Cursor:
     def __init__(self, cid):
         self.cid = cid
         self.max_idle = 0
@@ -391,16 +385,15 @@ class Cursor(object):
         return args
 
 
-class AggregateResult(object):
+class AggregateResult:
     def __init__(self, rows, cursor, schema):
         self.rows = rows
         self.cursor = cursor
         self.schema = schema
 
     def __repr__(self):
-        return "<{} at 0x{:x} Rows={}, Cursor={}>".format(
-            self.__class__.__name__,
-            id(self),
-            len(self.rows),
-            self.cursor.cid if self.cursor else -1,
+        cid = self.cursor.cid if self.cursor else -1
+        return (
+            f"<{self.__class__.__name__} at 0x{id(self):x} "
+            f"Rows={len(self.rows)}, Cursor={cid}>"
         )
