@@ -1362,7 +1362,21 @@ class PubSub:
             self.connection.register_connect_callback(self.on_connect)
         connection = self.connection
         kwargs = {"check_health": not self.subscribed}
+        if not self.subscribed:
+            self.clean_health_check_responses()
         self._execute(connection, connection.send_command, *args, **kwargs)
+
+
+    def clean_health_check_responses(self):
+        """
+        If any health check responses are present, clean them
+        """
+        conn = self.connection
+        while self._execute(conn, conn.can_read, timeout=0):
+            response = self._execute(conn, conn.read_response)
+            if not self.is_health_check_response(response):
+                raise PubSubError('A non health check response was cleaned by '
+                                  'execute_command: {0}'.format(response))
 
     def _disconnect_raise_connect(self, conn, error):
         """
@@ -1403,17 +1417,21 @@ class PubSub:
             return None
         response = self._execute(conn, conn.read_response)
 
-        if conn.health_check_interval and \
-                response in [
-                self.health_check_response,  # If there was a subscription
-                self.health_check_response_b  # If there wasn't
-                ]:
-            # If there are no subscriptions redis responds to PING command with
-            # a bulk response, instead of a multi-bulk with "pong" and the
-            # response.
+        if self.is_health_check_response(response):
             # ignore the health check message as user might not expect it
             return None
         return response
+
+    def is_health_check_response(self, response):
+        """
+        Check if the response is a health check response.
+        If there are no subscriptions redis responds to PING command with a
+        bulk response, instead of a multi-bulk with "pong" and the response.
+        """
+        return response in [
+                self.health_check_response,  # If there was a subscription
+                self.health_check_response_b  # If there wasn't
+                ]
 
     def check_health(self):
         conn = self.connection
@@ -1529,11 +1547,11 @@ class PubSub:
             # Wait for subscription
             start_time = time.time()
             if self.subscribed_event.wait(timeout) is True:
-                # The connection was subscribed during the timeout frametime.
+                # The connection was subscribed during the timeout time frame.
                 # The timeout should be adjusted based on the time spent
                 # waiting for the subscription
                 time_spent = time.time() - start_time
-                timeout = timeout - time_spent
+                timeout = max(0.0, timeout - time_spent)
             else:
                 # The connection isn't subscribed to any channels or patterns,
                 # so no messages are available
