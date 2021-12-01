@@ -61,9 +61,7 @@ def getClient():
 def createIndex(client, num_docs=100, definition=None):
     try:
         client.create_index(
-            (TextField("play", weight=5.0),
-             TextField("txt"),
-             NumericField("chapter")),
+            (TextField("play", weight=5.0), TextField("txt"), NumericField("chapter")),
             definition=definition,
         )
     except redis.ResponseError:
@@ -286,17 +284,8 @@ def test_stopwords(client):
 
 @pytest.mark.redismod
 def test_filters(client):
-    client.ft().create_index(
-        (TextField("txt"),
-         NumericField("num"),
-         GeoField("loc"))
-    )
-    client.ft().add_document(
-        "doc1",
-        txt="foo bar",
-        num=3.141,
-        loc="-0.441,51.458"
-    )
+    client.ft().create_index((TextField("txt"), NumericField("num"), GeoField("loc")))
+    client.ft().add_document("doc1", txt="foo bar", num=3.141, loc="-0.441,51.458")
     client.ft().add_document("doc2", txt="foo baz", num=2, loc="-0.1,51.2")
 
     waitForIndex(client, "idx")
@@ -342,10 +331,7 @@ def test_payloads_with_no_content(client):
 
 @pytest.mark.redismod
 def test_sort_by(client):
-    client.ft().create_index(
-        (TextField("txt"),
-         NumericField("num", sortable=True))
-    )
+    client.ft().create_index((TextField("txt"), NumericField("num", sortable=True)))
     client.ft().add_document("doc1", txt="foo bar", num=1)
     client.ft().add_document("doc2", txt="foo baz", num=2)
     client.ft().add_document("doc3", txt="foo qux", num=3)
@@ -387,10 +373,7 @@ def test_drop_index():
 @pytest.mark.redismod
 def test_example(client):
     # Creating the index definition and schema
-    client.ft().create_index(
-        (TextField("title", weight=5.0),
-         TextField("body"))
-    )
+    client.ft().create_index((TextField("title", weight=5.0), TextField("body")))
 
     # Indexing a document
     client.ft().add_document(
@@ -510,11 +493,7 @@ def test_no_index(client):
 
 @pytest.mark.redismod
 def test_partial(client):
-    client.ft().create_index(
-        (TextField("f1"),
-         TextField("f2"),
-         TextField("f3"))
-    )
+    client.ft().create_index((TextField("f1"), TextField("f2"), TextField("f3")))
     client.ft().add_document("doc1", f1="f1_val", f2="f2_val")
     client.ft().add_document("doc2", f1="f1_val", f2="f2_val")
     client.ft().add_document("doc1", f3="f3_val", partial=True)
@@ -532,11 +511,7 @@ def test_partial(client):
 
 @pytest.mark.redismod
 def test_no_create(client):
-    client.ft().create_index(
-        (TextField("f1"),
-         TextField("f2"),
-         TextField("f3"))
-    )
+    client.ft().create_index((TextField("f1"), TextField("f2"), TextField("f3")))
     client.ft().add_document("doc1", f1="f1_val", f2="f2_val")
     client.ft().add_document("doc2", f1="f1_val", f2="f2_val")
     client.ft().add_document("doc1", f3="f3_val", no_create=True)
@@ -557,11 +532,7 @@ def test_no_create(client):
 
 @pytest.mark.redismod
 def test_explain(client):
-    client.ft().create_index(
-        (TextField("f1"),
-         TextField("f2"),
-         TextField("f3"))
-    )
+    client.ft().create_index((TextField("f1"), TextField("f2"), TextField("f3")))
     res = client.ft().explain("@f3:f3_val @f2:f2_val @f1:f1_val")
     assert res
 
@@ -584,8 +555,8 @@ def test_summarize(client):
     doc = sorted(client.ft().search(q).docs)[0]
     assert "<b>Henry</b> IV" == doc.play
     assert (
-            "ACT I SCENE I. London. The palace. Enter <b>KING</b> <b>HENRY</b>, LORD JOHN OF LANCASTER, the EARL of WESTMORELAND, SIR... "  # noqa
-            == doc.txt
+        "ACT I SCENE I. London. The palace. Enter <b>KING</b> <b>HENRY</b>, LORD JOHN OF LANCASTER, the EARL of WESTMORELAND, SIR... "  # noqa
+        == doc.txt
     )
 
     q = Query("king henry").paging(0, 1).summarize().highlight()
@@ -593,8 +564,8 @@ def test_summarize(client):
     doc = sorted(client.ft().search(q).docs)[0]
     assert "<b>Henry</b> ... " == doc.play
     assert (
-            "ACT I SCENE I. London. The palace. Enter <b>KING</b> <b>HENRY</b>, LORD JOHN OF LANCASTER, the EARL of WESTMORELAND, SIR... "  # noqa
-            == doc.txt
+        "ACT I SCENE I. London. The palace. Enter <b>KING</b> <b>HENRY</b>, LORD JOHN OF LANCASTER, the EARL of WESTMORELAND, SIR... "  # noqa
+        == doc.txt
     )
 
 
@@ -763,10 +734,10 @@ def test_spell_check(client):
     res = client.ft().spellcheck("lorm", include="dict")
     assert len(res["lorm"]) == 3
     assert (
-               res["lorm"][0]["suggestion"],
-               res["lorm"][1]["suggestion"],
-               res["lorm"][2]["suggestion"],
-           ) == ("lorem", "lore", "lorm")
+        res["lorm"][0]["suggestion"],
+        res["lorm"][1]["suggestion"],
+        res["lorm"][2]["suggestion"],
+    ) == ("lorem", "lore", "lorm")
     assert (res["lorm"][0]["score"], res["lorm"][1]["score"]) == ("0.5", "0")
 
     # test spellcheck exclude
@@ -1010,7 +981,7 @@ def test_aggregations_groupby(client):
     )
 
     res = client.ft().aggregate(req).rows[0]
-    assert res == ['parent', 'redis', 'first', 'RediSearch']
+    assert res == ["parent", "redis", "first", "RediSearch"]
 
     req = aggregations.AggregateRequest("redis").group_by(
         "@parent",
@@ -1033,35 +1004,33 @@ def test_aggregations_sort_by_and_limit(client):
         )
     )
 
-    client.ft().client.hset("doc1", mapping={'t1': 'a', 't2': 'b'})
-    client.ft().client.hset("doc2", mapping={'t1': 'b', 't2': 'a'})
+    client.ft().client.hset("doc1", mapping={"t1": "a", "t2": "b"})
+    client.ft().client.hset("doc2", mapping={"t1": "b", "t2": "a"})
 
     # test sort_by using SortDirection
-    req = aggregations.AggregateRequest("*") \
-        .sort_by(aggregations.Asc("@t2"), aggregations.Desc("@t1"))
+    req = aggregations.AggregateRequest("*").sort_by(
+        aggregations.Asc("@t2"), aggregations.Desc("@t1")
+    )
     res = client.ft().aggregate(req)
-    assert res.rows[0] == ['t2', 'a', 't1', 'b']
-    assert res.rows[1] == ['t2', 'b', 't1', 'a']
+    assert res.rows[0] == ["t2", "a", "t1", "b"]
+    assert res.rows[1] == ["t2", "b", "t1", "a"]
 
     # test sort_by without SortDirection
-    req = aggregations.AggregateRequest("*") \
-        .sort_by("@t1")
+    req = aggregations.AggregateRequest("*").sort_by("@t1")
     res = client.ft().aggregate(req)
-    assert res.rows[0] == ['t1', 'a']
-    assert res.rows[1] == ['t1', 'b']
+    assert res.rows[0] == ["t1", "a"]
+    assert res.rows[1] == ["t1", "b"]
 
     # test sort_by with max
-    req = aggregations.AggregateRequest("*") \
-        .sort_by("@t1", max=1)
+    req = aggregations.AggregateRequest("*").sort_by("@t1", max=1)
     res = client.ft().aggregate(req)
     assert len(res.rows) == 1
 
     # test limit
-    req = aggregations.AggregateRequest("*") \
-        .sort_by("@t1").limit(1, 1)
+    req = aggregations.AggregateRequest("*").sort_by("@t1").limit(1, 1)
     res = client.ft().aggregate(req)
     assert len(res.rows) == 1
-    assert res.rows[0] == ['t1', 'b']
+    assert res.rows[0] == ["t1", "b"]
 
 
 @pytest.mark.redismod
@@ -1073,22 +1042,22 @@ def test_aggregations_load(client):
         )
     )
 
-    client.ft().client.hset("doc1", mapping={'t1': 'hello', 't2': 'world'})
+    client.ft().client.hset("doc1", mapping={"t1": "hello", "t2": "world"})
 
     # load t1
     req = aggregations.AggregateRequest("*").load("t1")
     res = client.ft().aggregate(req)
-    assert res.rows[0] == ['t1', 'hello']
+    assert res.rows[0] == ["t1", "hello"]
 
     # load t2
     req = aggregations.AggregateRequest("*").load("t2")
     res = client.ft().aggregate(req)
-    assert res.rows[0] == ['t2', 'world']
+    assert res.rows[0] == ["t2", "world"]
 
     # load all
     req = aggregations.AggregateRequest("*").load()
     res = client.ft().aggregate(req)
-    assert res.rows[0] == ['t1', 'hello', 't2', 'world']
+    assert res.rows[0] == ["t1", "hello", "t2", "world"]
 
 
 @pytest.mark.redismod
@@ -1102,24 +1071,19 @@ def test_aggregations_apply(client):
 
     client.ft().client.hset(
         "doc1",
-        mapping={
-            'PrimaryKey': '9::362330',
-            'CreatedDateTimeUTC': '637387878524969984'
-        }
+        mapping={"PrimaryKey": "9::362330", "CreatedDateTimeUTC": "637387878524969984"},
     )
     client.ft().client.hset(
         "doc2",
-        mapping={
-            'PrimaryKey': '9::362329',
-            'CreatedDateTimeUTC': '637387875859270016'
-        }
+        mapping={"PrimaryKey": "9::362329", "CreatedDateTimeUTC": "637387875859270016"},
     )
 
-    req = aggregations.AggregateRequest("*") \
-        .apply(CreatedDateTimeUTC='@CreatedDateTimeUTC * 10')
+    req = aggregations.AggregateRequest("*").apply(
+        CreatedDateTimeUTC = "@CreatedDateTimeUTC * 10"
+    )
     res = client.ft().aggregate(req)
-    assert res.rows[0] == ['CreatedDateTimeUTC', '6373878785249699840']
-    assert res.rows[1] == ['CreatedDateTimeUTC', '6373878758592700416']
+    assert res.rows[0] == ["CreatedDateTimeUTC", "6373878785249699840"]
+    assert res.rows[1] == ["CreatedDateTimeUTC", "6373878758592700416"]
 
 
 @pytest.mark.redismod
@@ -1131,33 +1095,19 @@ def test_aggregations_filter(client):
         )
     )
 
-    client.ft().client.hset(
-        "doc1",
-        mapping={
-            'name': 'bar',
-            'age': '25'
-        }
-    )
-    client.ft().client.hset(
-        "doc2",
-        mapping={
-            'name': 'foo',
-            'age': '19'
-        }
-    )
+    client.ft().client.hset("doc1", mapping={"name": "bar", "age": "25"})
+    client.ft().client.hset("doc2", mapping={"name": "foo", "age": "19"})
 
-    req = aggregations.AggregateRequest("*") \
-        .filter("@name=='foo' && @age < 20")
+    req = aggregations.AggregateRequest("*").filter("@name=='foo' && @age < 20")
     res = client.ft().aggregate(req)
     assert len(res.rows) == 1
-    assert res.rows[0] == ['name', 'foo', 'age', '19']
+    assert res.rows[0] == ["name", "foo", "age", "19"]
 
-    req = aggregations.AggregateRequest("*") \
-        .filter("@age > 15").sort_by("@age")
+    req = aggregations.AggregateRequest("*").filter("@age > 15").sort_by("@age")
     res = client.ft().aggregate(req)
     assert len(res.rows) == 2
-    assert res.rows[0] == ['age', '19']
-    assert res.rows[1] == ['age', '25']
+    assert res.rows[0] == ["age", "19"]
+    assert res.rows[1] == ["age", "25"]
 
 
 @pytest.mark.redismod
@@ -1181,25 +1131,25 @@ def test_index_definition(client):
     )
 
     assert [
-               "ON",
-               "JSON",
-               "PREFIX",
-               2,
-               "hset:",
-               "henry",
-               "FILTER",
-               "@f1==32",
-               "LANGUAGE_FIELD",
-               "play",
-               "LANGUAGE",
-               "English",
-               "SCORE_FIELD",
-               "chapter",
-               "SCORE",
-               0.5,
-               "PAYLOAD_FIELD",
-               "txt",
-           ] == definition.args
+       "ON",
+       "JSON",
+       "PREFIX",
+       2,
+       "hset:",
+       "henry",
+       "FILTER",
+       "@f1==32",
+       "LANGUAGE_FIELD",
+       "play",
+       "LANGUAGE",
+       "English",
+       "SCORE_FIELD",
+       "chapter",
+       "SCORE",
+       0.5,
+       "PAYLOAD_FIELD",
+       "txt",
+   ] == definition.args
 
     createIndex(client.ft(), num_docs=500, definition=definition)
 
