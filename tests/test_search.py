@@ -1,52 +1,32 @@
-import pytest
-import redis
 import bz2
 import csv
-import time
 import os
-
+import time
 from io import TextIOWrapper
-from .conftest import skip_ifmodversion_lt, default_redismod_url
-from redis import Redis
 
+import pytest
+
+import redis
 import redis.commands.search
-from redis.commands.json.path import Path
-from redis.commands.search import Search
-from redis.commands.search.field import (
-    GeoField,
-    NumericField,
-    TagField,
-    TextField
-)
-from redis.commands.search.query import (
-    GeoFilter,
-    NumericFilter,
-    Query
-)
-from redis.commands.search.result import Result
-from redis.commands.search.indexDefinition import IndexDefinition, IndexType
-from redis.commands.search.suggestion import Suggestion
 import redis.commands.search.aggregation as aggregations
 import redis.commands.search.reducers as reducers
+from redis import Redis
+from redis.commands.json.path import Path
+from redis.commands.search import Search
+from redis.commands.search.field import GeoField, NumericField, TagField, TextField
+from redis.commands.search.indexDefinition import IndexDefinition, IndexType
+from redis.commands.search.query import GeoFilter, NumericFilter, Query
+from redis.commands.search.result import Result
+from redis.commands.search.suggestion import Suggestion
 
-WILL_PLAY_TEXT = (
-    os.path.abspath(
-        os.path.join(
-            os.path.dirname(__file__),
-            "testdata",
-            "will_play_text.csv.bz2"
-        )
-    )
+from .conftest import default_redismod_url, skip_ifmodversion_lt
+
+WILL_PLAY_TEXT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "testdata", "will_play_text.csv.bz2")
 )
 
-TITLES_CSV = (
-    os.path.abspath(
-        os.path.join(
-            os.path.dirname(__file__),
-            "testdata",
-            "titles.csv"
-        )
-    )
+TITLES_CSV = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "testdata", "titles.csv")
 )
 
 
@@ -96,10 +76,9 @@ def createIndex(client, num_docs=100, definition=None):
     r = csv.reader(bzfp, delimiter=";")
     for n, line in enumerate(r):
 
-        play, chapter, _, text = \
-            line[1], line[2], line[4], line[5]
+        play, chapter, _, text = line[1], line[2], line[4], line[5]
 
-        key = "{}:{}".format(play, chapter).lower()
+        key = f"{play}:{chapter}".lower()
         d = chapters.setdefault(key, {})
         d["play"] = play
         d["txt"] = d.get("txt", "") + " " + text
@@ -183,12 +162,10 @@ def test_client(client):
 
     # test in fields
     txt_total = (
-        client.ft().search(
-            Query("henry").no_content().limit_fields("txt")).total
+        client.ft().search(Query("henry").no_content().limit_fields("txt")).total
     )
     play_total = (
-        client.ft().search(
-            Query("henry").no_content().limit_fields("play")).total
+        client.ft().search(Query("henry").no_content().limit_fields("play")).total
     )
     both_total = (
         client.ft()
@@ -217,10 +194,8 @@ def test_client(client):
 
     # test slop and in order
     assert 193 == client.ft().search(Query("henry king")).total
-    assert 3 == client.ft().search(
-        Query("henry king").slop(0).in_order()).total
-    assert 52 == client.ft().search(
-        Query("king henry").slop(0).in_order()).total
+    assert 3 == client.ft().search(Query("henry king").slop(0).in_order()).total
+    assert 52 == client.ft().search(Query("king henry").slop(0).in_order()).total
     assert 53 == client.ft().search(Query("henry king").slop(0)).total
     assert 167 == client.ft().search(Query("henry king").slop(100)).total
 
@@ -284,11 +259,7 @@ def test_replace(client):
 
     res = client.ft().search("foo bar")
     assert 2 == res.total
-    client.ft().add_document(
-        "doc1",
-        replace=True,
-        txt="this is a replaced doc"
-    )
+    client.ft().add_document("doc1", replace=True, txt="this is a replaced doc")
 
     res = client.ft().search("foo bar")
     assert 1 == res.total
@@ -301,10 +272,7 @@ def test_replace(client):
 
 @pytest.mark.redismod
 def test_stopwords(client):
-    client.ft().create_index(
-        (TextField("txt"),),
-        stopwords=["foo", "bar", "baz"]
-    )
+    client.ft().create_index((TextField("txt"),), stopwords=["foo", "bar", "baz"])
     client.ft().add_document("doc1", txt="foo bar")
     client.ft().add_document("doc2", txt="hello world")
     waitForIndex(client, "idx")
@@ -336,8 +304,7 @@ def test_filters(client):
     q1 = Query("foo").add_filter(NumericFilter("num", 0, 2)).no_content()
     q2 = (
         Query("foo")
-        .add_filter(
-            NumericFilter("num", 2, NumericFilter.INF, minExclusive=True))
+        .add_filter(NumericFilter("num", 2, NumericFilter.INF, minExclusive=True))
         .no_content()
     )
     res1, res2 = client.ft().search(q1), client.ft().search(q2)
@@ -348,10 +315,8 @@ def test_filters(client):
     assert "doc1" == res2.docs[0].id
 
     # Test geo filter
-    q1 = Query("foo").add_filter(
-        GeoFilter("loc", -0.44, 51.45, 10)).no_content()
-    q2 = Query("foo").add_filter(
-        GeoFilter("loc", -0.44, 51.45, 100)).no_content()
+    q1 = Query("foo").add_filter(GeoFilter("loc", -0.44, 51.45, 10)).no_content()
+    q2 = Query("foo").add_filter(GeoFilter("loc", -0.44, 51.45, 100)).no_content()
     res1, res2 = client.ft().search(q1), client.ft().search(q2)
 
     assert 1 == res1.total
@@ -483,12 +448,7 @@ def test_auto_complete(client):
     client.ft().sugadd("ac", Suggestion("pay2", payload="pl2"))
     client.ft().sugadd("ac", Suggestion("pay3", payload="pl3"))
 
-    sugs = client.ft().sugget(
-        "ac",
-        "pay",
-        with_payloads=True,
-        with_scores=True
-    )
+    sugs = client.ft().sugget("ac", "pay", with_payloads=True, with_scores=True)
     assert 3 == len(sugs)
     for sug in sugs:
         assert sug.payload
@@ -592,12 +552,7 @@ def test_no_create(client):
     assert 1 == res.total
 
     with pytest.raises(redis.ResponseError):
-        client.ft().add_document(
-            "doc3",
-            f2="f2_val",
-            f3="f3_val",
-            no_create=True
-        )
+        client.ft().add_document("doc3", f2="f2_val", f3="f3_val", no_create=True)
 
 
 @pytest.mark.redismod
@@ -786,11 +741,7 @@ def test_alter_schema_add(client):
 def test_spell_check(client):
     client.ft().create_index((TextField("f1"), TextField("f2")))
 
-    client.ft().add_document(
-        "doc1",
-        f1="some valid content",
-        f2="this is sample text"
-    )
+    client.ft().add_document("doc1", f1="some valid content", f2="this is sample text")
     client.ft().add_document("doc2", f1="very important", f2="lorem ipsum")
     waitForIndex(client, "idx")
 
@@ -861,7 +812,7 @@ def test_phonetic_matcher(client):
 
     res = client.ft().search(Query("Jon"))
     assert 2 == len(res.docs)
-    assert ["John", "Jon"] == sorted([d.name for d in res.docs])
+    assert ["John", "Jon"] == sorted(d.name for d in res.docs)
 
 
 @pytest.mark.redismod
@@ -881,8 +832,7 @@ def test_scorer(client):
     assert 1.0 == res.docs[0].score
     res = client.ft().search(Query("quick").scorer("TFIDF").with_scores())
     assert 1.0 == res.docs[0].score
-    res = client.ft().search(
-        Query("quick").scorer("TFIDF.DOCNORM").with_scores())
+    res = client.ft().search(Query("quick").scorer("TFIDF.DOCNORM").with_scores())
     assert 0.1111111111111111 == res.docs[0].score
     res = client.ft().search(Query("quick").scorer("BM25").with_scores())
     assert 0.17699114465425977 == res.docs[0].score
@@ -1279,10 +1229,7 @@ def test_create_client_definition_hash(client):
     Create definition with IndexType.HASH as index type (ON HASH),
     and use hset to test the client definition.
     """
-    definition = IndexDefinition(
-        prefix=["hset:", "henry"],
-        index_type=IndexType.HASH
-    )
+    definition = IndexDefinition(prefix=["hset:", "henry"], index_type=IndexType.HASH)
     createIndex(client.ft(), num_docs=500, definition=definition)
 
     info = client.ft().info()
@@ -1325,15 +1272,10 @@ def test_fields_as_name(client):
     client.ft().create_index(SCHEMA, definition=definition)
 
     # insert json data
-    res = client.json().set(
-        "doc:1",
-        Path.rootPath(),
-        {"name": "Jon", "age": 25}
-    )
+    res = client.json().set("doc:1", Path.rootPath(), {"name": "Jon", "age": 25})
     assert res
 
-    total = client.ft().search(
-        Query("Jon").return_fields("name", "just_a_number")).docs
+    total = client.ft().search(Query("Jon").return_fields("name", "just_a_number")).docs
     assert 1 == len(total)
     assert "doc:1" == total[0].id
     assert "Jon" == total[0].name
@@ -1359,14 +1301,12 @@ def test_search_return_fields(client):
     client.ft().create_index(SCHEMA, definition=definition)
     waitForIndex(client, "idx")
 
-    total = client.ft().search(
-        Query("*").return_field("$.t", as_field="txt")).docs
+    total = client.ft().search(Query("*").return_field("$.t", as_field="txt")).docs
     assert 1 == len(total)
     assert "doc:1" == total[0].id
     assert "riceratops" == total[0].txt
 
-    total = client.ft().search(
-        Query("*").return_field("$.t2", as_field="txt")).docs
+    total = client.ft().search(Query("*").return_field("$.t2", as_field="txt")).docs
     assert 1 == len(total)
     assert "doc:1" == total[0].id
     assert "telmatosaurus" == total[0].txt
@@ -1384,17 +1324,10 @@ def test_synupdate(client):
     )
 
     client.ft().synupdate("id1", True, "boy", "child", "offspring")
-    client.ft().add_document(
-        "doc1",
-        title="he is a baby",
-        body="this is a test")
+    client.ft().add_document("doc1", title="he is a baby", body="this is a test")
 
     client.ft().synupdate("id1", True, "baby")
-    client.ft().add_document(
-        "doc2",
-        title="he is another baby",
-        body="another test"
-    )
+    client.ft().add_document("doc2", title="he is another baby", body="another test")
 
     res = client.ft().search(Query("child").expander("SYNONYM"))
     assert res.docs[0].id == "doc2"
@@ -1436,15 +1369,12 @@ def test_create_json_with_alias(client):
     """
     definition = IndexDefinition(prefix=["king:"], index_type=IndexType.JSON)
     client.ft().create_index(
-        (TextField("$.name", as_name="name"),
-         NumericField("$.num", as_name="num")),
-        definition=definition
+        (TextField("$.name", as_name="name"), NumericField("$.num", as_name="num")),
+        definition=definition,
     )
 
-    client.json().set("king:1", Path.rootPath(), {"name": "henry",
-                                                  "num": 42})
-    client.json().set("king:2", Path.rootPath(), {"name": "james",
-                                                  "num": 3.14})
+    client.json().set("king:1", Path.rootPath(), {"name": "henry", "num": 42})
+    client.json().set("king:2", Path.rootPath(), {"name": "james", "num": 3.14})
 
     res = client.ft().search("@name:henry")
     assert res.docs[0].id == "king:1"
@@ -1471,12 +1401,12 @@ def test_json_with_multipath(client):
     """
     definition = IndexDefinition(prefix=["king:"], index_type=IndexType.JSON)
     client.ft().create_index(
-        (TagField("$..name", as_name="name")),
-        definition=definition
+        (TagField("$..name", as_name="name")), definition=definition
     )
 
-    client.json().set("king:1", Path.rootPath(),
-                      {"name": "henry", "country": {"name": "england"}})
+    client.json().set(
+        "king:1", Path.rootPath(), {"name": "henry", "country": {"name": "england"}}
+    )
 
     res = client.ft().search("@name:{henry}")
     assert res.docs[0].id == "king:1"
@@ -1494,9 +1424,11 @@ def test_json_with_multipath(client):
 def test_json_with_jsonpath(client):
     definition = IndexDefinition(index_type=IndexType.JSON)
     client.ft().create_index(
-        (TextField('$["prod:name"]', as_name="name"),
-         TextField('$.prod:name', as_name="name_unsupported")),
-        definition=definition
+        (
+            TextField('$["prod:name"]', as_name="name"),
+            TextField("$.prod:name", as_name="name_unsupported"),
+        ),
+        definition=definition,
     )
 
     client.json().set("doc:1", Path.rootPath(), {"prod:name": "RediSearch"})
@@ -1515,12 +1447,61 @@ def test_json_with_jsonpath(client):
     res = client.ft().search(Query("@name:RediSearch").return_field("name"))
     assert res.total == 1
     assert res.docs[0].id == "doc:1"
-    assert res.docs[0].name == 'RediSearch'
+    assert res.docs[0].name == "RediSearch"
 
     # return of an unsupported field fails
-    res = client.ft().search(Query("@name:RediSearch")
-                             .return_field("name_unsupported"))
+    res = client.ft().search(Query("@name:RediSearch").return_field("name_unsupported"))
     assert res.total == 1
     assert res.docs[0].id == "doc:1"
     with pytest.raises(Exception):
         res.docs[0].name_unsupported
+
+
+@pytest.mark.redismod
+def test_profile(client):
+    client.ft().create_index((TextField("t"),))
+    client.ft().client.hset("1", "t", "hello")
+    client.ft().client.hset("2", "t", "world")
+
+    # check using Query
+    q = Query("hello|world").no_content()
+    res, det = client.ft().profile(q)
+    assert det["Iterators profile"]["Counter"] == 2.0
+    assert len(det["Iterators profile"]["Child iterators"]) == 2
+    assert det["Iterators profile"]["Type"] == "UNION"
+    assert det["Parsing time"] < 0.3
+    assert len(res.docs) == 2  # check also the search result
+
+    # check using AggregateRequest
+    req = (
+        aggregations.AggregateRequest("*")
+        .load("t")
+        .apply(prefix="startswith(@t, 'hel')")
+    )
+    res, det = client.ft().profile(req)
+    assert det["Iterators profile"]["Counter"] == 2.0
+    assert det["Iterators profile"]["Type"] == "WILDCARD"
+    assert det["Parsing time"] < 0.3
+    assert len(res.rows) == 2  # check also the search result
+
+
+@pytest.mark.redismod
+def test_profile_limited(client):
+    client.ft().create_index((TextField("t"),))
+    client.ft().client.hset("1", "t", "hello")
+    client.ft().client.hset("2", "t", "hell")
+    client.ft().client.hset("3", "t", "help")
+    client.ft().client.hset("4", "t", "helowa")
+
+    q = Query("%hell% hel*")
+    res, det = client.ft().profile(q, limited=True)
+    assert (
+        det["Iterators profile"]["Child iterators"][0]["Child iterators"]
+        == "The number of iterators in the union is 3"
+    )
+    assert (
+        det["Iterators profile"]["Child iterators"][1]["Child iterators"]
+        == "The number of iterators in the union is 4"
+    )
+    assert det["Iterators profile"]["Type"] == "INTERSECT"
+    assert len(res.docs) == 3  # check also the search result
