@@ -9,7 +9,7 @@ import sys
 from collections import OrderedDict
 from redis.client import CaseInsensitiveDict, Redis, PubSub
 from redis.commands import (
-    ClusterCommands,
+    RedisClusterCommands,
     CommandsParser
 )
 from redis.connection import DefaultParser, ConnectionPool, Encoder, parse_url
@@ -201,7 +201,7 @@ class ClusterParser(DefaultParser):
         })
 
 
-class RedisCluster(ClusterCommands, object):
+class RedisCluster(RedisClusterCommands, object):
     RedisClusterRequestTTL = 16
 
     PRIMARIES = "primaries"
@@ -788,6 +788,18 @@ class RedisCluster(ClusterCommands, object):
 
     def reinitialize_caches(self):
         self.nodes_manager.initialize()
+
+    def get_encoder(self):
+        """
+        Get the connections' encoder
+        """
+        return self.encoder
+
+    def get_connection_kwargs(self):
+        """
+        Get the connections' key-word arguments
+        """
+        return self.nodes_manager.connection_kwargs
 
     def _is_nodes_flag(self, target_nodes):
         return isinstance(target_nodes, str) \

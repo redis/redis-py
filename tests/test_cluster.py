@@ -258,7 +258,7 @@ class TestRedisClusterObj:
         primaries = r.get_primaries()
         replicas = r.get_replicas()
         mock_all_nodes_resp(r, 'PONG')
-        assert r.ping(RedisCluster.PRIMARIES) is True
+        assert r.ping(target_nodes=RedisCluster.PRIMARIES) is True
         for primary in primaries:
             conn = primary.redis_connection.connection
             assert conn.read_response.called is True
@@ -275,7 +275,7 @@ class TestRedisClusterObj:
             r = get_mocked_redis_client(default_host, default_port)
         primaries = r.get_primaries()
         mock_all_nodes_resp(r, 'PONG')
-        assert r.ping(RedisCluster.REPLICAS) is True
+        assert r.ping(target_nodes=RedisCluster.REPLICAS) is True
         for replica in replicas:
             conn = replica.redis_connection.connection
             assert conn.read_response.called is True
@@ -288,7 +288,7 @@ class TestRedisClusterObj:
         Test command execution with nodes flag ALL_NODES
         """
         mock_all_nodes_resp(r, 'PONG')
-        assert r.ping(RedisCluster.ALL_NODES) is True
+        assert r.ping(target_nodes=RedisCluster.ALL_NODES) is True
         for node in r.get_nodes():
             conn = node.redis_connection.connection
             assert conn.read_response.called is True
@@ -298,7 +298,7 @@ class TestRedisClusterObj:
         Test command execution with nodes flag RANDOM
         """
         mock_all_nodes_resp(r, 'PONG')
-        assert r.ping(RedisCluster.RANDOM) is True
+        assert r.ping(target_nodes=RedisCluster.RANDOM) is True
         called_count = 0
         for node in r.get_nodes():
             conn = node.redis_connection.connection
@@ -1112,7 +1112,7 @@ class TestClusterRedisCommands:
 
     def test_cluster_echo(self, r):
         node = r.get_primaries()[0]
-        assert r.echo('foo bar', node) == b'foo bar'
+        assert r.echo('foo bar', target_nodes=node) == b'foo bar'
 
     @skip_if_server_version_lt('1.0.0')
     def test_debug_segfault(self, r):
