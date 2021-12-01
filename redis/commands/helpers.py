@@ -1,3 +1,4 @@
+import copy
 import random
 import string
 
@@ -22,7 +23,7 @@ def list_or_args(keys, args):
 def nativestr(x):
     """Return the decoded binary string, or a string, depending on type."""
     r = x.decode("utf-8", "replace") if isinstance(x, bytes) else x
-    if r == 'null':
+    if r == "null":
         return
     return r
 
@@ -58,14 +59,14 @@ def parse_list_to_dict(response):
     res = {}
     for i in range(0, len(response), 2):
         if isinstance(response[i], list):
-            res['Child iterators'].append(parse_list_to_dict(response[i]))
-        elif isinstance(response[i+1], list):
-            res['Child iterators'] = [parse_list_to_dict(response[i+1])]
+            res["Child iterators"].append(parse_list_to_dict(response[i]))
+        elif isinstance(response[i + 1], list):
+            res["Child iterators"] = [parse_list_to_dict(response[i + 1])]
         else:
             try:
-                res[response[i]] = float(response[i+1])
+                res[response[i]] = float(response[i + 1])
             except (TypeError, ValueError):
-                res[response[i]] = response[i+1]
+                res[response[i]] = response[i + 1]
     return res
 
 
@@ -114,3 +115,40 @@ def quote_string(v):
     v = v.replace('"', '\\"')
 
     return f'"{v}"'
+
+
+def decodeDictKeys(obj):
+    """Decode the keys of the given dictionary with utf-8."""
+    newobj = copy.copy(obj)
+    for k in obj.keys():
+        if isinstance(k, bytes):
+            newobj[k.decode("utf-8")] = newobj[k]
+            newobj.pop(k)
+    return newobj
+
+
+def stringify_param_value(value):
+    """
+    Turn a parameter value into a string suitable for the params header of
+    a Cypher command.
+    You may pass any value that would be accepted by `json.dumps()`.
+
+    Ways in which output differs from that of `str()`:
+        * Strings are quoted.
+        * None --> "null".
+        * In dictionaries, keys are _not_ quoted.
+
+    :param value: The parameter value to be turned into a string.
+    :return: string
+    """
+
+    if isinstance(value, str):
+        return quote_string(value)
+    elif value is None:
+        return "null"
+    elif isinstance(value, (list, tuple)):
+        return f'[{",".join(map(stringify_param_value, value))}]'
+    elif isinstance(value, dict):
+        return f'{{{",".join(f"{k}:{stringify_param_value(v)}" for k, v in value.items())}}}'  # noqa
+    else:
+        return str(value)

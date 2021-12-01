@@ -46,8 +46,6 @@ class SuggestionParser:
     def __iter__(self):
         for i in range(0, len(self._sugs), self.sugsize):
             ss = self._sugs[i]
-            score = float(self._sugs[i + self._scoreidx]) \
-                if self.with_scores else 1.0
-            payload = self._sugs[i + self._payloadidx] \
-                if self.with_payloads else None
+            score = float(self._sugs[i + self._scoreidx]) if self.with_scores else 1.0
+            payload = self._sugs[i + self._payloadidx] if self.with_payloads else None
             yield Suggestion(ss, score, payload)

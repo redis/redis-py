@@ -1,11 +1,11 @@
 import os
 import shutil
-from invoke import task, run
 
-with open('tox.ini') as fp:
+from invoke import run, task
+
+with open("tox.ini") as fp:
     lines = fp.read().split("\n")
-    dockers = [line.split("=")[1].strip() for line in lines
-               if line.find("name") != -1]
+    dockers = [line.split("=")[1].strip() for line in lines if line.find("name") != -1]
 
 
 @task
@@ -14,7 +14,7 @@ def devenv(c):
     specified in the tox.ini file.
     """
     clean(c)
-    cmd = 'tox -e devenv'
+    cmd = "tox -e devenv"
     for d in dockers:
         cmd += f" --docker-dont-stop={d}"
     run(cmd)
