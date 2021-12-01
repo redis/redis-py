@@ -1,8 +1,6 @@
-from redis.exceptions import (
-    RedisClusterException,
-    RedisError,
-)
 from redis.crc import key_slot
+from redis.exceptions import RedisClusterException, RedisError
+
 from .core import ACLCommands, DataAccessCommands, ManagementCommands, PubSubCommands
 from .helpers import list_or_args
 

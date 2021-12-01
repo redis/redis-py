@@ -458,7 +458,7 @@ class ManagementCommands:
         """
         replies = ["ON", "OFF", "SKIP"]
         if reply not in replies:
-            raise DataError("CLIENT REPLY must be one of %r" % replies)
+            raise DataError(f"CLIENT REPLY must be one of {replies!r}")
         return self.execute_command("CLIENT REPLY", reply, **kwargs)
 
     def client_id(self, **kwargs):
@@ -4405,7 +4405,7 @@ class ClusterCommands:
     """
 
     def cluster(self, cluster_arg, *args, **kwargs):
-        return self.execute_command("CLUSTER %s" % cluster_arg.upper(), *args, **kwargs)
+        return self.execute_command(f"CLUSTER {cluster_arg.upper()}", *args, **kwargs)
 
     def readwrite(self, **kwargs):
         """

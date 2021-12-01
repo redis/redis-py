@@ -6,10 +6,11 @@ import sys
 import threading
 import time
 from collections import OrderedDict
-from redis.client import CaseInsensitiveDict, Redis, PubSub
-from redis.commands import RedisClusterCommands, CommandsParser
-from redis.connection import DefaultParser, ConnectionPool, Encoder, parse_url
-from redis.crc import key_slot, REDIS_CLUSTER_HASH_SLOTS
+
+from redis.client import CaseInsensitiveDict, PubSub, Redis
+from redis.commands import CommandsParser, RedisClusterCommands
+from redis.connection import ConnectionPool, DefaultParser, Encoder, parse_url
+from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
     AskError,
     BusyLoadingError,
@@ -671,7 +672,7 @@ class RedisCluster(RedisClusterCommands, object):
             target_node = self.get_default_node()
         if target_node.redis_connection is None:
             raise RedisClusterException(
-                "Cluster Node {0} has no redis_connection".format(target_node.name)
+                f"Cluster Node {target_node.name} has no redis_connection"
             )
         return target_node.redis_connection.monitor()
 
