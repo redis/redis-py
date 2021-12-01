@@ -38,7 +38,7 @@ jobs:
          connection-type: ['hiredis', 'plain']
      env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-     name: Python ${{ matrix.python-version }} tests
+     name: Python ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}} tests
      steps:
        - uses: actions/checkout@v2
        - name: install python
