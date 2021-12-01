@@ -1,7 +1,8 @@
 import pytest
 
 import redis.commands.bf
-from redis.exceptions import RedisError
+from redis.exceptions import ModuleError, RedisError
+from redis.utils import HIREDIS_AVAILABLE
 
 
 def intlist(obj):
@@ -85,6 +86,11 @@ def test_bf_scandump_and_loadchunk(client):
 
     do_verify()
     cmds = []
+    if HIREDIS_AVAILABLE:
+        with pytest.raises(ModuleError):
+            cur = client.bf().scandump("myBloom", 0)
+        return
+
     cur = client.bf().scandump("myBloom", 0)
     first = cur[0]
     cmds.append(cur)
