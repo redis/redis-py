@@ -199,7 +199,7 @@ class ClusterParser(DefaultParser):
     )
 
 
-class RedisCluster(RedisClusterCommands, object):
+class RedisCluster(RedisClusterCommands):
     RedisClusterRequestTTL = 16
 
     PRIMARIES = "primaries"
@@ -658,23 +658,6 @@ class RedisCluster(RedisClusterCommands, object):
         self.nodes_manager.default_node = node
         log.info(f"Changed the default cluster node to {node}")
         return True
-
-    def monitor(self, target_node=None):
-        """
-        Returns a Monitor object for the specified target node.
-        The default cluster node will be selected if no target node was
-        specified.
-        Monitor is useful for handling the MONITOR command to the redis server.
-        next_command() method returns one command from monitor
-        listen() method yields commands from monitor.
-        """
-        if target_node is None:
-            target_node = self.get_default_node()
-        if target_node.redis_connection is None:
-            raise RedisClusterException(
-                f"Cluster Node {target_node.name} has no redis_connection"
-            )
-        return target_node.redis_connection.monitor()
 
     def pubsub(self, node=None, host=None, port=None, **kwargs):
         """
@@ -1425,7 +1408,8 @@ class NodesManager:
             # isn't a full coverage
             raise RedisClusterException(
                 f"All slots are not covered after query all startup_nodes. "
-                f"{len(self.slots_cache)} of {REDIS_CLUSTER_HASH_SLOTS} covered..."
+                f"{len(self.slots_cache)} of {REDIS_CLUSTER_HASH_SLOTS} "
+                f"covered..."
             )
         elif not fully_covered and not self._require_full_coverage:
             # The user set require_full_coverage to False.
@@ -1444,7 +1428,8 @@ class NodesManager:
                     "cluster-require-full-coverage configuration to no on "
                     "all of the cluster nodes if you wish the cluster to "
                     "be able to serve without being fully covered."
-                    f"{len(self.slots_cache)} of {REDIS_CLUSTER_HASH_SLOTS} covered..."
+                    f"{len(self.slots_cache)} of {REDIS_CLUSTER_HASH_SLOTS} "
+                    f"covered..."
                 )
 
         # Set the tmp variables to the real variables
@@ -1992,8 +1977,8 @@ def block_pipeline_command(func):
 
     def inner(*args, **kwargs):
         raise RedisClusterException(
-            f"ERROR: Calling pipelined function {func.__name__} is blocked when "
-            f"running redis in cluster mode..."
+            f"ERROR: Calling pipelined function {func.__name__} is blocked "
+            f"when running redis in cluster mode..."
         )
 
     return inner

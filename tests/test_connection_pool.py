@@ -496,7 +496,7 @@ class TestConnection:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.8")
-    @skip_if_redis_enterprise()
+    @skip_if_redis_enterprise
     def test_busy_loading_disconnects_socket(self, r):
         """
         If Redis raises a LOADING error, the connection should be
@@ -508,7 +508,7 @@ class TestConnection:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.8")
-    @skip_if_redis_enterprise()
+    @skip_if_redis_enterprise
     def test_busy_loading_from_pipeline_immediate_command(self, r):
         """
         BusyLoadingErrors should raise from Pipelines that execute a
@@ -524,7 +524,7 @@ class TestConnection:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.8")
-    @skip_if_redis_enterprise()
+    @skip_if_redis_enterprise
     def test_busy_loading_from_pipeline(self, r):
         """
         BusyLoadingErrors should be raised from a pipeline execution
@@ -540,7 +540,7 @@ class TestConnection:
         assert not pool._available_connections[0]._sock
 
     @skip_if_server_version_lt("2.8.8")
-    @skip_if_redis_enterprise()
+    @skip_if_redis_enterprise
     def test_read_only_error(self, r):
         "READONLY errors get turned in ReadOnlyError exceptions"
         with pytest.raises(redis.ReadOnlyError):
@@ -566,7 +566,7 @@ class TestConnection:
             "path=/path/to/socket,db=0",
         )
 
-    @skip_if_redis_enterprise()
+    @skip_if_redis_enterprise
     def test_connect_no_auth_supplied_when_required(self, r):
         """
         AuthenticationError should be raised when the server requires a
@@ -577,7 +577,7 @@ class TestConnection:
                 "DEBUG", "ERROR", "ERR Client sent AUTH, but no password is set"
             )
 
-    @skip_if_redis_enterprise()
+    @skip_if_redis_enterprise
     def test_connect_invalid_password_supplied(self, r):
         "AuthenticationError should be raised when sending the wrong password"
         with pytest.raises(redis.AuthenticationError):

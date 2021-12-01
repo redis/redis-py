@@ -47,7 +47,7 @@ class TestMonitor:
             response = wait_for_command(r, m, "GET foo\\\\x92")
             assert response["command"] == "GET foo\\\\x92"
 
-    @skip_if_redis_enterprise()
+    @skip_if_redis_enterprise
     def test_lua_script(self, r):
         with r.monitor() as m:
             script = 'return redis.call("GET", "foo")'
@@ -58,7 +58,7 @@ class TestMonitor:
             assert response["client_address"] == "lua"
             assert response["client_port"] == ""
 
-    @skip_ifnot_redis_enterprise()
+    @skip_ifnot_redis_enterprise
     def test_lua_script_in_enterprise(self, r):
         with r.monitor() as m:
             script = 'return redis.call("GET", "foo")'
