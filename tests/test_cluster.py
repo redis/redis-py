@@ -31,7 +31,6 @@ from redis.exceptions import (
 from redis.utils import str_if_bytes
 from tests.test_pubsub import wait_for_message
 
-from redis.crc import key_slot
 from .conftest import (
     _get_client,
     skip_if_redis_enterprise,

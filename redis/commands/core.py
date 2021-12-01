@@ -374,7 +374,7 @@ class ManagementCommands:
         For more information check https://redis.io/commands/client-info
         """
         return self.execute_command('CLIENT INFO', **kwargs)
-      
+
     def client_list(self, _type=None, client_id=[], **kwargs):
         """
         Returns a list of currently connected clients.
