@@ -40,6 +40,7 @@ class ClusterMultiKeyCommands:
         """
 
         from redis.client import EMPTY_RESPONSE
+
         options = {}
         if not args:
             options[EMPTY_RESPONSE] = []
@@ -54,8 +55,7 @@ class ClusterMultiKeyCommands:
         # We must make sure that the keys are returned in order
         all_results = {}
         for slot_keys in slots_to_keys.values():
-            slot_values = self.execute_command(
-                'MGET', *slot_keys, **options)
+            slot_values = self.execute_command("MGET", *slot_keys, **options)
 
             slot_results = dict(zip(slot_keys, slot_values))
             all_results.update(slot_results)
@@ -87,7 +87,7 @@ class ClusterMultiKeyCommands:
         # the results (one result per slot)
         res = []
         for pairs in slots_to_pairs.values():
-            res.append(self.execute_command('MSET', *pairs))
+            res.append(self.execute_command("MSET", *pairs))
 
         return res
 
@@ -112,7 +112,7 @@ class ClusterMultiKeyCommands:
         whole cluster. The keys are first split up into slots
         and then an EXISTS command is sent for every slot
         """
-        return self._split_command_across_slots('EXISTS', *keys)
+        return self._split_command_across_slots("EXISTS", *keys)
 
     def delete(self, *keys):
         """
@@ -123,7 +123,7 @@ class ClusterMultiKeyCommands:
         Non-existant keys are ignored.
         Returns the number of keys that were deleted.
         """
-        return self._split_command_across_slots('DEL', *keys)
+        return self._split_command_across_slots("DEL", *keys)
 
     def touch(self, *keys):
         """
@@ -136,7 +136,7 @@ class ClusterMultiKeyCommands:
         Non-existant keys are ignored.
         Returns the number of keys that were touched.
         """
-        return self._split_command_across_slots('TOUCH', *keys)
+        return self._split_command_across_slots("TOUCH", *keys)
 
     def unlink(self, *keys):
         """
@@ -148,7 +148,7 @@ class ClusterMultiKeyCommands:
         Non-existant keys are ignored.
         Returns the number of keys that were unlinked.
         """
-        return self._split_command_across_slots('UNLINK', *keys)
+        return self._split_command_across_slots("UNLINK", *keys)
 
 
 class ClusterManagementCommands(ManagementCommands):
@@ -200,7 +200,6 @@ class RedisClusterCommands(ClusterMultiKeyCommands, ClusterManagementCommands,
     target specific nodes. By default, if target_nodes is not specified, the
     command will be executed on the default cluster node.
 
-
     :param :target_nodes: type can be one of the followings:
         - nodes flag: ALL_NODES, PRIMARIES, REPLICAS, RANDOM
         - 'ClusterNode'
@@ -218,22 +217,23 @@ class RedisClusterCommands(ClusterMultiKeyCommands, ClusterManagementCommands,
         :target_node: 'ClusterNode'
             The node to execute the command on
         """
-        return self.execute_command('CLUSTER ADDSLOTS', *slots,
-                                    target_nodes=target_node)
+        return self.execute_command(
+            "CLUSTER ADDSLOTS", *slots, target_nodes=target_node
+        )
 
     def cluster_countkeysinslot(self, slot_id):
         """
         Return the number of local keys in the specified hash slot
         Send to node based on specified slot_id
         """
-        return self.execute_command('CLUSTER COUNTKEYSINSLOT', slot_id)
+        return self.execute_command("CLUSTER COUNTKEYSINSLOT", slot_id)
 
     def cluster_count_failure_report(self, node_id):
         """
         Return the number of failure reports active for a given node
         Sends to a random node
         """
-        return self.execute_command('CLUSTER COUNT-FAILURE-REPORTS', node_id)
+        return self.execute_command("CLUSTER COUNT-FAILURE-REPORTS", node_id)
 
     def cluster_delslots(self, *slots):
         """
@@ -242,10 +242,7 @@ class RedisClusterCommands(ClusterMultiKeyCommands, ClusterManagementCommands,
 
         Returns a list of the results for each processed slot.
         """
-        return [
-            self.execute_command('CLUSTER DELSLOTS', slot)
-            for slot in slots
-        ]
+        return [self.execute_command("CLUSTER DELSLOTS", slot) for slot in slots]
 
     def cluster_failover(self, target_node, option=None):
         """
@@ -256,16 +253,16 @@ class RedisClusterCommands(ClusterMultiKeyCommands, ClusterManagementCommands,
             The node to execute the command on
         """
         if option:
-            if option.upper() not in ['FORCE', 'TAKEOVER']:
+            if option.upper() not in ["FORCE", "TAKEOVER"]:
                 raise RedisError(
-                    'Invalid option for CLUSTER FAILOVER command: {0}'.format(
-                        option))
+                    f"Invalid option for CLUSTER FAILOVER command: {option}"
+                )
             else:
-                return self.execute_command('CLUSTER FAILOVER', option,
-                                            target_nodes=target_node)
+                return self.execute_command(
+                    "CLUSTER FAILOVER", option, target_nodes=target_node
+                )
         else:
-            return self.execute_command('CLUSTER FAILOVER',
-                                        target_nodes=target_node)
+            return self.execute_command("CLUSTER FAILOVER", target_nodes=target_node)
 
     def cluster_info(self, target_nodes=None):
         """
@@ -273,22 +270,23 @@ class RedisClusterCommands(ClusterMultiKeyCommands, ClusterManagementCommands,
         The command will be sent to a random node in the cluster if no target
         node is specified.
         """
-        return self.execute_command('CLUSTER INFO', target_nodes=target_nodes)
+        return self.execute_command("CLUSTER INFO", target_nodes=target_nodes)
 
     def cluster_keyslot(self, key):
         """
         Returns the hash slot of the specified key
         Sends to random node in the cluster
         """
-        return self.execute_command('CLUSTER KEYSLOT', key)
+        return self.execute_command("CLUSTER KEYSLOT", key)
 
     def cluster_meet(self, host, port, target_nodes=None):
         """
         Force a node cluster to handshake with another node.
         Sends to specified node.
         """
-        return self.execute_command('CLUSTER MEET', host, port,
-                                    target_nodes=target_nodes)
+        return self.execute_command(
+            "CLUSTER MEET", host, port, target_nodes=target_nodes
+        )
 
     def cluster_nodes(self):
         """
@@ -296,14 +294,15 @@ class RedisClusterCommands(ClusterMultiKeyCommands, ClusterManagementCommands,
 
         Sends to random node in the cluster
         """
-        return self.execute_command('CLUSTER NODES')
+        return self.execute_command("CLUSTER NODES")
 
     def cluster_replicate(self, target_nodes, node_id):
         """
         Reconfigure a node as a slave of the specified master node
         """
-        return self.execute_command('CLUSTER REPLICATE', node_id,
-                                    target_nodes=target_nodes)
+        return self.execute_command(
+            "CLUSTER REPLICATE", node_id, target_nodes=target_nodes
+        )
 
     def cluster_reset(self, soft=True, target_nodes=None):
         """
@@ -312,29 +311,29 @@ class RedisClusterCommands(ClusterMultiKeyCommands, ClusterManagementCommands,
         If 'soft' is True then it will send 'SOFT' argument
         If 'soft' is False then it will send 'HARD' argument
         """
-        return self.execute_command('CLUSTER RESET',
-                                    b'SOFT' if soft else b'HARD',
-                                    target_nodes=target_nodes)
+        return self.execute_command(
+            "CLUSTER RESET", b"SOFT" if soft else b"HARD", target_nodes=target_nodes
+        )
 
     def cluster_save_config(self, target_nodes=None):
         """
         Forces the node to save cluster state on disk
         """
-        return self.execute_command('CLUSTER SAVECONFIG',
-                                    target_nodes=target_nodes)
+        return self.execute_command("CLUSTER SAVECONFIG", target_nodes=target_nodes)
 
     def cluster_get_keys_in_slot(self, slot, num_keys):
         """
         Returns the number of keys in the specified cluster slot
         """
-        return self.execute_command('CLUSTER GETKEYSINSLOT', slot, num_keys)
+        return self.execute_command("CLUSTER GETKEYSINSLOT", slot, num_keys)
 
     def cluster_set_config_epoch(self, epoch, target_nodes=None):
         """
         Set the configuration epoch in a new node
         """
-        return self.execute_command('CLUSTER SET-CONFIG-EPOCH', epoch,
-                                    target_nodes=target_nodes)
+        return self.execute_command(
+            "CLUSTER SET-CONFIG-EPOCH", epoch, target_nodes=target_nodes
+        )
 
     def cluster_setslot(self, target_node, node_id, slot_id, state):
         """
@@ -343,47 +342,48 @@ class RedisClusterCommands(ClusterMultiKeyCommands, ClusterManagementCommands,
         :target_node: 'ClusterNode'
             The node to execute the command on
         """
-        if state.upper() in ('IMPORTING', 'NODE', 'MIGRATING'):
-            return self.execute_command('CLUSTER SETSLOT', slot_id, state,
-                                        node_id, target_nodes=target_node)
-        elif state.upper() == 'STABLE':
-            raise RedisError('For "stable" state please use '
-                             'cluster_setslot_stable')
+        if state.upper() in ("IMPORTING", "NODE", "MIGRATING"):
+            return self.execute_command(
+                "CLUSTER SETSLOT", slot_id, state, node_id, target_nodes=target_node
+            )
+        elif state.upper() == "STABLE":
+            raise RedisError('For "stable" state please use ' "cluster_setslot_stable")
         else:
-            raise RedisError('Invalid slot state: {0}'.format(state))
+            raise RedisError(f"Invalid slot state: {state}")
 
     def cluster_setslot_stable(self, slot_id):
         """
         Clears migrating / importing state from the slot.
         It determines by it self what node the slot is in and sends it there.
         """
-        return self.execute_command('CLUSTER SETSLOT', slot_id, 'STABLE')
+        return self.execute_command("CLUSTER SETSLOT", slot_id, "STABLE")
 
     def cluster_replicas(self, node_id, target_nodes=None):
         """
         Provides a list of replica nodes replicating from the specified primary
         target node.
         """
-        return self.execute_command('CLUSTER REPLICAS', node_id,
-                                    target_nodes=target_nodes)
+        return self.execute_command(
+            "CLUSTER REPLICAS", node_id, target_nodes=target_nodes
+        )
 
     def cluster_slots(self, target_nodes=None):
         """
         Get array of Cluster slot to node mappings
         """
-        return self.execute_command('CLUSTER SLOTS', target_nodes=target_nodes)
+        return self.execute_command("CLUSTER SLOTS", target_nodes=target_nodes)
 
     def readonly(self, target_nodes=None):
         """
         Enables read queries.
         The command will be sent to the default cluster node if target_nodes is
         not specified.
-         """
-        if target_nodes == 'replicas' or target_nodes == 'all':
+        """
+        if target_nodes == "replicas" or target_nodes == "all":
             # read_from_replicas will only be enabled if the READONLY command
             # is sent to all replicas
             self.read_from_replicas = True
-        return self.execute_command('READONLY', target_nodes=target_nodes)
+        return self.execute_command("READONLY", target_nodes=target_nodes)
 
     def readwrite(self, target_nodes=None):
         """
@@ -393,4 +393,4 @@ class RedisClusterCommands(ClusterMultiKeyCommands, ClusterManagementCommands,
         """
         # Reset read from replicas flag
         self.read_from_replicas = False
-        return self.execute_command('READWRITE', target_nodes=target_nodes)
+        return self.execute_command("READWRITE", target_nodes=target_nodes)

@@ -1,8 +1,8 @@
-from redis.backoff import NoBackoff
 import pytest
 
-from redis.exceptions import ConnectionError
+from redis.backoff import NoBackoff
 from redis.connection import Connection, UnixDomainSocketConnection
+from redis.exceptions import ConnectionError
 from redis.retry import Retry
 
 
@@ -34,8 +34,7 @@ class TestConnectionConstructorWithRetry:
     @pytest.mark.parametrize("Class", [Connection, UnixDomainSocketConnection])
     def test_retry_on_timeout_retry(self, Class, retries):
         retry_on_timeout = retries > 0
-        c = Class(retry_on_timeout=retry_on_timeout,
-                  retry=Retry(NoBackoff(), retries))
+        c = Class(retry_on_timeout=retry_on_timeout, retry=Retry(NoBackoff(), retries))
         assert c.retry_on_timeout == retry_on_timeout
         assert isinstance(c.retry, Retry)
         assert c.retry._retries == retries
