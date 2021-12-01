@@ -32,6 +32,46 @@ class RedisModuleCommands:
         s = TimeSeries(client=self)
         return s
 
+    def bf(self):
+        """Access the bloom namespace."""
+
+        from .bf import BFBloom
+
+        bf = BFBloom(client=self)
+        return bf
+
+    def cf(self):
+        """Access the bloom namespace."""
+
+        from .bf import CFBloom
+
+        cf = CFBloom(client=self)
+        return cf
+
+    def cms(self):
+        """Access the bloom namespace."""
+
+        from .bf import CMSBloom
+
+        cms = CMSBloom(client=self)
+        return cms
+
+    def topk(self):
+        """Access the bloom namespace."""
+
+        from .bf import TOPKBloom
+
+        topk = TOPKBloom(client=self)
+        return topk
+
+    def tdigest(self):
+        """Access the bloom namespace."""
+
+        from .bf import TDigestBloom
+
+        tdigest = TDigestBloom(client=self)
+        return tdigest
+
     def graph(self, index_name="idx"):
         """Access the timeseries namespace, providing support for
         redis timeseries data.
