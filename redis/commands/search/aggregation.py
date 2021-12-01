@@ -82,7 +82,7 @@ class Desc(SortDirection):
     DIRSTRING = "DESC"
 
 
-class AggregateRequest(object):
+class AggregateRequest:
     """
     Aggregation request which can be passed to `Client.aggregate`.
     """
