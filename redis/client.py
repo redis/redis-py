@@ -960,6 +960,18 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     def __repr__(self):
         return f"{type(self).__name__}<{repr(self.connection_pool)}>"
 
+    def get_encoder(self):
+        """
+        Get the connection pool's encoder
+        """
+        return self.connection_pool.get_encoder()
+
+    def get_connection_kwargs(self):
+        """
+        Get the connection's key-word arguments
+        """
+        return self.connection_pool.connection_kwargs
+
     def set_response_callback(self, command, callback):
         "Set a custom Response Callback"
         self.response_callbacks[command] = callback

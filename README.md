@@ -1046,7 +1046,7 @@ and attempt to retry executing the command.
     >>> rc.cluster_meet('127.0.0.1', 6379, target_nodes=Redis.ALL_NODES)
     >>> # ping all replicas
     >>> rc.ping(target_nodes=Redis.REPLICAS)
-    >>> # ping a specific node
+    >>> # ping a random node
     >>> rc.ping(target_nodes=Redis.RANDOM)
     >>> # get the keys from all cluster nodes
     >>> rc.keys(target_nodes=Redis.ALL_NODES)
@@ -1158,7 +1158,7 @@ readwrite() method.
     >>> from cluster import RedisCluster as Redis
     # Use 'debug' log level to print the node that the command is executed on
     >>> rc_readonly = Redis(startup_nodes=startup_nodes, 
-                    read_from_replicas=True, debug=True)
+                    read_from_replicas=True)
     >>> rc_readonly.set('{foo}1', 'bar1')
     >>> for i in range(0, 4):
             # Assigns read command to the slot's hosts in a Round-Robin manner

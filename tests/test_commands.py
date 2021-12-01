@@ -71,21 +71,18 @@ class TestRedisCommands:
             r["a"]
 
     # SERVER INFORMATION
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
     def test_acl_cat_no_category(self, r):
         categories = r.acl_cat()
         assert isinstance(categories, list)
         assert "read" in categories
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
     def test_acl_cat_with_category(self, r):
         commands = r.acl_cat("read")
         assert isinstance(commands, list)
         assert "get" in commands
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise
     def test_acl_deluser(self, r, request):
@@ -111,7 +108,6 @@ class TestRedisCommands:
         assert r.acl_getuser(users[3]) is None
         assert r.acl_getuser(users[4]) is None
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise
     def test_acl_genpass(self, r):
@@ -126,7 +122,6 @@ class TestRedisCommands:
         r.acl_genpass(555)
         assert isinstance(password, str)
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise
     def test_acl_getuser_setuser(self, r, request):
@@ -234,14 +229,12 @@ class TestRedisCommands:
         )
         assert len(r.acl_getuser(username)["passwords"]) == 1
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
     def test_acl_help(self, r):
         res = r.acl_help()
         assert isinstance(res, list)
         assert len(res) != 0
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise
     def test_acl_list(self, r, request):
@@ -256,7 +249,6 @@ class TestRedisCommands:
         users = r.acl_list()
         assert len(users) == 2
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise
     def test_acl_log(self, r, request):
@@ -299,7 +291,6 @@ class TestRedisCommands:
         assert "client-info" in r.acl_log(count=1)[0]
         assert r.acl_log_reset()
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise
     def test_acl_setuser_categories_without_prefix_fails(self, r, request):
@@ -313,7 +304,6 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             r.acl_setuser(username, categories=["list"])
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise
     def test_acl_setuser_commands_without_prefix_fails(self, r, request):
@@ -327,7 +317,6 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             r.acl_setuser(username, commands=["get"])
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise
     def test_acl_setuser_add_passwords_and_nopass_fails(self, r, request):
@@ -341,14 +330,12 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             r.acl_setuser(username, passwords="+mypass", nopass=True)
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
     def test_acl_users(self, r):
         users = r.acl_users()
         assert isinstance(users, list)
         assert len(users) > 0
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
     def test_acl_whoami(self, r):
         username = r.acl_whoami()
@@ -549,7 +536,7 @@ class TestRedisCommands:
             killuser,
             enabled=True,
             reset=True,
-            commands=["+get", "+set", "+select"],
+            commands=["+get", "+set", "+select", "+cluster", "+command"],
             keys=["cache:*"],
             nopass=True,
         )

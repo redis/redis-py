@@ -8,7 +8,7 @@ import time
 from collections import OrderedDict
 
 from redis.client import CaseInsensitiveDict, PubSub, Redis
-from redis.commands import ClusterCommands, CommandsParser
+from redis.commands import CommandsParser, RedisClusterCommands
 from redis.connection import ConnectionPool, DefaultParser, Encoder, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
@@ -94,6 +94,7 @@ REDIS_ALLOWED_KEYS = (
     "charset",
     "connection_class",
     "connection_pool",
+    "client_name",
     "db",
     "decode_responses",
     "encoding",
@@ -198,7 +199,7 @@ class ClusterParser(DefaultParser):
     )
 
 
-class RedisCluster(ClusterCommands):
+class RedisCluster(RedisClusterCommands):
     RedisClusterRequestTTL = 16
 
     PRIMARIES = "primaries"
@@ -212,6 +213,18 @@ class RedisCluster(ClusterCommands):
     COMMAND_FLAGS = dict_merge(
         list_keys_to_dict(
             [
+                "ACL CAT",
+                "ACL DELUSER",
+                "ACL GENPASS",
+                "ACL GETUSER",
+                "ACL HELP",
+                "ACL LIST",
+                "ACL LOG",
+                "ACL LOAD",
+                "ACL SAVE",
+                "ACL SETUSER",
+                "ACL USERS",
+                "ACL WHOAMI",
                 "CLIENT LIST",
                 "CLIENT SETNAME",
                 "CLIENT GETNAME",
@@ -769,6 +782,18 @@ class RedisCluster(ClusterCommands):
 
     def reinitialize_caches(self):
         self.nodes_manager.initialize()
+
+    def get_encoder(self):
+        """
+        Get the connections' encoder
+        """
+        return self.encoder
+
+    def get_connection_kwargs(self):
+        """
+        Get the connections' key-word arguments
+        """
+        return self.nodes_manager.connection_kwargs
 
     def _is_nodes_flag(self, target_nodes):
         return isinstance(target_nodes, str) and target_nodes in self.node_flags
@@ -1383,7 +1408,8 @@ class NodesManager:
             # isn't a full coverage
             raise RedisClusterException(
                 f"All slots are not covered after query all startup_nodes. "
-                f"{len(self.slots_cache)} of {REDIS_CLUSTER_HASH_SLOTS} covered..."
+                f"{len(self.slots_cache)} of {REDIS_CLUSTER_HASH_SLOTS} "
+                f"covered..."
             )
         elif not fully_covered and not self._require_full_coverage:
             # The user set require_full_coverage to False.
@@ -1402,7 +1428,8 @@ class NodesManager:
                     "cluster-require-full-coverage configuration to no on "
                     "all of the cluster nodes if you wish the cluster to "
                     "be able to serve without being fully covered."
-                    f"{len(self.slots_cache)} of {REDIS_CLUSTER_HASH_SLOTS} covered..."
+                    f"{len(self.slots_cache)} of {REDIS_CLUSTER_HASH_SLOTS} "
+                    f"covered..."
                 )
 
         # Set the tmp variables to the real variables
@@ -1950,8 +1977,8 @@ def block_pipeline_command(func):
 
     def inner(*args, **kwargs):
         raise RedisClusterException(
-            f"ERROR: Calling pipelined function {func.__name__} is blocked when "
-            f"running redis in cluster mode..."
+            f"ERROR: Calling pipelined function {func.__name__} is blocked "
+            f"when running redis in cluster mode..."
         )
 
     return inner
