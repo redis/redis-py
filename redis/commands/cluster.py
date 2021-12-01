@@ -3,12 +3,7 @@ from redis.exceptions import (
     RedisError,
 )
 from redis.crc import key_slot
-from .core import (
-    ACLCommands,
-    DataAccessCommands,
-    ManagementCommands,
-    PubSubCommands
-)
+from .core import ACLCommands, DataAccessCommands, ManagementCommands, PubSubCommands
 from .helpers import list_or_args
 
 
@@ -158,16 +153,15 @@ class ClusterManagementCommands(ManagementCommands):
     The class inherits from Redis's core ManagementCommands class and do the
     required adjustments to work with cluster mode
     """
+
     def slaveof(self, *args, **kwargs):
         raise RedisClusterException("SLAVEOF is not supported in cluster mode")
 
     def replicaof(self, *args, **kwargs):
-        raise RedisClusterException("REPLICAOF is not supported in cluster"
-                                    " mode")
+        raise RedisClusterException("REPLICAOF is not supported in cluster" " mode")
 
     def swapdb(self, *args, **kwargs):
-        raise RedisClusterException("SWAPDB is not supported in cluster"
-                                    " mode")
+        raise RedisClusterException("SWAPDB is not supported in cluster" " mode")
 
 
 class ClusterDataAccessCommands(DataAccessCommands):
@@ -177,20 +171,43 @@ class ClusterDataAccessCommands(DataAccessCommands):
     The class inherits from Redis's core DataAccessCommand class and do the
     required adjustments to work with cluster mode
     """
-    def stralgo(self, algo, value1, value2, specific_argument='strings',
-                len=False, idx=False, minmatchlen=None, withmatchlen=False,
-                **kwargs):
-        target_nodes = kwargs.pop('target_nodes', None)
-        if specific_argument == 'strings' and target_nodes is None:
-            target_nodes = 'default-node'
-        kwargs.update({'target_nodes': target_nodes})
-        return super().stralgo(algo, value1, value2, specific_argument,
-                               len, idx, minmatchlen, withmatchlen, **kwargs)
+
+    def stralgo(
+        self,
+        algo,
+        value1,
+        value2,
+        specific_argument="strings",
+        len=False,
+        idx=False,
+        minmatchlen=None,
+        withmatchlen=False,
+        **kwargs,
+    ):
+        target_nodes = kwargs.pop("target_nodes", None)
+        if specific_argument == "strings" and target_nodes is None:
+            target_nodes = "default-node"
+        kwargs.update({"target_nodes": target_nodes})
+        return super().stralgo(
+            algo,
+            value1,
+            value2,
+            specific_argument,
+            len,
+            idx,
+            minmatchlen,
+            withmatchlen,
+            **kwargs,
+        )
 
 
-class RedisClusterCommands(ClusterMultiKeyCommands, ClusterManagementCommands,
-                           ACLCommands, PubSubCommands,
-                           ClusterDataAccessCommands):
+class RedisClusterCommands(
+    ClusterMultiKeyCommands,
+    ClusterManagementCommands,
+    ACLCommands,
+    PubSubCommands,
+    ClusterDataAccessCommands,
+):
     """
     A class for all Redis Cluster commands
 

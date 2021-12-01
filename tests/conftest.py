@@ -331,11 +331,11 @@ def wait_for_command(client, monitor, command, key=None):
     if key is None:
         # generate key
         redis_version = REDIS_INFO["version"]
-        if LooseVersion(redis_version) >= LooseVersion('5.0.0'):
+        if LooseVersion(redis_version) >= LooseVersion("5.0.0"):
             id_str = str(client.client_id())
         else:
-            id_str = '%08x' % random.randrange(2**32)
-        key = '__REDIS-PY-%s__' % id_str
+            id_str = "%08x" % random.randrange(2 ** 32)
+        key = "__REDIS-PY-%s__" % id_str
     client.get(key)
     while True:
         monitor_response = monitor.next_command()

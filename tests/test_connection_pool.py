@@ -9,8 +9,7 @@ import pytest
 import redis
 from redis.connection import ssl_available, to_bool
 
-from .conftest import _get_client, skip_if_redis_enterprise, \
-    skip_if_server_version_lt
+from .conftest import _get_client, skip_if_redis_enterprise, skip_if_server_version_lt
 from .test_pubsub import wait_for_message
 
 
@@ -46,8 +45,7 @@ class TestConnectionPool:
     def test_connection_creation(self):
         connection_kwargs = {"foo": "bar", "biz": "baz"}
         pool = self.get_pool(
-            connection_kwargs=connection_kwargs,
-            connection_class=DummyConnection
+            connection_kwargs=connection_kwargs, connection_class=DummyConnection
         )
         connection = pool.get_connection("_")
         assert isinstance(connection, DummyConnection)
@@ -62,8 +60,7 @@ class TestConnectionPool:
 
     def test_max_connections(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
-        pool = self.get_pool(max_connections=2,
-                             connection_kwargs=connection_kwargs)
+        pool = self.get_pool(max_connections=2, connection_kwargs=connection_kwargs)
         pool.get_connection("_")
         pool.get_connection("_")
         with pytest.raises(redis.ConnectionError):
@@ -85,8 +82,7 @@ class TestConnectionPool:
             "client_name": "test-client",
         }
         pool = self.get_pool(
-            connection_kwargs=connection_kwargs,
-            connection_class=redis.Connection
+            connection_kwargs=connection_kwargs, connection_class=redis.Connection
         )
         expected = (
             "ConnectionPool<Connection<"
@@ -95,8 +91,7 @@ class TestConnectionPool:
         assert repr(pool) == expected
 
     def test_repr_contains_db_info_unix(self):
-        connection_kwargs = {"path": "/abc", "db": 1,
-                             "client_name": "test-client"}
+        connection_kwargs = {"path": "/abc", "db": 1, "client_name": "test-client"}
         pool = self.get_pool(
             connection_kwargs=connection_kwargs,
             connection_class=redis.UnixDomainSocketConnection,
@@ -335,8 +330,7 @@ class TestConnectionPoolURLParsing:
             assert expected is to_bool(value)
 
     def test_client_name_in_querystring(self):
-        pool = redis.ConnectionPool.from_url(
-            "redis://location?client_name=test-client")
+        pool = redis.ConnectionPool.from_url("redis://location?client_name=test-client")
         assert pool.connection_kwargs["client_name"] == "test-client"
 
     def test_invalid_extra_typed_querystring_options(self):
@@ -348,8 +342,7 @@ class TestConnectionPoolURLParsing:
     def test_extra_querystring_options(self):
         pool = redis.ConnectionPool.from_url("redis://localhost?a=1&b=2")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "localhost", "a": "1",
-                                          "b": "2"}
+        assert pool.connection_kwargs == {"host": "localhost", "a": "1", "b": "2"}
 
     def test_calling_from_subclass_returns_correct_instance(self):
         pool = redis.BlockingConnectionPool.from_url("redis://localhost")
@@ -444,15 +437,13 @@ class TestConnectionPoolUnixSocketURLParsing:
         }
 
     def test_client_name_in_querystring(self):
-        pool = redis.ConnectionPool.from_url(
-            "redis://location?client_name=test-client")
+        pool = redis.ConnectionPool.from_url("redis://location?client_name=test-client")
         assert pool.connection_kwargs["client_name"] == "test-client"
 
     def test_extra_querystring_options(self):
         pool = redis.ConnectionPool.from_url("unix:///socket?a=1&b=2")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "a": "1",
-                                          "b": "2"}
+        assert pool.connection_kwargs == {"path": "/socket", "a": "1", "b": "2"}
 
 
 @pytest.mark.skipif(not ssl_available, reason="SSL not installed")
@@ -480,12 +471,10 @@ class TestSSLConnectionURLParsing:
         pool = DummyConnectionPool.from_url("rediss://?ssl_cert_reqs=required")
         assert pool.get_connection("_").cert_reqs == ssl.CERT_REQUIRED
 
-        pool = DummyConnectionPool.from_url(
-            "rediss://?ssl_check_hostname=False")
+        pool = DummyConnectionPool.from_url("rediss://?ssl_check_hostname=False")
         assert pool.get_connection("_").check_hostname is False
 
-        pool = DummyConnectionPool.from_url(
-            "rediss://?ssl_check_hostname=True")
+        pool = DummyConnectionPool.from_url("rediss://?ssl_check_hostname=True")
         assert pool.get_connection("_").check_hostname is True
 
 
@@ -506,7 +495,7 @@ class TestConnection:
         assert not pool._available_connections[0]._sock
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt('2.8.8')
+    @skip_if_server_version_lt("2.8.8")
     @skip_if_redis_enterprise()
     def test_busy_loading_disconnects_socket(self, r):
         """
@@ -518,7 +507,7 @@ class TestConnection:
         assert not r.connection._sock
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt('2.8.8')
+    @skip_if_server_version_lt("2.8.8")
     @skip_if_redis_enterprise()
     def test_busy_loading_from_pipeline_immediate_command(self, r):
         """
@@ -527,15 +516,14 @@ class TestConnection:
         """
         pipe = r.pipeline()
         with pytest.raises(redis.BusyLoadingError):
-            pipe.immediate_execute_command("DEBUG", "ERROR",
-                                           "LOADING fake message")
+            pipe.immediate_execute_command("DEBUG", "ERROR", "LOADING fake message")
         pool = r.connection_pool
         assert not pipe.connection
         assert len(pool._available_connections) == 1
         assert not pool._available_connections[0]._sock
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt('2.8.8')
+    @skip_if_server_version_lt("2.8.8")
     @skip_if_redis_enterprise()
     def test_busy_loading_from_pipeline(self, r):
         """
@@ -551,7 +539,7 @@ class TestConnection:
         assert len(pool._available_connections) == 1
         assert not pool._available_connections[0]._sock
 
-    @skip_if_server_version_lt('2.8.8')
+    @skip_if_server_version_lt("2.8.8")
     @skip_if_redis_enterprise()
     def test_read_only_error(self, r):
         "READONLY errors get turned in ReadOnlyError exceptions"
@@ -586,8 +574,7 @@ class TestConnection:
         """
         with pytest.raises(redis.AuthenticationError):
             r.execute_command(
-                "DEBUG", "ERROR",
-                "ERR Client sent AUTH, but no password is set"
+                "DEBUG", "ERROR", "ERR Client sent AUTH, but no password is set"
             )
 
     @skip_if_redis_enterprise()
@@ -601,8 +588,7 @@ class TestConnection:
 class TestMultiConnectionClient:
     @pytest.fixture()
     def r(self, request):
-        return _get_client(redis.Redis, request,
-                           single_connection_client=False)
+        return _get_client(redis.Redis, request, single_connection_client=False)
 
     def test_multi_connection_command(self, r):
         assert not r.connection
@@ -616,8 +602,7 @@ class TestHealthCheck:
 
     @pytest.fixture()
     def r(self, request):
-        return _get_client(redis.Redis, request,
-                           health_check_interval=self.interval)
+        return _get_client(redis.Redis, request, health_check_interval=self.interval)
 
     def assert_interval_advanced(self, connection):
         diff = connection.next_health_check - time.time()
@@ -633,7 +618,7 @@ class TestHealthCheck:
         r.get("foo")
         r.connection.next_health_check = time.time()
         with mock.patch.object(
-                r.connection, "send_command", wraps=r.connection.send_command
+            r.connection, "send_command", wraps=r.connection.send_command
         ) as m:
             r.get("foo")
             m.assert_called_with("PING", check_health=False)
@@ -649,7 +634,7 @@ class TestHealthCheck:
     def test_health_check_not_invoked_within_interval(self, r):
         r.get("foo")
         with mock.patch.object(
-                r.connection, "send_command", wraps=r.connection.send_command
+            r.connection, "send_command", wraps=r.connection.send_command
         ) as m:
             r.get("foo")
             ping_call_spec = (("PING",), {"check_health": False})
@@ -660,8 +645,7 @@ class TestHealthCheck:
             pipe.connection = pipe.connection_pool.get_connection("_")
             pipe.connection.next_health_check = 0
             with mock.patch.object(
-                    pipe.connection, "send_command",
-                    wraps=pipe.connection.send_command
+                pipe.connection, "send_command", wraps=pipe.connection.send_command
             ) as m:
                 responses = pipe.set("foo", "bar").get("foo").execute()
                 m.assert_any_call("PING", check_health=False)
@@ -672,8 +656,7 @@ class TestHealthCheck:
             pipe.connection = pipe.connection_pool.get_connection("_")
             pipe.connection.next_health_check = 0
             with mock.patch.object(
-                    pipe.connection, "send_command",
-                    wraps=pipe.connection.send_command
+                pipe.connection, "send_command", wraps=pipe.connection.send_command
             ) as m:
                 responses = pipe.set("foo", "bar").get("foo").execute()
                 m.assert_any_call("PING", check_health=False)
@@ -685,8 +668,7 @@ class TestHealthCheck:
             pipe.connection = pipe.connection_pool.get_connection("_")
             pipe.connection.next_health_check = 0
             with mock.patch.object(
-                    pipe.connection, "send_command",
-                    wraps=pipe.connection.send_command
+                pipe.connection, "send_command", wraps=pipe.connection.send_command
             ) as m:
                 pipe.watch("foo")
                 # the health check should be called when watching
@@ -710,7 +692,7 @@ class TestHealthCheck:
         p.connection = p.connection_pool.get_connection("_")
         p.connection.next_health_check = 0
         with mock.patch.object(
-                p.connection, "send_command", wraps=p.connection.send_command
+            p.connection, "send_command", wraps=p.connection.send_command
         ) as m:
             assert not p.subscribed
             p.subscribe("foo")
@@ -732,7 +714,7 @@ class TestHealthCheck:
         p.connection = p.connection_pool.get_connection("_")
         p.connection.next_health_check = 0
         with mock.patch.object(
-                p.connection, "send_command", wraps=p.connection.send_command
+            p.connection, "send_command", wraps=p.connection.send_command
         ) as m:
             p.subscribe("foo")
             subscribe_message = wait_for_message(p)
@@ -760,8 +742,7 @@ class TestHealthCheck:
             assert wait_for_message(p) is None
             # now that the connection is subscribed, the pubsub health
             # check should have taken over and include the HEALTH_CHECK_MESSAGE
-            m.assert_any_call("PING", p.HEALTH_CHECK_MESSAGE,
-                              check_health=False)
+            m.assert_any_call("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
             self.assert_interval_advanced(p.connection)
 
     def test_health_check_in_pubsub_poll(self, r):
@@ -772,7 +753,7 @@ class TestHealthCheck:
         p = r.pubsub()
         p.connection = p.connection_pool.get_connection("_")
         with mock.patch.object(
-                p.connection, "send_command", wraps=p.connection.send_command
+            p.connection, "send_command", wraps=p.connection.send_command
         ) as m:
             p.subscribe("foo")
             subscribe_message = wait_for_message(p)
@@ -792,6 +773,5 @@ class TestHealthCheck:
             # should be advanced
             p.connection.next_health_check = 0
             assert wait_for_message(p) is None
-            m.assert_called_with("PING", p.HEALTH_CHECK_MESSAGE,
-                                 check_health=False)
+            m.assert_called_with("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
             self.assert_interval_advanced(p.connection)

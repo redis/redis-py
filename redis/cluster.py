@@ -7,10 +7,7 @@ import threading
 import time
 from collections import OrderedDict
 from redis.client import CaseInsensitiveDict, Redis, PubSub
-from redis.commands import (
-    RedisClusterCommands,
-    CommandsParser
-)
+from redis.commands import RedisClusterCommands, CommandsParser
 from redis.connection import DefaultParser, ConnectionPool, Encoder, parse_url
 from redis.crc import key_slot, REDIS_CLUSTER_HASH_SLOTS
 from redis.exceptions import (
@@ -674,8 +671,8 @@ class RedisCluster(RedisClusterCommands, object):
             target_node = self.get_default_node()
         if target_node.redis_connection is None:
             raise RedisClusterException(
-                "Cluster Node {0} has no redis_connection".
-                format(target_node.name))
+                "Cluster Node {0} has no redis_connection".format(target_node.name)
+            )
         return target_node.redis_connection.monitor()
 
     def pubsub(self, node=None, host=None, port=None, **kwargs):

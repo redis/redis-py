@@ -6,10 +6,10 @@ from .redismodules import RedisModuleCommands
 from .sentinel import SentinelCommands
 
 __all__ = [
-    'RedisClusterCommands',
-    'CommandsParser',
-    'CoreCommands',
-    'list_or_args',
-    'RedisModuleCommands',
-    'SentinelCommands'
+    "RedisClusterCommands",
+    "CommandsParser",
+    "CoreCommands",
+    "list_or_args",
+    "RedisModuleCommands",
+    "SentinelCommands",
 ]

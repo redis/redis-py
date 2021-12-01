@@ -529,14 +529,18 @@ class TestRedisCommands:
         client_2_addr = clients_by_name["redis-py-c2"].get("laddr")
         assert r.client_kill_filter(laddr=client_2_addr)
 
-    @skip_if_server_version_lt('6.0.0')
+    @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
     def test_client_kill_filter_by_user(self, r, request):
-        killuser = 'user_to_kill'
-        r.acl_setuser(killuser, enabled=True, reset=True,
-                      commands=['+get', '+set', '+select', '+cluster',
-                                '+command'],
-                      keys=['cache:*'], nopass=True)
+        killuser = "user_to_kill"
+        r.acl_setuser(
+            killuser,
+            enabled=True,
+            reset=True,
+            commands=["+get", "+set", "+select", "+cluster", "+command"],
+            keys=["cache:*"],
+            nopass=True,
+        )
         _get_client(redis.Redis, request, flushdb=False, username=killuser)
         r.client_kill_filter(user=killuser)
         clients = r.client_list()
@@ -545,7 +549,7 @@ class TestRedisCommands:
         r.acl_deluser(killuser)
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt('2.9.50')
+    @skip_if_server_version_lt("2.9.50")
     @skip_if_redis_enterprise()
     def test_client_pause(self, r):
         assert r.client_pause(1)
@@ -554,7 +558,7 @@ class TestRedisCommands:
             r.client_pause(timeout="not an integer")
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt('6.2.0')
+    @skip_if_server_version_lt("6.2.0")
     @skip_if_redis_enterprise()
     def test_client_unpause(self, r):
         assert r.client_unpause() == b"OK"
@@ -574,7 +578,7 @@ class TestRedisCommands:
         assert r.get("foo") == b"bar"
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt('6.0.0')
+    @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
     def test_client_getredir(self, r):
         assert isinstance(r.client_getredir(), int)
@@ -2654,7 +2658,7 @@ class TestRedisCommands:
         assert isinstance(mock_cluster_resp_slaves.cluster("slaves", "nodeid"), dict)
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt('3.0.0')
+    @skip_if_server_version_lt("3.0.0")
     @skip_if_redis_enterprise()
     def test_readwrite(self, r):
         assert r.readwrite()
@@ -4036,7 +4040,7 @@ class TestRedisCommands:
         assert isinstance(r.memory_usage("foo"), int)
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt('4.0.0')
+    @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
     def test_module_list(self, r):
         assert isinstance(r.module_list(), list)
@@ -4077,7 +4081,7 @@ class TestRedisCommands:
         assert "get" in cmds
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt('4.0.0')
+    @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
     def test_module(self, r):
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
@@ -4133,7 +4137,7 @@ class TestRedisCommands:
         assert r.get(key) == b"blee!"
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt('5.0.0')
+    @skip_if_server_version_lt("5.0.0")
     @skip_if_redis_enterprise()
     def test_replicaof(self, r):
         with pytest.raises(redis.ResponseError):

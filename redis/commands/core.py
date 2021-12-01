@@ -13,6 +13,7 @@ class ACLCommands:
     Redis Access Control List (ACL) commands.
     see: https://redis.io/topics/acl
     """
+
     def acl_cat(self, category=None, **kwargs):
         """
         Returns a list of categories or commands within a category.
@@ -24,7 +25,7 @@ class ACLCommands:
         For more information check https://redis.io/commands/acl-cat
         """
         pieces = [category] if category else []
-        return self.execute_command('ACL CAT', *pieces, **kwargs)
+        return self.execute_command("ACL CAT", *pieces, **kwargs)
 
     def acl_deluser(self, *username, **kwargs):
         """
@@ -32,7 +33,7 @@ class ACLCommands:
 
         For more information check https://redis.io/commands/acl-deluser
         """
-        return self.execute_command('ACL DELUSER', *username, **kwargs)
+        return self.execute_command("ACL DELUSER", *username, **kwargs)
 
     def acl_genpass(self, bits=None, **kwargs):
         """Generate a random password value.
@@ -47,9 +48,10 @@ class ACLCommands:
                 if b < 0 or b > 4096:
                     raise ValueError
             except ValueError:
-                raise DataError('genpass optionally accepts a bits argument, '
-                                'between 0 and 4096.')
-        return self.execute_command('ACL GENPASS', *pieces, **kwargs)
+                raise DataError(
+                    "genpass optionally accepts a bits argument, " "between 0 and 4096."
+                )
+        return self.execute_command("ACL GENPASS", *pieces, **kwargs)
 
     def acl_getuser(self, username, **kwargs):
         """
@@ -59,7 +61,7 @@ class ACLCommands:
 
         For more information check https://redis.io/commands/acl-getuser
         """
-        return self.execute_command('ACL GETUSER', username, **kwargs)
+        return self.execute_command("ACL GETUSER", username, **kwargs)
 
     def acl_help(self, **kwargs):
         """The ACL HELP command returns helpful text describing
@@ -67,7 +69,7 @@ class ACLCommands:
 
         For more information check https://redis.io/commands/acl-help
         """
-        return self.execute_command('ACL HELP', **kwargs)
+        return self.execute_command("ACL HELP", **kwargs)
 
     def acl_list(self, **kwargs):
         """
@@ -75,7 +77,7 @@ class ACLCommands:
 
         For more information check https://redis.io/commands/acl-list
         """
-        return self.execute_command('ACL LIST', **kwargs)
+        return self.execute_command("ACL LIST", **kwargs)
 
     def acl_log(self, count=None, **kwargs):
         """
@@ -91,7 +93,7 @@ class ACLCommands:
                 raise DataError("ACL LOG count must be an " "integer")
             args.append(count)
 
-        return self.execute_command('ACL LOG', *args, **kwargs)
+        return self.execute_command("ACL LOG", *args, **kwargs)
 
     def acl_log_reset(self, **kwargs):
         """
@@ -100,8 +102,8 @@ class ACLCommands:
 
         For more information check https://redis.io/commands/acl-log
         """
-        args = [b'RESET']
-        return self.execute_command('ACL LOG', *args, **kwargs)
+        args = [b"RESET"]
+        return self.execute_command("ACL LOG", *args, **kwargs)
 
     def acl_load(self, **kwargs):
         """
@@ -112,7 +114,7 @@ class ACLCommands:
 
         For more information check https://redis.io/commands/acl-load
         """
-        return self.execute_command('ACL LOAD', **kwargs)
+        return self.execute_command("ACL LOAD", **kwargs)
 
     def acl_save(self, **kwargs):
         """
@@ -123,12 +125,23 @@ class ACLCommands:
 
         For more information check https://redis.io/commands/acl-save
         """
-        return self.execute_command('ACL SAVE', **kwargs)
+        return self.execute_command("ACL SAVE", **kwargs)
 
-    def acl_setuser(self, username, enabled=False, nopass=False,
-                    passwords=None, hashed_passwords=None, categories=None,
-                    commands=None, keys=None, reset=False, reset_keys=False,
-                    reset_passwords=False, **kwargs):
+    def acl_setuser(
+        self,
+        username,
+        enabled=False,
+        nopass=False,
+        passwords=None,
+        hashed_passwords=None,
+        categories=None,
+        commands=None,
+        keys=None,
+        reset=False,
+        reset_keys=False,
+        reset_passwords=False,
+        **kwargs,
+    ):
         """
         Create or update an ACL user.
 
@@ -279,33 +292,34 @@ class ACLCommands:
                 key = encoder.encode(key)
                 pieces.append(b"~%s" % key)
 
-        return self.execute_command('ACL SETUSER', *pieces, **kwargs)
+        return self.execute_command("ACL SETUSER", *pieces, **kwargs)
 
     def acl_users(self, **kwargs):
         """Returns a list of all registered users on the server.
 
         For more information check https://redis.io/commands/acl-users
         """
-        return self.execute_command('ACL USERS', **kwargs)
+        return self.execute_command("ACL USERS", **kwargs)
 
     def acl_whoami(self, **kwargs):
         """Get the username for the current connection
 
         For more information check https://redis.io/commands/acl-whoami
         """
-        return self.execute_command('ACL WHOAMI', **kwargs)
+        return self.execute_command("ACL WHOAMI", **kwargs)
 
 
 class ManagementCommands:
     """
     Redis management commands
     """
+
     def bgrewriteaof(self, **kwargs):
         """Tell the Redis server to rewrite the AOF file from data in memory.
 
         For more information check https://redis.io/commands/bgrewriteaof
         """
-        return self.execute_command('BGREWRITEAOF', **kwargs)
+        return self.execute_command("BGREWRITEAOF", **kwargs)
 
     def bgsave(self, schedule=True, **kwargs):
         """
@@ -317,17 +331,25 @@ class ManagementCommands:
         pieces = []
         if schedule:
             pieces.append("SCHEDULE")
-        return self.execute_command('BGSAVE', *pieces, **kwargs)
+        return self.execute_command("BGSAVE", *pieces, **kwargs)
 
     def client_kill(self, address, **kwargs):
         """Disconnects the client at ``address`` (ip:port)
 
         For more information check https://redis.io/commands/client-kill
         """
-        return self.execute_command('CLIENT KILL', address, **kwargs)
+        return self.execute_command("CLIENT KILL", address, **kwargs)
 
-    def client_kill_filter(self, _id=None, _type=None, addr=None,
-                           skipme=None, laddr=None, user=None, **kwargs):
+    def client_kill_filter(
+        self,
+        _id=None,
+        _type=None,
+        addr=None,
+        skipme=None,
+        laddr=None,
+        user=None,
+        **kwargs,
+    ):
         """
         Disconnects client(s) using a variety of filter options
         :param id: Kills a client by its unique ID field
@@ -362,9 +384,11 @@ class ManagementCommands:
         if user is not None:
             args.extend((b"USER", user))
         if not args:
-            raise DataError("CLIENT KILL <filter> <value> ... ... <filter> "
-                            "<value> must specify at least one filter")
-        return self.execute_command('CLIENT KILL', *args, **kwargs)
+            raise DataError(
+                "CLIENT KILL <filter> <value> ... ... <filter> "
+                "<value> must specify at least one filter"
+            )
+        return self.execute_command("CLIENT KILL", *args, **kwargs)
 
     def client_info(self, **kwargs):
         """
@@ -373,7 +397,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/client-info
         """
-        return self.execute_command('CLIENT INFO', **kwargs)
+        return self.execute_command("CLIENT INFO", **kwargs)
 
     def client_list(self, _type=None, client_id=[], **kwargs):
         """
@@ -396,8 +420,8 @@ class ManagementCommands:
             raise DataError("client_id must be a list")
         if client_id != []:
             args.append(b"ID")
-            args.append(' '.join(client_id))
-        return self.execute_command('CLIENT LIST', *args, **kwargs)
+            args.append(" ".join(client_id))
+        return self.execute_command("CLIENT LIST", *args, **kwargs)
 
     def client_getname(self, **kwargs):
         """
@@ -405,7 +429,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/client-getname
         """
-        return self.execute_command('CLIENT GETNAME', **kwargs)
+        return self.execute_command("CLIENT GETNAME", **kwargs)
 
     def client_getredir(self, **kwargs):
         """
@@ -414,7 +438,7 @@ class ManagementCommands:
 
         see: https://redis.io/commands/client-getredir
         """
-        return self.execute_command('CLIENT GETREDIR', **kwargs)
+        return self.execute_command("CLIENT GETREDIR", **kwargs)
 
     def client_reply(self, reply, **kwargs):
         """
@@ -434,7 +458,7 @@ class ManagementCommands:
         """
         replies = ["ON", "OFF", "SKIP"]
         if reply not in replies:
-            raise DataError('CLIENT REPLY must be one of %r' % replies)
+            raise DataError("CLIENT REPLY must be one of %r" % replies)
         return self.execute_command("CLIENT REPLY", reply, **kwargs)
 
     def client_id(self, **kwargs):
@@ -443,7 +467,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/client-id
         """
-        return self.execute_command('CLIENT ID', **kwargs)
+        return self.execute_command("CLIENT ID", **kwargs)
 
     def client_trackinginfo(self, **kwargs):
         """
@@ -452,7 +476,7 @@ class ManagementCommands:
 
         See https://redis.io/commands/client-trackinginfo
         """
-        return self.execute_command('CLIENT TRACKINGINFO', **kwargs)
+        return self.execute_command("CLIENT TRACKINGINFO", **kwargs)
 
     def client_setname(self, name, **kwargs):
         """
@@ -460,7 +484,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/client-setname
         """
-        return self.execute_command('CLIENT SETNAME', name, **kwargs)
+        return self.execute_command("CLIENT SETNAME", name, **kwargs)
 
     def client_unblock(self, client_id, error=False, **kwargs):
         """
@@ -473,7 +497,7 @@ class ManagementCommands:
         """
         args = ["CLIENT UNBLOCK", int(client_id)]
         if error:
-            args.append(b'ERROR')
+            args.append(b"ERROR")
         return self.execute_command(*args, **kwargs)
 
     def client_pause(self, timeout, **kwargs):
@@ -485,7 +509,7 @@ class ManagementCommands:
         """
         if not isinstance(timeout, int):
             raise DataError("CLIENT PAUSE timeout must be an integer")
-        return self.execute_command('CLIENT PAUSE', str(timeout), **kwargs)
+        return self.execute_command("CLIENT PAUSE", str(timeout), **kwargs)
 
     def client_unpause(self, **kwargs):
         """
@@ -493,7 +517,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/client-unpause
         """
-        return self.execute_command('CLIENT UNPAUSE', **kwargs)
+        return self.execute_command("CLIENT UNPAUSE", **kwargs)
 
     def command(self, **kwargs):
         """
@@ -501,7 +525,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/command
         """
-        return self.execute_command('COMMAND', **kwargs)
+        return self.execute_command("COMMAND", **kwargs)
 
     def command_info(self, **kwargs):
         raise NotImplementedError(
@@ -509,7 +533,7 @@ class ManagementCommands:
         )
 
     def command_count(self, **kwargs):
-        return self.execute_command('COMMAND COUNT', **kwargs)
+        return self.execute_command("COMMAND COUNT", **kwargs)
 
     def config_get(self, pattern="*", **kwargs):
         """
@@ -517,14 +541,14 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/config-get
         """
-        return self.execute_command('CONFIG GET', pattern, **kwargs)
+        return self.execute_command("CONFIG GET", pattern, **kwargs)
 
     def config_set(self, name, value, **kwargs):
         """Set config item ``name`` with ``value``
 
         For more information check https://redis.io/commands/config-set
         """
-        return self.execute_command('CONFIG SET', name, value, **kwargs)
+        return self.execute_command("CONFIG SET", name, value, **kwargs)
 
     def config_resetstat(self, **kwargs):
         """
@@ -532,7 +556,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/config-resetstat
         """
-        return self.execute_command('CONFIG RESETSTAT', **kwargs)
+        return self.execute_command("CONFIG RESETSTAT", **kwargs)
 
     def config_rewrite(self, **kwargs):
         """
@@ -540,7 +564,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/config-rewrite
         """
-        return self.execute_command('CONFIG REWRITE', **kwargs)
+        return self.execute_command("CONFIG REWRITE", **kwargs)
 
     def dbsize(self, **kwargs):
         """
@@ -548,7 +572,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/dbsize
         """
-        return self.execute_command('DBSIZE', **kwargs)
+        return self.execute_command("DBSIZE", **kwargs)
 
     def debug_object(self, key, **kwargs):
         """
@@ -556,7 +580,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/debug-object
         """
-        return self.execute_command('DEBUG OBJECT', key, **kwargs)
+        return self.execute_command("DEBUG OBJECT", key, **kwargs)
 
     def debug_segfault(self, **kwargs):
         raise NotImplementedError(
@@ -573,7 +597,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/echo
         """
-        return self.execute_command('ECHO', value, **kwargs)
+        return self.execute_command("ECHO", value, **kwargs)
 
     def flushall(self, asynchronous=False, **kwargs):
         """
@@ -586,8 +610,8 @@ class ManagementCommands:
         """
         args = []
         if asynchronous:
-            args.append(b'ASYNC')
-        return self.execute_command('FLUSHALL', *args, **kwargs)
+            args.append(b"ASYNC")
+        return self.execute_command("FLUSHALL", *args, **kwargs)
 
     def flushdb(self, asynchronous=False, **kwargs):
         """
@@ -600,8 +624,8 @@ class ManagementCommands:
         """
         args = []
         if asynchronous:
-            args.append(b'ASYNC')
-        return self.execute_command('FLUSHDB', *args, **kwargs)
+            args.append(b"ASYNC")
+        return self.execute_command("FLUSHDB", *args, **kwargs)
 
     def swapdb(self, first, second, **kwargs):
         """
@@ -609,7 +633,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/swapdb
         """
-        return self.execute_command('SWAPDB', first, second, **kwargs)
+        return self.execute_command("SWAPDB", first, second, **kwargs)
 
     def info(self, section=None, **kwargs):
         """
@@ -624,9 +648,9 @@ class ManagementCommands:
         For more information check https://redis.io/commands/info
         """
         if section is None:
-            return self.execute_command('INFO', **kwargs)
+            return self.execute_command("INFO", **kwargs)
         else:
-            return self.execute_command('INFO', section, **kwargs)
+            return self.execute_command("INFO", section, **kwargs)
 
     def lastsave(self, **kwargs):
         """
@@ -635,7 +659,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/lastsave
         """
-        return self.execute_command('LASTSAVE', **kwargs)
+        return self.execute_command("LASTSAVE", **kwargs)
 
     def lolwut(self, *version_numbers, **kwargs):
         """
@@ -644,13 +668,22 @@ class ManagementCommands:
         See: https://redis.io/commands/lolwut
         """
         if version_numbers:
-            return self.execute_command('LOLWUT VERSION', *version_numbers,
-                                        **kwargs)
+            return self.execute_command("LOLWUT VERSION", *version_numbers, **kwargs)
         else:
-            return self.execute_command('LOLWUT', **kwargs)
+            return self.execute_command("LOLWUT", **kwargs)
 
-    def migrate(self, host, port, keys, destination_db, timeout,
-                copy=False, replace=False, auth=None, **kwargs):
+    def migrate(
+        self,
+        host,
+        port,
+        keys,
+        destination_db,
+        timeout,
+        copy=False,
+        replace=False,
+        auth=None,
+        **kwargs,
+    ):
         """
         Migrate 1 or more keys from the current Redis server to a different
         server specified by the ``host``, ``port`` and ``destination_db``.
@@ -683,15 +716,17 @@ class ManagementCommands:
             pieces.append(auth)
         pieces.append(b"KEYS")
         pieces.extend(keys)
-        return self.execute_command('MIGRATE', host, port, '', destination_db,
-                                    timeout, *pieces, **kwargs)
+        return self.execute_command(
+            "MIGRATE", host, port, "", destination_db, timeout, *pieces, **kwargs
+        )
 
     def object(self, infotype, key, **kwargs):
         """
         Return the encoding, idletime, or refcount about the key
         """
-        return self.execute_command('OBJECT', infotype, key, infotype=infotype,
-                                    **kwargs)
+        return self.execute_command(
+            "OBJECT", infotype, key, infotype=infotype, **kwargs
+        )
 
     def memory_doctor(self, **kwargs):
         raise NotImplementedError(
@@ -717,7 +752,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/memory-stats
         """
-        return self.execute_command('MEMORY STATS', **kwargs)
+        return self.execute_command("MEMORY STATS", **kwargs)
 
     def memory_malloc_stats(self, **kwargs):
         """
@@ -725,7 +760,7 @@ class ManagementCommands:
 
         See: https://redis.io/commands/memory-malloc-stats
         """
-        return self.execute_command('MEMORY MALLOC-STATS', **kwargs)
+        return self.execute_command("MEMORY MALLOC-STATS", **kwargs)
 
     def memory_usage(self, key, samples=None, **kwargs):
         """
@@ -740,8 +775,8 @@ class ManagementCommands:
         """
         args = []
         if isinstance(samples, int):
-            args.extend([b'SAMPLES', samples])
-        return self.execute_command('MEMORY USAGE', key, *args, **kwargs)
+            args.extend([b"SAMPLES", samples])
+        return self.execute_command("MEMORY USAGE", key, *args, **kwargs)
 
     def memory_purge(self, **kwargs):
         """
@@ -749,7 +784,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/memory-purge
         """
-        return self.execute_command('MEMORY PURGE', **kwargs)
+        return self.execute_command("MEMORY PURGE", **kwargs)
 
     def ping(self, **kwargs):
         """
@@ -757,7 +792,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/ping
         """
-        return self.execute_command('PING', **kwargs)
+        return self.execute_command("PING", **kwargs)
 
     def quit(self, **kwargs):
         """
@@ -765,7 +800,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/quit
         """
-        return self.execute_command('QUIT', **kwargs)
+        return self.execute_command("QUIT", **kwargs)
 
     def replicaof(self, *args, **kwargs):
         """
@@ -776,7 +811,7 @@ class ManagementCommands:
 
         For more information check  https://redis.io/commands/replicaof
         """
-        return self.execute_command('REPLICAOF', *args, **kwargs)
+        return self.execute_command("REPLICAOF", *args, **kwargs)
 
     def save(self, **kwargs):
         """
@@ -785,7 +820,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/save
         """
-        return self.execute_command('SAVE', **kwargs)
+        return self.execute_command("SAVE", **kwargs)
 
     def shutdown(self, save=False, nosave=False, **kwargs):
         """Shutdown the Redis server.  If Redis has persistence configured,
@@ -819,8 +854,8 @@ class ManagementCommands:
         For more information check https://redis.io/commands/slaveof
         """
         if host is None and port is None:
-            return self.execute_command('SLAVEOF', b'NO', b'ONE', **kwargs)
-        return self.execute_command('SLAVEOF', host, port, **kwargs)
+            return self.execute_command("SLAVEOF", b"NO", b"ONE", **kwargs)
+        return self.execute_command("SLAVEOF", host, port, **kwargs)
 
     def slowlog_get(self, num=None, **kwargs):
         """
@@ -832,10 +867,8 @@ class ManagementCommands:
         args = ["SLOWLOG GET"]
         if num is not None:
             args.append(num)
-        decode_responses = self.get_connection_kwargs().get(
-            'decode_responses', False)
-        return self.execute_command(*args, decode_responses=decode_responses,
-                                    **kwargs)
+        decode_responses = self.get_connection_kwargs().get("decode_responses", False)
+        return self.execute_command(*args, decode_responses=decode_responses, **kwargs)
 
     def slowlog_len(self, **kwargs):
         """
@@ -843,7 +876,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/slowlog-len
         """
-        return self.execute_command('SLOWLOG LEN', **kwargs)
+        return self.execute_command("SLOWLOG LEN", **kwargs)
 
     def slowlog_reset(self, **kwargs):
         """
@@ -851,7 +884,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/slowlog-reset
         """
-        return self.execute_command('SLOWLOG RESET', **kwargs)
+        return self.execute_command("SLOWLOG RESET", **kwargs)
 
     def time(self, **kwargs):
         """
@@ -860,7 +893,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/time
         """
-        return self.execute_command('TIME', **kwargs)
+        return self.execute_command("TIME", **kwargs)
 
     def wait(self, num_replicas, timeout, **kwargs):
         """
@@ -871,7 +904,7 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/wait
         """
-        return self.execute_command('WAIT', num_replicas, timeout, **kwargs)
+        return self.execute_command("WAIT", num_replicas, timeout, **kwargs)
 
 
 class BasicKeyCommands:
@@ -1183,13 +1216,13 @@ class BasicKeyCommands:
         """
         return self.execute_command("INCRBYFLOAT", name, amount)
 
-    def keys(self, pattern='*', **kwargs):
+    def keys(self, pattern="*", **kwargs):
         """
         Returns a list of keys matching ``pattern``
 
         For more information check https://redis.io/commands/keys
         """
-        return self.execute_command('KEYS', pattern, **kwargs)
+        return self.execute_command("KEYS", pattern, **kwargs)
 
     def lmove(self, first_list, second_list, src="LEFT", dest="RIGHT"):
         """
@@ -1341,7 +1374,7 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/randomkey
         """
-        return self.execute_command('RANDOMKEY', **kwargs)
+        return self.execute_command("RANDOMKEY", **kwargs)
 
     def rename(self, src, dst):
         """
@@ -1542,9 +1575,18 @@ class BasicKeyCommands:
         """
         return self.execute_command("SETRANGE", name, offset, value)
 
-    def stralgo(self, algo, value1, value2, specific_argument='strings',
-                len=False, idx=False, minmatchlen=None, withmatchlen=False,
-                **kwargs):
+    def stralgo(
+        self,
+        algo,
+        value1,
+        value2,
+        specific_argument="strings",
+        len=False,
+        idx=False,
+        minmatchlen=None,
+        withmatchlen=False,
+        **kwargs,
+    ):
         """
         Implements complex algorithms that operate on strings.
         Right now the only algorithm implemented is the LCS algorithm
@@ -1585,12 +1627,17 @@ class BasicKeyCommands:
         except TypeError:
             pass
         if withmatchlen:
-            pieces.append(b'WITHMATCHLEN')
+            pieces.append(b"WITHMATCHLEN")
 
-        return self.execute_command('STRALGO', *pieces, len=len, idx=idx,
-                                    minmatchlen=minmatchlen,
-                                    withmatchlen=withmatchlen,
-                                    **kwargs)
+        return self.execute_command(
+            "STRALGO",
+            *pieces,
+            len=len,
+            idx=idx,
+            minmatchlen=minmatchlen,
+            withmatchlen=withmatchlen,
+            **kwargs,
+        )
 
     def strlen(self, name):
         """
@@ -1980,6 +2027,7 @@ class ScanCommands:
     Redis SCAN commands.
     see: https://redis.io/commands/scan
     """
+
     def scan(self, cursor=0, match=None, count=None, _type=None, **kwargs):
         """
         Incrementally return lists of key names. Also return a cursor
@@ -2003,8 +2051,8 @@ class ScanCommands:
         if count is not None:
             pieces.extend([b"COUNT", count])
         if _type is not None:
-            pieces.extend([b'TYPE', _type])
-        return self.execute_command('SCAN', *pieces, **kwargs)
+            pieces.extend([b"TYPE", _type])
+        return self.execute_command("SCAN", *pieces, **kwargs)
 
     def scan_iter(self, match=None, count=None, _type=None, **kwargs):
         """
@@ -2023,8 +2071,9 @@ class ScanCommands:
         """
         cursor = "0"
         while cursor != 0:
-            cursor, data = self.scan(cursor=cursor, match=match,
-                                     count=count, _type=_type, **kwargs)
+            cursor, data = self.scan(
+                cursor=cursor, match=match, count=count, _type=_type, **kwargs
+            )
             yield from data
 
     def sscan(self, name, cursor=0, match=None, count=None):
@@ -3627,6 +3676,7 @@ class PubSubCommands:
     Redis PubSub commands.
     see https://redis.io/topics/pubsub
     """
+
     def publish(self, channel, message, **kwargs):
         """
         Publish ``message`` on ``channel``.
@@ -3634,15 +3684,15 @@ class PubSubCommands:
 
         For more information check https://redis.io/commands/publish
         """
-        return self.execute_command('PUBLISH', channel, message, **kwargs)
+        return self.execute_command("PUBLISH", channel, message, **kwargs)
 
-    def pubsub_channels(self, pattern='*', **kwargs):
+    def pubsub_channels(self, pattern="*", **kwargs):
         """
         Return a list of channels that have at least one subscriber
 
         For more information check https://redis.io/commands/pubsub-channels
         """
-        return self.execute_command('PUBSUB CHANNELS', pattern, **kwargs)
+        return self.execute_command("PUBSUB CHANNELS", pattern, **kwargs)
 
     def pubsub_numpat(self, **kwargs):
         """
@@ -3650,7 +3700,7 @@ class PubSubCommands:
 
         For more information check https://redis.io/commands/pubsub-numpat
         """
-        return self.execute_command('PUBSUB NUMPAT', **kwargs)
+        return self.execute_command("PUBSUB NUMPAT", **kwargs)
 
     def pubsub_numsub(self, *args, **kwargs):
         """
@@ -3659,7 +3709,7 @@ class PubSubCommands:
 
         For more information check https://redis.io/commands/pubsub-numsub
         """
-        return self.execute_command('PUBSUB NUMSUB', *args, **kwargs)
+        return self.execute_command("PUBSUB NUMSUB", *args, **kwargs)
 
 
 class ScriptCommands:
@@ -4353,9 +4403,9 @@ class ClusterCommands:
     """
     Class for Redis Cluster commands
     """
+
     def cluster(self, cluster_arg, *args, **kwargs):
-        return self.execute_command('CLUSTER %s' % cluster_arg.upper(), *args,
-                                    **kwargs)
+        return self.execute_command("CLUSTER %s" % cluster_arg.upper(), *args, **kwargs)
 
     def readwrite(self, **kwargs):
         """
@@ -4363,7 +4413,7 @@ class ClusterCommands:
 
         For more information check https://redis.io/commands/readwrite
         """
-        return self.execute_command('READWRITE', **kwargs)
+        return self.execute_command("READWRITE", **kwargs)
 
     def readonly(self, **kwargs):
         """
@@ -4371,23 +4421,35 @@ class ClusterCommands:
 
         For more information check https://redis.io/commands/readonly
         """
-        return self.execute_command('READONLY', **kwargs)
+        return self.execute_command("READONLY", **kwargs)
 
 
-class DataAccessCommands(BasicKeyCommands, ListCommands,
-                         ScanCommands, SetCommands, StreamCommands,
-                         SortedSetCommands,
-                         HyperlogCommands, HashCommands, GeoCommands,
-                         ):
+class DataAccessCommands(
+    BasicKeyCommands,
+    HyperlogCommands,
+    HashCommands,
+    GeoCommands,
+    ListCommands,
+    ScanCommands,
+    SetCommands,
+    StreamCommands,
+    SortedSetCommands,
+):
     """
     A class containing all of the implemented data access redis commands.
     This class is to be used as a mixin.
     """
 
 
-class CoreCommands(ACLCommands, ClusterCommands, DataAccessCommands,
-                   ManagementCommands, ModuleCommands, PubSubCommands,
-                   ScriptCommands):
+class CoreCommands(
+    ACLCommands,
+    ClusterCommands,
+    DataAccessCommands,
+    ManagementCommands,
+    ModuleCommands,
+    PubSubCommands,
+    ScriptCommands,
+):
     """
     A class containing all of the implemented redis commands. This class is
     to be used as a mixin.
