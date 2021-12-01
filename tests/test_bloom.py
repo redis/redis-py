@@ -1,4 +1,5 @@
 import pytest
+
 import redis.commands.bf
 from redis.exceptions import RedisError
 
@@ -78,7 +79,7 @@ def test_bf_scandump_and_loadchunk(client):
             client.bf().add("myBloom", x)
             rv = client.bf().exists("myBloom", x)
             assert rv
-            rv = client.bf().exists("myBloom", "nonexist_{}".format(x))
+            rv = client.bf().exists("myBloom", f"nonexist_{x}")
             res += rv == x
         assert res < 5
 
@@ -126,8 +127,9 @@ def test_bf_info(client):
 
     try:
         # noScale mean no expansion
-        client.bf().create("myBloom", "0.0001", "1000",
-                           expansion=expansion, noScale=True)
+        client.bf().create(
+            "myBloom", "0.0001", "1000", expansion=expansion, noScale=True
+        )
         assert False
     except RedisError:
         assert True
@@ -274,8 +276,7 @@ def test_topk(client):
         "E",
     )
     assert ["A", "B", "E"] == client.topk().list("topklist")
-    assert ["A", 4, "B", 3, "E", 3] == \
-           client.topk().list("topklist", withcount=True)
+    assert ["A", 4, "B", 3, "E", 3] == client.topk().list("topklist", withcount=True)
     info = client.topk().info("topklist")
     assert 3 == info.k
     assert 50 == info.width
@@ -290,10 +291,10 @@ def test_topk_incrby(client):
     assert [None, None, None] == client.topk().incrby(
         "topk", ["bar", "baz", "42"], [3, 6, 2]
     )
-    assert [None, "bar"] == \
-           client.topk().incrby("topk", ["42", "xyzzy"], [8, 4])
-    assert [3, 6, 10, 4, 0] == \
-           client.topk().count("topk", "bar", "baz", "42", "xyzzy", 4)
+    assert [None, "bar"] == client.topk().incrby("topk", ["42", "xyzzy"], [8, 4])
+    assert [3, 6, 10, 4, 0] == client.topk().count(
+        "topk", "bar", "baz", "42", "xyzzy", 4
+    )
 
 
 # region Test T-Digest
@@ -343,10 +344,8 @@ def test_tdigest_quantile(client):
         "tDigest", list([x * 0.01 for x in range(1, 10000)]), [1.0] * 10000
     )
     # assert min min/max have same result as quantile 0 and 1
-    assert client.tdigest().max("tDigest") \
-           == client.tdigest().quantile("tDigest", 1.0)
-    assert client.tdigest().min("tDigest") \
-           == client.tdigest().quantile("tDigest", 0.0)
+    assert client.tdigest().max("tDigest") == client.tdigest().quantile("tDigest", 1.0)
+    assert client.tdigest().min("tDigest") == client.tdigest().quantile("tDigest", 0.0)
 
     assert 1.0 == round(client.tdigest().quantile("tDigest", 0.01), 2)
     assert 99.0 == round(client.tdigest().quantile("tDigest", 0.99), 2)

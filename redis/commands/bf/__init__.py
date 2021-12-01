@@ -1,14 +1,8 @@
 from redis.client import bool_ok
 
-from .commands import *  # lgtm [py/polluting-import]
-from .info import (
-    BFInfo,
-    CFInfo,
-    CMSInfo,
-    TopKInfo,
-    TDigestInfo,
-)
 from ..helpers import parse_to_list
+from .commands import *  # noqa
+from .info import BFInfo, CFInfo, CMSInfo, TDigestInfo, TopKInfo
 
 
 class AbstractBloom(object):
@@ -22,6 +16,7 @@ class AbstractBloom(object):
     - TOPK for TopK Data Structure
     - TDIGEST for estimate rank statistics
     """
+
     @staticmethod
     def appendItems(params, items):
         """Append ITEMS to params."""

@@ -1,4 +1,4 @@
-class Field(object):
+class Field:
 
     NUMERIC = "NUMERIC"
     TEXT = "TEXT"
@@ -9,8 +9,7 @@ class Field(object):
     NOINDEX = "NOINDEX"
     AS = "AS"
 
-    def __init__(self, name, args=[], sortable=False,
-                 no_index=False, as_name=None):
+    def __init__(self, name, args=[], sortable=False, no_index=False, as_name=None):
         self.name = name
         self.args = args
         self.args_suffix = list()
@@ -47,8 +46,7 @@ class TextField(Field):
     def __init__(
         self, name, weight=1.0, no_stem=False, phonetic_matcher=None, **kwargs
     ):
-        Field.__init__(self, name,
-                       args=[Field.TEXT, Field.WEIGHT, weight], **kwargs)
+        Field.__init__(self, name, args=[Field.TEXT, Field.WEIGHT, weight], **kwargs)
 
         if no_stem:
             Field.append_arg(self, self.NOSTEM)

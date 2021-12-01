@@ -1,4 +1,4 @@
-class Query(object):
+class Query:
     """
     Query is used to build complex queries that have more parameters than just
     the query string. The query string is set in the constructor, and other
@@ -62,11 +62,9 @@ class Query(object):
     def _mk_field_list(self, fields):
         if not fields:
             return []
-        return  \
-            [fields] if isinstance(fields, str) else list(fields)
+        return [fields] if isinstance(fields, str) else list(fields)
 
-    def summarize(self, fields=None, context_len=None,
-                  num_frags=None, sep=None):
+    def summarize(self, fields=None, context_len=None, num_frags=None, sep=None):
         """
         Return an abridged format of the field, containing only the segments of
         the field which contain the matching term(s).
@@ -291,7 +289,7 @@ class Query(object):
         return self
 
 
-class Filter(object):
+class Filter:
     def __init__(self, keyword, field, *args):
         self.args = [keyword, field] + list(args)
 
@@ -300,11 +298,10 @@ class NumericFilter(Filter):
     INF = "+inf"
     NEG_INF = "-inf"
 
-    def __init__(self, field, minval, maxval, minExclusive=False,
-                 maxExclusive=False):
+    def __init__(self, field, minval, maxval, minExclusive=False, maxExclusive=False):
         args = [
-            minval if not minExclusive else "({}".format(minval),
-            maxval if not maxExclusive else "({}".format(maxval),
+            minval if not minExclusive else f"({minval}",
+            maxval if not maxExclusive else f"({maxval}",
         ]
 
         Filter.__init__(self, "FILTER", field, *args)
@@ -320,6 +317,6 @@ class GeoFilter(Filter):
         Filter.__init__(self, "GEOFILTER", field, lon, lat, radius, unit)
 
 
-class SortbyField(object):
+class SortbyField:
     def __init__(self, field, asc=True):
         self.args = [field, "ASC" if asc else "DESC"]
