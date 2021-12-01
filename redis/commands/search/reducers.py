@@ -3,7 +3,7 @@ from .aggregation import Reducer, SortDirection
 
 class FieldOnlyReducer(Reducer):
     def __init__(self, field):
-        super(FieldOnlyReducer, self).__init__(field)
+        super().__init__(field)
         self._field = field
 
 
@@ -15,7 +15,7 @@ class count(Reducer):
     NAME = "COUNT"
 
     def __init__(self):
-        super(count, self).__init__()
+        super().__init__()
 
 
 class sum(FieldOnlyReducer):
@@ -26,7 +26,7 @@ class sum(FieldOnlyReducer):
     NAME = "SUM"
 
     def __init__(self, field):
-        super(sum, self).__init__(field)
+        super().__init__(field)
 
 
 class min(FieldOnlyReducer):
@@ -37,7 +37,7 @@ class min(FieldOnlyReducer):
     NAME = "MIN"
 
     def __init__(self, field):
-        super(min, self).__init__(field)
+        super().__init__(field)
 
 
 class max(FieldOnlyReducer):
@@ -48,7 +48,7 @@ class max(FieldOnlyReducer):
     NAME = "MAX"
 
     def __init__(self, field):
-        super(max, self).__init__(field)
+        super().__init__(field)
 
 
 class avg(FieldOnlyReducer):
@@ -59,7 +59,7 @@ class avg(FieldOnlyReducer):
     NAME = "AVG"
 
     def __init__(self, field):
-        super(avg, self).__init__(field)
+        super().__init__(field)
 
 
 class tolist(FieldOnlyReducer):
@@ -70,7 +70,7 @@ class tolist(FieldOnlyReducer):
     NAME = "TOLIST"
 
     def __init__(self, field):
-        super(tolist, self).__init__(field)
+        super().__init__(field)
 
 
 class count_distinct(FieldOnlyReducer):
@@ -82,7 +82,7 @@ class count_distinct(FieldOnlyReducer):
     NAME = "COUNT_DISTINCT"
 
     def __init__(self, field):
-        super(count_distinct, self).__init__(field)
+        super().__init__(field)
 
 
 class count_distinctish(FieldOnlyReducer):
@@ -104,7 +104,7 @@ class quantile(Reducer):
     NAME = "QUANTILE"
 
     def __init__(self, field, pct):
-        super(quantile, self).__init__(field, str(pct))
+        super().__init__(field, str(pct))
         self._field = field
 
 
@@ -116,7 +116,7 @@ class stddev(FieldOnlyReducer):
     NAME = "STDDEV"
 
     def __init__(self, field):
-        super(stddev, self).__init__(field)
+        super().__init__(field)
 
 
 class first_value(Reducer):
@@ -155,7 +155,7 @@ class first_value(Reducer):
         args = [field]
         if fieldstrs:
             args += ["BY"] + fieldstrs
-        super(first_value, self).__init__(*args)
+        super().__init__(*args)
         self._field = field
 
 
@@ -174,5 +174,5 @@ class random_sample(Reducer):
         **size**: Return this many items (can be less)
         """
         args = [field, str(size)]
-        super(random_sample, self).__init__(*args)
+        super().__init__(*args)
         self._field = field

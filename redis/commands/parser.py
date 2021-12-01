@@ -1,7 +1,4 @@
-from redis.exceptions import (
-    RedisError,
-    ResponseError
-)
+from redis.exceptions import RedisError, ResponseError
 from redis.utils import str_if_bytes
 
 
@@ -13,6 +10,7 @@ class CommandsParser:
     'movablekeys', and these commands' keys are determined by the command
     'COMMAND GETKEYS'.
     """
+
     def __init__(self, redis_connection):
         self.initialized = False
         self.commands = {}
@@ -46,24 +44,29 @@ class CommandsParser:
                 # version has changed, the commands may not be current
                 self.initialize(redis_conn)
                 if cmd_name not in self.commands:
-                    raise RedisError("{0} command doesn't exist in Redis "
-                                     "commands".format(cmd_name.upper()))
+                    raise RedisError(
+                        f"{cmd_name.upper()} command doesn't exist in Redis commands"
+                    )
 
         command = self.commands.get(cmd_name)
-        if 'movablekeys' in command['flags']:
+        if "movablekeys" in command["flags"]:
             keys = self._get_moveable_keys(redis_conn, *args)
-        elif 'pubsub' in command['flags']:
+        elif "pubsub" in command["flags"]:
             keys = self._get_pubsub_keys(*args)
         else:
-            if command['step_count'] == 0 and command['first_key_pos'] == 0 \
-                    and command['last_key_pos'] == 0:
+            if (
+                command["step_count"] == 0
+                and command["first_key_pos"] == 0
+                and command["last_key_pos"] == 0
+            ):
                 # The command doesn't have keys in it
                 return None
-            last_key_pos = command['last_key_pos']
+            last_key_pos = command["last_key_pos"]
             if last_key_pos < 0:
                 last_key_pos = len(args) - abs(last_key_pos)
-            keys_pos = list(range(command['first_key_pos'], last_key_pos + 1,
-                                  command['step_count']))
+            keys_pos = list(
+                range(command["first_key_pos"], last_key_pos + 1, command["step_count"])
+            )
             keys = [args[pos] for pos in keys_pos]
 
         return keys
@@ -76,11 +79,13 @@ class CommandsParser:
         pieces = pieces + cmd_name.split()
         pieces = pieces + list(args[1:])
         try:
-            keys = redis_conn.execute_command('COMMAND GETKEYS', *pieces)
+            keys = redis_conn.execute_command("COMMAND GETKEYS", *pieces)
         except ResponseError as e:
             message = e.__str__()
-            if 'Invalid arguments' in message or \
-                    'The command has no key arguments' in message:
+            if (
+                "Invalid arguments" in message
+                or "The command has no key arguments" in message
+            ):
                 return None
             else:
                 raise e
@@ -98,18 +103,17 @@ class CommandsParser:
             return None
         args = [str_if_bytes(arg) for arg in args]
         command = args[0].upper()
-        if command == 'PUBSUB':
+        if command == "PUBSUB":
             # the second argument is a part of the command name, e.g.
             # ['PUBSUB', 'NUMSUB', 'foo'].
             pubsub_type = args[1].upper()
-            if pubsub_type in ['CHANNELS', 'NUMSUB']:
+            if pubsub_type in ["CHANNELS", "NUMSUB"]:
                 keys = args[2:]
-        elif command in ['SUBSCRIBE', 'PSUBSCRIBE', 'UNSUBSCRIBE',
-                         'PUNSUBSCRIBE']:
+        elif command in ["SUBSCRIBE", "PSUBSCRIBE", "UNSUBSCRIBE", "PUNSUBSCRIBE"]:
             # format example:
             # SUBSCRIBE channel [channel ...]
             keys = list(args[1:])
-        elif command == 'PUBLISH':
+        elif command == "PUBLISH":
             # format example:
             # PUBLISH channel message
             keys = [args[1]]
