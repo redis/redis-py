@@ -95,8 +95,7 @@ def get_mocked_redis_client(func=None, *args, **kwargs):
                 return {"get": [], "set": []}
             elif _args[0] == "INFO":
                 return {"cluster_enabled": cluster_enabled}
-            elif len(_args) > 1 and \
-                    _args[1] == "cluster-require-full-coverage":
+            elif len(_args) > 1 and _args[1] == "cluster-require-full-coverage":
                 return {"cluster-require-full-coverage": coverage_res}
             elif func is not None:
                 return func(*args, **kwargs)
