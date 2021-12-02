@@ -745,8 +745,7 @@ class RedisCluster(RedisClusterCommands):
         if self.moved_reinitialize_steps == 0:
             return False
         else:
-            return self.moved_reinitialize_counter % \
-                   self.moved_reinitialize_steps == 0
+            return self.moved_reinitialize_counter % self.moved_reinitialize_steps == 0
 
     def keyslot(self, key):
         """
@@ -1068,6 +1067,10 @@ class ClusterNode:
 
     def __eq__(self, obj):
         return isinstance(obj, ClusterNode) and obj.name == self.name
+
+    def __del__(self):
+        if self.redis_connection is not None:
+            self.redis_connection.close()
 
 
 class LoadBalancer:
