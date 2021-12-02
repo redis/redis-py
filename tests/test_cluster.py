@@ -36,7 +36,7 @@ from .conftest import (
     skip_if_redis_enterprise,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
-    wait_for_command
+    wait_for_command,
 )
 
 default_host = "127.0.0.1"
@@ -1772,7 +1772,7 @@ class TestClusterRedisCommands:
         assert r.randomkey(target_nodes=node) in (b"{foo}a", b"{foo}b", b"{foo}c")
 
     @skip_if_server_version_lt("6.0.0")
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_acl_log(self, r, request):
         key = "{cache}:"
         node = r.get_node_from_key(key)
@@ -1814,45 +1814,6 @@ class TestClusterRedisCommands:
         assert len(r.acl_log(count=1, target_nodes=node)) == 1
         assert isinstance(r.acl_log(target_nodes=node)[0], dict)
         assert "client-info" in r.acl_log(count=1, target_nodes=node)[0]
-        assert r.acl_log_reset(target_nodes=node)
-
-    @skip_if_server_version_lt("6.0.0")
-    @skip_if_redis_enterprise()
-    def test_acl_log(self, r, request):
-        key = '{cache}:'
-        node = r.get_node_from_key(key)
-        username = 'redis-py-user'
-
-        def teardown():
-            r.acl_deluser(username, target_nodes='primaries')
-
-        request.addfinalizer(teardown)
-        r.acl_setuser(username, enabled=True, reset=True,
-                      commands=['+get', '+set', '+select', '+cluster',
-                                '+command'], keys=['{cache}:*'], nopass=True,
-                      target_nodes='primaries')
-        r.acl_log_reset(target_nodes=node)
-
-        user_client = _get_client(RedisCluster, request, flushdb=False,
-                                  username=username)
-
-        # Valid operation and key
-        assert user_client.set('{cache}:0', 1)
-        assert user_client.get('{cache}:0') == b'1'
-
-        # Invalid key
-        with pytest.raises(NoPermissionError):
-            user_client.get('{cache}violated_cache:0')
-
-        # Invalid operation
-        with pytest.raises(NoPermissionError):
-            user_client.hset('{cache}:0', 'hkey', 'hval')
-
-        assert isinstance(r.acl_log(target_nodes=node), list)
-        assert len(r.acl_log(target_nodes=node)) == 2
-        assert len(r.acl_log(count=1, target_nodes=node)) == 1
-        assert isinstance(r.acl_log(target_nodes=node)[0], dict)
-        assert 'client-info' in r.acl_log(count=1, target_nodes=node)[0]
         assert r.acl_log_reset(target_nodes=node)
 
 
@@ -2659,48 +2620,48 @@ class TestReadOnlyPipeline:
 class TestClusterMonitor:
     def test_wait_command_not_found(self, r):
         "Make sure the wait_for_command func works when command is not found"
-        key = 'foo'
+        key = "foo"
         node = r.get_node_from_key(key)
         with r.monitor(target_node=node) as m:
-            response = wait_for_command(r, m, 'nothing', key=key)
+            response = wait_for_command(r, m, "nothing", key=key)
             assert response is None
 
     def test_response_values(self, r):
         db = 0
-        key = 'foo'
+        key = "foo"
         node = r.get_node_from_key(key)
         with r.monitor(target_node=node) as m:
             r.ping(target_nodes=node)
-            response = wait_for_command(r, m, 'PING', key=key)
-            assert isinstance(response['time'], float)
-            assert response['db'] == db
-            assert response['client_type'] in ('tcp', 'unix')
-            assert isinstance(response['client_address'], str)
-            assert isinstance(response['client_port'], str)
-            assert response['command'] == 'PING'
+            response = wait_for_command(r, m, "PING", key=key)
+            assert isinstance(response["time"], float)
+            assert response["db"] == db
+            assert response["client_type"] in ("tcp", "unix")
+            assert isinstance(response["client_address"], str)
+            assert isinstance(response["client_port"], str)
+            assert response["command"] == "PING"
 
     def test_command_with_quoted_key(self, r):
-        key = '{foo}1'
+        key = "{foo}1"
         node = r.get_node_from_key(key)
         with r.monitor(node) as m:
             r.get('{foo}"bar')
             response = wait_for_command(r, m, 'GET {foo}"bar', key=key)
-            assert response['command'] == 'GET {foo}"bar'
+            assert response["command"] == 'GET {foo}"bar'
 
     def test_command_with_binary_data(self, r):
-        key = '{foo}1'
+        key = "{foo}1"
         node = r.get_node_from_key(key)
         with r.monitor(target_node=node) as m:
-            byte_string = b'{foo}bar\x92'
+            byte_string = b"{foo}bar\x92"
             r.get(byte_string)
-            response = wait_for_command(r, m, 'GET {foo}bar\\x92', key=key)
-            assert response['command'] == 'GET {foo}bar\\x92'
+            response = wait_for_command(r, m, "GET {foo}bar\\x92", key=key)
+            assert response["command"] == "GET {foo}bar\\x92"
 
     def test_command_with_escaped_data(self, r):
-        key = '{foo}1'
+        key = "{foo}1"
         node = r.get_node_from_key(key)
         with r.monitor(target_node=node) as m:
-            byte_string = b'{foo}bar\\x92'
+            byte_string = b"{foo}bar\\x92"
             r.get(byte_string)
-            response = wait_for_command(r, m, 'GET {foo}bar\\\\x92', key=key)
-            assert response['command'] == 'GET {foo}bar\\\\x92'
+            response = wait_for_command(r, m, "GET {foo}bar\\\\x92", key=key)
+            assert response["command"] == "GET {foo}bar\\\\x92"
