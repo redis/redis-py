@@ -382,7 +382,7 @@ class RedisCluster(RedisClusterCommands):
         cluster_error_retry_attempts=3,
         require_full_coverage=True,
         skip_full_coverage_check=False,
-        moved_reinitialize_steps=10,
+        reinitialize_steps=10,
         read_from_replicas=False,
         url=None,
         retry_on_timeout=False,
@@ -422,16 +422,16 @@ class RedisCluster(RedisClusterCommands):
              then set `retry` to a valid `Retry` object
         :retry: 'Retry'
               a `Retry` object
-        :moved_reinitialize_steps: 'int'
+        :reinitialize_steps: 'int'
             Specifies the number of MOVED errors that need to occur before
             reinitializing the whole cluster topology. If a MOVED error occurs
             and the cluster does not need to be reinitialized on this current
             error handling, only the MOVED slot will be patched with the
             redirected node.
             To reinitialize the cluster on every MOVED error, set
-            moved_reinitialize_steps to 1.
+            reinitialize_steps to 1.
             To avoid reinitializing the cluster on moved errors, set
-            moved_reinitialize_steps to 0.
+            reinitialize_steps to 0.
 
          :**kwargs:
              Extra arguments that will be sent into Redis instance when created
@@ -506,8 +506,8 @@ class RedisCluster(RedisClusterCommands):
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
         self.read_from_replicas = read_from_replicas
-        self.moved_reinitialize_counter = 0
-        self.moved_reinitialize_steps = moved_reinitialize_steps
+        self.reinitialize_counter = 0
+        self.reinitialize_steps = reinitialize_steps
         self.nodes_manager = None
         self.nodes_manager = NodesManager(
             startup_nodes=startup_nodes,
@@ -699,7 +699,7 @@ class RedisCluster(RedisClusterCommands):
             cluster_response_callbacks=self.cluster_response_callbacks,
             cluster_error_retry_attempts=self.cluster_error_retry_attempts,
             read_from_replicas=self.read_from_replicas,
-            moved_reinitialize_steps=self.moved_reinitialize_steps,
+            reinitialize_steps=self.reinitialize_steps,
         )
 
     def _determine_nodes(self, *args, **kwargs):
@@ -739,13 +739,13 @@ class RedisCluster(RedisClusterCommands):
 
     def _should_reinitialized(self):
         # To reinitialize the cluster on every MOVED error,
-        # set moved_reinitialize_steps to 1.
+        # set reinitialize_steps to 1.
         # To avoid reinitializing the cluster on moved errors, set
-        # moved_reinitialize_steps to 0.
-        if self.moved_reinitialize_steps == 0:
+        # reinitialize_steps to 0.
+        if self.reinitialize_steps == 0:
             return False
         else:
-            return self.moved_reinitialize_counter % self.moved_reinitialize_steps == 0
+            return self.reinitialize_counter % self.reinitialize_steps == 0
 
     def keyslot(self, key):
         """
@@ -969,14 +969,14 @@ class RedisCluster(RedisClusterCommands):
             except MovedError as e:
                 # First, we will try to patch the slots/nodes cache with the
                 # redirected node output and try again. If MovedError exceeds
-                # 'moved_reinitialize_steps' number of times, we will force
+                # 'reinitialize_steps' number of times, we will force
                 # reinitializing the tables, and then try again.
-                # 'moved_reinitialize_steps' counter will increase faster when
+                # 'reinitialize_steps' counter will increase faster when
                 # the same client object is shared between multiple threads. To
                 # reduce the frequency you can set this variable in the
                 # RedisCluster constructor.
                 log.exception("MovedError")
-                self.moved_reinitialize_counter += 1
+                self.reinitialize_counter += 1
                 if self._should_reinitialized():
                     self.nodes_manager.initialize()
                 else:
@@ -1291,12 +1291,6 @@ class NodesManager:
             r = Redis(host=host, port=port, **kwargs)
         return r
 
-    def _is_cluster_enabled(self, redis_node):
-        """
-        Checks if the passed redis node has cluster mode enabled
-        """
-        return bool(redis_node.info().get("cluster_enabled")) is True
-
     def initialize(self):
         """
         Initializes the nodes cache, slots cache and redis connections.
@@ -1324,9 +1318,9 @@ class NodesManager:
                     )
                     self.startup_nodes[startup_node.name].redis_connection = r
                 # Make sure cluster mode is enabled on this node
-                if self._is_cluster_enabled(r) is False:
+                if bool(r.info().get("cluster_enabled")) is False:
                     raise RedisClusterException(
-                        "Cluster mode is not enabled " "on this node"
+                        "Cluster mode is not enabled on this node"
                     )
                 cluster_slots = r.execute_command("CLUSTER SLOTS")
                 startup_nodes_reachable = True
@@ -1633,7 +1627,7 @@ class ClusterPipeline(RedisCluster):
         startup_nodes=None,
         read_from_replicas=False,
         cluster_error_retry_attempts=3,
-        moved_reinitialize_steps=10,
+        reinitialize_steps=10,
         **kwargs,
     ):
         """ """
@@ -1649,8 +1643,8 @@ class ClusterPipeline(RedisCluster):
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.cluster_response_callbacks = cluster_response_callbacks
         self.cluster_error_retry_attempts = cluster_error_retry_attempts
-        self.moved_reinitialize_counter = 0
-        self.moved_reinitialize_steps = moved_reinitialize_steps
+        self.reinitialize_counter = 0
+        self.reinitialize_steps = reinitialize_steps
         self.encoder = Encoder(
             kwargs.get("encoding", "utf-8"),
             kwargs.get("encoding_errors", "strict"),
@@ -1922,7 +1916,7 @@ class ClusterPipeline(RedisCluster):
                 f"error: {type(attempt[-1].result).__name__} "
                 f"{str(attempt[-1].result)}"
             )
-            self.moved_reinitialize_counter += 1
+            self.reinitialize_counter += 1
             if self._should_reinitialized():
                 self.nodes_manager.initialize()
             for c in attempt:
