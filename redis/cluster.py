@@ -1291,6 +1291,12 @@ class NodesManager:
             r = Redis(host=host, port=port, **kwargs)
         return r
 
+    def _is_cluster_enabled(self, redis_node):
+        """
+        Checks if the passed redis node has cluster mode enabled
+        """
+        return bool(redis_node.info().get("cluster_enabled")) is True
+
     def initialize(self):
         """
         Initializes the nodes cache, slots cache and redis connections.
@@ -1317,6 +1323,11 @@ class NodesManager:
                         startup_node.host, startup_node.port, **copy_kwargs
                     )
                     self.startup_nodes[startup_node.name].redis_connection = r
+                # Make sure cluster mode is enabled on this node
+                if self._is_cluster_enabled(r) is False:
+                    raise RedisClusterException(
+                        "Cluster mode is not enabled " "on this node"
+                    )
                 cluster_slots = r.execute_command("CLUSTER SLOTS")
                 startup_nodes_reachable = True
             except (ConnectionError, TimeoutError) as e:
@@ -1344,7 +1355,7 @@ class NodesManager:
                 message = e.__str__()
                 raise RedisClusterException(
                     'ERROR sending "cluster slots" command to redis '
-                    f"server: {startup_node}. error: {message}"
+                    f"server {startup_node.name}. error: {message}"
                 )
 
             # CLUSTER SLOTS command results in the following output:

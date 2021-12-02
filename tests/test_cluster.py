@@ -84,6 +84,7 @@ def get_mocked_redis_client(func=None, *args, **kwargs):
     """
     cluster_slots = kwargs.pop("cluster_slots", default_cluster_slots)
     coverage_res = kwargs.pop("coverage_result", "yes")
+    cluster_enabled = kwargs.pop("cluster_enabled", True)
     with patch.object(Redis, "execute_command") as execute_command_mock:
 
         def execute_command(*_args, **_kwargs):
@@ -92,8 +93,10 @@ def get_mocked_redis_client(func=None, *args, **kwargs):
                 return mock_cluster_slots
             elif _args[0] == "COMMAND":
                 return {"get": [], "set": []}
-            elif _args[1] == "cluster-require-full-coverage":
+            elif len(_args) > 1 and _args[1] == "cluster-require-full-coverage":
                 return {"cluster-require-full-coverage": coverage_res}
+            elif _args[0] == "INFO":
+                return {"cluster_enabled": cluster_enabled}
             elif func is not None:
                 return func(*args, **kwargs)
             else:
@@ -1973,6 +1976,17 @@ class TestNodesManager:
                 assert n_manager.slots_cache[i][1].port in all_ports
 
         assert len(n_manager.nodes_cache) == 6
+
+    def test_init_slots_cache_cluster_mode_disabled(self):
+        """
+        Test that creating a RedisCluster failes if one of the startup nodes
+        has cluster mode disabled
+        """
+        with pytest.raises(RedisClusterException) as e:
+            get_mocked_redis_client(
+                host=default_host, port=default_port, cluster_enabled=False
+            )
+            assert "Cluster mode is not enabled on this node" in str(e.value)
 
     def test_empty_startup_nodes(self):
         """
