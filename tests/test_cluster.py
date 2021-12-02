@@ -93,10 +93,11 @@ def get_mocked_redis_client(func=None, *args, **kwargs):
                 return mock_cluster_slots
             elif _args[0] == "COMMAND":
                 return {"get": [], "set": []}
-            elif len(_args) > 1 and _args[1] == "cluster-require-full-coverage":
-                return {"cluster-require-full-coverage": coverage_res}
             elif _args[0] == "INFO":
                 return {"cluster_enabled": cluster_enabled}
+            elif len(_args) > 1 and \
+                    _args[1] == "cluster-require-full-coverage":
+                return {"cluster-require-full-coverage": coverage_res}
             elif func is not None:
                 return func(*args, **kwargs)
             else:
@@ -2058,6 +2059,8 @@ class TestNodesManager:
                 def execute_command(*args, **kwargs):
                     if args[0] == "CLUSTER SLOTS":
                         return result
+                    elif args[0] == "INFO":
+                        return {"cluster_enabled": True}
                     elif args[1] == "cluster-require-full-coverage":
                         return {"cluster-require-full-coverage": "yes"}
                     else:
@@ -2122,6 +2125,8 @@ class TestNodesManager:
                                 ["127.0.0.1", 7002, "node_2"],
                             ],
                         ]
+                    elif args[0] == "INFO":
+                        return {"cluster_enabled": True}
                     elif args[1] == "cluster-require-full-coverage":
                         return {"cluster-require-full-coverage": "yes"}
 
