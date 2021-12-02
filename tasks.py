@@ -47,7 +47,7 @@ def tests(c):
     with and without hiredis.
     """
     print("Starting Redis tests")
-    run("tox -e '{standalone,cluster}'-'{hiredis}'")
+    run("tox -e '{standalone,cluster}'-'{plain,hiredis}'")
 
 
 @task
