@@ -55,7 +55,7 @@ def standalone_tests(c):
     """Run all Redis tests against the current python,
     with and without hiredis."""
     print("Starting Redis tests")
-    run("tox -e standalone-'{hiredis}'")
+    run("tox -e standalone-'{plain,hiredis}'")
 
 
 @task
