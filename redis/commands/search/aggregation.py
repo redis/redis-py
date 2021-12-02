@@ -103,6 +103,7 @@ class AggregateRequest:
         self._query = query
         self._aggregateplan = []
         self._loadfields = []
+        self._loadall = False
         self._limit = Limit()
         self._max = 0
         self._with_schema = False
@@ -116,9 +117,13 @@ class AggregateRequest:
 
         ### Parameters
 
-        - **fields**: One or more fields in the format of `@field`
+        - **fields**: If fields not specified, all the fields will be loaded.
+        Otherwise, fields should be given in the format of `@field`.
         """
-        self._loadfields.extend(fields)
+        if fields:
+            self._loadfields.extend(fields)
+        else:
+            self._loadall = True
         return self
 
     def group_by(self, fields, *reducers):
@@ -308,7 +313,10 @@ class AggregateRequest:
         if self._cursor:
             ret += self._cursor
 
-        if self._loadfields:
+        if self._loadall:
+            ret.append("LOAD")
+            ret.append("*")
+        elif self._loadfields:
             ret.append("LOAD")
             ret.append(str(len(self._loadfields)))
             ret.extend(self._loadfields)

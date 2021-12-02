@@ -1131,6 +1131,10 @@ class ConnectionPool:
         arguments always win.
         """
         url_options = parse_url(url)
+
+        if "connection_class" in kwargs:
+            url_options["connection_class"] = kwargs["connection_class"]
+
         kwargs.update(url_options)
         return cls(**kwargs)
 
