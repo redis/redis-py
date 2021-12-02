@@ -1,13 +1,13 @@
 import itertools
 import time
 
-from .document import Document
-from .result import Result
-from .query import Query
+from ..helpers import parse_to_dict
 from ._util import to_string
 from .aggregation import AggregateRequest, AggregateResult, Cursor
+from .document import Document
+from .query import Query
+from .result import Result
 from .suggestion import SuggestionParser
-from ..helpers import parse_to_dict
 
 NUMERIC = "NUMERIC"
 
@@ -148,7 +148,7 @@ class SearchCommands:
         partial=False,
         language=None,
         no_create=False,
-        **fields
+        **fields,
     ):
         """
         Internal add_document used for both batch and single doc indexing
@@ -211,7 +211,7 @@ class SearchCommands:
         partial=False,
         language=None,
         no_create=False,
-        **fields
+        **fields,
     ):
         """
         Add a single document to the index.
@@ -253,7 +253,7 @@ class SearchCommands:
             partial=partial,
             language=language,
             no_create=no_create,
-            **fields
+            **fields,
         )
 
     def add_document_hash(
@@ -274,7 +274,7 @@ class SearchCommands:
         - **replace**: if True, and the document already is in the index, we
                       perform an update and reindex the document
         - **language**: Specify the language used for document tokenization.
-        
+
         For more information: https://oss.redis.com/redisearch/Commands/#ftaddhash
         """  # noqa
         return self._add_document_hash(
@@ -294,7 +294,7 @@ class SearchCommands:
 
         - **delete_actual_document**: if set to True, RediSearch also delete
                                       the actual document if it is in the index
-                                      
+
         For more information: https://oss.redis.com/redisearch/Commands/#ftdel
         """  # noqa
         args = [DEL_CMD, self.index_name, doc_id]
@@ -453,7 +453,7 @@ class SearchCommands:
         cmd = [PROFILE_CMD, self.index_name, ""]
         if limited:
             cmd.append("LIMITED")
-        cmd.append('QUERY')
+        cmd.append("QUERY")
 
         if isinstance(query, AggregateRequest):
             cmd[2] = "AGGREGATE"
@@ -462,19 +462,20 @@ class SearchCommands:
             cmd[2] = "SEARCH"
             cmd += query.get_args()
         else:
-            raise ValueError("Must provide AggregateRequest object or "
-                             "Query object.")
+            raise ValueError("Must provide AggregateRequest object or " "Query object.")
 
         res = self.execute_command(*cmd)
 
         if isinstance(query, AggregateRequest):
             result = self._get_AggregateResult(res[0], query, query._cursor)
         else:
-            result = Result(res[0],
-                            not query._no_content,
-                            duration=(time.time() - st) * 1000.0,
-                            has_payload=query._with_payloads,
-                            with_scores=query._with_scores,)
+            result = Result(
+                res[0],
+                not query._no_content,
+                duration=(time.time() - st) * 1000.0,
+                has_payload=query._with_payloads,
+                with_scores=query._with_scores,
+            )
 
         return result, parse_to_dict(res[1])
 
@@ -535,8 +536,7 @@ class SearchCommands:
             #     ]
             # }
             corrections[_correction[1]] = [
-                {"score": _item[0], "suggestion": _item[1]}
-                for _item in _correction[2]
+                {"score": _item[0], "suggestion": _item[1]} for _item in _correction[2]
             ]
 
         return corrections
@@ -704,8 +704,7 @@ class SearchCommands:
         return self.execute_command(SUGDEL_COMMAND, key, string)
 
     def sugget(
-        self, key, prefix, fuzzy=False, num=10, with_scores=False,
-        with_payloads=False
+        self, key, prefix, fuzzy=False, num=10, with_scores=False, with_payloads=False
     ):
         """
         Get a list of suggestions from the AutoCompleter, for a given prefix.
@@ -769,7 +768,7 @@ class SearchCommands:
             If set to true, we do not scan and index.
         terms :
             The terms.
-            
+
         For more information: https://oss.redis.com/redisearch/Commands/#ftsynupdate
         """  # noqa
         cmd = [SYNUPDATE_CMD, self.index_name, groupid]

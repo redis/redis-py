@@ -4,10 +4,7 @@ from binascii import crc_hqx
 # For more information see: https://github.com/redis/redis/issues/2576
 REDIS_CLUSTER_HASH_SLOTS = 16384
 
-__all__ = [
-    "key_slot",
-    "REDIS_CLUSTER_HASH_SLOTS"
-]
+__all__ = ["key_slot", "REDIS_CLUSTER_HASH_SLOTS"]
 
 
 def key_slot(key, bucket=REDIS_CLUSTER_HASH_SLOTS):
@@ -20,5 +17,5 @@ def key_slot(key, bucket=REDIS_CLUSTER_HASH_SLOTS):
     if start > -1:
         end = key.find(b"}", start + 1)
         if end > -1 and end != start + 1:
-            key = key[start + 1: end]
+            key = key[start + 1 : end]
     return crc_hqx(key, 0) % bucket
