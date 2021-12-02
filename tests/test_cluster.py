@@ -2576,14 +2576,14 @@ class TestReadOnlyPipeline:
                     raise MovedError(moved_error)
 
                 mock_node_resp_func(replica, raise_moved_error)
-            assert readwrite_pipe.reinitialize_counter == 0
+            assert readwrite_pipe.moved_reinitialize_counter == 0
             readwrite_pipe.get(key).get(key)
             assert readwrite_pipe.execute() == ["MOCK_FOO", "MOCK_FOO"]
             if replica is not None:
                 # the slot has a replica as well, so MovedError should have
                 # occurred. If MovedError occurs, we should see the
                 # reinitialize_counter increase.
-                assert readwrite_pipe.reinitialize_counter == 1
+                assert readwrite_pipe.moved_reinitialize_counter == 1
                 conn = replica.redis_connection.connection
                 assert conn.read_response.called is True
 

@@ -382,7 +382,7 @@ class RedisCluster(RedisClusterCommands):
         cluster_error_retry_attempts=3,
         require_full_coverage=True,
         skip_full_coverage_check=False,
-        reinitialize_steps=10,
+        moved_reinitialize_steps=10,
         read_from_replicas=False,
         url=None,
         retry_on_timeout=False,
@@ -414,14 +414,25 @@ class RedisCluster(RedisClusterCommands):
              stale data.
              When set to true, read commands will be assigned between the
              primary and its replications in a Round-Robin manner.
-         :cluster_error_retry_attempts: 'int'
+        :cluster_error_retry_attempts: 'int'
              Retry command execution attempts when encountering ClusterDownError
              or ConnectionError
-         :retry_on_timeout: 'bool'
+        :retry_on_timeout: 'bool'
              To specify a retry policy, first set `retry_on_timeout` to `True`
              then set `retry` to a valid `Retry` object
-         :retry: 'Retry'
+        :retry: 'Retry'
               a `Retry` object
+        :moved_reinitialize_steps: 'int'
+            Specifies the number of MOVED errors that need to occur before
+            reinitializing the whole cluster topology. If a MOVED error occurs
+            and the cluster does not need to be reinitialized on this current
+            error handling, only the MOVED slot will be patched with the
+            redirected node.
+            To reinitialize the cluster on every MOVED error, set
+            moved_reinitialize_steps to 1.
+            To avoid reinitializing the cluster on moved errors, set
+            moved_reinitialize_steps to 0.
+
          :**kwargs:
              Extra arguments that will be sent into Redis instance when created
              (See Official redis-py doc for supported kwargs
@@ -495,8 +506,8 @@ class RedisCluster(RedisClusterCommands):
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
         self.read_from_replicas = read_from_replicas
-        self.reinitialize_counter = 0
-        self.reinitialize_steps = reinitialize_steps
+        self.moved_reinitialize_counter = 0
+        self.moved_reinitialize_steps = moved_reinitialize_steps
         self.nodes_manager = None
         self.nodes_manager = NodesManager(
             startup_nodes=startup_nodes,
@@ -688,7 +699,7 @@ class RedisCluster(RedisClusterCommands):
             cluster_response_callbacks=self.cluster_response_callbacks,
             cluster_error_retry_attempts=self.cluster_error_retry_attempts,
             read_from_replicas=self.read_from_replicas,
-            reinitialize_steps=self.reinitialize_steps,
+            moved_reinitialize_steps=self.moved_reinitialize_steps,
         )
 
     def _determine_nodes(self, *args, **kwargs):
@@ -727,12 +738,15 @@ class RedisCluster(RedisClusterCommands):
             return [node]
 
     def _should_reinitialized(self):
-        # In order not to reinitialize the cluster, the user can set
-        # reinitialize_steps to 0.
-        if self.reinitialize_steps == 0:
+        # To reinitialize the cluster on every MOVED error,
+        # set moved_reinitialize_steps to 1.
+        # To avoid reinitializing the cluster on moved errors, set
+        # moved_reinitialize_steps to 0.
+        if self.moved_reinitialize_steps == 0:
             return False
         else:
-            return self.reinitialize_counter % self.reinitialize_steps == 0
+            return self.moved_reinitialize_counter % \
+                   self.moved_reinitialize_steps == 0
 
     def keyslot(self, key):
         """
@@ -956,14 +970,14 @@ class RedisCluster(RedisClusterCommands):
             except MovedError as e:
                 # First, we will try to patch the slots/nodes cache with the
                 # redirected node output and try again. If MovedError exceeds
-                # 'reinitialize_steps' number of times, we will force
+                # 'moved_reinitialize_steps' number of times, we will force
                 # reinitializing the tables, and then try again.
-                # 'reinitialize_steps' counter will increase faster when the
-                # same client object is shared between multiple threads. To
+                # 'moved_reinitialize_steps' counter will increase faster when
+                # the same client object is shared between multiple threads. To
                 # reduce the frequency you can set this variable in the
                 # RedisCluster constructor.
                 log.exception("MovedError")
-                self.reinitialize_counter += 1
+                self.moved_reinitialize_counter += 1
                 if self._should_reinitialized():
                     self.nodes_manager.initialize()
                 else:
@@ -1605,7 +1619,7 @@ class ClusterPipeline(RedisCluster):
         startup_nodes=None,
         read_from_replicas=False,
         cluster_error_retry_attempts=3,
-        reinitialize_steps=10,
+        moved_reinitialize_steps=10,
         **kwargs,
     ):
         """ """
@@ -1621,8 +1635,8 @@ class ClusterPipeline(RedisCluster):
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.cluster_response_callbacks = cluster_response_callbacks
         self.cluster_error_retry_attempts = cluster_error_retry_attempts
-        self.reinitialize_counter = 0
-        self.reinitialize_steps = reinitialize_steps
+        self.moved_reinitialize_counter = 0
+        self.moved_reinitialize_steps = moved_reinitialize_steps
         self.encoder = Encoder(
             kwargs.get("encoding", "utf-8"),
             kwargs.get("encoding_errors", "strict"),
@@ -1894,7 +1908,7 @@ class ClusterPipeline(RedisCluster):
                 f"error: {type(attempt[-1].result).__name__} "
                 f"{str(attempt[-1].result)}"
             )
-            self.reinitialize_counter += 1
+            self.moved_reinitialize_counter += 1
             if self._should_reinitialized():
                 self.nodes_manager.initialize()
             for c in attempt:
