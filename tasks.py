@@ -1,11 +1,11 @@
 import os
 import shutil
-from invoke import task, run
 
-with open('tox.ini') as fp:
+from invoke import run, task
+
+with open("tox.ini") as fp:
     lines = fp.read().split("\n")
-    dockers = [line.split("=")[1].strip() for line in lines
-               if line.find("name") != -1]
+    dockers = [line.split("=")[1].strip() for line in lines if line.find("name") != -1]
 
 
 @task
@@ -14,9 +14,9 @@ def devenv(c):
     specified in the tox.ini file.
     """
     clean(c)
-    cmd = 'tox -e devenv'
+    cmd = "tox -e devenv"
     for d in dockers:
-        cmd += " --docker-dont-stop={}".format(d)
+        cmd += f" --docker-dont-stop={d}"
     run(cmd)
 
 
@@ -55,7 +55,7 @@ def standalone_tests(c):
     """Run all Redis tests against the current python,
     with and without hiredis."""
     print("Starting Redis tests")
-    run("tox -e standalone-'{hiredis}'")
+    run("tox -e standalone-'{plain,hiredis}'")
 
 
 @task
@@ -73,7 +73,7 @@ def clean(c):
         shutil.rmtree("build")
     if os.path.isdir("dist"):
         shutil.rmtree("dist")
-    run("docker rm -f {}".format(' '.join(dockers)))
+    run(f"docker rm -f {' '.join(dockers)}")
 
 
 @task

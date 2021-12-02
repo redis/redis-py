@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
+
 import redis
 
 setup(
@@ -14,9 +15,11 @@ setup(
         include=[
             "redis",
             "redis.commands",
+            "redis.commands.bf",
             "redis.commands.json",
             "redis.commands.search",
             "redis.commands.timeseries",
+            "redis.commands.graph",
         ]
     ),
     url="https://github.com/redis/redis-py",
@@ -24,8 +27,8 @@ setup(
     author_email="oss@redis.com",
     python_requires=">=3.6",
     install_requires=[
-        'deprecated==1.2.3',
-        'packaging==21.3',
+        "deprecated==1.2.3",
+        "packaging==21.3",
     ],
     classifiers=[
         "Development Status :: 5 - Production/Stable",

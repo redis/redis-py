@@ -1,6 +1,7 @@
-from ..helpers import nativestr
-import re
 import copy
+import re
+
+from ..helpers import nativestr
 
 
 def bulk_of_jsons(d):
@@ -33,7 +34,7 @@ def unstring(obj):
     One can't simply call int/float in a try/catch because there is a
     semantic difference between (for example) 15.0 and 15.
     """
-    floatreg = '^\\d+.\\d+$'
+    floatreg = "^\\d+.\\d+$"
     match = re.findall(floatreg, obj)
     if match != []:
         return float(match[0])

@@ -1,19 +1,12 @@
 import redis.client
 
-from .utils import (
-    parse_range,
-    parse_get,
-    parse_m_range,
-    parse_m_get,
-)
-from .info import TSInfo
 from ..helpers import parse_to_list
 from .commands import (
     ALTER_CMD,
     CREATE_CMD,
     CREATERULE_CMD,
-    DELETERULE_CMD,
     DEL_CMD,
+    DELETERULE_CMD,
     GET_CMD,
     INFO_CMD,
     MGET_CMD,
@@ -24,6 +17,8 @@ from .commands import (
     REVRANGE_CMD,
     TimeSeriesCommands,
 )
+from .info import TSInfo
+from .utils import parse_get, parse_m_get, parse_m_range, parse_range
 
 
 class TimeSeries(TimeSeriesCommands):

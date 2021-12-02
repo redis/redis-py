@@ -9,41 +9,39 @@ class SentinelCommands:
 
     def sentinel(self, *args):
         "Redis Sentinel's SENTINEL command."
-        warnings.warn(
-            DeprecationWarning('Use the individual sentinel_* methods'))
+        warnings.warn(DeprecationWarning("Use the individual sentinel_* methods"))
 
     def sentinel_get_master_addr_by_name(self, service_name):
         "Returns a (host, port) pair for the given ``service_name``"
-        return self.execute_command('SENTINEL GET-MASTER-ADDR-BY-NAME',
-                                    service_name)
+        return self.execute_command("SENTINEL GET-MASTER-ADDR-BY-NAME", service_name)
 
     def sentinel_master(self, service_name):
         "Returns a dictionary containing the specified masters state."
-        return self.execute_command('SENTINEL MASTER', service_name)
+        return self.execute_command("SENTINEL MASTER", service_name)
 
     def sentinel_masters(self):
         "Returns a list of dictionaries containing each master's state."
-        return self.execute_command('SENTINEL MASTERS')
+        return self.execute_command("SENTINEL MASTERS")
 
     def sentinel_monitor(self, name, ip, port, quorum):
         "Add a new master to Sentinel to be monitored"
-        return self.execute_command('SENTINEL MONITOR', name, ip, port, quorum)
+        return self.execute_command("SENTINEL MONITOR", name, ip, port, quorum)
 
     def sentinel_remove(self, name):
         "Remove a master from Sentinel's monitoring"
-        return self.execute_command('SENTINEL REMOVE', name)
+        return self.execute_command("SENTINEL REMOVE", name)
 
     def sentinel_sentinels(self, service_name):
         "Returns a list of sentinels for ``service_name``"
-        return self.execute_command('SENTINEL SENTINELS', service_name)
+        return self.execute_command("SENTINEL SENTINELS", service_name)
 
     def sentinel_set(self, name, option, value):
         "Set Sentinel monitoring parameters for a given master"
-        return self.execute_command('SENTINEL SET', name, option, value)
+        return self.execute_command("SENTINEL SET", name, option, value)
 
     def sentinel_slaves(self, service_name):
         "Returns a list of slaves for ``service_name``"
-        return self.execute_command('SENTINEL SLAVES', service_name)
+        return self.execute_command("SENTINEL SLAVES", service_name)
 
     def sentinel_reset(self, pattern):
         """
@@ -54,7 +52,7 @@ class SentinelCommands:
         failover in progress), and removes every slave and sentinel already
         discovered and associated with the master.
         """
-        return self.execute_command('SENTINEL RESET', pattern, once=True)
+        return self.execute_command("SENTINEL RESET", pattern, once=True)
 
     def sentinel_failover(self, new_master_name):
         """
@@ -63,7 +61,7 @@ class SentinelCommands:
         configuration will be published so that the other Sentinels will
         update their configurations).
         """
-        return self.execute_command('SENTINEL FAILOVER', new_master_name)
+        return self.execute_command("SENTINEL FAILOVER", new_master_name)
 
     def sentinel_ckquorum(self, new_master_name):
         """
@@ -74,9 +72,7 @@ class SentinelCommands:
         This command should be used in monitoring systems to check if a
         Sentinel deployment is ok.
         """
-        return self.execute_command('SENTINEL CKQUORUM',
-                                    new_master_name,
-                                    once=True)
+        return self.execute_command("SENTINEL CKQUORUM", new_master_name, once=True)
 
     def sentinel_flushconfig(self):
         """
@@ -94,4 +90,4 @@ class SentinelCommands:
         This command works even if the previous configuration file is
         completely missing.
         """
-        return self.execute_command('SENTINEL FLUSHCONFIG')
+        return self.execute_command("SENTINEL FLUSHCONFIG")
