@@ -338,10 +338,10 @@ class ManagementCommands:
         Provide information on the role of a Redis instance in
         the context of replication, by returning if the instance
         is currently a master, slave, or sentinel.
-        
+
         For more information check https://redis.io/commands/role
         """
-        return self.execute_command('ROLE')
+        return self.execute_command("ROLE")
 
     def client_kill(self, address, **kwargs):
         """Disconnects the client at ``address`` (ip:port)
@@ -874,11 +874,15 @@ class ManagementCommands:
 
         For more information check https://redis.io/commands/slowlog-get
         """
+        from redis.client import NEVER_DECODE
+
         args = ["SLOWLOG GET"]
         if num is not None:
             args.append(num)
         decode_responses = self.get_connection_kwargs().get("decode_responses", False)
-        return self.execute_command(*args, decode_responses=decode_responses, **kwargs)
+        if decode_responses is True:
+            kwargs[NEVER_DECODE] = []
+        return self.execute_command(*args, **kwargs)
 
     def slowlog_len(self, **kwargs):
         """

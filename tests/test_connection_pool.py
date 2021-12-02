@@ -450,7 +450,7 @@ class TestConnectionPoolUnixSocketURLParsing:
             pass
 
         pool = redis.ConnectionPool.from_url(
-            'unix:///socket', connection_class=MyConnection
+            "unix:///socket", connection_class=MyConnection
         )
         assert pool.connection_class == MyConnection
 
@@ -469,7 +469,7 @@ class TestSSLConnectionURLParsing:
             pass
 
         pool = redis.ConnectionPool.from_url(
-            'rediss://my.host', connection_class=MyConnection
+            "rediss://my.host", connection_class=MyConnection
         )
         assert pool.connection_class == MyConnection
 

@@ -653,12 +653,14 @@ class TestRedisCommands:
     def test_quit(self, r):
         assert r.quit()
 
-    @skip_if_server_version_lt('2.8.12')
+    @skip_if_server_version_lt("2.8.12")
+    @pytest.mark.onlynoncluster
     def test_role(self, r):
-        assert r.role()[0] == b'master'
+        assert r.role()[0] == b"master"
         assert isinstance(r.role()[1], int)
         assert isinstance(r.role()[2], list)
 
+    @pytest.mark.onlynoncluster
     def test_slowlog_get(self, r, slowlog):
         assert r.slowlog_reset()
         unicode_string = chr(3456) + "abcd" + chr(3421)
