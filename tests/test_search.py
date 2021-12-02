@@ -1054,6 +1054,11 @@ def test_aggregations_load(client):
     res = client.ft().aggregate(req)
     assert res.rows[0] == ["t2", "world"]
 
+    # load all
+    req = aggregations.AggregateRequest("*").load()
+    res = client.ft().aggregate(req)
+    assert res.rows[0] == ["t1", "hello", "t2", "world"]
+
 
 @pytest.mark.redismod
 def test_aggregations_apply(client):
