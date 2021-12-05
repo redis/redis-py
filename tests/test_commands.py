@@ -537,7 +537,8 @@ class TestRedisCommands:
             killuser,
             enabled=True,
             reset=True,
-            commands=["+get", "+set", "+select", "+cluster", "+command"],
+            commands=["+get", "+set", "+select",
+                      "+cluster", "+command", "+info"],
             keys=["cache:*"],
             nopass=True,
         )
