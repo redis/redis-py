@@ -2,10 +2,10 @@
 
 The Python interface to the Redis key-value store.
 
-[![CI](https://github.com/redis/redis-py/workflows/CI/badge.svg?branch=master)](https://github.com/redis/redis-py/actions?query=workflow%3ACI+branch%3Amaster) 
-[![docs](https://readthedocs.org/projects/redis-py/badge/?version=stable&style=flat)](https://redis-py.readthedocs.io/en/stable/) 
-[![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE.txt)
-[![pypi](https://badge.fury.io/py/redis.svg)](https://pypi.org/project/redis/) 
+[![CI](https://github.com/redis/redis-py/workflows/CI/badge.svg?branch=master)](https://github.com/redis/redis-py/actions?query=workflow%3ACI+branch%3Amaster)
+[![docs](https://readthedocs.org/projects/redis-py/badge/?version=stable&style=flat)](https://redis-py.readthedocs.io/en/stable/)
+[![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![pypi](https://badge.fury.io/py/redis.svg)](https://pypi.org/project/redis/)
 [![codecov](https://codecov.io/gh/redis/redis-py/branch/master/graph/badge.svg?token=yenl5fzxxr)](https://codecov.io/gh/redis/redis-py)
 [![Total alerts](https://img.shields.io/lgtm/alerts/g/redis/redis-py.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/redis/redis-py/alerts/)
 
@@ -72,7 +72,7 @@ specified.
 The default encoding is utf-8, but this can be customized by specifiying the
 encoding argument for the redis.Redis class.
 The encoding will be used to automatically encode any
-strings passed to commands, such as key names and values. 
+strings passed to commands, such as key names and values.
 
 
 --------------------
@@ -951,16 +951,16 @@ C 3
 redis-py is now supports cluster mode and provides a client for
 [Redis Cluster](<https://redis.io/topics/cluster-tutorial>).
 
-The cluster client is based on Grokzen's 
-[redis-py-cluster](https://github.com/Grokzen/redis-py-cluster), has added bug 
-fixes, and now supersedes that library. Support for these changes is thanks to 
+The cluster client is based on Grokzen's
+[redis-py-cluster](https://github.com/Grokzen/redis-py-cluster), has added bug
+fixes, and now supersedes that library. Support for these changes is thanks to
 his contributions.
 
 
 **Create RedisCluster:**
 
-Connecting redis-py to a Redis Cluster instance(s) requires at a minimum a 
-single node for cluster discovery. There are multiple ways in which a cluster 
+Connecting redis-py to a Redis Cluster instance(s) requires at a minimum a
+single node for cluster discovery. There are multiple ways in which a cluster
 instance can be created:
 
 - Using 'host' and 'port' arguments:
@@ -1001,16 +1001,16 @@ RedisCluster instance can be directly used to execute Redis commands. When a
 command is being executed through the cluster instance, the target node(s) will
 be internally determined. When using a key-based command, the target node will
 be the node that holds the key's slot.
-Cluster management commands and other commands that are not key-based have a 
-parameter called 'target_nodes' where you can specify which nodes to execute 
-the command on. In the absence of target_nodes, the command will be executed 
-on the default cluster node. As part of cluster instance initialization, the 
-cluster's default node is randomly selected from the cluster's primaries, and 
-will be updated upon reinitialization. Using r.get_default_node(), you can 
-get the cluster's default node, or you can change it using the 
+Cluster management commands and other commands that are not key-based have a
+parameter called 'target_nodes' where you can specify which nodes to execute
+the command on. In the absence of target_nodes, the command will be executed
+on the default cluster node. As part of cluster instance initialization, the
+cluster's default node is randomly selected from the cluster's primaries, and
+will be updated upon reinitialization. Using r.get_default_node(), you can
+get the cluster's default node, or you can change it using the
 'set_default_node' method.
 
-The 'target_nodes' parameter is explained in the following section, 
+The 'target_nodes' parameter is explained in the following section,
 'Specifying Target Nodes'.
 
 ``` pycon
@@ -1030,8 +1030,8 @@ The 'target_nodes' parameter is explained in the following section,
 
 **Specifying Target Nodes:**
 
-As mentioned above, all non key-based RedisCluster commands accept the kwarg 
-parameter 'target_nodes' that specifies the node/nodes that the command should 
+As mentioned above, all non key-based RedisCluster commands accept the kwarg
+parameter 'target_nodes' that specifies the node/nodes that the command should
 be executed on.
 The best practice is to specify target nodes using RedisCluster class's node
 flags: PRIMARIES, REPLICAS, ALL_NODES, RANDOM. When a nodes flag is passed
@@ -1070,7 +1070,7 @@ the relevant cluster or connection error will be returned.
     >>> rc.info(target_nodes=subset_primaries)
 ```
 
-In addition, the RedisCluster instance can query the Redis instance of a 
+In addition, the RedisCluster instance can query the Redis instance of a
 specific node and execute commands on that node directly. The Redis client,
 however, does not handle cluster failures and retries.
 
@@ -1094,7 +1094,7 @@ By using RedisCluster client, you can use the known functions (e.g. mget, mset)
 to perform an atomic multi-key operation. However, you must ensure all keys are
 mapped to the same slot, otherwise a RedisClusterException will be thrown.
 Redis Cluster implements a concept called hash tags that can be used in order
-to force certain keys to be stored in the same hash slot, see 
+to force certain keys to be stored in the same hash slot, see
 [Keys hash tag](https://redis.io/topics/cluster-spec#keys-hash-tags).
 You can also use nonatomic for some of the multikey operations, and pass keys
 that aren't mapped to the same slot. The client will then map the keys to the
@@ -1121,15 +1121,15 @@ first command execution. The node will be determined by:
  1. Hashing the channel name in the request to find its keyslot
  2. Selecting a node that handles the keyslot: If read_from_replicas is
     set to true, a replica can be selected.
-    
+
 *Known limitations with pubsub:*
 
-Pattern subscribe and publish do not currently work properly due to key slots. 
-If we hash a pattern like fo* we will receive a keyslot for that string but 
-there are endless possibilities for channel names based on this pattern - 
-unknowable in advance. This feature is not disabled but the commands are not 
+Pattern subscribe and publish do not currently work properly due to key slots.
+If we hash a pattern like fo* we will receive a keyslot for that string but
+there are endless possibilities for channel names based on this pattern -
+unknowable in advance. This feature is not disabled but the commands are not
 currently recommended for use.
-See [redis-py-cluster documentation](https://redis-py-cluster.readthedocs.io/en/stable/pubsub.html) 
+See [redis-py-cluster documentation](https://redis-py-cluster.readthedocs.io/en/stable/pubsub.html)
  for more.
 
 ``` pycon
@@ -1142,22 +1142,22 @@ See [redis-py-cluster documentation](https://redis-py-cluster.readthedocs.io/en/
 
 **Read Only Mode**
 
-By default, Redis Cluster always returns MOVE redirection response on accessing 
-a replica node. You can overcome this limitation and scale read commands by 
+By default, Redis Cluster always returns MOVE redirection response on accessing
+a replica node. You can overcome this limitation and scale read commands by
 triggering READONLY mode.
 
-To enable READONLY mode pass read_from_replicas=True to RedisCluster 
+To enable READONLY mode pass read_from_replicas=True to RedisCluster
 constructor. When set to true, read commands will be assigned between the
-primary and its replications in a Round-Robin manner. 
+primary and its replications in a Round-Robin manner.
 
-READONLY mode can be set at runtime by calling the readonly() method with 
-target_nodes='replicas', and read-write access can be restored by calling the 
+READONLY mode can be set at runtime by calling the readonly() method with
+target_nodes='replicas', and read-write access can be restored by calling the
 readwrite() method.
 
 ``` pycon
     >>> from cluster import RedisCluster as Redis
     # Use 'debug' log level to print the node that the command is executed on
-    >>> rc_readonly = Redis(startup_nodes=startup_nodes, 
+    >>> rc_readonly = Redis(startup_nodes=startup_nodes,
                     read_from_replicas=True)
     >>> rc_readonly.set('{foo}1', 'bar1')
     >>> for i in range(0, 4):
@@ -1173,15 +1173,15 @@ readwrite() method.
 
 **Cluster Pipeline**
 
-ClusterPipeline is a subclass of RedisCluster that provides support for Redis 
-pipelines in cluster mode. 
-When calling the execute() command, all the commands are grouped by the node 
-on which they will be executed, and are then executed by the respective nodes 
-in parallel. The pipeline instance will wait for all the nodes to respond 
-before returning the result to the caller. Command responses are returned as a 
+ClusterPipeline is a subclass of RedisCluster that provides support for Redis
+pipelines in cluster mode.
+When calling the execute() command, all the commands are grouped by the node
+on which they will be executed, and are then executed by the respective nodes
+in parallel. The pipeline instance will wait for all the nodes to respond
+before returning the result to the caller. Command responses are returned as a
 list sorted in the same order in which they were sent.
-Pipelines can be used to dramatically increase the throughput of Redis Cluster 
-by significantly reducing the the number of network round trips between the 
+Pipelines can be used to dramatically increase the throughput of Redis Cluster
+by significantly reducing the the number of network round trips between the
 client and the server.
 
 ``` pycon
@@ -1198,16 +1198,16 @@ client and the server.
 Please note:
 - RedisCluster pipelines currently only support key-based commands.
 - The pipeline gets its 'read_from_replicas' value from the cluster's parameter.
-Thus, if read from replications is enabled in the cluster instance, the pipeline 
+Thus, if read from replications is enabled in the cluster instance, the pipeline
 will also direct read commands to replicas.
-- The 'transcation' option is NOT supported in cluster-mode. In non-cluster mode, 
-the 'transaction' option is available when executing pipelines. This wraps the 
-pipeline commands with MULTI/EXEC commands, and effectively turns the pipeline 
-commands into a single transaction block. This means that all commands are 
-executed sequentially without any interruptions from other clients. However, 
-in cluster-mode this is not possible, because commands are partitioned 
-according to their respective destination nodes. This means that we can not 
-turn the pipeline commands into one transaction block, because in most cases 
+- The 'transcation' option is NOT supported in cluster-mode. In non-cluster mode,
+the 'transaction' option is available when executing pipelines. This wraps the
+pipeline commands with MULTI/EXEC commands, and effectively turns the pipeline
+commands into a single transaction block. This means that all commands are
+executed sequentially without any interruptions from other clients. However,
+in cluster-mode this is not possible, because commands are partitioned
+according to their respective destination nodes. This means that we can not
+turn the pipeline commands into one transaction block, because in most cases
 they are split up into several smaller pipelines.
 
 
