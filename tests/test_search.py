@@ -1419,7 +1419,7 @@ def test_profile(client):
     assert det["Iterators profile"]["Counter"] == 2.0
     assert len(det["Iterators profile"]["Child iterators"]) == 2
     assert det["Iterators profile"]["Type"] == "UNION"
-    assert det["Parsing time"] < 0.3
+    assert det["Parsing time"] < 0.5
     assert len(res.docs) == 2  # check also the search result
 
     # check using AggregateRequest
@@ -1431,7 +1431,7 @@ def test_profile(client):
     res, det = client.ft().profile(req)
     assert det["Iterators profile"]["Counter"] == 2.0
     assert det["Iterators profile"]["Type"] == "WILDCARD"
-    assert det["Parsing time"] < 0.3
+    assert det["Parsing time"] < 0.5
     assert len(res.rows) == 2  # check also the search result
 
 
