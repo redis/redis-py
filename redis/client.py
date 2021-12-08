@@ -1480,6 +1480,8 @@ class PubSub:
         if not self.subscribed:
             # Set the subscribed_event flag to True
             self.subscribed_event.set()
+            # Clear the health check counter
+            self.health_check_response_counter = 0
         self.pending_unsubscribe_patterns.difference_update(new_patterns)
         return ret_val
 
@@ -1517,6 +1519,8 @@ class PubSub:
         if not self.subscribed:
             # Set the subscribed_event flag to True
             self.subscribed_event.set()
+            # Clear the health check counter
+            self.health_check_response_counter = 0
         self.pending_unsubscribe_channels.difference_update(new_channels)
         return ret_val
 
