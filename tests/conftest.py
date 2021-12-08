@@ -1,10 +1,10 @@
 import random
 import time
-from distutils.version import LooseVersion
 from unittest.mock import Mock
 from urllib.parse import urlparse
 
 import pytest
+from packaging.version import Version
 
 import redis
 from redis.backoff import NoBackoff
@@ -117,13 +117,13 @@ def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=20):
 
 def skip_if_server_version_lt(min_version):
     redis_version = REDIS_INFO["version"]
-    check = LooseVersion(redis_version) < LooseVersion(min_version)
+    check = Version(redis_version) < Version(min_version)
     return pytest.mark.skipif(check, reason=f"Redis version required >= {min_version}")
 
 
 def skip_if_server_version_gte(min_version):
     redis_version = REDIS_INFO["version"]
-    check = LooseVersion(redis_version) >= LooseVersion(min_version)
+    check = Version(redis_version) >= Version(min_version)
     return pytest.mark.skipif(check, reason=f"Redis version required < {min_version}")
 
 
@@ -331,7 +331,7 @@ def wait_for_command(client, monitor, command, key=None):
     if key is None:
         # generate key
         redis_version = REDIS_INFO["version"]
-        if LooseVersion(redis_version) >= LooseVersion("5.0.0"):
+        if Version(redis_version) >= Version("5.0.0"):
             id_str = str(client.client_id())
         else:
             id_str = f"{random.randrange(2 ** 32):08x}"
