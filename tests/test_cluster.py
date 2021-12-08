@@ -1789,7 +1789,7 @@ class TestClusterRedisCommands:
             username,
             enabled=True,
             reset=True,
-            commands=["+get", "+set", "+select", "+cluster", "+command"],
+            commands=["+get", "+set", "+select", "+cluster", "+command", "+info"],
             keys=["{cache}:*"],
             nopass=True,
             target_nodes="primaries",
