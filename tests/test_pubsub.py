@@ -2,17 +2,14 @@ import platform
 import threading
 import time
 from unittest import mock
+from unittest.mock import patch
 
 import pytest
 
 import redis
 from redis.exceptions import ConnectionError
 
-from .conftest import (
-    _get_client,
-    skip_if_redis_enterprise,
-    skip_if_server_version_lt
-)
+from .conftest import _get_client, skip_if_redis_enterprise, skip_if_server_version_lt
 
 
 def wait_for_message(pubsub, timeout=0.1, ignore_subscribe_messages=False):
@@ -20,7 +17,8 @@ def wait_for_message(pubsub, timeout=0.1, ignore_subscribe_messages=False):
     timeout = now + timeout
     while now < timeout:
         message = pubsub.get_message(
-            ignore_subscribe_messages=ignore_subscribe_messages)
+            ignore_subscribe_messages=ignore_subscribe_messages
+        )
         if message is not None:
             return message
         time.sleep(0.01)
@@ -351,15 +349,6 @@ class TestPubSubMessages:
             "pmessage", channel, "test message", pattern=pattern
         )
 
-    def test_get_message_without_subscribe(self, r):
-        p = r.pubsub()
-        with pytest.raises(RuntimeError) as info:
-            p.get_message()
-        expect = (
-            "connection not set: " "did you forget to call subscribe() or psubscribe()?"
-        )
-        assert expect in info.exconly()
-
 
 class TestPubSubAutoDecoding:
     "These tests only validate that we get unicode values back"
@@ -557,7 +546,7 @@ class TestPubSubTimeouts:
         assert p.subscribed is False
         assert p.get_message() is None
         assert p.get_message(timeout=0.1) is None
-        with patch.object(threading.Event, 'wait') as mock:
+        with patch.object(threading.Event, "wait") as mock:
             mock.return_value = False
             assert p.get_message(timeout=0.01) is None
             assert mock.called
@@ -570,19 +559,19 @@ class TestPubSubTimeouts:
             message = ps.get_message(timeout=1)
             assert message == expected_res
 
-        subscribe_response = make_message('subscribe', 'foo', 1)
+        subscribe_response = make_message("subscribe", "foo", 1)
         poller = threading.Thread(target=poll, args=(p, subscribe_response))
         poller.start()
         time.sleep(0.2)
-        p.subscribe('foo')
+        p.subscribe("foo")
         poller.join()
 
     def test_get_message_wait_for_subscription_not_being_called(self, r):
         p = r.pubsub()
-        p.subscribe('foo')
-        with patch.object(threading.Event, 'wait') as mock:
+        p.subscribe("foo")
+        with patch.object(threading.Event, "wait") as mock:
             assert p.subscribed is True
-            assert wait_for_message(p) == make_message('subscribe', 'foo', 1)
+            assert wait_for_message(p) == make_message("subscribe", "foo", 1)
             assert mock.called is False
 
 

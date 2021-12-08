@@ -1282,15 +1282,11 @@ class PubSub:
         self.encoder = encoder
         if self.encoder is None:
             self.encoder = self.connection_pool.get_encoder()
-        self.health_check_response_b = self.encoder.encode(
-            self.HEALTH_CHECK_MESSAGE)
+        self.health_check_response_b = self.encoder.encode(self.HEALTH_CHECK_MESSAGE)
         if self.encoder.decode_responses:
             self.health_check_response = ["pong", self.HEALTH_CHECK_MESSAGE]
         else:
-            self.health_check_response = [
-                b"pong",
-                self.health_check_response_b
-            ]
+            self.health_check_response = [b"pong", self.health_check_response_b]
         self.reset()
 
     def __enter__(self):
@@ -1315,6 +1311,7 @@ class PubSub:
             self.connection_pool.release(self.connection)
             self.connection = None
         self.channels = {}
+        self.health_check_response_counter = 0
         self.pending_unsubscribe_channels = set()
         self.patterns = {}
         self.pending_unsubscribe_patterns = set()
@@ -1370,12 +1367,19 @@ class PubSub:
         """
         If any health check responses are present, clean them
         """
+        ttl = 10
         conn = self.connection
-        while self._execute(conn, conn.can_read, timeout=0):
-            response = self._execute(conn, conn.read_response)
-            if not self.is_health_check_response(response):
-                raise PubSubError('A non health check response was cleaned by '
-                                  'execute_command: {0}'.format(response))
+        while self.health_check_response_counter > 0 and ttl > 0:
+            if self._execute(conn, conn.can_read, timeout=1):
+                response = self._execute(conn, conn.read_response)
+                if self.is_health_check_response(response):
+                    self.health_check_response_counter -= 1
+                else:
+                    raise PubSubError(
+                        "A non health check response was cleaned by "
+                        "execute_command: {0}".format(response)
+                    )
+            ttl -= 1
 
     def _disconnect_raise_connect(self, conn, error):
         """
@@ -1418,6 +1422,7 @@ class PubSub:
 
         if self.is_health_check_response(response):
             # ignore the health check message as user might not expect it
+            self.health_check_response_counter -= 1
             return None
         return response
 
@@ -1428,9 +1433,9 @@ class PubSub:
         bulk response, instead of a multi-bulk with "pong" and the response.
         """
         return response in [
-                self.health_check_response,  # If there was a subscription
-                self.health_check_response_b  # If there wasn't
-                ]
+            self.health_check_response,  # If there was a subscription
+            self.health_check_response_b,  # If there wasn't
+        ]
 
     def check_health(self):
         conn = self.connection
@@ -1442,6 +1447,7 @@ class PubSub:
 
         if conn.health_check_interval and time.time() > conn.next_health_check:
             conn.send_command("PING", self.HEALTH_CHECK_MESSAGE, check_health=False)
+            self.health_check_response_counter += 1
 
     def _normalize_keys(self, data):
         """
