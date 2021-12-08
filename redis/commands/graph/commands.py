@@ -6,6 +6,8 @@ from .query_result import QueryResult
 
 
 class GraphCommands:
+    """RedisGraph Commands"""
+
     def commit(self):
         """
         Create entire graph.
