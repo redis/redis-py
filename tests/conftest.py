@@ -14,6 +14,7 @@ from redis.retry import Retry
 
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/9"
+default_redis_ssl_url = "rediss://localhost:6666"
 
 default_redismod_url = "redis://localhost:36379"
 default_cluster_nodes = 6
@@ -34,6 +35,13 @@ def pytest_addoption(parser):
         help="Connection string to redis server"
         " with loaded modules,"
         " defaults to `%(default)s`",
+    )
+    
+    parser.addoption(
+        "--redis-ssl-url",
+        default=default_redis_ssl_url,
+        action="store",
+        help="Redis SSL connection string," " defaults to `%(default)s`",
     )
 
     parser.addoption(
@@ -227,6 +235,14 @@ def modclient(request, **kwargs):
         redis.Redis, request, from_url=rmurl, decode_responses=True, **kwargs
     ) as client:
         yield client
+        
+# @pytest.fixture()
+# def sslclient(request, **kwargs):
+#     ssl_url = request.config.getoption("--redis-ssl-url")
+#     with _get_client(
+#         redis.Redis, request, from_url=ssl_url, decode_responses=True, **kwargs
+#     ) as client:
+#         yield client
 
 
 @pytest.fixture()
