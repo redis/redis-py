@@ -879,6 +879,11 @@ class Connection:
 
 
 class SSLConnection(Connection):
+    """Manages SSL connections to and from the Redis server(s).
+    This class extends the Connection class, adding SSL functionality, and making
+    use of ssl.SSLContext (https://docs.python.org/3/library/ssl.html#ssl.SSLContext)
+    """  # noqa
+
     def __init__(
         self,
         ssl_keyfile=None,
@@ -886,8 +891,24 @@ class SSLConnection(Connection):
         ssl_cert_reqs="required",
         ssl_ca_certs=None,
         ssl_check_hostname=False,
+        ssl_ca_path=None,
+        ssl_password=None,
         **kwargs,
     ):
+        """Constructor
+
+        Args:
+            ssl_keyfile: Path to an ssl private key. Defaults to None.
+            ssl_certfile: Path to an ssl certificate. Defaults to None.
+            ssl_cert_reqs: The string value for the SSLContext.verify_mode (none, optional, required). Defaults to "required".
+            ssl_ca_certs: The path to a file of concatenated CA certificates in PEM format. Defaults to None.
+            ssl_check_hostname: If set, match the hostname during the SSL handshake. Defaults to False.
+            ssl_ca_path: The path to a directory containing several CA certificates in PEM format. Defaults to None.
+            ssl_password: Password for unlocking an encrypted private key. Defaults to None.
+
+        Raises:
+            RedisError
+        """  # noqa
         if not ssl_available:
             raise RedisError("Python wasn't built with SSL support")
 
@@ -910,7 +931,9 @@ class SSLConnection(Connection):
             ssl_cert_reqs = CERT_REQS[ssl_cert_reqs]
         self.cert_reqs = ssl_cert_reqs
         self.ca_certs = ssl_ca_certs
+        self.ca_path = ssl_ca_path
         self.check_hostname = ssl_check_hostname
+        self.certificate_password = ssl_password
 
     def _connect(self):
         "Wrap the socket with SSL support"
@@ -919,9 +942,12 @@ class SSLConnection(Connection):
         context.check_hostname = self.check_hostname
         context.verify_mode = self.cert_reqs
         if self.certfile and self.keyfile:
-            context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
-        if self.ca_certs:
-            context.load_verify_locations(self.ca_certs)
+            context.load_cert_chain(certfile=self.certfile,
+                                    keyfile=self.keyfile,
+                                    password=self.certificate_password)
+        if self.ca_certs is not None or self.ca_path is not None:
+            context.load_verify_locations(cafile=self.ca_certs,
+                                          capath=self.ca_path)
         return context.wrap_socket(sock, server_hostname=self.host)
 
 
