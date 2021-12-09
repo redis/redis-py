@@ -51,7 +51,7 @@ TDIGEST_INFO = "TDIGEST.INFO"
 
 
 class BFCommands:
-    """RedisBloom commands."""
+    """Bloom Filter commands."""
 
     # region Bloom Filter Functions
     def create(self, key, errorRate, capacity, expansion=None, noScale=None):
@@ -166,6 +166,7 @@ class BFCommands:
 
 
 class CFCommands:
+    """Cuckoo Filter commands."""
 
     # region Cuckoo Filter Functions
     def create(
@@ -283,6 +284,8 @@ class CFCommands:
 
 
 class TOPKCommands:
+    """TOP-k Filter commands."""
+
     def reserve(self, key, k, width, depth, decay):
         """
         Create a new Top-K Filter `key` with desired probability of false
@@ -432,6 +435,7 @@ class TDigestCommands:
 
 
 class CMSCommands:
+    """Count-Min Sketch Commands"""
 
     # region Count-Min Sketch Functions
     def initbydim(self, key, width, depth):
