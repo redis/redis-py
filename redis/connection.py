@@ -942,12 +942,13 @@ class SSLConnection(Connection):
         context.check_hostname = self.check_hostname
         context.verify_mode = self.cert_reqs
         if self.certfile and self.keyfile:
-            context.load_cert_chain(certfile=self.certfile,
-                                    keyfile=self.keyfile,
-                                    password=self.certificate_password)
+            context.load_cert_chain(
+                certfile=self.certfile,
+                keyfile=self.keyfile,
+                password=self.certificate_password,
+            )
         if self.ca_certs is not None or self.ca_path is not None:
-            context.load_verify_locations(cafile=self.ca_certs,
-                                          capath=self.ca_path)
+            context.load_verify_locations(cafile=self.ca_certs, capath=self.ca_path)
         return context.wrap_socket(sock, server_hostname=self.host)
 
 

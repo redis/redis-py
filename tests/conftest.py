@@ -36,7 +36,7 @@ def pytest_addoption(parser):
         " with loaded modules,"
         " defaults to `%(default)s`",
     )
-    
+
     parser.addoption(
         "--redis-ssl-url",
         default=default_redis_ssl_url,
@@ -235,7 +235,8 @@ def modclient(request, **kwargs):
         redis.Redis, request, from_url=rmurl, decode_responses=True, **kwargs
     ) as client:
         yield client
-        
+
+
 # @pytest.fixture()
 # def sslclient(request, **kwargs):
 #     ssl_url = request.config.getoption("--redis-ssl-url")
