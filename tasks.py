@@ -35,6 +35,7 @@ def build_docs(c):
 @task
 def linters(c):
     """Run code linters"""
+    _generate_keys()
     run("tox -e linters")
 
 
