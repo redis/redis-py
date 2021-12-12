@@ -873,6 +873,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ssl_certfile=None,
         ssl_cert_reqs="required",
         ssl_ca_certs=None,
+        ssl_ca_path=None,
         ssl_check_hostname=False,
         ssl_password=None,
         max_connections=None,

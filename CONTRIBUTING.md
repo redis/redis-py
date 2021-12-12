@@ -58,6 +58,7 @@ can execute docker and its various commands.
 -   A Redis replica node
 -   Three sentinel Redis nodes
 -   A multi-python docker, with your source code mounted in /data
+-   An stunnel docker, fronting the master Redis node
 
 The replica node, is a replica of the master node, using the
 [leader-follower replication](https://redis.io/topics/replication)
@@ -73,7 +74,7 @@ tests as well. With the 'tests' and 'all-tests' targets, all Redis and
 RedisCluster tests will be run. 
 
 It is possible to run only Redis client tests (with cluster mode disabled) by 
-using `invoke redis-tests`; similarly, RedisCluster tests can be run by using 
+using `invoke standalone-tests`; similarly, RedisCluster tests can be run by using 
 `invoke cluster-tests`.
 
 Each run of tox starts and stops the various dockers required. Sometimes
