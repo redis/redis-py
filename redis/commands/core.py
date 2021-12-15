@@ -637,6 +637,31 @@ class ManagementCommands:
             args.append(b"ASYNC")
         return self.execute_command("FLUSHDB", *args, **kwargs)
 
+    def sync(self):
+        """
+        Initiates a replication stream from the master.
+
+        For more information check https://redis.io/commands/sync
+        """
+        from redis.client import NEVER_DECODE
+
+        options = {}
+        options[NEVER_DECODE] = []
+        return self.execute_command("SYNC", **options)
+
+    def psync(self, replicationid, offset):
+        """
+        Initiates a replication stream from the master.
+        Newer version for `sync`.
+
+        For more information check https://redis.io/commands/sync
+        """
+        from redis.client import NEVER_DECODE
+
+        options = {}
+        options[NEVER_DECODE] = []
+        return self.execute_command("PSYNC", replicationid, offset, **options)
+
     def swapdb(self, first, second, **kwargs):
         """
         Swap two databases

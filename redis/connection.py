@@ -382,7 +382,7 @@ class HiredisParser(BaseParser):
         except Exception:
             pass
 
-    def on_connect(self, connection):
+    def on_connect(self, connection, **kwargs):
         self._sock = connection._sock
         self._socket_timeout = connection.socket_timeout
         kwargs = {

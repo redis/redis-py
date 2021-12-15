@@ -1,3 +1,10 @@
+import sys
+
+if sys.version_info >= (3, 8):
+    from importlib import metadata
+else:
+    import importlib_metadata as metadata
+
 from redis.client import Redis, StrictRedis
 from redis.cluster import RedisCluster
 from redis.connection import (
@@ -38,7 +45,10 @@ def int_or_str(value):
         return value
 
 
-__version__ = "4.1.0rc2"
+try:
+    __version__ = metadata.version("redis")
+except metadata.PackageNotFoundError:
+    __version__ = "99.99.99"
 
 
 VERSION = tuple(map(int_or_str, __version__.split(".")))
