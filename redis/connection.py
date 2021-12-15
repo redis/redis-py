@@ -552,8 +552,8 @@ class Connection:
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
         self.next_health_check = 0
-        self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self.redis_connect_func = redis_connect_func
+        self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
         self._socket_read_size = socket_read_size
         self.set_parser(parser_class)
@@ -969,6 +969,7 @@ class UnixDomainSocketConnection(Connection):
         health_check_interval=0,
         client_name=None,
         retry=None,
+        redis_connect_func=None,
     ):
         """
         Initialize a new UnixDomainSocketConnection.
@@ -993,6 +994,7 @@ class UnixDomainSocketConnection(Connection):
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
         self.next_health_check = 0
+        self.redis_connect_func = redis_connect_func
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
         self._socket_read_size = socket_read_size

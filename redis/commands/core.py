@@ -1244,7 +1244,7 @@ class BasicKeyCommands:
         pushing it as the first/last element on the destination list.
         Returns the element being popped and pushed.
 
-        For more information check https://redis.io/commands/lmov
+        For more information check https://redis.io/commands/lmove
         """
         params = [first_list, second_list, src, dest]
         return self.execute_command("LMOVE", *params)
