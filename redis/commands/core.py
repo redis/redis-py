@@ -644,9 +644,10 @@ class ManagementCommands:
         For more information check https://redis.io/commands/sync
         """
         from redis.client import NEVER_DECODE
+
         options = {}
         options[NEVER_DECODE] = []
-        return self.execute_command('SYNC', **options)
+        return self.execute_command("SYNC", **options)
 
     def psync(self, replicationid, offset):
         """
@@ -656,9 +657,10 @@ class ManagementCommands:
         For more information check https://redis.io/commands/sync
         """
         from redis.client import NEVER_DECODE
+
         options = {}
         options[NEVER_DECODE] = []
-        return self.execute_command('PSYNC', replicationid, offset, **options)
+        return self.execute_command("PSYNC", replicationid, offset, **options)
 
     def swapdb(self, first, second, **kwargs):
         """

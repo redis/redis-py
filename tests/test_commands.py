@@ -4151,17 +4151,17 @@ class TestRedisCommands:
             assert r.replicaof("NO ONE")
         assert r.replicaof("NO", "ONE")
 
-    @skip_if_server_version_lt('2.8.0')
+    @skip_if_server_version_lt("2.8.0")
     def test_sync(self, r):
-        r2 = redis.Redis(port=6380, decode_responses=True)
+        r2 = redis.Redis(port=6380, decode_responses=False)
         res = r2.sync()
-        assert b'REDIS' in res
+        assert b"REDIS" in res
 
-    @skip_if_server_version_lt('2.8.0')
+    @skip_if_server_version_lt("2.8.0")
     def test_psync(self, r):
-        r2 = redis.Redis(port=6380, decode_responses=True)
+        r2 = redis.Redis(port=6380, decode_responses=False)
         res = r2.psync(r2.client_id(), 1)
-        assert b'FULLRESYNC' in res
+        assert b"FULLRESYNC" in res
 
 
 @pytest.mark.onlynoncluster
