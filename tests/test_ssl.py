@@ -15,8 +15,14 @@ class TestSSL:
     and connecting to the appropriate port.
     """
 
-    ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    CERT_DIR = os.path.join(ROOT, "docker", "stunnel", "keys")
+    ROOT = os.path.join(os.path.dirname(__file__), "..")
+    CERT_DIR = os.path.abspath(os.path.join(ROOT, "docker", "stunnel", "keys"))
+    if not os.path.isdir(CERT_DIR):  # github actions package validation case
+        CERT_DIR = os.path.abspath(
+            os.path.join(ROOT, "..", "docker", "stunnel", "keys")
+        )
+        if not os.path.isdir(CERT_DIR):
+            raise IOError(f"No SSL certificates found. They should be in {CERT_DIR}")
 
     def test_ssl_with_invalid_cert(self, request):
         ssl_url = request.config.option.redis_ssl_url
