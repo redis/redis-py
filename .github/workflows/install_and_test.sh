@@ -42,4 +42,4 @@ pip install ${PKG}
 pytest -m 'not onlycluster'
 # RedisCluster tests
 CLUSTER_URL="redis://localhost:16379/0"
-pytest -m 'not onlynoncluster and not redismod' --redis-url=${CLUSTER_URL}
+pytest -m 'not onlynoncluster and not redismod and not ssl' --redis-url=${CLUSTER_URL}

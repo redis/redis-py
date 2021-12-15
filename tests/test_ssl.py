@@ -7,6 +7,7 @@ import redis
 from redis.exceptions import ConnectionError
 
 
+@pytest.mark.ssl
 class TestSSL:
     """Tests for SSL connections
 
