@@ -74,12 +74,15 @@ jobs:
    install_package_from_commit:
     name: Install package from commit hash
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
     steps:
       - uses: actions/checkout@v2
-      - name: install python
+      - name: install python ${{ matrix.python-version }}
         uses: actions/setup-python@v2
         with:
-          python-version: 3.9
+          python-version: ${{ matrix.python-version }}
       - name: install from pip
         run: |
           pip install --quiet git+${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git@${GITHUB_SHA}
