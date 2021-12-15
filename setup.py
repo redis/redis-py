@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 from setuptools import find_packages, setup
 
-import redis
-
 setup(
     name="redis",
     description="Python client for Redis database and key-value store",
