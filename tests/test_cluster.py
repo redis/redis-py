@@ -36,6 +36,7 @@ from .conftest import (
     skip_if_redis_enterprise,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
+    wait_for_command,
 )
 
 default_host = "127.0.0.1"
@@ -84,6 +85,7 @@ def get_mocked_redis_client(func=None, *args, **kwargs):
     """
     cluster_slots = kwargs.pop("cluster_slots", default_cluster_slots)
     coverage_res = kwargs.pop("coverage_result", "yes")
+    cluster_enabled = kwargs.pop("cluster_enabled", True)
     with patch.object(Redis, "execute_command") as execute_command_mock:
 
         def execute_command(*_args, **_kwargs):
@@ -92,7 +94,9 @@ def get_mocked_redis_client(func=None, *args, **kwargs):
                 return mock_cluster_slots
             elif _args[0] == "COMMAND":
                 return {"get": [], "set": []}
-            elif _args[1] == "cluster-require-full-coverage":
+            elif _args[0] == "INFO":
+                return {"cluster_enabled": cluster_enabled}
+            elif len(_args) > 1 and _args[1] == "cluster-require-full-coverage":
                 return {"cluster-require-full-coverage": coverage_res}
             elif func is not None:
                 return func(*args, **kwargs)
@@ -1771,7 +1775,7 @@ class TestClusterRedisCommands:
         assert r.randomkey(target_nodes=node) in (b"{foo}a", b"{foo}b", b"{foo}c")
 
     @skip_if_server_version_lt("6.0.0")
-    @skip_if_redis_enterprise
+    @skip_if_redis_enterprise()
     def test_acl_log(self, r, request):
         key = "{cache}:"
         node = r.get_node_from_key(key)
@@ -1785,7 +1789,7 @@ class TestClusterRedisCommands:
             username,
             enabled=True,
             reset=True,
-            commands=["+get", "+set", "+select", "+cluster", "+command"],
+            commands=["+get", "+set", "+select", "+cluster", "+command", "+info"],
             keys=["{cache}:*"],
             nopass=True,
             target_nodes="primaries",
@@ -1974,6 +1978,17 @@ class TestNodesManager:
 
         assert len(n_manager.nodes_cache) == 6
 
+    def test_init_slots_cache_cluster_mode_disabled(self):
+        """
+        Test that creating a RedisCluster failes if one of the startup nodes
+        has cluster mode disabled
+        """
+        with pytest.raises(RedisClusterException) as e:
+            get_mocked_redis_client(
+                host=default_host, port=default_port, cluster_enabled=False
+            )
+            assert "Cluster mode is not enabled on this node" in str(e.value)
+
     def test_empty_startup_nodes(self):
         """
         It should not be possible to create a node manager with no nodes
@@ -2044,6 +2059,8 @@ class TestNodesManager:
                 def execute_command(*args, **kwargs):
                     if args[0] == "CLUSTER SLOTS":
                         return result
+                    elif args[0] == "INFO":
+                        return {"cluster_enabled": True}
                     elif args[1] == "cluster-require-full-coverage":
                         return {"cluster-require-full-coverage": "yes"}
                     else:
@@ -2108,6 +2125,8 @@ class TestNodesManager:
                                 ["127.0.0.1", 7002, "node_2"],
                             ],
                         ]
+                    elif args[0] == "INFO":
+                        return {"cluster_enabled": True}
                     elif args[1] == "cluster-require-full-coverage":
                         return {"cluster-require-full-coverage": "yes"}
 
@@ -2613,3 +2632,54 @@ class TestReadOnlyPipeline:
                         if executed_on_replica:
                             break
                 assert executed_on_replica is True
+
+
+@pytest.mark.onlycluster
+class TestClusterMonitor:
+    def test_wait_command_not_found(self, r):
+        "Make sure the wait_for_command func works when command is not found"
+        key = "foo"
+        node = r.get_node_from_key(key)
+        with r.monitor(target_node=node) as m:
+            response = wait_for_command(r, m, "nothing", key=key)
+            assert response is None
+
+    def test_response_values(self, r):
+        db = 0
+        key = "foo"
+        node = r.get_node_from_key(key)
+        with r.monitor(target_node=node) as m:
+            r.ping(target_nodes=node)
+            response = wait_for_command(r, m, "PING", key=key)
+            assert isinstance(response["time"], float)
+            assert response["db"] == db
+            assert response["client_type"] in ("tcp", "unix")
+            assert isinstance(response["client_address"], str)
+            assert isinstance(response["client_port"], str)
+            assert response["command"] == "PING"
+
+    def test_command_with_quoted_key(self, r):
+        key = "{foo}1"
+        node = r.get_node_from_key(key)
+        with r.monitor(node) as m:
+            r.get('{foo}"bar')
+            response = wait_for_command(r, m, 'GET {foo}"bar', key=key)
+            assert response["command"] == 'GET {foo}"bar'
+
+    def test_command_with_binary_data(self, r):
+        key = "{foo}1"
+        node = r.get_node_from_key(key)
+        with r.monitor(target_node=node) as m:
+            byte_string = b"{foo}bar\x92"
+            r.get(byte_string)
+            response = wait_for_command(r, m, "GET {foo}bar\\x92", key=key)
+            assert response["command"] == "GET {foo}bar\\x92"
+
+    def test_command_with_escaped_data(self, r):
+        key = "{foo}1"
+        node = r.get_node_from_key(key)
+        with r.monitor(target_node=node) as m:
+            byte_string = b"{foo}bar\\x92"
+            r.get(byte_string)
+            response = wait_for_command(r, m, "GET {foo}bar\\\\x92", key=key)
+            assert response["command"] == "GET {foo}bar\\\\x92"

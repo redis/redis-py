@@ -414,14 +414,25 @@ class RedisCluster(RedisClusterCommands):
              stale data.
              When set to true, read commands will be assigned between the
              primary and its replications in a Round-Robin manner.
-         :cluster_error_retry_attempts: 'int'
+        :cluster_error_retry_attempts: 'int'
              Retry command execution attempts when encountering ClusterDownError
              or ConnectionError
-         :retry_on_timeout: 'bool'
+        :retry_on_timeout: 'bool'
              To specify a retry policy, first set `retry_on_timeout` to `True`
              then set `retry` to a valid `Retry` object
-         :retry: 'Retry'
+        :retry: 'Retry'
               a `Retry` object
+        :reinitialize_steps: 'int'
+            Specifies the number of MOVED errors that need to occur before
+            reinitializing the whole cluster topology. If a MOVED error occurs
+            and the cluster does not need to be reinitialized on this current
+            error handling, only the MOVED slot will be patched with the
+            redirected node.
+            To reinitialize the cluster on every MOVED error, set
+            reinitialize_steps to 1.
+            To avoid reinitializing the cluster on moved errors, set
+            reinitialize_steps to 0.
+
          :**kwargs:
              Extra arguments that will be sent into Redis instance when created
              (See Official redis-py doc for supported kwargs
@@ -659,6 +670,23 @@ class RedisCluster(RedisClusterCommands):
         log.info(f"Changed the default cluster node to {node}")
         return True
 
+    def monitor(self, target_node=None):
+        """
+        Returns a Monitor object for the specified target node.
+        The default cluster node will be selected if no target node was
+        specified.
+        Monitor is useful for handling the MONITOR command to the redis server.
+        next_command() method returns one command from monitor
+        listen() method yields commands from monitor.
+        """
+        if target_node is None:
+            target_node = self.get_default_node()
+        if target_node.redis_connection is None:
+            raise RedisClusterException(
+                f"Cluster Node {target_node.name} has no redis_connection"
+            )
+        return target_node.redis_connection.monitor()
+
     def pubsub(self, node=None, host=None, port=None, **kwargs):
         """
         Allows passing a ClusterNode, or host&port, to get a pubsub instance
@@ -727,7 +755,9 @@ class RedisCluster(RedisClusterCommands):
             return [node]
 
     def _should_reinitialized(self):
-        # In order not to reinitialize the cluster, the user can set
+        # To reinitialize the cluster on every MOVED error,
+        # set reinitialize_steps to 1.
+        # To avoid reinitializing the cluster on moved errors, set
         # reinitialize_steps to 0.
         if self.reinitialize_steps == 0:
             return False
@@ -958,8 +988,8 @@ class RedisCluster(RedisClusterCommands):
                 # redirected node output and try again. If MovedError exceeds
                 # 'reinitialize_steps' number of times, we will force
                 # reinitializing the tables, and then try again.
-                # 'reinitialize_steps' counter will increase faster when the
-                # same client object is shared between multiple threads. To
+                # 'reinitialize_steps' counter will increase faster when
+                # the same client object is shared between multiple threads. To
                 # reduce the frequency you can set this variable in the
                 # RedisCluster constructor.
                 log.exception("MovedError")
@@ -1054,6 +1084,10 @@ class ClusterNode:
 
     def __eq__(self, obj):
         return isinstance(obj, ClusterNode) and obj.name == self.name
+
+    def __del__(self):
+        if self.redis_connection is not None:
+            self.redis_connection.close()
 
 
 class LoadBalancer:
@@ -1300,6 +1334,11 @@ class NodesManager:
                         startup_node.host, startup_node.port, **copy_kwargs
                     )
                     self.startup_nodes[startup_node.name].redis_connection = r
+                # Make sure cluster mode is enabled on this node
+                if bool(r.info().get("cluster_enabled")) is False:
+                    raise RedisClusterException(
+                        "Cluster mode is not enabled on this node"
+                    )
                 cluster_slots = r.execute_command("CLUSTER SLOTS")
                 startup_nodes_reachable = True
             except (ConnectionError, TimeoutError) as e:
@@ -1327,7 +1366,7 @@ class NodesManager:
                 message = e.__str__()
                 raise RedisClusterException(
                     'ERROR sending "cluster slots" command to redis '
-                    f"server: {startup_node}. error: {message}"
+                    f"server {startup_node.name}. error: {message}"
                 )
 
             # CLUSTER SLOTS command results in the following output:

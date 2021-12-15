@@ -16,21 +16,30 @@ redis-py can be installed using pip via ``pip install redis``.
 
 
 Quickly connecting to redis
-************
+***************************
 
 There are two quick ways to connect to Redis.
 
-Assuming you run Redis on localhost:6379 (the default)::
+**Assuming you run Redis on localhost:6379 (the default)**
+
+.. code-block:: python
+
    import redis
    r = redis.Redis()
    r.ping()
 
-Running redis on foo.bar.com, port 12345::
+**Running redis on foo.bar.com, port 12345**
+
+.. code-block:: python
+
    import redis
    r = redis.Redis(host='foo.bar.com', port=12345)
    r.ping()
 
-Another example with foo.bar.com, port 12345::
+**Another example with foo.bar.com, port 12345**
+
+.. code-block:: python
+
    import redis
    r = redis.from_url('redis://foo.bar.com:12345')
    r.ping()
@@ -47,7 +56,8 @@ Redis Command Functions
 .. toctree::
    :maxdepth: 2
 
-   redis_core_commands
+   redis_commands
+   redis_cluster_commands
    sentinel_commands
    redismodules
 

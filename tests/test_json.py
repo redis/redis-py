@@ -134,14 +134,14 @@ def test_strappend(client):
     assert "foobar" == client.json().get("jsonkey", Path.rootPath())
 
 
-@pytest.mark.redismod
-def test_debug(client):
-    client.json().set("str", Path.rootPath(), "foo")
-    assert 24 == client.json().debug("MEMORY", "str", Path.rootPath())
-    assert 24 == client.json().debug("MEMORY", "str")
-
-    # technically help is valid
-    assert isinstance(client.json().debug("HELP"), list)
+# @pytest.mark.redismod
+# def test_debug(client):
+#    client.json().set("str", Path.rootPath(), "foo")
+#    assert 24 == client.json().debug("MEMORY", "str", Path.rootPath())
+#    assert 24 == client.json().debug("MEMORY", "str")
+#
+#    # technically help is valid
+#    assert isinstance(client.json().debug("HELP"), list)
 
 
 @pytest.mark.redismod
@@ -969,27 +969,27 @@ def test_toggle_dollar(client):
         client.json().toggle("non_existing_doc", "$..a")
 
 
-@pytest.mark.redismod
-def test_debug_dollar(client):
-
-    jdata, jtypes = load_types_data("a")
-
-    client.json().set("doc1", "$", jdata)
-
-    # Test multi
-    assert client.json().debug("MEMORY", "doc1", "$..a") == [72, 24, 24, 16, 16, 1, 0]
-
-    # Test single
-    assert client.json().debug("MEMORY", "doc1", "$.nested2.a") == [24]
-
-    # Test legacy
-    assert client.json().debug("MEMORY", "doc1", "..a") == 72
-
-    # Test missing path (defaults to root)
-    assert client.json().debug("MEMORY", "doc1") == 72
-
-    # Test missing key
-    assert client.json().debug("MEMORY", "non_existing_doc", "$..a") == []
+# @pytest.mark.redismod
+# def test_debug_dollar(client):
+#
+#    jdata, jtypes = load_types_data("a")
+#
+#    client.json().set("doc1", "$", jdata)
+#
+#    # Test multi
+#    assert client.json().debug("MEMORY", "doc1", "$..a") == [72, 24, 24, 16, 16, 1, 0]
+#
+#    # Test single
+#    assert client.json().debug("MEMORY", "doc1", "$.nested2.a") == [24]
+#
+#    # Test legacy
+#    assert client.json().debug("MEMORY", "doc1", "..a") == 72
+#
+#    # Test missing path (defaults to root)
+#    assert client.json().debug("MEMORY", "doc1") == 72
+#
+#    # Test missing key
+#    assert client.json().debug("MEMORY", "non_existing_doc", "$..a") == []
 
 
 @pytest.mark.redismod

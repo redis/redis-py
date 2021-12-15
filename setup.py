@@ -26,9 +26,12 @@ setup(
     author="Redis Inc.",
     author_email="oss@redis.com",
     python_requires=">=3.6",
+    setup_requires=[
+        "packaging>=21.3",
+    ],
     install_requires=[
-        "deprecated==1.2.3",
-        "packaging==21.3",
+        "deprecated>=1.2.3",
+        "packaging>=21.3",
     ],
     classifiers=[
         "Development Status :: 5 - Production/Stable",
