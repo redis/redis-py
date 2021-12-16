@@ -717,9 +717,14 @@ class Connection:
         self._parser.on_disconnect()
         if self._sock is None:
             return
-        try:
-            if os.getpid() == self.pid:
+
+        if os.getpid() == self.pid:
+            try:
                 self._sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+        try:
             self._sock.close()
         except OSError:
             pass
