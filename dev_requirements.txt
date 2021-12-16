@@ -6,6 +6,7 @@ pytest==6.2.5
 pytest-timeout==2.0.1
 tox==3.24.4
 tox-docker==3.1.0
+tox-run-before==0.1
 invoke==1.6.0
 pytest-cov>=3.0.0
 vulture>=2.3.0
