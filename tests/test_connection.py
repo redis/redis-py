@@ -3,6 +3,7 @@ from unittest import mock
 
 import pytest
 
+from redis.connection import Connection
 from redis.exceptions import InvalidResponse
 from redis.utils import HIREDIS_AVAILABLE
 
@@ -40,3 +41,36 @@ def test_loading_external_modules(modclient):
     # mod = j(modclient)
     # mod.set("fookey", ".", d)
     # assert mod.get('fookey') == d
+
+
+class TestConnection:
+    def test_disconnect(self):
+        conn = Connection()
+        mock_sock = mock.Mock()
+        conn._sock = mock_sock
+        conn.disconnect()
+        mock_sock.shutdown.assert_called_once()
+        mock_sock.close.assert_called_once()
+        assert conn._sock is None
+
+    def test_disconnect__shutdown_OSError(self):
+        """An OSError on socket shutdown will still close the socket."""
+        conn = Connection()
+        mock_sock = mock.Mock()
+        conn._sock = mock_sock
+        conn._sock.shutdown.side_effect = OSError
+        conn.disconnect()
+        mock_sock.shutdown.assert_called_once()
+        mock_sock.close.assert_called_once()
+        assert conn._sock is None
+
+    def test_disconnect__close_OSError(self):
+        """An OSError on socket close will still clear out the socket."""
+        conn = Connection()
+        mock_sock = mock.Mock()
+        conn._sock = mock_sock
+        conn._sock.close.side_effect = OSError
+        conn.disconnect()
+        mock_sock.shutdown.assert_called_once()
+        mock_sock.close.assert_called_once()
+        assert conn._sock is None
