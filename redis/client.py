@@ -950,6 +950,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_ca_certs": ssl_ca_certs,
                             "ssl_check_hostname": ssl_check_hostname,
                             "ssl_password": ssl_password,
+                            "ssl_ca_path": ssl_ca_path,
                         }
                     )
             connection_pool = ConnectionPool(**kwargs)
