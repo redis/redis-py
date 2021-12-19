@@ -30,13 +30,8 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
-from redis.ocsp import get_certificate
 from redis.retry import Retry
-from redis.utils import (
-    CRYPTOGRAPHY_AVAILABLE, 
-    HIREDIS_AVAILABLE, 
-    str_if_bytes
-)
+from redis.utils import CRYPTOGRAPHY_AVAILABLE, HIREDIS_AVAILABLE, str_if_bytes
 
 try:
     import ssl
@@ -965,8 +960,13 @@ class SSLConnection(Connection):
         if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE is False:
             raise RedisError("cryptography is not installed.")
         else:
-            from . import ocsp
-            get_certificate(sslsock)
+            from .ocsp import OCSPVerifier
+
+            o = OCSPVerifier(sslsock)
+            if o.is_valid():
+                return sslsock
+            else:
+                raise ConnectionError("ocsp certificate is invalid.")
         return sslsock
 
 

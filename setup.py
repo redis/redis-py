@@ -48,6 +48,6 @@ setup(
     ],
     extras_require={
         "hiredis": ["hiredis>=1.0.0"],
-        "cryptography": ["cryptography>=35.0.0", "requests>2.14.0"],
+        "cryptography": ["cryptography>=36.0.1", "requests>2.26.0"],
     },
 )
