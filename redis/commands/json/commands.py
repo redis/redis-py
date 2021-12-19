@@ -4,6 +4,8 @@ from redis.exceptions import DataError
 
 from .decoders import decode_dict_keys
 from .path import Path
+from json import loads, JSONDecodeError
+import os
 
 
 class JSONCommands:
@@ -212,6 +214,43 @@ class JSONCommands:
         elif xx:
             pieces.append("XX")
         return self.execute_command("JSON.SET", *pieces)
+
+    def set_file(self, name, path, file_name, nx=False, xx=False, decode_keys=False):
+        """
+        Set the JSON value at key ``name`` under the ``path`` to the contents of the json file ``file_name``.
+
+        ``nx`` if set to True, set ``value`` only if it does not exist.
+        ``xx`` if set to True, set ``value`` only if it exists.
+        ``decode_keys`` If set to True, the keys of ``obj`` will be decoded
+        with utf-8.
+
+        """
+        try:
+            file_content = loads(file_name)
+        except JSONDecodeError:
+            raise JSONDecodeError("Inappropriate file type, set_file() requires json file")
+        
+        return self.set(name, path, file_content, nx, xx, decode_keys)
+
+
+    def set_path(self, json_path, root_directory , nx=False, xx=False, decode_keys=False):
+        """ 
+
+        """
+        set_files_result = {}
+        for root, dirs, files in os.walk(root_directory):
+            for file in files:
+                try:
+                    file_name = file.rsplit('.')[0]
+                    file_path = os.path.join(root, file)
+                    self.set_file(file_name, json_path, file_path, nx, xx, decode_keys)
+                    set_files_result[os.path.join(root, file)] = True
+                except JSONDecodeError:
+                    set_files_result[os.path.join(root, file)] = False
+
+        return set_files_result
+
+
 
     def strlen(self, name, path=None):
         """Return the length of the string JSON value under ``path`` at key

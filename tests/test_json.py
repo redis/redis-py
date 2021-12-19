@@ -1392,3 +1392,15 @@ def test_custom_decoder(client):
     assert client.exists("foo") == 0
     assert not isinstance(cj.__encoder__, json.JSONEncoder)
     assert not isinstance(cj.__decoder__, json.JSONDecoder)
+
+
+@pytest.mark.redismod
+def test_set_file(client):
+    import tempfile
+    import json
+
+    jsonfile = tempfile.NamedTemporaryFile(suffix=".json")
+    with open(jsonfile.name, 'w+') as fp:
+        fp.write(json.dumps({"hello": "world"}))
+
+    assert client.json().set("test", Path.rootPath(), jsonfile.name)
