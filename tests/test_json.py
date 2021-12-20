@@ -1416,18 +1416,18 @@ def test_set_file(client):
 @pytest.mark.redismod
 def test_set_path(client):
     import json
-    import os
     import tempfile
 
     root = tempfile.mkdtemp()
     sub = tempfile.mkdtemp(dir=root)
-    ospointer, jsonfile = tempfile.mkstemp(suffix=".json", dir=sub)
-    ospointer2, nojsonfile = tempfile.mkstemp(dir=root)
+    jsonfile = tempfile.mktemp(suffix=".json", dir=sub)
+    nojsonfile = tempfile.mktemp(dir=root)
 
     with open(jsonfile, "w+") as fp:
         fp.write(json.dumps({"hello": "world"}))
     open(nojsonfile, "a+").write("hello")
 
-    result = {"/private" + jsonfile: True, "/private" + nojsonfile: False}
-    assert client.json().set_path(Path.rootPath(), os.path.realpath(root)) == result
-    assert client.json().get("/private" + jsonfile.rsplit(".")[0]) == {"hello": "world"}
+    result = {jsonfile: True, nojsonfile: False}
+    print(result)
+    assert client.json().set_path(Path.rootPath(), root) == result
+    assert client.json().get(jsonfile.rsplit(".")[0]) == {"hello": "world"}
