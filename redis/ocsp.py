@@ -1,6 +1,6 @@
 import base64
 import ssl
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import cryptography.hazmat.primitives.hashes
 import requests
@@ -83,13 +83,18 @@ class OCSPVerifier:
     def check_certificate(self, server, cert, issuer_cert):
         """Checks the validitity of an ocsp server for an issuer"""
         ocsp_url = self.build_certificate_url(server, cert, issuer_cert)
+        print(ocsp_url)
         r = requests.get(ocsp_url)
         if not r.ok:
             raise ConnectionError("failed to fetch ocsp certificate")
 
         ocsp_response = ocsp.load_der_ocsp_response(r.content)
+        print(ocsp_response.response_status)
         if ocsp_response.response_status == ocsp.OCSPResponseStatus.SUCCESSFUL:
-            return True
+            if ocsp_response.certificate_status == ocsp.OCSPCertStatus.REVOKED:
+                return False
+            else:
+                return True
         else:
             return False
 
@@ -98,7 +103,8 @@ class OCSPVerifier:
         cert, issuer_url, ocsp_server = self.get_certificate_components()
 
         # now get the ascii formatted issuer certificate
-        r = requests.get(issuer_url)
+        header = {"Host": urlparse(issuer_url).netloc}
+        r = requests.get(issuer_url)  #, headers=header)
         if not r.ok:
             raise ConnectionError("failed to fetch issuer certificate")
         der = r.content
