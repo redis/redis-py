@@ -1,10 +1,13 @@
 import os
+import socket
+import ssl
 from urllib.parse import urlparse
 
 import pytest
 
 import redis
 from redis.exceptions import ConnectionError
+from redis.ocsp import OCSPVerifier
 
 
 @pytest.mark.ssl
@@ -59,3 +62,19 @@ class TestSSL:
             ssl_ca_certs=os.path.join(self.CERT_DIR, "server-cert.pem"),
         )
         assert r.ping()
+
+    def test_valid_ocsp_cert(self):
+        context = ssl.create_default_context()
+        hostname = "github.com"
+        with socket.create_connection((hostname, 443)) as sock:
+            with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
+                ocsp = OCSPVerifier(wrapped)
+                assert ocsp.is_valid()
+
+    def test_invalid_ocsp_cert(self):
+        context = ssl.create_default_context()
+        hostname = "google.co.il"
+        with socket.create_connection((hostname, 443)) as sock:
+            with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
+                ocsp = OCSPVerifier(wrapped)
+                assert ocsp.is_valid() is False

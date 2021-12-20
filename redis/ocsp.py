@@ -2,33 +2,31 @@ import base64
 import ssl
 from urllib.parse import urljoin
 
+import cryptography.hazmat.primitives.hashes
 import requests
 from cryptography import hazmat, x509
-from cryptography.x509 import ocsp
 from cryptography.hazmat import backends
-import cryptography.hazmat.primitives.hashes
+from cryptography.x509 import ocsp
 
 from redis.exceptions import ConnectionError
 
 
 class OCSPVerifier:
-    """A class to verify ssl sockets for RFC6960, the 
+    """A class to verify ssl sockets for RFC6960, the
     Online Certificate Status Protocol.
-    
+
     @see https://datatracker.ietf.org/doc/html/rfc6960
     """
-    
+
     def __init__(self, sock):
         self.SOCK = sock
 
     def _bin2ascii(self, der):
         """Convert SSL certificates in a binary (DER) format to ASCII PEM."""
         pem = ssl.DER_cert_to_PEM_cert(der)
-        cert = x509.load_pem_x509_certificate(
-            pem.encode(), backends.default_backend()
-        )
+        cert = x509.load_pem_x509_certificate(pem.encode(), backends.default_backend())
         return cert
-    
+
     def get_certificate_components(self):
         """This function returns the certificate, primary issuer, and primary ocsp server
         in the chain for a socket already wrapped with ssl.
@@ -67,18 +65,19 @@ class OCSPVerifier:
         return cert, issuer, ocsp
 
     def build_certificate_url(self, server, cert, issuer_cert):
-        """Return the"""
+        """Return the complete url to the ocsp"""
         orb = ocsp.OCSPRequestBuilder()
-        
+
         # add_certificate returns an initialized OCSPRequestBuilder
-        orb = orb.add_certificate(cert, issuer_cert, cryptography.hazmat.primitives.hashes.SHA256())
+        orb = orb.add_certificate(
+            cert, issuer_cert, cryptography.hazmat.primitives.hashes.SHA256()
+        )
         request = orb.build()
 
-        # need to encode the request so that we can armour it
         path = base64.b64encode(
             request.public_bytes(hazmat.primitives.serialization.Encoding.DER)
         )
-        url = urljoin(server, "/", path.decode())
+        url = urljoin(server, path.decode())
         return url
 
     def check_certificate(self, server, cert, issuer_cert):
