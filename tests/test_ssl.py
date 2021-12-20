@@ -63,18 +63,36 @@ class TestSSL:
         )
         assert r.ping()
 
-    def test_valid_ocsp_cert(self):
+    def test_valid_ocsp_cert_http_10(self):
         context = ssl.create_default_context()
         hostname = "github.com"
         with socket.create_connection((hostname, 443)) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
                 ocsp = OCSPVerifier(wrapped)
                 assert ocsp.is_valid()
+                
+    def test_invalid_ocsp_certificate(self):
+        context = ssl.create_default_context()
+        hostname = "revoked.badssl.com"
+        with socket.create_connection((hostname, 443)) as sock:
+            with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
+                ocsp = OCSPVerifier(wrapped)
+                assert ocsp.is_valid() is False
+                
+    def test_unauthorized_ocsp(self):
+        context = ssl.create_default_context()
+        hostname = "stackoverflow.com"
+        with socket.create_connection((hostname, 443)) as sock:
+            with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
+                ocsp = OCSPVerifier(wrapped)
+                with pytest.raises(ConnectionError):
+                    ocsp.is_valid()
 
-    def test_invalid_ocsp_cert(self):
+
+    def test_valid_ocsp_cert_http_11(self):
         context = ssl.create_default_context()
         hostname = "google.co.il"
         with socket.create_connection((hostname, 443)) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
                 ocsp = OCSPVerifier(wrapped)
-                assert ocsp.is_valid() is False
+                assert ocsp.is_valid()
