@@ -36,9 +36,12 @@ class OCSPVerifier:
         der = self.SOCK.getpeercert(True)
         cert = self._bin2ascii(der)
 
-        aia = cert.extensions.get_extension_for_oid(
-            x509.oid.ExtensionOID.AUTHORITY_INFORMATION_ACCESS
-        ).value
+        try:
+            aia = cert.extensions.get_extension_for_oid(
+                x509.oid.ExtensionOID.AUTHORITY_INFORMATION_ACCESS
+            ).value
+        except cryptography.x509.extensions.ExtensionNotFound:
+            raise ConnectionError("No AIA information present in ssl certificate")
 
         # fetch certificate issuers
         issuers = [
@@ -85,7 +88,10 @@ class OCSPVerifier:
         ocsp_url = self.build_certificate_url(server, cert, issuer_cert)
 
         # HTTP 1.1 mandates the addition of the Host header in ocsp responses
-        header = {"Host": urlparse(ocsp_url).netloc}
+        header = {
+            "Host": urlparse(ocsp_url).netloc,
+            "Content-Type": "application/ocsp-request",
+        }
         r = requests.get(ocsp_url, headers=header)
         if not r.ok:
             raise ConnectionError("failed to fetch ocsp certificate")

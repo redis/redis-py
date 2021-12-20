@@ -959,14 +959,14 @@ class SSLConnection(Connection):
         sslsock = context.wrap_socket(sock, server_hostname=self.host)
         if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE is False:
             raise RedisError("cryptography is not installed.")
-        else:
+        elif self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE:
             from .ocsp import OCSPVerifier
 
             o = OCSPVerifier(sslsock)
             if o.is_valid():
                 return sslsock
             else:
-                raise ConnectionError("ocsp certificate is invalid.")
+                raise ConnectionError("ocsp validation error")
         return sslsock
 
 

@@ -170,6 +170,24 @@ def skip_ifnot_redis_enterprise():
     return pytest.mark.skipif(check, reason="Not running in redis enterprise")
 
 
+def skip_if_nocryptography():
+    try:
+        import cryptography  # noqa
+
+        return pytest.mark.skipif(False, reason="Cryptography dependency found")
+    except ImportError:
+        return pytest.mark.skipif(True, reason="No cryptography dependency")
+
+
+def skip_if_cryptography():
+    try:
+        import cryptography  # noqa
+
+        return pytest.mark.skipif(True, reason="Cryptography dependency found")
+    except ImportError:
+        return pytest.mark.skipif(False, reason="No cryptography dependency")
+
+
 def _get_client(
     cls, request, single_connection_client=True, flushdb=True, from_url=None, **kwargs
 ):
