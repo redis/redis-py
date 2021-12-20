@@ -83,20 +83,18 @@ class OCSPVerifier:
     def check_certificate(self, server, cert, issuer_cert):
         """Checks the validitity of an ocsp server for an issuer"""
         ocsp_url = self.build_certificate_url(server, cert, issuer_cert)
-        print(ocsp_url)
-        header = {"Host": urlparse(ocsp_url).netloc,
-                  "Content-Type": "application/ocsp-request"}
+
+        # HTTP 1.1 mandates the addition of the Host header in ocsp responses
+        header = {"Host": urlparse(ocsp_url).netloc}
         r = requests.get(ocsp_url, headers=header)
         if not r.ok:
             raise ConnectionError("failed to fetch ocsp certificate")
 
-        print(header)
-        print(ocsp_url)
         ocsp_response = ocsp.load_der_ocsp_response(r.content)
-        print(ocsp_response)
-        print(ocsp_response.response_status)
         if ocsp_response.response_status == ocsp.OCSPResponseStatus.UNAUTHORIZED:
-            raise ConnectionError("you are not authorized to view this ocsp certificate")
+            raise ConnectionError(
+                "you are not authorized to view this ocsp certificate"
+            )
         if ocsp_response.response_status == ocsp.OCSPResponseStatus.SUCCESSFUL:
             if ocsp_response.certificate_status == ocsp.OCSPCertStatus.REVOKED:
                 return False
