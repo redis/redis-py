@@ -962,7 +962,7 @@ class SSLConnection(Connection):
         elif self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE:
             from .ocsp import OCSPVerifier
 
-            o = OCSPVerifier(sslsock)
+            o = OCSPVerifier(sslsock, self.host, self.port, self.ca_certs)
             if o.is_valid():
                 return sslsock
             else:

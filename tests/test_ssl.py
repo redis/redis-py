@@ -7,6 +7,7 @@ import pytest
 
 import redis
 from redis.exceptions import ConnectionError, RedisError
+from redis.ocsp import OCSPVerifier
 
 from .conftest import skip_if_cryptography, skip_if_nocryptography
 
@@ -93,35 +94,37 @@ class TestSSL:
             assert r.ping()
             assert "No AIA information present in ssl certificate" in str(e)
 
+        # rediss://, url based
         ssl_url = request.config.option.redis_ssl_url
         sslclient = redis.from_url(ssl_url)
         with pytest.raises(ConnectionError) as e:
             sslclient.ping()
             assert "No AIA information present in ssl certificate" in str(e)
 
-    @skip_if_nocryptography()
+    @skip_if_cryptography()
     def test_valid_ocsp_cert_http(self):
         from redis.ocsp import OCSPVerifier
 
-        context = ssl.create_default_context()
-        hostname = "github.com"
-        with socket.create_connection((hostname, 443)) as sock:
-            with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
-                ocsp = OCSPVerifier(wrapped)
-                assert ocsp.is_valid()
+        hostnames = ["github.com", "aws.amazon.com", "ynet.co.il", "microsoft.com"]
+        for hostname in hostnames:
+            context = ssl.create_default_context()
+            with socket.create_connection((hostname, 443)) as sock:
+                with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
+                    ocsp = OCSPVerifier(wrapped, hostname, 443)
+                    assert ocsp.is_valid()
 
-    @skip_if_nocryptography()
-    def test_invalid_ocsp_certificate(self):
+    @skip_if_cryptography()
+    def test_revoked_ocsp_certificate(self):
         from redis.ocsp import OCSPVerifier
 
         context = ssl.create_default_context()
         hostname = "revoked.badssl.com"
         with socket.create_connection((hostname, 443)) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
-                ocsp = OCSPVerifier(wrapped)
+                ocsp = OCSPVerifier(wrapped, hostname, 443)
                 assert ocsp.is_valid() is False
 
-    @skip_if_nocryptography()
+    @skip_if_cryptography()
     def test_unauthorized_ocsp(self):
         from redis.ocsp import OCSPVerifier
 
@@ -129,11 +132,11 @@ class TestSSL:
         hostname = "stackoverflow.com"
         with socket.create_connection((hostname, 443)) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
-                ocsp = OCSPVerifier(wrapped)
+                ocsp = OCSPVerifier(wrapped, hostname, 443)
                 with pytest.raises(ConnectionError):
                     ocsp.is_valid()
 
-    @skip_if_nocryptography()
+    @skip_if_cryptography()
     def test_ocsp_not_present_in_response(self):
         from redis.ocsp import OCSPVerifier
 
@@ -141,11 +144,18 @@ class TestSSL:
         hostname = "google.co.il"
         with socket.create_connection((hostname, 443)) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
-                ocsp = OCSPVerifier(wrapped)
+                ocsp = OCSPVerifier(wrapped, hostname, 443)
                 assert ocsp.is_valid() is False
 
-    # def test_ocsp_and_redis(self, request):
-    #     ssl_url = request.config.option.redis_ssl_url
-    #     p = urlparse(ssl_url)[1].split(":")
-    #     hostname = p[0]
-    #     port = p[1]
+    @skip_if_cryptography()
+    def test_unauthorized_then_direct(self):
+
+        # these certificates on the socket end return unauthorized
+        # then the second call succeeds
+        hostnames = ["wikipedia.org", "squarespace.com"]
+        for hostname in hostnames:
+            context = ssl.create_default_context()
+            with socket.create_connection((hostname, 443)) as sock:
+                with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
+                    ocsp = OCSPVerifier(wrapped, hostname, 443)
+                    assert ocsp.is_valid()
