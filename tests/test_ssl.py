@@ -7,7 +7,6 @@ import pytest
 
 import redis
 from redis.exceptions import ConnectionError, RedisError
-from redis.ocsp import OCSPVerifier
 
 from .conftest import skip_if_cryptography, skip_if_nocryptography
 
@@ -149,6 +148,7 @@ class TestSSL:
 
     @skip_if_nocryptography()
     def test_unauthorized_then_direct(self):
+        from redis.ocsp import OCSPVerifier
 
         # these certificates on the socket end return unauthorized
         # then the second call succeeds
