@@ -101,7 +101,7 @@ class TestSSL:
             sslclient.ping()
             assert "No AIA information present in ssl certificate" in str(e)
 
-    @skip_if_cryptography()
+    @skip_if_nocryptography()
     def test_valid_ocsp_cert_http(self):
         from redis.ocsp import OCSPVerifier
 
@@ -113,7 +113,7 @@ class TestSSL:
                     ocsp = OCSPVerifier(wrapped, hostname, 443)
                     assert ocsp.is_valid()
 
-    @skip_if_cryptography()
+    @skip_if_nocryptography()
     def test_revoked_ocsp_certificate(self):
         from redis.ocsp import OCSPVerifier
 
@@ -124,7 +124,7 @@ class TestSSL:
                 ocsp = OCSPVerifier(wrapped, hostname, 443)
                 assert ocsp.is_valid() is False
 
-    @skip_if_cryptography()
+    @skip_if_nocryptography()
     def test_unauthorized_ocsp(self):
         from redis.ocsp import OCSPVerifier
 
@@ -136,7 +136,7 @@ class TestSSL:
                 with pytest.raises(ConnectionError):
                     ocsp.is_valid()
 
-    @skip_if_cryptography()
+    @skip_if_nocryptography()
     def test_ocsp_not_present_in_response(self):
         from redis.ocsp import OCSPVerifier
 
@@ -147,7 +147,7 @@ class TestSSL:
                 ocsp = OCSPVerifier(wrapped, hostname, 443)
                 assert ocsp.is_valid() is False
 
-    @skip_if_cryptography()
+    @skip_if_nocryptography()
     def test_unauthorized_then_direct(self):
 
         # these certificates on the socket end return unauthorized
