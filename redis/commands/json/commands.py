@@ -231,7 +231,7 @@ class JSONCommands:
         with open(file_name, "r") as fp:
             file_content = loads(fp.read())
 
-        return self.set(name, path, file_content, nx, xx, decode_keys)
+        return self.set(name, path, file_content, nx=nx, xx=xx, decode_keys=decode_keys)
 
     def set_path(self, json_path, root_folder, nx=False, xx=False, decode_keys=False):
         """
@@ -247,13 +247,20 @@ class JSONCommands:
         set_files_result = {}
         for root, dirs, files in os.walk(root_folder):
             for file in files:
+                file_path = os.path.join(root, file)
                 try:
-                    file_name = os.path.join(root, file).rsplit(".")[0]
-                    file_path = os.path.join(root, file)
-                    self.set_file(file_name, json_path, file_path, nx, xx, decode_keys)
-                    set_files_result[os.path.join(root, file)] = True
+                    file_name = file_path.rsplit(".")[0]
+                    self.set_file(
+                        file_name,
+                        json_path,
+                        file_path,
+                        nx=nx,
+                        xx=xx,
+                        decode_keys=decode_keys,
+                    )
+                    set_files_result[file_path] = True
                 except JSONDecodeError:
-                    set_files_result[os.path.join(root, file)] = False
+                    set_files_result[file_path] = False
 
         return set_files_result
 
