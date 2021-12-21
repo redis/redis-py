@@ -1,3 +1,6 @@
+import os
+from json import JSONDecodeError, loads
+
 from deprecated import deprecated
 
 from redis.exceptions import DataError
@@ -212,6 +215,54 @@ class JSONCommands:
         elif xx:
             pieces.append("XX")
         return self.execute_command("JSON.SET", *pieces)
+
+    def set_file(self, name, path, file_name, nx=False, xx=False, decode_keys=False):
+        """
+        Set the JSON value at key ``name`` under the ``path`` to the content
+        of the json file ``file_name``.
+
+        ``nx`` if set to True, set ``value`` only if it does not exist.
+        ``xx`` if set to True, set ``value`` only if it exists.
+        ``decode_keys`` If set to True, the keys of ``obj`` will be decoded
+        with utf-8.
+
+        """
+
+        with open(file_name, "r") as fp:
+            file_content = loads(fp.read())
+
+        return self.set(name, path, file_content, nx=nx, xx=xx, decode_keys=decode_keys)
+
+    def set_path(self, json_path, root_folder, nx=False, xx=False, decode_keys=False):
+        """
+        Iterate over ``root_folder`` and set each JSON file to a value
+        under ``json_path`` with the file name as the key.
+
+        ``nx`` if set to True, set ``value`` only if it does not exist.
+        ``xx`` if set to True, set ``value`` only if it exists.
+        ``decode_keys`` If set to True, the keys of ``obj`` will be decoded
+        with utf-8.
+
+        """
+        set_files_result = {}
+        for root, dirs, files in os.walk(root_folder):
+            for file in files:
+                file_path = os.path.join(root, file)
+                try:
+                    file_name = file_path.rsplit(".")[0]
+                    self.set_file(
+                        file_name,
+                        json_path,
+                        file_path,
+                        nx=nx,
+                        xx=xx,
+                        decode_keys=decode_keys,
+                    )
+                    set_files_result[file_path] = True
+                except JSONDecodeError:
+                    set_files_result[file_path] = False
+
+        return set_files_result
 
     def strlen(self, name, path=None):
         """Return the length of the string JSON value under ``path`` at key
