@@ -17,6 +17,7 @@ from redis.exceptions import (
     ClusterCrossSlotError,
     ClusterDownError,
     ClusterError,
+    ConnectionError,
     DataError,
     MasterDownError,
     MovedError,
@@ -24,9 +25,9 @@ from redis.exceptions import (
     RedisError,
     ResponseError,
     SlotNotCoveredError,
-    TimeoutError,
-    TryAgainError,
 )
+from redis.exceptions import TimeoutError as RedisTimeoutError
+from redis.exceptions import TryAgainError
 from redis.utils import (
     dict_merge,
     list_keys_to_dict,
@@ -374,6 +375,13 @@ class RedisCluster(RedisClusterCommands):
         ),
     )
 
+    ERRORS_ALLOW_RETRY = (
+        ConnectionError,
+        TimeoutError,
+        RedisTimeoutError,
+        ClusterDownError,
+    )
+
     def __init__(
         self,
         host=None,
@@ -385,8 +393,6 @@ class RedisCluster(RedisClusterCommands):
         reinitialize_steps=10,
         read_from_replicas=False,
         url=None,
-        retry_on_timeout=False,
-        retry=None,
         **kwargs,
     ):
         """
@@ -417,11 +423,6 @@ class RedisCluster(RedisClusterCommands):
         :cluster_error_retry_attempts: 'int'
              Retry command execution attempts when encountering ClusterDownError
              or ConnectionError
-        :retry_on_timeout: 'bool'
-             To specify a retry policy, first set `retry_on_timeout` to `True`
-             then set `retry` to a valid `Retry` object
-        :retry: 'Retry'
-              a `Retry` object
         :reinitialize_steps: 'int'
             Specifies the number of MOVED errors that need to occur before
             reinitializing the whole cluster topology. If a MOVED error occurs
@@ -451,9 +452,6 @@ class RedisCluster(RedisClusterCommands):
             raise RedisClusterException(
                 "Argument 'db' is not possible to use in cluster mode"
             )
-
-        if retry_on_timeout:
-            kwargs.update({"retry_on_timeout": retry_on_timeout, "retry": retry})
 
         # Get the startup node/s
         from_url = False
@@ -850,7 +848,7 @@ class RedisCluster(RedisClusterCommands):
 
     def execute_command(self, *args, **kwargs):
         """
-        Wrapper for ClusterDownError and ConnectionError error handling.
+        Wrapper for ERRORS_ALLOW_RETRY error handling.
 
         It will try the number of times specified by the config option
         "self.cluster_error_retry_attempts" which defaults to 3 unless manually
@@ -869,14 +867,14 @@ class RedisCluster(RedisClusterCommands):
         if target_nodes is not None and not self._is_nodes_flag(target_nodes):
             target_nodes = self._parse_target_nodes(target_nodes)
             target_nodes_specified = True
-        # If ClusterDownError/ConnectionError were thrown, the nodes
-        # and slots cache were reinitialized. We will retry executing the
-        # command with the updated cluster setup only when the target nodes
-        # can be determined again with the new cache tables. Therefore,
-        # when target nodes were passed to this function, we cannot retry
-        # the command execution since the nodes may not be valid anymore
-        # after the tables were reinitialized. So in case of passed target
-        # nodes, retry_attempts will be set to 1.
+        # If an error that allows retrying was thrown, the nodes and slots
+        # cache were reinitialized. We will retry executing the command with
+        # the updated cluster setup only when the target nodes can be
+        # determined again with the new cache tables. Therefore, when target
+        # nodes were passed to this function, we cannot retry the command
+        # execution since the nodes may not be valid anymore after the tables
+        # were reinitialized. So in case of passed target nodes,
+        # retry_attempts will be set to 1.
         retry_attempts = (
             1 if target_nodes_specified else self.cluster_error_retry_attempts
         )
@@ -897,11 +895,14 @@ class RedisCluster(RedisClusterCommands):
                     res[node.name] = self._execute_command(node, *args, **kwargs)
                 # Return the processed result
                 return self._process_result(args[0], res, **kwargs)
-            except (ClusterDownError, ConnectionError) as e:
-                # The nodes and slots cache were reinitialized.
-                # Try again with the new cluster setup. All other errors
-                # should be raised.
-                exception = e
+            except BaseException as e:
+                if type(e) in RedisCluster.ERRORS_ALLOW_RETRY:
+                    # The nodes and slots cache were reinitialized.
+                    # Try again with the new cluster setup.
+                    exception = e
+                else:
+                    # All other errors should be raised.
+                    raise e
 
         # If it fails the configured number of times then raise exception back
         # to caller of this method
@@ -953,11 +954,11 @@ class RedisCluster(RedisClusterCommands):
                     )
                 return response
 
-            except (RedisClusterException, BusyLoadingError):
-                log.exception("RedisClusterException || BusyLoadingError")
+            except (RedisClusterException, BusyLoadingError) as e:
+                log.exception(type(e))
                 raise
-            except ConnectionError:
-                log.exception("ConnectionError")
+            except (ConnectionError, TimeoutError, RedisTimeoutError) as e:
+                log.exception(type(e))
                 # ConnectionError can also be raised if we couldn't get a
                 # connection from the pool before timing out, so check that
                 # this is an actual connection before attempting to disconnect.
@@ -976,13 +977,6 @@ class RedisCluster(RedisClusterCommands):
                     # and try again with the new setup
                     self.nodes_manager.initialize()
                     raise
-            except TimeoutError:
-                log.exception("TimeoutError")
-                if connection is not None:
-                    connection.disconnect()
-
-                if ttl < self.RedisClusterRequestTTL / 2:
-                    time.sleep(0.05)
             except MovedError as e:
                 # First, we will try to patch the slots/nodes cache with the
                 # redirected node output and try again. If MovedError exceeds
@@ -1014,7 +1008,7 @@ class RedisCluster(RedisClusterCommands):
                 # ClusterDownError can occur during a failover and to get
                 # self-healed, we will try to reinitialize the cluster layout
                 # and retry executing the command
-                time.sleep(0.05)
+                time.sleep(0.25)
                 self.nodes_manager.initialize()
                 raise e
             except ResponseError as e:
@@ -1339,9 +1333,9 @@ class NodesManager:
                     raise RedisClusterException(
                         "Cluster mode is not enabled on this node"
                     )
-                cluster_slots = r.execute_command("CLUSTER SLOTS")
+                cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
                 startup_nodes_reachable = True
-            except (ConnectionError, TimeoutError) as e:
+            except (ConnectionError, TimeoutError, RedisTimeoutError) as e:
                 msg = e.__str__
                 log.exception(
                     "An exception occurred while trying to"
@@ -1621,20 +1615,20 @@ class ClusterPubSub(PubSub):
             return self.node.redis_connection
 
 
-ERRORS_ALLOW_RETRY = (
-    ConnectionError,
-    TimeoutError,
-    MovedError,
-    AskError,
-    TryAgainError,
-)
-
-
 class ClusterPipeline(RedisCluster):
     """
     Support for Redis pipeline
     in cluster mode
     """
+
+    ERRORS_ALLOW_RETRY = (
+        ConnectionError,
+        TimeoutError,
+        RedisTimeoutError,
+        MovedError,
+        AskError,
+        TryAgainError,
+    )
 
     def __init__(
         self,
@@ -1905,7 +1899,11 @@ class ClusterPipeline(RedisCluster):
         # collect all the commands we are allowed to retry.
         # (MOVED, ASK, or connection errors or timeout errors)
         attempt = sorted(
-            (c for c in attempt if isinstance(c.result, ERRORS_ALLOW_RETRY)),
+            (
+                c
+                for c in attempt
+                if isinstance(c.result, ClusterPipeline.ERRORS_ALLOW_RETRY)
+            ),
             key=lambda x: x.position,
         )
         if attempt and allow_redirections:
@@ -2105,7 +2103,7 @@ class NodeCommands:
             connection.send_packed_command(
                 connection.pack_commands([c.args for c in commands])
             )
-        except (ConnectionError, TimeoutError) as e:
+        except (ConnectionError, RedisTimeoutError) as e:
             for c in commands:
                 c.result = e
 
@@ -2135,7 +2133,7 @@ class NodeCommands:
             if c.result is None:
                 try:
                     c.result = self.parse_response(connection, c.args[0], **c.options)
-                except (ConnectionError, TimeoutError) as e:
+                except (ConnectionError, RedisTimeoutError) as e:
                     for c in self.commands:
                         c.result = e
                     return
