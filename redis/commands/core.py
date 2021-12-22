@@ -707,6 +707,13 @@ class ManagementCommands:
         else:
             return self.execute_command("LOLWUT", **kwargs)
 
+    def reset(self):
+        """Perform a full reset on the connection's server side contenxt.
+
+        See: https://redis.io/commands/reset
+        """
+        return self.execute_command("RESET")
+
     def migrate(
         self,
         host,

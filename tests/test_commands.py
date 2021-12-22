@@ -640,6 +640,11 @@ class TestRedisCommands:
         lolwut = r.lolwut(5, 6, 7, 8).decode("utf-8")
         assert "Redis ver." in lolwut
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    def test_reset(self, r):
+        assert r.reset() == "RESET"
+
     def test_object(self, r):
         r["a"] = "foo"
         assert isinstance(r.object("refcount", "a"), int)
