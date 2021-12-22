@@ -25,9 +25,9 @@ from redis.exceptions import (
     RedisError,
     ResponseError,
     SlotNotCoveredError,
+    TimeoutError,
+    TryAgainError,
 )
-from redis.exceptions import TimeoutError as RedisTimeoutError
-from redis.exceptions import TryAgainError
 from redis.utils import (
     dict_merge,
     list_keys_to_dict,
@@ -378,7 +378,6 @@ class RedisCluster(RedisClusterCommands):
     ERRORS_ALLOW_RETRY = (
         ConnectionError,
         TimeoutError,
-        RedisTimeoutError,
         ClusterDownError,
     )
 
@@ -863,9 +862,10 @@ class RedisCluster(RedisClusterCommands):
             dict<Any, ClusterNode>
         """
         target_nodes_specified = False
-        target_nodes = kwargs.pop("target_nodes", None)
-        if target_nodes is not None and not self._is_nodes_flag(target_nodes):
-            target_nodes = self._parse_target_nodes(target_nodes)
+        target_nodes = None
+        passed_targets = kwargs.pop("target_nodes", None)
+        if passed_targets is not None and not self._is_nodes_flag(passed_targets):
+            target_nodes = self._parse_target_nodes(passed_targets)
             target_nodes_specified = True
         # If an error that allows retrying was thrown, the nodes and slots
         # cache were reinitialized. We will retry executing the command with
@@ -885,7 +885,7 @@ class RedisCluster(RedisClusterCommands):
                 if not target_nodes_specified:
                     # Determine the nodes to execute the command on
                     target_nodes = self._determine_nodes(
-                        *args, **kwargs, nodes_flag=target_nodes
+                        *args, **kwargs, nodes_flag=passed_targets
                     )
                     if not target_nodes:
                         raise RedisClusterException(
@@ -957,7 +957,7 @@ class RedisCluster(RedisClusterCommands):
             except (RedisClusterException, BusyLoadingError) as e:
                 log.exception(type(e))
                 raise
-            except (ConnectionError, TimeoutError, RedisTimeoutError) as e:
+            except (ConnectionError, TimeoutError) as e:
                 log.exception(type(e))
                 # ConnectionError can also be raised if we couldn't get a
                 # connection from the pool before timing out, so check that
@@ -1335,7 +1335,7 @@ class NodesManager:
                     )
                 cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
                 startup_nodes_reachable = True
-            except (ConnectionError, TimeoutError, RedisTimeoutError) as e:
+            except (ConnectionError, TimeoutError) as e:
                 msg = e.__str__
                 log.exception(
                     "An exception occurred while trying to"
@@ -1624,7 +1624,6 @@ class ClusterPipeline(RedisCluster):
     ERRORS_ALLOW_RETRY = (
         ConnectionError,
         TimeoutError,
-        RedisTimeoutError,
         MovedError,
         AskError,
         TryAgainError,
@@ -1637,7 +1636,7 @@ class ClusterPipeline(RedisCluster):
         cluster_response_callbacks=None,
         startup_nodes=None,
         read_from_replicas=False,
-        cluster_error_retry_attempts=3,
+        cluster_error_retry_attempts=5,
         reinitialize_steps=10,
         **kwargs,
     ):
@@ -2103,7 +2102,7 @@ class NodeCommands:
             connection.send_packed_command(
                 connection.pack_commands([c.args for c in commands])
             )
-        except (ConnectionError, RedisTimeoutError) as e:
+        except (ConnectionError, TimeoutError) as e:
             for c in commands:
                 c.result = e
 
@@ -2133,7 +2132,7 @@ class NodeCommands:
             if c.result is None:
                 try:
                     c.result = self.parse_response(connection, c.args[0], **c.options)
-                except (ConnectionError, RedisTimeoutError) as e:
+                except (ConnectionError, TimeoutError) as e:
                     for c in self.commands:
                         c.result = e
                     return
