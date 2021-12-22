@@ -1530,6 +1530,8 @@ class PubSub:
         with a message handler, the handler is invoked instead of a parsed
         message being returned.
         """
+        if response is None:
+            return None
         message_type = str_if_bytes(response[0])
         if message_type == "pmessage":
             message = {
