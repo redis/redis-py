@@ -479,6 +479,104 @@ class ManagementCommands:
         """
         return self.execute_command("CLIENT ID", **kwargs)
 
+    def client_tracking_on(
+        self,
+        clientid=None,
+        prefix=[],
+        bcast=False,
+        optin=False,
+        optout=False,
+        noloop=False,
+    ):
+        """
+        Turn on the tracking mode.
+        For more information about the options look at client_tracking func.
+
+        See https://redis.io/commands/client-tracking
+        """
+        return self.client_tracking(
+            True, clientid, prefix, bcast, optin, optout, noloop
+        )
+
+    def client_tracking_off(
+        self,
+        clientid=None,
+        prefix=[],
+        bcast=False,
+        optin=False,
+        optout=False,
+        noloop=False,
+    ):
+        """
+        Turn off the tracking mode.
+        For more information about the options look at client_tracking func.
+
+        See https://redis.io/commands/client-tracking
+        """
+        return self.client_tracking(
+            False, clientid, prefix, bcast, optin, optout, noloop
+        )
+
+    def client_tracking(
+        self,
+        on=True,
+        clientid=None,
+        prefix=[],
+        bcast=False,
+        optin=False,
+        optout=False,
+        noloop=False,
+        **kwargs,
+    ):
+        """
+        Enables the tracking feature of the Redis server, that is used
+        for server assisted client side caching.
+
+        ``on`` indicate for tracking on or tracking off. The dafualt is on.
+
+        ``clientid`` send invalidation messages to the connection with
+        the specified ID.
+
+        ``bcast`` enable tracking in broadcasting mode. In this mode
+        invalidation messages are reported for all the prefixes
+        specified, regardless of the keys requested by the connection.
+
+        ``optin``  when broadcasting is NOT active, normally don't track
+        keys in read only commands, unless they are called immediately
+        after a CLIENT CACHING yes command.
+
+        ``optout`` when broadcasting is NOT active, normally track keys in
+        read only commands, unless they are called immediately after a
+        CLIENT CACHING no command.
+
+        ``noloop`` don't send notifications about keys modified by this
+        connection itself.
+
+        ``prefix``  for broadcasting, register a given key prefix, so that
+        notifications will be provided only for keys starting with this string.
+
+        See https://redis.io/commands/client-tracking
+        """
+
+        if len(prefix) != 0 and bcast is False:
+            raise DataError("Prefix can only be used with bcast")
+
+        pieces = ["ON"] if on else ["OFF"]
+        if clientid is not None:
+            pieces.extend(["REDIRECT", clientid])
+        for p in prefix:
+            pieces.extend(["PREFIX", p])
+        if bcast:
+            pieces.append("BCAST")
+        if optin:
+            pieces.append("OPTIN")
+        if optout:
+            pieces.append("OPTOUT")
+        if noloop:
+            pieces.append("NOLOOP")
+
+        return self.execute_command("CLIENT TRACKING", *pieces)
+
     def client_trackinginfo(self, **kwargs):
         """
         Returns the information about the current client connection's

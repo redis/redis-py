@@ -397,6 +397,28 @@ class TestRedisCommands:
         assert "prefixes" in res
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.0.0")
+    def test_client_tracking(self, r, r2):
+
+        # simple case
+        assert r.client_tracking_on()
+        assert r.client_tracking_off()
+
+        # id based
+        client_id = r.client_id()
+        assert r.client_tracking_on(client_id)
+        assert r.client_tracking_off(client_id)
+
+        # id exists
+        client_id = r2.client_id()
+        assert r.client_tracking_on(client_id)
+        assert r2.client_tracking_off(client_id)
+
+        # now with some prefixes
+        with pytest.raises(exceptions.DataError):
+            assert r.client_tracking_on(prefix=["foo", "bar", "blee"])
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("5.0.0")
     def test_client_unblock(self, r):
         myid = r.client_id()
