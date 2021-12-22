@@ -996,9 +996,11 @@ class RedisCluster(RedisClusterCommands):
                 self.reinitialize_counter += 1
                 if self._should_reinitialized():
                     self.nodes_manager.initialize()
+                    # Reset the counter
+                    self.reinitialize_counter = 0
                 else:
                     self.nodes_manager.update_moved_exception(e)
-                    moved = True
+                moved = True
             except TryAgainError:
                 log.exception("TryAgainError")
 
@@ -1320,6 +1322,7 @@ class NodesManager:
         tmp_slots = {}
         disagreements = []
         startup_nodes_reachable = False
+        fully_covered = False
         kwargs = self.connection_kwargs
         for startup_node in self.startup_nodes.values():
             try:
@@ -1431,6 +1434,12 @@ class NodesManager:
                                     f'slots cache: {", ".join(disagreements)}'
                                 )
 
+            fully_covered = self.check_slots_coverage(tmp_slots)
+            if fully_covered:
+                # Don't need to continue to the next startup node if all
+                # slots are covered
+                break
+
         if not startup_nodes_reachable:
             raise RedisClusterException(
                 "Redis Cluster cannot be connected. Please provide at least "
@@ -1440,7 +1449,6 @@ class NodesManager:
         # Create Redis connections to all nodes
         self.create_redis_connections(list(tmp_nodes_cache.values()))
 
-        fully_covered = self.check_slots_coverage(tmp_slots)
         # Check if the slots are not fully covered
         if not fully_covered and self._require_full_coverage:
             # Despite the requirement that the slots be covered, there
@@ -1478,6 +1486,8 @@ class NodesManager:
         self.default_node = self.get_nodes_by_server_type(PRIMARY)[0]
         # Populate the startup nodes with all discovered nodes
         self.populate_startup_nodes(self.nodes_cache.values())
+        # If initialize was called after a MovedError, clear it
+        self._moved_exception = None
 
     def close(self):
         self.default_node = None
