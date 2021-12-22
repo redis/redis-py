@@ -768,6 +768,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         "STRALGO": parse_stralgo,
         "PUBSUB NUMSUB": parse_pubsub_numsub,
         "RANDOMKEY": lambda r: r and r or None,
+        "RESET": str_if_bytes,
         "SCAN": parse_scan,
         "SCRIPT EXISTS": lambda r: list(map(bool, r)),
         "SCRIPT FLUSH": bool_ok,
