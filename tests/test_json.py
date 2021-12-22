@@ -1428,6 +1428,5 @@ def test_set_path(client):
     open(nojsonfile, "a+").write("hello")
 
     result = {jsonfile: True, nojsonfile: False}
-    print(result)
     assert client.json().set_path(Path.rootPath(), root) == result
     assert client.json().get(jsonfile.rsplit(".")[0]) == {"hello": "world"}
