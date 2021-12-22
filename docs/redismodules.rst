@@ -44,7 +44,7 @@ These are the commands for interacting with the `RedisJSON module <https://redis
 RediSearch Commands
 *******************
 
-These are the commands for interacting with the `RediSearch module <https://redisjson.io>`_. Below is a brief example, as well as documentation on the commands themselves.
+These are the commands for interacting with the `RediSearch module <https://redisearch.io>`_. Below is a brief example, as well as documentation on the commands themselves.
 
 **Create a search index, and display its information**
 
@@ -64,7 +64,7 @@ These are the commands for interacting with the `RediSearch module <https://redi
 RedisGraph Commands
 *******************
 
-These are the commands for interacting with the `RedisGraph module <https://redisjson.io>`_. Below is a brief example, as well as documentation on the commands themselves.
+These are the commands for interacting with the `RedisGraph module <https://redisgraph.io>`_. Below is a brief example, as well as documentation on the commands themselves.
 
 **Create a graph, adding two nodes**
 
@@ -97,7 +97,7 @@ These are the commands for interacting with the `RedisGraph module <https://redi
 RedisBloom Commands
 *******************
 
-These are the commands for interacting with the `RedisBloom module <https://redisjson.io>`_. Below is a brief example, as well as documentation on the commands themselves.
+These are the commands for interacting with the `RedisBloom module <https://redisbloom.io>`_. Below is a brief example, as well as documentation on the commands themselves.
 
 **Create and add to a bloom filter**
 
