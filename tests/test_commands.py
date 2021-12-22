@@ -662,6 +662,12 @@ class TestRedisCommands:
         assert isinstance(r.role()[2], list)
 
     @pytest.mark.onlynoncluster
+    def test_select(self, r):
+        assert r.select(5)
+        assert r.select(2)
+        assert r.select(9)
+
+    @pytest.mark.onlynoncluster
     def test_slowlog_get(self, r, slowlog):
         assert r.slowlog_reset()
         unicode_string = chr(3456) + "abcd" + chr(3421)
