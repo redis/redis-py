@@ -1370,7 +1370,7 @@ class PubSub:
         ttl = 10
         conn = self.connection
         while self.health_check_response_counter > 0 and ttl > 0:
-            if self._execute(conn, conn.can_read, timeout=1):
+            if self._execute(conn, conn.can_read, timeout=conn.socket_timeout):
                 response = self._execute(conn, conn.read_response)
                 if self.is_health_check_response(response):
                     self.health_check_response_counter -= 1
