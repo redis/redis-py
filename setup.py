@@ -1,6 +1,5 @@
 #!/usr/bin/env python
-from setuptools import setup, find_packages
-import redis
+from setuptools import find_packages, setup
 
 setup(
     name="redis",
@@ -9,14 +8,16 @@ setup(
     long_description_content_type="text/markdown",
     keywords=["Redis", "key-value store", "database"],
     license="MIT",
-    version=redis.__version__,
+    version="4.1.0rc2",
     packages=find_packages(
         include=[
             "redis",
             "redis.commands",
+            "redis.commands.bf",
             "redis.commands.json",
             "redis.commands.search",
             "redis.commands.timeseries",
+            "redis.commands.graph",
         ]
     ),
     url="https://github.com/redis/redis-py",
@@ -24,7 +25,9 @@ setup(
     author_email="oss@redis.com",
     python_requires=">=3.6",
     install_requires=[
-        'deprecated'
+        "deprecated>=1.2.3",
+        "packaging>=21.3",
+        'importlib-metadata >= 1.0; python_version < "3.8"',
     ],
     classifiers=[
         "Development Status :: 5 - Production/Stable",
