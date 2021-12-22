@@ -513,7 +513,7 @@ class Connection:
         socket_keepalive_options=None,
         socket_type=0,
         retry_on_timeout=False,
-        retry_on_error=None,
+        retry_on_error=[],
         encoding="utf-8",
         encoding_errors="strict",
         decode_responses=False,
@@ -547,7 +547,6 @@ class Connection:
         self.retry_on_timeout = retry_on_timeout
         if retry_on_timeout:
             # Add TimeoutError to the errors list to retry on
-            retry_on_error = [] if retry_on_error is None else retry_on_error
             retry_on_error.append(TimeoutError)
         self.retry_on_error = retry_on_error
         if retry_on_error:
@@ -979,7 +978,7 @@ class UnixDomainSocketConnection(Connection):
         encoding_errors="strict",
         decode_responses=False,
         retry_on_timeout=False,
-        retry_on_error=None,
+        retry_on_error=[],
         parser_class=DefaultParser,
         socket_read_size=65536,
         health_check_interval=0,
@@ -1004,7 +1003,6 @@ class UnixDomainSocketConnection(Connection):
         self.retry_on_timeout = retry_on_timeout
         if retry_on_timeout:
             # Add TimeoutError to the errors list to retry on
-            retry_on_error = [] if retry_on_error is None else retry_on_error
             retry_on_error.append(TimeoutError)
         self.retry_on_error = retry_on_error
         if self.retry_on_error:

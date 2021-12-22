@@ -868,7 +868,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         errors=None,
         decode_responses=False,
         retry_on_timeout=False,
-        retry_on_error=None,
+        retry_on_error=[],
         ssl=False,
         ssl_keyfile=None,
         ssl_certfile=None,
@@ -908,7 +908,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 )
                 encoding_errors = errors
             if retry_on_timeout is True:
-                retry_on_error = [] if retry_on_error is None else retry_on_error
                 retry_on_error.append(TimeoutError)
             kwargs = {
                 "db": db,
@@ -1153,7 +1152,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         is not one of the specified error types
         """
         conn.disconnect()
-        if not (conn.retry_on_error and isinstance(error, tuple(conn.retry_on_error))):
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
             raise error
 
     # COMMAND EXECUTION AND PROTOCOL PARSING

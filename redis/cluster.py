@@ -1436,7 +1436,8 @@ class NodesManager:
 
             fully_covered = self.check_slots_coverage(tmp_slots)
             if fully_covered:
-                # Don't need to continue to the next startup node if all slots are covered
+                # Don't need to continue to the next startup node if all
+                # slots are covered
                 break
 
         if not startup_nodes_reachable:
