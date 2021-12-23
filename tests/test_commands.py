@@ -1346,6 +1346,7 @@ class TestRedisCommands:
         assert r["a"] == b"abcdef12345"
 
     @skip_if_server_version_lt("6.0.0")
+    @skip_if_server_version_gte("7.0.0")
     def test_stralgo_lcs(self, r):
         key1 = "{foo}key1"
         key2 = "{foo}key2"
