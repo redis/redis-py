@@ -869,6 +869,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         errors=None,
         decode_responses=False,
         retry_on_timeout=False,
+        retry_on_error=[],
         ssl=False,
         ssl_keyfile=None,
         ssl_certfile=None,
@@ -887,8 +888,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     ):
         """
         Initialize a new Redis client.
-        To specify a retry policy, first set `retry_on_timeout` to `True`
-        then set `retry` to a valid `Retry` object
+        To specify a retry policy for specific errors, first set
+        `retry_on_error` to a list of the error/s to retry on, then set
+        `retry` to a valid `Retry` object.
+        To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
         """
         if not connection_pool:
             if charset is not None:
@@ -905,7 +908,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                     )
                 )
                 encoding_errors = errors
-
+            if retry_on_timeout is True:
+                retry_on_error.append(TimeoutError)
             kwargs = {
                 "db": db,
                 "username": username,
@@ -914,7 +918,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "encoding": encoding,
                 "encoding_errors": encoding_errors,
                 "decode_responses": decode_responses,
-                "retry_on_timeout": retry_on_timeout,
+                "retry_on_error": retry_on_error,
                 "retry": copy.deepcopy(retry),
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
@@ -1146,11 +1150,14 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     def _disconnect_raise(self, conn, error):
         """
         Close the connection and raise an exception
-        if retry_on_timeout is not set or the error
-        is not a TimeoutError
+        if retry_on_error is not set or the error
+        is not one of the specified error types
         """
         conn.disconnect()
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
             raise error
 
     # COMMAND EXECUTION AND PROTOCOL PARSING

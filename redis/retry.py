@@ -19,6 +19,14 @@ class Retry:
         self._retries = retries
         self._supported_errors = supported_errors
 
+    def update_supported_erros(self, specified_errors: list):
+        """
+        Updates the supported errors with the specified error types
+        """
+        self._supported_errors = tuple(
+            set(self._supported_errors + tuple(specified_errors))
+        )
+
     def call_with_retry(self, do, fail):
         """
         Execute an operation that might fail and returns its result, or
