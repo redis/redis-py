@@ -1,6 +1,8 @@
-import pytest
 import time
 from time import sleep
+
+import pytest
+
 from .conftest import skip_ifmodversion_lt
 
 
@@ -31,7 +33,7 @@ def test_create(client):
 def test_create_duplicate_policy(client):
     # Test for duplicate policy
     for duplicate_policy in ["block", "last", "first", "min", "max"]:
-        ts_name = "time-serie-ooo-{0}".format(duplicate_policy)
+        ts_name = f"time-serie-ooo-{duplicate_policy}"
         assert client.ts().create(ts_name, duplicate_policy=duplicate_policy)
         info = client.ts().info(ts_name)
         assert duplicate_policy == info.duplicate_policy
@@ -68,8 +70,7 @@ def test_add(client):
     assert 4 == client.ts().add(
         4, 4, 2, retention_msecs=10, labels={"Redis": "Labs", "Time": "Series"}
     )
-    assert round(time.time()) == \
-        round(float(client.ts().add(5, "*", 1)) / 1000)
+    assert round(time.time()) == round(float(client.ts().add(5, "*", 1)) / 1000)
 
     info = client.ts().info(4)
     assert 10 == info.retention_msecs
@@ -88,12 +89,7 @@ def test_add_duplicate_policy(client):
     # Test for duplicate policy BLOCK
     assert 1 == client.ts().add("time-serie-add-ooo-block", 1, 5.0)
     with pytest.raises(Exception):
-        client.ts().add(
-            "time-serie-add-ooo-block",
-            1,
-            5.0,
-            duplicate_policy="block"
-        )
+        client.ts().add("time-serie-add-ooo-block", 1, 5.0, duplicate_policy="block")
 
     # Test for duplicate policy LAST
     assert 1 == client.ts().add("time-serie-add-ooo-last", 1, 5.0)
@@ -127,8 +123,7 @@ def test_add_duplicate_policy(client):
 @pytest.mark.redismod
 def test_madd(client):
     client.ts().create("a")
-    assert [1, 2, 3] == \
-        client.ts().madd([("a", 1, 5), ("a", 2, 10), ("a", 3, 15)])
+    assert [1, 2, 3] == client.ts().madd([("a", 1, 5), ("a", 2, 10), ("a", 3, 15)])
 
 
 @pytest.mark.redismod
@@ -206,13 +201,7 @@ def test_range(client):
     assert 200 == len(client.ts().range(1, 0, 500))
     # last sample isn't returned
     assert 20 == len(
-        client.ts().range(
-            1,
-            0,
-            500,
-            aggregation_type="avg",
-            bucket_size_msec=10
-        )
+        client.ts().range(1, 0, 500, aggregation_type="avg", bucket_size_msec=10)
     )
     assert 10 == len(client.ts().range(1, 0, 500, count=10))
 
@@ -253,13 +242,7 @@ def test_rev_range(client):
     assert 200 == len(client.ts().range(1, 0, 500))
     # first sample isn't returned
     assert 20 == len(
-        client.ts().revrange(
-            1,
-            0,
-            500,
-            aggregation_type="avg",
-            bucket_size_msec=10
-        )
+        client.ts().revrange(1, 0, 500, aggregation_type="avg", bucket_size_msec=10)
     )
     assert 10 == len(client.ts().revrange(1, 0, 500, count=10))
     assert 2 == len(
@@ -283,10 +266,7 @@ def test_rev_range(client):
 @pytest.mark.redismod
 def testMultiRange(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
-    client.ts().create(
-        2,
-        labels={"Test": "This", "Taste": "That", "team": "sf"}
-    )
+    client.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
     for i in range(100):
         client.ts().add(1, i, i % 7)
         client.ts().add(2, i, i % 11)
@@ -301,11 +281,7 @@ def testMultiRange(client):
     for i in range(100):
         client.ts().add(1, i + 200, i % 7)
     res = client.ts().mrange(
-        0,
-        500,
-        filters=["Test=This"],
-        aggregation_type="avg",
-        bucket_size_msec=10
+        0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
     )
     assert 2 == len(res)
     assert 20 == len(res[0]["1"][1])
@@ -320,21 +296,13 @@ def testMultiRange(client):
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 def test_multi_range_advanced(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
-    client.ts().create(
-        2,
-        labels={"Test": "This", "Taste": "That", "team": "sf"}
-    )
+    client.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
     for i in range(100):
         client.ts().add(1, i, i % 7)
         client.ts().add(2, i, i % 11)
 
     # test with selected labels
-    res = client.ts().mrange(
-        0,
-        200,
-        filters=["Test=This"],
-        select_labels=["team"]
-    )
+    res = client.ts().mrange(0, 200, filters=["Test=This"], select_labels=["team"])
     assert {"team": "ny"} == res[0]["1"][0]
     assert {"team": "sf"} == res[1]["2"][0]
 
@@ -350,28 +318,11 @@ def test_multi_range_advanced(client):
     assert [(15, 1.0), (16, 2.0)] == res[0]["1"][1]
 
     # test groupby
-    res = client.ts().mrange(
-        0,
-        3,
-        filters=["Test=This"],
-        groupby="Test",
-        reduce="sum"
-    )
+    res = client.ts().mrange(0, 3, filters=["Test=This"], groupby="Test", reduce="sum")
     assert [(0, 0.0), (1, 2.0), (2, 4.0), (3, 6.0)] == res[0]["Test=This"][1]
-    res = client.ts().mrange(
-        0,
-        3,
-        filters=["Test=This"],
-        groupby="Test",
-        reduce="max"
-    )
+    res = client.ts().mrange(0, 3, filters=["Test=This"], groupby="Test", reduce="max")
     assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[0]["Test=This"][1]
-    res = client.ts().mrange(
-        0,
-        3,
-        filters=["Test=This"],
-        groupby="team",
-        reduce="min")
+    res = client.ts().mrange(0, 3, filters=["Test=This"], groupby="team", reduce="min")
     assert 2 == len(res)
     assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[0]["team=ny"][1]
     assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[1]["team=sf"][1]
@@ -401,10 +352,7 @@ def test_multi_range_advanced(client):
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 def test_multi_reverse_range(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
-    client.ts().create(
-        2,
-        labels={"Test": "This", "Taste": "That", "team": "sf"}
-    )
+    client.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
     for i in range(100):
         client.ts().add(1, i, i % 7)
         client.ts().add(2, i, i % 11)
@@ -419,31 +367,18 @@ def test_multi_reverse_range(client):
     for i in range(100):
         client.ts().add(1, i + 200, i % 7)
     res = client.ts().mrevrange(
-        0,
-        500,
-        filters=["Test=This"],
-        aggregation_type="avg",
-        bucket_size_msec=10
+        0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
     )
     assert 2 == len(res)
     assert 20 == len(res[0]["1"][1])
     assert {} == res[0]["1"][0]
 
     # test withlabels
-    res = client.ts().mrevrange(
-        0,
-        200,
-        filters=["Test=This"],
-        with_labels=True
-    )
+    res = client.ts().mrevrange(0, 200, filters=["Test=This"], with_labels=True)
     assert {"Test": "This", "team": "ny"} == res[0]["1"][0]
 
     # test with selected labels
-    res = client.ts().mrevrange(
-        0,
-        200,
-        filters=["Test=This"], select_labels=["team"]
-    )
+    res = client.ts().mrevrange(0, 200, filters=["Test=This"], select_labels=["team"])
     assert {"team": "ny"} == res[0]["1"][0]
     assert {"team": "sf"} == res[1]["2"][0]
 
@@ -529,11 +464,7 @@ def test_mget(client):
 
 @pytest.mark.redismod
 def test_info(client):
-    client.ts().create(
-        1,
-        retention_msecs=5,
-        labels={"currentLabel": "currentData"}
-    )
+    client.ts().create(1, retention_msecs=5, labels={"currentLabel": "currentData"})
     info = client.ts().info(1)
     assert 5 == info.retention_msecs
     assert info.labels["currentLabel"] == "currentData"
@@ -542,11 +473,7 @@ def test_info(client):
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
 def testInfoDuplicatePolicy(client):
-    client.ts().create(
-        1,
-        retention_msecs=5,
-        labels={"currentLabel": "currentData"}
-    )
+    client.ts().create(1, retention_msecs=5, labels={"currentLabel": "currentData"})
     info = client.ts().info(1)
     assert info.duplicate_policy is None
 

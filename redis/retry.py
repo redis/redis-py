@@ -6,8 +6,9 @@ from redis.exceptions import ConnectionError, TimeoutError
 class Retry:
     """Retry a specific number of times after a failure"""
 
-    def __init__(self, backoff, retries,
-                 supported_errors=(ConnectionError, TimeoutError)):
+    def __init__(
+        self, backoff, retries, supported_errors=(ConnectionError, TimeoutError)
+    ):
         """
         Initialize a `Retry` object with a `Backoff` object
         that retries a maximum of `retries` times.
@@ -17,6 +18,14 @@ class Retry:
         self._backoff = backoff
         self._retries = retries
         self._supported_errors = supported_errors
+
+    def update_supported_erros(self, specified_errors: list):
+        """
+        Updates the supported errors with the specified error types
+        """
+        self._supported_errors = tuple(
+            set(self._supported_errors + tuple(specified_errors))
+        )
 
     def call_with_retry(self, do, fail):
         """

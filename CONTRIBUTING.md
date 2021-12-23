@@ -32,7 +32,7 @@ Here's how to get started with your code contribution:
 
 1.  Create your own fork of redis-py
 2.  Do the changes in your fork
-3.  
+3.
     *Create a virtualenv and install the development dependencies from the dev_requirements.txt file:*
 
         a.  python -m venv .venv
@@ -58,6 +58,7 @@ can execute docker and its various commands.
 -   A Redis replica node
 -   Three sentinel Redis nodes
 -   A multi-python docker, with your source code mounted in /data
+-   An stunnel docker, fronting the master Redis node
 
 The replica node, is a replica of the master node, using the
 [leader-follower replication](https://redis.io/topics/replication)
@@ -68,12 +69,12 @@ configuration](https://redis.io/topics/sentinel).
 
 ## Testing
 
-Call `invoke tests` to run all tests, or `invoke all-tests` to run linters 
-tests as well. With the 'tests' and 'all-tests' targets, all Redis and 
-RedisCluster tests will be run. 
+Call `invoke tests` to run all tests, or `invoke all-tests` to run linters
+tests as well. With the 'tests' and 'all-tests' targets, all Redis and
+RedisCluster tests will be run.
 
-It is possible to run only Redis client tests (with cluster mode disabled) by 
-using `invoke redis-tests`; similarly, RedisCluster tests can be run by using 
+It is possible to run only Redis client tests (with cluster mode disabled) by
+using `invoke standalone-tests`; similarly, RedisCluster tests can be run by using
 `invoke cluster-tests`.
 
 Each run of tox starts and stops the various dockers required. Sometimes
@@ -84,9 +85,7 @@ tests against multiple versions of python. Feel free to test your
 changes against all the python versions supported, as declared by the
 tox.ini file (eg: tox -e py39). If you have the various python versions
 on your desktop, you can run *tox* by itself, to test all supported
-versions. Alternatively, as your source code is mounted in the
-**lots-of-pythons** docker, you can start exploring from there, with all
-supported python versions!
+versions.
 
 ### Docker Tips
 
