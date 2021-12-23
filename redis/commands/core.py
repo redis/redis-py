@@ -780,6 +780,13 @@ class ManagementCommands:
         """
         return self.execute_command("SWAPDB", first, second, **kwargs)
 
+    def select(self, index, **kwargs):
+        """Select the Redis logical database at index.
+
+        See: https://redis.io/commands/select
+        """
+        return self.execute_command("SELECT", index, **kwargs)
+
     def info(self, section=None, **kwargs):
         """
         Returns a dictionary containing information about the Redis server
