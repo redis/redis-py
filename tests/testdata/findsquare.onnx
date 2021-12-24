@@ -1,0 +1,24 @@
+pytorch0.4:¿	
+ˆ	
+0
+01"Mul2÷test/testdata/onnxmaker.py(7): forward
+/home/sherin/miniconda3/envs/redisai/lib/python3.6/site-packages/torch/nn/modules/module.py(477): _slow_forward
+/home/sherin/miniconda3/envs/redisai/lib/python3.6/site-packages/torch/nn/modules/module.py(487): __call__
+/home/sherin/miniconda3/envs/redisai/lib/python3.6/site-packages/torch/jit/__init__.py(252): forward
+/home/sherin/miniconda3/envs/redisai/lib/python3.6/site-packages/torch/nn/modules/module.py(489): __call__
+/home/sherin/miniconda3/envs/redisai/lib/python3.6/site-packages/torch/jit/__init__.py(197): get_trace_graph
+/home/sherin/miniconda3/envs/redisai/lib/python3.6/site-packages/torch/onnx/utils.py(192): _trace_and_get_graph_from_model
+/home/sherin/miniconda3/envs/redisai/lib/python3.6/site-packages/torch/onnx/utils.py(224): _model_to_graph
+/home/sherin/miniconda3/envs/redisai/lib/python3.6/site-packages/torch/onnx/utils.py(281): _export
+/home/sherin/miniconda3/envs/redisai/lib/python3.6/site-packages/torch/onnx/utils.py(104): export
+/home/sherin/miniconda3/envs/redisai/lib/python3.6/site-packages/torch/onnx/__init__.py(27): export
+test/testdata/onnxmaker.py(13): <module>
+torch-jit-exportZ
+0
+
+
+b
+1
+
+
+B	

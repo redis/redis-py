@@ -81,3 +81,13 @@ class RedisModuleCommands:
 
         g = Graph(client=self, name=index_name)
         return g
+    
+    def ai(self, debug=False):
+        """Access the timeseries namespace, providing support for
+        redis timeseries data.
+        """
+
+        from .ai import AI
+
+        ai = AI(client=self, debug=debug)
+        return ai
