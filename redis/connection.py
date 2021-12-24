@@ -1303,7 +1303,7 @@ class ConnectionPool:
             try:
                 if connection.can_read():
                     raise ConnectionError("Connection has data")
-            except ConnectionError:
+            except (ConnectionError, OSError):
                 connection.disconnect()
                 connection.connect()
                 if connection.can_read():
