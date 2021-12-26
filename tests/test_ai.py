@@ -182,30 +182,35 @@ def test_deprecated_modelset(client):
     model_pb = load_model(model_path)
 
     with pytest.raises(ValueError):
-        client.ai().modelset(
-            "m",
-            "tf",
-            "wrongdevice",
-            model_pb,
-            inputs=["a", "b"],
-            outputs=["mul"],
-            tag="v1.0",
-        )
+        with pytest.warns(DeprecationWarning):
+            client.ai().modelset(
+                "m",
+                "tf",
+                "wrongdevice",
+                model_pb,
+                inputs=["a", "b"],
+                outputs=["mul"],
+                tag="v1.0",
+            )
 
     with pytest.raises(ValueError):
+        with pytest.warns(DeprecationWarning):
+            client.ai().modelset(
+                "m",
+                "wrongbackend",
+                "cpu",
+                model_pb,
+                inputs=["a", "b"],
+                outputs=["mul"],
+                tag="v1.0",
+            )
+    with pytest.warns(DeprecationWarning):
         client.ai().modelset(
-            "m",
-            "wrongbackend",
-            "cpu",
-            model_pb,
+            "m", "tf", "cpu", model_pb,
             inputs=["a", "b"],
             outputs=["mul"],
-            tag="v1.0",
+            tag="v1.0"
         )
-
-    client.ai().modelset(
-        "m", "tf", "cpu", model_pb, inputs=["a", "b"], outputs=["mul"], tag="v1.0"
-    )
     model = client.ai().modelget("m", meta_only=True)
     assert model == {
         "backend": "TF",
@@ -581,7 +586,8 @@ def test_deprecated_modelrun(client):
 
     client.ai().tensorset("a", (2, 3), dtype="float")
     client.ai().tensorset("b", (2, 3), dtype="float")
-    client.ai().modelrun("m", ["a", "b"], ["c"])
+    with pytest.warns(DeprecationWarning):
+        client.ai().modelrun("m", ["a", "b"], ["c"])
     tensor = client.ai().tensorget("c")
     assert np.allclose([4, 9], tensor)
 
@@ -629,14 +635,17 @@ def test_model_scan(client):
 
     # TODO: RedisAI modelscan issue
     client.ai().modelstore("pt_model", "torch", "cpu", ptmodel)
-    mlist = client.ai().modelscan()
+    with pytest.warns(UserWarning):
+        mlist = client.ai().modelscan()
     assert mlist == [["pt_model", ""], ["m", "v1.2"]]
 
 
 def test_script_scan(client):
-    client.ai().scriptset("ket1", "cpu", script, tag="v1.0")
-    client.ai().scriptset("ket2", "cpu", script)
-    slist = client.ai().scriptscan()
+    with pytest.warns(DeprecationWarning):
+        client.ai().scriptset("ket1", "cpu", script, tag="v1.0")
+        client.ai().scriptset("ket2", "cpu", script)
+    with pytest.warns(UserWarning):
+        slist = client.ai().scriptscan()
     assert slist == [["ket1", "v1.0"], ["ket2", ""]]
 
 

@@ -393,10 +393,9 @@ class AICommands:
         >>> con.modelscan()
         [['pt_model', ''], ['m', 'v1.2']]
         """
-        warnings.warn(
+        warnings.warn(UserWarning(
             "Experimental: Model List API is experimental and might change "
-            "in the future without any notice",
-            UserWarning,
+            "in the future without any notice")
         )
         args = builder.modelscan()
         res = self.execute_command(*args)
@@ -765,10 +764,9 @@ class AICommands:
         >>> con.scriptscan()
         [['ket1', 'v1.0'], ['ket2', '']]
         """
-        warnings.warn(
+        warnings.warn(UserWarning(
             "Experimental: Script List API is experimental and might change "
-            "in the future without any notice",
-            UserWarning,
+            "in the future without any notice")
         )
         args = builder.scriptscan()
         res = self.execute_command(*args)
