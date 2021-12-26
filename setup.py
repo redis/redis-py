@@ -8,7 +8,7 @@ setup(
     long_description_content_type="text/markdown",
     keywords=["Redis", "key-value store", "database"],
     license="MIT",
-    version="4.1.0rc2",
+    version="4.1.0",
     packages=find_packages(
         include=[
             "redis",
@@ -48,5 +48,6 @@ setup(
     ],
     extras_require={
         "hiredis": ["hiredis>=1.0.0"],
+        "cryptography": ["cryptography>=36.0.1", "requests>=2.26.0"],
     },
 )

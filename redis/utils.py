@@ -7,6 +7,13 @@ try:
 except ImportError:
     HIREDIS_AVAILABLE = False
 
+try:
+    import cryptography  # noqa
+
+    CRYPTOGRAPHY_AVAILABLE = True
+except ImportError:
+    CRYPTOGRAPHY_AVAILABLE = False
+
 
 def from_url(url, **kwargs):
     """

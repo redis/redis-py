@@ -31,7 +31,7 @@ from redis.exceptions import (
     TimeoutError,
 )
 from redis.retry import Retry
-from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
+from redis.utils import CRYPTOGRAPHY_AVAILABLE, HIREDIS_AVAILABLE, str_if_bytes
 
 try:
     import ssl
@@ -907,6 +907,7 @@ class SSLConnection(Connection):
         ssl_check_hostname=False,
         ssl_ca_path=None,
         ssl_password=None,
+        ssl_validate_ocsp=False,
         **kwargs,
     ):
         """Constructor
@@ -948,6 +949,7 @@ class SSLConnection(Connection):
         self.ca_path = ssl_ca_path
         self.check_hostname = ssl_check_hostname
         self.certificate_password = ssl_password
+        self.ssl_validate_ocsp = ssl_validate_ocsp
 
     def _connect(self):
         "Wrap the socket with SSL support"
@@ -963,7 +965,18 @@ class SSLConnection(Connection):
             )
         if self.ca_certs is not None or self.ca_path is not None:
             context.load_verify_locations(cafile=self.ca_certs, capath=self.ca_path)
-        return context.wrap_socket(sock, server_hostname=self.host)
+        sslsock = context.wrap_socket(sock, server_hostname=self.host)
+        if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE is False:
+            raise RedisError("cryptography is not installed.")
+        elif self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE:
+            from .ocsp import OCSPVerifier
+
+            o = OCSPVerifier(sslsock, self.host, self.port, self.ca_certs)
+            if o.is_valid():
+                return sslsock
+            else:
+                raise ConnectionError("ocsp validation error")
+        return sslsock
 
 
 class UnixDomainSocketConnection(Connection):
