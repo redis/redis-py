@@ -1,5 +1,4 @@
 import warnings
-from functools import wraps
 
 import numpy as np
 from deprecated import deprecated
@@ -7,10 +6,10 @@ from typing import AnyStr, ByteString, List, Sequence, Union
 
 from . import command_builder as builder
 from .dag import Dag
-from .pipeline import Pipeline
 from .postprocessor import Processor
 
 processor = Processor()
+
 
 class AICommands:
     def dag(
@@ -31,18 +30,19 @@ class AICommands:
             Load the list of given values from the keyspace to DAG scope
         persist : Union[AnyStr, List[AnyStr]]
             For each tensor key in the given list, write its values to the keyspace from
-            DAG scope after the DAG execution is finished.
+            DAG scope after the DAG execution is finished
         routing : AnyStr
-            Denotes a key to be used in the DAG or a tag that will assist in routing the dag
-            execution command to the right shard. Redis will verify that all potential key
-            accesses are done to within the target shard.
+            Denotes a key to be used in the DAG or a tag that will assist in routing
+            the dag execution command to the right shard. Redis will verify that all
+            potential key accesses are done to within the target shard
         timeout : int
             The max number on milisecinds that may pass before the request is prossced
             (meaning that the result will not be computed after that time and TIMEDOUT
             is returned in that case)
         readonly : bool
-            If True, it triggers AI.DAGRUN_RO, the read only DAG which cannot write (PERSIST) to
-            the keyspace. But since it can't write, it can execute on replicas
+            If True, it triggers AI.DAGRUN_RO, the read only DAG which cannot write
+            (PERSIST) to the keyspace. But since it can't write, it can execute on
+            replicas
 
 
         Returns
@@ -61,7 +61,9 @@ class AICommands:
         >>> dag.modelrun('model', inputs=['tensor', 'another'], outputs=['output'])
         >>> output = dag.tensorget('output').run()
         >>> # You can even chain the operations
-        >>> result = dag.tensorset(**akwargs).modelrun(**bkwargs).tensorget(**ckwargs).run()
+        >>> result = dag.tensorset(**akwargs)
+                        .modelrun(**bkwargs)
+                        .tensorget(**ckwargs).run()
         """
         return Dag(load, persist, routing, timeout, self.execute_command, readonly)
 
@@ -115,7 +117,7 @@ class AICommands:
         backend : str
             Backend name. Allowed backends are TF, TORCH, TFLITE, ONNX
         device : str
-            Device name. Allowed devices are CPU and GPU. If multiple GPUs are available,
+            Device name. Allowed devices are CPU and GPU. If multiple GPUs are available
             it can be specified using the format GPU:<gpu number>. For example: GPU:0
         data : bytes
             Model graph read as bytes string
@@ -124,9 +126,10 @@ class AICommands:
         minbatch : int
             Minimum number of samples required in a batch for model execution
         minbatchtimeout : int
-            The max number of miliseconds for which the engine will not trigger an execution
-            if the number of samples is lower than minbatch (after minbatchtimeout is passed,
-            the execution will start even if minbatch jas not reached)
+            The max number of miliseconds for which the engine will not trigger
+            an execution if the number of samples is lower than minbatch (after
+            minbatchtimeout is passed, the execution will start even if minbatch
+            jas not reached)
         tag : AnyStr
             Any string that will be saved in RedisAI as tag for the model
         inputs : Union[AnyStr, List[AnyStr]]
@@ -191,7 +194,7 @@ class AICommands:
         backend : str
             Backend name. Allowed backends are TF, TORCH, TFLITE, ONNX
         device : str
-            Device name. Allowed devices are CPU and GPU. If multiple GPUs are available,
+            Device name. Allowed devices are CPU and GPU. If multiple GPUs are available
             it can be specified using the format GPU:<gpu number>. For example: GPU:0
         data : bytes
             Model graph read as bytes string
@@ -298,8 +301,8 @@ class AICommands:
         key : str
             Model key to run
         inputs : Union[AnyStr, List[AnyStr]]
-            Tensor(s) which is already saved in the RedisAI using a tensorset call. These
-            tensors will be used as the inputs for the modelexecute
+            Tensor(s) which is already saved in the RedisAI using a tensorset call.
+            These tensors will be used as the inputs for the modelexecute
         outputs : Union[AnyStr, List[AnyStr]]
             keys on which the outputs to be saved. If those keys exist already,
             modelexecute will overwrite them with new values
@@ -347,8 +350,8 @@ class AICommands:
         key : str
             Model key to run
         inputs : Union[AnyStr, List[AnyStr]]
-            Tensor(s) which is already saved in the RedisAI using a tensorset call. These
-            tensors will be used as the input for the modelrun
+            Tensor(s) which is already saved in the RedisAI using a tensorset call.
+            These tensors will be used as the input for the modelrun
         outputs : Union[AnyStr, List[AnyStr]]
             keys on which the outputs to be saved. If those keys exist already, modelrun
             will overwrite them with new values
@@ -457,8 +460,9 @@ class AICommands:
             metadata in a dictionary if False. This flag also decides how to fetch
             the value from the RedisAI server, which also has performance implications
         as_numpy_mutable : bool
-            If True, returns a a mutable numpy.ndarray object by copy the tensor data. Otherwise (as long as_numpy=True)
-            the returned numpy.ndarray will use the original tensor buffer and will be for read-only
+            If True, returns a a mutable numpy.ndarray object by copy the tensor data.
+            Otherwise (as long as_numpy=True) the returned numpy.ndarray will use the
+            original tensor buffer and will be for read-only
         meta_only : bool
             If True, the value is not retrieved, only the shape and the type
 
@@ -485,12 +489,17 @@ class AICommands:
         )
 
     def scriptstore(
-        self, key: AnyStr, device: str, script: str, entry_points: Union[str, Sequence[str]], tag: AnyStr = None
+        self,
+        key: AnyStr,
+        device: str,
+        script: str,
+        entry_points: Union[str, Sequence[str]],
+        tag: AnyStr = None
     ) -> str:
         """
         Set the script to RedisAI. The difference from scriptset is that in scriptstore
         you must specify entry points within your script. These functions must have specific
-        signature: 'def entry_point(tensors: List[Tensor], keys: List[str], args: List[str])'.
+        signature: 'def entry_point(tensors: List[Tensor], keys: List[str], args: List[str])'. # noqa
         RedisAI uses the TorchScript engine to execute the script. So the script should
         have only TorchScript supported constructs. That being said, it's important to
         mention that using redisai script to do post processing or pre processing for a
@@ -502,7 +511,7 @@ class AICommands:
         key : AnyStr
             Script key at the server
         device : str
-            Device name. Allowed devices are CPU and GPU. If multiple GPUs are available.
+            Device name. Allowed devices are CPU and GPU. If multiple GPUs are available
             it can be specified using the format GPU:<gpu number>. For example: GPU:0
         script : str
             Script itself, as a Python string
@@ -522,11 +531,12 @@ class AICommands:
 
         Note
         ----
-        Even though ``script`` is pure Python code, it's a subset of Python language and not
-        all the Python operations are supported. For more details, checkout TorchScript
-        documentation. It's also important to note that that the script is executed on a high
-        performance C++ runtime instead of the Python interpreter. And hence ``script`` should
-        not have any import statements (A common mistake people make all the time)
+        Even though ``script`` is pure Python code, it's a subset of Python
+        language and not all the Python operations are supported. For more
+        details, checkout TorchScript documentation. It's also important to
+        note that that the script is executed on a high performance C++ runtime
+        instead of the Python interpreter. And hence ``script`` should not have
+        any import statements (A common mistake people make all the time)
 
         Example
         -------
@@ -548,19 +558,20 @@ class AICommands:
         self, key: AnyStr, device: str, script: str, tag: AnyStr = None
     ) -> str:
         """
-        Set the script to RedisAI. Action similar to Modelset. RedisAI uses the TorchScript
-        engine to execute the script. So the script should have only TorchScript supported
-        constructs. That being said, it's important to mention that using redisai script
-        to do post processing or pre processing for a Tensorflow (or any other backend)
-        is completely valid. For more details about TorchScript and supported ops,
-        checkout TorchScript documentation.
+        Set the script to RedisAI. Action similar to Modelset. RedisAI uses the
+        TorchScript engine to execute the script. So the script should have only
+        TorchScript supported constructs. That being said, it's important to
+        mention that using redisai script to do post processing or pre processing
+        for a Tensorflow (or any other backend) is completely valid. For more
+        details about TorchScript and supported ops, checkout TorchScript
+        documentation
 
         Parameters
         ----------
         key : AnyStr
             Script key at the server
         device : str
-            Device name. Allowed devices are CPU and GPU. If multiple GPUs are available.
+            Device name. Allowed devices are CPU and GPU. If multiple GPUs are available
             it can be specified using the format GPU:<gpu number>. For example: GPU:0
         script : str
             Script itself, as a Python string
@@ -574,11 +585,12 @@ class AICommands:
 
         Note
         ----
-        Even though ``script`` is pure Python code, it's a subset of Python language and not
-        all the Python operations are supported. For more details, checkout TorchScript
-        documentation. It's also important to note that that the script is executed on a high
-        performance C++ runtime instead of the Python interpreter. And hence ``script`` should
-        not have any import statements (A common mistake people make all the time)
+        Even though ``script`` is pure Python code, it's a subset of Python
+        language and not all the Python operations are supported. For more
+        details, checkout TorchScript documentation. It's also important to
+        note that that the script is executed on a high performance C++ runtime
+        instead of the Python interpreter. And hence ``script`` should not have
+        any import statements (A common mistake people make all the time)
 
         Example
         -------
@@ -656,11 +668,11 @@ class AICommands:
         function : str
             Name of the function in the ``script``
         inputs : Union[AnyStr, List[AnyStr]]
-            Tensor(s) which is already saved in the RedisAI using a tensorset call. These
-            tensors will be used as the input for the modelrun
+            Tensor(s) which is already saved in the RedisAI using a tensorset
+            call. These tensors will be used as the input for the modelrun
         outputs : Union[AnyStr, List[AnyStr]]
-            keys on which the outputs to be saved. If those keys exist already, scriptrun
-            will overwrite them with new values
+            keys on which the outputs to be saved. If those keys exist already,
+            scriptrun will overwrite them with new values
 
         Returns
         -------
@@ -723,12 +735,13 @@ class AICommands:
         >>> con.scriptexecute('myscript', 'bar', inputs=['a', 'b'], outputs=['c'])
         'OK'
         >>> con.scriptexecute('myscript{tag}', 'addn',
-        >>>                   inputs=['mytensor1{tag}', 'mytensor2{tag}', 'mytensor3{tag}'],
+        >>>                   inputs=['tensor1{tag}', 'tensor2{tag}', 'tensor3{tag}'],
         >>>                   args=['5.0'],
         >>>                   outputs=['result{tag}'])
         'OK'
         """
-        args = builder.scriptexecute(key, function, keys, inputs, args, outputs, timeout)
+        args = builder.scriptexecute(key, function, keys, inputs, args,
+                                     outputs, timeout)
         res = self.execute_command(*args)
         return res if not self.enable_postprocess else processor.scriptexecute(res)
 

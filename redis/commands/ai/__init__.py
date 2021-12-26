@@ -1,4 +1,7 @@
 from .commands import AICommands
+from .pipeline import Pipeline
+from functools import wraps
+
 
 class AI(AICommands):
     """
@@ -14,10 +17,10 @@ class AI(AICommands):
         printed to the terminal
     enable_postprocess : bool
         Flag to enable post processing. If enabled, all the bytestring-ed returns
-        are converted to python strings recursively and key value pairs will be converted
-        to dictionaries. Also note that, this flag doesn't work with pipeline() function
-        since pipeline function could have native redis commands (along with RedisAI
-        commands)
+        are converted to python strings recursively and key value pairs will be
+        converted to dictionaries. Also note that, this flag doesn't work with
+        pipeline() function since pipeline function could have native redis commands
+        (along with RedisAI commands)
 
     Example
     -------
@@ -30,7 +33,7 @@ class AI(AICommands):
     def __init__(self, client, debug=False, enable_postprocess=True):
         self.client = client
         self.enable_postprocess = enable_postprocess
-        
+
         if debug:
             self.execute_command = enable_debug(super().execute_command)
         else:
@@ -38,9 +41,9 @@ class AI(AICommands):
 
     def pipeline(self, transaction: bool = True, shard_hint: bool = None) -> "Pipeline":
         """
-        It follows the same pipeline implementation of native redis client but enables it
-        to access redisai operation as well. This function is experimental in the
-        current release.
+        It follows the same pipeline implementation of native redis
+        client but enables it to access redisai operation as well.
+        This function is experimental in the current release
 
         Example
         -------
@@ -57,6 +60,7 @@ class AI(AICommands):
             transaction=transaction,
             shard_hint=shard_hint,
         )
+
 
 def enable_debug(f):
     @wraps(f)
