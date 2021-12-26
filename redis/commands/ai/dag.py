@@ -4,11 +4,11 @@ from typing import Any, AnyStr, List, Sequence, Union
 import numpy as np
 
 from . import command_builder as builder
-from .postprocessor import Processor
+# from .postprocessor import Processor
 from deprecated import deprecated
 import warnings
 
-processor = Processor()
+# processor = Processor()
 
 
 class Dag:

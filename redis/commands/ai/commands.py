@@ -6,9 +6,9 @@ from typing import AnyStr, ByteString, List, Sequence, Union
 
 from . import command_builder as builder
 from .dag import Dag
-from .postprocessor import Processor
+# from .postprocessor import Processor
 
-processor = Processor()
+# processor = Processor()
 
 
 class AICommands:
@@ -92,7 +92,7 @@ class AICommands:
         """
         args = builder.loadbackend(identifier, path)
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.loadbackend(res)
+        return res # if not self.enable_postprocess else processor.loadbackend(res)
 
     def modelstore(
         self,
@@ -169,7 +169,7 @@ class AICommands:
             outputs,
         )
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.modelstore(res)
+        return res # if not self.enable_postprocess else processor.modelstore(res)
 
     @deprecated(version="1.2.0", reason="Use modelstore instead")
     def modelset(
@@ -232,7 +232,7 @@ class AICommands:
             key, backend, device, data, batch, minbatch, tag, inputs, outputs
         )
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.modelset(res)
+        return res # if not self.enable_postprocess else processor.modelset(res)
 
     def modelget(self, key: AnyStr, meta_only=False) -> dict:
         """
@@ -258,7 +258,7 @@ class AICommands:
         """
         args = builder.modelget(key, meta_only)
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.modelget(res)
+        return res # if not self.enable_postprocess else processor.modelget(res)
 
     def modeldel(self, key: AnyStr) -> str:
         """
@@ -281,7 +281,7 @@ class AICommands:
         """
         args = builder.modeldel(key)
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.modeldel(res)
+        return res # if not self.enable_postprocess else processor.modeldel(res)
 
     def modelexecute(
         self,
@@ -330,7 +330,7 @@ class AICommands:
         """
         args = builder.modelexecute(key, inputs, outputs, timeout)
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.modelexecute(res)
+        return res # if not self.enable_postprocess else processor.modelexecute(res)
 
     @deprecated(version="1.2.0", reason="Use modelexecute instead")
     def modelrun(
@@ -375,7 +375,7 @@ class AICommands:
         """
         args = builder.modelrun(key, inputs, outputs)
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.modelrun(res)
+        return res # if not self.enable_postprocess else processor.modelrun(res)
 
     def modelscan(self) -> List[List[AnyStr]]:
         """
@@ -400,7 +400,7 @@ class AICommands:
         )
         args = builder.modelscan()
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.modelscan(res)
+        return res # if not self.enable_postprocess else processor.modelscan(res)
 
     def tensorset(
         self,
@@ -438,7 +438,7 @@ class AICommands:
         """
         args = builder.tensorset(key, tensor, shape, dtype)
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.tensorset(res)
+        return res # if not self.enable_postprocess else processor.tensorset(res)
 
     def tensorget(
         self,
@@ -481,11 +481,16 @@ class AICommands:
         {'dtype': 'INT64', 'shape': [3]}
         """
         args = builder.tensorget(key, as_numpy, meta_only)
-        res = self.execute_command(*args)
+        options = {
+            "as_numpy": as_numpy,
+            "as_numpy_mutable": as_numpy_mutable,
+            "meta_only": meta_only
+        }
+        res = self.execute_command(*args, **options)
         return (
             res
-            if not self.enable_postprocess
-            else processor.tensorget(res, as_numpy, as_numpy_mutable, meta_only)
+            # if not self.enable_postprocess
+            # else processor.tensorget(res, as_numpy, as_numpy_mutable, meta_only)
         )
 
     def scriptstore(
@@ -551,7 +556,7 @@ class AICommands:
         """
         args = builder.scriptstore(key, device, script, entry_points, tag)
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.scriptstore(res)
+        return res # if not self.enable_postprocess else processor.scriptstore(res)
 
     @deprecated(version="1.2.0", reason="Use scriptstore instead")
     def scriptset(
@@ -600,7 +605,7 @@ class AICommands:
         """
         args = builder.scriptset(key, device, script, tag)
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.scriptset(res)
+        return res # if not self.enable_postprocess else processor.scriptset(res)
 
     def scriptget(self, key: AnyStr, meta_only=False) -> dict:
         """
@@ -625,7 +630,7 @@ class AICommands:
         """
         args = builder.scriptget(key, meta_only)
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.scriptget(res)
+        return res # if not self.enable_postprocess else processor.scriptget(res)
 
     def scriptdel(self, key: AnyStr) -> str:
         """
@@ -648,7 +653,7 @@ class AICommands:
         """
         args = builder.scriptdel(key)
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.scriptdel(res)
+        return res # if not self.enable_postprocess else processor.scriptdel(res)
 
     @deprecated(version="1.2.0", reason="Use scriptexecute instead")
     def scriptrun(
@@ -686,7 +691,7 @@ class AICommands:
         """
         args = builder.scriptrun(key, function, inputs, outputs)
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.scriptrun(res)
+        return res # if not self.enable_postprocess else processor.scriptrun(res)
 
     def scriptexecute(
         self,
@@ -743,7 +748,7 @@ class AICommands:
         args = builder.scriptexecute(key, function, keys, inputs, args,
                                      outputs, timeout)
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.scriptexecute(res)
+        return res # if not self.enable_postprocess else processor.scriptexecute(res)
 
     def scriptscan(self) -> List[List[AnyStr]]:
         """
@@ -767,7 +772,7 @@ class AICommands:
         )
         args = builder.scriptscan()
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.scriptscan(res)
+        return res # if not self.enable_postprocess else processor.scriptscan(res)
 
     def infoget(self, key: AnyStr) -> dict:
         """
@@ -796,7 +801,7 @@ class AICommands:
         """
         args = builder.infoget(key)
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.infoget(res)
+        return res # if not self.enable_postprocess else processor.infoget(res)
 
     def inforeset(self, key: AnyStr) -> str:
         """
@@ -819,4 +824,4 @@ class AICommands:
         """
         args = builder.inforeset(key)
         res = self.execute_command(*args)
-        return res if not self.enable_postprocess else processor.inforeset(res)
+        return res # if not self.enable_postprocess else processor.inforeset(res)

@@ -3,8 +3,6 @@ import sys
 import pytest
 
 from io import StringIO
-from skimage.io import imread
-from skimage.transform import resize
 
 import numpy as np
 from ml2rt import load_model
@@ -641,8 +639,9 @@ def test_script_scan(client):
     slist = client.ai().scriptscan()
     assert slist == [["ket1", "v1.0"], ["ket2", ""]]
 
-# def test_debug(client):
-#     con = self.get_client(debug=True)
-#     with Capturing() as output:
-#         client.ai().tensorset("x", (2, 3, 4, 5), dtype="float")
-#     self.assertEqual(["AI.TENSORSET x FLOAT 4 VALUES 2 3 4 5"], output)
+
+def test_debug(client):
+    ai_client = client.ai(debug=True)
+    with Capturing() as output:
+        ai_client.tensorset("x", (2, 3, 4, 5), dtype="float")
+    assert output == ["AI.TENSORSET x FLOAT 4 VALUES 2 3 4 5"]

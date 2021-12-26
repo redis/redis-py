@@ -1,5 +1,6 @@
 from .commands import AICommands
 from .pipeline import Pipeline
+from .postprocessor import * # noqa
 from functools import wraps
 
 
@@ -27,17 +28,38 @@ class AI(AICommands):
     >>> from redisai import Client
     >>> con = Client(host='localhost', port=6379)
     """
-
-    REDISAI_COMMANDS_RESPONSE_CALLBACKS = {}
-
     def __init__(self, client, debug=False, enable_postprocess=True):
         self.client = client
         self.enable_postprocess = enable_postprocess
 
         if debug:
-            self.execute_command = enable_debug(super().execute_command)
+            self.execute_command = enable_debug(self.client.execute_command)
         else:
             self.execute_command = client.execute_command
+
+        MODULE_CALLBACKS = {
+            "AI.LOADBACKEND": decoder,
+            "AI.MODELGET": modelget_decode,
+            "AI.MODELSET": decoder,
+            "AI.MODELSCAN": modelscan_decode,
+            "AI.MODELSTORE": decoder,
+            "AI.MODELDEL": decoder,
+            "AI.MODELRUN": decoder,
+            "AI.MODELEXECUTE": decoder,
+            "AI.TENSORGET": tensorget_decode,
+            "AI.TENSORSET": decoder,
+            "AI.SCRIPTGET": scriptget_decode,
+            "AI.SCRIPTSCAN": scriptscan_decode,
+            "AI.SCRIPTSET": decoder,
+            "AI.SCRIPTSTORE": decoder,
+            "AI.SCRIPTDEL": decoder,
+            "AI.SCRIPTRUN": decoder,
+            "AI.SCRIPTEXECUTE": decoder,
+            "AI.INFOGET": infoget_decode,
+            "AI.INFOSET": decoder,
+        }
+        for k, v in MODULE_CALLBACKS.items():
+            self.client.set_response_callback(k, v)
 
     def pipeline(self, transaction: bool = True, shard_hint: bool = None) -> "Pipeline":
         """
