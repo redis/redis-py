@@ -17,6 +17,10 @@ class AuthenticationError(ConnectionError):
     pass
 
 
+class AuthorizationError(ConnectionError):
+    pass
+
+
 class BusyLoadingError(ConnectionError):
     pass
 

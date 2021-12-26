@@ -696,6 +696,12 @@ class TestRedisCommands:
         assert isinstance(r.role()[2], list)
 
     @pytest.mark.onlynoncluster
+    def test_select(self, r):
+        assert r.select(5)
+        assert r.select(2)
+        assert r.select(9)
+
+    @pytest.mark.onlynoncluster
     def test_slowlog_get(self, r, slowlog):
         assert r.slowlog_reset()
         unicode_string = chr(3456) + "abcd" + chr(3421)
@@ -1340,6 +1346,7 @@ class TestRedisCommands:
         assert r["a"] == b"abcdef12345"
 
     @skip_if_server_version_lt("6.0.0")
+    @skip_if_server_version_gte("7.0.0")
     def test_stralgo_lcs(self, r):
         key1 = "{foo}key1"
         key2 = "{foo}key2"
@@ -1372,6 +1379,7 @@ class TestRedisCommands:
         ) == {"len": len(res), "matches": [[4, (4, 7), (5, 8)]]}
 
     @skip_if_server_version_lt("6.0.0")
+    @skip_if_server_version_gte("7.0.0")
     def test_stralgo_negative(self, r):
         with pytest.raises(exceptions.DataError):
             r.stralgo("ISSUB", "value1", "value2")

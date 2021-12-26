@@ -22,6 +22,7 @@ from redis.crc import key_slot
 from redis.exceptions import (
     AskError,
     ClusterDownError,
+    ConnectionError,
     DataError,
     MovedError,
     NoPermissionError,
@@ -555,46 +556,24 @@ class TestRedisClusterObj:
         for node in r.get_primaries():
             assert node in nodes
 
-    def test_cluster_down_overreaches_retry_attempts(self):
+    @pytest.mark.parametrize("error", RedisCluster.ERRORS_ALLOW_RETRY)
+    def test_cluster_down_overreaches_retry_attempts(self, error):
         """
-        When ClusterDownError is thrown, test that we retry executing the
-        command as many times as configured in cluster_error_retry_attempts
+        When error that allows retry is thrown, test that we retry executing
+        the command as many times as configured in cluster_error_retry_attempts
         and then raise the exception
         """
         with patch.object(RedisCluster, "_execute_command") as execute_command:
 
-            def raise_cluster_down_error(target_node, *args, **kwargs):
+            def raise_error(target_node, *args, **kwargs):
                 execute_command.failed_calls += 1
-                raise ClusterDownError(
-                    "CLUSTERDOWN The cluster is down. Use CLUSTER INFO for "
-                    "more information"
-                )
+                raise error("mocked error")
 
-            execute_command.side_effect = raise_cluster_down_error
+            execute_command.side_effect = raise_error
 
             rc = get_mocked_redis_client(host=default_host, port=default_port)
 
-            with pytest.raises(ClusterDownError):
-                rc.get("bar")
-                assert execute_command.failed_calls == rc.cluster_error_retry_attempts
-
-    def test_connection_error_overreaches_retry_attempts(self):
-        """
-        When ConnectionError is thrown, test that we retry executing the
-        command as many times as configured in cluster_error_retry_attempts
-        and then raise the exception
-        """
-        with patch.object(RedisCluster, "_execute_command") as execute_command:
-
-            def raise_conn_error(target_node, *args, **kwargs):
-                execute_command.failed_calls += 1
-                raise ConnectionError()
-
-            execute_command.side_effect = raise_conn_error
-
-            rc = get_mocked_redis_client(host=default_host, port=default_port)
-
-            with pytest.raises(ConnectionError):
+            with pytest.raises(error):
                 rc.get("bar")
                 assert execute_command.failed_calls == rc.cluster_error_retry_attempts
 
