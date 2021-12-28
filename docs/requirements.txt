@@ -3,5 +3,4 @@ docutils<0.18
 sphinx-rtd-theme
 nbsphinx
 sphinx_gallery
-sphinx
-iphython
+ipython
