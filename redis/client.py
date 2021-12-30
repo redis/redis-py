@@ -832,6 +832,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         There are several ways to specify a database number. The first value
         found will be used:
+
             1. A ``db`` querystring option, e.g. redis://localhost?db=0
             2. If using the redis:// or rediss:// schemes, the path argument
                of the url, e.g. redis://localhost/0

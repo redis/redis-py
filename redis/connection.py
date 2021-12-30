@@ -1145,11 +1145,11 @@ def parse_url(url):
 class ConnectionPool:
     """
     Create a connection pool. ``If max_connections`` is set, then this
-    object raises :py:class:`~redis.ConnectionError` when the pool's
+    object raises :py:class:`~redis.exceptions.ConnectionError` when the pool's
     limit is reached.
 
     By default, TCP connections are created unless ``connection_class``
-    is specified. Use :py:class:`~redis.UnixDomainSocketConnection` for
+    is specified. Use class:`.UnixDomainSocketConnection` for
     unix sockets.
 
     Any additional keyword arguments are passed to the constructor of
@@ -1181,6 +1181,7 @@ class ConnectionPool:
 
         There are several ways to specify a database number. The first value
         found will be used:
+
             1. A ``db`` querystring option, e.g. redis://localhost?db=0
             2. If using the redis:// or rediss:// schemes, the path argument
                of the url, e.g. redis://localhost/0
