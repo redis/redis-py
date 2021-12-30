@@ -29,6 +29,7 @@ def devenv(c):
 @task
 def build_docs(c):
     """Generates the sphinx documentation."""
+    _generate_keys()
     run("tox -e docs")
 
 
