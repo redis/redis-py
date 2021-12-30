@@ -1,11 +1,11 @@
 import os.path
 import sys
-import pytest
-
 from io import StringIO
 
 import numpy as np
+import pytest
 from ml2rt import load_model
+
 from redis.exceptions import ResponseError
 
 DEBUG = False
@@ -106,9 +106,9 @@ def test_set_non_numpy_tensor(client):
     assert [2, 2] == result["shape"]
     assert "BOOL" == result["dtype"]
 
-    client.ai().tensorset("x", (12, 'a', 'G', 'four'), dtype="str", shape=(2, 2))
+    client.ai().tensorset("x", (12, "a", "G", "four"), dtype="str", shape=(2, 2))
     result = client.ai().tensorget("x", as_numpy=False)
-    assert ['12', 'a', 'G', 'four'] == result["values"]
+    assert ["12", "a", "G", "four"] == result["values"]
     assert [2, 2] == result["shape"]
     assert "STRING" == result["dtype"]
 
@@ -154,7 +154,7 @@ def test_numpy_tensor(client):
     client.ai().tensorset("x", input_array)
     values = client.ai().tensorget("x")
     assert values.dtype.num == np.dtype("str").num
-    assert np.array_equal(values, [['a', 'bb'], ["⚓⚓⚓", "d♻d♻"]])
+    assert np.array_equal(values, [["a", "bb"], ["⚓⚓⚓", "d♻d♻"]])
 
     input_array = np.array([2, 3])
     client.ai().tensorset("x", input_array)
@@ -206,10 +206,7 @@ def test_deprecated_modelset(client):
             )
     with pytest.warns(DeprecationWarning):
         client.ai().modelset(
-            "m", "tf", "cpu", model_pb,
-            inputs=["a", "b"],
-            outputs=["mul"],
-            tag="v1.0"
+            "m", "tf", "cpu", model_pb, inputs=["a", "b"], outputs=["mul"], tag="v1.0"
         )
     model = client.ai().modelget("m", meta_only=True)
     assert model == {
@@ -230,12 +227,7 @@ def test_modelstore_errors(client):
 
     with pytest.raises(ValueError):
         client.ai().modelstore(
-            None,
-            "TF",
-            "CPU",
-            model_pb,
-            inputs=["a", "b"],
-            outputs=["mul"]
+            None, "TF", "CPU", model_pb, inputs=["a", "b"], outputs=["mul"]
         )
 
     with pytest.raises(ValueError):
@@ -349,8 +341,7 @@ def test_non_ascii_char(client):
     )
     client.ai().tensorset("a" + nonascii, (2, 3), dtype="float")
     client.ai().tensorset("b", (2, 3), dtype="float")
-    client.ai().modelexecute(
-        "m" + nonascii, ["a" + nonascii, "b"], ["c" + nonascii])
+    client.ai().modelexecute("m" + nonascii, ["a" + nonascii, "b"], ["c" + nonascii])
     tensor = client.ai().tensorget("c" + nonascii)
     assert np.allclose(tensor, [4.0, 9.0])
 
@@ -368,7 +359,7 @@ def test_device_with_id(client):
         outputs=["mul"],
         tag="v1.0",
     )
-    assert 'OK' == ret
+    assert "OK" == ret
 
 
 def test_run_tf_model(client):
@@ -390,11 +381,7 @@ def test_run_tf_model(client):
 
     # Required arguments ar None
     with pytest.raises(ValueError):
-        client.ai().modelexecute(
-            "m",
-            inputs=None,
-            outputs=None
-        )
+        client.ai().modelexecute("m", inputs=None, outputs=None)
 
     # wrong model
     with pytest.raises(ResponseError):
@@ -434,9 +421,9 @@ def test_deprecated_scriptset_and_scriptrun(client):
     assert [4, 6] == tensor["values"]
 
     # test bar_variadic(a, args : List[Tensor])
-    client.ai().scriptrun("scr", "bar_variadic",
-                          inputs=["a", "$", "b", "b"],
-                          outputs=["c"])
+    client.ai().scriptrun(
+        "scr", "bar_variadic", inputs=["a", "$", "b", "b"], outputs=["c"]
+    )
     tensor = client.ai().tensorget("c", as_numpy=False)
     assert [4, 6] == tensor["values"]
 
@@ -476,47 +463,54 @@ def test_scripts_execute(client):
         client.ai().scriptget("test")
 
     # store new script
-    client.ai().scriptstore("myscript{1}",
-                            device="cpu",
-                            script=script,
-                            entry_points=["bar", "bar_variadic"],
-                            tag="version1")
+    client.ai().scriptstore(
+        "myscript{1}",
+        device="cpu",
+        script=script,
+        entry_points=["bar", "bar_variadic"],
+        tag="version1",
+    )
     client.ai().tensorset("a{1}", [2, 3, 2, 3], shape=(2, 2), dtype="float")
     client.ai().tensorset("b{1}", [2, 3, 2, 3], shape=(2, 2), dtype="float")
-    client.ai().scriptexecute("myscript{1}", "bar",
-                              inputs=["a{1}", "b{1}"],
-                              outputs=["c{1}"])
+    client.ai().scriptexecute(
+        "myscript{1}", "bar", inputs=["a{1}", "b{1}"], outputs=["c{1}"]
+    )
     values = client.ai().tensorget("c{1}", as_numpy=False)
     assert np.allclose(values["values"], [4.0, 6.0, 4.0, 6.0])
 
     client.ai().tensorset("b1{1}", [2, 3, 2, 3], shape=(2, 2), dtype="float")
-    client.ai().scriptexecute("myscript{1}", 'bar_variadic',
-                              inputs=["a{1}", "b1{1}", "b{1}"],
-                              outputs=["c{1}"])
+    client.ai().scriptexecute(
+        "myscript{1}",
+        "bar_variadic",
+        inputs=["a{1}", "b1{1}", "b{1}"],
+        outputs=["c{1}"],
+    )
 
-    values = client.ai().tensorget("c{1}", as_numpy=False)['values']
+    values = client.ai().tensorget("c{1}", as_numpy=False)["values"]
     assert values == [4.0, 6.0, 4.0, 6.0]
 
 
 def test_scripts_redis_commands(client):
-    client.ai().scriptstore("myscript{1}", "cpu",
-                            script_with_redis_commands,
-                            ["int_set_get", "func"])
-    client.ai().scriptexecute("myscript{1}", "int_set_get",
-                              keys=["x{1}", "{1}"],
-                              args=["3"],
-                              outputs=["y{1}"])
+    client.ai().scriptstore(
+        "myscript{1}", "cpu", script_with_redis_commands, ["int_set_get", "func"]
+    )
+    client.ai().scriptexecute(
+        "myscript{1}", "int_set_get", keys=["x{1}", "{1}"], args=["3"], outputs=["y{1}"]
+    )
     values = client.ai().tensorget("y{1}", as_numpy=False)
     assert np.allclose(values["values"], [3])
 
     client.ai().tensorset("mytensor1{1}", [40], dtype="float")
     client.ai().tensorset("mytensor2{1}", [10], dtype="float")
     client.ai().tensorset("mytensor3{1}", [1], dtype="float")
-    client.ai().scriptexecute("myscript{1}", "func",
-                              keys=["key{1}"],
-                              inputs=["mytensor1{1}", "mytensor2{1}", "mytensor3{1}"],
-                              args=["3"],
-                              outputs=["my_output{1}"])
+    client.ai().scriptexecute(
+        "myscript{1}",
+        "func",
+        keys=["key{1}"],
+        inputs=["mytensor1{1}", "mytensor2{1}", "mytensor3{1}"],
+        args=["3"],
+        outputs=["my_output{1}"],
+    )
     values = client.ai().tensorget("my_output{1}", as_numpy=False)
     assert np.allclose(values["values"], [54])
     assert client.get("key{1}") is None
@@ -567,7 +561,7 @@ def test_run_tflite_model(client):
     client.ai().modelstore("tfl_model", "tflite", "cpu", tflmodel)
 
     input_path = os.path.join(TENSOR_DIR, "one.raw")
-    with open(input_path, 'rb') as f:
+    with open(input_path, "rb") as f:
         img = np.frombuffer(f.read(), dtype=np.float32)
     client.ai().tensorset("img", img)
     client.ai().modelexecute("tfl_model", ["img"], ["output1", "output2"])
@@ -596,8 +590,9 @@ def test_info(client):
     model_path = os.path.join(MODEL_DIR, tf_graph)
     model_pb = load_model(model_path)
 
-    client.ai().modelstore("m", "tf", "cpu", model_pb,
-                           inputs=["a", "b"], outputs=["mul"])
+    client.ai().modelstore(
+        "m", "tf", "cpu", model_pb, inputs=["a", "b"], outputs=["mul"]
+    )
     first_info = client.ai().infoget("m")
     expected = {
         "key": "m",

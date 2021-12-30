@@ -43,8 +43,10 @@ def tensorget_decode(res, as_numpy, as_numpy_mutable, meta_only):
         )
     else:
         if rai_result["dtype"] == "STRING":
+
             def target(b):
                 return b.decode()
+
         else:
             target = float if rai_result["dtype"] in ("FLOAT", "DOUBLE") else int
         utils.recursive_bytetransform(rai_result["values"], target)

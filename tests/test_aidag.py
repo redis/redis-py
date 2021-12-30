@@ -3,7 +3,8 @@ import warnings
 
 from skimage.io import imread
 from skimage.transform import resize
-from .test_ai import * # noqa
+
+from .test_ai import *  # noqa
 
 
 def load_image():
@@ -156,7 +157,8 @@ def test_dagexecute_with_persist(client):
 def test_dagexecute_calling_on_return(client):
     client.ai().tensorset("a", [2, 3, 2, 3], shape=(2, 2), dtype="float")
     result = (
-        client.ai().dag(load="a")
+        client.ai()
+        .dag(load="a")
         .tensorset("b", [2, 3, 2, 3], shape=(2, 2), dtype="float")
         .modelexecute("pt_model", ["a", "b"], ["output"])
         .tensorget("output")

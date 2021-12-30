@@ -1,7 +1,8 @@
+from functools import wraps
+
 from .commands import AICommands
 from .pipeline import Pipeline
-from .postprocessor import * # noqa
-from functools import wraps
+from .postprocessor import *  # noqa
 
 
 class AI(AICommands):
@@ -28,6 +29,7 @@ class AI(AICommands):
     >>> from redisai import Client
     >>> con = Client(host='localhost', port=6379)
     """
+
     def __init__(self, client, debug=False, enable_postprocess=True):
         self.client = client
         self.enable_postprocess = enable_postprocess

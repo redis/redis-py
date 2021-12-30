@@ -67,7 +67,7 @@ def modelstore(
             "Inputs and outputs keywords should not be specified for this backend"
         )
     chunk_size = 500 * 1024 * 1024  # TODO: this should be configurable.
-    data_chunks = [data[i: i + chunk_size] for i in range(0, len(data), chunk_size)]
+    data_chunks = [data[i : i + chunk_size] for i in range(0, len(data), chunk_size)]
     # TODO: need a test case for this
     args += ["BLOB", *data_chunks]
     return args
@@ -105,7 +105,7 @@ def modelset(
         args += ["INPUTS", *utils.listify(inputs)]
         args += ["OUTPUTS", *utils.listify(outputs)]
     chunk_size = 500 * 1024 * 1024
-    data_chunks = [data[i: i + chunk_size] for i in range(0, len(data), chunk_size)]
+    data_chunks = [data[i : i + chunk_size] for i in range(0, len(data), chunk_size)]
     # TODO: need a test case for this
     args += ["BLOB", *data_chunks]
     return args
@@ -214,11 +214,11 @@ def tensorget(key: AnyStr, as_numpy: bool = True, meta_only: bool = False) -> Se
 
 
 def scriptstore(
-        name: AnyStr,
-        device: str,
-        script: str,
-        entry_points: Union[str, Sequence[str]],
-        tag: AnyStr = None
+    name: AnyStr,
+    device: str,
+    script: str,
+    entry_points: Union[str, Sequence[str]],
+    tag: AnyStr = None,
 ) -> Sequence:
     if device.upper() not in utils.allowed_devices:
         raise ValueError(f"Device not allowed. Use any from {utils.allowed_devices}")
@@ -227,9 +227,11 @@ def scriptstore(
     args = ["AI.SCRIPTSTORE", name, device]
     if tag:
         args += ["TAG", tag]
-    args += ["ENTRY_POINTS",
-             len(utils.listify(entry_points)),
-             *utils.listify(entry_points)]
+    args += [
+        "ENTRY_POINTS",
+        len(utils.listify(entry_points)),
+        *utils.listify(entry_points),
+    ]
     args.append("SOURCE")
     args.append(script)
     return args

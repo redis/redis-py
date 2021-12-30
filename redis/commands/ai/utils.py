@@ -1,4 +1,5 @@
 from typing import AnyStr, ByteString, Callable, List, Sequence, Union
+
 import numpy as np
 
 dtype_dict = {
@@ -43,8 +44,8 @@ def blob2numpy(
     """Convert `BLOB` result from RedisAI to `np.ndarray`."""
     mm = {"FLOAT": "float32", "DOUBLE": "float64"}
     dtype = mm.get(dtype, dtype.lower())
-    if dtype == 'string':
-        a = np.array(value.decode().split('\0')[:-1], dtype='str')
+    if dtype == "string":
+        a = np.array(value.decode().split("\0")[:-1], dtype="str")
     elif mutable:
         a = np.fromstring(value, dtype=dtype)
     else:
@@ -55,7 +56,7 @@ def blob2numpy(
 def list2dict(lst):
     """Convert the list from RedisAI to a dict."""
     if len(lst) % 2 != 0:
-        raise RuntimeError("Can't unpack the list: {}".format(lst))
+        raise RuntimeError(f"Can't unpack the list: {lst}")
     out = {}
     for i in range(0, len(lst), 2):
         key = lst[i].decode().lower()
