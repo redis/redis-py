@@ -69,6 +69,7 @@ Module Documentation
    exceptions
    lock
    retry
+   examples
 
 Contributing
 *************
