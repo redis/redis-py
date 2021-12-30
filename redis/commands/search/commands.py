@@ -73,12 +73,9 @@ class SearchCommands:
         ### Parameters:
 
         - **fields**: a list of TextField or NumericField objects
-        - **no_term_offsets**: If true, we will not save term offsets in
-        the index
-        - **no_field_flags**: If true, we will not save field flags that
-        allow searching in specific fields
-        - **stopwords**: If not None, we create the index with this custom
-        stopword list. The list can be empty
+        - **no_term_offsets**: If true, we will not save term offsets in the index
+        - **no_field_flags**: If true, we will not save field flags that allow searching in specific fields
+        - **stopwords**: If not None, we create the index with this custom stopword list. The list can be empty
 
         For more information: https://oss.redis.com/redisearch/Commands/#ftcreate
         """  # noqa
@@ -132,6 +129,7 @@ class SearchCommands:
         ### Parameters:
 
         - **delete_documents**: If `True`, all documents will be deleted.
+
         For more information: https://oss.redis.com/redisearch/Commands/#ftdropindex
         """  # noqa
         keep_str = "" if delete_documents else "KEEPDOCS"
@@ -219,27 +217,23 @@ class SearchCommands:
         ### Parameters
 
         - **doc_id**: the id of the saved document.
-        - **nosave**: if set to true, we just index the document, and don't
-                      save a copy of it. This means that searches will just
-                      return ids.
-        - **score**: the document ranking, between 0.0 and 1.0
-        - **payload**: optional inner-index payload we can save for fast
-        i              access in scoring functions
-        - **replace**: if True, and the document already is in the index,
+        - **nosave**: if set to true, we just index the document, and don't \
+        save a copy of it. This means that searches will just return ids.
+        - **score**: the document ranking, between 0.0 and 1.0.
+        - **payload**: optional inner-index payload we can save for fast access in scoring functions
+        - **replace**: if True, and the document already is in the index, \
         we perform an update and reindex the document
-        - **partial**: if True, the fields specified will be added to the
-                       existing document.
-                       This has the added benefit that any fields specified
-                       with `no_index`
-                       will not be reindexed again. Implies `replace`
+        - **partial**: if True, the fields specified will be added to the \
+        existing document. \
+        This has the added benefit that any fields specified \
+        with `no_index` will not be reindexed again. Implies `replace`
         - **language**: Specify the language used for document tokenization.
-        - **no_create**: if True, the document is only updated and reindexed
-                         if it already exists.
-                         If the document does not exist, an error will be
-                         returned. Implies `replace`
-        - **fields** kwargs dictionary of the document fields to be saved
-                         and/or indexed.
-                     NOTE: Geo points shoule be encoded as strings of "lon,lat"
+        - **no_create**: if True, the document is only updated and reindexed \
+        if it already exists.  If the document does not exist, an error will be \
+        returned. Implies `replace`
+        - **fields** kwargs dictionary of the document fields to be saved and/or indexed.
+
+        NOTE: Geo points shoule be encoded as strings of "lon,lat"
 
         For more information: https://oss.redis.com/redisearch/Commands/#ftadd
         """  # noqa
@@ -487,7 +481,7 @@ class SearchCommands:
 
         **query**: search query.
         **distance***: the maximal Levenshtein distance for spelling
-                       suggestions (default: 1, max: 4).
+        suggestions (default: 1, max: 4).
         **include**: specifies an inclusion custom dictionary.
         **exclude**: specifies an exclusion custom dictionary.
 

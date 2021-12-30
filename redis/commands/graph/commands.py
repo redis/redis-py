@@ -35,7 +35,6 @@ class GraphCommands:
 
         Args:
 
-        -------
         q :
             The query.
         params : dict
@@ -127,7 +126,6 @@ class GraphCommands:
 
         Args:
 
-        -------
         query:
             The query that will be executed.
         params: dict
