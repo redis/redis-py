@@ -2,6 +2,7 @@ import datetime
 import hashlib
 import time
 import warnings
+from typing import List, Optional
 
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 
@@ -1926,7 +1927,14 @@ class ListCommands:
             timeout = 0
         return self.execute_command("BRPOPLPUSH", src, dst, timeout)
 
-    def blmpop(self, timeout, num_keys, keys, *args, count=1):
+    def blmpop(
+        self,
+        timeout: float,
+        num_keys: int,
+        *args: List[str],
+        direction: str = None,
+        count: Optional[int] = 1,
+    ) -> Optional[list]:
         """
         Pop ``count`` values (default 1) first non-empty list key from the list
         of provided key names.
@@ -1936,11 +1944,11 @@ class ListCommands:
 
         For more information check https://redis.io/commands/blmpop
         """
-        args = [timeout, num_keys] + list_or_args(keys, args)
+        args = [timeout, num_keys] + list(args) + [direction]
         if count != 1:
             args.extend(["COUNT", count])
 
-        return self.execute_command("LMPOP", *args)
+        return self.execute_command("BLMPOP", *args)
 
     def lindex(self, name, index):
         """
