@@ -1,8 +1,8 @@
 import datetime
 import hashlib
 import time
-from typing import List, Optional
 import warnings
+from typing import List, Optional
 
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 
@@ -1931,9 +1931,9 @@ class ListCommands:
         self,
         num_keys: int,
         *args: List[str],
-        direction: str=None,
-        count: Optional[int]=1
-        ) -> List:
+        direction: str = None,
+        count: Optional[int] = 1,
+    ) -> List:
         """
         Pop ``count`` values (default 1) first non-empty list key from the list
         of args provided key names.
