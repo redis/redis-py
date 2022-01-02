@@ -1478,11 +1478,11 @@ class TestRedisCommands:
     def test_lmpop(self, unstable_r):
         unstable_r.rpush("foo", "1", "2", "3", "4", "5")
         result = [b"foo", [b"1", b"2"]]
-        assert unstable_r.lmpop("2", "bar", "foo", "LEFT", count=2) == result
+        assert unstable_r.lmpop("2", "bar", "foo", direction="LEFT", count=2) == result
         with pytest.raises(redis.ResponseError):
-            unstable_r.lmpop("2", "bar", "foo", count=2)
+            unstable_r.lmpop("2", "bar", "foo", direction="up", count=2)
         unstable_r.rpush("bar", "a", "b", "c", "d")
-        assert unstable_r.lmpop("2", ["bar", "foo"], "RIGHT") == [b"bar", [b"d"]]
+        assert unstable_r.lmpop("2", "bar", "foo", direction="RIGHT") == [b"bar", [b"d"]]
 
     def test_lindex(self, r):
         r.rpush("a", "1", "2", "3")

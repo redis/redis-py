@@ -1,6 +1,7 @@
 import datetime
 import hashlib
 import time
+from typing import List, Optional
 import warnings
 
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
@@ -1926,14 +1927,20 @@ class ListCommands:
             timeout = 0
         return self.execute_command("BRPOPLPUSH", src, dst, timeout)
 
-    def lmpop(self, num_keys, keys, *args, count=1):
+    def lmpop(
+        self,
+        num_keys: int,
+        *args: List[str],
+        direction: str=None,
+        count: Optional[int]=1
+        ) -> List:
         """
         Pop ``count`` values (default 1) first non-empty list key from the list
-        of provided key names.
+        of args provided key names.
 
         For more information check https://redis.io/commands/lmpop
         """
-        args = [num_keys] + list_or_args(keys, args)
+        args = [num_keys] + list(args) + [direction]
         if count != 1:
             args.extend(["COUNT", count])
 
