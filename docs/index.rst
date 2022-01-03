@@ -56,9 +56,7 @@ Redis Command Functions
 .. toctree::
    :maxdepth: 2
 
-   redis_commands
-   redis_cluster_commands
-   sentinel_commands
+   commands
    redismodules
 
 Module Documentation
@@ -71,6 +69,7 @@ Module Documentation
    exceptions
    lock
    retry
+   examples
 
 Contributing
 *************
