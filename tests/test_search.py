@@ -1159,23 +1159,19 @@ def testExpire(client):
     client.ft().create_index((TextField("txt", sortable=True),), temporary=4)
 
     # redis_client = redis.client.Redis()
-    # ttl = client.execute_command('ft.debug', 'TTL', 'idx')
-    ttl = client.ttl("idx")
+    ttl = client.execute_command('ft.debug', 'TTL', 'idx')
     assert ttl > 2
     while ttl > 2:
-        # ttl = client.execute_command('ft.debug', 'TTL', 'idx')
-        ttl = client.ttl("idx")
+        ttl = client.execute_command('ft.debug', 'TTL', 'idx')
         time.sleep(0.01)
 
     # add document - should reset the ttl
     client.ft().add_document("doc", txt="foo bar", text="this is a simple test")
-    # ttl = client.execute_command('ft.debug', 'TTL', 'idx')
-    ttl = client.ttl("idx")
+    ttl = client.execute_command('ft.debug', 'TTL', 'idx')
     assert ttl > 2
     try:
         while True:
-            # ttl = client.execute_command('ft.debug', 'TTL', 'idx')
-            ttl = client.ttl("idx")
+            ttl = client.execute_command('ft.debug', 'TTL', 'idx')
             time.sleep(0.5)
     except redis.exceptions.ResponseError:
         assert ttl == 0
@@ -1187,18 +1183,20 @@ def testSkipInitialScan(client):
     q = Query('@foo:bar')
 
     client.ft().create_index((TextField("foo"),), skip_initial_scan=True)
-    assert 0 == client.search(q).total
+    assert 0 == client.ft().search(q).total
 
 
 @pytest.mark.redismod
-def testSummarizeDisabled(client):
+def testSummarizeDisabled_nooffset(client):
     # test NOOFFSETS
     client.ft().create_index((TextField('txt'),), no_term_offsets=True)
     client.ft().add_document('doc1', txt='foo bar')
     with pytest.raises(Exception):
         client.ft().search(Query('foo').summarize(fields=['txt']))
 
-    # test NOHL
+
+@pytest.mark.redismod
+def testSummarizeDisabled_nohl(client):
     client.ft().create_index((TextField('txt'),), no_highlight=True)
     client.ft().add_document('doc1', txt='foo bar')
     with pytest.raises(Exception):
