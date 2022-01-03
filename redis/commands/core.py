@@ -3259,11 +3259,11 @@ class SortedSetCommands:
     def zmpop(
         self,
         num_keys: int,
-        *keys: List[str],
-        min_max: str = None,
+        keys: List[str],
+        min_max: str,
         count: Optional[int] = 1,
     ) -> list:
-        args = [num_keys] + list(keys) + [min_max]
+        args = [num_keys] + keys + [min_max]
         if count != 1:
             args.extend(["COUNT", count])
 
