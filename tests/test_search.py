@@ -1187,7 +1187,7 @@ def testSkipInitialScan(client):
     q = Query('@foo:bar')
 
     client.ft().create_index((TextField("foo"),), skip_initial_scan=True)
-    self.assertEqual(0, client.search(q).total)
+    assert 0 == client.search(q).total
 
 
 @pytest.mark.redismod
