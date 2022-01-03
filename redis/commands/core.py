@@ -1932,7 +1932,7 @@ class ListCommands:
         timeout: float,
         num_keys: int,
         *args: List[str],
-        direction: str = None,
+        direction: str,
         count: Optional[int] = 1,
     ) -> Optional[list]:
         """

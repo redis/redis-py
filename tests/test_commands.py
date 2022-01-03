@@ -1479,11 +1479,11 @@ class TestRedisCommands:
         unstable_r.rpush("a", "1", "2", "3", "4", "5")
         res = [b"a", [b"1", b"2"]]
         assert unstable_r.blmpop(1, "2", "b", "a", direction="LEFT", count=2) == res
-        with pytest.raises(redis.ResponseError):
+        with pytest.raises(TypeError):
             unstable_r.blmpop(1, "2", "b", "a", count=2)
         unstable_r.rpush("b", "6", "7", "8", "9")
         assert unstable_r.blmpop(0, "2", "b", "a", direction="LEFT") == [b"b", [b"6"]]
-        assert unstable_r.blmpop(1, "2", "foo", "bar", "RIGHT") is None
+        assert unstable_r.blmpop(1, "2", "foo", "bar", direction="RIGHT") is None
 
     def test_lindex(self, r):
         r.rpush("a", "1", "2", "3")
