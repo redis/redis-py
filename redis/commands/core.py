@@ -2,6 +2,7 @@ import datetime
 import hashlib
 import time
 import warnings
+from typing import List, Optional
 
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 
@@ -3254,6 +3255,20 @@ class SortedSetCommands:
         keys = list_or_args(keys, None)
         keys.append(timeout)
         return self.execute_command("BZPOPMIN", *keys)
+
+    def bzmpop(
+        self,
+        timeout: float,
+        num_keys: int,
+        keys: List[str],
+        min_max: str,
+        count: Optional[int] = 1,
+    ) -> Optional[list]:
+        args = [timeout, num_keys] + keys + [min_max]
+        if count != 1:
+            args.extend(["COUNT", count])
+
+        return self.execute_command("BZMPOP", *args)
 
     def _zrange(
         self,
