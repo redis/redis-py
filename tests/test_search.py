@@ -1159,19 +1159,19 @@ def testExpire(client):
     client.ft().create_index((TextField("txt", sortable=True),), temporary=4)
 
     # redis_client = redis.client.Redis()
-    ttl = client.execute_command('ft.debug', 'TTL', 'idx')
+    ttl = client.execute_command("ft.debug", "TTL", "idx")
     assert ttl > 2
     while ttl > 2:
-        ttl = client.execute_command('ft.debug', 'TTL', 'idx')
+        ttl = client.execute_command("ft.debug", "TTL", "idx")
         time.sleep(0.01)
 
     # add document - should reset the ttl
     client.ft().add_document("doc", txt="foo bar", text="this is a simple test")
-    ttl = client.execute_command('ft.debug', 'TTL', 'idx')
+    ttl = client.execute_command("ft.debug", "TTL", "idx")
     assert ttl > 2
     try:
         while True:
-            ttl = client.execute_command('ft.debug', 'TTL', 'idx')
+            ttl = client.execute_command("ft.debug", "TTL", "idx")
             time.sleep(0.5)
     except redis.exceptions.ResponseError:
         assert ttl == 0
@@ -1180,7 +1180,7 @@ def testExpire(client):
 @pytest.mark.redismod
 def testSkipInitialScan(client):
     client.hset("doc1", "foo", "bar")
-    q = Query('@foo:bar')
+    q = Query("@foo:bar")
 
     client.ft().create_index((TextField("foo"),), skip_initial_scan=True)
     assert 0 == client.ft().search(q).total
@@ -1189,37 +1189,37 @@ def testSkipInitialScan(client):
 @pytest.mark.redismod
 def testSummarizeDisabled_nooffset(client):
     # test NOOFFSETS
-    client.ft().create_index((TextField('txt'),), no_term_offsets=True)
-    client.ft().add_document('doc1', txt='foo bar')
+    client.ft().create_index((TextField("txt"),), no_term_offsets=True)
+    client.ft().add_document("doc1", txt="foo bar")
     with pytest.raises(Exception):
-        client.ft().search(Query('foo').summarize(fields=['txt']))
+        client.ft().search(Query("foo").summarize(fields=["txt"]))
 
 
 @pytest.mark.redismod
 def testSummarizeDisabled_nohl(client):
-    client.ft().create_index((TextField('txt'),), no_highlight=True)
-    client.ft().add_document('doc1', txt='foo bar')
+    client.ft().create_index((TextField("txt"),), no_highlight=True)
+    client.ft().add_document("doc1", txt="foo bar")
     with pytest.raises(Exception):
-        client.ft().search(Query('foo').summarize(fields=['txt']))
+        client.ft().search(Query("foo").summarize(fields=["txt"]))
 
 
 @pytest.mark.redismod
 def testMaxTextFields(client):
     # Creating the index definition
-    client.ft().create_index((TextField('f0'),))
+    client.ft().create_index((TextField("f0"),))
     for x in range(1, 32):
-        client.ft().alter_schema_add((TextField('f{}'.format(x)),))
+        client.ft().alter_schema_add((TextField("f{}".format(x)),))
 
     # Should be too many indexes
     with pytest.raises(redis.ResponseError):
-        client.ft().alter_schema_add((TextField('f{}'.format(x)),))
+        client.ft().alter_schema_add((TextField("f{}".format(x)),))
 
     client.ft().dropindex("idx")
     # Creating the index definition
-    client.ft().create_index((TextField('f0'),), max_text_fields=True)
+    client.ft().create_index((TextField("f0"),), max_text_fields=True)
     # Fill the index with fields
     for x in range(1, 50):
-        client.ft().alter_schema_add((TextField('f{}'.format(x)),))
+        client.ft().alter_schema_add((TextField("f{}".format(x)),))
 
 
 @pytest.mark.redismod

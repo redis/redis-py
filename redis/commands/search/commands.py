@@ -75,7 +75,7 @@ class SearchCommands:
         temporary=None,
         no_highlight=False,
         no_term_frequencies=False,
-        skip_initial_scan=False
+        skip_initial_scan=False,
     ):
         """
         Create the search index. The index must not already exist.
@@ -89,13 +89,13 @@ class SearchCommands:
         allow searching in specific fields
         - **stopwords**: If not None, we create the index with this custom
         stopword list. The list can be empty
-        - **max_text_fields**: If true, we will encode indexes as if there 
-        were more than 32 text fields which allows you to add additional 
+        - **max_text_fields**: If true, we will encode indexes as if there
+        were more than 32 text fields which allows you to add additional
         fields (beyond 32).
-        - **temporary**: Create a lightweight temporary index which will 
-        expire after the specified period of inactivity (in seconds). The 
+        - **temporary**: Create a lightweight temporary index which will
+        expire after the specified period of inactivity (in seconds). The
         internal idle timer is reset whenever the index is searched or added to.
-        - **no_highlight**: If true, disabling highlighting support. 
+        - **no_highlight**: If true, disabling highlighting support.
         Also implied by no_term_offsets.
         - **no_term_frequencies**: If true, we avoid saving the term frequencies
         in the index.
