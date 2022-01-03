@@ -100,7 +100,7 @@ class SearchCommands:
         - **no_term_frequencies**: If true, we avoid saving the term frequencies
         in the index.
         - **skip_initial_scan**: If true, we do not scan and index.
-        
+
         For more information: https://oss.redis.com/redisearch/Commands/#ftcreate
         """  # noqa
 
