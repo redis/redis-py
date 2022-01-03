@@ -2062,7 +2062,7 @@ class TestRedisCommands:
     # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
     def test_zmpop(self, unstable_r):
         unstable_r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        res = [b"a", [[b'a1', b'1'], [b'a2', b'2']]]
+        res = [b"a", [[b"a1", b"1"], [b"a2", b"2"]]]
         assert unstable_r.zmpop("2", ["b", "a"], "MIN", count=2) == res
         with pytest.raises(TypeError):
             unstable_r.zmpop("2", ["b", "a"], count=2)

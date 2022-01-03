@@ -3268,7 +3268,7 @@ class SortedSetCommands:
             args.extend(["COUNT", count])
 
         return self.execute_command("ZMPOP", *args)
-    
+
     def _zrange(
         self,
         command,
