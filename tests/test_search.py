@@ -1210,7 +1210,7 @@ def testMaxTextFields(client):
     # Creating the index definition
     client.ft().create_index((TextField('f0'),))
     for x in range(1, 32):
-        client.alter_schema_add((TextField('f{}'.format(x)),))
+        client.ft().alter_schema_add((TextField('f{}'.format(x)),))
 
     # Should be too many indexes
     with pytest.raises(redis.ResponseError):
