@@ -1157,10 +1157,9 @@ def test_index_definition(client):
 @pytest.mark.redismod
 def testExpire(client):
     client.ft().create_index((TextField("txt", sortable=True),), temporary=4)
-
-    # redis_client = redis.client.Redis()
     ttl = client.execute_command("ft.debug", "TTL", "idx")
     assert ttl > 2
+    
     while ttl > 2:
         ttl = client.execute_command("ft.debug", "TTL", "idx")
         time.sleep(0.01)
@@ -1188,7 +1187,6 @@ def testSkipInitialScan(client):
 
 @pytest.mark.redismod
 def testSummarizeDisabled_nooffset(client):
-    # test NOOFFSETS
     client.ft().create_index((TextField("txt"),), no_term_offsets=True)
     client.ft().add_document("doc1", txt="foo bar")
     with pytest.raises(Exception):
