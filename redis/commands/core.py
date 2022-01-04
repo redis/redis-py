@@ -3263,6 +3263,12 @@ class SortedSetCommands:
         min_max: str,
         count: Optional[int] = 1,
     ) -> list:
+        """
+        Pop ``count`` values (default 1) off of the first non-empty sorted set
+        named in the ``keys`` list.
+
+        For more information check https://redis.io/commands/zmpop
+        """
         args = [num_keys] + keys + [min_max]
         if count != 1:
             args.extend(["COUNT", count])
