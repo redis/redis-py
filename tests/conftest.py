@@ -15,6 +15,7 @@ from redis.retry import Retry
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/9"
 default_redismod_url = "redis://localhost:36379"
+default_redis_unstable_url = "redis://localhost:6378"
 
 # default ssl client ignores verification for the purpose of testing
 default_redis_ssl_url = "rediss://localhost:6666"
@@ -52,6 +53,14 @@ def pytest_addoption(parser):
         help="The number of cluster nodes that need to be "
         "available before the test can start,"
         " defaults to `%(default)s`",
+    )
+
+    parser.addoption(
+        "--redis-unstable-url",
+        default=default_redis_unstable_url,
+        action="store",
+        help="Redis unstable (latest version) connection string "
+        "defaults to %(default)s`",
     )
 
 
@@ -355,6 +364,13 @@ def master_host(request):
     url = request.config.getoption("--redis-url")
     parts = urlparse(url)
     yield parts.hostname, parts.port
+
+
+@pytest.fixture()
+def unstable_r(request):
+    url = request.config.getoption("--redis-unstable-url")
+    with _get_client(redis.Redis, request, from_url=url) as client:
+        yield client
 
 
 def wait_for_command(client, monitor, command, key=None):
