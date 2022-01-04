@@ -1936,7 +1936,7 @@ class ListCommands:
         count: Optional[int] = 1,
     ) -> Optional[list]:
         """
-        Pop ``count`` values (default 1) first non-empty list key from the list
+        Pop ``count`` values (default 1) from first non-empty in the list
         of provided key names.
 
         When all lists are empty this command blocks the connection until another
