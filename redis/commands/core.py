@@ -3264,6 +3264,18 @@ class SortedSetCommands:
         min_max: str,
         count: Optional[int] = 1,
     ) -> Optional[list]:
+        """
+        Pop ``count`` values (default 1) off of the first non-empty sorted set
+        named in the ``keys`` list.
+
+        If none of the sorted sets in ``keys`` has a value to pop,
+        then block for ``timeout`` seconds, or until a member gets added
+        to one of the sorted sets.
+
+        If timeout is 0, then block indefinitely.
+
+        For more information check https://redis.io/commands/bzmpop
+        """
         args = [timeout, num_keys] + keys + [min_max]
         if count != 1:
             args.extend(["COUNT", count])
