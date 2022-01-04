@@ -593,6 +593,13 @@ class TestRedisCommands:
         assert r.client_unpause() == b"OK"
 
     @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_client_no_evict(self, unstable_r):
+        assert unstable_r.client_no_evict("ON") == b"OK"
+        with pytest.raises(TypeError):
+            unstable_r.client_no_evict()
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("3.2.0")
     def test_client_reply(self, r, r_timeout):
         assert r_timeout.client_reply("ON") == b"OK"

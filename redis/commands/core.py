@@ -639,6 +639,14 @@ class ManagementCommands:
         """
         return self.execute_command("CLIENT UNPAUSE", **kwargs)
 
+    def client_no_evict(self, mode: str) -> str:
+        """
+        Sets the client eviction mode for the current connection.
+
+        For more information check https://redis.io/commands/client-no-evict
+        """
+        return self.execute_command("CLIENT NO-EVICT", mode)
+
     def command(self, **kwargs):
         """
         Returns dict reply of details about all Redis commands.
