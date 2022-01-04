@@ -244,6 +244,13 @@ class RedisClusterCommands(
             "CLUSTER ADDSLOTS", *slots, target_nodes=target_node
         )
 
+    def cluster_addslotsrange(self, target_node, *slots):
+        """
+        """
+        return self.execute_command(
+            "CLUSTER ADDSLOTSRANGE", *slots, target_nodes=target_node
+        )
+
     def cluster_countkeysinslot(self, slot_id):
         """
         Return the number of local keys in the specified hash slot
