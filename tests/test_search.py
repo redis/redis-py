@@ -1159,7 +1159,7 @@ def testExpire(client):
     client.ft().create_index((TextField("txt", sortable=True),), temporary=4)
     ttl = client.execute_command("ft.debug", "TTL", "idx")
     assert ttl > 2
-    
+
     while ttl > 2:
         ttl = client.execute_command("ft.debug", "TTL", "idx")
         time.sleep(0.01)
