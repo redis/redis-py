@@ -3928,6 +3928,18 @@ class ScriptCommands:
         """
         return self.execute_command("EVAL", script, numkeys, *keys_and_args)
 
+    def eval_ro(self, script, numkeys, *keys_and_args):
+        """
+        The read-only variant of the EVAL command
+
+        Execute the read-only Lue ``script`` specifying the ``numkeys`` the script
+        will touch and the key names and argument values in ``keys_and_args``.
+        Returns the result of the script.
+
+        For more information check  https://redis.io/commands/eval_ro
+        """
+        return self.execute_command("EVAL_RO", script, numkeys, *keys_and_args)
+
     def evalsha(self, sha, numkeys, *keys_and_args):
         """
         Use the ``sha`` to execute a Lua script already registered via EVAL
