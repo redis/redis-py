@@ -1973,6 +1973,15 @@ class TestRedisCommands:
         ]
 
     @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_zintercard(self, unstable_r):
+        unstable_r.zadd("a", {"a1": 1, "a2": 2, "a3": 1})
+        unstable_r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        unstable_r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert unstable_r.zintercard(3, ["a", "b", "c"]) == 2
+        assert unstable_r.zintercard(3, ["a", "b", "c"], limit=1) == 1
+
+    @pytest.mark.onlynoncluster
     def test_zinterstore_sum(self, r):
         r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
