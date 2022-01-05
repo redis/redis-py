@@ -2639,6 +2639,16 @@ class TestRedisCommands:
         assert num == 4
         assert r.lrange("sorted", 0, 10) == [b"vodka", b"milk", b"gin", b"apple juice"]
 
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_sort_ro(self, unstable_r):
+        unstable_r["score:1"] = 8
+        unstable_r["score:2"] = 3
+        unstable_r["score:3"] = 5
+        unstable_r.rpush("a", "3", "2", "1")
+        assert unstable_r.sort_ro("a", by="score:*") == [b"2", b"3", b"1"]
+        unstable_r.rpush("b", "2", "3", "1")
+        assert unstable_r.sort_ro("b", desc=True) == [b"3", b"2", b"1"]
+
     def test_sort_issue_924(self, r):
         # Tests for issue https://github.com/andymccurdy/redis-py/issues/924
         r.execute_command("SADD", "issue#924", 1)
