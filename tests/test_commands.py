@@ -2639,6 +2639,7 @@ class TestRedisCommands:
         assert num == 4
         assert r.lrange("sorted", 0, 10) == [b"vodka", b"milk", b"gin", b"apple juice"]
 
+    @pytest.mark.onlynoncluster
     # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
     def test_sort_ro(self, unstable_r):
         unstable_r["score:1"] = 8
