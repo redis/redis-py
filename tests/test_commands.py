@@ -1187,6 +1187,12 @@ class TestRedisCommands:
         assert r.pexpireat("a", expire_at_seconds) is True
         assert 0 < r.pttl("a") <= 61000
 
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_pexpiretime(self, unstable_r):
+        unstable_r.set("a", "foo")
+        unstable_r.pexpireat("a", 33177117420000)
+        assert unstable_r.pexpiretime("a") == 33177117420000
+
     @skip_if_server_version_lt("2.6.0")
     def test_psetex(self, r):
         assert r.psetex("a", 1000, "value")
