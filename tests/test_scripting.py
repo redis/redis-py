@@ -1,7 +1,7 @@
 import pytest
 
-from redis import exceptions
 import redis
+from redis import exceptions
 from tests.conftest import skip_if_server_version_lt
 
 multiply_script = """
@@ -35,7 +35,7 @@ class TestScripting:
     # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
     def test_eval_ro(self, unstable_r):
         unstable_r.set("a", "b")
-        assert unstable_r.eval_ro("return redis.call('GET', KEYS[1])", 1, "a") == b'b'
+        assert unstable_r.eval_ro("return redis.call('GET', KEYS[1])", 1, "a") == b"b"
         with pytest.raises(redis.ResponseError):
             unstable_r.eval_ro("return redis.call('DEL', KEYS[1])", 1, "a")
 
