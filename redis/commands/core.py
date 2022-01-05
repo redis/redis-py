@@ -2,6 +2,7 @@ import datetime
 import hashlib
 import time
 import warnings
+from typing import List
 
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 
@@ -2396,6 +2397,19 @@ class SetCommands:
         """
         args = list_or_args(keys, args)
         return self.execute_command("SINTER", *args)
+
+    def sintercard(self, numkeys: int, keys: List[str], limit: int = 0) -> int:
+        """
+        Return the cardinality of the intersect of multiple sets specified by ``keys`.
+
+        When LIMIT provided (defaults to 0 and means unlimited), if the intersection
+        cardinality reaches limit partway through the computation, the algorithm will
+        exit and yield limit as the cardinality
+
+        For more information check https://redis.io/commands/sintercard
+        """
+        args = [numkeys] + keys + ["LIMIT", limit]
+        return self.execute_command("SINTERCARD", *args)
 
     def sinterstore(self, dest, keys, *args):
         """
