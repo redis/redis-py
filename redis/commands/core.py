@@ -1233,6 +1233,15 @@ class BasicKeyCommands:
             when = int(time.mktime(when.timetuple()))
         return self.execute_command("EXPIREAT", name, when)
 
+    def expiretime(self, key: str) -> int:
+        """
+        Returns the absolute Unix timestamp (since January 1, 1970) in seconds
+        at which the given key will expire.
+
+        For more information check https://redis.io/commands/expiretime
+        """
+        return self.execute_command("EXPIRETIME", key)
+
     def get(self, name):
         """
         Return the value at key ``name``, or None if the key doesn't exist

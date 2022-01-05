@@ -1014,6 +1014,12 @@ class TestRedisCommands:
         assert r.expireat("a", expire_at_seconds) is True
         assert 0 < r.ttl("a") <= 61
 
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_expiretime(self, unstable_r):
+        unstable_r.set("a", "foo")
+        unstable_r.expireat("a", 33177117420)
+        assert unstable_r.expiretime("a") == 33177117420
+
     def test_get_and_set(self, r):
         # get and set can't be tested independently of each other
         assert r.get("a") is None
