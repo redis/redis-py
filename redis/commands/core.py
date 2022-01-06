@@ -1866,6 +1866,32 @@ class BasicKeyCommands:
         """
         return self.execute_command("UNLINK", *names)
 
+    def lcs(self, key1, key2, len=False, idx=False, minmatchlen=0, withmatchlen=False):
+        """
+        Find the longest common subsequence between ``key1`` and ``key2``.
+
+        If ``len`` is true the length of the match will will be returned.
+
+        If ``idx`` is true the match position in each strings will be returned.
+
+        ``minmatchlen`` restrict the list of matches to the ones of
+        the given ``minmatchlen``.
+
+        If ``withmatchlen`` the length of the match also will be returned.
+
+        For more information check https://redis.io/commands/lcs
+        """
+        pieces = [key1, key2]
+        if len:
+            pieces.append("LEN")
+        if idx:
+            pieces.append("IDX")
+        if minmatchlen != 0:
+            pieces.extend(["MINMATCHLEN", minmatchlen])
+        if withmatchlen:
+            pieces.append("WITHMATCHLEN")
+        return self.execute_command("LCS", *pieces)
+
 
 class ListCommands:
     """

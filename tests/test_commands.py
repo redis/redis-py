@@ -932,6 +932,16 @@ class TestRedisCommands:
         del r["a"]
         assert r.get("a") is None
 
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_lcs(self, unstable_r):
+        unstable_r.mset({"foo": "ohmytext", "bar": "mynewtext"})
+        assert unstable_r.lcs("foo", "bar") == b"mytext"
+        assert unstable_r.lcs("foo", "bar", len=True) == 6
+        result = [b"matches", [[[4, 7], [5, 8]]], b"len", 6]
+        assert unstable_r.lcs("foo", "bar", idx=True, minmatchlen=3) == result
+        with pytest.raises(redis.ResponseError):
+            assert unstable_r.lcs("foo", "bar", len=True, idx=True)
+
     @skip_if_server_version_lt("4.0.0")
     def test_unlink(self, r):
         assert r.unlink("a") == 0
