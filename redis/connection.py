@@ -908,6 +908,8 @@ class SSLConnection(Connection):
         ssl_ca_path=None,
         ssl_password=None,
         ssl_validate_ocsp=False,
+        ssl_ocsp_context=None,
+        ssl_ocsp_stapled_cert=None,
         **kwargs,
     ):
         """Constructor
@@ -920,6 +922,10 @@ class SSLConnection(Connection):
             ssl_check_hostname: If set, match the hostname during the SSL handshake. Defaults to False.
             ssl_ca_path: The path to a directory containing several CA certificates in PEM format. Defaults to None.
             ssl_password: Password for unlocking an encrypted private key. Defaults to None.
+
+            ssl_validate_ocsp: If set, perform a full ocsp validation (i.e not a stapled verification)
+            ssl_ocsp_context: A fully initialized OpenSSL.SSL.Context object to be used in verifying the ssl_ocsp_stapled_cert
+            ssl_ocsp_stapled_cert: A PEM armoured string containing the expected certificate to be returned from the ocsp verification service.
 
         Raises:
             RedisError
@@ -950,6 +956,8 @@ class SSLConnection(Connection):
         self.check_hostname = ssl_check_hostname
         self.certificate_password = ssl_password
         self.ssl_validate_ocsp = ssl_validate_ocsp
+        self.ssl_ocsp_context = ssl_ocsp_context
+        self.ssl_ocsp_stapled_cert = ssl_ocsp_stapled_cert
 
     def _connect(self):
         "Wrap the socket with SSL support"
@@ -968,7 +976,27 @@ class SSLConnection(Connection):
         sslsock = context.wrap_socket(sock, server_hostname=self.host)
         if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE is False:
             raise RedisError("cryptography is not installed.")
-        elif self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE:
+
+        if self.ssl_ocsp_context is not None and self.ssl_validate_ocsp is not None:
+            raise RedisError(
+                "Either an OCSP context or validation may be specified " "but not both."
+            )
+
+        # validation for the stapled case
+        if self.ssl_ocsp_context:
+            import OpenSSL
+
+            from .ocsp import ocsp_staple_verifier
+
+            self.ssl_ocsp_context.set_ocsp_client_callback(ocsp_staple_verifier)
+            con = OpenSSL.SSL.Connection(self.ssl_ocsp_context, sock)
+            con.request_ocsp()
+            con.do_handshake()
+            con.shutdown()
+            return sslsock
+
+        # pure ocsp validation
+        if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE:
             from .ocsp import OCSPVerifier
 
             o = OCSPVerifier(sslsock, self.host, self.port, self.ca_certs)

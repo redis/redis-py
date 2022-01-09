@@ -11,8 +11,50 @@ from cryptography.x509 import ocsp
 from redis.exceptions import AuthorizationError, ConnectionError
 
 
+def _check_certificate(certificate):
+    """A wrapper the return the validity of a known ocsp certificate"""
+
+    ocsp_response = ocsp.load_der_ocsp_response(certificate)
+    if ocsp_response.response_status == ocsp.OCSPResponseStatus.UNAUTHORIZED:
+        raise AuthorizationError("you are not authorized to view this ocsp certificate")
+    if ocsp_response.response_status == ocsp.OCSPResponseStatus.SUCCESSFUL:
+        if ocsp_response.certificate_status == ocsp.OCSPCertStatus.REVOKED:
+            return False
+        else:
+            return True
+    else:
+        return False
+
+
+def ocsp_staple_verifier(con, ocsp_bytes, expected):
+    """An implemention of a function for set_ocsp_client_callback in PyOpenSSL.
+
+    This function validates that the provide ocsp_bytes response is valid,
+    and matches the expected, stapled responses.
+    """
+    if ocsp_bytes in [b"", None]:
+        raise ConnectionError("No stapled ocsp response present")
+
+    issuer_cert = None
+    peer_cert = con.get_peer_certificate().to_cryptography()
+    cert_chain = con.get_peer_cert_chain()
+    for c in cert_chain:
+        if c.issuer_name == peer_cert.subject:
+            issuer_cert = c
+            break
+
+    if issuer_cert is None:
+        raise ConnectionError("no issuer cert found")
+
+    if issuer_cert != expected:
+        raise ConnectionError("Issued and expected certificates do not match")
+
+    return _check_certificate(ocsp_bytes)
+
+
 class OCSPVerifier:
-    """A class to verify ssl sockets for RFC6960/RFC6961.
+    """A class to verify ssl sockets for RFC6960/RFC6961. This can be used
+    when using direct validation of OCSP responses and certificate revocations.
 
     @see https://datatracker.ietf.org/doc/html/rfc6960
     @see https://datatracker.ietf.org/doc/html/rfc6961
@@ -67,7 +109,7 @@ class OCSPVerifier:
         try:
             issuer = issuers[0].access_location.value
         except IndexError:
-            raise ConnectionError("no issuers in certificate")
+            issuer = None
 
         # now, the series of ocsp server entries
         ocsps = [
@@ -128,19 +170,7 @@ class OCSPVerifier:
         r = requests.get(ocsp_url, headers=header)
         if not r.ok:
             raise ConnectionError("failed to fetch ocsp certificate")
-
-        ocsp_response = ocsp.load_der_ocsp_response(r.content)
-        if ocsp_response.response_status == ocsp.OCSPResponseStatus.UNAUTHORIZED:
-            raise AuthorizationError(
-                "you are not authorized to view this ocsp certificate"
-            )
-        if ocsp_response.response_status == ocsp.OCSPResponseStatus.SUCCESSFUL:
-            if ocsp_response.certificate_status == ocsp.OCSPCertStatus.REVOKED:
-                return False
-            else:
-                return True
-        else:
-            return False
+        return _check_certificate(r.content)
 
     def is_valid(self):
         """Returns the validity of the certificate wrapping our socket.
@@ -153,7 +183,11 @@ class OCSPVerifier:
         # validate the certificate
         try:
             cert, issuer_url, ocsp_server = self.components_from_socket()
+            if issuer_url is None:
+                raise ConnectionError("no issuers found in certificate chain")
             return self.check_certificate(ocsp_server, cert, issuer_url)
         except AuthorizationError:
             cert, issuer_url, ocsp_server = self.components_from_direct_connection()
+            if issuer_url is None:
+                raise ConnectionError("no issuers found in certificate chain")
             return self.check_certificate(ocsp_server, cert, issuer_url)
