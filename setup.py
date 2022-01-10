@@ -33,7 +33,6 @@ setup(
     install_requires=[
         "deprecated>=1.2.3",
         "packaging>=20.4",
-        "skimage",
         'importlib-metadata >= 1.0; python_version < "3.8"',
     ],
     classifiers=[
@@ -56,5 +55,6 @@ setup(
     extras_require={
         "hiredis": ["hiredis>=1.0.0"],
         "cryptography": ["cryptography>=36.0.1", "requests>=2.26.0"],
+        "ai": ["skimage", "numpy"],
     },
 )
