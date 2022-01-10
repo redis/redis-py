@@ -4,11 +4,11 @@ from typing import AnyStr, ByteString, List, Sequence, Union
 import numpy as np
 from deprecated import deprecated
 
+from redis.client import NEVER_DECODE
+
 from . import command_builder as builder
 from .dag import Dag
 from .postprocessor import decode_infoget
-
-from redis.client import NEVER_DECODE
 
 
 class AICommands:
