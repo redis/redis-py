@@ -7,18 +7,18 @@ def decoder(val):
     return val.decode()
 
 
-def modelget_decode(res):
+def decode_modelget(res, NEVER_DECODE=False):
     resdict = utils.list2dict(res)
     utils.recursive_bytetransform(resdict["inputs"], lambda x: x.decode())
     utils.recursive_bytetransform(resdict["outputs"], lambda x: x.decode())
     return resdict
 
 
-def modelscan_decode(res):
+def decode_modelscan(res, NEVER_DECODE=False):
     return utils.recursive_bytetransform(res, lambda x: x.decode())
 
 
-def tensorget_decode(res, as_numpy, as_numpy_mutable, meta_only):
+def decode_tensorget(res, as_numpy, as_numpy_mutable, meta_only, NEVER_DECODE=False):
     """Process the tensorget output.
 
     If ``as_numpy`` is True, it'll be converted to a numpy array. The required
@@ -53,15 +53,15 @@ def tensorget_decode(res, as_numpy, as_numpy_mutable, meta_only):
         return rai_result
 
 
-def scriptget_decode(res):
+def decode_scriptget(res, NEVER_DECODE=False):
     return utils.list2dict(res)
 
 
-def scriptscan_decode(res):
+def decode_scriptscan(res, NEVER_DECODE=False):
     return utils.recursive_bytetransform(res, decoder)
 
 
-def infoget_decode(res):
+def decode_infoget(res, NEVER_DECODE=False):
     return utils.list2dict(res)
 
 

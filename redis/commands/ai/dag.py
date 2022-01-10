@@ -6,9 +6,9 @@ import numpy as np
 from deprecated import deprecated
 
 from . import command_builder as builder
-from .postprocessor import Processor
+from .postprocessor import *  # noqa
 
-processor = Processor()
+# processor = Processor()
 
 
 class Dag:
@@ -87,7 +87,7 @@ class Dag:
         self.commands.append("|>")
         self.result_processors.append(
             partial(
-                processor.tensorget,
+                decode_tensorget,
                 as_numpy=as_numpy,
                 as_numpy_mutable=as_numpy_mutable,
                 meta_only=meta_only,

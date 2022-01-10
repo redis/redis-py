@@ -6,9 +6,8 @@ import numpy as np
 import redis
 
 from . import command_builder as builder
-from .postprocessor import Processor
-
-processor = Processor()
+from .postprocessor import *  # noqa
+# processor = Processor()
 
 
 class Pipeline(redis.client.Pipeline):
@@ -21,7 +20,7 @@ class Pipeline(redis.client.Pipeline):
     def tensorget(self, key, as_numpy=True, as_numpy_mutable=False, meta_only=False):
         self.tensorget_processors.append(
             partial(
-                processor.tensorget,
+                decode_tensorget,
                 as_numpy=as_numpy,
                 as_numpy_mutable=as_numpy_mutable,
                 meta_only=meta_only,
