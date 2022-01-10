@@ -488,7 +488,7 @@ class AICommands:
             "as_numpy": as_numpy,
             "as_numpy_mutable": as_numpy_mutable,
             "meta_only": meta_only,
-            NEVER_DECODE: []
+            NEVER_DECODE: [],
         }
         res = self.execute_command(*args, **options)
         return res
