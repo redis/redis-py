@@ -21,6 +21,12 @@ setup(
         ]
     ),
     url="https://github.com/redis/redis-py",
+    project_urls={
+        "Documentation": "https://redis.readthedocs.io/en/latest/",
+        "Changes": "https://github.com/redis/redis-py/releases",
+        "Code": "https://github.com/redis/redis-py",
+        "Issue tracker": "https://github.com/redis/redis-py/issues",
+    },
     author="Redis Inc.",
     author_email="oss@redis.com",
     python_requires=">=3.6",
