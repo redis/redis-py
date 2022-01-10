@@ -2,9 +2,11 @@ from functools import partial
 from typing import AnyStr, Sequence, Union
 
 import numpy as np
+
 import redis
 
 from . import command_builder as builder
+from .postprocessor import *  # noqa
 
 
 class Pipeline(redis.client.Pipeline):
