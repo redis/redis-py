@@ -33,7 +33,7 @@ setup(
     install_requires=[
         "deprecated>=1.2.3",
         "packaging>=20.4",
-        "skimage"
+        "skimage",
         'importlib-metadata >= 1.0; python_version < "3.8"',
     ],
     classifiers=[
