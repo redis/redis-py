@@ -55,6 +55,6 @@ setup(
     extras_require={
         "hiredis": ["hiredis>=1.0.0"],
         "cryptography": ["cryptography>=36.0.1", "requests>=2.26.0"],
-        "ai": ["skimage", "numpy"],
+        "ai": ["skimage", "numpy>=1.19.5"],
     },
 )

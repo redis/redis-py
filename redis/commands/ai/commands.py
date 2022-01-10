@@ -10,6 +10,7 @@ from .postprocessor import decode_infoget
 
 from redis.client import NEVER_DECODE
 
+
 class AICommands:
     def dag(
         self,
