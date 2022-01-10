@@ -21,12 +21,18 @@ setup(
         ]
     ),
     url="https://github.com/redis/redis-py",
+    project_urls={
+        "Documentation": "https://redis.readthedocs.io/en/latest/",
+        "Changes": "https://github.com/redis/redis-py/releases",
+        "Code": "https://github.com/redis/redis-py",
+        "Issue tracker": "https://github.com/redis/redis-py/issues",
+    },
     author="Redis Inc.",
     author_email="oss@redis.com",
     python_requires=">=3.6",
     install_requires=[
         "deprecated>=1.2.3",
-        "packaging>=21.3",
+        "packaging>=20.4",
         'importlib-metadata >= 1.0; python_version < "3.8"',
     ],
     classifiers=[

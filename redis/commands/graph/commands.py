@@ -35,7 +35,7 @@ class GraphCommands:
 
         Args:
 
-        q :
+        q : str
             The query.
         params : dict
             Query parameters.
@@ -178,7 +178,7 @@ class GraphCommands:
         name : str
             The name of the configuration
         value :
-            The value we want to ser (can be used only when `set` is on)
+            The value we want to set (can be used only when `set` is on)
         set : bool
             Turn on to set a configuration. Default behavior is get.
         """
