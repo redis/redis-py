@@ -28,6 +28,7 @@ from redis.exceptions import (
     NoPermissionError,
     RedisClusterException,
     RedisError,
+    ResponseError,
 )
 from redis.utils import str_if_bytes
 from tests.test_pubsub import wait_for_message
@@ -627,6 +628,32 @@ class TestRedisClusterObj:
         if replica is not None:
             assert replica.server_type == REPLICA
             assert replica in slot_nodes
+
+    def test_not_require_full_coverage_cluster_down_error(self, r):
+        """
+        When require_full_coverage is set to False (default client config) and not
+        all slots are covered, if one of the nodes has 'cluster-require_full_coverage'
+        config set to 'yes' some key-based commands should throw ClusterDownError
+        """
+        node = r.get_node_from_key("foo")
+        missing_slot = r.keyslot("foo")
+        assert r.set("foo", "bar") is True
+        try:
+            assert all(r.cluster_delslots(missing_slot))
+            with pytest.raises(ClusterDownError):
+                r.exists("foo")
+        finally:
+            try:
+                # Add back the missing slot
+                assert r.cluster_addslots(node, missing_slot) is True
+                # Make sure we are not getting ClusterDownError anymore
+                assert r.exists("foo") == 1
+            except ResponseError as e:
+                if f"Slot {missing_slot} is already busy" in str(e):
+                    # It can happen if the test failed to delete this slot
+                    pass
+                else:
+                    raise e
 
 
 @pytest.mark.onlycluster
@@ -1849,39 +1876,19 @@ class TestNodesManager:
         ]
         with pytest.raises(RedisClusterException) as ex:
             get_mocked_redis_client(
-                host=default_host, port=default_port, cluster_slots=cluster_slots
+                host=default_host,
+                port=default_port,
+                cluster_slots=cluster_slots,
+                require_full_coverage=True,
             )
         assert str(ex.value).startswith(
             "All slots are not covered after query all startup_nodes."
         )
 
-    def test_init_slots_cache_not_require_full_coverage_error(self):
-        """
-        When require_full_coverage is set to False and not all slots are
-        covered, if one of the nodes has 'cluster-require_full_coverage'
-        config set to 'yes' the cluster initialization should fail
-        """
-        # Missing slot 5460
-        cluster_slots = [
-            [0, 5459, ["127.0.0.1", 7000], ["127.0.0.1", 7003]],
-            [5461, 10922, ["127.0.0.1", 7001], ["127.0.0.1", 7004]],
-            [10923, 16383, ["127.0.0.1", 7002], ["127.0.0.1", 7005]],
-        ]
-
-        with pytest.raises(RedisClusterException):
-            get_mocked_redis_client(
-                host=default_host,
-                port=default_port,
-                cluster_slots=cluster_slots,
-                require_full_coverage=False,
-                coverage_result="yes",
-            )
-
     def test_init_slots_cache_not_require_full_coverage_success(self):
         """
         When require_full_coverage is set to False and not all slots are
-        covered, if all of the nodes has 'cluster-require_full_coverage'
-        config set to 'no' the cluster initialization should succeed
+        covered the cluster client initialization should succeed
         """
         # Missing slot 5460
         cluster_slots = [
@@ -1895,38 +1902,9 @@ class TestNodesManager:
             port=default_port,
             cluster_slots=cluster_slots,
             require_full_coverage=False,
-            coverage_result="no",
         )
 
         assert 5460 not in rc.nodes_manager.slots_cache
-
-    def test_init_slots_cache_not_require_full_coverage_skips_check(self):
-        """
-        Test that when require_full_coverage is set to False and
-        skip_full_coverage_check is set to true, the cluster initialization
-        succeed without checking the nodes' Redis configurations
-        """
-        # Missing slot 5460
-        cluster_slots = [
-            [0, 5459, ["127.0.0.1", 7000], ["127.0.0.1", 7003]],
-            [5461, 10922, ["127.0.0.1", 7001], ["127.0.0.1", 7004]],
-            [10923, 16383, ["127.0.0.1", 7002], ["127.0.0.1", 7005]],
-        ]
-
-        with patch.object(
-            NodesManager, "cluster_require_full_coverage"
-        ) as conf_check_mock:
-            rc = get_mocked_redis_client(
-                host=default_host,
-                port=default_port,
-                cluster_slots=cluster_slots,
-                require_full_coverage=False,
-                skip_full_coverage_check=True,
-                coverage_result="no",
-            )
-
-            assert conf_check_mock.called is False
-            assert 5460 not in rc.nodes_manager.slots_cache
 
     def test_init_slots_cache(self):
         """
