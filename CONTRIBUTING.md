@@ -57,8 +57,9 @@ can execute docker and its various commands.
 -   A master Redis node
 -   A Redis replica node
 -   Three sentinel Redis nodes
--   A multi-python docker, with your source code mounted in /data
+-   A redis cluster
 -   An stunnel docker, fronting the master Redis node
+-   A Redis node, running unstable - the latest redis
 
 The replica node, is a replica of the master node, using the
 [leader-follower replication](https://redis.io/topics/replication)
