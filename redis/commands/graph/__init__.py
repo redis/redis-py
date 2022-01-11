@@ -156,7 +156,7 @@ class Graph(GraphCommands):
         return self.call_procedure("db.labels", read_only=True).result_set
 
     def relationship_types(self):
-        return self.call_procedure("db.relationship_types", read_only=True).result_set
+        return self.call_procedure("db.relationshipTypes", read_only=True).result_set
 
     def property_keys(self):
-        return self.call_procedure("db.property_keys", read_only=True).result_set
+        return self.call_procedure("db.propertyKeys", read_only=True).result_set
