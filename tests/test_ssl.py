@@ -197,7 +197,7 @@ class TestSSL:
             ssl_cert_reqs="required",
             ssl_ca_certs=self.SERVER_CERT,
             ssl_ocsp_context=ctx,
-            ssl_ocsp_expected_cert=open(self.SERVER_KEY, 'rb').read(),
+            ssl_ocsp_expected_cert=open(self.SERVER_KEY, "rb").read(),
         )
 
         with pytest.raises(ConnectionError) as e:
