@@ -37,17 +37,18 @@ def ocsp_staple_verifier(con, ocsp_bytes, expected):
 
     issuer_cert = None
     peer_cert = con.get_peer_certificate().to_cryptography()
-    cert_chain = con.get_peer_cert_chain()
+    cert_chain = [c.to_cryptography() for c in con.get_peer_cert_chain()]
     for c in cert_chain:
-        if c.issuer_name == peer_cert.subject:
+        if c.subject == peer_cert.issuer:
             issuer_cert = c
             break
 
     if issuer_cert is None:
-        raise ConnectionError("no issuer cert found")
+        raise ConnectionError("no matching issuer cert found in certificate chain")
 
-    if issuer_cert != expected:
-        raise ConnectionError("Issued and expected certificates do not match")
+    e = x509.load_pem_x509_certificate(expected)
+    if peer_cert != e:
+        raise ConnectionError("received and expected certificates do not match")
 
     return _check_certificate(ocsp_bytes)
 
