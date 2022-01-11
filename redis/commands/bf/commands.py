@@ -62,8 +62,8 @@ class BFCommands:
         For more information see `BF.RESERVE <https://oss.redis.com/redisbloom/master/Bloom_Commands/#bfreserve>`_.
         """  # noqa
         params = [key, errorRate, capacity]
-        self.appendExpansion(params, expansion)
-        self.appendNoScale(params, noScale)
+        self.append_expansion(params, expansion)
+        self.append_no_scale(params, noScale)
         return self.execute_command(BF_RESERVE, *params)
 
     def add(self, key, item):
@@ -102,12 +102,12 @@ class BFCommands:
         For more information see `BF.INSERT <https://oss.redis.com/redisbloom/master/Bloom_Commands/#bfinsert>`_.
         """  # noqa
         params = [key]
-        self.appendCapacity(params, capacity)
-        self.appendError(params, error)
-        self.appendExpansion(params, expansion)
-        self.appendNoCreate(params, noCreate)
-        self.appendNoScale(params, noScale)
-        self.appendItems(params, items)
+        self.append_capacity(params, capacity)
+        self.append_error(params, error)
+        self.append_expansion(params, expansion)
+        self.append_no_create(params, noCreate)
+        self.append_no_scale(params, noScale)
+        self.append_items(params, items)
 
         return self.execute_command(BF_INSERT, *params)
 
@@ -177,9 +177,9 @@ class CFCommands:
         For more information see `CF.RESERVE <https://oss.redis.com/redisbloom/master/Cuckoo_Commands/#cfreserve>`_.
         """  # noqa
         params = [key, capacity]
-        self.appendExpansion(params, expansion)
-        self.appendBucketSize(params, bucket_size)
-        self.appendMaxIterations(params, max_iterations)
+        self.append_expansion(params, expansion)
+        self.append_bucket_size(params, bucket_size)
+        self.append_max_iterations(params, max_iterations)
         return self.execute_command(CF_RESERVE, *params)
 
     def add(self, key, item):
@@ -207,9 +207,9 @@ class CFCommands:
         For more information see `CF.INSERT <https://oss.redis.com/redisbloom/master/Cuckoo_Commands/#cfinsert>`_.
         """  # noqa
         params = [key]
-        self.appendCapacity(params, capacity)
-        self.appendNoCreate(params, nocreate)
-        self.appendItems(params, items)
+        self.append_capacity(params, capacity)
+        self.append_no_create(params, nocreate)
+        self.append_items(params, items)
         return self.execute_command(CF_INSERT, *params)
 
     def insertnx(self, key, items, capacity=None, nocreate=None):
@@ -220,9 +220,9 @@ class CFCommands:
         For more information see `CF.INSERTNX <https://oss.redis.com/redisbloom/master/Cuckoo_Commands/#cfinsertnx>`_.
         """  # noqa
         params = [key]
-        self.appendCapacity(params, capacity)
-        self.appendNoCreate(params, nocreate)
-        self.appendItems(params, items)
+        self.append_capacity(params, capacity)
+        self.append_no_create(params, nocreate)
+        self.append_items(params, items)
         return self.execute_command(CF_INSERTNX, *params)
 
     def exists(self, key, item):
@@ -315,7 +315,7 @@ class TOPKCommands:
         >>> topkincrby('A', ['foo'], [1])
         """  # noqa
         params = [key]
-        self.appendItemsAndIncrements(params, items, increments)
+        self.append_items_and_increments(params, items, increments)
         return self.execute_command(TOPK_INCRBY, *params)
 
     def query(self, key, *items):
@@ -383,7 +383,7 @@ class TDigestCommands:
         >>> tdigestadd('A', [1500.0], [1.0])
         """  # noqa
         params = [key]
-        self.appendValuesAndWeights(params, values, weights)
+        self.append_values_and_weights(params, values, weights)
         return self.execute_command(TDIGEST_ADD, *params)
 
     def merge(self, toKey, fromKey):
@@ -465,7 +465,7 @@ class CMSCommands:
         >>> cmsincrby('A', ['foo'], [1])
         """  # noqa
         params = [key]
-        self.appendItemsAndIncrements(params, items, increments)
+        self.append_items_and_increments(params, items, increments)
         return self.execute_command(CMS_INCRBY, *params)
 
     def query(self, key, *items):
@@ -487,7 +487,7 @@ class CMSCommands:
         """  # noqa
         params = [destKey, numKeys]
         params += srcKeys
-        self.appendWeights(params, weights)
+        self.append_weights(params, weights)
         return self.execute_command(CMS_MERGE, *params)
 
     def info(self, key):
