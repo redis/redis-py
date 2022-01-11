@@ -33,13 +33,12 @@ def ocsp_staple_verifier(con, ocsp_bytes, expected):
     and matches the expected, stapled responses.
     """
     if ocsp_bytes in [b"", None]:
-        raise ConnectionError("No stapled ocsp response present")
+        raise ConnectionError("no ocsp response present")
 
     issuer_cert = None
     peer_cert = con.get_peer_certificate().to_cryptography()
-    cert_chain = [c.to_cryptography() for c in con.get_peer_cert_chain()]
-    for c in cert_chain:
-        if c.subject == peer_cert.issuer:
+    for c in con.get_peer_cert_chain():
+        if c.to_cryptography().subject == peer_cert.issuer:
             issuer_cert = c
             break
 
