@@ -3173,7 +3173,7 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/zintercard
         """
-        args = [numkeys] + keys + ["LIMIT", limit]
+        args = [numkeys, *keys, "LIMIT", limit]
         return self.execute_command("ZINTERCARD", *args)
 
     def zlexcount(self, name, min, max):
