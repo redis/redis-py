@@ -3261,7 +3261,8 @@ class SortedSetCommands:
         timeout: float,
         num_keys: int,
         keys: List[str],
-        min_max: str,
+        min: Optional[bool] = False,
+        max: Optional[bool] = False,
         count: Optional[int] = 1,
     ) -> Optional[list]:
         """
@@ -3276,7 +3277,13 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/bzmpop
         """
-        args = [timeout, num_keys] + keys + [min_max]
+        args = [timeout, num_keys, *keys]
+        if (min and max) or (not min and not max):
+            raise DataError
+        elif min:
+            args.append("MIN")
+        else:
+            args.append("MAX")
         if count != 1:
             args.extend(["COUNT", count])
 

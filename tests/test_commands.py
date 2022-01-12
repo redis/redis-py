@@ -2063,12 +2063,12 @@ class TestRedisCommands:
     def test_bzmpop(self, unstable_r):
         unstable_r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         res = [b"a", [[b"a1", b"1"], [b"a2", b"2"]]]
-        assert unstable_r.bzmpop(1, "2", ["b", "a"], "MIN", count=2) == res
-        with pytest.raises(TypeError):
+        assert unstable_r.bzmpop(1, "2", ["b", "a"], min=True, count=2) == res
+        with pytest.raises(redis.DataError):
             unstable_r.bzmpop(1, "2", ["b", "a"], count=2)
         unstable_r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
-        assert unstable_r.bzmpop(0, "2", ["b", "a"], "MAX") == [b"b", [[b"b1", b"10"]]]
-        assert unstable_r.bzmpop(1, "2", ["foo", "bar"], "MAX") is None
+        assert unstable_r.bzmpop(0, "2", ["b", "a"], max=True) == [b"b", [[b"b1", b"10"]]]
+        assert unstable_r.bzmpop(1, "2", ["foo", "bar"], max=True) is None
 
     def test_zrange(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
