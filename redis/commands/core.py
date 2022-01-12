@@ -2408,7 +2408,7 @@ class SetCommands:
 
         For more information check https://redis.io/commands/sintercard
         """
-        args = [numkeys] + keys + ["LIMIT", limit]
+        args = [numkeys, *keys, "LIMIT", limit]
         return self.execute_command("SINTERCARD", *args)
 
     def sinterstore(self, dest, keys, *args):
