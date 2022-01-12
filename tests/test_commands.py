@@ -2067,7 +2067,8 @@ class TestRedisCommands:
         with pytest.raises(redis.DataError):
             unstable_r.bzmpop(1, "2", ["b", "a"], count=2)
         unstable_r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
-        assert unstable_r.bzmpop(0, "2", ["b", "a"], max=True) == [b"b", [[b"b1", b"10"]]]
+        res = [b"b", [[b"b1", b"10"]]]
+        assert unstable_r.bzmpop(0, "2", ["b", "a"], max=True) == res
         assert unstable_r.bzmpop(1, "2", ["foo", "bar"], max=True) is None
 
     def test_zrange(self, r):
