@@ -6,67 +6,132 @@ from urllib.parse import urljoin, urlparse
 import cryptography.hazmat.primitives.hashes
 import requests
 from cryptography import hazmat, x509
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat import backends
+from cryptography.hazmat.primitives.asymmetric.dsa import DSAPublicKey
+from cryptography.hazmat.primitives.asymmetric.ec import ECDSA, EllipticCurvePublicKey
+from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
+from cryptography.hazmat.primitives.hashes import SHA1, Hash
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.x509 import ocsp
 
 from redis.exceptions import AuthorizationError, ConnectionError
 
-from cryptography.hazmat.primitives.asymmetric.dsa import (
-    DSAPublicKey as _DSAPublicKey)
-from cryptography.hazmat.primitives.asymmetric.ec import (
-    ECDSA as _ECDSA,
-    EllipticCurvePublicKey as _EllipticCurvePublicKey)
-from cryptography.hazmat.primitives.asymmetric.padding import (
-    PKCS1v15 as _PKCS1v15)
-from cryptography.hazmat.primitives.asymmetric.rsa import (
-    RSAPublicKey as _RSAPublicKey)
-from cryptography.exceptions import InvalidSignature as _InvalidSignature
+
+def _verify_response(issuer_cert, ocsp_response):
+    pubkey = issuer_cert.public_key()
+    try:
+        if isinstance(pubkey, RSAPublicKey):
+            pubkey.verify(
+                ocsp_response.signature,
+                ocsp_response.tbs_response_bytes,
+                PKCS1v15(),
+                ocsp_response.signature_hash_algorithm,
+            )
+        elif isinstance(pubkey, DSAPublicKey):
+            pubkey.verify(
+                ocsp_response.signature,
+                ocsp_response.tbs_response_bytes,
+                ocsp_response.signature_hash_algorithm,
+            )
+        elif isinstance(pubkey, EllipticCurvePublicKey):
+            pubkey.verify(
+                ocsp_response.signature,
+                ocsp_response.tbs_response_bytes,
+                ECDSA(ocsp_response.signature_hash_algorithm),
+            )
+        else:
+            pubkey.verify(ocsp_response.signature, ocsp_response.tbs_response_bytes)
+    except InvalidSignature:
+        raise ConnectionError("failed to valid ocsp response")
 
 
-#def _verify_response(ocsp_response):
-#    # See cryptography.x509.Certificate.public_key
-#    # for the public key types.
-#    key = ocsp_response.issuer_key_hash
-#    signature = ocsp_response.signature
-#    algorithm = ocsp_response.signature_hash_algorithm
-#    data = ocsp_response.tbs_response_bytes
-#
-#    try:
-#        if isinstance(key, _RSAPublicKey):
-#            key.verify(signature, data, _PKCS1v15(), algorithm)
-#        elif isinstance(key, _DSAPublicKey):
-#            key.verify(signature, data, algorithm)
-#        elif isinstance(key, _EllipticCurvePublicKey):
-#            key.verify(signature, data, _ECDSA(algorithm))
-#        else:
-#            key.verify(signature, data)
-#    except _InvalidSignature:
-#        raise ConnectionError("invalid signature on ocsp response")
-#
-
-def _check_certificate(certificate):
+def _check_certificate(issuer_cert, ocsp_bytes, validate=True):
     """A wrapper the return the validity of a known ocsp certificate"""
 
-    ocsp_response = ocsp.load_der_ocsp_response(certificate)
-    if ocsp_response.this_update >= datetime.datetime.now():
-        raise ConnectionError("ocsp certificate was issued in the future")
+    ocsp_response = ocsp.load_der_ocsp_response(ocsp_bytes)
 
-    if ocsp_response.next_update and ocsp_response.next_update < datetime.datetime.now():
-
-    #responder_pubkey = ocsp_response.responder_key_hash
-#    print(ocsp_response.issuer_key_hash)
-#    print(responder_pubkey)
-#    verify(responder_pubkye, ocsp_response.signature, ocsp_response.signature_hash_algorthim, ocsp_response.tbs_response_bytes)
     if ocsp_response.response_status == ocsp.OCSPResponseStatus.UNAUTHORIZED:
         raise AuthorizationError("you are not authorized to view this ocsp certificate")
     if ocsp_response.response_status == ocsp.OCSPResponseStatus.SUCCESSFUL:
         if ocsp_response.certificate_status != ocsp.OCSPCertStatus.GOOD:
             return False
-        else:
-            #_verify_response(issuer, ocsp_response)
-            return True
     else:
         return False
+
+    if ocsp_response.this_update >= datetime.datetime.now():
+        raise ConnectionError("ocsp certificate was issued in the future")
+
+    if (
+        ocsp_response.next_update
+        and ocsp_response.next_update < datetime.datetime.now()
+    ):
+        raise ConnectionError("ocsp certificate has invalid update - in the past")
+
+    responder_name = ocsp_response.responder_name
+    issuer_hash = ocsp_response.issuer_key_hash
+    responder_hash = ocsp_response.responder_key_hash
+
+    cert_to_validate = issuer_cert
+    if (
+        responder_name is not None
+        and responder_name == issuer_cert.subject
+        or responder_hash == issuer_hash
+    ):
+        cert_to_validate = issuer_cert
+    else:
+        certs = ocsp_response.certificates
+        responder_certs = _get_certificates(
+            certs, issuer_cert, responder_name, responder_hash
+        )
+
+        try:
+            responder_cert = responder_certs[0]
+        except IndexError:
+            raise ConnectionError("no certificates found for the responder")
+
+        ext = responder_cert.extensions.get_extension_for_class(x509.ExtendedKeyUsage)
+        if ext is None or x509.oid.ExtendedKeyUsageOID.OCSP_SIGNING not in ext.value:
+            raise ConnectionError("delegate not autorized for ocsp signing")
+        cert_to_validate = responder_cert
+
+    if validate:
+        _verify_response(cert_to_validate, ocsp_response)
+    return True
+
+
+def _get_certificates(certs, issuer_cert, responder_name, responder_hash):
+    if responder_name is None:
+        certificates = [
+            c
+            for c in certs
+            if _get_pubkey_hash(c) == responder_hash and c.issuer == issuer_cert.subject
+        ]
+    else:
+        certificates = [
+            c
+            for c in certs
+            if c.subject == responder_name and c.issuer == issuer_cert.subject
+        ]
+
+    return certificates
+
+
+def _get_pubkey_hash(certificate):
+    pubkey = certificate.public_key()
+
+    # https://stackoverflow.com/a/46309453/600498
+    if isinstance(pubkey, RSAPublicKey):
+        h = pubkey.public_bytes(Encoding.DER, PublicFormat.PKCS1)
+    elif isinstance(pubkey, EllipticCurvePublicKey):
+        h = pubkey.public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+    else:
+        h = pubkey.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
+
+    sha1 = Hash(SHA1(), backend=backends.default_backend())
+    sha1.update(h)
+    return sha1.finalize()
 
 
 def ocsp_staple_verifier(con, ocsp_bytes, expected=None):
@@ -81,8 +146,9 @@ def ocsp_staple_verifier(con, ocsp_bytes, expected=None):
     issuer_cert = None
     peer_cert = con.get_peer_certificate().to_cryptography()
     for c in con.get_peer_cert_chain():
-        if c.to_cryptography().subject == peer_cert.issuer:
-            issuer_cert = c
+        cert = c.to_cryptography()
+        if cert.subject == peer_cert.issuer:
+            issuer_cert = cert
             break
 
     if issuer_cert is None:
@@ -93,7 +159,7 @@ def ocsp_staple_verifier(con, ocsp_bytes, expected=None):
         if peer_cert != e:
             raise ConnectionError("received and expected certificates do not match")
 
-    return _check_certificate(ocsp_bytes)
+    return _check_certificate(issuer_cert, ocsp_bytes)
 
 
 class OCSPVerifier:
@@ -214,7 +280,7 @@ class OCSPVerifier:
         r = requests.get(ocsp_url, headers=header)
         if not r.ok:
             raise ConnectionError("failed to fetch ocsp certificate")
-        return _check_certificate(r.content)
+        return _check_certificate(issuer_cert, r.content, True)
 
     def is_valid(self):
         """Returns the validity of the certificate wrapping our socket.

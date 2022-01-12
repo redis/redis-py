@@ -198,6 +198,22 @@ class TestSSL:
             ssl_ca_certs=self.SERVER_CERT,
             ssl_ocsp_context=ctx,
             ssl_ocsp_expected_cert=open(self.SERVER_KEY, "rb").read(),
+            ssl_validate_ocsp_stapled=True,
+        )
+
+        with pytest.raises(ConnectionError) as e:
+            r.ping()
+            assert "no ocsp response present" in str(e)
+
+        r = redis.Redis(
+            host=p[0],
+            port=p[1],
+            ssl=True,
+            ssl_certfile=self.SERVER_CERT,
+            ssl_keyfile=self.SERVER_KEY,
+            ssl_cert_reqs="required",
+            ssl_ca_certs=self.SERVER_CERT,
+            ssl_validate_ocsp_stapled=True,
         )
 
         with pytest.raises(ConnectionError) as e:
