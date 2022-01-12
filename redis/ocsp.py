@@ -1,4 +1,5 @@
 import base64
+import datetime
 import ssl
 from urllib.parse import urljoin, urlparse
 
@@ -10,23 +11,65 @@ from cryptography.x509 import ocsp
 
 from redis.exceptions import AuthorizationError, ConnectionError
 
+from cryptography.hazmat.primitives.asymmetric.dsa import (
+    DSAPublicKey as _DSAPublicKey)
+from cryptography.hazmat.primitives.asymmetric.ec import (
+    ECDSA as _ECDSA,
+    EllipticCurvePublicKey as _EllipticCurvePublicKey)
+from cryptography.hazmat.primitives.asymmetric.padding import (
+    PKCS1v15 as _PKCS1v15)
+from cryptography.hazmat.primitives.asymmetric.rsa import (
+    RSAPublicKey as _RSAPublicKey)
+from cryptography.exceptions import InvalidSignature as _InvalidSignature
+
+
+#def _verify_response(ocsp_response):
+#    # See cryptography.x509.Certificate.public_key
+#    # for the public key types.
+#    key = ocsp_response.issuer_key_hash
+#    signature = ocsp_response.signature
+#    algorithm = ocsp_response.signature_hash_algorithm
+#    data = ocsp_response.tbs_response_bytes
+#
+#    try:
+#        if isinstance(key, _RSAPublicKey):
+#            key.verify(signature, data, _PKCS1v15(), algorithm)
+#        elif isinstance(key, _DSAPublicKey):
+#            key.verify(signature, data, algorithm)
+#        elif isinstance(key, _EllipticCurvePublicKey):
+#            key.verify(signature, data, _ECDSA(algorithm))
+#        else:
+#            key.verify(signature, data)
+#    except _InvalidSignature:
+#        raise ConnectionError("invalid signature on ocsp response")
+#
 
 def _check_certificate(certificate):
     """A wrapper the return the validity of a known ocsp certificate"""
 
     ocsp_response = ocsp.load_der_ocsp_response(certificate)
+    if ocsp_response.this_update >= datetime.datetime.now():
+        raise ConnectionError("ocsp certificate was issued in the future")
+
+    if ocsp_response.next_update and ocsp_response.next_update < datetime.datetime.now():
+
+    #responder_pubkey = ocsp_response.responder_key_hash
+#    print(ocsp_response.issuer_key_hash)
+#    print(responder_pubkey)
+#    verify(responder_pubkye, ocsp_response.signature, ocsp_response.signature_hash_algorthim, ocsp_response.tbs_response_bytes)
     if ocsp_response.response_status == ocsp.OCSPResponseStatus.UNAUTHORIZED:
         raise AuthorizationError("you are not authorized to view this ocsp certificate")
     if ocsp_response.response_status == ocsp.OCSPResponseStatus.SUCCESSFUL:
-        if ocsp_response.certificate_status == ocsp.OCSPCertStatus.REVOKED:
+        if ocsp_response.certificate_status != ocsp.OCSPCertStatus.GOOD:
             return False
         else:
+            #_verify_response(issuer, ocsp_response)
             return True
     else:
         return False
 
 
-def ocsp_staple_verifier(con, ocsp_bytes, expected):
+def ocsp_staple_verifier(con, ocsp_bytes, expected=None):
     """An implemention of a function for set_ocsp_client_callback in PyOpenSSL.
 
     This function validates that the provide ocsp_bytes response is valid,
@@ -45,9 +88,10 @@ def ocsp_staple_verifier(con, ocsp_bytes, expected):
     if issuer_cert is None:
         raise ConnectionError("no matching issuer cert found in certificate chain")
 
-    e = x509.load_pem_x509_certificate(expected)
-    if peer_cert != e:
-        raise ConnectionError("received and expected certificates do not match")
+    if expected is not None:
+        e = x509.load_pem_x509_certificate(expected)
+        if peer_cert != e:
+            raise ConnectionError("received and expected certificates do not match")
 
     return _check_certificate(ocsp_bytes)
 

@@ -908,6 +908,7 @@ class SSLConnection(Connection):
         ssl_ca_path=None,
         ssl_password=None,
         ssl_validate_ocsp=False,
+        ssl_validate_ocsp_stapled=False,
         ssl_ocsp_context=None,
         ssl_ocsp_expected_cert=None,
         **kwargs,
@@ -956,6 +957,7 @@ class SSLConnection(Connection):
         self.check_hostname = ssl_check_hostname
         self.certificate_password = ssl_password
         self.ssl_validate_ocsp = ssl_validate_ocsp
+        self.ssl_validate_ocsp_stapled = ssl_validate_ocsp_stapled
         self.ssl_ocsp_context = ssl_ocsp_context
         self.ssl_ocsp_expected_cert = ssl_ocsp_expected_cert
 
@@ -977,24 +979,33 @@ class SSLConnection(Connection):
         if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE is False:
             raise RedisError("cryptography is not installed.")
 
-        if self.ssl_ocsp_context is not None and self.ssl_validate_ocsp is not False:
+        if self.ssl_validate_ocsp_stapled and self.ssl_validate_ocsp:
             raise RedisError(
-                "Either an OCSP context or validation may be specified " "but not both."
+                "Either an OCSP staple or pure OCSP connection must be validated "
+                "- not both."
             )
 
         # validation for the stapled case
-        if self.ssl_ocsp_context:
+        if self.ssl_validate_ocsp_stapled:
             import OpenSSL
 
             from .ocsp import ocsp_staple_verifier
 
-            self.ssl_ocsp_context.set_ocsp_client_callback(
+            # if a context is provided use it - otherwise, a basic context
+            if self.ssl_ocsp_context is None:
+                staple_ctx = OpenSSL.SSL.Context(OpenSSL.SSL.SSLv23_METHOD)
+                staple_ctx.use_certificate_file(self.certfile)
+                staple_ctx.use_privatekey_file(self.keyfile)
+            else:
+                staple_ctx = self.ssl_ocsp_context
+
+            staple_ctx.set_ocsp_client_callback(
                 ocsp_staple_verifier,
                 self.ssl_ocsp_expected_cert,
             )
 
             #  need another socket
-            con = OpenSSL.SSL.Connection(self.ssl_ocsp_context, socket.socket())
+            con = OpenSSL.SSL.Connection(staple_ctx, socket.socket())
             con.request_ocsp()
             con.connect((self.host, self.port))
             con.do_handshake()
