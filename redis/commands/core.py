@@ -3881,6 +3881,9 @@ class ScriptCommands:
     https://redis.com/ebook/part-3-next-steps/chapter-11-scripting-redis-with-lua/
     """
 
+    def _eval(self, command, script, numkeys, *keys_and_args):
+        return self.execute_command(command, script, numkeys, *keys_and_args)
+
     def eval(self, script, numkeys, *keys_and_args):
         """
         Execute the Lua ``script``, specifying the ``numkeys`` the script
@@ -3892,7 +3895,7 @@ class ScriptCommands:
 
         For more information check  https://redis.io/commands/eval
         """
-        return self.execute_command("EVAL", script, numkeys, *keys_and_args)
+        return self._eval("EVAL", script, numkeys, *keys_and_args)
 
     def eval_ro(self, script, numkeys, *keys_and_args):
         """
@@ -3904,7 +3907,7 @@ class ScriptCommands:
 
         For more information check  https://redis.io/commands/eval_ro
         """
-        return self.execute_command("EVAL_RO", script, numkeys, *keys_and_args)
+        return self._eval("EVAL_RO", script, numkeys, *keys_and_args)
 
     def evalsha(self, sha, numkeys, *keys_and_args):
         """
