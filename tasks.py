@@ -74,8 +74,6 @@ def clean(c):
     if os.path.isdir("dist"):
         shutil.rmtree("dist")
     run(f"docker rm -f {' '.join(dockers)}")
-    if os.path.isdir("docker/stunnel/keys"):
-        shutil.rmtree("docker/stunnel/keys")
 
 
 @task
