@@ -94,14 +94,14 @@ def parse_debug_object(response):
 
 
 def parse_object(response, infotype):
-    "Parse the results of an OBJECT command"
+    """Parse the results of an OBJECT command"""
     if infotype in ("idletime", "refcount"):
         return int_or_none(response)
     return response
 
 
 def parse_info(response):
-    "Parse the result of Redis's INFO command into a Python dict"
+    """Parse the result of Redis's INFO command into a Python dict"""
     info = {}
     response = str_if_bytes(response)
 
@@ -145,7 +145,7 @@ def parse_info(response):
 
 
 def parse_memory_stats(response, **kwargs):
-    "Parse the results of MEMORY STATS"
+    """Parse the results of MEMORY STATS"""
     stats = pairs_to_dict(response, decode_keys=True, decode_string_values=True)
     for key, value in stats.items():
         if key.startswith("db."):
@@ -219,7 +219,7 @@ def parse_sentinel_get_master(response):
 
 
 def pairs_to_dict(response, decode_keys=False, decode_string_values=False):
-    "Create a dict given a list of key/value pairs"
+    """Create a dict given a list of key/value pairs"""
     if response is None:
         return {}
     if decode_keys or decode_string_values:
@@ -973,19 +973,15 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         return f"{type(self).__name__}<{repr(self.connection_pool)}>"
 
     def get_encoder(self):
-        """
-        Get the connection pool's encoder
-        """
+        """Get the connection pool's encoder"""
         return self.connection_pool.get_encoder()
 
     def get_connection_kwargs(self):
-        """
-        Get the connection's key-word arguments
-        """
+        """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
 
     def set_response_callback(self, command, callback):
-        "Set a custom Response Callback"
+        """Set a custom Response Callback"""
         self.response_callbacks[command] = callback
 
     def load_external_module(
@@ -1165,7 +1161,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
     # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
-        "Execute a command and return a parsed response"
+        """Execute a command and return a parsed response"""
         pool = self.connection_pool
         command_name = args[0]
         conn = self.connection or pool.get_connection(command_name, **options)
@@ -1182,7 +1178,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 pool.release(conn)
 
     def parse_response(self, connection, command_name, **options):
-        "Parses a response from the Redis server"
+        """Parses a response from the Redis server"""
         try:
             if NEVER_DECODE in options:
                 response = connection.read_response(disable_decoding=True)
@@ -1227,7 +1223,7 @@ class Monitor:
         self.connection_pool.release(self.connection)
 
     def next_command(self):
-        "Parse the response from a monitor command"
+        """Parse the response from a monitor command"""
         response = self.connection.read_response()
         if isinstance(response, bytes):
             response = self.connection.encoder.decode(response, force=True)
@@ -1262,7 +1258,7 @@ class Monitor:
         }
 
     def listen(self):
-        "Listen for commands coming to the server."
+        """Listen for commands coming to the server."""
         while True:
             yield self.next_command()
 
@@ -1355,11 +1351,11 @@ class PubSub:
 
     @property
     def subscribed(self):
-        "Indicates if there are subscriptions to any channels or patterns"
+        """Indicates if there are subscriptions to any channels or patterns"""
         return self.subscribed_event.is_set()
 
     def execute_command(self, *args):
-        "Execute a publish/subscribe command"
+        """Execute a publish/subscribe command"""
 
         # NOTE: don't parse the response in this function -- it could pull a
         # legitimate message off the stack if the connection is already
@@ -1751,7 +1747,7 @@ class Pipeline(Redis):
         return len(self.command_stack)
 
     def __bool__(self):
-        "Pipeline instances should always evaluate to True"
+        """Pipeline instances should always evaluate to True"""
         return True
 
     def reset(self):
@@ -1992,7 +1988,7 @@ class Pipeline(Redis):
             raise
 
     def execute(self, raise_on_error=True):
-        "Execute all the commands in the current pipeline"
+        """Execute all the commands in the current pipeline"""
         stack = self.command_stack
         if not stack and not self.watching:
             return []
@@ -2019,17 +2015,18 @@ class Pipeline(Redis):
             self.reset()
 
     def discard(self):
-        """Flushes all previously queued commands
+        """
+        Flushes all previously queued commands
         See: https://redis.io/commands/DISCARD
         """
         self.execute_command("DISCARD")
 
     def watch(self, *names):
-        "Watches the values at keys ``names``"
+        """Watches the values at keys ``names``"""
         if self.explicit_transaction:
             raise RedisError("Cannot issue a WATCH after a MULTI")
         return self.execute_command("WATCH", *names)
 
     def unwatch(self):
-        "Unwatches all previously specified keys"
+        """Unwatches all previously specified keys"""
         return self.watching and self.execute_command("UNWATCH") or True
