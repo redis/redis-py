@@ -2,6 +2,7 @@ import datetime
 import hashlib
 import time
 import warnings
+from typing import Optional, Union
 
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 
@@ -1866,7 +1867,15 @@ class BasicKeyCommands:
         """
         return self.execute_command("UNLINK", *names)
 
-    def lcs(self, key1, key2, len=False, idx=False, minmatchlen=0, withmatchlen=False):
+    def lcs(
+        self,
+        key1: str,
+        key2: str,
+        len: Optional[bool] = False,
+        idx: Optional[bool] = False,
+        minmatchlen: Optional[int] = 0,
+        withmatchlen: Optional[bool] = False,
+    ) -> Union[str, int, list]:
         """
         Find the longest common subsequence between ``key1`` and ``key2``.
 
