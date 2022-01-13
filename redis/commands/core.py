@@ -3894,6 +3894,9 @@ class ScriptCommands:
         """
         return self.execute_command("EVAL", script, numkeys, *keys_and_args)
 
+    def _evalsha(self, command, sha, numkeys, *keys_and_args):
+        return self.execute_command(command, sha, numkeys, *keys_and_args)
+
     def evalsha(self, sha, numkeys, *keys_and_args):
         """
         Use the ``sha`` to execute a Lua script already registered via EVAL
@@ -3906,7 +3909,7 @@ class ScriptCommands:
 
         For more information check  https://redis.io/commands/evalsha
         """
-        return self.execute_command("EVALSHA", sha, numkeys, *keys_and_args)
+        return self._evalsha("EVALSHA", sha, numkeys, *keys_and_args)
 
     def evalsha_ro(self, sha, numkeys, *keys_and_args):
         """
@@ -3919,7 +3922,7 @@ class ScriptCommands:
 
         For more information check  https://redis.io/commands/evalsha_ro
         """
-        return self.execute_command("EVALSHA_RO", sha, numkeys, *keys_and_args)
+        return self._evalsha("EVALSHA_RO", sha, numkeys, *keys_and_args)
 
     def script_exists(self, *args):
         """
