@@ -3,7 +3,6 @@ import shutil
 
 from invoke import run, task
 
-
 with open("tox.ini") as fp:
     lines = fp.read().split("\n")
     dockers = [line.split("=")[1].strip() for line in lines if line.find("name") != -1]
