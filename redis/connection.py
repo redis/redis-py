@@ -925,6 +925,7 @@ class SSLConnection(Connection):
             ssl_password: Password for unlocking an encrypted private key. Defaults to None.
 
             ssl_validate_ocsp: If set, perform a full ocsp validation (i.e not a stapled verification)
+            ssl_validate_ocsp_stapled: If set, perform a validation on a stapled ocsp response
             ssl_ocsp_context: A fully initialized OpenSSL.SSL.Context object to be used in verifying the ssl_ocsp_expected_cert
             ssl_ocsp_expected_cert: A PEM armoured string containing the expected certificate to be returned from the ocsp verification service.
 
