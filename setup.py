@@ -54,7 +54,7 @@ setup(
     ],
     extras_require={
         "hiredis": ["hiredis>=1.0.0"],
-        "cryptography": ["cryptography>=36.0.1", "requests>=2.26.0"],
         "ai": ["scikit-image>=0.16.0", "numpy>=1.19.5", "ml2rt>=0.2.0"],
+        "ocsp": ["cryptography>=36.0.1", "pyopenssl==20.0.1", "requests>=2.26.0"],
     },
 )

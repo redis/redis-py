@@ -66,7 +66,7 @@ def standalone_tests(c):
     with and without hiredis."""
     print("Starting Redis tests")
     _generate_keys()
-    run("tox -e standalone-'{plain,hiredis,cryptography,ai}'")
+    run("tox -e standalone-'{plain,hiredis,ocsp,ai}'")
 
 
 @task
