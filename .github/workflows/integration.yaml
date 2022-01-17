@@ -30,6 +30,7 @@ jobs:
 
    run-tests:
      runs-on: ubuntu-latest
+     timeout-minutes: 30
      strategy:
        max-parallel: 15
        matrix:
