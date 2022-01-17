@@ -4,12 +4,10 @@ from typing import Any, AnyStr, List, Sequence, Union
 
 import numpy as np
 from deprecated import deprecated
+from redis.client import NEVER_DECODE
 
 from . import command_builder as builder
 from .postprocessor import *  # noqa
-
-# processor = Processor()
-
 
 class Dag:
     def __init__(self, load, persist, routing, timeout, executor, readonly=False):
@@ -160,7 +158,9 @@ class Dag:
 
     def execute(self):
         commands = self.commands[:-1]  # removing the last "|>"
-        results = self.executor(*commands)
+        options = {}
+        options[NEVER_DECODE] = []
+        results = self.executor(*commands, **options)
         if self.enable_postprocess:
             out = []
             for res, fn in zip(results, self.result_processors):
