@@ -1,13 +1,10 @@
-import copy
 import random
 import weakref
 
-from redis.backoff import NoBackoff
 from redis.client import Redis
 from redis.commands import SentinelCommands
 from redis.connection import Connection, ConnectionPool, SSLConnection
 from redis.exceptions import ConnectionError, ReadOnlyError, ResponseError, TimeoutError
-from redis.retry import Retry
 from redis.utils import str_if_bytes
 
 
@@ -40,7 +37,7 @@ class SentinelManagedConnection(Connection):
             if str_if_bytes(self.read_response()) != "PONG":
                 raise ConnectionError("PING failed")
 
-    def connect(self):
+    def _connect_retry(self):
         if self._sock:
             return  # already connected
         if self.connection_pool.is_master:
@@ -52,6 +49,12 @@ class SentinelManagedConnection(Connection):
                 except ConnectionError:
                     continue
             raise SlaveNotFoundError  # Never be here
+
+    def connect(self):
+        return self.retry.call_with_retry(
+            self._connect_retry,
+            lambda error: None,
+        )
 
     def read_response(self, disable_decoding=False):
         try:
@@ -87,24 +90,6 @@ class SentinelConnectionPool(ConnectionPool):
             if kwargs.pop("ssl", False)
             else SentinelManagedConnection,
         )
-        retry = kwargs.get("retry", None)
-        retry_on_error = kwargs.get("retry_on_error", None)
-        retry_on_timeout = kwargs.get("retry_on_timeout", False)
-        self.retry_on_timeout = retry_on_timeout
-        if retry_on_timeout:
-            # Add TimeoutError to the errors list to retry on
-            retry_on_error.append(TimeoutError)
-        self.retry_on_error = retry_on_error
-        if retry_on_error:
-            if retry is None:
-                self.retry = Retry(NoBackoff(), 1)
-            else:
-                # deep-copy the Retry object as it is mutable
-                self.retry = copy.deepcopy(retry)
-            # Update the retry's supported errors with the specified errors
-            self.retry.update_supported_erros(retry_on_error)
-        else:
-            self.retry = Retry(NoBackoff(), 0)
         self.is_master = kwargs.pop("is_master", True)
         self.check_connection = kwargs.pop("check_connection", False)
         super().__init__(**kwargs)
@@ -127,12 +112,6 @@ class SentinelConnectionPool(ConnectionPool):
         )
         parent = super()
         return check and parent.owns_connection(connection)
-
-    def get_connection(self, *args, **kwargs):
-        return self.retry.call_with_retry(
-            lambda: super(type(self), self).get_connection(self, *args, **kwargs),
-            lambda error: None,
-        )
 
     def get_master_address(self):
         master_address = self.sentinel_manager.discover_master(self.service_name)
