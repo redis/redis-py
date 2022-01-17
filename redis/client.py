@@ -880,6 +880,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ssl_check_hostname=False,
         ssl_password=None,
         ssl_validate_ocsp=False,
+        ssl_validate_ocsp_stapled=False,
+        ssl_ocsp_context=None,
+        ssl_ocsp_expected_cert=None,
         max_connections=None,
         single_connection_client=False,
         health_check_interval=0,
@@ -958,7 +961,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_check_hostname": ssl_check_hostname,
                             "ssl_password": ssl_password,
                             "ssl_ca_path": ssl_ca_path,
+                            "ssl_validate_ocsp_stapled": ssl_validate_ocsp_stapled,
                             "ssl_validate_ocsp": ssl_validate_ocsp,
+                            "ssl_ocsp_context": ssl_ocsp_context,
+                            "ssl_ocsp_expected_cert": ssl_ocsp_expected_cert,
                         }
                     )
             connection_pool = ConnectionPool(**kwargs)
