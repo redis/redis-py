@@ -109,6 +109,8 @@ These are the commands for interacting with the `RediSearch module <https://redi
 .. code-block:: python
 
     import redis
+    from redis.commands.search.field import TextField
+
     r = redis.Redis()
     r.ft().create_index(TextField("play", weight=5.0), TextField("ball"))
     print(r.ft().info())
