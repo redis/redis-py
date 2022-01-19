@@ -3881,10 +3881,16 @@ class ScriptCommands:
     https://redis.com/ebook/part-3-next-steps/chapter-11-scripting-redis-with-lua/
     """
 
-    def _eval(self, command, script, numkeys, *keys_and_args):
+    def _eval(
+        self,
+        command: str,
+        script: str,
+        numkeys: int,
+        *keys_and_args: list
+    ) -> str:
         return self.execute_command(command, script, numkeys, *keys_and_args)
 
-    def eval(self, script, numkeys, *keys_and_args):
+    def eval(self, script: str, numkeys: int, *keys_and_args: list) -> str:
         """
         Execute the Lua ``script``, specifying the ``numkeys`` the script
         will touch and the key names and argument values in ``keys_and_args``.
