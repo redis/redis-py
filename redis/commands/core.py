@@ -3882,11 +3882,7 @@ class ScriptCommands:
     """
 
     def _eval(
-        self,
-        command: str,
-        script: str,
-        numkeys: int,
-        *keys_and_args: list
+        self, command: str, script: str, numkeys: int, *keys_and_args: list
     ) -> str:
         return self.execute_command(command, script, numkeys, *keys_and_args)
 
