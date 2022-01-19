@@ -3911,7 +3911,7 @@ class ScriptCommands:
         """
         return self._evalsha("EVALSHA", sha, numkeys, *keys_and_args)
 
-    def evalsha_ro(self, sha, numkeys, *keys_and_args):
+    def evalsha_ro(self, sha: str, numkeys: int, *keys_and_args: list) -> str:
         """
         The read-only variant of the EVALSHA command
 
