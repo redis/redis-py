@@ -3897,7 +3897,7 @@ class ScriptCommands:
         """
         return self._eval("EVAL", script, numkeys, *keys_and_args)
 
-    def eval_ro(self, script, numkeys, *keys_and_args):
+    def eval_ro(self, script: str, numkeys: int, *keys_and_args: list) -> str:
         """
         The read-only variant of the EVAL command
 
