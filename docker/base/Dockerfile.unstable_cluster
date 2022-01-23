@@ -1,5 +1,5 @@
 # produces redisfab/redis-py-cluster:6.2.6
-FROM redis:6.2.6-buster
+FROM redisfab/redis-py:unstable-bionic
 
 COPY create_cluster.sh /create_cluster.sh
 RUN chmod +x /create_cluster.sh
