@@ -6,4 +6,4 @@ RUN chmod +x /create_cluster.sh
 
 EXPOSE 6372 6373 6374 6375 6376 6377
 
-CMD [ "/create_cluster.sh"]
+CMD /create_cluster.sh  6372 6377
