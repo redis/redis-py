@@ -60,8 +60,27 @@ def pytest_addoption(parser):
         default=default_redis_unstable_url,
         action="store",
         help="Redis unstable (latest version) connection string "
-        "defaults to %(default)s`",
+             "defaults to %(default)s`",
     )
+
+    parser.addoption('--repeat', action='store',
+                     help='Number of times to repeat each test',
+    )
+
+
+def pytest_generate_tests(metafunc):
+    if metafunc.config.option.repeat is not None:
+        count = int(metafunc.config.option.repeat)
+
+        # We're going to duplicate these tests by parametrizing them,
+        # which requires that each test has a fixture to accept the parameter.
+        # We can add a new fixture like so:
+        metafunc.fixturenames.append('tmp_ct')
+
+        # Now we parametrize. This is what happens when we do e.g.,
+        # @pytest.mark.parametrize('tmp_ct', range(count))
+        # def test_foo(): pass
+        metafunc.parametrize('tmp_ct', range(count))
 
 
 def _get_info(redis_url):
@@ -136,18 +155,21 @@ def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=20):
 def skip_if_server_version_lt(min_version):
     redis_version = REDIS_INFO["version"]
     check = Version(redis_version) < Version(min_version)
-    return pytest.mark.skipif(check, reason=f"Redis version required >= {min_version}")
+    return pytest.mark.skipif(check,
+                              reason=f"Redis version required >= {min_version}")
 
 
 def skip_if_server_version_gte(min_version):
     redis_version = REDIS_INFO["version"]
     check = Version(redis_version) >= Version(min_version)
-    return pytest.mark.skipif(check, reason=f"Redis version required < {min_version}")
+    return pytest.mark.skipif(check,
+                              reason=f"Redis version required < {min_version}")
 
 
 def skip_unless_arch_bits(arch_bits):
     return pytest.mark.skipif(
-        REDIS_INFO["arch_bits"] != arch_bits, reason=f"server is not {arch_bits}-bit"
+        REDIS_INFO["arch_bits"] != arch_bits,
+        reason=f"server is not {arch_bits}-bit"
     )
 
 
@@ -155,7 +177,8 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
     try:
         modules = REDIS_INFO["modules"]
     except KeyError:
-        return pytest.mark.skipif(True, reason="Redis server does not have modules")
+        return pytest.mark.skipif(True,
+                                  reason="Redis server does not have modules")
     if modules == []:
         return pytest.mark.skipif(True, reason="No redis modules found")
 
@@ -183,7 +206,8 @@ def skip_if_nocryptography():
     try:
         import cryptography  # noqa
 
-        return pytest.mark.skipif(False, reason="Cryptography dependency found")
+        return pytest.mark.skipif(False,
+                                  reason="Cryptography dependency found")
     except ImportError:
         return pytest.mark.skipif(True, reason="No cryptography dependency")
 
@@ -198,7 +222,8 @@ def skip_if_cryptography():
 
 
 def _get_client(
-    cls, request, single_connection_client=True, flushdb=True, from_url=None, **kwargs
+        cls, request, single_connection_client=True, flushdb=True,
+        from_url=None, **kwargs
 ):
     """
     Helper for fixtures or tests that need a Redis client
@@ -260,7 +285,8 @@ def cluster_teardown(client, flushdb):
 def modclient(request, **kwargs):
     rmurl = request.config.getoption("--redismod-url")
     with _get_client(
-        redis.Redis, request, from_url=rmurl, decode_responses=True, **kwargs
+            redis.Redis, request, from_url=rmurl, decode_responses=True,
+            **kwargs
     ) as client:
         yield client
 
