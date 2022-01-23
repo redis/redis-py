@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  schedule:
+    cron: '5 5 * * *'
   push:
     paths-ignore:
       - 'docs/**'
