@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Iterable, TypeVar, Union
+from typing import TYPE_CHECKING, Callable, Iterable, TypeVar, Union
 
 from redis.compat import Protocol
 
 if TYPE_CHECKING:
+    from os import PathLike
+
     from redis.asyncio.connection import ConnectionPool as AsyncConnectionPool
     from redis.connection import ConnectionPool
 
+StrOrBytesPathT = Union[str, bytes, PathLike[str], PathLike[bytes]]
+SSLPasswordTypeT = Union[Callable[[], Union[str, bytes]], str, bytes]
 
 EncodedT = Union[bytes, memoryview]
 DecodedT = Union[str, int, float]

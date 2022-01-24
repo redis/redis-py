@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copy
 import datetime
 import re
@@ -5,6 +7,7 @@ import threading
 import time
 import warnings
 from itertools import chain
+from typing import TYPE_CHECKING, Any, Mapping, MutableMapping, Callable, Iterator
 
 from redis.commands import (
     CoreCommands,
@@ -12,7 +15,8 @@ from redis.commands import (
     SentinelCommands,
     list_or_args,
 )
-from redis.connection import ConnectionPool, SSLConnection, UnixDomainSocketConnection
+from redis.compat import TypedDict
+from redis.connection import ConnectionPool, SSLConnection, UnixDomainSocketConnection, ConnectCallbackProtocol
 from redis.exceptions import (
     ConnectionError,
     ExecAbortError,
@@ -24,7 +28,24 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.lock import Lock
+from redis.typing import StrOrBytesPathT, SSLPasswordTypeT, KeyT
 from redis.utils import safe_str, str_if_bytes
+
+if TYPE_CHECKING:
+    from redis.asyncio.client import (
+        Redis as AsyncRedis, Pipeline as AsyncPipeline, ResponseCallbackT
+    )
+    from redis.asyncio.connection import ConnectionPool as AsyncConnectionPool
+    from redis.asyncio.retry import Retry as AsyncRetry
+    from redis.connection import Connection
+    from redis.retry import Retry
+
+    try:
+        import OpenSSL
+
+        SSLContextT = OpenSSL.SSL.Context
+    except ImportError:
+        SSLContextT = Any
 
 SYM_EMPTY = b""
 EMPTY_RESPONSE = "EMPTY_RESPONSE"
@@ -642,18 +663,10 @@ def parse_set_result(response, **options):
     return response and str_if_bytes(response) == "OK"
 
 
-class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
-    """
-    Implementation of the Redis protocol.
+class AbstractRedis:
 
-    This abstract class provides a Python interface to all Redis commands
-    and an implementation of the Redis protocol.
-
-    Pipelines derive from this, implementing how
-    the commands are sent and received to the Redis server. Based on
-    configuration, an instance will either use a ConnectionPool, or
-    Connection object to talk to redis.
-    """
+    response_callbacks: MutableMapping[str | bytes, ResponseCallbackT]
+    connection_pool_cls: type[ConnectionPool] | type[AsyncConnectionPool]
 
     RESPONSE_CALLBACKS = {
         **string_keys_to_dict(
@@ -808,7 +821,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     }
 
     @classmethod
-    def from_url(cls, url, **kwargs):
+    def from_url(cls: type[Redis] | type[AsyncRedis], url: str, **kwargs):
         """
         Return a Redis client object configured from the given URL
 
@@ -849,47 +862,47 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         arguments always win.
 
         """
-        connection_pool = ConnectionPool.from_url(url, **kwargs)
+        connection_pool = cls.connection_pool_cls.from_url(url, **kwargs)
         return cls(connection_pool=connection_pool)
 
     def __init__(
         self,
-        host="localhost",
-        port=6379,
-        db=0,
-        password=None,
-        socket_timeout=None,
-        socket_connect_timeout=None,
-        socket_keepalive=None,
-        socket_keepalive_options=None,
-        connection_pool=None,
-        unix_socket_path=None,
-        encoding="utf-8",
-        encoding_errors="strict",
-        charset=None,
-        errors=None,
-        decode_responses=False,
-        retry_on_timeout=False,
-        retry_on_error=[],
-        ssl=False,
-        ssl_keyfile=None,
-        ssl_certfile=None,
-        ssl_cert_reqs="required",
-        ssl_ca_certs=None,
-        ssl_ca_path=None,
-        ssl_check_hostname=False,
-        ssl_password=None,
-        ssl_validate_ocsp=False,
-        ssl_validate_ocsp_stapled=False,
-        ssl_ocsp_context=None,
-        ssl_ocsp_expected_cert=None,
-        max_connections=None,
-        single_connection_client=False,
-        health_check_interval=0,
-        client_name=None,
-        username=None,
-        retry=None,
-        redis_connect_func=None,
+        host: str = "localhost",
+        port: int = 6379,
+        db: str | int = 0,
+        password: str | None = None,
+        socket_timeout: float | None = None,
+        socket_connect_timeout: float | None = None,
+        socket_keepalive: bool | None = None,
+        socket_keepalive_options: Mapping[int, int | bytes] | None = None,
+        connection_pool: ConnectionPool | AsyncConnectionPool = None,
+        unix_socket_path: str | None = None,
+        encoding: str = "utf-8",
+        encoding_errors: str = "strict",
+        charset: str | None = None,
+        errors: str | None = None,
+        decode_responses: bool = False,
+        retry_on_timeout: bool = False,
+        retry_on_error: list[type[Exception]] = [],
+        ssl: bool = False,
+        ssl_keyfile: StrOrBytesPathT | None = None,
+        ssl_certfile: StrOrBytesPathT | None = None,
+        ssl_cert_reqs: str = "required",
+        ssl_ca_certs: str | None = None,
+        ssl_ca_path: str = None,
+        ssl_check_hostname: bool = False,
+        ssl_password: SSLPasswordTypeT | None = None,
+        ssl_validate_ocsp: bool = False,
+        ssl_validate_ocsp_stapled: bool = False,
+        ssl_ocsp_context: SSLContextT | None = None,
+        ssl_ocsp_expected_cert: Any = None,
+        max_connections: int | None = None,
+        single_connection_client: bool = False,
+        health_check_interval: int = 0,
+        client_name: str | None = None,
+        username: str | None = None,
+        retry: Retry | AsyncRetry | None = None,
+        redis_connect_func: ConnectCallbackProtocol | None = None,
     ):
         """
         Initialize a new Redis client.
@@ -935,7 +948,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 kwargs.update(
                     {
                         "path": unix_socket_path,
-                        "connection_class": UnixDomainSocketConnection,
+                        "connection_class": self.unix_domain_socket_connection_cls,
                     }
                 )
             else:
@@ -953,7 +966,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 if ssl:
                     kwargs.update(
                         {
-                            "connection_class": SSLConnection,
+                            "connection_class": self.ssl_connection_cls,
                             "ssl_keyfile": ssl_keyfile,
                             "ssl_certfile": ssl_certfile,
                             "ssl_cert_reqs": ssl_cert_reqs,
@@ -967,13 +980,17 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_ocsp_expected_cert": ssl_ocsp_expected_cert,
                         }
                     )
-            connection_pool = ConnectionPool(**kwargs)
+            connection_pool = self.connection_pool_cls(**kwargs)
         self.connection_pool = connection_pool
+        self._init(single_connection_client)
         self.connection = None
-        if single_connection_client:
-            self.connection = self.connection_pool.get_connection("_")
 
         self.response_callbacks = CaseInsensitiveDict(self.__class__.RESPONSE_CALLBACKS)
+
+    def _init(self, single_connection_client) -> None:
+        ...
+
+    connection_pool: ConnectionPool | AsyncConnectionPool
 
     def __repr__(self):
         return f"{type(self).__name__}<{repr(self.connection_pool)}>"
@@ -1017,7 +1034,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         """
         setattr(self, funcname, func)
 
-    def pipeline(self, transaction=True, shard_hint=None):
+    pipeline_cls: type["Pipeline"] | type[AsyncPipeline]
+
+    def pipeline(
+        self, transaction: bool = True, shard_hint: str | None = None
+    ) -> Pipeline | AsyncPipeline:
         """
         Return a new pipeline object that can queue multiple commands for
         later execution. ``transaction`` indicates whether all commands
@@ -1025,19 +1046,50 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         atomic, pipelines are useful for reducing the back-and-forth overhead
         between the client and server.
         """
-        return Pipeline(
+        return self.pipeline_cls(
             self.connection_pool, self.response_callbacks, transaction, shard_hint
         )
 
-    def transaction(self, func, *watches, **kwargs):
+
+class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
+    """
+    Implementation of the Redis protocol.
+
+    This abstract class provides a Python interface to all Redis commands
+    and an implementation of the Redis protocol.
+
+    Pipelines derive from this, implementing how
+    the commands are sent and received to the Redis server. Based on
+    configuration, an instance will either use a ConnectionPool, or
+    Connection object to talk to redis.
+    """
+
+    connection_pool_cls: type[ConnectionPool] = ConnectionPool
+    connection_pool: ConnectionPool
+    unix_domain_socket_connection_cls: type[UnixDomainSocketConnection] = UnixDomainSocketConnection
+    ssl_connection_cls: type[SSLConnection] = SSLConnection
+    pipeline_cls: type["Pipeline"]
+    connection: Connection | None
+
+    def _init(self, single_connection_client: bool):
+        self.pipeline_cls = Pipeline
+        if single_connection_client:
+            self.connection = self.connection_pool.get_connection("_")
+
+    def transaction(
+        self,
+        func: Callable[["Pipeline"], Any],
+        *watches: KeyT,
+        shard_hint: str | None = None,
+        value_from_callable: bool = False,
+        watch_delay: float | None = None,
+    ):
         """
         Convenience method for executing the callable `func` as a transaction
         while watching all keys specified in `watches`. The 'func' callable
         should expect a single argument which is a Pipeline object.
         """
-        shard_hint = kwargs.pop("shard_hint", None)
-        value_from_callable = kwargs.pop("value_from_callable", False)
-        watch_delay = kwargs.pop("watch_delay", None)
+        pipe: Pipeline
         with self.pipeline(True, shard_hint) as pipe:
             while True:
                 try:
@@ -1053,13 +1105,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
     def lock(
         self,
-        name,
-        timeout=None,
-        sleep=0.1,
-        blocking_timeout=None,
-        lock_class=None,
-        thread_local=True,
-    ):
+        name: KeyT,
+        timeout: float | None = None,
+        sleep: float = 0.1,
+        blocking_timeout: float | None = None,
+        lock_class: type[Lock] | None = None,
+        thread_local: bool = True,
+    ) -> Lock:
         """
         Return a new Lock object using key ``name`` that mimics
         the behavior of threading.Lock.
@@ -1202,6 +1254,15 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 StrictRedis = Redis
 
 
+class MonitorCommandInfo(TypedDict):
+    time: float
+    db: int
+    client_address: str
+    client_port: str
+    client_type: str
+    command: str
+
+
 class Monitor:
     """
     Monitor is useful for handling the MONITOR command to the redis server.
@@ -1212,9 +1273,9 @@ class Monitor:
     monitor_re = re.compile(r"\[(\d+) (.*)\] (.*)")
     command_re = re.compile(r'"(.*?)(?<!\\)"')
 
-    def __init__(self, connection_pool):
+    def __init__(self, connection_pool: ConnectionPool):
         self.connection_pool = connection_pool
-        self.connection = self.connection_pool.get_connection("MONITOR")
+        self.connection: Connection = self.connection_pool.get_connection("MONITOR")
 
     def __enter__(self):
         self.connection.send_command("MONITOR")
@@ -1228,7 +1289,7 @@ class Monitor:
         self.connection.disconnect()
         self.connection_pool.release(self.connection)
 
-    def next_command(self):
+    def next_command(self) -> MonitorCommandInfo:
         """Parse the response from a monitor command"""
         response = self.connection.read_response()
         if isinstance(response, bytes):
@@ -1263,7 +1324,7 @@ class Monitor:
             "command": command,
         }
 
-    def listen(self):
+    def listen(self) -> Iterator[MonitorCommandInfo]:
         """Listen for commands coming to the server."""
         while True:
             yield self.next_command()

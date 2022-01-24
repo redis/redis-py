@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from packaging.version import Version
 
 from redis.backoff import NoBackoff
+from redis.compat import Protocol
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -496,6 +497,11 @@ if HIREDIS_AVAILABLE:
     DefaultParser = HiredisParser
 else:
     DefaultParser = PythonParser
+
+
+class ConnectCallbackProtocol(Protocol):
+    def __call__(self, connection: "Connection"):
+        ...
 
 
 class Connection:
