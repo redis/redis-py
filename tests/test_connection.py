@@ -79,6 +79,9 @@ class TestConnection:
         mock_sock.close.assert_called_once()
         assert conn._sock is None
 
+    def clear(self, conn):
+        conn.retry_on_error.clear()
+
     def test_retry_connect_on_timeout_error(self):
         """Test that the _connect function is retried in case of a timeout"""
         conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 3))
@@ -95,6 +98,7 @@ class TestConnection:
         conn._connect.side_effect = mock_connect
         conn.connect()
         assert conn._connect.call_count == 3
+        self.clear(conn)
 
     def test_connect_without_retry_on_os_error(self):
         """Test that the _connect function is not being retried in case of a OSError"""
@@ -104,11 +108,12 @@ class TestConnection:
             with pytest.raises(ConnectionError):
                 conn.connect()
             assert _connect.call_count == 1
+            self.clear(conn)
 
     def test_connect_timeout_error_without_retry(self):
         """Test that the _connect function is not being retried if retry_on_timeout is
-        set to False (default value)"""
-        conn = Connection()
+        set to False"""
+        conn = Connection(retry_on_timeout=False)
         conn._connect = mock.Mock()
         conn._connect.side_effect = socket.timeout
 
@@ -116,3 +121,4 @@ class TestConnection:
             conn.connect()
         assert conn._connect.call_count == 1
         assert str(e.value) == "Timeout connecting to server"
+        self.clear(conn)
