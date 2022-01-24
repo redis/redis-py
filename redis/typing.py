@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING, Iterable, TypeVar, Union
 from redis.compat import Protocol
 
 if TYPE_CHECKING:
-    from redis.connection import AsyncConnectionPool, ConnectionPool
+    from redis.asyncio.connection import ConnectionPool as AsyncConnectionPool
+    from redis.connection import ConnectionPool
 
 
 EncodedT = Union[bytes, memoryview]
@@ -41,4 +42,10 @@ class CommandsProtocol(Protocol):
     connection_pool: Union[AsyncConnectionPool, ConnectionPool]
 
     def execute_command(self, *args, **options):
+        ...
+
+    def get_encoder(self):
+        ...
+
+    def get_connection_kwargs(self):
         ...

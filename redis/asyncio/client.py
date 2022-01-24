@@ -59,7 +59,7 @@ _ArgT = TypeVar("_ArgT", KeyT, EncodableT)
 _RedisT = TypeVar("_RedisT", bound="Redis")
 _NormalizeKeysT = TypeVar("_NormalizeKeysT", bound=Mapping[ChannelT, object])
 if TYPE_CHECKING:
-    from redis.commands.core import Script
+    from redis.commands.core import AsyncScript
 
 SYM_EMPTY = b""
 EMPTY_RESPONSE = "EMPTY_RESPONSE"
@@ -1759,7 +1759,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         self.shard_hint = shard_hint
         self.watching = False
         self.command_stack: CommandStackT = []
-        self.scripts: Set["Script"] = set()
+        self.scripts: Set["AsyncScript"] = set()
         self.explicit_transaction = False
 
     async def __aenter__(self: _RedisT) -> _RedisT:
