@@ -604,7 +604,9 @@ class Connection:
         if self._sock:
             return
         try:
-            sock = self._connect()
+            sock = self.retry.call_with_retry(
+                lambda: self._connect(), lambda error: self.disconnect(error)
+            )
         except socket.timeout:
             raise TimeoutError("Timeout connecting to server")
         except OSError as e:
@@ -721,7 +723,7 @@ class Connection:
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
-    def disconnect(self):
+    def disconnect(self, *args):
         "Disconnects from the Redis server"
         self._parser.on_disconnect()
         if self._sock is None:
