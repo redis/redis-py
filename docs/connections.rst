@@ -41,3 +41,5 @@ Connection Pools
 *****************
 .. autoclass:: redis.connection.ConnectionPool
     :members:
+
+More connection examples can be found `here <examples/connection_examples.html>`_.

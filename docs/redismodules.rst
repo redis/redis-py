@@ -93,6 +93,7 @@ These are the commands for interacting with the `RedisJSON module <https://redis
     r = redis.Redis()
     r.json().set("mykey", ".", {"hello": "world", "i am": ["a", "json", "object!"]}
 
+Examples of how to combine search and json can be found `here <examples/search_json_examples.html>`_.
 
 .. automodule:: redis.commands.json.commands
     :members: JSONCommands
@@ -109,6 +110,8 @@ These are the commands for interacting with the `RediSearch module <https://redi
 .. code-block:: python
 
     import redis
+    from redis.commands.search.field import TextField
+
     r = redis.Redis()
     r.ft().create_index(TextField("play", weight=5.0), TextField("ball"))
     print(r.ft().info())

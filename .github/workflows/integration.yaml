@@ -30,8 +30,9 @@ jobs:
 
    run-tests:
      runs-on: ubuntu-latest
+     timeout-minutes: 30
      strategy:
-       max-parallel: 6
+       max-parallel: 15
        matrix:
          python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
          test-type: ['standalone', 'cluster']
