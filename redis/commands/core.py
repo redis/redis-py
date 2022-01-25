@@ -3259,7 +3259,7 @@ class SortedSetCommands:
     def bzmpop(
         self,
         timeout: float,
-        num_keys: int,
+        numkeys: int,
         keys: List[str],
         min: Optional[bool] = False,
         max: Optional[bool] = False,
@@ -3277,15 +3277,14 @@ class SortedSetCommands:
 
         For more information check https://redis.io/commands/bzmpop
         """
-        args = [timeout, num_keys, *keys]
+        args = [timeout, numkeys, *keys]
         if (min and max) or (not min and not max):
-            raise DataError
+            raise DataError("Either min or max, but not both must be set")
         elif min:
             args.append("MIN")
         else:
             args.append("MAX")
-        if count != 1:
-            args.extend(["COUNT", count])
+        args.extend(["COUNT", count])
 
         return self.execute_command("BZMPOP", *args)
 
