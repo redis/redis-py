@@ -29,11 +29,12 @@ setup(
     },
     author="Redis Inc.",
     author_email="oss@redis.com",
-    python_requires=">=3.6",
+    python_requires=">=3.7",
     install_requires=[
         "deprecated>=1.2.3",
         "packaging>=20.4",
         'importlib-metadata >= 1.0; python_version < "3.8"',
+        "typing-extensions",
     ],
     classifiers=[
         "Development Status :: 5 - Production/Stable",
@@ -44,7 +45,6 @@ setup(
         "Programming Language :: Python",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3 :: Only",
-        "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
@@ -53,6 +53,7 @@ setup(
         "Programming Language :: Python :: Implementation :: PyPy",
     ],
     extras_require={
+        "async": ["async-timeout"],
         "hiredis": ["hiredis>=1.0.0"],
         "ocsp": ["cryptography>=36.0.1", "pyopenssl==20.0.1", "requests>=2.26.0"],
     },

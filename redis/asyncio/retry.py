@@ -52,7 +52,7 @@ class Retry:
                 return await do()
             except self._supported_errors as error:
                 failures += 1
-                fail(error)
+                await fail(error)
                 if failures > self._retries:
                     raise error
                 backoff = self._backoff.compute(failures)

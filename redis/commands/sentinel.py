@@ -91,3 +91,9 @@ class SentinelCommands:
         completely missing.
         """
         return self.execute_command("SENTINEL FLUSHCONFIG")
+
+
+class AsyncSentinelCommands(SentinelCommands):
+    async def sentinel(self, *args) -> None:
+        "Redis Sentinel's SENTINEL command."
+        super().sentinel(*args)

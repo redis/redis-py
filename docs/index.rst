@@ -9,7 +9,7 @@ Welcome to redis-py's documentation!
 Getting Started
 ****************
 
-`redis-py <https://pypi.org/project/redis>`_ requires a running Redis server, and Python 3.6+. See the `Redis
+`redis-py <https://pypi.org/project/redis>`_ requires a running Redis server, and Python 3.7+. See the `Redis
 quickstart <https://redis.io/topics/quickstart>`_ for Redis installation instructions.
 
 redis-py can be installed using pip via ``pip install redis``.

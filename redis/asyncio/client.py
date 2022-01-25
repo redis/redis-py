@@ -32,9 +32,9 @@ from redis.asyncio.connection import (
     UnixDomainSocketConnection,
 )
 from redis.commands import (
-    CoreCommands,
+    AsyncCoreCommands,
     RedisModuleCommands,
-    SentinelCommands,
+    AsyncSentinelCommands,
     list_or_args,
 )
 from redis.compat import Protocol, TypedDict
@@ -693,7 +693,7 @@ ResponseCallbackT = Union[ResponseCallbackProtocol, AsyncResponseCallbackProtoco
 _R = TypeVar("_R")
 
 
-class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
+class Redis(RedisModuleCommands, AsyncCoreCommands, AsyncSentinelCommands):
     """
     Implementation of the Redis protocol.
 

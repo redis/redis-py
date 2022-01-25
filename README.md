@@ -51,7 +51,7 @@ contributing](https://github.com/redis/redis-py/blob/master/CONTRIBUTING.md).
 
 ## Getting Started
 
-redis-py supports Python 3.6+.
+redis-py supports Python 3.7+.
 
 ``` pycon
 >>> import redis
