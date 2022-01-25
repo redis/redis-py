@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from redis.asyncio.client import Redis, Pipeline
+    from redis.asyncio.client import Pipeline, Redis
 
 
 def from_url(url, **kwargs):
@@ -23,6 +23,6 @@ class pipeline:
     async def __aenter__(self) -> "Pipeline":
         return self.p
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         await self.p.execute()
         del self.p

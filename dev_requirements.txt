@@ -2,6 +2,7 @@ black==21.11b1
 flake8==4.0.1
 flynt~=0.69.0
 isort==5.10.1
+mock==4.0.3
 pytest==6.2.5
 pytest-timeout==2.0.1
 pytest-asyncio==0.17.2

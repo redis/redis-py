@@ -153,10 +153,10 @@ class BaseParser:
             "invalid password": AuthenticationError,
             # some Redis server versions report invalid command syntax
             # in lowercase
-            "wrong number of arguments for 'auth' command": AuthenticationWrongNumberOfArgsError,
+            "wrong number of arguments for 'auth' command": AuthenticationWrongNumberOfArgsError,  # noqa: E501
             # some Redis server versions report invalid command syntax
             # in uppercase
-            "wrong number of arguments for 'AUTH' command": AuthenticationWrongNumberOfArgsError,
+            "wrong number of arguments for 'AUTH' command": AuthenticationWrongNumberOfArgsError,  # noqa: E501
             MODULE_LOAD_ERROR: ModuleError,
             MODULE_EXPORTS_DATA_TYPES_ERROR: ModuleError,
             NO_SUCH_MODULE_ERROR: ModuleError,
