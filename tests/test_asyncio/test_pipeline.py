@@ -1,8 +1,8 @@
 import pytest
 
 import redis
-
 from tests.conftest import skip_if_server_version_lt
+
 from .conftest import wait_for_command
 
 pytestmark = pytest.mark.asyncio
@@ -351,7 +351,7 @@ class TestPipeline:
             with pytest.raises(redis.ResponseError) as ex:
                 await pipe.execute()
 
-            expected = "Command # 1 (LLEN %s) of pipeline caused error: " % key
+            expected = f"Command # 1 (LLEN {key}) of pipeline caused error: "
             assert str(ex.value).startswith(expected)
 
         assert await r.get(key) == b"1"

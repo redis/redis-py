@@ -11,9 +11,10 @@ from typing import (
     Awaitable,
     Callable,
     Iterable,
+    Iterator,
     Mapping,
     Sequence,
-    Union, Iterator,
+    Union,
 )
 
 from redis.compat import Literal
@@ -386,7 +387,7 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("ROLE")
 
-    def client_kill(self, address: str,  **kwargs) -> ResponseT:
+    def client_kill(self, address: str, **kwargs) -> ResponseT:
         """Disconnects the client at ``address`` (ip:port)
 
         For more information check https://redis.io/commands/client-kill
@@ -665,7 +666,7 @@ class ManagementCommands(CommandsProtocol):
             args.append(b"ERROR")
         return self.execute_command(*args, **kwargs)
 
-    def client_pause(self, timeout: int , all: bool = True, **kwargs) -> ResponseT:
+    def client_pause(self, timeout: int, all: bool = True, **kwargs) -> ResponseT:
         """
         Suspend all the Redis clients for the specified amount of time
         :param timeout: milliseconds to pause clients
@@ -978,7 +979,9 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("MEMORY MALLOC-STATS", **kwargs)
 
-    def memory_usage(self, key: KeyT, samples: int | None = None, **kwargs) -> ResponseT:
+    def memory_usage(
+        self, key: KeyT, samples: int | None = None, **kwargs
+    ) -> ResponseT:
         """
         Return the total memory usage for key, its value and associated
         administrative overheads.
@@ -1061,7 +1064,9 @@ class ManagementCommands(CommandsProtocol):
             return
         raise RedisError("SHUTDOWN seems to have failed.")
 
-    def slaveof(self, host: str | None = None, port: int | None = None, **kwargs) -> ResponseT:
+    def slaveof(
+        self, host: str | None = None, port: int | None = None, **kwargs
+    ) -> ResponseT:
         """
         Set the server to be a replicated slave of the instance identified
         by the ``host`` and ``port``. If called without arguments, the
@@ -1143,7 +1148,9 @@ class AsyncManagementCommands(ManagementCommands):
     async def memory_help(self, **kwargs) -> None:
         return super().memory_help(**kwargs)
 
-    async def shutdown(self, save: bool = False, nosave: bool = False, **kwargs) -> None:
+    async def shutdown(
+        self, save: bool = False, nosave: bool = False, **kwargs
+    ) -> None:
         """Shutdown the Redis server.  If Redis has persistence configured,
         data will be flushed before shutdown.  If the "save" option is set,
         a data flush will be attempted even if there is no persistence
@@ -2429,7 +2436,7 @@ class ScanCommands(CommandsProtocol):
         match: PatternT | None = None,
         count: int | None = None,
         _type: str | None = None,
-        **kwargs
+        **kwargs,
     ) -> Iterator:
         """
         Make an iterator using the SCAN command so that the client doesn't
@@ -2601,7 +2608,7 @@ class AsyncScanCommands(ScanCommands):
         match: PatternT | None = None,
         count: int | None = None,
         _type: str | None = None,
-        **kwargs
+        **kwargs,
     ) -> AsyncIterator:
         """
         Make an iterator using the SCAN command so that the client doesn't
@@ -2785,7 +2792,9 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SMEMBERS", name)
 
-    def smismember(self, name: KeyT, values: Sequence[EncodableT], *args: EncodableT) -> ResponseT:
+    def smismember(
+        self, name: KeyT, values: Sequence[EncodableT], *args: EncodableT
+    ) -> ResponseT:
         """
         Return whether each value in ``values`` is a member of the set ``name``
         as a list of ``bool`` in the order of ``values``
@@ -3134,7 +3143,10 @@ class StreamCommands(CommandsProtocol):
         return self.execute_command("XGROUP DESTROY", name, groupname)
 
     def xgroup_createconsumer(
-        self, name: KeyT, groupname: GroupT, consumername: ConsumerT,
+        self,
+        name: KeyT,
+        groupname: GroupT,
+        consumername: ConsumerT,
     ) -> ResponseT:
         """
         Consumers in a consumer group are auto-created every time a new
@@ -3542,12 +3554,7 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZCARD", name)
 
-    def zcount(
-        self,
-        name: KeyT,
-        min: ZScoreBoundT,
-        max: ZScoreBoundT
-    ) -> ResponseT:
+    def zcount(self, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT) -> ResponseT:
         """
         Returns the number of elements in the sorted set at key ``name`` with
         a score between ``min`` and ``max``.
@@ -3849,7 +3856,7 @@ class SortedSetCommands(CommandsProtocol):
         start: int,
         end: int,
         withscores: bool = False,
-        score_cast_func: type | Callable = float
+        score_cast_func: type | Callable = float,
     ) -> ResponseT:
         """
         Return a range of values from sorted set ``name`` between
@@ -3926,7 +3933,7 @@ class SortedSetCommands(CommandsProtocol):
         min: EncodableT,
         max: EncodableT,
         start: int | None = None,
-        num: int | None = None
+        num: int | None = None,
     ) -> ResponseT:
         """
         Return the lexicographical range of values from sorted set ``name``
@@ -3950,7 +3957,7 @@ class SortedSetCommands(CommandsProtocol):
         max: EncodableT,
         min: EncodableT,
         start: int | None = None,
-        num: int | None = None
+        num: int | None = None,
     ) -> ResponseT:
         """
         Return the reversed lexicographical range of values from sorted set
@@ -4053,12 +4060,7 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZREM", name, *values)
 
-    def zremrangebylex(
-        self,
-        name: KeyT,
-        min: EncodableT,
-        max: EncodableT
-    ) -> ResponseT:
+    def zremrangebylex(self, name: KeyT, min: EncodableT, max: EncodableT) -> ResponseT:
         """
         Remove all elements in the sorted set ``name`` between the
         lexicographical range specified by ``min`` and ``max``.
@@ -4069,12 +4071,7 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZREMRANGEBYLEX", name, min, max)
 
-    def zremrangebyrank(
-        self,
-        name: KeyT,
-        min: int,
-        max: int
-    ) -> ResponseT:
+    def zremrangebyrank(self, name: KeyT, min: int, max: int) -> ResponseT:
         """
         Remove all elements in the sorted set ``name`` with ranks between
         ``min`` and ``max``. Values are 0-based, ordered from smallest score
@@ -4085,7 +4082,9 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZREMRANGEBYRANK", name, min, max)
 
-    def zremrangebyscore(self, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT) -> ResponseT:
+    def zremrangebyscore(
+        self, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT
+    ) -> ResponseT:
         """
         Remove all elements in the sorted set ``name`` with scores
         between ``min`` and ``max``. Returns the number of elements removed.
@@ -4115,7 +4114,7 @@ class SortedSetCommands(CommandsProtocol):
         self,
         keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
         aggregate: str | None = None,
-        withscores: bool = False
+        withscores: bool = False,
     ) -> ResponseT:
         """
         Return the union of multiple sorted sets specified by ``keys``.
@@ -4131,7 +4130,7 @@ class SortedSetCommands(CommandsProtocol):
         self,
         dest: KeyT,
         keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
-        aggregate: str | None = None
+        aggregate: str | None = None,
     ) -> ResponseT:
         """
         Union multiple sorted sets specified by ``keys`` into
@@ -4306,7 +4305,7 @@ class HashCommands(CommandsProtocol):
         name: KeyT,
         key: FieldT = None,
         value: EncodableT = None,
-        mapping: Mapping[AnyFieldT, EncodableT] = None
+        mapping: Mapping[AnyFieldT, EncodableT] = None,
     ) -> ResponseT:
         """
         Set ``key`` to ``value`` within hash ``name``,
@@ -4437,10 +4436,7 @@ class ScriptCommands(CommandsProtocol):
     """
 
     def eval(
-        self,
-        script: ScriptTextT,
-        numkeys: int,
-        *keys_and_args: EncodableT
+        self, script: ScriptTextT, numkeys: int, *keys_and_args: EncodableT
     ) -> ResponseT:
         """
         Execute the Lua ``script``, specifying the ``numkeys`` the script
@@ -4489,8 +4485,7 @@ class ScriptCommands(CommandsProtocol):
         )
 
     def script_flush(
-        self,
-        sync_type: Literal["SYNC"] | Literal["ASYNC"] = None
+        self, sync_type: Literal["SYNC"] | Literal["ASYNC"] = None
     ) -> ResponseT:
         """Flush all scripts from the script cache.
         ``sync_type`` is by default SYNC (synchronous) but it can also be
@@ -5060,7 +5055,7 @@ class Script:
         self,
         keys: Sequence[KeyT] | None = None,
         args: Iterable[EncodableT] | None = None,
-        client: Redis | None = None
+        client: Redis | None = None,
     ):
         """Execute the script, passing any required ``args``"""
         keys = keys or []
@@ -5134,7 +5129,9 @@ class BitFieldOperation:
     Command builder for BITFIELD commands.
     """
 
-    def __init__(self, client: Redis | AsyncRedis, key: str, default_overflow: str | None = None):
+    def __init__(
+        self, client: Redis | AsyncRedis, key: str, default_overflow: str | None = None
+    ):
         self.client = client
         self.key = key
         self._default_overflow = default_overflow

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import random
-from packaging.version import Version
 from urllib.parse import urlparse
 
 import pytest
+from packaging.version import Version
 
 import redis.asyncio as redis
 from redis.asyncio.client import Monitor
@@ -15,8 +15,8 @@ from redis.asyncio.connection import (
     PythonParser,
     parse_url,
 )
-
 from tests.conftest import REDIS_INFO
+
 from .compat import mock
 
 

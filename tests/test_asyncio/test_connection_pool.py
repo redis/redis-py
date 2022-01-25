@@ -6,9 +6,8 @@ import pytest
 
 import redis.asyncio as redis
 from redis.asyncio.connection import Connection, to_bool
-from redis import exceptions
-
 from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
+
 from .compat import mock
 from .test_pubsub import wait_for_message
 
@@ -68,7 +67,7 @@ class TestConnectionPool:
         pool = self.get_pool(max_connections=2, connection_kwargs=connection_kwargs)
         await pool.get_connection("_")
         await pool.get_connection("_")
-        with pytest.raises(exceptions.ConnectionError):
+        with pytest.raises(redis.ConnectionError):
             await pool.get_connection("_")
 
     async def test_reuse_previously_released_connection(self, master_host):
@@ -159,7 +158,7 @@ class TestBlockingConnectionPool:
         await pool.get_connection("_")
 
         start = asyncio.get_event_loop().time()
-        with pytest.raises(exceptions.ConnectionError):
+        with pytest.raises(redis.ConnectionError):
             await pool.get_connection("_")
         # we should have waited at least 0.1 seconds
         assert asyncio.get_event_loop().time() - start >= 0.1
@@ -346,9 +345,7 @@ class TestConnectionPoolURLParsing:
             assert expected is to_bool(value)
 
     def test_client_name_in_querystring(self):
-        pool = redis.ConnectionPool.from_url(
-            "redis://location?client_name=test-client"
-        )
+        pool = redis.ConnectionPool.from_url("redis://location?client_name=test-client")
         assert pool.connection_kwargs["client_name"] == "test-client"
 
     def test_invalid_extra_typed_querystring_options(self):
@@ -455,9 +452,7 @@ class TestConnectionPoolUnixSocketURLParsing:
         }
 
     def test_client_name_in_querystring(self):
-        pool = redis.ConnectionPool.from_url(
-            "redis://location?client_name=test-client"
-        )
+        pool = redis.ConnectionPool.from_url("redis://location?client_name=test-client")
         assert pool.connection_kwargs["client_name"] == "test-client"
 
     def test_extra_querystring_options(self):
@@ -507,7 +502,7 @@ class TestConnection:
         # 9999 databases ;)
         bad_connection = redis.Redis(db=9999)
         # an error should be raised on connect
-        with pytest.raises(exceptions.RedisError):
+        with pytest.raises(redis.RedisError):
             await bad_connection.info()
         pool = bad_connection.connection_pool
         assert len(pool._available_connections) == 1
@@ -521,7 +516,7 @@ class TestConnection:
         If Redis raises a LOADING error, the connection should be
         disconnected and a BusyLoadingError raised
         """
-        with pytest.raises(exceptions.BusyLoadingError):
+        with pytest.raises(redis.BusyLoadingError):
             await r.execute_command("DEBUG", "ERROR", "LOADING fake message")
         if r.connection:
             assert not r.connection._reader
@@ -535,7 +530,7 @@ class TestConnection:
         command immediately, like WATCH does.
         """
         pipe = r.pipeline()
-        with pytest.raises(exceptions.BusyLoadingError):
+        with pytest.raises(redis.BusyLoadingError):
             await pipe.immediate_execute_command(
                 "DEBUG", "ERROR", "LOADING fake message"
             )
@@ -554,7 +549,7 @@ class TestConnection:
         """
         pipe = r.pipeline()
         pipe.execute_command("DEBUG", "ERROR", "LOADING fake message")
-        with pytest.raises(exceptions.BusyLoadingError):
+        with pytest.raises(redis.BusyLoadingError):
             await pipe.execute()
         pool = r.connection_pool
         assert not pipe.connection
@@ -565,7 +560,7 @@ class TestConnection:
     @skip_if_redis_enterprise()
     async def test_read_only_error(self, r):
         """READONLY errors get turned in ReadOnlyError exceptions"""
-        with pytest.raises(exceptions.ReadOnlyError):
+        with pytest.raises(redis.ReadOnlyError):
             await r.execute_command("DEBUG", "ERROR", "READONLY blah blah")
 
     def test_connect_from_url_tcp(self):
@@ -594,7 +589,7 @@ class TestConnection:
         AuthenticationError should be raised when the server requires a
         password but one isn't supplied.
         """
-        with pytest.raises(exceptions.AuthenticationError):
+        with pytest.raises(redis.AuthenticationError):
             await r.execute_command(
                 "DEBUG", "ERROR", "ERR Client sent AUTH, but no password is set"
             )
@@ -602,7 +597,7 @@ class TestConnection:
     @skip_if_redis_enterprise()
     async def test_connect_invalid_password_supplied(self, r):
         """AuthenticationError should be raised when sending the wrong password"""
-        with pytest.raises(exceptions.AuthenticationError):
+        with pytest.raises(redis.AuthenticationError):
             await r.execute_command("DEBUG", "ERROR", "ERR invalid password")
 
 

@@ -5,6 +5,7 @@ import inspect
 import re
 import warnings
 from typing import (
+    TYPE_CHECKING,
     Any,
     AsyncIterator,
     Awaitable,
@@ -22,7 +23,6 @@ from typing import (
     TypeVar,
     Union,
     cast,
-    TYPE_CHECKING,
 )
 
 from redis.asyncio.connection import (
@@ -33,8 +33,8 @@ from redis.asyncio.connection import (
 )
 from redis.commands import (
     AsyncCoreCommands,
-    RedisModuleCommands,
     AsyncSentinelCommands,
+    RedisModuleCommands,
     list_or_args,
 )
 from redis.compat import Protocol, TypedDict

@@ -379,7 +379,9 @@ class PythonParser(BaseParser):
     async def can_read(self, timeout: float):
         return self._buffer and bool(await self._buffer.can_read(timeout))
 
-    async def read_response(self, disable_decoding: bool = False) -> Union[EncodableT, ResponseError, None]:
+    async def read_response(
+        self, disable_decoding: bool = False
+    ) -> Union[EncodableT, ResponseError, None]:
         if not self._buffer or not self.encoder:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         raw = await self._buffer.readline()
@@ -421,7 +423,9 @@ class PythonParser(BaseParser):
             length = int(response)
             if length == -1:
                 return None
-            response = [(await self.read_response(disable_decoding)) for _ in range(length)]
+            response = [
+                (await self.read_response(disable_decoding)) for _ in range(length)
+            ]
         if isinstance(response, bytes) and disable_decoding is False:
             response = self.encoder.decode(response)
         return response
@@ -504,7 +508,9 @@ class HiredisParser(BaseParser):
                 return False
             raise ConnectionError(f"Error while reading from socket: {ex.args}")
 
-    async def read_response(self, disable_decoding: bool = False) -> Union[EncodableT, List[EncodableT]]:
+    async def read_response(
+        self, disable_decoding: bool = False
+    ) -> Union[EncodableT, List[EncodableT]]:
         if not self._stream or not self._reader:
             self.on_disconnect()
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None

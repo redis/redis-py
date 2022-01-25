@@ -1,10 +1,5 @@
 import sys
 
-if sys.version_info >= (3, 8):
-    from importlib import metadata
-else:
-    import importlib_metadata as metadata
-
 from redis.client import Redis, StrictRedis
 from redis.cluster import RedisCluster
 from redis.connection import (
@@ -36,6 +31,11 @@ from redis.sentinel import (
     SentinelManagedSSLConnection,
 )
 from redis.utils import from_url
+
+if sys.version_info >= (3, 8):
+    from importlib import metadata
+else:
+    import importlib_metadata as metadata
 
 
 def int_or_str(value):

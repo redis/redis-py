@@ -6,13 +6,13 @@ from redis.asyncio.connection import (
     SSLConnection,
     UnixDomainSocketConnection,
 )
-from redis.asyncio.utils import from_url
 from redis.asyncio.sentinel import (
     Sentinel,
     SentinelConnectionPool,
     SentinelManagedConnection,
     SentinelManagedSSLConnection,
 )
+from redis.asyncio.utils import from_url
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -28,7 +28,6 @@ from redis.exceptions import (
     TimeoutError,
     WatchError,
 )
-
 
 __all__ = [
     "AuthenticationError",

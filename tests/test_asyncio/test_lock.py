@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
-from redis.exceptions import LockError, LockNotOwnedError
 from redis.asyncio.lock import Lock
+from redis.exceptions import LockError, LockNotOwnedError
 
 pytestmark = pytest.mark.asyncio
 

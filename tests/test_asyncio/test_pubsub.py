@@ -6,9 +6,9 @@ import pytest
 import redis.asyncio as redis
 from redis.exceptions import ConnectionError
 from redis.typing import EncodableT
+from tests.conftest import skip_if_server_version_lt
 
 from .compat import mock
-from tests.conftest import skip_if_server_version_lt
 
 pytestmark = pytest.mark.asyncio(forbid_global_loop=True)
 
@@ -57,7 +57,7 @@ def make_subscribe_test_data(pubsub, type):
             "unsub_func": pubsub.punsubscribe,
             "keys": ["f*", "b*", "uni" + chr(4456) + "*"],
         }
-    assert False, "invalid subscribe type: %s" % type
+    assert False, f"invalid subscribe type: {type}"
 
 
 class TestPubSubSubscribeUnsubscribe:
@@ -548,9 +548,7 @@ class TestPubSubPings:
 @pytest.mark.onlynoncluster
 class TestPubSubConnectionKilled:
     @skip_if_server_version_lt("3.0.0")
-    async def test_connection_error_raised_when_connection_dies(
-        self, r: redis.Redis
-    ):
+    async def test_connection_error_raised_when_connection_dies(self, r: redis.Redis):
         p = r.pubsub()
         await p.subscribe("foo")
         assert await wait_for_message(p) == make_message("subscribe", "foo", 1)

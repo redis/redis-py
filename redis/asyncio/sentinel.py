@@ -5,15 +5,13 @@ from typing import AsyncIterator, Iterable, Mapping, Sequence, Tuple, Type
 
 from redis.asyncio.client import Redis
 from redis.asyncio.connection import (
-    Connection, ConnectionPool, EncodableT, SSLConnection,
+    Connection,
+    ConnectionPool,
+    EncodableT,
+    SSLConnection,
 )
 from redis.commands import SentinelCommands
-from redis.exceptions import (
-    ConnectionError,
-    ReadOnlyError,
-    ResponseError,
-    TimeoutError,
-)
+from redis.exceptions import ConnectionError, ReadOnlyError, ResponseError, TimeoutError
 from redis.utils import str_if_bytes
 
 
