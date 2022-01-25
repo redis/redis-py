@@ -55,7 +55,6 @@ def standalone_tests(c):
     """Run all Redis tests against the current python,
     with and without hiredis."""
     print("Starting Redis tests")
-    _generate_keys()
     run("tox -e standalone-'{plain,hiredis,ocsp}'")
 
 
