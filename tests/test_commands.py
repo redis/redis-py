@@ -932,6 +932,7 @@ class TestRedisCommands:
         del r["a"]
         assert r.get("a") is None
 
+    @pytest.mark.onlynoncluster
     # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
     def test_lcs(self, unstable_r):
         unstable_r.mset({"foo": "ohmytext", "bar": "mynewtext"})
