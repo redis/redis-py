@@ -1930,7 +1930,7 @@ class ListCommands:
     def blmpop(
         self,
         timeout: float,
-        num_keys: int,
+        numkeys: int,
         *args: List[str],
         direction: str,
         count: Optional[int] = 1,
@@ -1944,7 +1944,7 @@ class ListCommands:
 
         For more information check https://redis.io/commands/blmpop
         """
-        args = [timeout, num_keys, *args, direction, "COUNT", count]
+        args = [timeout, numkeys, *args, direction, "COUNT", count]
 
         return self.execute_command("BLMPOP", *args)
 
