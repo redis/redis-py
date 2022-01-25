@@ -1944,9 +1944,7 @@ class ListCommands:
 
         For more information check https://redis.io/commands/blmpop
         """
-        args = [timeout, num_keys, *args, direction]
-        if count != 1:
-            args.extend(["COUNT", count])
+        args = [timeout, num_keys, *args, direction, "COUNT", count]
 
         return self.execute_command("BLMPOP", *args)
 
