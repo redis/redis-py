@@ -44,7 +44,7 @@ There are two quick ways to connect to Redis.
    r = redis.from_url('redis://foo.bar.com:12345')
    r.ping()
 
-After that, you probably want to `run redis commands <redis_core_commands.html>`_.
+After that, you probably want to `run redis commands <commands.html>`_.
 
 .. toctree::
    :hidden:
