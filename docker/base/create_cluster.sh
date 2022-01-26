@@ -2,10 +2,10 @@
 
 mkdir -p /nodes
 touch /nodes/nodemap
-if [ -z ${START_PORT}]; then
+if [ -z ${START_PORT} ]; then
     START_PORT=16379
 fi
-if [ -z ${END_PORT}]; then
+if [ -z ${END_PORT} ]; then
     END_PORT=16384
 fi
 if [ ! -z "$3" ]; then
@@ -38,5 +38,9 @@ EOF
   fi
   echo 127.0.0.1:$PORT >> /nodes/nodemap
 done
-echo yes | redis-cli --cluster create $(seq -f 127.0.0.1:%g ${START_PORT} ${END_PORT}) --cluster-replicas 1
+if [ -z "${REDIS_PASSWORD}" ]; then
+    echo yes | redis-cli --cluster create $(seq -f 127.0.0.1:%g ${START_PORT} ${END_PORT}) --cluster-replicas 1
+else
+    echo yes | redis-cli -a ${REDIS_PASSWORD} --cluster create $(seq -f 127.0.0.1:%g ${START_PORT} ${END_PORT}) --cluster-replicas 1
+fi
 tail -f /redis.log
