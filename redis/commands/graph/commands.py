@@ -135,6 +135,8 @@ class GraphCommands:
             query = self._build_params_header(params) + query
 
         plan = self.execute_command("GRAPH.EXPLAIN", self.name, query)
+        if isinstance(plan[0], bytes):
+            plan = [b.decode() for b in plan]
         return "\n".join(plan)
 
     def bulk(self, **kwargs):
