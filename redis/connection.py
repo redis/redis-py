@@ -806,15 +806,18 @@ class Connection:
     def read_response(self, disable_decoding=False):
         """Read the response from a previously sent command"""
         try:
+            hosterr = f"{self.host}:{self.port}"
+        except AttributeError:
+            hosterr = "connection"
+
+        try:
             response = self._parser.read_response(disable_decoding=disable_decoding)
         except socket.timeout:
             self.disconnect()
-            raise TimeoutError(f"Timeout reading from {self.host}:{self.port}")
+            raise TimeoutError(f"Timeout reading from {hosterr}")
         except OSError as e:
             self.disconnect()
-            raise ConnectionError(
-                f"Error while reading from {self.host}:{self.port}" f" : {e.args}"
-            )
+            raise ConnectionError(f"Error while reading from {hosterr}" f" : {e.args}")
         except BaseException:
             self.disconnect()
             raise
