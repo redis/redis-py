@@ -817,9 +817,7 @@ class Connection:
             raise TimeoutError(f"Timeout reading from {hosterr}")
         except OSError as e:
             self.disconnect()
-            raise ConnectionError(
-                f"Error while reading from {hosterr}" f" : {e.args}"
-            )
+            raise ConnectionError(f"Error while reading from {hosterr}" f" : {e.args}")
         except BaseException:
             self.disconnect()
             raise
