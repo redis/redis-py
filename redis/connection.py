@@ -677,12 +677,19 @@ class Connection:
         # args for socket.error can either be (errno, "message")
         # or just "message"
         if len(exception.args) == 1:
-            return f"Error connecting to {self.host}:{self.port}. {exception.args[0]}."
+            try:
+                return f"Error connecting to {self.host}:{self.port}. \
+                        {exception.args[0]}."
+            except AttributeError:
+                return f"Connection Error: {exception.args[0]}"
         else:
-            return (
-                f"Error {exception.args[0]} connecting to "
-                f"{self.host}:{self.port}. {exception.args[1]}."
-            )
+            try:
+                return (
+                    f"Error {exception.args[0]} connecting to "
+                    f"{self.host}:{self.port}. {exception.args[1]}."
+                )
+            except AttributeError:
+                return f"Connection Error: {exception.args[0]}"
 
     def on_connect(self):
         "Initialize the connection, authenticate and select a database"
