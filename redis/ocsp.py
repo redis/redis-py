@@ -56,9 +56,14 @@ def _check_certificate(issuer_cert, ocsp_bytes, validate=True):
         raise AuthorizationError("you are not authorized to view this ocsp certificate")
     if ocsp_response.response_status == ocsp.OCSPResponseStatus.SUCCESSFUL:
         if ocsp_response.certificate_status != ocsp.OCSPCertStatus.GOOD:
-            return False
+            raise ConnectionError(
+                f'Received an {str(ocsp_response.certificate_status).split(".")[1]} '
+                "ocsp certificate status"
+            )
     else:
-        return False
+        raise ConnectionError(
+            "failed to retrieve a sucessful response from the ocsp responder"
+        )
 
     if ocsp_response.this_update >= datetime.datetime.now():
         raise ConnectionError("ocsp certificate was issued in the future")
