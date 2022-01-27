@@ -107,7 +107,7 @@ class TestSSL:
     def test_valid_ocsp_cert_http(self):
         from redis.ocsp import OCSPVerifier
 
-        hostnames = ["github.com", "aws.amazon.com", "ynet.co.il", "microsoft.com"]
+        hostnames = ["github.com", "aws.amazon.com", "ynet.co.il"]
         for hostname in hostnames:
             context = ssl.create_default_context()
             with socket.create_connection((hostname, 443)) as sock:
@@ -124,7 +124,9 @@ class TestSSL:
         with socket.create_connection((hostname, 443)) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
                 ocsp = OCSPVerifier(wrapped, hostname, 443)
-                assert ocsp.is_valid() is False
+                with pytest.raises(ConnectionError) as e:
+                    assert ocsp.is_valid()
+                    assert "REVOKED" in str(e)
 
     @skip_if_nocryptography()
     def test_unauthorized_ocsp(self):
@@ -147,7 +149,9 @@ class TestSSL:
         with socket.create_connection((hostname, 443)) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
                 ocsp = OCSPVerifier(wrapped, hostname, 443)
-                assert ocsp.is_valid() is False
+                with pytest.raises(ConnectionError) as e:
+                    assert ocsp.is_valid()
+                    assert "from the" in str(e)
 
     @skip_if_nocryptography()
     def test_unauthorized_then_direct(self):
