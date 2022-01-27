@@ -36,6 +36,7 @@ setup(
         "packaging>=20.4",
         'importlib-metadata >= 1.0; python_version < "3.8"',
         "typing-extensions",
+        "async-timeout>=4.0.2",
     ],
     classifiers=[
         "Development Status :: 5 - Production/Stable",
@@ -54,7 +55,6 @@ setup(
         "Programming Language :: Python :: Implementation :: PyPy",
     ],
     extras_require={
-        "async": ["async-timeout"],
         "hiredis": ["hiredis>=1.0.0"],
         "ocsp": ["cryptography>=36.0.1", "pyopenssl==20.0.1", "requests>=2.26.0"],
     },
