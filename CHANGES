@@ -50,7 +50,6 @@
     * Add CI action to install package from repository commit hash (#1781) (#1790)
     * Fix link in lmove docstring (#1793)
     * Disabling JSON.DEBUG tests (#1787)
-* 4.1.0-rc2 (Dec 09, 2021)
     * Migrated targeted nodes to kwargs in Cluster Mode (#1762)
     * Added support for MONITOR in clusters (#1756)
     * Adding ROLE Command (#1610)
@@ -68,7 +67,6 @@
     * Link Documents for all module commands (#1711)
     * Pyupgrade + flynt + f-strings (#1759)
     * Remove unused aggregation subclasses in RediSearch (#1754)
-* 4.1.0-rc1 (Nov 25, 2021)
     * Adding RedisCluster client to support Redis Cluster Mode (#1660)
     * Support RediSearch FT.PROFILE command (#1727)
     * Adding support for non-decodable commands (#1731)
@@ -81,7 +79,6 @@
     * Improve code coverage for aggregation tests (#1713)
     * Fixing COMMAND GETKEYS tests (#1750)
     * GitHub release improvements (#1684)
-    4.1.0rc1 (#1742)
 * 4.0.2 (Nov 22, 2021)
     * Restoring Sentinel commands to redis client (#1723)
     * Better removal of hiredis warning (#1726)
@@ -104,7 +101,6 @@
     * Updating codecov rules (#1689)
     * Tests to validate custom JSON decoders (#1681)
     * Added breaking icon to release drafter (#1702)
-* 4.0.0-rc2 (Nov 09, 2021)
     * Removing dependency on six (#1676)
     * Re-enable pipeline support for JSON and TimeSeries (#1674)
     * Export Sentinel, and SSL like other classes (#1671)
@@ -115,7 +111,6 @@
     * Test function renames, to match standards (#1679)
     * Docstring improvements for Redis class (#1675)
     * Fix georadius tests (#1672) 
-* 4.0.0-rc1 (Nov 04, 2021)   
     * Improvements to JSON coverage (#1666)
     * Add python_requires setuptools check for python > 3.6 (#1656)
     * SMISMEMBER support (#1667)
@@ -130,10 +125,8 @@
     * Adding description format for package (#1651)
     * Publish to pypi as releases are generated with the release drafter (#1647)
     * Restore actions to prs (#1653)
-* 4.0.0-beta3 (Oct 26, 2021)
     * Fixing the package to include commands (#1649)
     * Re-enabling codecov as part of CI process (#1646)
-* 4.0.0-beta2 (Oct 26, 2021)
     * Adding support for redisearch (#1640) Thanks @chayim
     * redisjson support (#1636) Thanks @chayim
     * Sentinel: Add SentinelManagedSSLConnection (#1419) Thanks @AbdealiJK
@@ -157,7 +150,6 @@
     * Test BYLEX param in zrangestore (#1634) Thanks @AvitalFineRedis
     * Tox integrations with invoke and docker (#1632) Thanks @chayim
     * Adding the release drafter to help simplify release notes (#1618). Thanks @chayim
-* 4.0.0-beta1 (Oct 26, 2021)
     * BACKWARDS INCOMPATIBLE: Removed support for end of life Python 2.7. #1318
     * BACKWARDS INCOMPATIBLE: All values within Redis URLs are unquoted via
       urllib.parse.unquote. Prior versions of redis-py supported this by
