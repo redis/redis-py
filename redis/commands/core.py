@@ -316,7 +316,7 @@ class ManagementCommands:
 
     def auth(self):
         raise NotImplementedError(
-            "COMMAND INFO is intentionally not implemented in the client."
+            "AUTH is intentionally not implemented in the client."
         )
 
     def bgrewriteaof(self, **kwargs):
