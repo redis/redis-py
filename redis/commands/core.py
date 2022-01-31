@@ -2,7 +2,7 @@ import datetime
 import hashlib
 import time
 import warnings
-from typing import Optional
+from typing import List, Optional
 
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 
@@ -3677,7 +3677,7 @@ class HashCommands:
     see: https://redis.io/topics/data-types-intro#redis-hashes
     """
 
-    def hdel(self, name: str, *keys: list) -> int:
+    def hdel(self, name: str, *keys: List) -> int:
         """
         Delete ``keys`` from hash ``name``
 
@@ -3725,7 +3725,7 @@ class HashCommands:
         """
         return self.execute_command("HINCRBYFLOAT", name, key, amount)
 
-    def hkeys(self, name: str) -> list:
+    def hkeys(self, name: str) -> List:
         """
         Return the list of keys within hash ``name``
 
@@ -3796,7 +3796,7 @@ class HashCommands:
             items.extend(pair)
         return self.execute_command("HMSET", name, *items)
 
-    def hmget(self, name: str, keys: list, *args: list) -> list:
+    def hmget(self, name: str, keys: List, *args: List) -> List:
         """
         Returns a list of values ordered identically to ``keys``
 
@@ -3805,7 +3805,7 @@ class HashCommands:
         args = list_or_args(keys, args)
         return self.execute_command("HMGET", name, *args)
 
-    def hvals(self, name: str) -> list:
+    def hvals(self, name: str) -> List:
         """
         Return the list of values within hash ``name``
 
