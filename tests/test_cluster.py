@@ -1359,15 +1359,15 @@ class TestClusterRedisCommands:
     def test_cluster_brpoplpush(self, r):
         r.rpush("{foo}a", "1", "2")
         r.rpush("{foo}b", "3", "4")
-        assert r.brpoplpush("{foo}a", "{foo}b", timeout=0) == b"2"
-        assert r.brpoplpush("{foo}a", "{foo}b", timeout=0) == b"1"
+        assert r.brpoplpush("{foo}a", "{foo}b") == b"2"
+        assert r.brpoplpush("{foo}a", "{foo}b") == b"1"
         assert r.brpoplpush("{foo}a", "{foo}b", timeout=1) is None
         assert r.lrange("{foo}a", 0, -1) == []
         assert r.lrange("{foo}b", 0, -1) == [b"1", b"2", b"3", b"4"]
 
     def test_cluster_brpoplpush_empty_string(self, r):
         r.rpush("{foo}a", "")
-        assert r.brpoplpush("{foo}a", "{foo}b", timeout=0) == b""
+        assert r.brpoplpush("{foo}a", "{foo}b") == b""
 
     def test_cluster_rpoplpush(self, r):
         r.rpush("{foo}a", "a1", "a2", "a3")

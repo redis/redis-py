@@ -1070,10 +1070,6 @@ class ManagementCommands:
         """
         return self.execute_command("WAIT", num_replicas, timeout, **kwargs)
 
-    def hello(self):
-        raise NotImplementedError(
-            "HELLO is intentionally not implemented in the client."
-        )
 
 
 class BasicKeyCommands:
@@ -1861,7 +1857,7 @@ class ListCommands:
     see: https://redis.io/topics/data-types#lists
     """
 
-    def blpop(self, keys: list, timeout: float) -> list:
+    def blpop(self, keys: List, timeout: Optional[int] = 0) -> List:
         """
         LPOP a value off of the first non-empty list
         named in the ``keys`` list.
@@ -1880,7 +1876,7 @@ class ListCommands:
         keys.append(timeout)
         return self.execute_command("BLPOP", *keys)
 
-    def brpop(self, keys: list, timeout: float) -> list:
+    def brpop(self, keys: List, timeout: Optional[int] = 0) -> List:
         """
         RPOP a value off of the first non-empty list
         named in the ``keys`` list.
@@ -1899,7 +1895,7 @@ class ListCommands:
         keys.append(timeout)
         return self.execute_command("BRPOP", *keys)
 
-    def brpoplpush(self, src: str, dst: str, timeout: float) -> Optional[str]:
+    def brpoplpush(self, src: str, dst: str, timeout: Optional[int] = 0) -> Optional[str]:
         """
         Pop a value off the tail of ``src``, push it on the head of ``dst``
         and then return it.
@@ -1945,7 +1941,7 @@ class ListCommands:
         """
         return self.execute_command("LLEN", name)
 
-    def lpop(self, name: str, count: Optional[int] = None) -> Union[str, list, None]:
+    def lpop(self, name: str, count: Optional[int] = None) -> Union[str, List, None]:
         """
         Removes and returns the first elements of the list ``name``.
 
@@ -1960,7 +1956,7 @@ class ListCommands:
         else:
             return self.execute_command("LPOP", name)
 
-    def lpush(self, name: str, *values: list) -> int:
+    def lpush(self, name: str, *values: List) -> int:
         """
         Push ``values`` onto the head of the list ``name``
 
@@ -1968,7 +1964,7 @@ class ListCommands:
         """
         return self.execute_command("LPUSH", name, *values)
 
-    def lpushx(self, name: str, *values: list) -> int:
+    def lpushx(self, name: str, *values: List) -> int:
         """
         Push ``value`` onto the head of the list ``name`` if ``name`` exists
 
@@ -1976,7 +1972,7 @@ class ListCommands:
         """
         return self.execute_command("LPUSHX", name, *values)
 
-    def lrange(self, name: str, start: int, end: int) -> list:
+    def lrange(self, name: str, start: int, end: int) -> List:
         """
         Return a slice of the list ``name`` between
         position ``start`` and ``end``
@@ -2022,7 +2018,7 @@ class ListCommands:
         """
         return self.execute_command("LTRIM", name, start, end)
 
-    def rpop(self, name: str, count: Optional[int] = None) -> Union[str, list, None]:
+    def rpop(self, name: str, count: Optional[int] = None) -> Union[str, List, None]:
         """
         Removes and returns the last elements of the list ``name``.
 
@@ -2046,7 +2042,7 @@ class ListCommands:
         """
         return self.execute_command("RPOPLPUSH", src, dst)
 
-    def rpush(self, name: str, *values: list) -> int:
+    def rpush(self, name: str, *values: List) -> int:
         """
         Push ``values`` onto the tail of the list ``name``
 
@@ -2054,13 +2050,13 @@ class ListCommands:
         """
         return self.execute_command("RPUSH", name, *values)
 
-    def rpushx(self, name: str, *values: list) -> int:
+    def rpushx(self, name: str, value: str) -> int:
         """
         Push ``value`` onto the tail of the list ``name`` if ``name`` exists
 
         For more information check https://redis.io/commands/rpushx
         """
-        return self.execute_command("RPUSHX", name, *values)
+        return self.execute_command("RPUSHX", name, value)
 
     def lpos(
         self,
@@ -2069,7 +2065,7 @@ class ListCommands:
         rank: Optional[int] = None,
         count: Optional[int] = None,
         maxlen: Optional[int] = None,
-    ) -> Union[str, list, None]:
+    ) -> Union[str, List, None]:
         """
         Get position of ``value`` within the list ``name``
 
@@ -2118,7 +2114,7 @@ class ListCommands:
         alpha: bool = False,
         store: Optional[str] = None,
         groups: Optional[bool] = False,
-    ) -> Union[list, int]:
+    ) -> Union[List, int]:
         """
         Sort and return the list, set or sorted set at ``name``.
 
