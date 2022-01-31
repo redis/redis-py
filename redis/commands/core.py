@@ -2,6 +2,7 @@ import datetime
 import hashlib
 import time
 import warnings
+from typing import List, Optional, Union
 
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 
@@ -2335,7 +2336,7 @@ class SetCommands:
     see: https://redis.io/topics/data-types#sets
     """
 
-    def sadd(self, name, *values):
+    def sadd(self, name: str, *values: list) -> int:
         """
         Add ``value(s)`` to set ``name``
 
@@ -2343,7 +2344,7 @@ class SetCommands:
         """
         return self.execute_command("SADD", name, *values)
 
-    def scard(self, name):
+    def scard(self, name: str) -> int:
         """
         Return the number of elements in set ``name``
 
@@ -2351,7 +2352,7 @@ class SetCommands:
         """
         return self.execute_command("SCARD", name)
 
-    def sdiff(self, keys, *args):
+    def sdiff(self, keys: list, *args: list) -> list:
         """
         Return the difference of sets specified by ``keys``
 
@@ -2360,7 +2361,7 @@ class SetCommands:
         args = list_or_args(keys, args)
         return self.execute_command("SDIFF", *args)
 
-    def sdiffstore(self, dest, keys, *args):
+    def sdiffstore(self, dest: str, keys: list, *args: list) -> int:
         """
         Store the difference of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
@@ -2370,7 +2371,7 @@ class SetCommands:
         args = list_or_args(keys, args)
         return self.execute_command("SDIFFSTORE", dest, *args)
 
-    def sinter(self, keys, *args):
+    def sinter(self, keys: list, *args: list) -> list:
         """
         Return the intersection of sets specified by ``keys``
 
@@ -2379,7 +2380,7 @@ class SetCommands:
         args = list_or_args(keys, args)
         return self.execute_command("SINTER", *args)
 
-    def sinterstore(self, dest, keys, *args):
+    def sinterstore(self, dest: str, keys: list, *args: list) -> int:
         """
         Store the intersection of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
@@ -2389,7 +2390,7 @@ class SetCommands:
         args = list_or_args(keys, args)
         return self.execute_command("SINTERSTORE", dest, *args)
 
-    def sismember(self, name, value):
+    def sismember(self, name: str, value: str) -> bool:
         """
         Return a boolean indicating if ``value`` is a member of set ``name``
 
@@ -2397,7 +2398,7 @@ class SetCommands:
         """
         return self.execute_command("SISMEMBER", name, value)
 
-    def smembers(self, name):
+    def smembers(self, name: str) -> list:
         """
         Return all members of the set ``name``
 
@@ -2405,7 +2406,7 @@ class SetCommands:
         """
         return self.execute_command("SMEMBERS", name)
 
-    def smismember(self, name, values, *args):
+    def smismember(self, name: str, values: list, *args: list) -> List[bool]:
         """
         Return whether each value in ``values`` is a member of the set ``name``
         as a list of ``bool`` in the order of ``values``
@@ -2415,7 +2416,7 @@ class SetCommands:
         args = list_or_args(values, args)
         return self.execute_command("SMISMEMBER", name, *args)
 
-    def smove(self, src, dst, value):
+    def smove(self, src: str, dst: str, value: str) -> bool:
         """
         Move ``value`` from set ``src`` to set ``dst`` atomically
 
@@ -2423,7 +2424,7 @@ class SetCommands:
         """
         return self.execute_command("SMOVE", src, dst, value)
 
-    def spop(self, name, count=None):
+    def spop(self, name: str, count: Optional[int] = None) -> Union[str, list, None]:
         """
         Remove and return a random member of set ``name``
 
@@ -2432,7 +2433,11 @@ class SetCommands:
         args = (count is not None) and [count] or []
         return self.execute_command("SPOP", name, *args)
 
-    def srandmember(self, name, number=None):
+    def srandmember(
+        self,
+        name: str,
+        number: Optional[int] = None,
+    ) -> Union[str, list, None]:
         """
         If ``number`` is None, returns a random member of set ``name``.
 
@@ -2445,7 +2450,7 @@ class SetCommands:
         args = (number is not None) and [number] or []
         return self.execute_command("SRANDMEMBER", name, *args)
 
-    def srem(self, name, *values):
+    def srem(self, name: str, *values: list) -> int:
         """
         Remove ``values`` from set ``name``
 
@@ -2453,7 +2458,7 @@ class SetCommands:
         """
         return self.execute_command("SREM", name, *values)
 
-    def sunion(self, keys, *args):
+    def sunion(self, keys: list, *args: list) -> list:
         """
         Return the union of sets specified by ``keys``
 
@@ -2462,7 +2467,7 @@ class SetCommands:
         args = list_or_args(keys, args)
         return self.execute_command("SUNION", *args)
 
-    def sunionstore(self, dest, keys, *args):
+    def sunionstore(self, dest: str, keys: list, *args: list) -> int:
         """
         Store the union of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
