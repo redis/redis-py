@@ -2336,7 +2336,7 @@ class SetCommands:
     see: https://redis.io/topics/data-types#sets
     """
 
-    def sadd(self, name: str, *values: list) -> int:
+    def sadd(self, name: str, *values: List) -> int:
         """
         Add ``value(s)`` to set ``name``
 
@@ -2352,7 +2352,7 @@ class SetCommands:
         """
         return self.execute_command("SCARD", name)
 
-    def sdiff(self, keys: list, *args: list) -> list:
+    def sdiff(self, keys: List, *args: List) -> List:
         """
         Return the difference of sets specified by ``keys``
 
@@ -2361,7 +2361,7 @@ class SetCommands:
         args = list_or_args(keys, args)
         return self.execute_command("SDIFF", *args)
 
-    def sdiffstore(self, dest: str, keys: list, *args: list) -> int:
+    def sdiffstore(self, dest: str, keys: List, *args: List) -> int:
         """
         Store the difference of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
@@ -2371,7 +2371,7 @@ class SetCommands:
         args = list_or_args(keys, args)
         return self.execute_command("SDIFFSTORE", dest, *args)
 
-    def sinter(self, keys: list, *args: list) -> list:
+    def sinter(self, keys: List, *args: List) -> List:
         """
         Return the intersection of sets specified by ``keys``
 
@@ -2380,7 +2380,7 @@ class SetCommands:
         args = list_or_args(keys, args)
         return self.execute_command("SINTER", *args)
 
-    def sinterstore(self, dest: str, keys: list, *args: list) -> int:
+    def sinterstore(self, dest: str, keys: List, *args: List) -> int:
         """
         Store the intersection of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
@@ -2398,7 +2398,7 @@ class SetCommands:
         """
         return self.execute_command("SISMEMBER", name, value)
 
-    def smembers(self, name: str) -> list:
+    def smembers(self, name: str) -> List:
         """
         Return all members of the set ``name``
 
@@ -2406,7 +2406,7 @@ class SetCommands:
         """
         return self.execute_command("SMEMBERS", name)
 
-    def smismember(self, name: str, values: list, *args: list) -> List[bool]:
+    def smismember(self, name: str, values: List, *args: List) -> List[bool]:
         """
         Return whether each value in ``values`` is a member of the set ``name``
         as a list of ``bool`` in the order of ``values``
@@ -2424,7 +2424,7 @@ class SetCommands:
         """
         return self.execute_command("SMOVE", src, dst, value)
 
-    def spop(self, name: str, count: Optional[int] = None) -> Union[str, list, None]:
+    def spop(self, name: str, count: Optional[int] = None) -> Union[str, List, None]:
         """
         Remove and return a random member of set ``name``
 
@@ -2437,7 +2437,7 @@ class SetCommands:
         self,
         name: str,
         number: Optional[int] = None,
-    ) -> Union[str, list, None]:
+    ) -> Union[str, List, None]:
         """
         If ``number`` is None, returns a random member of set ``name``.
 
@@ -2450,7 +2450,7 @@ class SetCommands:
         args = (number is not None) and [number] or []
         return self.execute_command("SRANDMEMBER", name, *args)
 
-    def srem(self, name: str, *values: list) -> int:
+    def srem(self, name: str, *values: List) -> int:
         """
         Remove ``values`` from set ``name``
 
@@ -2458,7 +2458,7 @@ class SetCommands:
         """
         return self.execute_command("SREM", name, *values)
 
-    def sunion(self, keys: list, *args: list) -> list:
+    def sunion(self, keys: List, *args: List) -> List:
         """
         Return the union of sets specified by ``keys``
 
@@ -2467,7 +2467,7 @@ class SetCommands:
         args = list_or_args(keys, args)
         return self.execute_command("SUNION", *args)
 
-    def sunionstore(self, dest: str, keys: list, *args: list) -> int:
+    def sunionstore(self, dest: str, keys: List, *args: List) -> int:
         """
         Store the union of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
