@@ -1071,7 +1071,6 @@ class ManagementCommands:
         return self.execute_command("WAIT", num_replicas, timeout, **kwargs)
 
 
-
 class BasicKeyCommands:
     """
     Redis basic key-based commands
@@ -1895,7 +1894,9 @@ class ListCommands:
         keys.append(timeout)
         return self.execute_command("BRPOP", *keys)
 
-    def brpoplpush(self, src: str, dst: str, timeout: Optional[int] = 0) -> Optional[str]:
+    def brpoplpush(
+        self, src: str, dst: str, timeout: Optional[int] = 0
+    ) -> Optional[str]:
         """
         Pop a value off the tail of ``src``, push it on the head of ``dst``
         and then return it.
