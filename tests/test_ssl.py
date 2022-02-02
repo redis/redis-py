@@ -28,6 +28,9 @@ class TestSSL:
         if not os.path.isdir(CERT_DIR):
             raise IOError(f"No SSL certificates found. They should be in {CERT_DIR}")
 
+    SERVER_CERT = os.path.join(CERT_DIR, "server-cert.pem")
+    SERVER_KEY = os.path.join(CERT_DIR, "server-key.pem")
+
     def test_ssl_with_invalid_cert(self, request):
         ssl_url = request.config.option.redis_ssl_url
         sslclient = redis.from_url(ssl_url)
@@ -57,10 +60,10 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=os.path.join(self.CERT_DIR, "server-cert.pem"),
-            ssl_keyfile=os.path.join(self.CERT_DIR, "server-key.pem"),
+            ssl_certfile=self.SERVER_CERT,
+            ssl_keyfile=self.SERVER_KEY,
             ssl_cert_reqs="required",
-            ssl_ca_certs=os.path.join(self.CERT_DIR, "server-cert.pem"),
+            ssl_ca_certs=self.SERVER_CERT,
         )
         assert r.ping()
 
@@ -71,10 +74,10 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=os.path.join(self.CERT_DIR, "server-cert.pem"),
-            ssl_keyfile=os.path.join(self.CERT_DIR, "server-key.pem"),
+            ssl_certfile=self.SERVER_CERT,
+            ssl_keyfile=self.SERVER_KEY,
             ssl_cert_reqs="required",
-            ssl_ca_certs=os.path.join(self.CERT_DIR, "server-cert.pem"),
+            ssl_ca_certs=self.SERVER_CERT,
             ssl_validate_ocsp=True,
         )
         return r
@@ -104,7 +107,7 @@ class TestSSL:
     def test_valid_ocsp_cert_http(self):
         from redis.ocsp import OCSPVerifier
 
-        hostnames = ["github.com", "aws.amazon.com", "ynet.co.il", "microsoft.com"]
+        hostnames = ["github.com", "aws.amazon.com", "ynet.co.il"]
         for hostname in hostnames:
             context = ssl.create_default_context()
             with socket.create_connection((hostname, 443)) as sock:
@@ -121,7 +124,9 @@ class TestSSL:
         with socket.create_connection((hostname, 443)) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
                 ocsp = OCSPVerifier(wrapped, hostname, 443)
-                assert ocsp.is_valid() is False
+                with pytest.raises(ConnectionError) as e:
+                    assert ocsp.is_valid()
+                    assert "REVOKED" in str(e)
 
     @skip_if_nocryptography()
     def test_unauthorized_ocsp(self):
@@ -144,7 +149,9 @@ class TestSSL:
         with socket.create_connection((hostname, 443)) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
                 ocsp = OCSPVerifier(wrapped, hostname, 443)
-                assert ocsp.is_valid() is False
+                with pytest.raises(ConnectionError) as e:
+                    assert ocsp.is_valid()
+                    assert "from the" in str(e)
 
     @skip_if_nocryptography()
     def test_unauthorized_then_direct(self):
@@ -159,3 +166,60 @@ class TestSSL:
                 with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
                     ocsp = OCSPVerifier(wrapped, hostname, 443)
                     assert ocsp.is_valid()
+
+    @skip_if_nocryptography()
+    def test_mock_ocsp_staple(self, request):
+        import OpenSSL
+
+        ssl_url = request.config.option.redis_ssl_url
+        p = urlparse(ssl_url)[1].split(":")
+        r = redis.Redis(
+            host=p[0],
+            port=p[1],
+            ssl=True,
+            ssl_certfile=self.SERVER_CERT,
+            ssl_keyfile=self.SERVER_KEY,
+            ssl_cert_reqs="required",
+            ssl_ca_certs=self.SERVER_CERT,
+            ssl_validate_ocsp=True,
+            ssl_ocsp_context=p,  # just needs to not be none
+        )
+
+        with pytest.raises(RedisError):
+            r.ping()
+
+        ctx = OpenSSL.SSL.Context(OpenSSL.SSL.SSLv23_METHOD)
+        ctx.use_certificate_file(self.SERVER_CERT)
+        ctx.use_privatekey_file(self.SERVER_KEY)
+
+        r = redis.Redis(
+            host=p[0],
+            port=p[1],
+            ssl=True,
+            ssl_certfile=self.SERVER_CERT,
+            ssl_keyfile=self.SERVER_KEY,
+            ssl_cert_reqs="required",
+            ssl_ca_certs=self.SERVER_CERT,
+            ssl_ocsp_context=ctx,
+            ssl_ocsp_expected_cert=open(self.SERVER_KEY, "rb").read(),
+            ssl_validate_ocsp_stapled=True,
+        )
+
+        with pytest.raises(ConnectionError) as e:
+            r.ping()
+            assert "no ocsp response present" in str(e)
+
+        r = redis.Redis(
+            host=p[0],
+            port=p[1],
+            ssl=True,
+            ssl_certfile=self.SERVER_CERT,
+            ssl_keyfile=self.SERVER_KEY,
+            ssl_cert_reqs="required",
+            ssl_ca_certs=self.SERVER_CERT,
+            ssl_validate_ocsp_stapled=True,
+        )
+
+        with pytest.raises(ConnectionError) as e:
+            r.ping()
+            assert "no ocsp response present" in str(e)
