@@ -440,13 +440,13 @@ def test_cache_sync(client):
 
     assert len(A._labels) == 2
     assert len(A._properties) == 2
-    assert len(A._relationshipTypes) == 2
+    assert len(A._relationship_types) == 2
     assert A._labels[0] == "L"
     assert A._labels[1] == "K"
     assert A._properties[0] == "x"
     assert A._properties[1] == "q"
-    assert A._relationshipTypes[0] == "R"
-    assert A._relationshipTypes[1] == "S"
+    assert A._relationship_types[0] == "R"
+    assert A._relationship_types[1] == "S"
 
     # Have client B reconstruct the graph in a different order.
     B.delete()
@@ -468,10 +468,10 @@ def test_cache_sync(client):
 
     assert len(A._labels) == 2
     assert len(A._properties) == 2
-    assert len(A._relationshipTypes) == 2
+    assert len(A._relationship_types) == 2
     assert A._labels[0] == "K"
     assert A._labels[1] == "L"
     assert A._properties[0] == "q"
     assert A._properties[1] == "x"
-    assert A._relationshipTypes[0] == "S"
-    assert A._relationshipTypes[1] == "R"
+    assert A._relationship_types[0] == "S"
+    assert A._relationship_types[1] == "R"

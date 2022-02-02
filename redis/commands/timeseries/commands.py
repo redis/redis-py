@@ -66,11 +66,11 @@ class TimeSeriesCommands:
         chunk_size = kwargs.get("chunk_size", None)
         duplicate_policy = kwargs.get("duplicate_policy", None)
         params = [key]
-        self._appendRetention(params, retention_msecs)
-        self._appendUncompressed(params, uncompressed)
-        self._appendChunkSize(params, chunk_size)
-        self._appendDuplicatePolicy(params, CREATE_CMD, duplicate_policy)
-        self._appendLabels(params, labels)
+        self._append_retention(params, retention_msecs)
+        self._append_uncompressed(params, uncompressed)
+        self._append_chunk_size(params, chunk_size)
+        self._append_duplicate_policy(params, CREATE_CMD, duplicate_policy)
+        self._append_labels(params, labels)
 
         return self.execute_command(CREATE_CMD, *params)
 
@@ -87,9 +87,9 @@ class TimeSeriesCommands:
         labels = kwargs.get("labels", {})
         duplicate_policy = kwargs.get("duplicate_policy", None)
         params = [key]
-        self._appendRetention(params, retention_msecs)
-        self._appendDuplicatePolicy(params, ALTER_CMD, duplicate_policy)
-        self._appendLabels(params, labels)
+        self._append_retention(params, retention_msecs)
+        self._append_duplicate_policy(params, ALTER_CMD, duplicate_policy)
+        self._append_labels(params, labels)
 
         return self.execute_command(ALTER_CMD, *params)
 
@@ -137,11 +137,11 @@ class TimeSeriesCommands:
         chunk_size = kwargs.get("chunk_size", None)
         duplicate_policy = kwargs.get("duplicate_policy", None)
         params = [key, timestamp, value]
-        self._appendRetention(params, retention_msecs)
-        self._appendUncompressed(params, uncompressed)
-        self._appendChunkSize(params, chunk_size)
-        self._appendDuplicatePolicy(params, ADD_CMD, duplicate_policy)
-        self._appendLabels(params, labels)
+        self._append_retention(params, retention_msecs)
+        self._append_uncompressed(params, uncompressed)
+        self._append_chunk_size(params, chunk_size)
+        self._append_duplicate_policy(params, ADD_CMD, duplicate_policy)
+        self._append_labels(params, labels)
 
         return self.execute_command(ADD_CMD, *params)
 
@@ -197,11 +197,11 @@ class TimeSeriesCommands:
         labels = kwargs.get("labels", {})
         chunk_size = kwargs.get("chunk_size", None)
         params = [key, value]
-        self._appendTimestamp(params, timestamp)
-        self._appendRetention(params, retention_msecs)
-        self._appendUncompressed(params, uncompressed)
-        self._appendChunkSize(params, chunk_size)
-        self._appendLabels(params, labels)
+        self._append_timestamp(params, timestamp)
+        self._append_retention(params, retention_msecs)
+        self._append_uncompressed(params, uncompressed)
+        self._append_chunk_size(params, chunk_size)
+        self._append_labels(params, labels)
 
         return self.execute_command(INCRBY_CMD, *params)
 
@@ -245,11 +245,11 @@ class TimeSeriesCommands:
         labels = kwargs.get("labels", {})
         chunk_size = kwargs.get("chunk_size", None)
         params = [key, value]
-        self._appendTimestamp(params, timestamp)
-        self._appendRetention(params, retention_msecs)
-        self._appendUncompressed(params, uncompressed)
-        self._appendChunkSize(params, chunk_size)
-        self._appendLabels(params, labels)
+        self._append_timestamp(params, timestamp)
+        self._append_retention(params, retention_msecs)
+        self._append_uncompressed(params, uncompressed)
+        self._append_chunk_size(params, chunk_size)
+        self._append_labels(params, labels)
 
         return self.execute_command(DECRBY_CMD, *params)
 
@@ -285,7 +285,7 @@ class TimeSeriesCommands:
         For more information: https://oss.redis.com/redistimeseries/master/commands/#tscreaterule
         """  # noqa
         params = [source_key, dest_key]
-        self._appendAggregation(params, aggregation_type, bucket_size_msec)
+        self._append_aggregation(params, aggregation_type, bucket_size_msec)
 
         return self.execute_command(CREATERULE_CMD, *params)
 
@@ -313,11 +313,11 @@ class TimeSeriesCommands:
     ):
         """Create TS.RANGE and TS.REVRANGE arguments."""
         params = [key, from_time, to_time]
-        self._appendFilerByTs(params, filter_by_ts)
-        self._appendFilerByValue(params, filter_by_min_value, filter_by_max_value)
-        self._appendCount(params, count)
-        self._appendAlign(params, align)
-        self._appendAggregation(params, aggregation_type, bucket_size_msec)
+        self._append_filer_by_ts(params, filter_by_ts)
+        self._append_filer_by_value(params, filter_by_min_value, filter_by_max_value)
+        self._append_count(params, count)
+        self._append_align(params, align)
+        self._append_aggregation(params, aggregation_type, bucket_size_msec)
 
         return params
 
@@ -459,15 +459,15 @@ class TimeSeriesCommands:
     ):
         """Create TS.MRANGE and TS.MREVRANGE arguments."""
         params = [from_time, to_time]
-        self._appendFilerByTs(params, filter_by_ts)
-        self._appendFilerByValue(params, filter_by_min_value, filter_by_max_value)
-        self._appendCount(params, count)
-        self._appendAlign(params, align)
-        self._appendAggregation(params, aggregation_type, bucket_size_msec)
-        self._appendWithLabels(params, with_labels, select_labels)
+        self._append_filer_by_ts(params, filter_by_ts)
+        self._append_filer_by_value(params, filter_by_min_value, filter_by_max_value)
+        self._append_count(params, count)
+        self._append_align(params, align)
+        self._append_aggregation(params, aggregation_type, bucket_size_msec)
+        self._append_with_labels(params, with_labels, select_labels)
         params.extend(["FILTER"])
         params += filters
-        self._appendGroupbyReduce(params, groupby, reduce)
+        self._append_groupby_reduce(params, groupby, reduce)
         return params
 
     def mrange(
@@ -653,7 +653,7 @@ class TimeSeriesCommands:
         For more information: https://oss.redis.com/redistimeseries/master/commands/#tsmget
         """  # noqa
         params = []
-        self._appendWithLabels(params, with_labels)
+        self._append_with_labels(params, with_labels)
         params.extend(["FILTER"])
         params += filters
         return self.execute_command(MGET_CMD, *params)
@@ -675,13 +675,13 @@ class TimeSeriesCommands:
         return self.execute_command(QUERYINDEX_CMD, *filters)
 
     @staticmethod
-    def _appendUncompressed(params, uncompressed):
+    def _append_uncompressed(params, uncompressed):
         """Append UNCOMPRESSED tag to params."""
         if uncompressed:
             params.extend(["UNCOMPRESSED"])
 
     @staticmethod
-    def _appendWithLabels(params, with_labels, select_labels=None):
+    def _append_with_labels(params, with_labels, select_labels=None):
         """Append labels behavior to params."""
         if with_labels and select_labels:
             raise DataError(
@@ -694,19 +694,19 @@ class TimeSeriesCommands:
             params.extend(["SELECTED_LABELS", *select_labels])
 
     @staticmethod
-    def _appendGroupbyReduce(params, groupby, reduce):
+    def _append_groupby_reduce(params, groupby, reduce):
         """Append GROUPBY REDUCE property to params."""
         if groupby is not None and reduce is not None:
             params.extend(["GROUPBY", groupby, "REDUCE", reduce.upper()])
 
     @staticmethod
-    def _appendRetention(params, retention):
+    def _append_retention(params, retention):
         """Append RETENTION property to params."""
         if retention is not None:
             params.extend(["RETENTION", retention])
 
     @staticmethod
-    def _appendLabels(params, labels):
+    def _append_labels(params, labels):
         """Append LABELS property to params."""
         if labels:
             params.append("LABELS")
@@ -714,38 +714,38 @@ class TimeSeriesCommands:
                 params.extend([k, v])
 
     @staticmethod
-    def _appendCount(params, count):
+    def _append_count(params, count):
         """Append COUNT property to params."""
         if count is not None:
             params.extend(["COUNT", count])
 
     @staticmethod
-    def _appendTimestamp(params, timestamp):
+    def _append_timestamp(params, timestamp):
         """Append TIMESTAMP property to params."""
         if timestamp is not None:
             params.extend(["TIMESTAMP", timestamp])
 
     @staticmethod
-    def _appendAlign(params, align):
+    def _append_align(params, align):
         """Append ALIGN property to params."""
         if align is not None:
             params.extend(["ALIGN", align])
 
     @staticmethod
-    def _appendAggregation(params, aggregation_type, bucket_size_msec):
+    def _append_aggregation(params, aggregation_type, bucket_size_msec):
         """Append AGGREGATION property to params."""
         if aggregation_type is not None:
             params.append("AGGREGATION")
             params.extend([aggregation_type, bucket_size_msec])
 
     @staticmethod
-    def _appendChunkSize(params, chunk_size):
+    def _append_chunk_size(params, chunk_size):
         """Append CHUNK_SIZE property to params."""
         if chunk_size is not None:
             params.extend(["CHUNK_SIZE", chunk_size])
 
     @staticmethod
-    def _appendDuplicatePolicy(params, command, duplicate_policy):
+    def _append_duplicate_policy(params, command, duplicate_policy):
         """Append DUPLICATE_POLICY property to params on CREATE
         and ON_DUPLICATE on ADD.
         """
@@ -756,13 +756,13 @@ class TimeSeriesCommands:
                 params.extend(["DUPLICATE_POLICY", duplicate_policy])
 
     @staticmethod
-    def _appendFilerByTs(params, ts_list):
+    def _append_filer_by_ts(params, ts_list):
         """Append FILTER_BY_TS property to params."""
         if ts_list is not None:
             params.extend(["FILTER_BY_TS", *ts_list])
 
     @staticmethod
-    def _appendFilerByValue(params, min_value, max_value):
+    def _append_filer_by_value(params, min_value, max_value):
         """Append FILTER_BY_VALUE property to params."""
         if min_value is not None and max_value is not None:
             params.extend(["FILTER_BY_VALUE", min_value, max_value])
