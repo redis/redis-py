@@ -15,7 +15,7 @@ class JSONCommands:
     """json commands."""
 
     def arrappend(
-        self, name: str, path: Optional[str] = Path.rootPath(), *args: List[JsonType]
+        self, name: str, path: Optional[str] = Path.root_path(), *args: List[JsonType]
     ) -> List[Union[int, None]]:
         """Append the objects ``args`` to the array under the
         ``path` in key ``name``.
@@ -62,7 +62,7 @@ class JSONCommands:
         return self.execute_command("JSON.ARRINSERT", *pieces)
 
     def arrlen(
-        self, name: str, path: Optional[str] = Path.rootPath()
+        self, name: str, path: Optional[str] = Path.root_path()
     ) -> List[Union[int, None]]:
         """Return the length of the array JSON value under ``path``
         at key``name``.
@@ -74,7 +74,7 @@ class JSONCommands:
     def arrpop(
         self,
         name: str,
-        path: Optional[str] = Path.rootPath(),
+        path: Optional[str] = Path.root_path(),
         index: Optional[int] = -1,
     ) -> List[Union[str, None]]:
 
@@ -95,15 +95,14 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.ARRTRIM", name, str(path), start, stop)
 
-    def type(self, name: str, path: Optional[str] = Path.rootPath()) -> List[str]:
-
+    def type(self, name: str, path: Optional[str] = Path.root_path()) -> List[str]:
         """Get the type of the JSON value under ``path`` from key ``name``.
 
         For more information: https://oss.redis.com/redisjson/commands/#jsontype
         """  # noqa
         return self.execute_command("JSON.TYPE", name, str(path))
 
-    def resp(self, name: str, path: Optional[str] = Path.rootPath()) -> List:
+    def resp(self, name: str, path: Optional[str] = Path.root_path()) -> List:
         """Return the JSON value under ``path`` at key ``name``.
 
         For more information: https://oss.redis.com/redisjson/commands/#jsonresp
@@ -111,7 +110,7 @@ class JSONCommands:
         return self.execute_command("JSON.RESP", name, str(path))
 
     def objkeys(
-        self, name: str, path: Optional[str] = Path.rootPath()
+        self, name: str, path: Optional[str] = Path.root_path()
     ) -> List[Union[List[str], None]]:
         """Return the key names in the dictionary JSON value under ``path`` at
         key ``name``.
@@ -120,7 +119,7 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.OBJKEYS", name, str(path))
 
-    def objlen(self, name: str, path: Optional[str] = Path.rootPath()) -> int:
+    def objlen(self, name: str, path: Optional[str] = Path.root_path()) -> int:
         """Return the length of the dictionary JSON value under ``path`` at key
         ``name``.
 
@@ -149,7 +148,7 @@ class JSONCommands:
             "JSON.NUMMULTBY", name, str(path), self._encode(number)
         )
 
-    def clear(self, name: str, path: Optional[str] = Path.rootPath()) -> int:
+    def clear(self, name: str, path: Optional[str] = Path.root_path()) -> int:
         """
         Empty arrays and objects (to have zero slots/keys without deleting the
         array/object).
@@ -161,7 +160,7 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.CLEAR", name, str(path))
 
-    def delete(self, key: str, path: Optional[str] = Path.rootPath()) -> int:
+    def delete(self, key: str, path: Optional[str] = Path.root_path()) -> int:
         """Delete the JSON value stored at key ``key`` under ``path``.
 
         For more information: https://oss.redis.com/redisjson/commands/#jsondel
@@ -327,7 +326,7 @@ class JSONCommands:
         return self.execute_command("JSON.STRLEN", *pieces)
 
     def toggle(
-        self, name: str, path: Optional[str] = Path.rootPath()
+        self, name: str, path: Optional[str] = Path.root_path()
     ) -> Union[bool, List[Optional[int]]]:
         """Toggle boolean value under ``path`` at key ``name``.
         returning the new value.
@@ -337,7 +336,7 @@ class JSONCommands:
         return self.execute_command("JSON.TOGGLE", name, str(path))
 
     def strappend(
-        self, name: str, value: str, path: Optional[int] = Path.rootPath()
+        self, name: str, value: str, path: Optional[int] = Path.root_path()
     ) -> Union[int, List[Optional[int]]]:
         """Append to the string JSON value. If two options are specified after
         the key name, the path is determined to be the first. If a single
@@ -352,7 +351,7 @@ class JSONCommands:
         self,
         subcommand: str,
         key: Optional[str] = None,
-        path: Optional[str] = Path.rootPath(),
+        path: Optional[str] = Path.root_path(),
     ) -> Union[int, List[str]]:
         """Return the memory usage in bytes of a value under ``path`` from
         key ``name``.
