@@ -3947,7 +3947,12 @@ class ScriptCommands:
         """
         return self._eval("EVAL_RO", script, numkeys, *keys_and_args)
 
-    def evalsha(self, sha, numkeys, *keys_and_args):
+    def _evalsha(
+        self, command: str, sha: str, numkeys: int, *keys_and_args: list
+    ) -> str:
+        return self.execute_command(command, sha, numkeys, *keys_and_args)
+
+    def evalsha(self, sha: str, numkeys: int, *keys_and_args: list) -> str:
         """
         Use the ``sha`` to execute a Lua script already registered via EVAL
         or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
@@ -3959,7 +3964,20 @@ class ScriptCommands:
 
         For more information check  https://redis.io/commands/evalsha
         """
-        return self.execute_command("EVALSHA", sha, numkeys, *keys_and_args)
+        return self._evalsha("EVALSHA", sha, numkeys, *keys_and_args)
+
+    def evalsha_ro(self, sha: str, numkeys: int, *keys_and_args: list) -> str:
+        """
+        The read-only variant of the EVALSHA command
+
+        Use the ``sha`` to execute a read-only Lua script already registered via EVAL
+        or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
+        key names and argument values in ``keys_and_args``. Returns the result
+        of the script.
+
+        For more information check  https://redis.io/commands/evalsha_ro
+        """
+        return self._evalsha("EVALSHA_RO", sha, numkeys, *keys_and_args)
 
     def script_exists(self, *args):
         """
