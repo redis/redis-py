@@ -1917,6 +1917,25 @@ class ListCommands:
             timeout = 0
         return self.execute_command("BRPOPLPUSH", src, dst, timeout)
 
+    def lmpop(
+        self,
+        num_keys: int,
+        *args: List[str],
+        direction: str = None,
+        count: Optional[int] = 1,
+    ) -> List:
+        """
+        Pop ``count`` values (default 1) first non-empty list key from the list
+        of args provided key names.
+
+        For more information check https://redis.io/commands/lmpop
+        """
+        args = [num_keys] + list(args) + [direction]
+        if count != 1:
+            args.extend(["COUNT", count])
+
+        return self.execute_command("LMPOP", *args)
+
     def lindex(self, name, index):
         """
         Return the item from list ``name`` at position ``index``

@@ -1480,6 +1480,17 @@ class TestRedisCommands:
         r.rpush("a", "")
         assert r.brpoplpush("a", "b") == b""
 
+    @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_lmpop(self, unstable_r):
+        unstable_r.rpush("foo", "1", "2", "3", "4", "5")
+        result = [b"foo", [b"1", b"2"]]
+        assert unstable_r.lmpop("2", "bar", "foo", direction="LEFT", count=2) == result
+        with pytest.raises(redis.ResponseError):
+            unstable_r.lmpop("2", "bar", "foo", direction="up", count=2)
+        unstable_r.rpush("bar", "a", "b", "c", "d")
+        assert unstable_r.lmpop("2", "bar", "foo", direction="LEFT") == [b"bar", [b"a"]]
+
     def test_lindex(self, r):
         r.rpush("a", "1", "2", "3")
         assert r.lindex("a", "0") == b"1"
