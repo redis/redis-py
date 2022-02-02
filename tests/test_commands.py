@@ -2076,6 +2076,17 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_zmpop(self, unstable_r):
+        unstable_r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
+        res = [b"a", [[b"a1", b"1"], [b"a2", b"2"]]]
+        assert unstable_r.zmpop("2", ["b", "a"], min=True, count=2) == res
+        with pytest.raises(redis.DataError):
+            unstable_r.zmpop("2", ["b", "a"], count=2)
+        unstable_r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
+        assert unstable_r.zmpop("2", ["b", "a"], max=True) == [b"b", [[b"b1", b"10"]]]
+
+    @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
     def test_bzmpop(self, unstable_r):
         unstable_r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         res = [b"a", [[b"a1", b"1"], [b"a2", b"2"]]]
