@@ -2,7 +2,7 @@ import datetime
 import hashlib
 import time
 import warnings
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 
@@ -1856,6 +1856,35 @@ class BasicKeyCommands:
         For more information check https://redis.io/commands/unlink
         """
         return self.execute_command("UNLINK", *names)
+
+    def lcs(
+        self,
+        key1: str,
+        key2: str,
+        len: Optional[bool] = False,
+        idx: Optional[bool] = False,
+        minmatchlen: Optional[int] = 0,
+        withmatchlen: Optional[bool] = False,
+    ) -> Union[str, int, list]:
+        """
+        Find the longest common subsequence between ``key1`` and ``key2``.
+        If ``len`` is true the length of the match will will be returned.
+        If ``idx`` is true the match position in each strings will be returned.
+        ``minmatchlen`` restrict the list of matches to the ones of
+        the given ``minmatchlen``.
+        If ``withmatchlen`` the length of the match also will be returned.
+        For more information check https://redis.io/commands/lcs
+        """
+        pieces = [key1, key2]
+        if len:
+            pieces.append("LEN")
+        if idx:
+            pieces.append("IDX")
+        if minmatchlen != 0:
+            pieces.extend(["MINMATCHLEN", minmatchlen])
+        if withmatchlen:
+            pieces.append("WITHMATCHLEN")
+        return self.execute_command("LCS", *pieces)
 
 
 class ListCommands:
