@@ -186,7 +186,7 @@ class JSONCommands:
             pieces.append("noescape")
 
         if len(args) == 0:
-            pieces.append(Path.rootPath())
+            pieces.append(Path.root_path())
 
         else:
             for p in args:
@@ -339,7 +339,7 @@ class JSONCommands:
     ) -> Union[int, List[Optional[int]]]:
         """Append to the string JSON value. If two options are specified after
         the key name, the path is determined to be the first. If a single
-        option is passed, then the rootpath (i.e Path.rootPath()) is used.
+        option is passed, then the root_path (i.e Path.root_path()) is used.
 
         For more information: https://oss.redis.com/redisjson/commands/#jsonstrappend
         """  # noqa

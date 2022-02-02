@@ -1266,8 +1266,8 @@ def test_create_client_definition_json(client):
     definition = IndexDefinition(prefix=["king:"], index_type=IndexType.JSON)
     client.ft().create_index((TextField("$.name"),), definition=definition)
 
-    client.json().set("king:1", Path.rootPath(), {"name": "henry"})
-    client.json().set("king:2", Path.rootPath(), {"name": "james"})
+    client.json().set("king:1", Path.root_path(), {"name": "henry"})
+    client.json().set("king:2", Path.root_path(), {"name": "james"})
 
     res = client.ft().search("henry")
     assert res.docs[0].id == "king:1"
@@ -1288,7 +1288,7 @@ def test_fields_as_name(client):
     client.ft().create_index(SCHEMA, definition=definition)
 
     # insert json data
-    res = client.json().set("doc:1", Path.rootPath(), {"name": "Jon", "age": 25})
+    res = client.json().set("doc:1", Path.root_path(), {"name": "Jon", "age": 25})
     assert res
 
     total = client.ft().search(Query("Jon").return_fields("name", "just_a_number")).docs
@@ -1303,7 +1303,7 @@ def test_fields_as_name(client):
 def test_search_return_fields(client):
     res = client.json().set(
         "doc:1",
-        Path.rootPath(),
+        Path.root_path(),
         {"t": "riceratops", "t2": "telmatosaurus", "n": 9072, "flt": 97.2},
     )
     assert res
@@ -1389,8 +1389,8 @@ def test_create_json_with_alias(client):
         definition=definition,
     )
 
-    client.json().set("king:1", Path.rootPath(), {"name": "henry", "num": 42})
-    client.json().set("king:2", Path.rootPath(), {"name": "james", "num": 3.14})
+    client.json().set("king:1", Path.root_path(), {"name": "henry", "num": 42})
+    client.json().set("king:2", Path.root_path(), {"name": "james", "num": 3.14})
 
     res = client.ft().search("@name:henry")
     assert res.docs[0].id == "king:1"
@@ -1421,7 +1421,7 @@ def test_json_with_multipath(client):
     )
 
     client.json().set(
-        "king:1", Path.rootPath(), {"name": "henry", "country": {"name": "england"}}
+        "king:1", Path.root_path(), {"name": "henry", "country": {"name": "england"}}
     )
 
     res = client.ft().search("@name:{henry}")
@@ -1447,7 +1447,7 @@ def test_json_with_jsonpath(client):
         definition=definition,
     )
 
-    client.json().set("doc:1", Path.rootPath(), {"prod:name": "RediSearch"})
+    client.json().set("doc:1", Path.root_path(), {"prod:name": "RediSearch"})
 
     # query for a supported field succeeds
     res = client.ft().search(Query("@name:RediSearch"))
