@@ -1917,6 +1917,46 @@ class ListCommands:
             timeout = 0
         return self.execute_command("BRPOPLPUSH", src, dst, timeout)
 
+    def blmpop(
+        self,
+        timeout: float,
+        numkeys: int,
+        *args: List[str],
+        direction: str,
+        count: Optional[int] = 1,
+    ) -> Optional[list]:
+        """
+        Pop ``count`` values (default 1) from first non-empty in the list
+        of provided key names.
+
+        When all lists are empty this command blocks the connection until another
+        client pushes to it or until the timeout, timeout of 0 blocks indefinitely
+
+        For more information check https://redis.io/commands/blmpop
+        """
+        args = [timeout, numkeys, *args, direction, "COUNT", count]
+
+        return self.execute_command("BLMPOP", *args)
+
+    def lmpop(
+        self,
+        num_keys: int,
+        *args: List[str],
+        direction: str = None,
+        count: Optional[int] = 1,
+    ) -> List:
+        """
+        Pop ``count`` values (default 1) first non-empty list key from the list
+        of args provided key names.
+
+        For more information check https://redis.io/commands/lmpop
+        """
+        args = [num_keys] + list(args) + [direction]
+        if count != 1:
+            args.extend(["COUNT", count])
+
+        return self.execute_command("LMPOP", *args)
+
     def lindex(self, name, index):
         """
         Return the item from list ``name`` at position ``index``
@@ -2387,6 +2427,19 @@ class SetCommands:
         """
         args = list_or_args(keys, args)
         return self.execute_command("SINTER", *args)
+
+    def sintercard(self, numkeys: int, keys: List[str], limit: int = 0) -> int:
+        """
+        Return the cardinality of the intersect of multiple sets specified by ``keys`.
+
+        When LIMIT provided (defaults to 0 and means unlimited), if the intersection
+        cardinality reaches limit partway through the computation, the algorithm will
+        exit and yield limit as the cardinality
+
+        For more information check https://redis.io/commands/sintercard
+        """
+        args = [numkeys, *keys, "LIMIT", limit]
+        return self.execute_command("SINTERCARD", *args)
 
     def sinterstore(self, dest, keys, *args):
         """

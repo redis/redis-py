@@ -1480,6 +1480,29 @@ class TestRedisCommands:
         r.rpush("a", "")
         assert r.brpoplpush("a", "b") == b""
 
+    @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_blmpop(self, unstable_r):
+        unstable_r.rpush("a", "1", "2", "3", "4", "5")
+        res = [b"a", [b"1", b"2"]]
+        assert unstable_r.blmpop(1, "2", "b", "a", direction="LEFT", count=2) == res
+        with pytest.raises(TypeError):
+            unstable_r.blmpop(1, "2", "b", "a", count=2)
+        unstable_r.rpush("b", "6", "7", "8", "9")
+        assert unstable_r.blmpop(0, "2", "b", "a", direction="LEFT") == [b"b", [b"6"]]
+        assert unstable_r.blmpop(1, "2", "foo", "bar", direction="RIGHT") is None
+
+    @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_lmpop(self, unstable_r):
+        unstable_r.rpush("foo", "1", "2", "3", "4", "5")
+        result = [b"foo", [b"1", b"2"]]
+        assert unstable_r.lmpop("2", "bar", "foo", direction="LEFT", count=2) == result
+        with pytest.raises(redis.ResponseError):
+            unstable_r.lmpop("2", "bar", "foo", direction="up", count=2)
+        unstable_r.rpush("bar", "a", "b", "c", "d")
+        assert unstable_r.lmpop("2", "bar", "foo", direction="LEFT") == [b"bar", [b"a"]]
+
     def test_lindex(self, r):
         r.rpush("a", "1", "2", "3")
         assert r.lindex("a", "0") == b"1"
@@ -1747,6 +1770,15 @@ class TestRedisCommands:
         assert r.sinter("a", "b") == set()
         r.sadd("b", "2", "3")
         assert r.sinter("a", "b") == {b"2", b"3"}
+
+    @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_sintercard(self, unstable_r):
+        unstable_r.sadd("a", 1, 2, 3)
+        unstable_r.sadd("b", 1, 2, 3)
+        unstable_r.sadd("c", 1, 3, 4)
+        assert unstable_r.sintercard(3, ["a", "b", "c"]) == 2
+        assert unstable_r.sintercard(3, ["a", "b", "c"], limit=1) == 1
 
     @pytest.mark.onlynoncluster
     def test_sinterstore(self, r):
