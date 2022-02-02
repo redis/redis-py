@@ -3153,6 +3153,19 @@ class SortedSetCommands:
         """
         return self._zaggregate("ZINTERSTORE", dest, keys, aggregate)
 
+    def zintercard(self, numkeys: int, keys: List[str], limit: int = 0) -> int:
+        """
+        Return the cardinality of the intersect of multiple sorted sets
+        specified by ``keys`.
+        When LIMIT provided (defaults to 0 and means unlimited), if the intersection
+        cardinality reaches limit partway through the computation, the algorithm will
+        exit and yield limit as the cardinality
+
+        For more information check https://redis.io/commands/zintercard
+        """
+        args = [numkeys, *keys, "LIMIT", limit]
+        return self.execute_command("ZINTERCARD", *args)
+
     def zlexcount(self, name, min, max):
         """
         Return the number of items in the sorted set ``name`` between the
