@@ -1,7 +1,21 @@
 #! /bin/bash
+
 mkdir -p /nodes
 touch /nodes/nodemap
-for PORT in $(seq 16379 16384); do
+if [ -z ${START_PORT} ]; then
+    START_PORT=16379
+fi
+if [ -z ${END_PORT} ]; then
+    END_PORT=16384
+fi
+if [ ! -z "$3" ]; then
+    START_PORT=$2
+    START_PORT=$3
+fi
+echo "STARTING: ${START_PORT}"
+echo "ENDING: ${END_PORT}"
+
+for PORT in `seq ${START_PORT} ${END_PORT}`; do
   mkdir -p /nodes/$PORT
   if [[ -e /redis.conf ]]; then
     cp /redis.conf /nodes/$PORT/redis.conf
@@ -15,12 +29,18 @@ daemonize yes
 logfile /redis.log
 dir /nodes/$PORT
 EOF
+
+  set -x
   redis-server /nodes/$PORT/redis.conf
   if [ $? -ne 0 ]; then
     echo "Redis failed to start, exiting."
-    exit 3
+    continue
   fi
   echo 127.0.0.1:$PORT >> /nodes/nodemap
 done
-echo yes | redis-cli --cluster create $(seq -f 127.0.0.1:%g 16379 16384) --cluster-replicas 1
+if [ -z "${REDIS_PASSWORD}" ]; then
+    echo yes | redis-cli --cluster create `seq -f 127.0.0.1:%g ${START_PORT} ${END_PORT}` --cluster-replicas 1
+else
+    echo yes | redis-cli -a ${REDIS_PASSWORD} --cluster create `seq -f 127.0.0.1:%g ${START_PORT} ${END_PORT}` --cluster-replicas 1
+fi
 tail -f /redis.log

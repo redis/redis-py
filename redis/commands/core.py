@@ -640,6 +640,14 @@ class ManagementCommands:
         """
         return self.execute_command("CLIENT UNPAUSE", **kwargs)
 
+    def client_no_evict(self, mode: str) -> str:
+        """
+        Sets the client eviction mode for the current connection.
+
+        For more information check https://redis.io/commands/client-no-evict
+        """
+        return self.execute_command("CLIENT NO-EVICT", mode)
+
     def command(self, **kwargs):
         """
         Returns dict reply of details about all Redis commands.
@@ -1160,17 +1168,6 @@ class BasicKeyCommands:
             params.append("REPLACE")
         return self.execute_command("COPY", *params)
 
-    def decr(self, name, amount=1):
-        """
-        Decrements the value of ``key`` by ``amount``.  If no key exists,
-        the value will be initialized as 0 - ``amount``
-
-        For more information check https://redis.io/commands/decr
-        """
-        # An alias for ``decr()``, because it is already implemented
-        # as DECRBY redis command.
-        return self.decrby(name, amount)
-
     def decrby(self, name, amount=1):
         """
         Decrements the value of ``key`` by ``amount``.  If no key exists,
@@ -1179,6 +1176,8 @@ class BasicKeyCommands:
         For more information check https://redis.io/commands/decrby
         """
         return self.execute_command("DECRBY", name, amount)
+
+    decr = decrby
 
     def delete(self, *names):
         """
@@ -1351,15 +1350,6 @@ class BasicKeyCommands:
         """
         return self.execute_command("GETSET", name, value)
 
-    def incr(self, name, amount=1):
-        """
-        Increments the value of ``key`` by ``amount``.  If no key exists,
-        the value will be initialized as ``amount``
-
-        For more information check https://redis.io/commands/incr
-        """
-        return self.incrby(name, amount)
-
     def incrby(self, name, amount=1):
         """
         Increments the value of ``key`` by ``amount``.  If no key exists,
@@ -1367,9 +1357,9 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/incrby
         """
-        # An alias for ``incr()``, because it is already implemented
-        # as INCRBY redis command.
         return self.execute_command("INCRBY", name, amount)
+
+    incr = incrby
 
     def incrbyfloat(self, name, amount=1.0):
         """
@@ -1948,6 +1938,25 @@ class ListCommands:
 
         return self.execute_command("BLMPOP", *args)
 
+      def lmpop(
+        self,
+        num_keys: int,
+        *args: List[str],
+        direction: str = None,
+        count: Optional[int] = 1,
+    ) -> List:
+        """
+        Pop ``count`` values (default 1) first non-empty list key from the list
+        of args provided key names.
+
+        For more information check https://redis.io/commands/lmpop
+        """
+        args = [num_keys] + list(args) + [direction]
+        if count != 1:
+            args.extend(["COUNT", count])
+
+        return self.execute_command("LMPOP", *args)
+
     def lindex(self, name, index):
         """
         Return the item from list ``name`` at position ``index``
@@ -2418,6 +2427,19 @@ class SetCommands:
         """
         args = list_or_args(keys, args)
         return self.execute_command("SINTER", *args)
+
+    def sintercard(self, numkeys: int, keys: List[str], limit: int = 0) -> int:
+        """
+        Return the cardinality of the intersect of multiple sets specified by ``keys`.
+
+        When LIMIT provided (defaults to 0 and means unlimited), if the intersection
+        cardinality reaches limit partway through the computation, the algorithm will
+        exit and yield limit as the cardinality
+
+        For more information check https://redis.io/commands/sintercard
+        """
+        args = [numkeys, *keys, "LIMIT", limit]
+        return self.execute_command("SINTERCARD", *args)
 
     def sinterstore(self, dest, keys, *args):
         """
@@ -3184,6 +3206,19 @@ class SortedSetCommands:
         """
         return self._zaggregate("ZINTERSTORE", dest, keys, aggregate)
 
+    def zintercard(self, numkeys: int, keys: List[str], limit: int = 0) -> int:
+        """
+        Return the cardinality of the intersect of multiple sorted sets
+        specified by ``keys`.
+        When LIMIT provided (defaults to 0 and means unlimited), if the intersection
+        cardinality reaches limit partway through the computation, the algorithm will
+        exit and yield limit as the cardinality
+
+        For more information check https://redis.io/commands/zintercard
+        """
+        args = [numkeys, *keys, "LIMIT", limit]
+        return self.execute_command("ZINTERCARD", *args)
+
     def zlexcount(self, name, min, max):
         """
         Return the number of items in the sorted set ``name`` between the
@@ -3276,6 +3311,38 @@ class SortedSetCommands:
         keys = list_or_args(keys, None)
         keys.append(timeout)
         return self.execute_command("BZPOPMIN", *keys)
+
+    def bzmpop(
+        self,
+        timeout: float,
+        numkeys: int,
+        keys: List[str],
+        min: Optional[bool] = False,
+        max: Optional[bool] = False,
+        count: Optional[int] = 1,
+    ) -> Optional[list]:
+        """
+        Pop ``count`` values (default 1) off of the first non-empty sorted set
+        named in the ``keys`` list.
+
+        If none of the sorted sets in ``keys`` has a value to pop,
+        then block for ``timeout`` seconds, or until a member gets added
+        to one of the sorted sets.
+
+        If timeout is 0, then block indefinitely.
+
+        For more information check https://redis.io/commands/bzmpop
+        """
+        args = [timeout, numkeys, *keys]
+        if (min and max) or (not min and not max):
+            raise DataError("Either min or max, but not both must be set")
+        elif min:
+            args.append("MIN")
+        else:
+            args.append("MAX")
+        args.extend(["COUNT", count])
+
+        return self.execute_command("BZMPOP", *args)
 
     def _zrange(
         self,
@@ -3903,7 +3970,12 @@ class ScriptCommands:
     https://redis.com/ebook/part-3-next-steps/chapter-11-scripting-redis-with-lua/
     """
 
-    def eval(self, script, numkeys, *keys_and_args):
+    def _eval(
+        self, command: str, script: str, numkeys: int, *keys_and_args: list
+    ) -> str:
+        return self.execute_command(command, script, numkeys, *keys_and_args)
+
+    def eval(self, script: str, numkeys: int, *keys_and_args: list) -> str:
         """
         Execute the Lua ``script``, specifying the ``numkeys`` the script
         will touch and the key names and argument values in ``keys_and_args``.
@@ -3914,9 +3986,26 @@ class ScriptCommands:
 
         For more information check  https://redis.io/commands/eval
         """
-        return self.execute_command("EVAL", script, numkeys, *keys_and_args)
+        return self._eval("EVAL", script, numkeys, *keys_and_args)
 
-    def evalsha(self, sha, numkeys, *keys_and_args):
+    def eval_ro(self, script: str, numkeys: int, *keys_and_args: list) -> str:
+        """
+        The read-only variant of the EVAL command
+
+        Execute the read-only Lue ``script`` specifying the ``numkeys`` the script
+        will touch and the key names and argument values in ``keys_and_args``.
+        Returns the result of the script.
+
+        For more information check  https://redis.io/commands/eval_ro
+        """
+        return self._eval("EVAL_RO", script, numkeys, *keys_and_args)
+
+    def _evalsha(
+        self, command: str, sha: str, numkeys: int, *keys_and_args: list
+    ) -> str:
+        return self.execute_command(command, sha, numkeys, *keys_and_args)
+
+    def evalsha(self, sha: str, numkeys: int, *keys_and_args: list) -> str:
         """
         Use the ``sha`` to execute a Lua script already registered via EVAL
         or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
@@ -3928,7 +4017,20 @@ class ScriptCommands:
 
         For more information check  https://redis.io/commands/evalsha
         """
-        return self.execute_command("EVALSHA", sha, numkeys, *keys_and_args)
+        return self._evalsha("EVALSHA", sha, numkeys, *keys_and_args)
+
+    def evalsha_ro(self, sha: str, numkeys: int, *keys_and_args: list) -> str:
+        """
+        The read-only variant of the EVALSHA command
+
+        Use the ``sha`` to execute a read-only Lua script already registered via EVAL
+        or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
+        key names and argument values in ``keys_and_args``. Returns the result
+        of the script.
+
+        For more information check  https://redis.io/commands/evalsha_ro
+        """
+        return self._evalsha("EVALSHA_RO", sha, numkeys, *keys_and_args)
 
     def script_exists(self, *args):
         """

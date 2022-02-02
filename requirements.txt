@@ -1,2 +1,2 @@
-deprecated
-packaging
+deprecated>=1.2.3
+packaging>=20.4
