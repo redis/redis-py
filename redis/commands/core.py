@@ -1917,6 +1917,27 @@ class ListCommands:
             timeout = 0
         return self.execute_command("BRPOPLPUSH", src, dst, timeout)
 
+    def blmpop(
+        self,
+        timeout: float,
+        numkeys: int,
+        *args: List[str],
+        direction: str,
+        count: Optional[int] = 1,
+    ) -> Optional[list]:
+        """
+        Pop ``count`` values (default 1) from first non-empty in the list
+        of provided key names.
+
+        When all lists are empty this command blocks the connection until another
+        client pushes to it or until the timeout, timeout of 0 blocks indefinitely
+
+        For more information check https://redis.io/commands/blmpop
+        """
+        args = [timeout, numkeys, *args, direction, "COUNT", count]
+
+        return self.execute_command("BLMPOP", *args)
+
     def lmpop(
         self,
         num_keys: int,

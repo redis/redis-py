@@ -1482,6 +1482,18 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_blmpop(self, unstable_r):
+        unstable_r.rpush("a", "1", "2", "3", "4", "5")
+        res = [b"a", [b"1", b"2"]]
+        assert unstable_r.blmpop(1, "2", "b", "a", direction="LEFT", count=2) == res
+        with pytest.raises(TypeError):
+            unstable_r.blmpop(1, "2", "b", "a", count=2)
+        unstable_r.rpush("b", "6", "7", "8", "9")
+        assert unstable_r.blmpop(0, "2", "b", "a", direction="LEFT") == [b"b", [b"6"]]
+        assert unstable_r.blmpop(1, "2", "foo", "bar", direction="RIGHT") is None
+
+    @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
     def test_lmpop(self, unstable_r):
         unstable_r.rpush("foo", "1", "2", "3", "4", "5")
         result = [b"foo", [b"1", b"2"]]
