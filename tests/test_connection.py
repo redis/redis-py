@@ -1,10 +1,14 @@
+import socket
 import types
 from unittest import mock
+from unittest.mock import patch
 
 import pytest
 
+from redis.backoff import NoBackoff
 from redis.connection import Connection
-from redis.exceptions import InvalidResponse
+from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
+from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
 
 from .conftest import skip_if_server_version_lt
@@ -74,3 +78,47 @@ class TestConnection:
         mock_sock.shutdown.assert_called_once()
         mock_sock.close.assert_called_once()
         assert conn._sock is None
+
+    def clear(self, conn):
+        conn.retry_on_error.clear()
+
+    def test_retry_connect_on_timeout_error(self):
+        """Test that the _connect function is retried in case of a timeout"""
+        conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 3))
+        origin_connect = conn._connect
+        conn._connect = mock.Mock()
+
+        def mock_connect():
+            # connect only on the last retry
+            if conn._connect.call_count <= 2:
+                raise socket.timeout
+            else:
+                return origin_connect()
+
+        conn._connect.side_effect = mock_connect
+        conn.connect()
+        assert conn._connect.call_count == 3
+        self.clear(conn)
+
+    def test_connect_without_retry_on_os_error(self):
+        """Test that the _connect function is not being retried in case of a OSError"""
+        with patch.object(Connection, "_connect") as _connect:
+            _connect.side_effect = OSError("")
+            conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 2))
+            with pytest.raises(ConnectionError):
+                conn.connect()
+            assert _connect.call_count == 1
+            self.clear(conn)
+
+    def test_connect_timeout_error_without_retry(self):
+        """Test that the _connect function is not being retried if retry_on_timeout is
+        set to False"""
+        conn = Connection(retry_on_timeout=False)
+        conn._connect = mock.Mock()
+        conn._connect.side_effect = socket.timeout
+
+        with pytest.raises(TimeoutError) as e:
+            conn.connect()
+        assert conn._connect.call_count == 1
+        assert str(e.value) == "Timeout connecting to server"
+        self.clear(conn)

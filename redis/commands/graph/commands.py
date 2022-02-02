@@ -35,7 +35,7 @@ class GraphCommands:
 
         Args:
 
-        q :
+        q : str
             The query.
         params : dict
             Query parameters.
@@ -135,6 +135,8 @@ class GraphCommands:
             query = self._build_params_header(params) + query
 
         plan = self.execute_command("GRAPH.EXPLAIN", self.name, query)
+        if isinstance(plan[0], bytes):
+            plan = [b.decode() for b in plan]
         return "\n".join(plan)
 
     def bulk(self, **kwargs):
@@ -178,7 +180,7 @@ class GraphCommands:
         name : str
             The name of the configuration
         value :
-            The value we want to ser (can be used only when `set` is on)
+            The value we want to set (can be used only when `set` is on)
         set : bool
             Turn on to set a configuration. Default behavior is get.
         """

@@ -593,6 +593,13 @@ class TestRedisCommands:
         assert r.client_unpause() == b"OK"
 
     @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_client_no_evict(self, unstable_r):
+        assert unstable_r.client_no_evict("ON") == b"OK"
+        with pytest.raises(TypeError):
+            unstable_r.client_no_evict()
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("3.2.0")
     def test_client_reply(self, r, r_timeout):
         assert r_timeout.client_reply("ON") == b"OK"
@@ -2066,6 +2073,19 @@ class TestRedisCommands:
         assert r.bzpopmin(["b", "a"], timeout=1) is None
         r.zadd("c", {"c1": 100})
         assert r.bzpopmin("c", timeout=1) == (b"c", b"c1", 100)
+
+    @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_bzmpop(self, unstable_r):
+        unstable_r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
+        res = [b"a", [[b"a1", b"1"], [b"a2", b"2"]]]
+        assert unstable_r.bzmpop(1, "2", ["b", "a"], min=True, count=2) == res
+        with pytest.raises(redis.DataError):
+            unstable_r.bzmpop(1, "2", ["b", "a"], count=2)
+        unstable_r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
+        res = [b"b", [[b"b1", b"10"]]]
+        assert unstable_r.bzmpop(0, "2", ["b", "a"], max=True) == res
+        assert unstable_r.bzmpop(1, "2", ["foo", "bar"], max=True) is None
 
     def test_zrange(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})

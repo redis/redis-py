@@ -2,7 +2,8 @@ import datetime
 import hashlib
 import time
 import warnings
-from typing import List
+
+from typing import List, Optional
 
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 
@@ -640,6 +641,14 @@ class ManagementCommands:
         """
         return self.execute_command("CLIENT UNPAUSE", **kwargs)
 
+    def client_no_evict(self, mode: str) -> str:
+        """
+        Sets the client eviction mode for the current connection.
+
+        For more information check https://redis.io/commands/client-no-evict
+        """
+        return self.execute_command("CLIENT NO-EVICT", mode)
+
     def command(self, **kwargs):
         """
         Returns dict reply of details about all Redis commands.
@@ -1160,17 +1169,6 @@ class BasicKeyCommands:
             params.append("REPLACE")
         return self.execute_command("COPY", *params)
 
-    def decr(self, name, amount=1):
-        """
-        Decrements the value of ``key`` by ``amount``.  If no key exists,
-        the value will be initialized as 0 - ``amount``
-
-        For more information check https://redis.io/commands/decr
-        """
-        # An alias for ``decr()``, because it is already implemented
-        # as DECRBY redis command.
-        return self.decrby(name, amount)
-
     def decrby(self, name, amount=1):
         """
         Decrements the value of ``key`` by ``amount``.  If no key exists,
@@ -1179,6 +1177,8 @@ class BasicKeyCommands:
         For more information check https://redis.io/commands/decrby
         """
         return self.execute_command("DECRBY", name, amount)
+
+    decr = decrby
 
     def delete(self, *names):
         """
@@ -1351,15 +1351,6 @@ class BasicKeyCommands:
         """
         return self.execute_command("GETSET", name, value)
 
-    def incr(self, name, amount=1):
-        """
-        Increments the value of ``key`` by ``amount``.  If no key exists,
-        the value will be initialized as ``amount``
-
-        For more information check https://redis.io/commands/incr
-        """
-        return self.incrby(name, amount)
-
     def incrby(self, name, amount=1):
         """
         Increments the value of ``key`` by ``amount``.  If no key exists,
@@ -1367,9 +1358,9 @@ class BasicKeyCommands:
 
         For more information check https://redis.io/commands/incrby
         """
-        # An alias for ``incr()``, because it is already implemented
-        # as INCRBY redis command.
         return self.execute_command("INCRBY", name, amount)
+
+    incr = incrby
 
     def incrbyfloat(self, name, amount=1.0):
         """
@@ -3268,6 +3259,38 @@ class SortedSetCommands:
         keys = list_or_args(keys, None)
         keys.append(timeout)
         return self.execute_command("BZPOPMIN", *keys)
+
+    def bzmpop(
+        self,
+        timeout: float,
+        numkeys: int,
+        keys: List[str],
+        min: Optional[bool] = False,
+        max: Optional[bool] = False,
+        count: Optional[int] = 1,
+    ) -> Optional[list]:
+        """
+        Pop ``count`` values (default 1) off of the first non-empty sorted set
+        named in the ``keys`` list.
+
+        If none of the sorted sets in ``keys`` has a value to pop,
+        then block for ``timeout`` seconds, or until a member gets added
+        to one of the sorted sets.
+
+        If timeout is 0, then block indefinitely.
+
+        For more information check https://redis.io/commands/bzmpop
+        """
+        args = [timeout, numkeys, *keys]
+        if (min and max) or (not min and not max):
+            raise DataError("Either min or max, but not both must be set")
+        elif min:
+            args.append("MIN")
+        else:
+            args.append("MAX")
+        args.extend(["COUNT", count])
+
+        return self.execute_command("BZMPOP", *args)
 
     def _zrange(
         self,

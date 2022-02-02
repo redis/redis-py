@@ -103,6 +103,7 @@ class CommandsParser:
             return None
         args = [str_if_bytes(arg) for arg in args]
         command = args[0].upper()
+        keys = None
         if command == "PUBSUB":
             # the second argument is a part of the command name, e.g.
             # ['PUBSUB', 'NUMSUB', 'foo'].
@@ -117,6 +118,4 @@ class CommandsParser:
             # format example:
             # PUBLISH channel message
             keys = [args[1]]
-        else:
-            keys = None
         return keys
