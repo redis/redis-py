@@ -1938,7 +1938,7 @@ class ListCommands:
 
         return self.execute_command("BLMPOP", *args)
 
-      def lmpop(
+    def lmpop(
         self,
         num_keys: int,
         *args: List[str],
