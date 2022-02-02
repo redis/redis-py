@@ -1,10 +1,12 @@
 import os
 from json import JSONDecodeError, loads
+from typing import Dict, List, Optional, Union
 
 from deprecated import deprecated
 
 from redis.exceptions import DataError
 
+from ._util import JsonType
 from .decoders import decode_dict_keys
 from .path import Path
 
@@ -12,7 +14,9 @@ from .path import Path
 class JSONCommands:
     """json commands."""
 
-    def arrappend(self, name, path=Path.rootPath(), *args):
+    def arrappend(
+        self, name: str, path: Optional[str] = Path.rootPath(), *args: List[JsonType]
+    ) -> List[Union[int, None]]:
         """Append the objects ``args`` to the array under the
         ``path` in key ``name``.
 
@@ -23,7 +27,14 @@ class JSONCommands:
             pieces.append(self._encode(o))
         return self.execute_command("JSON.ARRAPPEND", *pieces)
 
-    def arrindex(self, name, path, scalar, start=0, stop=-1):
+    def arrindex(
+        self,
+        name: str,
+        path: str,
+        scalar: int,
+        start: Optional[int] = 0,
+        stop: Optional[int] = -1,
+    ) -> List[Union[int, None]]:
         """
         Return the index of ``scalar`` in the JSON array under ``path`` at key
         ``name``.
@@ -37,7 +48,9 @@ class JSONCommands:
             "JSON.ARRINDEX", name, str(path), self._encode(scalar), start, stop
         )
 
-    def arrinsert(self, name, path, index, *args):
+    def arrinsert(
+        self, name: str, path: str, index: int, *args: List[JsonType]
+    ) -> List[Union[int, None]]:
         """Insert the objects ``args`` to the array at index ``index``
         under the ``path` in key ``name``.
 
@@ -48,7 +61,9 @@ class JSONCommands:
             pieces.append(self._encode(o))
         return self.execute_command("JSON.ARRINSERT", *pieces)
 
-    def arrlen(self, name, path=Path.rootPath()):
+    def arrlen(
+        self, name: str, path: Optional[str] = Path.rootPath()
+    ) -> List[Union[int, None]]:
         """Return the length of the array JSON value under ``path``
         at key``name``.
 
@@ -56,7 +71,12 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.ARRLEN", name, str(path))
 
-    def arrpop(self, name, path=Path.rootPath(), index=-1):
+    def arrpop(
+        self,
+        name: str,
+        path: Optional[str] = Path.rootPath(),
+        index: Optional[int] = -1,
+    ) -> List[Union[str, None]]:
         """Pop the element at ``index`` in the array JSON value under
         ``path`` at key ``name``.
 
@@ -64,7 +84,9 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.ARRPOP", name, str(path), index)
 
-    def arrtrim(self, name, path, start, stop):
+    def arrtrim(
+        self, name: str, path: str, start: int, stop: int
+    ) -> List[Union[int, None]]:
         """Trim the array JSON value under ``path`` at key ``name`` to the
         inclusive range given by ``start`` and ``stop``.
 
@@ -72,21 +94,23 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.ARRTRIM", name, str(path), start, stop)
 
-    def type(self, name, path=Path.rootPath()):
+    def type(self, name: str, path: Optional[str] = Path.rootPath()) -> List[str]:
         """Get the type of the JSON value under ``path`` from key ``name``.
 
         For more information: https://oss.redis.com/redisjson/commands/#jsontype
         """  # noqa
         return self.execute_command("JSON.TYPE", name, str(path))
 
-    def resp(self, name, path=Path.rootPath()):
+    def resp(self, name: str, path: Optional[str] = Path.rootPath()) -> List:
         """Return the JSON value under ``path`` at key ``name``.
 
         For more information: https://oss.redis.com/redisjson/commands/#jsonresp
         """  # noqa
         return self.execute_command("JSON.RESP", name, str(path))
 
-    def objkeys(self, name, path=Path.rootPath()):
+    def objkeys(
+        self, name: str, path: Optional[str] = Path.rootPath()
+    ) -> List[Union[List[str], None]]:
         """Return the key names in the dictionary JSON value under ``path`` at
         key ``name``.
 
@@ -94,7 +118,7 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.OBJKEYS", name, str(path))
 
-    def objlen(self, name, path=Path.rootPath()):
+    def objlen(self, name: str, path: Optional[str] = Path.rootPath()) -> int:
         """Return the length of the dictionary JSON value under ``path`` at key
         ``name``.
 
@@ -102,7 +126,7 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.OBJLEN", name, str(path))
 
-    def numincrby(self, name, path, number):
+    def numincrby(self, name: str, path: str, number: int) -> str:
         """Increment the numeric (integer or floating point) JSON value under
         ``path`` at key ``name`` by the provided ``number``.
 
@@ -113,7 +137,7 @@ class JSONCommands:
         )
 
     @deprecated(version="4.0.0", reason="deprecated since redisjson 1.0.0")
-    def nummultby(self, name, path, number):
+    def nummultby(self, name: str, path: str, number: int) -> str:
         """Multiply the numeric (integer or floating point) JSON value under
         ``path`` at key ``name`` with the provided ``number``.
 
@@ -123,7 +147,7 @@ class JSONCommands:
             "JSON.NUMMULTBY", name, str(path), self._encode(number)
         )
 
-    def clear(self, name, path=Path.rootPath()):
+    def clear(self, name: str, path: Optional[str] = Path.rootPath()) -> int:
         """
         Empty arrays and objects (to have zero slots/keys without deleting the
         array/object).
@@ -135,7 +159,7 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.CLEAR", name, str(path))
 
-    def delete(self, key, path=Path.rootPath()):
+    def delete(self, key: str, path: Optional[str] = Path.rootPath()) -> int:
         """Delete the JSON value stored at key ``key`` under ``path``.
 
         For more information: https://oss.redis.com/redisjson/commands/#jsondel
@@ -145,7 +169,9 @@ class JSONCommands:
     # forget is an alias for delete
     forget = delete
 
-    def get(self, name, *args, no_escape=False):
+    def get(
+        self, name: str, *args, no_escape: Optional[bool] = False
+    ) -> List[JsonType]:
         """
         Get the object stored as a JSON value at key ``name``.
 
@@ -173,7 +199,7 @@ class JSONCommands:
         except TypeError:
             return None
 
-    def mget(self, keys, path):
+    def mget(self, keys: List[str], path: str) -> List[JsonType]:
         """
         Get the objects stored as a JSON values under ``path``. ``keys``
         is a list of one or more keys.
@@ -185,7 +211,15 @@ class JSONCommands:
         pieces.append(str(path))
         return self.execute_command("JSON.MGET", *pieces)
 
-    def set(self, name, path, obj, nx=False, xx=False, decode_keys=False):
+    def set(
+        self,
+        name: str,
+        path: str,
+        obj: JsonType,
+        nx: Optional[bool] = False,
+        xx: Optional[bool] = False,
+        decode_keys: Optional[bool] = False,
+    ) -> Optional[str]:
         """
         Set the JSON value at key ``name`` under the ``path`` to ``obj``.
 
@@ -216,7 +250,15 @@ class JSONCommands:
             pieces.append("XX")
         return self.execute_command("JSON.SET", *pieces)
 
-    def set_file(self, name, path, file_name, nx=False, xx=False, decode_keys=False):
+    def set_file(
+        self,
+        name: str,
+        path: str,
+        file_name: str,
+        nx: Optional[bool] = False,
+        xx: Optional[bool] = False,
+        decode_keys: Optional[bool] = False,
+    ) -> Optional[str]:
         """
         Set the JSON value at key ``name`` under the ``path`` to the content
         of the json file ``file_name``.
@@ -233,7 +275,14 @@ class JSONCommands:
 
         return self.set(name, path, file_content, nx=nx, xx=xx, decode_keys=decode_keys)
 
-    def set_path(self, json_path, root_folder, nx=False, xx=False, decode_keys=False):
+    def set_path(
+        self,
+        json_path: str,
+        root_folder: str,
+        nx: Optional[bool] = False,
+        xx: Optional[bool] = False,
+        decode_keys: Optional[bool] = False,
+    ) -> List[Dict[str, bool]]:
         """
         Iterate over ``root_folder`` and set each JSON file to a value
         under ``json_path`` with the file name as the key.
@@ -264,7 +313,7 @@ class JSONCommands:
 
         return set_files_result
 
-    def strlen(self, name, path=None):
+    def strlen(self, name: str, path: Optional[str] = None) -> List[Union[int, None]]:
         """Return the length of the string JSON value under ``path`` at key
         ``name``.
 
@@ -275,7 +324,9 @@ class JSONCommands:
             pieces.append(str(path))
         return self.execute_command("JSON.STRLEN", *pieces)
 
-    def toggle(self, name, path=Path.rootPath()):
+    def toggle(
+        self, name: str, path: Optional[str] = Path.rootPath()
+    ) -> Union[bool, List[Optional[int]]]:
         """Toggle boolean value under ``path`` at key ``name``.
         returning the new value.
 
@@ -283,7 +334,9 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.TOGGLE", name, str(path))
 
-    def strappend(self, name, value, path=Path.rootPath()):
+    def strappend(
+        self, name: str, value: str, path: Optional[int] = Path.rootPath()
+    ) -> Union[int, List[Optional[int]]]:
         """Append to the string JSON value. If two options are specified after
         the key name, the path is determined to be the first. If a single
         option is passed, then the rootpath (i.e Path.rootPath()) is used.
@@ -293,11 +346,16 @@ class JSONCommands:
         pieces = [name, str(path), self._encode(value)]
         return self.execute_command("JSON.STRAPPEND", *pieces)
 
-    def debug(self, subcommand, key=None, path=Path.rootPath()):
+    def debug(
+        self,
+        subcommand: str,
+        key: Optional[str] = None,
+        path: Optional[str] = Path.rootPath(),
+    ) -> Union[int, List[str]]:
         """Return the memory usage in bytes of a value under ``path`` from
         key ``name``.
 
-        For more information: https://oss.redis.com/redisjson/commands/#jsondebg
+        For more information: https://oss.redis.com/redisjson/commands/#jsondebug
         """  # noqa
         valid_subcommands = ["MEMORY", "HELP"]
         if subcommand not in valid_subcommands:
