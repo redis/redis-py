@@ -3917,7 +3917,12 @@ class ScriptCommands:
     https://redis.com/ebook/part-3-next-steps/chapter-11-scripting-redis-with-lua/
     """
 
-    def eval(self, script, numkeys, *keys_and_args):
+    def _eval(
+        self, command: str, script: str, numkeys: int, *keys_and_args: list
+    ) -> str:
+        return self.execute_command(command, script, numkeys, *keys_and_args)
+
+    def eval(self, script: str, numkeys: int, *keys_and_args: list) -> str:
         """
         Execute the Lua ``script``, specifying the ``numkeys`` the script
         will touch and the key names and argument values in ``keys_and_args``.
@@ -3928,7 +3933,19 @@ class ScriptCommands:
 
         For more information check  https://redis.io/commands/eval
         """
-        return self.execute_command("EVAL", script, numkeys, *keys_and_args)
+        return self._eval("EVAL", script, numkeys, *keys_and_args)
+
+    def eval_ro(self, script: str, numkeys: int, *keys_and_args: list) -> str:
+        """
+        The read-only variant of the EVAL command
+
+        Execute the read-only Lue ``script`` specifying the ``numkeys`` the script
+        will touch and the key names and argument values in ``keys_and_args``.
+        Returns the result of the script.
+
+        For more information check  https://redis.io/commands/eval_ro
+        """
+        return self._eval("EVAL_RO", script, numkeys, *keys_and_args)
 
     def evalsha(self, sha, numkeys, *keys_and_args):
         """
