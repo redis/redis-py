@@ -1749,6 +1749,15 @@ class TestRedisCommands:
         assert r.sinter("a", "b") == {b"2", b"3"}
 
     @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_sintercard(self, unstable_r):
+        unstable_r.sadd("a", 1, 2, 3)
+        unstable_r.sadd("b", 1, 2, 3)
+        unstable_r.sadd("c", 1, 3, 4)
+        assert unstable_r.sintercard(3, ["a", "b", "c"]) == 2
+        assert unstable_r.sintercard(3, ["a", "b", "c"], limit=1) == 1
+
+    @pytest.mark.onlynoncluster
     def test_sinterstore(self, r):
         r.sadd("a", "1", "2", "3")
         assert r.sinterstore("c", "a", "b") == 0
