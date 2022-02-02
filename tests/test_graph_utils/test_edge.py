@@ -17,15 +17,15 @@ def test_init():
 
 
 @pytest.mark.redismod
-def test_toString():
+def test_to_string():
     props_result = edge.Edge(
         node.Node(), None, node.Node(), properties={"a": "a", "b": 10}
-    ).toString()
+    ).to_string()
     assert props_result == '{a:"a",b:10}'
 
     no_props_result = edge.Edge(
         node.Node(), None, node.Node(), properties={}
-    ).toString()
+    ).to_string()
     assert no_props_result == ""
 
 
