@@ -77,6 +77,7 @@ class JSONCommands:
         path: Optional[str] = Path.rootPath(),
         index: Optional[int] = -1,
     ) -> List[Union[str, None]]:
+
         """Pop the element at ``index`` in the array JSON value under
         ``path`` at key ``name``.
 
@@ -95,6 +96,7 @@ class JSONCommands:
         return self.execute_command("JSON.ARRTRIM", name, str(path), start, stop)
 
     def type(self, name: str, path: Optional[str] = Path.rootPath()) -> List[str]:
+
         """Get the type of the JSON value under ``path`` from key ``name``.
 
         For more information: https://oss.redis.com/redisjson/commands/#jsontype
