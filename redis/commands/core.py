@@ -640,6 +640,14 @@ class ManagementCommands:
         """
         return self.execute_command("CLIENT UNPAUSE", **kwargs)
 
+    def client_no_evict(self, mode: str) -> str:
+        """
+        Sets the client eviction mode for the current connection.
+
+        For more information check https://redis.io/commands/client-no-evict
+        """
+        return self.execute_command("CLIENT NO-EVICT", mode)
+
     def command(self, **kwargs):
         """
         Returns dict reply of details about all Redis commands.
@@ -1856,7 +1864,7 @@ class ListCommands:
     see: https://redis.io/topics/data-types#lists
     """
 
-    def blpop(self, keys, timeout=0):
+    def blpop(self, keys: List, timeout: Optional[int] = 0) -> List:
         """
         LPOP a value off of the first non-empty list
         named in the ``keys`` list.
@@ -1875,7 +1883,7 @@ class ListCommands:
         keys.append(timeout)
         return self.execute_command("BLPOP", *keys)
 
-    def brpop(self, keys, timeout=0):
+    def brpop(self, keys: List, timeout: Optional[int] = 0) -> List:
         """
         RPOP a value off of the first non-empty list
         named in the ``keys`` list.
@@ -1894,7 +1902,9 @@ class ListCommands:
         keys.append(timeout)
         return self.execute_command("BRPOP", *keys)
 
-    def brpoplpush(self, src, dst, timeout=0):
+    def brpoplpush(
+        self, src: str, dst: str, timeout: Optional[int] = 0
+    ) -> Optional[str]:
         """
         Pop a value off the tail of ``src``, push it on the head of ``dst``
         and then return it.
@@ -1909,7 +1919,47 @@ class ListCommands:
             timeout = 0
         return self.execute_command("BRPOPLPUSH", src, dst, timeout)
 
-    def lindex(self, name, index):
+    def blmpop(
+        self,
+        timeout: float,
+        numkeys: int,
+        *args: List[str],
+        direction: str,
+        count: Optional[int] = 1,
+    ) -> Optional[list]:
+        """
+        Pop ``count`` values (default 1) from first non-empty in the list
+        of provided key names.
+
+        When all lists are empty this command blocks the connection until another
+        client pushes to it or until the timeout, timeout of 0 blocks indefinitely
+
+        For more information check https://redis.io/commands/blmpop
+        """
+        args = [timeout, numkeys, *args, direction, "COUNT", count]
+
+        return self.execute_command("BLMPOP", *args)
+
+    def lmpop(
+        self,
+        num_keys: int,
+        *args: List[str],
+        direction: str = None,
+        count: Optional[int] = 1,
+    ) -> List:
+        """
+        Pop ``count`` values (default 1) first non-empty list key from the list
+        of args provided key names.
+
+        For more information check https://redis.io/commands/lmpop
+        """
+        args = [num_keys] + list(args) + [direction]
+        if count != 1:
+            args.extend(["COUNT", count])
+
+        return self.execute_command("LMPOP", *args)
+
+    def lindex(self, name: str, index: int) -> Optional[str]:
         """
         Return the item from list ``name`` at position ``index``
 
@@ -1920,7 +1970,7 @@ class ListCommands:
         """
         return self.execute_command("LINDEX", name, index)
 
-    def linsert(self, name, where, refvalue, value):
+    def linsert(self, name: str, where: str, refvalue: str, value: str) -> int:
         """
         Insert ``value`` in list ``name`` either immediately before or after
         [``where``] ``refvalue``
@@ -1932,7 +1982,7 @@ class ListCommands:
         """
         return self.execute_command("LINSERT", name, where, refvalue, value)
 
-    def llen(self, name):
+    def llen(self, name: str) -> int:
         """
         Return the length of the list ``name``
 
@@ -1940,7 +1990,7 @@ class ListCommands:
         """
         return self.execute_command("LLEN", name)
 
-    def lpop(self, name, count=None):
+    def lpop(self, name: str, count: Optional[int] = None) -> Union[str, List, None]:
         """
         Removes and returns the first elements of the list ``name``.
 
@@ -1955,7 +2005,7 @@ class ListCommands:
         else:
             return self.execute_command("LPOP", name)
 
-    def lpush(self, name, *values):
+    def lpush(self, name: str, *values: List) -> int:
         """
         Push ``values`` onto the head of the list ``name``
 
@@ -1963,7 +2013,7 @@ class ListCommands:
         """
         return self.execute_command("LPUSH", name, *values)
 
-    def lpushx(self, name, *values):
+    def lpushx(self, name: str, *values: List) -> int:
         """
         Push ``value`` onto the head of the list ``name`` if ``name`` exists
 
@@ -1971,7 +2021,7 @@ class ListCommands:
         """
         return self.execute_command("LPUSHX", name, *values)
 
-    def lrange(self, name, start, end):
+    def lrange(self, name: str, start: int, end: int) -> List:
         """
         Return a slice of the list ``name`` between
         position ``start`` and ``end``
@@ -1983,7 +2033,7 @@ class ListCommands:
         """
         return self.execute_command("LRANGE", name, start, end)
 
-    def lrem(self, name, count, value):
+    def lrem(self, name: str, count: int, value: str) -> int:
         """
         Remove the first ``count`` occurrences of elements equal to ``value``
         from the list stored at ``name``.
@@ -1997,15 +2047,15 @@ class ListCommands:
         """
         return self.execute_command("LREM", name, count, value)
 
-    def lset(self, name, index, value):
+    def lset(self, name: str, index: int, value: str) -> str:
         """
-        Set ``position`` of list ``name`` to ``value``
+        Set element at ``index`` of list ``name`` to ``value``
 
         For more information check https://redis.io/commands/lset
         """
         return self.execute_command("LSET", name, index, value)
 
-    def ltrim(self, name, start, end):
+    def ltrim(self, name: str, start: int, end: int) -> str:
         """
         Trim the list ``name``, removing all values not within the slice
         between ``start`` and ``end``
@@ -2017,7 +2067,7 @@ class ListCommands:
         """
         return self.execute_command("LTRIM", name, start, end)
 
-    def rpop(self, name, count=None):
+    def rpop(self, name: str, count: Optional[int] = None) -> Union[str, List, None]:
         """
         Removes and returns the last elements of the list ``name``.
 
@@ -2032,7 +2082,7 @@ class ListCommands:
         else:
             return self.execute_command("RPOP", name)
 
-    def rpoplpush(self, src, dst):
+    def rpoplpush(self, src: str, dst: str) -> str:
         """
         RPOP a value off of the ``src`` list and atomically LPUSH it
         on to the ``dst`` list.  Returns the value.
@@ -2041,7 +2091,7 @@ class ListCommands:
         """
         return self.execute_command("RPOPLPUSH", src, dst)
 
-    def rpush(self, name, *values):
+    def rpush(self, name: str, *values: List) -> int:
         """
         Push ``values`` onto the tail of the list ``name``
 
@@ -2049,7 +2099,7 @@ class ListCommands:
         """
         return self.execute_command("RPUSH", name, *values)
 
-    def rpushx(self, name, value):
+    def rpushx(self, name: str, value: str) -> int:
         """
         Push ``value`` onto the tail of the list ``name`` if ``name`` exists
 
@@ -2057,7 +2107,14 @@ class ListCommands:
         """
         return self.execute_command("RPUSHX", name, value)
 
-    def lpos(self, name, value, rank=None, count=None, maxlen=None):
+    def lpos(
+        self,
+        name: str,
+        value: str,
+        rank: Optional[int] = None,
+        count: Optional[int] = None,
+        maxlen: Optional[int] = None,
+    ) -> Union[str, List, None]:
         """
         Get position of ``value`` within the list ``name``
 
@@ -2097,16 +2154,16 @@ class ListCommands:
 
     def sort(
         self,
-        name,
-        start=None,
-        num=None,
-        by=None,
-        get=None,
-        desc=False,
-        alpha=False,
-        store=None,
-        groups=False,
-    ):
+        name: str,
+        start: Optional[int] = None,
+        num: Optional[int] = None,
+        by: Optional[str] = None,
+        get: Optional[List[str]] = None,
+        desc: bool = False,
+        alpha: bool = False,
+        store: Optional[str] = None,
+        groups: Optional[bool] = False,
+    ) -> Union[List, int]:
         """
         Sort and return the list, set or sorted set at ``name``.
 
@@ -2379,6 +2436,19 @@ class SetCommands:
         """
         args = list_or_args(keys, args)
         return self.execute_command("SINTER", *args)
+
+    def sintercard(self, numkeys: int, keys: List[str], limit: int = 0) -> int:
+        """
+        Return the cardinality of the intersect of multiple sets specified by ``keys`.
+
+        When LIMIT provided (defaults to 0 and means unlimited), if the intersection
+        cardinality reaches limit partway through the computation, the algorithm will
+        exit and yield limit as the cardinality
+
+        For more information check https://redis.io/commands/sintercard
+        """
+        args = [numkeys, *keys, "LIMIT", limit]
+        return self.execute_command("SINTERCARD", *args)
 
     def sinterstore(self, dest: str, keys: List, *args: List) -> int:
         """
@@ -3149,6 +3219,19 @@ class SortedSetCommands:
         """
         return self._zaggregate("ZINTERSTORE", dest, keys, aggregate)
 
+    def zintercard(self, numkeys: int, keys: List[str], limit: int = 0) -> int:
+        """
+        Return the cardinality of the intersect of multiple sorted sets
+        specified by ``keys`.
+        When LIMIT provided (defaults to 0 and means unlimited), if the intersection
+        cardinality reaches limit partway through the computation, the algorithm will
+        exit and yield limit as the cardinality
+
+        For more information check https://redis.io/commands/zintercard
+        """
+        args = [numkeys, *keys, "LIMIT", limit]
+        return self.execute_command("ZINTERCARD", *args)
+
     def zlexcount(self, name, min, max):
         """
         Return the number of items in the sorted set ``name`` between the
@@ -3241,6 +3324,38 @@ class SortedSetCommands:
         keys = list_or_args(keys, None)
         keys.append(timeout)
         return self.execute_command("BZPOPMIN", *keys)
+
+    def bzmpop(
+        self,
+        timeout: float,
+        numkeys: int,
+        keys: List[str],
+        min: Optional[bool] = False,
+        max: Optional[bool] = False,
+        count: Optional[int] = 1,
+    ) -> Optional[list]:
+        """
+        Pop ``count`` values (default 1) off of the first non-empty sorted set
+        named in the ``keys`` list.
+
+        If none of the sorted sets in ``keys`` has a value to pop,
+        then block for ``timeout`` seconds, or until a member gets added
+        to one of the sorted sets.
+
+        If timeout is 0, then block indefinitely.
+
+        For more information check https://redis.io/commands/bzmpop
+        """
+        args = [timeout, numkeys, *keys]
+        if (min and max) or (not min and not max):
+            raise DataError("Either min or max, but not both must be set")
+        elif min:
+            args.append("MIN")
+        else:
+            args.append("MAX")
+        args.extend(["COUNT", count])
+
+        return self.execute_command("BZMPOP", *args)
 
     def _zrange(
         self,
@@ -3868,7 +3983,12 @@ class ScriptCommands:
     https://redis.com/ebook/part-3-next-steps/chapter-11-scripting-redis-with-lua/
     """
 
-    def eval(self, script, numkeys, *keys_and_args):
+    def _eval(
+        self, command: str, script: str, numkeys: int, *keys_and_args: list
+    ) -> str:
+        return self.execute_command(command, script, numkeys, *keys_and_args)
+
+    def eval(self, script: str, numkeys: int, *keys_and_args: list) -> str:
         """
         Execute the Lua ``script``, specifying the ``numkeys`` the script
         will touch and the key names and argument values in ``keys_and_args``.
@@ -3879,9 +3999,26 @@ class ScriptCommands:
 
         For more information check  https://redis.io/commands/eval
         """
-        return self.execute_command("EVAL", script, numkeys, *keys_and_args)
+        return self._eval("EVAL", script, numkeys, *keys_and_args)
 
-    def evalsha(self, sha, numkeys, *keys_and_args):
+    def eval_ro(self, script: str, numkeys: int, *keys_and_args: list) -> str:
+        """
+        The read-only variant of the EVAL command
+
+        Execute the read-only Lue ``script`` specifying the ``numkeys`` the script
+        will touch and the key names and argument values in ``keys_and_args``.
+        Returns the result of the script.
+
+        For more information check  https://redis.io/commands/eval_ro
+        """
+        return self._eval("EVAL_RO", script, numkeys, *keys_and_args)
+
+    def _evalsha(
+        self, command: str, sha: str, numkeys: int, *keys_and_args: list
+    ) -> str:
+        return self.execute_command(command, sha, numkeys, *keys_and_args)
+
+    def evalsha(self, sha: str, numkeys: int, *keys_and_args: list) -> str:
         """
         Use the ``sha`` to execute a Lua script already registered via EVAL
         or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
@@ -3893,7 +4030,20 @@ class ScriptCommands:
 
         For more information check  https://redis.io/commands/evalsha
         """
-        return self.execute_command("EVALSHA", sha, numkeys, *keys_and_args)
+        return self._evalsha("EVALSHA", sha, numkeys, *keys_and_args)
+
+    def evalsha_ro(self, sha: str, numkeys: int, *keys_and_args: list) -> str:
+        """
+        The read-only variant of the EVALSHA command
+
+        Use the ``sha`` to execute a read-only Lua script already registered via EVAL
+        or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
+        key names and argument values in ``keys_and_args``. Returns the result
+        of the script.
+
+        For more information check  https://redis.io/commands/evalsha_ro
+        """
+        return self._evalsha("EVALSHA_RO", sha, numkeys, *keys_and_args)
 
     def script_exists(self, *args):
         """
