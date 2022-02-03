@@ -1070,6 +1070,12 @@ class ManagementCommands:
         return self.execute_command("WAIT", num_replicas, timeout, **kwargs)
 
     def hello(self):
+        """
+        Switch to a different protocol, optionally authenticating and setting
+        the connection's name, or provide a contextual client report.
+
+        For more information check https://redis.io/commands/hello
+        """
         raise NotImplementedError(
             "HELLO is intentionally not implemented in the client."
         )
