@@ -3,11 +3,6 @@ import shutil
 
 from invoke import run, task
 
-
-def _generate_keys():
-    run("bash docker/stunnel/create_certs.sh")
-
-
 with open("tox.ini") as fp:
     lines = fp.read().split("\n")
     dockers = [line.split("=")[1].strip() for line in lines if line.find("name") != -1]
@@ -19,7 +14,6 @@ def devenv(c):
     specified in the tox.ini file.
     """
     clean(c)
-    _generate_keys()
     cmd = "tox -e devenv"
     for d in dockers:
         cmd += f" --docker-dont-stop={d}"
@@ -29,14 +23,12 @@ def devenv(c):
 @task
 def build_docs(c):
     """Generates the sphinx documentation."""
-    _generate_keys()
     run("tox -e docs")
 
 
 @task
 def linters(c):
     """Run code linters"""
-    _generate_keys()
     run("tox -e linters")
 
 
@@ -45,7 +37,6 @@ def all_tests(c):
     """Run all linters, and tests in redis-py. This assumes you have all
     the python versions specified in the tox.ini file.
     """
-    _generate_keys()
     linters(c)
     tests(c)
 
@@ -56,7 +47,6 @@ def tests(c):
     with and without hiredis.
     """
     print("Starting Redis tests")
-    _generate_keys()
     run("tox -e '{standalone,cluster}'-'{plain,hiredis}'")
 
 
@@ -65,7 +55,6 @@ def standalone_tests(c):
     """Run all Redis tests against the current python,
     with and without hiredis."""
     print("Starting Redis tests")
-    _generate_keys()
     run("tox -e standalone-'{plain,hiredis,ocsp}'")
 
 
@@ -74,7 +63,6 @@ def cluster_tests(c):
     """Run all Redis Cluster tests against the current python,
     with and without hiredis."""
     print("Starting RedisCluster tests")
-    _generate_keys()
     run("tox -e cluster-'{plain,hiredis}'")
 
 
@@ -86,8 +74,6 @@ def clean(c):
     if os.path.isdir("dist"):
         shutil.rmtree("dist")
     run(f"docker rm -f {' '.join(dockers)}")
-    if os.path.isdir("docker/stunnel/keys"):
-        shutil.rmtree("docker/stunnel/keys")
 
 
 @task

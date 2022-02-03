@@ -12,7 +12,7 @@ from .path import Path
 class JSONCommands:
     """json commands."""
 
-    def arrappend(self, name, path=Path.rootPath(), *args):
+    def arrappend(self, name, path=Path.root_path(), *args):
         """Append the objects ``args`` to the array under the
         ``path` in key ``name``.
 
@@ -48,7 +48,7 @@ class JSONCommands:
             pieces.append(self._encode(o))
         return self.execute_command("JSON.ARRINSERT", *pieces)
 
-    def arrlen(self, name, path=Path.rootPath()):
+    def arrlen(self, name, path=Path.root_path()):
         """Return the length of the array JSON value under ``path``
         at key``name``.
 
@@ -56,7 +56,7 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.ARRLEN", name, str(path))
 
-    def arrpop(self, name, path=Path.rootPath(), index=-1):
+    def arrpop(self, name, path=Path.root_path(), index=-1):
         """Pop the element at ``index`` in the array JSON value under
         ``path`` at key ``name``.
 
@@ -72,21 +72,21 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.ARRTRIM", name, str(path), start, stop)
 
-    def type(self, name, path=Path.rootPath()):
+    def type(self, name, path=Path.root_path()):
         """Get the type of the JSON value under ``path`` from key ``name``.
 
         For more information: https://oss.redis.com/redisjson/commands/#jsontype
         """  # noqa
         return self.execute_command("JSON.TYPE", name, str(path))
 
-    def resp(self, name, path=Path.rootPath()):
+    def resp(self, name, path=Path.root_path()):
         """Return the JSON value under ``path`` at key ``name``.
 
         For more information: https://oss.redis.com/redisjson/commands/#jsonresp
         """  # noqa
         return self.execute_command("JSON.RESP", name, str(path))
 
-    def objkeys(self, name, path=Path.rootPath()):
+    def objkeys(self, name, path=Path.root_path()):
         """Return the key names in the dictionary JSON value under ``path`` at
         key ``name``.
 
@@ -94,7 +94,7 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.OBJKEYS", name, str(path))
 
-    def objlen(self, name, path=Path.rootPath()):
+    def objlen(self, name, path=Path.root_path()):
         """Return the length of the dictionary JSON value under ``path`` at key
         ``name``.
 
@@ -123,7 +123,7 @@ class JSONCommands:
             "JSON.NUMMULTBY", name, str(path), self._encode(number)
         )
 
-    def clear(self, name, path=Path.rootPath()):
+    def clear(self, name, path=Path.root_path()):
         """
         Empty arrays and objects (to have zero slots/keys without deleting the
         array/object).
@@ -135,7 +135,7 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.CLEAR", name, str(path))
 
-    def delete(self, key, path=Path.rootPath()):
+    def delete(self, key, path=Path.root_path()):
         """Delete the JSON value stored at key ``key`` under ``path``.
 
         For more information: https://oss.redis.com/redisjson/commands/#jsondel
@@ -160,7 +160,7 @@ class JSONCommands:
             pieces.append("noescape")
 
         if len(args) == 0:
-            pieces.append(Path.rootPath())
+            pieces.append(Path.root_path())
 
         else:
             for p in args:
@@ -275,7 +275,7 @@ class JSONCommands:
             pieces.append(str(path))
         return self.execute_command("JSON.STRLEN", *pieces)
 
-    def toggle(self, name, path=Path.rootPath()):
+    def toggle(self, name, path=Path.root_path()):
         """Toggle boolean value under ``path`` at key ``name``.
         returning the new value.
 
@@ -283,17 +283,17 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.TOGGLE", name, str(path))
 
-    def strappend(self, name, value, path=Path.rootPath()):
+    def strappend(self, name, value, path=Path.root_path()):
         """Append to the string JSON value. If two options are specified after
         the key name, the path is determined to be the first. If a single
-        option is passed, then the rootpath (i.e Path.rootPath()) is used.
+        option is passed, then the root_path (i.e Path.root_path()) is used.
 
         For more information: https://oss.redis.com/redisjson/commands/#jsonstrappend
         """  # noqa
         pieces = [name, str(path), self._encode(value)]
         return self.execute_command("JSON.STRAPPEND", *pieces)
 
-    def debug(self, subcommand, key=None, path=Path.rootPath()):
+    def debug(self, subcommand, key=None, path=Path.root_path()):
         """Return the memory usage in bytes of a value under ``path`` from
         key ``name``.
 

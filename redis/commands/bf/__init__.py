@@ -18,70 +18,70 @@ class AbstractBloom(object):
     """
 
     @staticmethod
-    def appendItems(params, items):
+    def append_items(params, items):
         """Append ITEMS to params."""
         params.extend(["ITEMS"])
         params += items
 
     @staticmethod
-    def appendError(params, error):
+    def append_error(params, error):
         """Append ERROR to params."""
         if error is not None:
             params.extend(["ERROR", error])
 
     @staticmethod
-    def appendCapacity(params, capacity):
+    def append_capacity(params, capacity):
         """Append CAPACITY to params."""
         if capacity is not None:
             params.extend(["CAPACITY", capacity])
 
     @staticmethod
-    def appendExpansion(params, expansion):
+    def append_expansion(params, expansion):
         """Append EXPANSION to params."""
         if expansion is not None:
             params.extend(["EXPANSION", expansion])
 
     @staticmethod
-    def appendNoScale(params, noScale):
+    def append_no_scale(params, noScale):
         """Append NONSCALING tag to params."""
         if noScale is not None:
             params.extend(["NONSCALING"])
 
     @staticmethod
-    def appendWeights(params, weights):
+    def append_weights(params, weights):
         """Append WEIGHTS to params."""
         if len(weights) > 0:
             params.append("WEIGHTS")
             params += weights
 
     @staticmethod
-    def appendNoCreate(params, noCreate):
+    def append_no_create(params, noCreate):
         """Append NOCREATE tag to params."""
         if noCreate is not None:
             params.extend(["NOCREATE"])
 
     @staticmethod
-    def appendItemsAndIncrements(params, items, increments):
+    def append_items_and_increments(params, items, increments):
         """Append pairs of items and increments to params."""
         for i in range(len(items)):
             params.append(items[i])
             params.append(increments[i])
 
     @staticmethod
-    def appendValuesAndWeights(params, items, weights):
+    def append_values_and_weights(params, items, weights):
         """Append pairs of items and weights to params."""
         for i in range(len(items)):
             params.append(items[i])
             params.append(weights[i])
 
     @staticmethod
-    def appendMaxIterations(params, max_iterations):
+    def append_max_iterations(params, max_iterations):
         """Append MAXITERATIONS to params."""
         if max_iterations is not None:
             params.extend(["MAXITERATIONS", max_iterations])
 
     @staticmethod
-    def appendBucketSize(params, bucket_size):
+    def append_bucket_size(params, bucket_size):
         """Append BUCKETSIZE to params."""
         if bucket_size is not None:
             params.extend(["BUCKETSIZE", bucket_size])
