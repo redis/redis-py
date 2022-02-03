@@ -1070,6 +1070,12 @@ class ManagementCommands:
         return self.execute_command("WAIT", num_replicas, timeout, **kwargs)
 
     def failover(self):
+        """
+        This command will start a coordinated failover between
+        the currently-connected-to master and one of its replicas.
+
+        For more information check https://redis.io/commands/failover
+        """
         raise NotImplementedError(
             "FAILOVER is intentionally not implemented in the client."
         )
