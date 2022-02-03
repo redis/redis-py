@@ -241,8 +241,6 @@ class RedisCluster(RedisClusterCommands):
                 "SHUTDOWN",
                 "KEYS",
                 "SCAN",
-                "FLUSHALL",
-                "FLUSHDB",
                 "DBSIZE",
                 "BGSAVE",
                 "SLOWLOG GET",
@@ -285,6 +283,13 @@ class RedisCluster(RedisClusterCommands):
                 "TIME",
             ],
             DEFAULT_NODE,
+        ),
+        list_keys_to_dict(
+            [
+                "FLUSHALL",
+                "FLUSHDB",
+            ],
+            ALL_NODES,
         ),
         list_keys_to_dict(
             [
