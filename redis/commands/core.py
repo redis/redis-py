@@ -3792,7 +3792,7 @@ class HashCommands:
     see: https://redis.io/topics/data-types-intro#redis-hashes
     """
 
-    def hdel(self, name, *keys):
+    def hdel(self, name: str, *keys: List) -> int:
         """
         Delete ``keys`` from hash ``name``
 
@@ -3800,7 +3800,7 @@ class HashCommands:
         """
         return self.execute_command("HDEL", name, *keys)
 
-    def hexists(self, name, key):
+    def hexists(self, name: str, key: str) -> bool:
         """
         Returns a boolean indicating if ``key`` exists within hash ``name``
 
@@ -3808,7 +3808,7 @@ class HashCommands:
         """
         return self.execute_command("HEXISTS", name, key)
 
-    def hget(self, name, key):
+    def hget(self, name: str, key: str) -> Optional[str]:
         """
         Return the value of ``key`` within the hash ``name``
 
@@ -3816,7 +3816,7 @@ class HashCommands:
         """
         return self.execute_command("HGET", name, key)
 
-    def hgetall(self, name):
+    def hgetall(self, name: str) -> dict:
         """
         Return a Python dict of the hash's name/value pairs
 
@@ -3824,7 +3824,7 @@ class HashCommands:
         """
         return self.execute_command("HGETALL", name)
 
-    def hincrby(self, name, key, amount=1):
+    def hincrby(self, name: str, key: str, amount: int = 1) -> int:
         """
         Increment the value of ``key`` in hash ``name`` by ``amount``
 
@@ -3832,7 +3832,7 @@ class HashCommands:
         """
         return self.execute_command("HINCRBY", name, key, amount)
 
-    def hincrbyfloat(self, name, key, amount=1.0):
+    def hincrbyfloat(self, name: str, key: str, amount: float = 1.0) -> float:
         """
         Increment the value of ``key`` in hash ``name`` by floating ``amount``
 
@@ -3840,7 +3840,7 @@ class HashCommands:
         """
         return self.execute_command("HINCRBYFLOAT", name, key, amount)
 
-    def hkeys(self, name):
+    def hkeys(self, name: str) -> List:
         """
         Return the list of keys within hash ``name``
 
@@ -3848,7 +3848,7 @@ class HashCommands:
         """
         return self.execute_command("HKEYS", name)
 
-    def hlen(self, name):
+    def hlen(self, name: str) -> int:
         """
         Return the number of elements in hash ``name``
 
@@ -3856,7 +3856,13 @@ class HashCommands:
         """
         return self.execute_command("HLEN", name)
 
-    def hset(self, name, key=None, value=None, mapping=None):
+    def hset(
+        self,
+        name: str,
+        key: Optional[str] = None,
+        value: Optional[str] = None,
+        mapping: Optional[dict] = None,
+    ) -> int:
         """
         Set ``key`` to ``value`` within hash ``name``,
         ``mapping`` accepts a dict of key/value pairs that will be
@@ -3876,7 +3882,7 @@ class HashCommands:
 
         return self.execute_command("HSET", name, *items)
 
-    def hsetnx(self, name, key, value):
+    def hsetnx(self, name: str, key: str, value: str) -> bool:
         """
         Set ``key`` to ``value`` within hash ``name`` if ``key`` does not
         exist.  Returns 1 if HSETNX created a field, otherwise 0.
@@ -3885,7 +3891,7 @@ class HashCommands:
         """
         return self.execute_command("HSETNX", name, key, value)
 
-    def hmset(self, name, mapping):
+    def hmset(self, name: str, mapping: dict) -> str:
         """
         Set key to value within hash ``name`` for each corresponding
         key and value from the ``mapping`` dict.
@@ -3905,7 +3911,7 @@ class HashCommands:
             items.extend(pair)
         return self.execute_command("HMSET", name, *items)
 
-    def hmget(self, name, keys, *args):
+    def hmget(self, name: str, keys: List, *args: List) -> List:
         """
         Returns a list of values ordered identically to ``keys``
 
@@ -3914,7 +3920,7 @@ class HashCommands:
         args = list_or_args(keys, args)
         return self.execute_command("HMGET", name, *args)
 
-    def hvals(self, name):
+    def hvals(self, name: str) -> List:
         """
         Return the list of values within hash ``name``
 
@@ -3922,7 +3928,7 @@ class HashCommands:
         """
         return self.execute_command("HVALS", name)
 
-    def hstrlen(self, name, key):
+    def hstrlen(self, name: str, key: str) -> int:
         """
         Return the number of bytes stored in the value of ``key``
         within hash ``name``
