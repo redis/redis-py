@@ -4,7 +4,7 @@ class Path:
     strPath = ""
 
     @staticmethod
-    def rootPath():
+    def root_path():
         """Return the root path's string representation."""
         return "."
 

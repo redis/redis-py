@@ -292,9 +292,9 @@ class QueryResult:
     #             record = []
     #             for idx, cell in enumerate(row):
     #                 if type(cell) is Node:
-    #                     record.append(cell.toString())
+    #                     record.append(cell.to_string())
     #                 elif type(cell) is Edge:
-    #                     record.append(cell.toString())
+    #                     record.append(cell.to_string())
     #                 else:
     #                     record.append(cell)
     #             tbl.add_row(record)

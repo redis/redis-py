@@ -1155,6 +1155,72 @@ def test_index_definition(client):
 
 
 @pytest.mark.redismod
+def testExpire(client):
+    client.ft().create_index((TextField("txt", sortable=True),), temporary=4)
+    ttl = client.execute_command("ft.debug", "TTL", "idx")
+    assert ttl > 2
+
+    while ttl > 2:
+        ttl = client.execute_command("ft.debug", "TTL", "idx")
+        time.sleep(0.01)
+
+    # add document - should reset the ttl
+    client.ft().add_document("doc", txt="foo bar", text="this is a simple test")
+    ttl = client.execute_command("ft.debug", "TTL", "idx")
+    assert ttl > 2
+    try:
+        while True:
+            ttl = client.execute_command("ft.debug", "TTL", "idx")
+            time.sleep(0.5)
+    except redis.exceptions.ResponseError:
+        assert ttl == 0
+
+
+@pytest.mark.redismod
+def testSkipInitialScan(client):
+    client.hset("doc1", "foo", "bar")
+    q = Query("@foo:bar")
+
+    client.ft().create_index((TextField("foo"),), skip_initial_scan=True)
+    assert 0 == client.ft().search(q).total
+
+
+@pytest.mark.redismod
+def testSummarizeDisabled_nooffset(client):
+    client.ft().create_index((TextField("txt"),), no_term_offsets=True)
+    client.ft().add_document("doc1", txt="foo bar")
+    with pytest.raises(Exception):
+        client.ft().search(Query("foo").summarize(fields=["txt"]))
+
+
+@pytest.mark.redismod
+def testSummarizeDisabled_nohl(client):
+    client.ft().create_index((TextField("txt"),), no_highlight=True)
+    client.ft().add_document("doc1", txt="foo bar")
+    with pytest.raises(Exception):
+        client.ft().search(Query("foo").summarize(fields=["txt"]))
+
+
+@pytest.mark.redismod
+def testMaxTextFields(client):
+    # Creating the index definition
+    client.ft().create_index((TextField("f0"),))
+    for x in range(1, 32):
+        client.ft().alter_schema_add((TextField(f"f{x}"),))
+
+    # Should be too many indexes
+    with pytest.raises(redis.ResponseError):
+        client.ft().alter_schema_add((TextField(f"f{x}"),))
+
+    client.ft().dropindex("idx")
+    # Creating the index definition
+    client.ft().create_index((TextField("f0"),), max_text_fields=True)
+    # Fill the index with fields
+    for x in range(1, 50):
+        client.ft().alter_schema_add((TextField(f"f{x}"),))
+
+
+@pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
 def test_create_client_definition(client):
     """
@@ -1200,8 +1266,8 @@ def test_create_client_definition_json(client):
     definition = IndexDefinition(prefix=["king:"], index_type=IndexType.JSON)
     client.ft().create_index((TextField("$.name"),), definition=definition)
 
-    client.json().set("king:1", Path.rootPath(), {"name": "henry"})
-    client.json().set("king:2", Path.rootPath(), {"name": "james"})
+    client.json().set("king:1", Path.root_path(), {"name": "henry"})
+    client.json().set("king:2", Path.root_path(), {"name": "james"})
 
     res = client.ft().search("henry")
     assert res.docs[0].id == "king:1"
@@ -1222,7 +1288,7 @@ def test_fields_as_name(client):
     client.ft().create_index(SCHEMA, definition=definition)
 
     # insert json data
-    res = client.json().set("doc:1", Path.rootPath(), {"name": "Jon", "age": 25})
+    res = client.json().set("doc:1", Path.root_path(), {"name": "Jon", "age": 25})
     assert res
 
     total = client.ft().search(Query("Jon").return_fields("name", "just_a_number")).docs
@@ -1237,7 +1303,7 @@ def test_fields_as_name(client):
 def test_search_return_fields(client):
     res = client.json().set(
         "doc:1",
-        Path.rootPath(),
+        Path.root_path(),
         {"t": "riceratops", "t2": "telmatosaurus", "n": 9072, "flt": 97.2},
     )
     assert res
@@ -1323,8 +1389,8 @@ def test_create_json_with_alias(client):
         definition=definition,
     )
 
-    client.json().set("king:1", Path.rootPath(), {"name": "henry", "num": 42})
-    client.json().set("king:2", Path.rootPath(), {"name": "james", "num": 3.14})
+    client.json().set("king:1", Path.root_path(), {"name": "henry", "num": 42})
+    client.json().set("king:2", Path.root_path(), {"name": "james", "num": 3.14})
 
     res = client.ft().search("@name:henry")
     assert res.docs[0].id == "king:1"
@@ -1355,7 +1421,7 @@ def test_json_with_multipath(client):
     )
 
     client.json().set(
-        "king:1", Path.rootPath(), {"name": "henry", "country": {"name": "england"}}
+        "king:1", Path.root_path(), {"name": "henry", "country": {"name": "england"}}
     )
 
     res = client.ft().search("@name:{henry}")
@@ -1381,7 +1447,7 @@ def test_json_with_jsonpath(client):
         definition=definition,
     )
 
-    client.json().set("doc:1", Path.rootPath(), {"prod:name": "RediSearch"})
+    client.json().set("doc:1", Path.root_path(), {"prod:name": "RediSearch"})
 
     # query for a supported field succeeds
     res = client.ft().search(Query("@name:RediSearch"))

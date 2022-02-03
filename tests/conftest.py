@@ -102,7 +102,7 @@ def pytest_sessionstart(session):
         wait_for_cluster_creation(redis_url, cluster_nodes)
 
 
-def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=20):
+def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=60):
     """
     Waits for the cluster creation to complete.
     As soon as all :cluster_nodes: nodes become available, the cluster will be
