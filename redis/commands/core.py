@@ -315,6 +315,13 @@ class ManagementCommands:
     """
 
     def auth(self):
+        """
+        The AUTH command authenticates the current connection in two cases:
+            1. If the Redis server is password protected via the requirepass option.
+            2. If a Redis 6.0 instance, or greater, is using the Redis ACL system.
+
+            For more information check https://redis.io/commands/auth
+        """
         raise NotImplementedError(
             "AUTH is intentionally not implemented in the client."
         )
