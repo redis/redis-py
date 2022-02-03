@@ -22,7 +22,7 @@ class Edge:
         self.src_node = src_node
         self.dest_node = dest_node
 
-    def toString(self):
+    def to_string(self):
         res = ""
         if self.properties:
             props = ",".join(
