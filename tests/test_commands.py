@@ -3,6 +3,7 @@ import datetime
 import re
 import time
 from string import ascii_letters
+from click import password_option
 
 import pytest
 
@@ -121,6 +122,26 @@ class TestRedisCommands:
 
         r.acl_genpass(555)
         assert isinstance(password, str)
+
+    def test_auth(self, r, request):
+        username = "redis-py-auth"
+
+        def teardown():
+            r.acl_deluser(username)
+
+        request.addfinalizer(teardown)
+        
+        assert r.acl_setuser(
+            username,
+            enabled=True,
+            passwords=["+strong_password"],
+            commands=["+acl"],
+        )
+
+        assert r.auth(username=username, password="strong_password") == True
+
+        with pytest.raises(exceptions.ResponseError):
+            r.auth(username=username, password="wrong_password")
 
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
