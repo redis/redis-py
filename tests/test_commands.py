@@ -80,7 +80,7 @@ class TestRedisCommands:
             commands=["+acl"],
         )
 
-        assert r.auth(username=username, password="strong_password") == True
+        assert r.auth(username=username, password="strong_password") is True
 
         with pytest.raises(exceptions.ResponseError):
             r.auth(username=username, password="wrong_password")
