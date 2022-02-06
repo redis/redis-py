@@ -1094,6 +1094,7 @@ class ManagementCommands:
         """
         raise NotImplementedError(
             "HELLO is intentionally not implemented in the client."
+        )
 
     def failover(self):
         """
@@ -1102,6 +1103,7 @@ class ManagementCommands:
         """
         raise NotImplementedError(
             "FAILOVER is intentionally not implemented in the client."
+        )
 
 
 class BasicKeyCommands:
