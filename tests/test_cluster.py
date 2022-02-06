@@ -2642,8 +2642,8 @@ class TestClusterMonitor:
             assert response["command"] == "GET {foo}bar\\\\x92"
 
     def test_flush(self, r):
-        r.set('x', '1')
-        r.set('z', '1')
+        r.set("x", "1")
+        r.set("z", "1")
         r.flushall()
-        assert r.get('x') == None
-        assert r.get('y') == None
+        assert r.get("x") is None
+        assert r.get("y") is None
