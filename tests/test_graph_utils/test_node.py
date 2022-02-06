@@ -14,13 +14,13 @@ def fixture():
 
 
 @pytest.mark.redismod
-def test_toString(fixture):
+def test_to_string(fixture):
     no_args, no_props, props_only, no_label, multi_label = fixture
-    assert no_args.toString() == ""
-    assert no_props.toString() == ""
-    assert props_only.toString() == '{a:"a",b:10}'
-    assert no_label.toString() == '{a:"a"}'
-    assert multi_label.toString() == ""
+    assert no_args.to_string() == ""
+    assert no_props.to_string() == ""
+    assert props_only.to_string() == '{a:"a",b:10}'
+    assert no_label.to_string() == '{a:"a"}'
+    assert multi_label.to_string() == ""
 
 
 @pytest.mark.redismod

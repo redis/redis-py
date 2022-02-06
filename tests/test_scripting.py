@@ -1,5 +1,6 @@
 import pytest
 
+import redis
 from redis import exceptions
 from tests.conftest import skip_if_server_version_lt
 
@@ -30,6 +31,13 @@ class TestScripting:
         r.set("a", 2)
         # 2 * 3 == 6
         assert r.eval(multiply_script, 1, "a", 3) == 6
+
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_eval_ro(self, unstable_r):
+        unstable_r.set("a", "b")
+        assert unstable_r.eval_ro("return redis.call('GET', KEYS[1])", 1, "a") == b"b"
+        with pytest.raises(redis.ResponseError):
+            unstable_r.eval_ro("return redis.call('DEL', KEYS[1])", 1, "a")
 
     @skip_if_server_version_lt("6.2.0")
     def test_script_flush_620(self, r):
@@ -65,6 +73,15 @@ class TestScripting:
         sha = r.script_load(multiply_script)
         # 2 * 3 == 6
         assert r.evalsha(sha, 1, "a", 3) == 6
+
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_evalsha_ro(self, unstable_r):
+        unstable_r.set("a", "b")
+        get_sha = unstable_r.script_load("return redis.call('GET', KEYS[1])")
+        del_sha = unstable_r.script_load("return redis.call('DEL', KEYS[1])")
+        assert unstable_r.evalsha_ro(get_sha, 1, "a") == b"b"
+        with pytest.raises(redis.ResponseError):
+            unstable_r.evalsha_ro(del_sha, 1, "a")
 
     def test_evalsha_script_not_loaded(self, r):
         r.set("a", 2)
