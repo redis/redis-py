@@ -1071,10 +1071,8 @@ class ManagementCommands:
 
     def failover(self):
         """
-        This command will start a coordinated failover between
-        the currently-connected-to master and one of its replicas.
-
-        For more information check https://redis.io/commands/failover
+        This function throws a NotImplementedError since it is intentionally
+        not supported.
         """
         raise NotImplementedError(
             "FAILOVER is intentionally not implemented in the client."
