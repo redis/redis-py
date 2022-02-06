@@ -647,6 +647,11 @@ class TestRedisCommands:
         assert r.config_set("timeout", 0)
         assert r.config_get()["timeout"] == "0"
 
+    @skip_if_server_version_lt("6.0.0")
+    def test_failover(self, r):
+        with pytest.raises(NotImplementedError):
+            r.failover()
+
     @pytest.mark.onlynoncluster
     def test_dbsize(self, r):
         r["a"] = "foo"

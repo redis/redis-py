@@ -1087,6 +1087,15 @@ class ManagementCommands:
         """
         return self.execute_command("WAIT", num_replicas, timeout, **kwargs)
 
+    def failover(self):
+        """
+        This function throws a NotImplementedError since it is intentionally
+        not supported.
+        """
+        raise NotImplementedError(
+            "FAILOVER is intentionally not implemented in the client."
+        )
+
 
 class BasicKeyCommands:
     """
