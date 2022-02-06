@@ -315,6 +315,15 @@ class ManagementCommands:
     Redis management commands
     """
 
+    def auth(self):
+        """
+        This function throws a NotImplementedError since it is intentionally
+        not supported.
+        """
+        raise NotImplementedError(
+            "AUTH is intentionally not implemented in the client."
+        )
+
     def bgrewriteaof(self, **kwargs):
         """Tell the Redis server to rewrite the AOF file from data in memory.
 

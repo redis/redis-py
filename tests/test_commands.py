@@ -71,6 +71,10 @@ class TestRedisCommands:
             r["a"]
 
     # SERVER INFORMATION
+    def test_auth_not_implemented(self, r):
+        with pytest.raises(NotImplementedError):
+            r.auth()
+
     @skip_if_server_version_lt("6.0.0")
     def test_acl_cat_no_category(self, r):
         categories = r.acl_cat()
