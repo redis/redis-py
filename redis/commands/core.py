@@ -1086,7 +1086,7 @@ class ManagementCommands:
         For more information check https://redis.io/commands/wait
         """
         return self.execute_command("WAIT", num_replicas, timeout, **kwargs)
-      
+
     def hello(self):
         """
         This function throws a NotImplementedError since it is intentionally
