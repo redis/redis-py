@@ -624,6 +624,11 @@ class TestRedisCommands:
         assert isinstance(r.client_getredir(), int)
         assert r.client_getredir() == -1
 
+    @skip_if_server_version_lt("6.0.0")
+    def test_hello_notI_implemented(self, r):
+        with pytest.raises(NotImplementedError):
+            r.hello()
+
     def test_config_get(self, r):
         data = r.config_get()
         assert len(data.keys()) > 10
