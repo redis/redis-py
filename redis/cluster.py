@@ -290,7 +290,7 @@ class RedisCluster(RedisClusterCommands):
                 "FLUSHALL",
                 "FLUSHDB",
             ],
-            ALL_NODES,
+            PRIMARIES,
         ),
         list_keys_to_dict(
             [
