@@ -646,8 +646,8 @@ class AbstractRedis:
     RESPONSE_CALLBACKS = {
         **string_keys_to_dict(
             "AUTH COPY EXPIRE EXPIREAT PEXPIRE PEXPIREAT "
-            "HEXISTS HMSET LMOVE BLMOVE MOVE "
-            "MSETNX PERSIST PSETEX RENAMENX SISMEMBER SMOVE SETEX SETNX",
+            "HEXISTS HMSET MOVE MSETNX PERSIST "
+            "PSETEX RENAMENX SISMEMBER SMOVE SETEX SETNX",
             bool,
         ),
         **string_keys_to_dict(

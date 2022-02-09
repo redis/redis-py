@@ -447,9 +447,9 @@ class SearchCommands:
             raise ValueError("Bad query", query)
 
         raw = self.execute_command(*cmd)
-        return self._get_AggregateResult(raw, query, has_cursor)
+        return self._get_aggregate_result(raw, query, has_cursor)
 
-    def _get_AggregateResult(self, raw, query, has_cursor):
+    def _get_aggregate_result(self, raw, query, has_cursor):
         if has_cursor:
             if isinstance(query, Cursor):
                 query.cid = raw[1]
@@ -499,7 +499,7 @@ class SearchCommands:
         res = self.execute_command(*cmd)
 
         if isinstance(query, AggregateRequest):
-            result = self._get_AggregateResult(res[0], query, query._cursor)
+            result = self._get_aggregate_result(res[0], query, query._cursor)
         else:
             result = Result(
                 res[0],

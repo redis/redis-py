@@ -50,7 +50,6 @@ jobs:
          run: |
            pip install -U setuptools wheel
            pip install -r dev_requirements.txt
-           bash docker/stunnel/create_certs.sh
            tox -e ${{matrix.test-type}}-${{matrix.connection-type}}
        - name: Upload codecov coverage
          uses: codecov/codecov-action@v2
