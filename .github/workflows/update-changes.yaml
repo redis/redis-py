@@ -15,7 +15,7 @@ jobs:
           fetch-depth: 0
       - name: Update CHANGES file
         run: |
-          sed -i '1s/^/* ${{ github.event.head_commit.message }}. Thanks @${{ github.actor }}\n/' changes
+          sed -i '1s/^/* ${{ github.event.head_commit.message }}. Thanks @${{ github.actor }}\n/' CHANGES
       - name: Commit & Push changes
         uses: actions-js/push@master
         with:
