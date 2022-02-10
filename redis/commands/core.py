@@ -4,7 +4,6 @@ import datetime
 import hashlib
 import time
 import warnings
-from typing import List, Optional, Union
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -13,7 +12,9 @@ from typing import (
     Callable,
     Iterable,
     Iterator,
+    List,
     Mapping,
+    Optional,
     Sequence,
     Union,
 )
@@ -22,7 +23,6 @@ from redis.compat import Literal
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 from redis.typing import (
     AbsExpiryT,
-    AnyFieldT,
     AnyKeyT,
     BitfieldOffsetT,
     ChannelT,
