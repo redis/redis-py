@@ -2640,3 +2640,10 @@ class TestClusterMonitor:
             r.get(byte_string)
             response = wait_for_command(r, m, "GET {foo}bar\\\\x92", key=key)
             assert response["command"] == "GET {foo}bar\\\\x92"
+
+    def test_flush(self, r):
+        r.set("x", "1")
+        r.set("z", "1")
+        r.flushall()
+        assert r.get("x") is None
+        assert r.get("y") is None
