@@ -6,6 +6,7 @@ from redis.exceptions import DataError
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.mark.onlynoncluster
 class TestEncoding:
     @pytest.fixture()
     async def r(self, create_redis):
@@ -57,6 +58,7 @@ class TestEncoding:
         assert await r.lrange("a", 0, -1) == result
 
 
+@pytest.mark.onlynoncluster
 class TestEncodingErrors:
     async def test_ignore(self, create_redis):
         r = await create_redis(
@@ -75,6 +77,7 @@ class TestEncodingErrors:
         assert await r.get("a") == "foo\ufffd"
 
 
+@pytest.mark.onlynoncluster
 class TestMemoryviewsAreNotPacked:
     async def test_memoryviews_are_not_packed(self, r):
         arg = memoryview(b"some_arg")

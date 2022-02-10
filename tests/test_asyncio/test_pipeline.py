@@ -8,6 +8,7 @@ from .conftest import wait_for_command
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.mark.onlynoncluster
 class TestPipeline:
     async def test_pipeline_is_true(self, r):
         """Ensure pipeline instances are not false-y"""

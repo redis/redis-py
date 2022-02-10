@@ -30,6 +30,7 @@ async def test_invalid_response(create_redis):
 
 @skip_if_server_version_lt("4.0.0")
 @pytest.mark.redismod
+@pytest.mark.onlynoncluster
 async def test_loading_external_modules(modclient):
     def inner():
         pass
@@ -50,12 +51,14 @@ async def test_loading_external_modules(modclient):
     # assert mod.get('fookey') == d
 
 
+@pytest.mark.onlynoncluster
 async def test_socket_param_regression(r):
     """A regression test for issue #1060"""
     conn = UnixDomainSocketConnection()
     _ = await conn.disconnect() is True
 
 
+@pytest.mark.onlynoncluster
 async def test_can_run_concurrent_commands(r):
     assert await r.ping() is True
     assert all(await asyncio.gather(*(r.ping() for _ in range(10))))

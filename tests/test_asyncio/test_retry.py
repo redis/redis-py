@@ -19,6 +19,7 @@ class BackoffMock(AbstractBackoff):
         return 0
 
 
+@pytest.mark.onlynoncluster
 class TestConnectionConstructorWithRetry:
     "Test that the Connection constructors properly handles Retry objects"
 
@@ -40,6 +41,7 @@ class TestConnectionConstructorWithRetry:
         assert c.retry._retries == retries
 
 
+@pytest.mark.onlynoncluster
 class TestRetry:
     "Test that Retry calls backoff and retries the expected number of times"
 

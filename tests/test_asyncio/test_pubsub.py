@@ -60,6 +60,7 @@ def make_subscribe_test_data(pubsub, type):
     assert False, f"invalid subscribe type: {type}"
 
 
+@pytest.mark.onlynoncluster
 class TestPubSubSubscribeUnsubscribe:
     async def _test_subscribe_unsubscribe(
         self, p, sub_type, unsub_type, sub_func, unsub_func, keys
@@ -268,6 +269,7 @@ class TestPubSubSubscribeUnsubscribe:
         assert p.subscribed is True
 
 
+@pytest.mark.onlynoncluster
 class TestPubSubMessages:
     def setup_method(self, method):
         self.message = None
@@ -362,6 +364,7 @@ class TestPubSubMessages:
         assert expect in info.exconly()
 
 
+@pytest.mark.onlynoncluster
 class TestPubSubAutoDecoding:
     """These tests only validate that we get unicode values back"""
 
@@ -479,6 +482,7 @@ class TestPubSubAutoDecoding:
         assert pubsub.patterns == {}
 
 
+@pytest.mark.onlynoncluster
 class TestPubSubRedisDown:
     async def test_channel_subscribe(self, r: redis.Redis):
         r = redis.Redis(host="localhost", port=6390)
@@ -487,6 +491,7 @@ class TestPubSubRedisDown:
             await p.subscribe("foo")
 
 
+@pytest.mark.onlynoncluster
 class TestPubSubSubcommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.0")
@@ -525,6 +530,7 @@ class TestPubSubSubcommands:
         assert await r.pubsub_numpat() == 3
 
 
+@pytest.mark.onlynoncluster
 class TestPubSubPings:
     @skip_if_server_version_lt("3.0.0")
     async def test_send_pubsub_ping(self, r: redis.Redis):
@@ -559,6 +565,7 @@ class TestPubSubConnectionKilled:
             await wait_for_message(p)
 
 
+@pytest.mark.onlynoncluster
 class TestPubSubTimeouts:
     async def test_get_message_with_timeout_returns_none(self, r: redis.Redis):
         p = r.pubsub()
@@ -567,6 +574,7 @@ class TestPubSubTimeouts:
         assert await p.get_message(timeout=0.01) is None
 
 
+@pytest.mark.onlynoncluster
 class TestPubSubRun:
     async def _subscribe(self, p, *args, **kwargs):
         await p.subscribe(*args, **kwargs)
