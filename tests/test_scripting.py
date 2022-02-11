@@ -21,23 +21,69 @@ return "hello " .. name
 """
 
 
-@pytest.mark.onlynoncluster
 class TestScripting:
     @pytest.fixture(autouse=True)
     def reset_scripts(self, r):
         r.script_flush()
 
-    def test_eval(self, r):
+    def test_eval_multiply(self, r):
         r.set("a", 2)
         # 2 * 3 == 6
         assert r.eval(multiply_script, 1, "a", 3) == 6
 
     # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    @pytest.mark.onlynoncluster
     def test_eval_ro(self, unstable_r):
         unstable_r.set("a", "b")
         assert unstable_r.eval_ro("return redis.call('GET', KEYS[1])", 1, "a") == b"b"
         with pytest.raises(redis.ResponseError):
             unstable_r.eval_ro("return redis.call('DEL', KEYS[1])", 1, "a")
+
+    def test_eval_msgpack(self, r):
+        msgpack_message_dumped = b"\x81\xa4name\xa3Joe"
+        # this is msgpack.dumps({"name": "joe"})
+        assert r.eval(msgpack_hello_script, 0, msgpack_message_dumped) == b"hello Joe"
+
+    def test_eval_same_slot(self, r):
+        """
+        In a clustered redis, the script keys must be in the same slot.
+
+        This test isn't very interesting for standalone redis, but it doesn't
+        hurt anything.
+        """
+        r.set("A{foo}", 2)
+        r.set("B{foo}", 4)
+        # 2 * 4 == 8
+
+        script = """
+        local value = redis.call('GET', KEYS[1])
+        local value2 = redis.call('GET', KEYS[2])
+        return value * value2
+        """
+        result = r.eval(script, 2, "A{foo}", "B{foo}")
+        assert result == 8
+
+    @pytest.mark.onlycluster
+    def test_eval_crossslot(self, r):
+        """
+        In a clustered redis, the script keys must be in the same slot.
+
+        This test should fail, because the two keys we send are in different
+        slots. This test assumes that {foo} and {bar} will not go to the same
+        server when used. In a setup with 3 primaries and 3 secondaries, this
+        assumption holds.
+        """
+        r.set("A{foo}", 2)
+        r.set("B{bar}", 4)
+        # 2 * 4 == 8
+
+        script = """
+        local value = redis.call('GET', KEYS[1])
+        local value2 = redis.call('GET', KEYS[2])
+        return value * value2
+        """
+        with pytest.raises(exceptions.RedisClusterException):
+            r.eval(script, 2, "A{foo}", "B{bar}")
 
     @skip_if_server_version_lt("6.2.0")
     def test_script_flush_620(self, r):
@@ -75,6 +121,7 @@ class TestScripting:
         assert r.evalsha(sha, 1, "a", 3) == 6
 
     # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    @pytest.mark.onlynoncluster
     def test_evalsha_ro(self, unstable_r):
         unstable_r.set("a", "b")
         get_sha = unstable_r.script_load("return redis.call('GET', KEYS[1])")
@@ -114,6 +161,8 @@ class TestScripting:
         # Test first evalsha block
         assert multiply(keys=["a"], args=[3]) == 6
 
+    # Scripting is not supported in cluster pipelines
+    @pytest.mark.onlynoncluster
     def test_script_object_in_pipeline(self, r):
         multiply = r.register_script(multiply_script)
         precalculated_sha = multiply.sha
@@ -142,6 +191,8 @@ class TestScripting:
         assert pipe.execute() == [True, b"2", 6]
         assert r.script_exists(multiply.sha) == [True]
 
+    # Scripting is not supported in cluster pipelines
+    @pytest.mark.onlynoncluster
     def test_eval_msgpack_pipeline_error_in_lua(self, r):
         msgpack_hello = r.register_script(msgpack_hello_script)
         assert msgpack_hello.sha
