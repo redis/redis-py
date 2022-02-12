@@ -964,7 +964,7 @@ def test_aggregations_groupby(client):
 
     res = client.ft().aggregate(req).rows[0]
     assert res[1] == "redis"
-    assert res[3] == "10"
+    assert res[3] == "8"  # median of 3,8,10
 
     req = aggregations.AggregateRequest("redis").group_by(
         "@parent",
