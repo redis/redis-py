@@ -277,6 +277,9 @@ class TestPubSubMessages:
     def message_handler(self, message):
         self.message = message
 
+    async def async_message_handler(self, message):
+        self.async_message = message
+
     async def test_published_message_to_channel(self, r: redis.Redis):
         p = r.pubsub()
         await p.subscribe("foo")
@@ -317,6 +320,25 @@ class TestPubSubMessages:
         assert await r.publish("foo", "test message") == 1
         assert await wait_for_message(p) is None
         assert self.message == make_message("message", "foo", "test message")
+
+    async def test_channel_async_message_handler(self, r):
+        p = r.pubsub(ignore_subscribe_messages=True)
+        await p.subscribe(foo=self.async_message_handler)
+        assert await wait_for_message(p) is None
+        assert await r.publish("foo", "test message") == 1
+        assert await wait_for_message(p) is None
+        assert self.async_message == make_message("message", "foo", "test message")
+
+    async def test_channel_sync_async_message_handler(self, r):
+        p = r.pubsub(ignore_subscribe_messages=True)
+        await p.subscribe(foo=self.message_handler)
+        await p.subscribe(bar=self.async_message_handler)
+        assert await wait_for_message(p) is None
+        assert await r.publish("foo", "test message") == 1
+        assert await r.publish("bar", "test message 2") == 1
+        assert await wait_for_message(p) is None
+        assert self.message == make_message("message", "foo", "test message")
+        assert self.async_message == make_message("message", "bar", "test message 2")
 
     @pytest.mark.onlynoncluster
     async def test_pattern_message_handler(self, r: redis.Redis):

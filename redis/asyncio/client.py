@@ -58,7 +58,7 @@ from redis.retry import Retry
 from redis.typing import ChannelT, EncodableT, KeyT
 from redis.utils import safe_str, str_if_bytes
 
-PubSubHandler = Callable[[Dict[str, str]], None]
+PubSubHandler = Callable[[Dict[str, str]], Awaitable[None]]
 _KeyT = TypeVar("_KeyT", bound=KeyT)
 _ArgT = TypeVar("_ArgT", KeyT, EncodableT)
 _RedisT = TypeVar("_RedisT", bound="Redis")
@@ -170,6 +170,7 @@ class Redis(
         client_name: Optional[str] = None,
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
+        auto_close_connection_pool: bool = True,
     ):
         """
         Initialize a new Redis client.
@@ -177,6 +178,13 @@ class Redis(
         then set `retry` to a valid `Retry` object
         """
         kwargs: Dict[str, Any]
+        # auto_close_connection_pool only has an effect if connection_pool is
+        # None. This is a similar feature to the missing __del__ to resolve #1103,
+        # but it accounts for whether a user wants to manually close the connection
+        # pool, as a similar feature to ConnectionPool's __del__.
+        self.auto_close_connection_pool = (
+            auto_close_connection_pool if connection_pool is None else False
+        )
         if not connection_pool:
             kwargs = {
                 "db": db,
@@ -412,11 +420,23 @@ class Redis(
             context = {"client": self, "message": self._DEL_MESSAGE}
             asyncio.get_event_loop().call_exception_handler(context)
 
-    async def close(self):
+    async def close(self, close_connection_pool: Optional[bool] = None) -> None:
+        """
+        Closes Redis client connection
+
+        :param close_connection_pool: decides whether to close the connection pool used
+        by this Redis client, overriding Redis.auto_close_connection_pool. By default,
+        let Redis.auto_close_connection_pool decide whether to close the connection
+        pool.
+        """
         conn = self.connection
         if conn:
             self.connection = None
             await self.connection_pool.release(conn)
+        if close_connection_pool or (
+            close_connection_pool is None and self.auto_close_connection_pool
+        ):
+            await self.connection_pool.disconnect()
 
     async def _send_command_parse_response(self, conn, command_name, *args, **options):
         """
@@ -815,7 +835,7 @@ class PubSub:
     async def listen(self) -> AsyncIterator:
         """Listen for messages on channels this client has been subscribed to"""
         while self.subscribed:
-            response = self.handle_message(await self.parse_response(block=True))
+            response = await self.handle_message(await self.parse_response(block=True))
             if response is not None:
                 yield response
 
@@ -831,7 +851,7 @@ class PubSub:
         """
         response = await self.parse_response(block=False, timeout=timeout)
         if response:
-            return self.handle_message(response, ignore_subscribe_messages)
+            return await self.handle_message(response, ignore_subscribe_messages)
         return None
 
     def ping(self, message=None) -> Awaitable:
@@ -841,7 +861,7 @@ class PubSub:
         message = "" if message is None else message
         return self.execute_command("PING", message)
 
-    def handle_message(self, response, ignore_subscribe_messages=False):
+    async def handle_message(self, response, ignore_subscribe_messages=False):
         """
         Parses a pub/sub message. If the channel or pattern was subscribed to
         with a message handler, the handler is invoked instead of a parsed
@@ -890,7 +910,10 @@ class PubSub:
             else:
                 handler = self.channels.get(message["channel"], None)
             if handler:
-                handler(message)
+                if inspect.iscoroutinefunction(handler):
+                    await handler(message)
+                else:
+                    handler(message)
                 return None
         elif message_type != "pong":
             # this is a subscribe/unsubscribe message. ignore if we don't
