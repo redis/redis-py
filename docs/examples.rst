@@ -8,3 +8,4 @@ Examples
    examples/connection_examples
    examples/ssl_connection_examples
    examples/search_json_examples
+   examples/asyncio_examples
