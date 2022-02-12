@@ -10,7 +10,7 @@ from redis.asyncio.connection import (
     EncodableT,
     SSLConnection,
 )
-from redis.commands import SentinelCommands
+from redis.commands import AsyncSentinelCommands
 from redis.exceptions import ConnectionError, ReadOnlyError, ResponseError, TimeoutError
 from redis.utils import str_if_bytes
 
@@ -145,7 +145,7 @@ class SentinelConnectionPool(ConnectionPool):
         raise SlaveNotFoundError(f"No slave found for {self.service_name!r}")
 
 
-class Sentinel(SentinelCommands):
+class Sentinel(AsyncSentinelCommands):
     """
     Redis Sentinel cluster client
 
