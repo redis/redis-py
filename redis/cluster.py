@@ -118,6 +118,7 @@ REDIS_ALLOWED_KEYS = (
     "ssl_certfile",
     "ssl_cert_reqs",
     "ssl_keyfile",
+    "ssl_password",
     "unix_socket_path",
     "username",
 )
@@ -241,8 +242,6 @@ class RedisCluster(RedisClusterCommands):
                 "SHUTDOWN",
                 "KEYS",
                 "SCAN",
-                "FLUSHALL",
-                "FLUSHDB",
                 "DBSIZE",
                 "BGSAVE",
                 "SLOWLOG GET",
@@ -285,6 +284,13 @@ class RedisCluster(RedisClusterCommands):
                 "TIME",
             ],
             DEFAULT_NODE,
+        ),
+        list_keys_to_dict(
+            [
+                "FLUSHALL",
+                "FLUSHDB",
+            ],
+            PRIMARIES,
         ),
         list_keys_to_dict(
             [

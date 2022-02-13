@@ -91,6 +91,10 @@ class TestRedisCommands:
             r["a"]
 
     # SERVER INFORMATION
+    def test_auth_not_implemented(self, r):
+        with pytest.raises(NotImplementedError):
+            r.auth()
+
     @skip_if_server_version_lt("6.0.0")
     def test_acl_cat_no_category(self, r):
         categories = r.acl_cat()
@@ -640,6 +644,11 @@ class TestRedisCommands:
         assert isinstance(r.client_getredir(), int)
         assert r.client_getredir() == -1
 
+    @skip_if_server_version_lt("6.0.0")
+    def test_hello_notI_implemented(self, r):
+        with pytest.raises(NotImplementedError):
+            r.hello()
+
     def test_config_get(self, r):
         data = r.config_get()
         assert len(data.keys()) > 10
@@ -662,6 +671,11 @@ class TestRedisCommands:
         assert r.config_get()["timeout"] == "70"
         assert r.config_set("timeout", 0)
         assert r.config_get()["timeout"] == "0"
+
+    @skip_if_server_version_lt("6.0.0")
+    def test_failover(self, r):
+        with pytest.raises(NotImplementedError):
+            r.failover()
 
     @pytest.mark.onlynoncluster
     def test_dbsize(self, r):
@@ -973,6 +987,17 @@ class TestRedisCommands:
         assert r.unlink("a", "b") == 2
         assert r.get("a") is None
         assert r.get("b") is None
+
+    @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_lcs(self, unstable_r):
+        unstable_r.mset({"foo": "ohmytext", "bar": "mynewtext"})
+        assert unstable_r.lcs("foo", "bar") == b"mytext"
+        assert unstable_r.lcs("foo", "bar", len=True) == 6
+        result = [b"matches", [[[4, 7], [5, 8]]], b"len", 6]
+        assert unstable_r.lcs("foo", "bar", idx=True, minmatchlen=3) == result
+        with pytest.raises(redis.ResponseError):
+            assert unstable_r.lcs("foo", "bar", len=True, idx=True)
 
     @skip_if_server_version_lt("2.6.0")
     def test_dump_and_restore(self, r):
@@ -2125,6 +2150,17 @@ class TestRedisCommands:
         assert r.bzpopmin(["b", "a"], timeout=1) is None
         r.zadd("c", {"c1": 100})
         assert r.bzpopmin("c", timeout=1) == (b"c", b"c1", 100)
+
+    @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_zmpop(self, unstable_r):
+        unstable_r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
+        res = [b"a", [[b"a1", b"1"], [b"a2", b"2"]]]
+        assert unstable_r.zmpop("2", ["b", "a"], min=True, count=2) == res
+        with pytest.raises(redis.DataError):
+            unstable_r.zmpop("2", ["b", "a"], count=2)
+        unstable_r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
+        assert unstable_r.zmpop("2", ["b", "a"], max=True) == [b"b", [[b"b1", b"10"]]]
 
     @pytest.mark.onlynoncluster
     # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release

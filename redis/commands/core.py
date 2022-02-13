@@ -1089,6 +1089,24 @@ class ManagementCommands:
         """
         return self.execute_command("WAIT", num_replicas, timeout, **kwargs)
 
+    def hello(self):
+        """
+        This function throws a NotImplementedError since it is intentionally
+        not supported.
+        """
+        raise NotImplementedError(
+            "HELLO is intentionally not implemented in the client."
+        )
+
+    def failover(self):
+        """
+        This function throws a NotImplementedError since it is intentionally
+        not supported.
+        """
+        raise NotImplementedError(
+            "FAILOVER is intentionally not implemented in the client."
+        )
+
 
 class BasicKeyCommands:
     """
@@ -1867,6 +1885,35 @@ class BasicKeyCommands:
         For more information check https://redis.io/commands/unlink
         """
         return self.execute_command("UNLINK", *names)
+
+    def lcs(
+        self,
+        key1: str,
+        key2: str,
+        len: Optional[bool] = False,
+        idx: Optional[bool] = False,
+        minmatchlen: Optional[int] = 0,
+        withmatchlen: Optional[bool] = False,
+    ) -> Union[str, int, list]:
+        """
+        Find the longest common subsequence between ``key1`` and ``key2``.
+        If ``len`` is true the length of the match will will be returned.
+        If ``idx`` is true the match position in each strings will be returned.
+        ``minmatchlen`` restrict the list of matches to the ones of
+        the given ``minmatchlen``.
+        If ``withmatchlen`` the length of the match also will be returned.
+        For more information check https://redis.io/commands/lcs
+        """
+        pieces = [key1, key2]
+        if len:
+            pieces.append("LEN")
+        if idx:
+            pieces.append("IDX")
+        if minmatchlen != 0:
+            pieces.extend(["MINMATCHLEN", minmatchlen])
+        if withmatchlen:
+            pieces.append("WITHMATCHLEN")
+        return self.execute_command("LCS", *pieces)
 
 
 class ListCommands:
@@ -3335,6 +3382,31 @@ class SortedSetCommands:
         keys = list_or_args(keys, None)
         keys.append(timeout)
         return self.execute_command("BZPOPMIN", *keys)
+
+    def zmpop(
+        self,
+        num_keys: int,
+        keys: List[str],
+        min: Optional[bool] = False,
+        max: Optional[bool] = False,
+        count: Optional[int] = 1,
+    ) -> list:
+        """
+        Pop ``count`` values (default 1) off of the first non-empty sorted set
+        named in the ``keys`` list.
+        For more information check https://redis.io/commands/zmpop
+        """
+        args = [num_keys] + keys
+        if (min and max) or (not min and not max):
+            raise DataError
+        elif min:
+            args.append("MIN")
+        else:
+            args.append("MAX")
+        if count != 1:
+            args.extend(["COUNT", count])
+
+        return self.execute_command("ZMPOP", *args)
 
     def bzmpop(
         self,
