@@ -112,12 +112,12 @@ You can see the logging output of a containers like this:
 `$ docker logs -f <service>`
 
 The command make test runs all tests in all tested Python
-environments. To run the tests in a single environment, like Python 3.6,
+environments. To run the tests in a single environment, like Python 3.9,
 use a command like this:
 
-`$ docker-compose run test tox -e py36 -- --redis-url=redis://master:6379/9`
+`$ docker-compose run test tox -e py39 -- --redis-url=redis://master:6379/9`
 
-Here, the flag `-e py36` runs tests against the Python 3.6 tox
+Here, the flag `-e py39` runs tests against the Python 3.9 tox
 environment. And note from the example that whenever you run tests like
 this, instead of using make test, you need to pass
 `-- --redis-url=redis://master:6379/9`. This points the tests at the
