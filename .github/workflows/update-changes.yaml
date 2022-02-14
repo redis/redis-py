@@ -20,7 +20,7 @@ jobs:
       - name: Update CHANGES file
         if: "!contains(steps.changed-files.outputs.all_changed_files, 'CHANGES')" 
         run: |
-          echo "* ${{ github.event.pull_request.title }} (#${{ github.event.pull_request.number }}). Thanks @${{ github.actor }}" > CHANGES2
+          echo -e "\t* ${{ github.event.pull_request.title }} (#${{ github.event.pull_request.number }}). Thanks @${{ github.actor }}" > CHANGES2
           cat CHANGES >> CHANGES2
           mv CHANGES2 CHANGES
       - name: Commit & Push changes
