@@ -1,28 +1,31 @@
 name: Update CHANGES File
 on:
-  push:
-    paths-ignore:
-      - 'CHANGES'
+  pull_request:
+    types: [opened]
     branches:
       - master
 jobs:
   update-changes:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@master
+      - uses: actions/checkout@v2
         with:
           persist-credentials: false
           fetch-depth: 0
+          
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v14.6
+          
       - name: Update CHANGES file
+        if: "!contains(steps.changed-files.outputs.all_changed_files, 'CHANGES')" 
         run: |
-          COMMIT="${{ github.event.head_commit.message }}"
-          PR_TITLE=`echo "${COMMIT}" | head -n 1`
-          echo "* ${PR_TITLE}" Thanks @${{ github.actor }} > TMP_CHANGES
-          cat CHANGES >> TMP_CHANGES
-          mv TMP_CHANGES CHANGES
+          echo -e "\t* ${{ github.event.pull_request.title }} (#${{ github.event.pull_request.number }}). Thanks @${{ github.actor }}" > CHANGES2
+          cat CHANGES >> CHANGES2
+          mv CHANGES2 CHANGES
       - name: Commit & Push changes
         uses: actions-js/push@master
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: master
-          message: ${{ github.event.head_commit.message }}
+          branch: ${{ github.head_ref }}
+          message: "Update CHANGES file"
