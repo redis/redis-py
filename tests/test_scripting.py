@@ -2,6 +2,7 @@ import pytest
 
 import redis
 from redis import exceptions
+from redis.commands.core import Script
 from tests.conftest import skip_if_server_version_lt
 
 multiply_script = """
@@ -19,6 +20,39 @@ local message = cmsgpack.unpack(ARGV[1])
 local names = message['name']
 return "hello " .. name
 """
+
+
+class TestScript:
+    """
+    We have a few tests to directly test the Script class.
+
+    However, most of the behavioral tests are covered by `TestScripting`.
+    """
+
+    @pytest.fixture()
+    def script_str(self):
+        return "fake-script"
+
+    @pytest.fixture()
+    def script_bytes(self):
+        return b"\xcf\x84o\xcf\x81\xce\xbdo\xcf\x82"
+
+    def test_script_text(self, r, script_str, script_bytes):
+        assert Script(r, script_str).script == "fake-script"
+        assert Script(r, script_bytes).script == b"\xcf\x84o\xcf\x81\xce\xbdo\xcf\x82"
+
+    def test_string_script_sha(self, r, script_str):
+        script = Script(r, script_str)
+        assert script.sha == "505e4245f0866b60552741b3cce9a0c3d3b66a87"
+
+    def test_bytes_script_sha(self, r, script_bytes):
+        script = Script(r, script_bytes)
+        assert script.sha == "1329344e6bf995a35a8dc57ab1a6af8b2d54a763"
+
+    def test_encoder(self, r, script_bytes):
+        encoder = Script(r, script_bytes).get_encoder()
+        assert encoder is not None
+        assert encoder.encode("fake-script") == b"fake-script"
 
 
 class TestScripting:

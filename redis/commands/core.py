@@ -4663,7 +4663,7 @@ class Script:
         if isinstance(script, str):
             # We need the encoding from the client in order to generate an
             # accurate byte representation of the script
-            encoder = registered_client.get_encoder()
+            encoder = self.get_encoder()
             script = encoder.encode(script)
         self.sha = hashlib.sha1(script).hexdigest()
 
@@ -4686,6 +4686,24 @@ class Script:
             # Overwrite the sha just in case there was a discrepancy.
             self.sha = client.script_load(self.script)
             return client.evalsha(self.sha, len(keys), *args)
+
+    def get_encoder(self):
+        """Get the encoder to encode string scripts into bytes."""
+        try:
+            return self.registered_client.get_encoder()
+        except AttributeError:
+            # DEPRECATED
+            # In version <=4.1.2, this was the code we used to get the encoder.
+            # However, after 4.1.2 we added support for scripting in clustered
+            # redis. ClusteredRedis doesn't have a `.connection_pool` attribute
+            # so we changed the Script class to use
+            # `self.registered_client.get_encoder` (see above).
+            # However, that is technically a breaking change, as consumers who
+            # use Scripts directly might inject a `registered_client` that
+            # doesn't have a `.get_encoder` field. This try/except prevents us
+            # from breaking backward-compatibility. Ideally, it would be
+            # removed in the next major release.
+            return self.registered_client.connection_pool.get_encoder()
 
 
 class BitFieldOperation:
