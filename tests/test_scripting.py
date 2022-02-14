@@ -180,6 +180,11 @@ class TestScripting:
         r.script_load(multiply_script)
         assert r.script_exists(sha) == [True]
 
+    def test_flush_response(self, r):
+        r.script_load(multiply_script)
+        flush_response = r.script_flush()
+        assert flush_response is True
+
     def test_script_object(self, r):
         r.set("a", 2)
         multiply = r.register_script(multiply_script)
