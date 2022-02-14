@@ -24,7 +24,6 @@ jobs:
           cat CHANGES >> CHANGES2
           mv CHANGES2 CHANGES
       - name: Commit & Push changes
-        if: "!contains(steps.changed-files.outputs.all_changed_files, 'CHANGES')"
         uses: actions-js/push@master
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
