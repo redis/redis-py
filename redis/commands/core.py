@@ -1864,7 +1864,7 @@ class BasicKeyCommands:
         """
         Watches the values at keys ``names``, or None if the key doesn't exist
 
-        For more information check https://redis.io/commands/type
+        For more information check https://redis.io/commands/watch
         """
         warnings.warn(DeprecationWarning("Call WATCH from a Pipeline object"))
 
