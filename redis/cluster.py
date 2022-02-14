@@ -712,6 +712,7 @@ class RedisCluster(RedisClusterCommands):
 
         return ClusterPipeline(
             nodes_manager=self.nodes_manager,
+            commands_parser=self.commands_parser,
             startup_nodes=self.nodes_manager.startup_nodes,
             result_callbacks=self.result_callbacks,
             cluster_response_callbacks=self.cluster_response_callbacks,
@@ -1598,6 +1599,7 @@ class ClusterPipeline(RedisCluster):
     def __init__(
         self,
         nodes_manager,
+        commands_parser,
         result_callbacks=None,
         cluster_response_callbacks=None,
         startup_nodes=None,
@@ -1610,6 +1612,7 @@ class ClusterPipeline(RedisCluster):
         log.info("Creating new instance of ClusterPipeline")
         self.command_stack = []
         self.nodes_manager = nodes_manager
+        self.commands_parser = commands_parser
         self.refresh_table_asap = False
         self.result_callbacks = (
             result_callbacks or self.__class__.RESULT_CALLBACKS.copy()
@@ -1626,11 +1629,6 @@ class ClusterPipeline(RedisCluster):
             kwargs.get("encoding_errors", "strict"),
             kwargs.get("decode_responses", False),
         )
-
-        # The commands parser refers to the parent
-        # so that we don't push the COMMAND command
-        # onto the stack
-        self.commands_parser = CommandsParser(super())
 
     def __repr__(self):
         """ """
