@@ -96,7 +96,9 @@ class TestRedisCommands:
             commands=["+set"],
         )
         assert r.acl_dryrun(username, "set", "key", "value") == b"OK"
-        assert r.acl_dryrun(username, "get", "key").startswith(b"This user has no permissions to run the")
+        assert r.acl_dryrun(username, "get", "key").startswith(
+            b"This user has no permissions to run the"
+        )
 
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
