@@ -1,5 +1,6 @@
 import itertools
 import time
+from typing import Dict, Union
 
 from ..helpers import parse_to_dict
 from ._util import to_string
@@ -377,7 +378,17 @@ class SearchCommands:
         it = map(to_string, res)
         return dict(zip(it, it))
 
-    def _mk_query_args(self, query):
+    def get_params_args(self, query_params: Dict[str, Union[str, int, float]]):
+        args = []
+        if len(query_params) > 0:
+            args.append("params")
+            args.append(len(query_params) * 2)
+            for key, value in query_params.items():
+                args.append(key)
+                args.append(value)
+        return args
+
+    def _mk_query_args(self, query, query_params: Dict[str, Union[str, int, float]]):
         args = [self.index_name]
 
         if isinstance(query, str):
@@ -387,9 +398,16 @@ class SearchCommands:
             raise ValueError(f"Bad query type {type(query)}")
 
         args += query.get_args()
+        if query_params is not None:
+            args += self.get_params_args(query_params)
+
         return args, query
 
-    def search(self, query):
+    def search(
+        self,
+        query: Union[str, Query],
+        query_params: Dict[str, Union[str, int, float]] = None,
+    ):
         """
         Search the index for a given query, and return a result of documents
 
@@ -401,7 +419,7 @@ class SearchCommands:
 
         For more information: https://oss.redis.com/redisearch/Commands/#ftsearch
         """  # noqa
-        args, query = self._mk_query_args(query)
+        args, query = self._mk_query_args(query, query_params=query_params)
         st = time.time()
         res = self.execute_command(SEARCH_CMD, *args)
 
@@ -413,18 +431,26 @@ class SearchCommands:
             with_scores=query._with_scores,
         )
 
-    def explain(self, query):
+    def explain(
+        self,
+        query=Union[str, Query],
+        query_params: Dict[str, Union[str, int, float]] = None,
+    ):
         """Returns the execution plan for a complex query.
 
         For more information: https://oss.redis.com/redisearch/Commands/#ftexplain
         """  # noqa
-        args, query_text = self._mk_query_args(query)
+        args, query_text = self._mk_query_args(query, query_params=query_params)
         return self.execute_command(EXPLAIN_CMD, *args)
 
-    def explain_cli(self, query):  # noqa
+    def explain_cli(self, query: Union[str, Query]):  # noqa
         raise NotImplementedError("EXPLAINCLI will not be implemented.")
 
-    def aggregate(self, query):
+    def aggregate(
+        self,
+        query: Union[str, Query],
+        query_params: Dict[str, Union[str, int, float]] = None,
+    ):
         """
         Issue an aggregation query.
 
@@ -445,6 +471,8 @@ class SearchCommands:
             cmd = [CURSOR_CMD, "READ", self.index_name] + query.build_args()
         else:
             raise ValueError("Bad query", query)
+        if query_params is not None:
+            cmd += self.get_params_args(query_params)
 
         raw = self.execute_command(*cmd)
         return self._get_aggregate_result(raw, query, has_cursor)
