@@ -37,6 +37,9 @@ jobs:
          python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
          test-type: ['standalone', 'cluster']
          connection-type: ['hiredis', 'plain']
+         include:
+           - python-version: 3.11
+           - experimental: true
      env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
      name: Python ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}} tests
@@ -78,6 +81,9 @@ jobs:
     strategy:
       matrix:
         python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
+        include:
+          - python-version: 3.11
+          - experimental: true
     steps:
       - uses: actions/checkout@v2
       - name: install python ${{ matrix.python-version }}
