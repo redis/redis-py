@@ -821,7 +821,9 @@ class Connection:
                 try:
                     if os.getpid() == self.pid:
                         self._writer.close()  # type: ignore[union-attr]
-                        await self._writer.wait_closed()  # type: ignore[union-attr]
+                        # py3.6 doesn't have this method
+                        if hasattr(self._writer, "wait_closed"):
+                            await self._writer.wait_closed()  # type: ignore[union-attr]
                 except OSError:
                     pass
                 self._reader = None
