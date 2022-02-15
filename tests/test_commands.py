@@ -96,7 +96,9 @@ class TestRedisCommands:
             commands=["+set"],
         )
         assert r.acl_dryrun(username, "set", "key", "value") == b"OK"
-        assert r.acl_dryrun(username, "get", "key").startswith(b"This user has no permissions to run the")
+        assert r.acl_dryrun(username, "get", "key").startswith(
+            b"This user has no permissions to run the"
+        )
 
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
@@ -3068,18 +3070,15 @@ class TestRedisCommands:
                 (2.19093829393386841, 41.43379028184083523),
             ]
         ]
-        assert (
-            r.geosearch(
-                "barcelona",
-                longitude=2.191,
-                latitude=41.433,
-                radius=1,
-                unit="km",
-                withdist=True,
-                withcoord=True,
-            )
-            == [[b"place1", 0.0881, (2.19093829393386841, 41.43379028184083523)]]
-        )
+        assert r.geosearch(
+            "barcelona",
+            longitude=2.191,
+            latitude=41.433,
+            radius=1,
+            unit="km",
+            withdist=True,
+            withcoord=True,
+        ) == [[b"place1", 0.0881, (2.19093829393386841, 41.43379028184083523)]]
         assert r.geosearch(
             "barcelona",
             longitude=2.191,
@@ -3409,7 +3408,7 @@ class TestRedisCommands:
     def test_xadd(self, r):
         stream = "stream"
         message_id = r.xadd(stream, {"foo": "bar"})
-        assert re.match(br"[0-9]+\-[0-9]+", message_id)
+        assert re.match(rb"[0-9]+\-[0-9]+", message_id)
 
         # explicit message id
         message_id = b"9999999999999999999-0"
@@ -3548,17 +3547,14 @@ class TestRedisCommands:
 
         # reclaim the message as consumer1, but use the justid argument
         # which only returns message ids
-        assert (
-            r.xclaim(
-                stream,
-                group,
-                consumer1,
-                min_idle_time=0,
-                message_ids=(message_id,),
-                justid=True,
-            )
-            == [message_id]
-        )
+        assert r.xclaim(
+            stream,
+            group,
+            consumer1,
+            min_idle_time=0,
+            message_ids=(message_id,),
+            justid=True,
+        ) == [message_id]
 
     @skip_if_server_version_lt("5.0.0")
     def test_xclaim_trimmed(self, r):
