@@ -30,6 +30,7 @@ jobs:
 
    run-tests:
      runs-on: ubuntu-latest
+     continue-on-error: ${{ matrix.experimental }}
      timeout-minutes: 30
      strategy:
        max-parallel: 15
@@ -37,6 +38,7 @@ jobs:
          python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
          test-type: ['standalone', 'cluster']
          connection-type: ['hiredis', 'plain']
+         experimental: [false]
          include:
            - python-version: 3.11.0-alpha.5
            - experimental: true
@@ -76,11 +78,13 @@ jobs:
           bash .github/workflows/install_and_test.sh ${{ matrix.extension }}
 
    install_package_from_commit:
+    continue-on-error: ${{ matrix.experimental }}
     name: Install package from commit hash
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
+        experimental: [false]
         include:
           - python-version: 3.11.0-alpha.5
           - experimental: true
