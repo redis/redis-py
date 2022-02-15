@@ -38,7 +38,7 @@ jobs:
          test-type: ['standalone', 'cluster']
          connection-type: ['hiredis', 'plain']
          include:
-           - python-version: 3.11
+           - python-version: 3.11.0-alpha.5
            - experimental: true
      env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
@@ -82,7 +82,7 @@ jobs:
       matrix:
         python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
         include:
-          - python-version: 3.11
+          - python-version: 3.11.0-alpha.5
           - experimental: true
     steps:
       - uses: actions/checkout@v2
