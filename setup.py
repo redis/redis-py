@@ -30,7 +30,7 @@ setup(
     },
     author="Redis Inc.",
     author_email="oss@redis.com",
-    python_requires=">=3.7",
+    python_requires=">=3.6",
     install_requires=[
         "deprecated>=1.2.3",
         "packaging>=20.4",
