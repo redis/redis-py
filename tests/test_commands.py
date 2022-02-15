@@ -87,6 +87,17 @@ class TestRedisCommands:
         assert isinstance(commands, list)
         assert "get" in commands
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_acl_dryrun(self, r):
+        username = "redis-py-user"
+        r.acl_setuser(
+            username,
+            keys=["*"],
+            commands=["+set"],
+        )
+        assert r.acl_dryrun(username, "set", "key", "value") == b"OK"
+        assert r.acl_dryrun(username, "get", "key").startswith(b"This user has no permissions to run the")
+
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
     def test_acl_deluser(self, r, request):
