@@ -964,7 +964,7 @@ def test_aggregations_groupby(client):
 
     res = client.ft().aggregate(req).rows[0]
     assert res[1] == "redis"
-    assert res[3] == "10"
+    assert res[3] == "8"  # median of 3,8,10
 
     req = aggregations.AggregateRequest("redis").group_by(
         "@parent",
@@ -1521,3 +1521,56 @@ def test_profile_limited(client):
     )
     assert det["Iterators profile"]["Type"] == "INTERSECT"
     assert len(res.docs) == 3  # check also the search result
+
+
+@pytest.mark.redismod
+def test_text_params(modclient):
+    modclient.flushdb()
+    modclient.ft().create_index((TextField("name"),))
+
+    modclient.ft().add_document("doc1", name="Alice")
+    modclient.ft().add_document("doc2", name="Bob")
+    modclient.ft().add_document("doc3", name="Carol")
+
+    params_dict = {"name1": "Alice", "name2": "Bob"}
+    q = Query("@name:($name1 | $name2 )")
+    res = modclient.ft().search(q, query_params=params_dict)
+    assert 2 == res.total
+    assert "doc1" == res.docs[0].id
+    assert "doc2" == res.docs[1].id
+
+
+@pytest.mark.redismod
+def test_numeric_params(modclient):
+    modclient.flushdb()
+    modclient.ft().create_index((NumericField("numval"),))
+
+    modclient.ft().add_document("doc1", numval=101)
+    modclient.ft().add_document("doc2", numval=102)
+    modclient.ft().add_document("doc3", numval=103)
+
+    params_dict = {"min": 101, "max": 102}
+    q = Query("@numval:[$min $max]")
+    res = modclient.ft().search(q, query_params=params_dict)
+
+    assert 2 == res.total
+    assert "doc1" == res.docs[0].id
+    assert "doc2" == res.docs[1].id
+
+
+@pytest.mark.redismod
+def test_geo_params(modclient):
+
+    modclient.flushdb()
+    modclient.ft().create_index((GeoField("g")))
+    modclient.ft().add_document("doc1", g="29.69465, 34.95126")
+    modclient.ft().add_document("doc2", g="29.69350, 34.94737")
+    modclient.ft().add_document("doc3", g="29.68746, 34.94882")
+
+    params_dict = {"lat": "34.95126", "lon": "29.69465", "radius": 1000, "units": "km"}
+    q = Query("@g:[$lon $lat $radius $units]")
+    res = modclient.ft().search(q, query_params=params_dict)
+    assert 3 == res.total
+    assert "doc1" == res.docs[0].id
+    assert "doc2" == res.docs[1].id
+    assert "doc3" == res.docs[2].id
