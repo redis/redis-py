@@ -28,6 +28,14 @@ class ACLCommands:
         pieces = [category] if category else []
         return self.execute_command("ACL CAT", *pieces, **kwargs)
 
+    def acl_dryrun(self, username, *args, **kwargs):
+        """
+        Simulate the execution of a given command by a given ``username``.
+
+        For more information check https://redis.io/commands/acl-dryrun
+        """
+        return self.execute_command("ACL DRYRUN", username, *args, **kwargs)
+
     def acl_deluser(self, *username, **kwargs):
         """
         Delete the ACL for the specified ``username``s
