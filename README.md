@@ -1203,7 +1203,7 @@ Please note:
 - The pipeline gets its 'read_from_replicas' value from the cluster's parameter.
 Thus, if read from replications is enabled in the cluster instance, the pipeline
 will also direct read commands to replicas.
-- The 'transcation' option is NOT supported in cluster-mode. In non-cluster mode,
+- The 'transaction' option is NOT supported in cluster-mode. In non-cluster mode,
 the 'transaction' option is available when executing pipelines. This wraps the
 pipeline commands with MULTI/EXEC commands, and effectively turns the pipeline
 commands into a single transaction block. This means that all commands are

@@ -71,6 +71,14 @@ class ACLCommands(CommandsProtocol):
         pieces: list[EncodableT] = [category] if category else []
         return self.execute_command("ACL CAT", *pieces, **kwargs)
 
+    def acl_dryrun(self, username, *args, **kwargs):
+        """
+        Simulate the execution of a given command by a given ``username``.
+
+        For more information check https://redis.io/commands/acl-dryrun
+        """
+        return self.execute_command("ACL DRYRUN", username, *args, **kwargs)
+
     def acl_deluser(self, *username: str, **kwargs) -> ResponseT:
         """
         Delete the ACL for the specified ``username``s
@@ -2144,7 +2152,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Watches the values at keys ``names``, or None if the key doesn't exist
 
-        For more information check https://redis.io/commands/type
+        For more information check https://redis.io/commands/watch
         """
         warnings.warn(DeprecationWarning("Call WATCH from a Pipeline object"))
 
