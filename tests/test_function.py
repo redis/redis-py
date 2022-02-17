@@ -9,6 +9,7 @@ set_function = "redis.register_function('set', function(keys, args) \
 get_function = "redis.register_function('get', function(keys, args) \
                 return redis.call('GET', keys[1]) end)"
 
+
 @pytest.mark.onlynoncluster
 # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
 class TestFunction:
