@@ -67,9 +67,9 @@ class TestFunction:
         unstable_r.function_load("Lua", "mylib", set_function)
         unstable_r.function_load("Lua", "mylib2", get_function)
         assert unstable_r.fcall("set", 1, "foo", "bar") == b"OK"
-        # assert unstable_r.fcall("get", 1, "foo") == b"bar"
-        # with pytest.raises(ResponseError):
-        #     unstable_r.fcall("myfunc", 0, "hello")
+        assert unstable_r.fcall("get", 1, "foo") == b"bar"
+        with pytest.raises(ResponseError):
+            unstable_r.fcall("myfunc", 0, "hello")
 
     def test_fcall_ro(self, unstable_r):
         unstable_r.function_load("Lua", "mylib", function)
