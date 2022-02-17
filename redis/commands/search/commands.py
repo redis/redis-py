@@ -433,7 +433,7 @@ class SearchCommands:
 
     def explain(
         self,
-        query=Union[str, Query],
+        query: Union[str, Query],
         query_params: Dict[str, Union[str, int, float]] = None,
     ):
         """Returns the execution plan for a complex query.
