@@ -1,9 +1,9 @@
-from __future__ import annotations
-
 import asyncio
 import random
+from typing import Union
 from urllib.parse import urlparse
 
+import pytest_asyncio
 import pytest
 from packaging.version import Version
 
@@ -27,7 +27,7 @@ async def _get_info(redis_url):
     return info
 
 
-@pytest.fixture(
+@pytest_asyncio.fixture(
     params=[
         (True, PythonParser),
         (False, PythonParser),
@@ -91,12 +91,12 @@ def create_redis(request, event_loop: asyncio.BaseEventLoop):
     return f
 
 
-@pytest.fixture()
+@pytest_asyncio.fixture()
 async def r(create_redis):
     yield await create_redis()
 
 
-@pytest.fixture()
+@pytest_asyncio.fixture()
 async def r2(create_redis):
     """A second client for tests that need multiple"""
     yield await create_redis()
@@ -109,19 +109,19 @@ def _gen_cluster_mock_resp(r, response):
     return r
 
 
-@pytest.fixture()
+@pytest_asyncio.fixture()
 async def mock_cluster_resp_ok(create_redis, **kwargs):
     r = await create_redis(**kwargs)
     return _gen_cluster_mock_resp(r, "OK")
 
 
-@pytest.fixture()
+@pytest_asyncio.fixture()
 async def mock_cluster_resp_int(create_redis, **kwargs):
     r = await create_redis(**kwargs)
     return _gen_cluster_mock_resp(r, "2")
 
 
-@pytest.fixture()
+@pytest_asyncio.fixture()
 async def mock_cluster_resp_info(create_redis, **kwargs):
     r = await create_redis(**kwargs)
     response = (
@@ -135,7 +135,7 @@ async def mock_cluster_resp_info(create_redis, **kwargs):
     return _gen_cluster_mock_resp(r, response)
 
 
-@pytest.fixture()
+@pytest_asyncio.fixture()
 async def mock_cluster_resp_nodes(create_redis, **kwargs):
     r = await create_redis(**kwargs)
     response = (
@@ -159,7 +159,7 @@ async def mock_cluster_resp_nodes(create_redis, **kwargs):
     return _gen_cluster_mock_resp(r, response)
 
 
-@pytest.fixture()
+@pytest_asyncio.fixture()
 async def mock_cluster_resp_slaves(create_redis, **kwargs):
     r = await create_redis(**kwargs)
     response = (
@@ -170,7 +170,7 @@ async def mock_cluster_resp_slaves(create_redis, **kwargs):
     return _gen_cluster_mock_resp(r, response)
 
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session")
 def master_host(request):
     url = request.config.getoption("--redis-url")
     parts = urlparse(url)
@@ -178,7 +178,7 @@ def master_host(request):
 
 
 async def wait_for_command(
-    client: redis.Redis, monitor: Monitor, command: str, key: str | None = None
+    client: redis.Redis, monitor: Monitor, command: str, key: Union[str, None] = None
 ):
     # issue a command with a key name that's local to this process.
     # if we find a command with our key before the command we're waiting

@@ -1,4 +1,4 @@
-from __future__ import annotations
+# from __future__ import annotations
 
 import datetime
 import hashlib
@@ -10,12 +10,14 @@ from typing import (
     AsyncIterator,
     Awaitable,
     Callable,
+    Dict,
     Iterable,
     Iterator,
     List,
     Mapping,
     Optional,
     Sequence,
+    Tuple,
     Union,
 )
 
@@ -56,7 +58,7 @@ class ACLCommands(CommandsProtocol):
     see: https://redis.io/topics/acl
     """
 
-    def acl_cat(self, category: str | None = None, **kwargs) -> ResponseT:
+    def acl_cat(self, category: Union[str, None] = None, **kwargs) -> ResponseT:
         """
         Returns a list of categories or commands within a category.
 
@@ -77,7 +79,7 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL DELUSER", *username, **kwargs)
 
-    def acl_genpass(self, bits: int | None = None, **kwargs) -> ResponseT:
+    def acl_genpass(self, bits: Union[int, None] = None, **kwargs) -> ResponseT:
         """Generate a random password value.
         If ``bits`` is supplied then use this number of bits, rounded to
         the next multiple of 4.
@@ -121,7 +123,7 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL LIST", **kwargs)
 
-    def acl_log(self, count: int | None = None, **kwargs) -> ResponseT:
+    def acl_log(self, count: Union[int, None] = None, **kwargs) -> ResponseT:
         """
         Get ACL logs as a list.
         :param int count: Get logs[0:count].
@@ -174,11 +176,11 @@ class ACLCommands(CommandsProtocol):
         username: str,
         enabled: bool = False,
         nopass: bool = False,
-        passwords: str | Iterable[str] | None = None,
-        hashed_passwords: str | Iterable[str] | None = None,
-        categories: Iterable[str] | None = None,
-        commands: Iterable[str] | None = None,
-        keys: Iterable[KeyT] | None = None,
+        passwords: Union[str, Iterable[str], None] = None,
+        hashed_passwords: Union[str, Iterable[str], None] = None,
+        categories: Union[Iterable[str], None] = None,
+        commands: Union[Iterable[str], None] = None,
+        keys: Union[Iterable[KeyT], None] = None,
         reset: bool = False,
         reset_keys: bool = False,
         reset_passwords: bool = False,
@@ -406,11 +408,11 @@ class ManagementCommands(CommandsProtocol):
 
     def client_kill_filter(
         self,
-        _id: str | None = None,
-        _type: str | None = None,
-        addr: str | None = None,
-        skipme: bool | None = None,
-        laddr: bool | None = None,
+        _id: Union[str, None] = None,
+        _type: Union[str, None] = None,
+        addr: Union[str, None] = None,
+        skipme: Union[bool, None] = None,
+        laddr: Union[bool, None] = None,
         user: str = None,
         **kwargs,
     ) -> ResponseT:
@@ -465,8 +467,8 @@ class ManagementCommands(CommandsProtocol):
 
     def client_list(
         self,
-        _type: str | None = None,
-        client_id: list[EncodableT] = [],
+        _type: Union[str, None] = None,
+        client_id: List[EncodableT] = [],
         **kwargs,
     ) -> ResponseT:
         """
@@ -511,7 +513,7 @@ class ManagementCommands(CommandsProtocol):
 
     def client_reply(
         self,
-        reply: Literal["ON"] | Literal["OFF"] | Literal["SKIP"],
+        reply: Union[Literal["ON"], Literal["OFF"], Literal["SKIP"]],
         **kwargs,
     ) -> ResponseT:
         """
@@ -544,7 +546,7 @@ class ManagementCommands(CommandsProtocol):
 
     def client_tracking_on(
         self,
-        clientid: int | None = None,
+        clientid: Union[int, None] = None,
         prefix: Sequence[KeyT] = [],
         bcast: bool = False,
         optin: bool = False,
@@ -563,7 +565,7 @@ class ManagementCommands(CommandsProtocol):
 
     def client_tracking_off(
         self,
-        clientid: int | None = None,
+        clientid: Union[int, None] = None,
         prefix: Sequence[KeyT] = [],
         bcast: bool = False,
         optin: bool = False,
@@ -583,7 +585,7 @@ class ManagementCommands(CommandsProtocol):
     def client_tracking(
         self,
         on: bool = True,
-        clientid: int | None = None,
+        clientid: Union[int, None] = None,
         prefix: Sequence[KeyT] = [],
         bcast: bool = False,
         optin: bool = False,
@@ -863,7 +865,7 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("SELECT", index, **kwargs)
 
-    def info(self, section: str | None = None, **kwargs) -> ResponseT:
+    def info(self, section: Union[str, None] = None, **kwargs) -> ResponseT:
         """
         Returns a dictionary containing information about the Redis server
 
@@ -889,7 +891,7 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("LASTSAVE", **kwargs)
 
-    def lolwut(self, *version_numbers: str | float, **kwargs) -> ResponseT:
+    def lolwut(self, *version_numbers: Union[str, float], **kwargs) -> ResponseT:
         """
         Get the Redis version and a piece of generative computer art
 
@@ -916,7 +918,7 @@ class ManagementCommands(CommandsProtocol):
         timeout: int,
         copy: bool = False,
         replace: bool = False,
-        auth: str | None = None,
+        auth: Union[str, None] = None,
         **kwargs,
     ) -> ResponseT:
         """
@@ -998,7 +1000,7 @@ class ManagementCommands(CommandsProtocol):
         return self.execute_command("MEMORY MALLOC-STATS", **kwargs)
 
     def memory_usage(
-        self, key: KeyT, samples: int | None = None, **kwargs
+        self, key: KeyT, samples: Union[int, None] = None, **kwargs
     ) -> ResponseT:
         """
         Return the total memory usage for key, its value and associated
@@ -1083,7 +1085,7 @@ class ManagementCommands(CommandsProtocol):
         raise RedisError("SHUTDOWN seems to have failed.")
 
     def slaveof(
-        self, host: str | None = None, port: int | None = None, **kwargs
+        self, host: Union[str, None] = None, port: Union[int, None] = None, **kwargs
     ) -> ResponseT:
         """
         Set the server to be a replicated slave of the instance identified
@@ -1096,7 +1098,7 @@ class ManagementCommands(CommandsProtocol):
             return self.execute_command("SLAVEOF", b"NO", b"ONE", **kwargs)
         return self.execute_command("SLAVEOF", host, port, **kwargs)
 
-    def slowlog_get(self, num: int | None = None, **kwargs) -> ResponseT:
+    def slowlog_get(self, num: Union[int, None] = None, **kwargs) -> ResponseT:
         """
         Get the entries from the slowlog. If ``num`` is specified, get the
         most recent ``num`` items.
@@ -1210,6 +1212,118 @@ class AsyncManagementCommands(ManagementCommands):
         raise RedisError("SHUTDOWN seems to have failed.")
 
 
+class BitFieldOperation:
+    """
+    Command builder for BITFIELD commands.
+    """
+
+    def __init__(
+        self,
+        client: Union["Redis", "AsyncRedis"],
+        key: str,
+        default_overflow: Union[str, None] = None,
+    ):
+        self.client = client
+        self.key = key
+        self._default_overflow = default_overflow
+        # for typing purposes, run the following in constructor and in reset()
+        self.operations: list[tuple[EncodableT, ...]] = []
+        self._last_overflow = "WRAP"
+        self.reset()
+
+    def reset(self):
+        """
+        Reset the state of the instance to when it was constructed
+        """
+        self.operations = []
+        self._last_overflow = "WRAP"
+        self.overflow(self._default_overflow or self._last_overflow)
+
+    def overflow(self, overflow: str):
+        """
+        Update the overflow algorithm of successive INCRBY operations
+        :param overflow: Overflow algorithm, one of WRAP, SAT, FAIL. See the
+            Redis docs for descriptions of these algorithmsself.
+        :returns: a :py:class:`BitFieldOperation` instance.
+        """
+        overflow = overflow.upper()
+        if overflow != self._last_overflow:
+            self._last_overflow = overflow
+            self.operations.append(("OVERFLOW", overflow))
+        return self
+
+    def incrby(
+        self,
+        fmt: str,
+        offset: BitfieldOffsetT,
+        increment: int,
+        overflow: Union[str, None] = None,
+    ):
+        """
+        Increment a bitfield by a given amount.
+        :param fmt: format-string for the bitfield being updated, e.g. 'u8'
+            for an unsigned 8-bit integer.
+        :param offset: offset (in number of bits). If prefixed with a
+            '#', this is an offset multiplier, e.g. given the arguments
+            fmt='u8', offset='#2', the offset will be 16.
+        :param int increment: value to increment the bitfield by.
+        :param str overflow: overflow algorithm. Defaults to WRAP, but other
+            acceptable values are SAT and FAIL. See the Redis docs for
+            descriptions of these algorithms.
+        :returns: a :py:class:`BitFieldOperation` instance.
+        """
+        if overflow is not None:
+            self.overflow(overflow)
+
+        self.operations.append(("INCRBY", fmt, offset, increment))
+        return self
+
+    def get(self, fmt: str, offset: BitfieldOffsetT):
+        """
+        Get the value of a given bitfield.
+        :param fmt: format-string for the bitfield being read, e.g. 'u8' for
+            an unsigned 8-bit integer.
+        :param offset: offset (in number of bits). If prefixed with a
+            '#', this is an offset multiplier, e.g. given the arguments
+            fmt='u8', offset='#2', the offset will be 16.
+        :returns: a :py:class:`BitFieldOperation` instance.
+        """
+        self.operations.append(("GET", fmt, offset))
+        return self
+
+    def set(self, fmt: str, offset: BitfieldOffsetT, value: int):
+        """
+        Set the value of a given bitfield.
+        :param fmt: format-string for the bitfield being read, e.g. 'u8' for
+            an unsigned 8-bit integer.
+        :param offset: offset (in number of bits). If prefixed with a
+            '#', this is an offset multiplier, e.g. given the arguments
+            fmt='u8', offset='#2', the offset will be 16.
+        :param int value: value to set at the given position.
+        :returns: a :py:class:`BitFieldOperation` instance.
+        """
+        self.operations.append(("SET", fmt, offset, value))
+        return self
+
+    @property
+    def command(self):
+        cmd = ["BITFIELD", self.key]
+        for ops in self.operations:
+            cmd.extend(ops)
+        return cmd
+
+    def execute(self) -> ResponseT:
+        """
+        Execute the operation(s) in a single BITFIELD command. The return value
+        is a list of values corresponding to each operation. If the client
+        used to create this instance was a pipeline, the list of values
+        will be present within the pipeline's execute.
+        """
+        command = self.command
+        self.reset()
+        return self.client.execute_command(*command)
+
+
 class BasicKeyCommands(CommandsProtocol):
     """
     Redis basic key-based commands
@@ -1228,8 +1342,8 @@ class BasicKeyCommands(CommandsProtocol):
     def bitcount(
         self,
         key: KeyT,
-        start: int | None = None,
-        end: int | None = None,
+        start: Union[int, None] = None,
+        end: Union[int, None] = None,
     ) -> ResponseT:
         """
         Returns the count of set bits in the value of ``key``.  Optional
@@ -1246,9 +1360,9 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("BITCOUNT", *params)
 
     def bitfield(
-        self: Redis | AsyncRedis,
+        self: Union["Redis", "AsyncRedis"],
         key: KeyT,
-        default_overflow: str | None = None,
+        default_overflow: Union[str, None] = None,
     ) -> BitFieldOperation:
         """
         Return a BitFieldOperation instance to conveniently construct one or
@@ -1276,8 +1390,8 @@ class BasicKeyCommands(CommandsProtocol):
         self,
         key: KeyT,
         bit: int,
-        start: int | None = None,
-        end: int | None = None,
+        start: Union[int, None] = None,
+        end: Union[int, None] = None,
     ) -> ResponseT:
         """
         Return the position of the first bit set to 1 or 0 in a string.
@@ -1303,7 +1417,7 @@ class BasicKeyCommands(CommandsProtocol):
         self,
         source: str,
         destination: str,
-        destination_db: str | None = None,
+        destination_db: Union[str, None] = None,
         replace: bool = False,
     ) -> ResponseT:
         """
@@ -1412,10 +1526,10 @@ class BasicKeyCommands(CommandsProtocol):
     def getex(
         self,
         name: KeyT,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
-        exat: AbsExpiryT | None = None,
-        pxat: AbsExpiryT | None = None,
+        ex: Union[ExpiryT, None] = None,
+        px: Union[ExpiryT, None] = None,
+        exat: Union[AbsExpiryT, None] = None,
+        pxat: Union[AbsExpiryT, None] = None,
         persist: bool = False,
     ) -> ResponseT:
         """
@@ -1741,8 +1855,8 @@ class BasicKeyCommands(CommandsProtocol):
         value: EncodableT,
         replace: bool = False,
         absttl: bool = False,
-        idletime: int | None = None,
-        frequency: int | None = None,
+        idletime: Union[int, None] = None,
+        frequency: Union[int, None] = None,
     ) -> ResponseT:
         """
         Create a key using the provided serialized value, previously obtained
@@ -1788,14 +1902,14 @@ class BasicKeyCommands(CommandsProtocol):
         self,
         name: KeyT,
         value: EncodableT,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: Union[ExpiryT, None] = None,
+        px: Union[ExpiryT, None] = None,
         nx: bool = False,
         xx: bool = False,
         keepttl: bool = False,
         get: bool = False,
-        exat: AbsExpiryT | None = None,
-        pxat: AbsExpiryT | None = None,
+        exat: Union[AbsExpiryT, None] = None,
+        pxat: Union[AbsExpiryT, None] = None,
     ) -> ResponseT:
         """
         Set the value at key ``name`` to ``value``
@@ -1927,10 +2041,10 @@ class BasicKeyCommands(CommandsProtocol):
         algo: Literal["LCS"],
         value1: KeyT,
         value2: KeyT,
-        specific_argument: Literal["strings"] | Literal["keys"] = "strings",
+        specific_argument: Union[Literal["strings"], Literal["keys"]] = "strings",
         len: bool = False,
         idx: bool = False,
-        minmatchlen: int | None = None,
+        minmatchlen: Union[int, None] = None,
         withmatchlen: bool = False,
         **kwargs,
     ) -> ResponseT:
@@ -2479,9 +2593,9 @@ class ScanCommands(CommandsProtocol):
     def scan(
         self,
         cursor: int = 0,
-        match: PatternT | None = None,
-        count: int | None = None,
-        _type: str | None = None,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+        _type: Union[str, None] = None,
         **kwargs,
     ) -> ResponseT:
         """
@@ -2511,9 +2625,9 @@ class ScanCommands(CommandsProtocol):
 
     def scan_iter(
         self,
-        match: PatternT | None = None,
-        count: int | None = None,
-        _type: str | None = None,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+        _type: Union[str, None] = None,
         **kwargs,
     ) -> Iterator:
         """
@@ -2541,8 +2655,8 @@ class ScanCommands(CommandsProtocol):
         self,
         name: KeyT,
         cursor: int = 0,
-        match: PatternT | None = None,
-        count: int | None = None,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
     ) -> ResponseT:
         """
         Incrementally return lists of elements in a set. Also return a cursor
@@ -2564,8 +2678,8 @@ class ScanCommands(CommandsProtocol):
     def sscan_iter(
         self,
         name: KeyT,
-        match: PatternT | None = None,
-        count: int | None = None,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
     ) -> Iterator:
         """
         Make an iterator using the SSCAN command so that the client doesn't
@@ -2584,8 +2698,8 @@ class ScanCommands(CommandsProtocol):
         self,
         name: KeyT,
         cursor: int = 0,
-        match: PatternT | None = None,
-        count: int | None = None,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
     ) -> ResponseT:
         """
         Incrementally return key/value slices in a hash. Also return a cursor
@@ -2607,8 +2721,8 @@ class ScanCommands(CommandsProtocol):
     def hscan_iter(
         self,
         name: str,
-        match: PatternT | None = None,
-        count: int | None = None,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
     ) -> Iterator:
         """
         Make an iterator using the HSCAN command so that the client doesn't
@@ -2627,9 +2741,9 @@ class ScanCommands(CommandsProtocol):
         self,
         name: KeyT,
         cursor: int = 0,
-        match: PatternT | None = None,
-        count: int | None = None,
-        score_cast_func: type | Callable = float,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+        score_cast_func: Union[type, Callable] = float,
     ) -> ResponseT:
         """
         Incrementally return lists of elements in a sorted set. Also return a
@@ -2654,9 +2768,9 @@ class ScanCommands(CommandsProtocol):
     def zscan_iter(
         self,
         name: KeyT,
-        match: PatternT | None = None,
-        count: int | None = None,
-        score_cast_func: type | Callable = float,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+        score_cast_func: Union[type, Callable] = float,
     ) -> Iterator:
         """
         Make an iterator using the ZSCAN command so that the client doesn't
@@ -2683,9 +2797,9 @@ class ScanCommands(CommandsProtocol):
 class AsyncScanCommands(ScanCommands):
     async def scan_iter(
         self,
-        match: PatternT | None = None,
-        count: int | None = None,
-        _type: str | None = None,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+        _type: Union[str, None] = None,
         **kwargs,
     ) -> AsyncIterator:
         """
@@ -2713,8 +2827,8 @@ class AsyncScanCommands(ScanCommands):
     async def sscan_iter(
         self,
         name: KeyT,
-        match: PatternT | None = None,
-        count: int | None = None,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
     ) -> AsyncIterator:
         """
         Make an iterator using the SSCAN command so that the client doesn't
@@ -2735,8 +2849,8 @@ class AsyncScanCommands(ScanCommands):
     async def hscan_iter(
         self,
         name: str,
-        match: PatternT | None = None,
-        count: int | None = None,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
     ) -> AsyncIterator:
         """
         Make an iterator using the HSCAN command so that the client doesn't
@@ -2757,9 +2871,9 @@ class AsyncScanCommands(ScanCommands):
     async def zscan_iter(
         self,
         name: KeyT,
-        match: PatternT | None = None,
-        count: int | None = None,
-        score_cast_func: type | Callable = float,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+        score_cast_func: Union[type, Callable] = float,
     ) -> AsyncIterator:
         """
         Make an iterator using the ZSCAN command so that the client doesn't
@@ -2973,13 +3087,13 @@ class StreamCommands(CommandsProtocol):
     def xadd(
         self,
         name: KeyT,
-        fields: dict[FieldT, EncodableT],
+        fields: Dict[FieldT, EncodableT],
         id: StreamIdT = "*",
-        maxlen: int | None = None,
+        maxlen: Union[int, None] = None,
         approximate: bool = True,
         nomkstream: bool = False,
-        minid: StreamIdT | None = None,
-        limit: int | None = None,
+        minid: Union[StreamIdT, None] = None,
+        limit: Union[int, None] = None,
     ) -> ResponseT:
         """
         Add to a stream.
@@ -3032,7 +3146,7 @@ class StreamCommands(CommandsProtocol):
         consumername: ConsumerT,
         min_idle_time: int,
         start_id: int = 0,
-        count: int | None = None,
+        count: Union[int, None] = None,
         justid: bool = False,
     ) -> ResponseT:
         """
@@ -3082,10 +3196,10 @@ class StreamCommands(CommandsProtocol):
         groupname: GroupT,
         consumername: ConsumerT,
         min_idle_time: int,
-        message_ids: list[StreamIdT] | tuple[StreamIdT],
-        idle: int | None = None,
-        time: int | None = None,
-        retrycount: int | None = None,
+        message_ids: [List[StreamIdT], Tuple[StreamIdT]],
+        idle: Union[int, None] = None,
+        time: Union[int, None] = None,
+        retrycount: Union[int, None] = None,
         force: bool = False,
         justid: bool = False,
     ) -> ResponseT:
@@ -3302,8 +3416,8 @@ class StreamCommands(CommandsProtocol):
         min: StreamIdT,
         max: StreamIdT,
         count: int,
-        consumername: ConsumerT | None = None,
-        idle: int | None = None,
+        consumername: Union[ConsumerT, None] = None,
+        idle: Union[int, None] = None,
     ) -> ResponseT:
         """
         Returns information about pending messages, in a range.
@@ -3357,7 +3471,7 @@ class StreamCommands(CommandsProtocol):
         name: KeyT,
         min: StreamIdT = "-",
         max: StreamIdT = "+",
-        count: int | None = None,
+        count: Union[int, None] = None,
     ) -> ResponseT:
         """
         Read stream values within an interval.
@@ -3382,9 +3496,9 @@ class StreamCommands(CommandsProtocol):
 
     def xread(
         self,
-        streams: dict[KeyT, StreamIdT],
-        count: int | None = None,
-        block: int | None = None,
+        streams: Dict[KeyT, StreamIdT],
+        count: Union[int, None] = None,
+        block: Union[int, None] = None,
     ) -> ResponseT:
         """
         Block and monitor multiple streams for new data.
@@ -3419,9 +3533,9 @@ class StreamCommands(CommandsProtocol):
         self,
         groupname: str,
         consumername: str,
-        streams: dict[KeyT, StreamIdT],
-        count: int | None = None,
-        block: int | None = None,
+        streams: Dict[KeyT, StreamIdT],
+        count: Union[int, None] = None,
+        block: Union[int, None] = None,
         noack: bool = False,
     ) -> ResponseT:
         """
@@ -3462,7 +3576,7 @@ class StreamCommands(CommandsProtocol):
         name: KeyT,
         max: StreamIdT = "+",
         min: StreamIdT = "-",
-        count: int | None = None,
+        count: Union[int, None] = None,
     ) -> ResponseT:
         """
         Read stream values within an interval, in reverse order.
@@ -3490,8 +3604,8 @@ class StreamCommands(CommandsProtocol):
         name: KeyT,
         maxlen: int,
         approximate: bool = True,
-        minid: StreamIdT | None = None,
-        limit: int | None = None,
+        minid: Union[StreamIdT, None] = None,
+        limit: Union[int, None] = None,
     ) -> ResponseT:
         """
         Trims old messages from a stream.
@@ -3666,7 +3780,7 @@ class SortedSetCommands(CommandsProtocol):
     def zinter(
         self,
         keys: KeysT,
-        aggregate: str | None = None,
+        aggregate: Union[str, None] = None,
         withscores: bool = False,
     ) -> ResponseT:
         """
@@ -3685,8 +3799,8 @@ class SortedSetCommands(CommandsProtocol):
     def zinterstore(
         self,
         dest: KeyT,
-        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
-        aggregate: str | None = None,
+        keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
+        aggregate: Union[str, None] = None,
     ) -> ResponseT:
         """
         Intersect multiple sorted sets specified by ``keys`` into a new
@@ -3726,7 +3840,7 @@ class SortedSetCommands(CommandsProtocol):
     def zpopmax(
         self,
         name: KeyT,
-        count: int | None = None,
+        count: Union[int, None] = None,
     ) -> ResponseT:
         """
         Remove and return up to ``count`` members with the highest scores
@@ -3741,7 +3855,7 @@ class SortedSetCommands(CommandsProtocol):
     def zpopmin(
         self,
         name: KeyT,
-        count: int | None = None,
+        count: Union[int, None] = None,
     ) -> ResponseT:
         """
         Remove and return up to ``count`` members with the lowest scores
@@ -3880,7 +3994,7 @@ class SortedSetCommands(CommandsProtocol):
     def _zrange(
         self,
         command,
-        dest: KeyT | None,
+        dest: Union[KeyT, None],
         name: KeyT,
         start: int,
         end: int,
@@ -3888,9 +4002,9 @@ class SortedSetCommands(CommandsProtocol):
         byscore: bool = False,
         bylex: bool = False,
         withscores: bool = False,
-        score_cast_func: type | Callable | None = float,
-        offset: int | None = None,
-        num: int | None = None,
+        score_cast_func: Union[type, Callable, None] = float,
+        offset: Union[int, None] = None,
+        num: Union[int, None] = None,
     ) -> ResponseT:
         if byscore and bylex:
             raise DataError(
@@ -3926,7 +4040,7 @@ class SortedSetCommands(CommandsProtocol):
         end: int,
         desc: bool = False,
         withscores: bool = False,
-        score_cast_func: type | Callable = float,
+        score_cast_func: Union[type, Callable] = float,
         byscore: bool = False,
         bylex: bool = False,
         offset: int = None,
@@ -3986,7 +4100,7 @@ class SortedSetCommands(CommandsProtocol):
         start: int,
         end: int,
         withscores: bool = False,
-        score_cast_func: type | Callable = float,
+        score_cast_func: Union[type, Callable] = float,
     ) -> ResponseT:
         """
         Return a range of values from sorted set ``name`` between
@@ -4016,8 +4130,8 @@ class SortedSetCommands(CommandsProtocol):
         byscore: bool = False,
         bylex: bool = False,
         desc: bool = False,
-        offset: int | None = None,
-        num: int | None = None,
+        offset: Union[int, None] = None,
+        num: Union[int, None] = None,
     ) -> ResponseT:
         """
         Stores in ``dest`` the result of a range of values from sorted set
@@ -4062,8 +4176,8 @@ class SortedSetCommands(CommandsProtocol):
         name: KeyT,
         min: EncodableT,
         max: EncodableT,
-        start: int | None = None,
-        num: int | None = None,
+        start: Union[int, None] = None,
+        num: Union[int, None] = None,
     ) -> ResponseT:
         """
         Return the lexicographical range of values from sorted set ``name``
@@ -4086,8 +4200,8 @@ class SortedSetCommands(CommandsProtocol):
         name: KeyT,
         max: EncodableT,
         min: EncodableT,
-        start: int | None = None,
-        num: int | None = None,
+        start: Union[int, None] = None,
+        num: Union[int, None] = None,
     ) -> ResponseT:
         """
         Return the reversed lexicographical range of values from sorted set
@@ -4110,10 +4224,10 @@ class SortedSetCommands(CommandsProtocol):
         name: KeyT,
         min: ZScoreBoundT,
         max: ZScoreBoundT,
-        start: int | None = None,
-        num: int | None = None,
+        start: Union[int, None] = None,
+        num: Union[int, None] = None,
         withscores: bool = False,
-        score_cast_func: type | Callable = float,
+        score_cast_func: Union[type, Callable] = float,
     ) -> ResponseT:
         """
         Return a range of values from the sorted set ``name`` with scores
@@ -4144,10 +4258,10 @@ class SortedSetCommands(CommandsProtocol):
         name: KeyT,
         max: ZScoreBoundT,
         min: ZScoreBoundT,
-        start: int | None = None,
-        num: int | None = None,
+        start: Union[int, None] = None,
+        num: Union[int, None] = None,
         withscores: bool = False,
-        score_cast_func: type | Callable = float,
+        score_cast_func: Union[type, Callable] = float,
     ):
         """
         Return a range of values from the sorted set ``name`` with scores
@@ -4242,8 +4356,8 @@ class SortedSetCommands(CommandsProtocol):
 
     def zunion(
         self,
-        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
-        aggregate: str | None = None,
+        keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
+        aggregate: Union[str, None] = None,
         withscores: bool = False,
     ) -> ResponseT:
         """
@@ -4259,8 +4373,8 @@ class SortedSetCommands(CommandsProtocol):
     def zunionstore(
         self,
         dest: KeyT,
-        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
-        aggregate: str | None = None,
+        keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
+        aggregate: Union[str, None] = None,
     ) -> ResponseT:
         """
         Union multiple sorted sets specified by ``keys`` into
@@ -4274,7 +4388,7 @@ class SortedSetCommands(CommandsProtocol):
     def zmscore(
         self,
         key: KeyT,
-        members: list[str],
+        members: List[str],
     ) -> ResponseT:
         """
         Returns the scores associated with the specified members
@@ -4294,9 +4408,9 @@ class SortedSetCommands(CommandsProtocol):
     def _zaggregate(
         self,
         command: str,
-        dest: KeyT | None,
-        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
-        aggregate: str | None = None,
+        dest: Union[KeyT, None],
+        keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
+        aggregate: Union[str, None] = None,
         **options,
     ) -> ResponseT:
         pieces: list[EncodableT] = [command]
@@ -4515,6 +4629,96 @@ class HashCommands(CommandsProtocol):
 AsyncHashCommands = HashCommands
 
 
+class Script:
+    """
+    An executable Lua script object returned by ``register_script``
+    """
+
+    def __init__(self, registered_client: "Redis", script: ScriptTextT):
+        self.registered_client = registered_client
+        self.script = script
+        # Precalculate and store the SHA1 hex digest of the script.
+
+        if isinstance(script, str):
+            # We need the encoding from the client in order to generate an
+            # accurate byte representation of the script
+            encoder = registered_client.connection_pool.get_encoder()
+            script = encoder.encode(script)
+        self.sha = hashlib.sha1(script).hexdigest()
+
+    def __call__(
+        self,
+        keys: Union[Sequence[KeyT], None] = None,
+        args: Union[Iterable[EncodableT], None] = None,
+        client: Union["Redis", None] = None,
+    ):
+        """Execute the script, passing any required ``args``"""
+        keys = keys or []
+        args = args or []
+        if client is None:
+            client = self.registered_client
+        args = tuple(keys) + tuple(args)
+        # make sure the Redis server knows about the script
+        from redis.client import Pipeline
+
+        if isinstance(client, Pipeline):
+            # Make sure the pipeline can register the script before executing.
+            client.scripts.add(self)
+        try:
+            return client.evalsha(self.sha, len(keys), *args)
+        except NoScriptError:
+            # Maybe the client is pointed to a different server than the client
+            # that created this instance?
+            # Overwrite the sha just in case there was a discrepancy.
+            self.sha = client.script_load(self.script)
+            return client.evalsha(self.sha, len(keys), *args)
+
+
+class AsyncScript:
+    """
+    An executable Lua script object returned by ``register_script``
+    """
+
+    def __init__(self, registered_client: "AsyncRedis", script: ScriptTextT):
+        self.registered_client = registered_client
+        self.script = script
+        # Precalculate and store the SHA1 hex digest of the script.
+
+        if isinstance(script, str):
+            # We need the encoding from the client in order to generate an
+            # accurate byte representation of the script
+            encoder = registered_client.connection_pool.get_encoder()
+            script = encoder.encode(script)
+        self.sha = hashlib.sha1(script).hexdigest()
+
+    async def __call__(
+        self,
+        keys: Union[Sequence[KeyT], None] = None,
+        args: Union[Iterable[EncodableT], None] = None,
+        client: Union["AsyncRedis", None] = None,
+    ):
+        """Execute the script, passing any required ``args``"""
+        keys = keys or []
+        args = args or []
+        if client is None:
+            client = self.registered_client
+        args = tuple(keys) + tuple(args)
+        # make sure the Redis server knows about the script
+        from redis.asyncio.client import Pipeline
+
+        if isinstance(client, Pipeline):
+            # Make sure the pipeline can register the script before executing.
+            client.scripts.add(self)
+        try:
+            return await client.evalsha(self.sha, len(keys), *args)
+        except NoScriptError:
+            # Maybe the client is pointed to a different server than the client
+            # that created this instance?
+            # Overwrite the sha just in case there was a discrepancy.
+            self.sha = await client.script_load(self.script)
+            return await client.evalsha(self.sha, len(keys), *args)
+
+
 class PubSubCommands(CommandsProtocol):
     """
     Redis PubSub commands.
@@ -4643,7 +4847,7 @@ class ScriptCommands(CommandsProtocol):
         )
 
     def script_flush(
-        self, sync_type: Literal["SYNC"] | Literal["ASYNC"] = None
+        self, sync_type: Union[Literal["SYNC"], Literal["ASYNC"]] = None
     ) -> ResponseT:
         """Flush all scripts from the script cache.
         ``sync_type`` is by default SYNC (synchronous) but it can also be
@@ -4680,7 +4884,7 @@ class ScriptCommands(CommandsProtocol):
         """
         return self.execute_command("SCRIPT LOAD", script)
 
-    def register_script(self: Redis, script: ScriptTextT) -> Script:
+    def register_script(self: "Redis", script: ScriptTextT) -> Script:
         """
         Register a Lua ``script`` specifying the ``keys`` it will touch.
         Returns a Script object that is callable and hides the complexity of
@@ -4694,7 +4898,7 @@ class AsyncScriptCommands(ScriptCommands):
     async def script_debug(self, *args) -> None:
         return super().script_debug()
 
-    def register_script(self: AsyncRedis, script: ScriptTextT) -> AsyncScript:
+    def register_script(self: "AsyncRedis", script: ScriptTextT) -> AsyncScript:
         """
         Register a Lua ``script`` specifying the ``keys`` it will touch.
         Returns a Script object that is callable and hides the complexity of
@@ -4757,7 +4961,7 @@ class GeoCommands(CommandsProtocol):
         name: KeyT,
         place1: FieldT,
         place2: FieldT,
-        unit: str | None = None,
+        unit: Union[str, None] = None,
     ) -> ResponseT:
         """
         Return the distance between ``place1`` and ``place2`` members of the
@@ -4799,14 +5003,14 @@ class GeoCommands(CommandsProtocol):
         longitude: float,
         latitude: float,
         radius: float,
-        unit: str | None = None,
+        unit: Union[str, None] = None,
         withdist: bool = False,
         withcoord: bool = False,
         withhash: bool = False,
-        count: int | None = None,
-        sort: str | None = None,
-        store: KeyT | None = None,
-        store_dist: KeyT | None = None,
+        count: Union[int, None] = None,
+        sort: Union[str, None] = None,
+        store: Union[KeyT, None] = None,
+        store_dist: Union[KeyT, None] = None,
         any: bool = False,
     ) -> ResponseT:
         """
@@ -4861,14 +5065,14 @@ class GeoCommands(CommandsProtocol):
         name: KeyT,
         member: FieldT,
         radius: float,
-        unit: str | None = None,
+        unit: Union[str, None] = None,
         withdist: bool = False,
         withcoord: bool = False,
         withhash: bool = False,
-        count: int | None = None,
-        sort: str | None = None,
-        store: KeyT | None = None,
-        store_dist: KeyT | None = None,
+        count: Union[int, None] = None,
+        sort: Union[str, None] = None,
+        store: Union[KeyT, None] = None,
+        store_dist: Union[KeyT, None] = None,
         any: bool = False,
     ) -> ResponseT:
         """
@@ -4899,7 +5103,7 @@ class GeoCommands(CommandsProtocol):
         self,
         command: str,
         *args: EncodableT,
-        **kwargs: EncodableT | None,
+        **kwargs: Union[EncodableT, None],
     ) -> ResponseT:
         pieces = list(args)
         if kwargs["unit"] and kwargs["unit"] not in ("m", "km", "mi", "ft"):
@@ -4949,15 +5153,15 @@ class GeoCommands(CommandsProtocol):
     def geosearch(
         self,
         name: KeyT,
-        member: FieldT | None = None,
-        longitude: float | None = None,
-        latitude: float | None = None,
+        member: Union[FieldT, None] = None,
+        longitude: Union[float, None] = None,
+        latitude: Union[float, None] = None,
         unit: str = "m",
-        radius: float | None = None,
-        width: float | None = None,
-        height: float | None = None,
-        sort: str | None = None,
-        count: int | None = None,
+        radius: Union[float, None] = None,
+        width: Union[float, None] = None,
+        height: Union[float, None] = None,
+        sort: Union[str, None] = None,
+        count: Union[int, None] = None,
         any: bool = False,
         withcoord: bool = False,
         withdist: bool = False,
@@ -5022,15 +5226,15 @@ class GeoCommands(CommandsProtocol):
         self,
         dest: KeyT,
         name: KeyT,
-        member: FieldT | None = None,
-        longitude: float | None = None,
-        latitude: float | None = None,
+        member: Union[FieldT, None] = None,
+        longitude: Union[float, None] = None,
+        latitude: Union[float, None] = None,
         unit: str = "m",
-        radius: float | None = None,
-        width: float | None = None,
-        height: float | None = None,
-        sort: str | None = None,
-        count: int | None = None,
+        radius: Union[float, None] = None,
+        width: Union[float, None] = None,
+        height: Union[float, None] = None,
+        sort: Union[str, None] = None,
+        count: Union[int, None] = None,
         any: bool = False,
         storedist: bool = False,
     ) -> ResponseT:
@@ -5069,7 +5273,7 @@ class GeoCommands(CommandsProtocol):
         self,
         command: str,
         *args: EncodableT,
-        **kwargs: EncodableT | None,
+        **kwargs: Union[EncodableT, None],
     ) -> ResponseT:
         pieces = list(args)
 
@@ -5190,205 +5394,6 @@ class ModuleCommands(CommandsProtocol):
 class AsyncModuleCommands(ModuleCommands):
     async def command_info(self) -> None:
         return super().command_info()
-
-
-class Script:
-    """
-    An executable Lua script object returned by ``register_script``
-    """
-
-    def __init__(self, registered_client: Redis, script: ScriptTextT):
-        self.registered_client = registered_client
-        self.script = script
-        # Precalculate and store the SHA1 hex digest of the script.
-
-        if isinstance(script, str):
-            # We need the encoding from the client in order to generate an
-            # accurate byte representation of the script
-            encoder = registered_client.connection_pool.get_encoder()
-            script = encoder.encode(script)
-        self.sha = hashlib.sha1(script).hexdigest()
-
-    def __call__(
-        self,
-        keys: Sequence[KeyT] | None = None,
-        args: Iterable[EncodableT] | None = None,
-        client: Redis | None = None,
-    ):
-        """Execute the script, passing any required ``args``"""
-        keys = keys or []
-        args = args or []
-        if client is None:
-            client = self.registered_client
-        args = tuple(keys) + tuple(args)
-        # make sure the Redis server knows about the script
-        from redis.client import Pipeline
-
-        if isinstance(client, Pipeline):
-            # Make sure the pipeline can register the script before executing.
-            client.scripts.add(self)
-        try:
-            return client.evalsha(self.sha, len(keys), *args)
-        except NoScriptError:
-            # Maybe the client is pointed to a different server than the client
-            # that created this instance?
-            # Overwrite the sha just in case there was a discrepancy.
-            self.sha = client.script_load(self.script)
-            return client.evalsha(self.sha, len(keys), *args)
-
-
-class AsyncScript:
-    """
-    An executable Lua script object returned by ``register_script``
-    """
-
-    def __init__(self, registered_client: AsyncRedis, script: ScriptTextT):
-        self.registered_client = registered_client
-        self.script = script
-        # Precalculate and store the SHA1 hex digest of the script.
-
-        if isinstance(script, str):
-            # We need the encoding from the client in order to generate an
-            # accurate byte representation of the script
-            encoder = registered_client.connection_pool.get_encoder()
-            script = encoder.encode(script)
-        self.sha = hashlib.sha1(script).hexdigest()
-
-    async def __call__(
-        self,
-        keys: Sequence[KeyT] | None = None,
-        args: Iterable[EncodableT] | None = None,
-        client: AsyncRedis | None = None,
-    ):
-        """Execute the script, passing any required ``args``"""
-        keys = keys or []
-        args = args or []
-        if client is None:
-            client = self.registered_client
-        args = tuple(keys) + tuple(args)
-        # make sure the Redis server knows about the script
-        from redis.asyncio.client import Pipeline
-
-        if isinstance(client, Pipeline):
-            # Make sure the pipeline can register the script before executing.
-            client.scripts.add(self)
-        try:
-            return await client.evalsha(self.sha, len(keys), *args)
-        except NoScriptError:
-            # Maybe the client is pointed to a different server than the client
-            # that created this instance?
-            # Overwrite the sha just in case there was a discrepancy.
-            self.sha = await client.script_load(self.script)
-            return await client.evalsha(self.sha, len(keys), *args)
-
-
-class BitFieldOperation:
-    """
-    Command builder for BITFIELD commands.
-    """
-
-    def __init__(
-        self, client: Redis | AsyncRedis, key: str, default_overflow: str | None = None
-    ):
-        self.client = client
-        self.key = key
-        self._default_overflow = default_overflow
-        # for typing purposes, run the following in constructor and in reset()
-        self.operations: list[tuple[EncodableT, ...]] = []
-        self._last_overflow = "WRAP"
-        self.reset()
-
-    def reset(self):
-        """
-        Reset the state of the instance to when it was constructed
-        """
-        self.operations = []
-        self._last_overflow = "WRAP"
-        self.overflow(self._default_overflow or self._last_overflow)
-
-    def overflow(self, overflow: str):
-        """
-        Update the overflow algorithm of successive INCRBY operations
-        :param overflow: Overflow algorithm, one of WRAP, SAT, FAIL. See the
-            Redis docs for descriptions of these algorithmsself.
-        :returns: a :py:class:`BitFieldOperation` instance.
-        """
-        overflow = overflow.upper()
-        if overflow != self._last_overflow:
-            self._last_overflow = overflow
-            self.operations.append(("OVERFLOW", overflow))
-        return self
-
-    def incrby(
-        self,
-        fmt: str,
-        offset: BitfieldOffsetT,
-        increment: int,
-        overflow: str | None = None,
-    ):
-        """
-        Increment a bitfield by a given amount.
-        :param fmt: format-string for the bitfield being updated, e.g. 'u8'
-            for an unsigned 8-bit integer.
-        :param offset: offset (in number of bits). If prefixed with a
-            '#', this is an offset multiplier, e.g. given the arguments
-            fmt='u8', offset='#2', the offset will be 16.
-        :param int increment: value to increment the bitfield by.
-        :param str overflow: overflow algorithm. Defaults to WRAP, but other
-            acceptable values are SAT and FAIL. See the Redis docs for
-            descriptions of these algorithms.
-        :returns: a :py:class:`BitFieldOperation` instance.
-        """
-        if overflow is not None:
-            self.overflow(overflow)
-
-        self.operations.append(("INCRBY", fmt, offset, increment))
-        return self
-
-    def get(self, fmt: str, offset: BitfieldOffsetT):
-        """
-        Get the value of a given bitfield.
-        :param fmt: format-string for the bitfield being read, e.g. 'u8' for
-            an unsigned 8-bit integer.
-        :param offset: offset (in number of bits). If prefixed with a
-            '#', this is an offset multiplier, e.g. given the arguments
-            fmt='u8', offset='#2', the offset will be 16.
-        :returns: a :py:class:`BitFieldOperation` instance.
-        """
-        self.operations.append(("GET", fmt, offset))
-        return self
-
-    def set(self, fmt: str, offset: BitfieldOffsetT, value: int):
-        """
-        Set the value of a given bitfield.
-        :param fmt: format-string for the bitfield being read, e.g. 'u8' for
-            an unsigned 8-bit integer.
-        :param offset: offset (in number of bits). If prefixed with a
-            '#', this is an offset multiplier, e.g. given the arguments
-            fmt='u8', offset='#2', the offset will be 16.
-        :param int value: value to set at the given position.
-        :returns: a :py:class:`BitFieldOperation` instance.
-        """
-        self.operations.append(("SET", fmt, offset, value))
-        return self
-
-    @property
-    def command(self):
-        cmd = ["BITFIELD", self.key]
-        for ops in self.operations:
-            cmd.extend(ops)
-        return cmd
-
-    def execute(self) -> ResponseT:
-        """
-        Execute the operation(s) in a single BITFIELD command. The return value
-        is a list of values corresponding to each operation. If the client
-        used to create this instance was a pipeline, the list of values
-        will be present within the pipeline's execute.
-        """
-        command = self.command
-        self.reset()
-        return self.client.execute_command(*command)
 
 
 class ClusterCommands(CommandsProtocol):

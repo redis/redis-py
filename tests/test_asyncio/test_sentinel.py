@@ -1,6 +1,7 @@
 import socket
 
 import pytest
+import pytest_asyncio
 
 import redis.asyncio.sentinel
 from redis import exceptions
@@ -14,7 +15,7 @@ from redis.asyncio.sentinel import (
 pytestmark = pytest.mark.asyncio
 
 
-@pytest.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module")
 def master_ip(master_host):
     yield socket.gethostbyname(master_host)
 
@@ -71,7 +72,7 @@ class SentinelTestCluster:
         return SentinelTestClient(self, (host, port))
 
 
-@pytest.fixture()
+@pytest_asyncio.fixture()
 async def cluster(master_ip):
 
     cluster = SentinelTestCluster(ip=master_ip)
@@ -81,7 +82,7 @@ async def cluster(master_ip):
     redis.asyncio.sentinel.Redis = saved_Redis
 
 
-@pytest.fixture()
+@pytest_asyncio.fixture()
 def sentinel(request, cluster):
     return Sentinel([("foo", 26379), ("bar", 26379)])
 

@@ -3,6 +3,7 @@ import os
 import re
 
 import pytest
+import pytest_asyncio
 
 import redis.asyncio as redis
 from redis.asyncio.connection import Connection, to_bool
@@ -15,7 +16,7 @@ pytestmark = pytest.mark.asyncio
 
 
 class TestRedisAutoReleaseConnectionPool:
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def r(self, create_redis) -> redis.Redis:
         """This is necessary since r and r2 create ConnectionPools behind the scenes"""
         r = await create_redis()
@@ -684,7 +685,7 @@ class TestConnection:
 
 @pytest.mark.onlynoncluster
 class TestMultiConnectionClient:
-    @pytest.fixture()
+    @pytest_asyncio.fixture()
     async def r(self, create_redis, server):
         redis = await create_redis(single_connection_client=False)
         yield redis
@@ -695,7 +696,7 @@ class TestMultiConnectionClient:
 class TestHealthCheck:
     interval = 60
 
-    @pytest.fixture()
+    @pytest_asyncio.fixture()
     async def r(self, create_redis):
         redis = await create_redis(health_check_interval=self.interval)
         yield redis

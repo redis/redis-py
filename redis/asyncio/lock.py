@@ -1,4 +1,5 @@
 import asyncio
+import sys
 import threading
 import uuid
 from types import SimpleNamespace
@@ -185,7 +186,11 @@ class Lock:
         object with the default encoding. If a token isn't specified, a UUID
         will be generated.
         """
-        loop = asyncio.get_running_loop()
+        if sys.version_info[0:2] != (3, 6):
+            loop = asyncio.get_running_loop()
+        else:
+            loop = asyncio.get_event_loop()
+
         sleep = self.sleep
         if token is None:
             token = uuid.uuid1().hex.encode()

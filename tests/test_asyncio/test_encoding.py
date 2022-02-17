@@ -1,4 +1,5 @@
 import pytest
+import pytest_asyncio
 
 import redis.asyncio as redis
 from redis.exceptions import DataError
@@ -8,13 +9,13 @@ pytestmark = pytest.mark.asyncio
 
 @pytest.mark.onlynoncluster
 class TestEncoding:
-    @pytest.fixture()
+    @pytest_asyncio.fixture()
     async def r(self, create_redis):
         redis = await create_redis(decode_responses=True)
         yield redis
         await redis.flushall()
 
-    @pytest.fixture()
+    @pytest_asyncio.fixture()
     async def r_no_decode(self, create_redis):
         redis = await create_redis(decode_responses=False)
         yield redis
@@ -91,7 +92,7 @@ class TestMemoryviewsAreNotPacked:
 
 
 class TestCommandsAreNotEncoded:
-    @pytest.fixture()
+    @pytest_asyncio.fixture()
     async def r(self, create_redis):
         redis = await create_redis(encoding="utf-16")
         yield redis

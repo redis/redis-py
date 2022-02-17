@@ -1,4 +1,5 @@
 import pytest
+import pytest_asyncio
 
 from redis import exceptions
 from tests.conftest import skip_if_server_version_lt
@@ -22,7 +23,7 @@ return "hello " .. name
 
 @pytest.mark.onlynoncluster
 class TestScripting:
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def r(self, create_redis):
         redis = await create_redis()
         yield redis

@@ -1,4 +1,4 @@
-from __future__ import annotations
+# from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Iterable, TypeVar, Union
@@ -39,7 +39,7 @@ AnyChannelT = TypeVar("AnyChannelT", bytes, str, memoryview)
 
 
 class CommandsProtocol(Protocol):
-    connection_pool: Union[AsyncConnectionPool, ConnectionPool]
+    connection_pool: Union["AsyncConnectionPool", "ConnectionPool"]
 
     def execute_command(self, *args, **options):
         ...

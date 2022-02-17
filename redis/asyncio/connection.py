@@ -7,6 +7,7 @@ import io
 import os
 import socket
 import ssl
+import sys
 import threading
 import weakref
 from itertools import chain
@@ -845,10 +846,12 @@ class Connection:
 
     async def check_health(self):
         """Check the health of the connection with a PING/PONG"""
-        if (
-            self.health_check_interval
-            and asyncio.get_running_loop().time() > self.next_health_check
-        ):
+        if sys.version_info[0:2] == (3, 6):
+            func = asyncio.get_event_loop
+        else:
+            func = asyncio.get_running_loop
+
+        if self.health_check_interval and func().time() > self.next_health_check:
             await self.retry.call_with_retry(self._send_ping, self._ping_failed)
 
     async def _send_packed_command(self, command: Iterable[bytes]) -> None:
@@ -930,9 +933,11 @@ class Connection:
             raise
 
         if self.health_check_interval:
-            self.next_health_check = (
-                asyncio.get_running_loop().time() + self.health_check_interval
-            )
+            if sys.version_info[0:2] == (3, 6):
+                func = asyncio.get_event_loop
+            else:
+                func = asyncio.get_running_loop
+            self.next_health_check = func().time() + self.health_check_interval
 
         if isinstance(response, ResponseError):
             raise response from None

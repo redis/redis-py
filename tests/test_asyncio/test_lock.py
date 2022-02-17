@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from redis.asyncio.lock import Lock
 from redis.exceptions import LockError, LockNotOwnedError
@@ -10,7 +11,7 @@ pytestmark = pytest.mark.asyncio
 
 @pytest.mark.onlynoncluster
 class TestLock:
-    @pytest.fixture()
+    @pytest_asyncio.fixture()
     async def r_decoded(self, create_redis):
         redis = await create_redis(decode_responses=True)
         yield redis

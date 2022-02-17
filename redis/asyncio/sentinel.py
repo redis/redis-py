@@ -208,7 +208,7 @@ class Sentinel(AsyncSentinelCommands):
 
         if once:
             tasks = [
-                asyncio.create_task(sentinel.execute_command(*args, **kwargs))
+                asyncio.Task(sentinel.execute_command(*args, **kwargs))
                 for sentinel in self.sentinels
             ]
             await asyncio.gather(*tasks)

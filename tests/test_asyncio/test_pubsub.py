@@ -2,6 +2,7 @@ import asyncio
 from typing import Optional
 
 import pytest
+import pytest_asyncio
 
 import redis.asyncio as redis
 from redis.exceptions import ConnectionError
@@ -403,7 +404,7 @@ class TestPubSubAutoDecoding:
     def message_handler(self, message):
         self.message = message
 
-    @pytest.fixture()
+    @pytest_asyncio.fixture()
     async def r(self, create_redis):
         return await create_redis(
             decode_responses=True,
