@@ -4819,6 +4819,126 @@ class ClusterCommands:
         return self.execute_command("READONLY", **kwargs)
 
 
+class FunctionCommands:
+    """
+    Redis Function commands
+    """
+
+    def function_load(
+        self,
+        engine: str,
+        library: str,
+        code: str,
+        replace: Optional[bool] = False,
+        description: Optional[str] = None,
+    ) -> str:
+        """
+        Load a library to Redis.
+        :param engine: the name of the execution engine for the library
+        :param library: the unique name of the library
+        :param code: the source code
+        :param replace: changes the behavior to replace the library if a library called
+         ``library`` already exists
+        :param description: description to the library
+
+        For more information check https://redis.io/commands/function-load
+        """
+        pieces = [engine, library]
+        if replace:
+            pieces.append("REPLACE")
+        if description is not None:
+            pieces.append(description)
+        pieces.append(code)
+        return self.execute_command("FUNCTION LOAD", *pieces)
+
+    def function_delete(self, library: str) -> str:
+        """
+        Delete the library called ``library`` and all its functions.
+
+        For more information check https://redis.io/commands/function-delete
+        """
+        return self.execute_command("FUNCTION DELETE", library)
+
+    def function_flush(self, mode: str = "SYNC") -> str:
+        """
+        Deletes all the libraries.
+
+        For more information check https://redis.io/commands/function-flush
+        """
+        return self.execute_command("FUNCTION FLUSH", mode)
+
+    def function_list(
+        self, library: Optional[str] = "*", withcode: Optional[bool] = False
+    ) -> List:
+        """
+        Return information about the functions and libraries.
+        :param library: pecify a pattern for matching library names
+        :param withcode: cause the server to include the libraries source
+         implementation in the reply
+        """
+        args = ["LIBRARYNAME", library]
+        if withcode:
+            args.append("WITHCODE")
+        return self.execute_command("FUNCTION LIST", *args)
+
+    def _fcall(
+        self, command: str, function, numkeys: int, *keys_and_args: Optional[List]
+    ) -> str:
+        return self.execute_command(command, function, numkeys, *keys_and_args)
+
+    def fcall(self, function, numkeys: int, *keys_and_args: Optional[List]) -> str:
+        """
+        Invoke a function.
+
+        For more information check https://redis.io/commands/fcall
+        """
+        return self._fcall("FCALL", function, numkeys, *keys_and_args)
+
+    def fcall_ro(self, function, numkeys: int, *keys_and_args: Optional[List]) -> str:
+        """
+        This is a read-only variant of the FCALL command that cannot
+        execute commands that modify data.
+
+        For more information check https://redis.io/commands/fcal_ro
+        """
+        return self._fcall("FCALL_RO", function, numkeys, *keys_and_args)
+
+    def function_dump(self) -> str:
+        """
+        Return the serialized payload of loaded libraries.
+
+        For more information check https://redis.io/commands/function-dump
+        """
+        return self.execute_command("FUNCTION DUMP")
+
+    def function_restore(self, payload: str, policy: Optional[str] = "APPEND") -> str:
+        """
+        Restore libraries from the serialized ``payload``.
+        You can use the optional policy argument to provide a policy
+        for handling existing libraries.
+
+        For more information check https://redis.io/commands/function-restore
+        """
+        return self.execute_command("FUNCTION RESTORE", payload, policy)
+
+    def function_kill(self) -> str:
+        """
+        Kill a function that is currently executing.
+
+        For more information check https://redis.io/commands/function-kill
+        """
+        return self.execute_command("FUNCTION KILL")
+
+    def function_stats(self) -> list:
+        """
+        Return information about the function that's currently running
+        and information about the available execution engines.
+
+        For more information check https://redis.io/commands/function-stats
+        """
+        return self.execute_command("FUNCTION STATS")
+
+
 class DataAccessCommands(
     BasicKeyCommands,
     HyperlogCommands,
@@ -4844,6 +4964,7 @@ class CoreCommands(
     ModuleCommands,
     PubSubCommands,
     ScriptCommands,
+    FunctionCommands,
 ):
     """
     A class containing all of the implemented redis commands. This class is
