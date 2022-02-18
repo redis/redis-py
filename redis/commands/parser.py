@@ -19,23 +19,6 @@ class CommandsParser:
     def initialize(self, r):
         self.commands = r.execute_command("COMMAND")
 
-    def check_cmd_name_in_commands(self, redis_conn, cmd_name, args):
-        if cmd_name not in self.commands:
-            # try to split the command name and to take only the main command,
-            # e.g. 'memory' for 'memory usage'
-            cmd_name_split = cmd_name.split()
-            cmd_name = cmd_name_split[0]
-            if cmd_name in self.commands:
-                # save the splitted command to args
-                args = cmd_name_split + list(args[1:])
-                return True
-            else:
-                # We'll try to reinitialize the commands cache, if the engine
-                # version has changed, the commands may not be current
-                self.initialize(redis_conn)
-                if cmd_name not in self.commands:
-                    return False
-
 
     # As soon as this PR is merged into Redis, we should reimplement
     # our logic to use COMMAND INFO changes to determine the key positions
