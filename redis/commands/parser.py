@@ -19,6 +19,24 @@ class CommandsParser:
     def initialize(self, r):
         self.commands = r.execute_command("COMMAND")
 
+    def check_cmd_name_in_commands(self, redis_conn, cmd_name, args):
+        if cmd_name not in self.commands:
+            # try to split the command name and to take only the main command,
+            # e.g. 'memory' for 'memory usage'
+            cmd_name_split = cmd_name.split()
+            cmd_name = cmd_name_split[0]
+            if cmd_name in self.commands:
+                # save the splitted command to args
+                args = cmd_name_split + list(args[1:])
+                return True
+            else:
+                # We'll try to reinitialize the commands cache, if the engine
+                # version has changed, the commands may not be current
+                self.initialize(redis_conn)
+                if cmd_name not in self.commands:
+                    return False
+
+
     # As soon as this PR is merged into Redis, we should reimplement
     # our logic to use COMMAND INFO changes to determine the key positions
     # https://github.com/redis/redis/pull/8324
@@ -29,23 +47,35 @@ class CommandsParser:
         if len(args) < 2:
             # The command has no keys in it
             return None
+        
+        cmd_name = args[0]
+        lower_cmd_name = cmd_name.lower()
 
-        cmd_name = args[0].lower()
-        if cmd_name not in self.commands:
+        if cmd_name not in self.commands and lower_cmd_name not in self.commands :
             # try to split the command name and to take only the main command,
             # e.g. 'memory' for 'memory usage'
             cmd_name_split = cmd_name.split()
-            cmd_name = cmd_name_split[0]
-            if cmd_name in self.commands:
+            main_cmd_name = cmd_name_split[0]
+            if main_cmd_name in self.commands:
                 # save the splitted command to args
                 args = cmd_name_split + list(args[1:])
+                # update cmd_name
+                cmd_name = main_cmd_name
             else:
-                # We'll try to reinitialize the commands cache, if the engine
-                # version has changed, the commands may not be current
-                self.initialize(redis_conn)
-                if cmd_name not in self.commands:
-                    raise RedisError(
-                        f"{cmd_name.upper()} command doesn't exist in Redis commands"
+                lower_cmd_name_split = lower_cmd_name.split()
+                lower_main_cmd_name = lower_cmd_name_split[0]
+                if lower_cmd_name in self.commands:
+                    # save the splitted command to args
+                    args = lower_cmd_name_split + list(args[1:])
+                    # update cmd_name
+                    cmd_name = lower_main_cmd_name
+                else:
+                    # We'll try to reinitialize the commands cache, if the engine
+                    # version has changed, the commands may not be current
+                    self.initialize(redis_conn)
+                    if cmd_name not in self.commands:
+                        raise RedisError(
+                            f"{cmd_name.upper()} command doesn't exist in Redis commands"
                     )
 
         command = self.commands.get(cmd_name)
