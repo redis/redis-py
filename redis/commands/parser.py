@@ -19,7 +19,6 @@ class CommandsParser:
     def initialize(self, r):
         self.commands = r.execute_command("COMMAND")
 
-
     # As soon as this PR is merged into Redis, we should reimplement
     # our logic to use COMMAND INFO changes to determine the key positions
     # https://github.com/redis/redis/pull/8324
@@ -30,20 +29,25 @@ class CommandsParser:
         if len(args) < 2:
             # The command has no keys in it
             return None
-        
+
         cmd_name = args[0]
+        upper_cmd_name = cmd_name.upper()
         lower_cmd_name = cmd_name.lower()
 
-        if cmd_name not in self.commands and lower_cmd_name not in self.commands :
+        if upper_cmd_name in self.commands:
+            cmd_name = upper_cmd_name
+        elif lower_cmd_name in self.commands:
+            cmd_name = lower_cmd_name
+        else:
             # try to split the command name and to take only the main command,
             # e.g. 'memory' for 'memory usage'
-            cmd_name_split = cmd_name.split()
-            main_cmd_name = cmd_name_split[0]
-            if main_cmd_name in self.commands:
+            upper_cmd_name_split = upper_cmd_name.split()
+            upper_main_cmd_name = upper_cmd_name_split[0]
+            if upper_main_cmd_name in self.commands:
                 # save the splitted command to args
-                args = cmd_name_split + list(args[1:])
+                args = upper_cmd_name_split + list(args[1:])
                 # update cmd_name
-                cmd_name = main_cmd_name
+                cmd_name = upper_main_cmd_name
             else:
                 lower_cmd_name_split = lower_cmd_name.split()
                 lower_main_cmd_name = lower_cmd_name_split[0]
@@ -58,8 +62,9 @@ class CommandsParser:
                     self.initialize(redis_conn)
                     if cmd_name not in self.commands:
                         raise RedisError(
-                            f"{cmd_name.upper()} command doesn't exist in Redis commands"
-                    )
+                            f"{cmd_name.upper()} command doesn't exist in \
+                                Redis commands"
+                        )
 
         command = self.commands.get(cmd_name)
         if "movablekeys" in command["flags"]:
