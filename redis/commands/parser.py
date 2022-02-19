@@ -60,10 +60,11 @@ class CommandsParser:
                     # We'll try to reinitialize the commands cache, if the engine
                     # version has changed, the commands may not be current
                     self.initialize(redis_conn)
-                    if (
-                        lower_main_cmd_name not in self.commands
-                        and upper_main_cmd_name not in self.commands
-                    ):
+                    if lower_main_cmd_name in self.commands:
+                        cmd_name = lower_main_cmd_name
+                    elif upper_main_cmd_name in self.commands:
+                        cmd_name = upper_main_cmd_name
+                    else:
                         raise RedisError(
                             f"{cmd_name.upper()} command doesn't exist in \
                                 Redis commands"
