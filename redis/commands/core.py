@@ -1246,16 +1246,26 @@ class BasicKeyCommands:
 
     __contains__ = exists
 
-    def expire(self, name, time):
+    def expire(self, name, time, option=None):
         """
-        Set an expire flag on key ``name`` for ``time`` seconds. ``time``
-        can be represented by an integer or a Python timedelta object.
+        Set an expire flag on key ``name`` for ``time`` seconds with the given
+        ``option``. ``time`` can be represented by an integer or a Python timedelta
+        object.
+
+        Valid options are:
+            NX -> Set expiry only when the key has no expiry
+            XX -> Set expiry only when the key has an existing expiry
+            GT -> Set expiry only when the new expiry is greater than current one
+            LT -> Set expiry only when the new expiry is less than current one
 
         For more information check https://redis.io/commands/expire
         """
         if isinstance(time, datetime.timedelta):
             time = int(time.total_seconds())
-        return self.execute_command("EXPIRE", name, time)
+
+        if option is None:
+            return self.execute_command("EXPIRE", name, time)
+        return self.execute_command("EXPIRE", name, time, option)
 
     def expireat(self, name, when):
         """
