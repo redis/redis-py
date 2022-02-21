@@ -18,8 +18,8 @@ class TestFunction:
         unstable_r.function_flush()
 
     def test_function_load(self, unstable_r):
-        assert unstable_r.function_load("Lua", "mylib", function) == "OK"
-        assert unstable_r.function_load("Lua", "mylib", function, replace=True) == "OK"
+        assert unstable_r.function_load("Lua", "mylib", function)
+        assert unstable_r.function_load("Lua", "mylib", function, replace=True)
         with pytest.raises(ResponseError):
             unstable_r.function_load("Lua", "mylib", function)
         with pytest.raises(ResponseError):
@@ -30,15 +30,15 @@ class TestFunction:
         with pytest.raises(ResponseError):
             unstable_r.function_load("Lua", "mylib", set_function)
         assert unstable_r.fcall("set", 1, "foo", "bar") == "OK"
-        assert unstable_r.function_delete("mylib") == "OK"
+        assert unstable_r.function_delete("mylib")
         with pytest.raises(ResponseError):
             unstable_r.fcall("set", 1, "foo", "bar")
-        assert unstable_r.function_load("Lua", "mylib", set_function) == "OK"
+        assert unstable_r.function_load("Lua", "mylib", set_function)
 
     def test_function_flush(self, unstable_r):
         unstable_r.function_load("Lua", "mylib", function)
         assert unstable_r.fcall("myfunc", 0, "hello") == "hello"
-        assert unstable_r.function_flush() == "OK"
+        assert unstable_r.function_flush()
         with pytest.raises(ResponseError):
             unstable_r.fcall("myfunc", 0, "hello")
         with pytest.raises(ResponseError):
@@ -84,11 +84,11 @@ class TestFunction:
         unstable_r.function_delete("mylib")
         with pytest.raises(ResponseError):
             unstable_r.fcall("set", 1, "foo", "bar")
-        assert unstable_r.function_restore(payload) == "OK"
+        assert unstable_r.function_restore(payload)
         assert unstable_r.fcall("set", 1, "foo", "bar") == "OK"
         unstable_r.function_load("Lua", "mylib2", get_function)
         assert unstable_r.fcall("get", 1, "foo") == "bar"
         unstable_r.function_delete("mylib")
-        assert unstable_r.function_restore(payload, "FLUSH") == "OK"
+        assert unstable_r.function_restore(payload, "FLUSH")
         with pytest.raises(ResponseError):
             unstable_r.fcall("get", 1, "foo")
