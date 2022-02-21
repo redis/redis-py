@@ -4909,7 +4909,12 @@ class FunctionCommands:
 
         For more information check https://redis.io/commands/function-dump
         """
-        return self.execute_command("FUNCTION DUMP")
+        from redis.client import NEVER_DECODE
+
+        options = {}
+        options[NEVER_DECODE] = []
+
+        return self.execute_command("FUNCTION DUMP", **options)
 
     def function_restore(self, payload: str, policy: Optional[str] = "APPEND") -> str:
         """
