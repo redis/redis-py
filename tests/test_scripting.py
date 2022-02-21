@@ -79,7 +79,7 @@ class TestScripting:
         unstable_r.set("a", "b")
         get_sha = unstable_r.script_load("return redis.call('GET', KEYS[1])")
         del_sha = unstable_r.script_load("return redis.call('DEL', KEYS[1])")
-        assert unstable_r.evalsha_ro(get_sha, 1, "a") == b"b"
+        assert unstable_r.evalsha_ro(get_sha, 1, "a") == "b"
         with pytest.raises(redis.ResponseError):
             unstable_r.evalsha_ro(del_sha, 1, "a")
 
