@@ -612,7 +612,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
     def test_client_no_evict(self, unstable_r):
-        assert unstable_r.client_no_evict("ON") == b"OK"
+        assert unstable_r.client_no_evict("ON") == "OK"
         with pytest.raises(TypeError):
             unstable_r.client_no_evict()
 
@@ -985,9 +985,9 @@ class TestRedisCommands:
     # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
     def test_lcs(self, unstable_r):
         unstable_r.mset({"foo": "ohmytext", "bar": "mynewtext"})
-        assert unstable_r.lcs("foo", "bar") == b"mytext"
+        assert unstable_r.lcs("foo", "bar") == "mytext"
         assert unstable_r.lcs("foo", "bar", len=True) == 6
-        result = [b"matches", [[[4, 7], [5, 8]]], b"len", 6]
+        result = ["matches", [[[4, 7], [5, 8]]], "len", 6]
         assert unstable_r.lcs("foo", "bar", idx=True, minmatchlen=3) == result
         with pytest.raises(redis.ResponseError):
             assert unstable_r.lcs("foo", "bar", len=True, idx=True)
@@ -1522,24 +1522,24 @@ class TestRedisCommands:
     # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
     def test_blmpop(self, unstable_r):
         unstable_r.rpush("a", "1", "2", "3", "4", "5")
-        res = [b"a", [b"1", b"2"]]
+        res = ["a", ["1", "2"]]
         assert unstable_r.blmpop(1, "2", "b", "a", direction="LEFT", count=2) == res
         with pytest.raises(TypeError):
             unstable_r.blmpop(1, "2", "b", "a", count=2)
         unstable_r.rpush("b", "6", "7", "8", "9")
-        assert unstable_r.blmpop(0, "2", "b", "a", direction="LEFT") == [b"b", [b"6"]]
+        assert unstable_r.blmpop(0, "2", "b", "a", direction="LEFT") == ["b", ["6"]]
         assert unstable_r.blmpop(1, "2", "foo", "bar", direction="RIGHT") is None
 
     @pytest.mark.onlynoncluster
     # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
     def test_lmpop(self, unstable_r):
         unstable_r.rpush("foo", "1", "2", "3", "4", "5")
-        result = [b"foo", [b"1", b"2"]]
+        result = ["foo", ["1", "2"]]
         assert unstable_r.lmpop("2", "bar", "foo", direction="LEFT", count=2) == result
         with pytest.raises(redis.ResponseError):
             unstable_r.lmpop("2", "bar", "foo", direction="up", count=2)
         unstable_r.rpush("bar", "a", "b", "c", "d")
-        assert unstable_r.lmpop("2", "bar", "foo", direction="LEFT") == [b"bar", [b"a"]]
+        assert unstable_r.lmpop("2", "bar", "foo", direction="LEFT") == ["bar", ["a"]]
 
     def test_lindex(self, r):
         r.rpush("a", "1", "2", "3")
@@ -2148,23 +2148,23 @@ class TestRedisCommands:
     # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
     def test_zmpop(self, unstable_r):
         unstable_r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        res = [b"a", [[b"a1", b"1"], [b"a2", b"2"]]]
+        res = ["a", [["a1", "1"], ["a2", "2"]]]
         assert unstable_r.zmpop("2", ["b", "a"], min=True, count=2) == res
         with pytest.raises(redis.DataError):
             unstable_r.zmpop("2", ["b", "a"], count=2)
         unstable_r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
-        assert unstable_r.zmpop("2", ["b", "a"], max=True) == [b"b", [[b"b1", b"10"]]]
+        assert unstable_r.zmpop("2", ["b", "a"], max=True) == ["b", [["b1", "10"]]]
 
     @pytest.mark.onlynoncluster
     # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
     def test_bzmpop(self, unstable_r):
         unstable_r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        res = [b"a", [[b"a1", b"1"], [b"a2", b"2"]]]
+        res = ["a", [["a1", "1"], ["a2", "2"]]]
         assert unstable_r.bzmpop(1, "2", ["b", "a"], min=True, count=2) == res
         with pytest.raises(redis.DataError):
             unstable_r.bzmpop(1, "2", ["b", "a"], count=2)
         unstable_r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
-        res = [b"b", [[b"b1", b"10"]]]
+        res = ["b", [["b1", "10"]]]
         assert unstable_r.bzmpop(0, "2", ["b", "a"], max=True) == res
         assert unstable_r.bzmpop(1, "2", ["foo", "bar"], max=True) is None
 

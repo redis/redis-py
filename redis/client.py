@@ -733,6 +733,10 @@ class AbstractRedis:
         "CONFIG RESETSTAT": bool_ok,
         "CONFIG SET": bool_ok,
         "DEBUG OBJECT": parse_debug_object,
+        "FUNCTION DELETE": bool_ok,
+        "FUNCTION FLUSH": bool_ok,
+        "FUNCTION LOAD": bool_ok,
+        "FUNCTION RESTORE": bool_ok,
         "GEOHASH": lambda r: list(map(str_if_bytes, r)),
         "GEOPOS": lambda r: list(
             map(lambda ll: (float(ll[0]), float(ll[1])) if ll is not None else None, r)

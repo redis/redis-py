@@ -434,7 +434,9 @@ def master_host(request):
 @pytest.fixture()
 def unstable_r(request):
     url = request.config.getoption("--redis-unstable-url")
-    with _get_client(redis.Redis, request, from_url=url) as client:
+    with _get_client(
+        redis.Redis, request, from_url=url, decode_responses=True
+    ) as client:
         yield client
 
 
