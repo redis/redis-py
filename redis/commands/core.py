@@ -1490,7 +1490,7 @@ class BasicKeyCommands(CommandsProtocol):
 
     __contains__ = exists
 
-    def expire(self, name, time, option=None):
+    def expire(self, name: KeyT, time: ExpiryT, option: str = None) -> ResponseT:
         """
         Set an expire flag on key ``name`` for ``time`` seconds with the given
         ``option``. ``time`` can be represented by an integer or a Python timedelta
@@ -1507,9 +1507,11 @@ class BasicKeyCommands(CommandsProtocol):
         if isinstance(time, datetime.timedelta):
             time = int(time.total_seconds())
 
-        if option is None:
-            return self.execute_command("EXPIRE", name, time)
-        return self.execute_command("EXPIRE", name, time, option)
+        exp_option = list()
+        if option is not None:
+            exp_option.append(option)
+
+        return self.execute_command("EXPIRE", name, time, *exp_option)
 
     def expireat(self, name: KeyT, when: AbsExpiryT) -> ResponseT:
         """
