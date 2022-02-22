@@ -642,19 +642,7 @@ def parse_set_result(response, **options):
     return response and str_if_bytes(response) == "OK"
 
 
-class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
-    """
-    Implementation of the Redis protocol.
-
-    This abstract class provides a Python interface to all Redis commands
-    and an implementation of the Redis protocol.
-
-    Pipelines derive from this, implementing how
-    the commands are sent and received to the Redis server. Based on
-    configuration, an instance will either use a ConnectionPool, or
-    Connection object to talk to redis.
-    """
-
+class AbstractRedis:
     RESPONSE_CALLBACKS = {
         **string_keys_to_dict(
             "AUTH COPY EXPIRE EXPIREAT PEXPIRE PEXPIREAT "
@@ -745,6 +733,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         "CONFIG RESETSTAT": bool_ok,
         "CONFIG SET": bool_ok,
         "DEBUG OBJECT": parse_debug_object,
+        "FUNCTION DELETE": bool_ok,
+        "FUNCTION FLUSH": bool_ok,
+        "FUNCTION LOAD": bool_ok,
+        "FUNCTION RESTORE": bool_ok,
         "GEOHASH": lambda r: list(map(str_if_bytes, r)),
         "GEOPOS": lambda r: list(
             map(lambda ll: (float(ll[0]), float(ll[1])) if ll is not None else None, r)
@@ -806,6 +798,20 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         "ZSCAN": parse_zscan,
         "ZMSCORE": parse_zmscore,
     }
+
+
+class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
+    """
+    Implementation of the Redis protocol.
+
+    This abstract class provides a Python interface to all Redis commands
+    and an implementation of the Redis protocol.
+
+    Pipelines derive from this, implementing how
+    the commands are sent and received to the Redis server. Based on
+    configuration, an instance will either use a ConnectionPool, or
+    Connection object to talk to redis.
+    """
 
     @classmethod
     def from_url(cls, url, **kwargs):
