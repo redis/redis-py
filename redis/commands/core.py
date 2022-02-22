@@ -5553,6 +5553,7 @@ class FunctionCommands:
         """
         return self.execute_command("FUNCTION STATS")
 
+
 AsyncClusterCommands = ClusterCommands
 
 
