@@ -13,6 +13,11 @@ The Python interface to the Redis key-value store.
 
 ---------------------------------------------
 
+## Python Notice
+
+redis-py 4.2.x will be the last generation of redis-py to support python 3.6 as it has been [End of Life'd](https://www.python.org/dev/peps/pep-0494/#schedule-last-security-only-release).  Async support was introduced in redis-py 4.2.x thanks to [aioredis](https://github.com/aio-libs/aioredis-py), which necessitates this change. We will continue to maintain 3.6 support as long as possible - but the plan is for redis-py version 5+ to offically remove 3.6.
+
+---------------------------
 
 ## Installation
 

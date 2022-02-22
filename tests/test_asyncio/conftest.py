@@ -1,9 +1,14 @@
 import asyncio
 import random
+import sys
 from typing import Union
 from urllib.parse import urlparse
 
-import pytest_asyncio
+if sys.version_info[0:2] == (3, 6):
+    import pytest as pytest_asyncio
+else:
+    import pytest_asyncio
+
 import pytest
 from packaging.version import Version
 

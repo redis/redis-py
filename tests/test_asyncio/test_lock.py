@@ -1,7 +1,12 @@
 import asyncio
+import sys
 
 import pytest
-import pytest_asyncio
+
+if sys.version_info[0:2] == (3, 6):
+    import pytest as pytest_asyncio
+else:
+    import pytest_asyncio
 
 from redis.asyncio.lock import Lock
 from redis.exceptions import LockError, LockNotOwnedError

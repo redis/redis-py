@@ -1,9 +1,14 @@
 import asyncio
 import os
 import re
+import sys
 
 import pytest
-import pytest_asyncio
+
+if sys.version_info[0:2] == (3, 6):
+    import pytest as pytest_asyncio
+else:
+    import pytest_asyncio
 
 import redis.asyncio as redis
 from redis.asyncio.connection import Connection, to_bool

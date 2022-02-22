@@ -1,7 +1,12 @@
 import socket
+import sys
 
 import pytest
-import pytest_asyncio
+
+if sys.version_info[0:2] == (3, 6):
+    import pytest as pytest_asyncio
+else:
+    import pytest_asyncio
 
 import redis.asyncio.sentinel
 from redis import exceptions
