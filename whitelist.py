@@ -14,4 +14,4 @@ exc_type  # unused variable (/data/repos/redis/redis-py/redis/asyncio/utils.py:2
 exc_value  # unused variable (/data/repos/redis/redis-py/redis/asyncio/utils.py:26)
 traceback  # unused variable (/data/repos/redis/redis-py/redis/asyncio/utils.py:26)
 AsyncConnectionPool  # unused import (//data/repos/redis/redis-py/redis/typing.py:9)
-AsyncRedis # unused import (//data/repos/redis/redis-py/redis/commands/core.py:49)
+AsyncRedis  # unused import (//data/repos/redis/redis-py/redis/commands/core.py:49)
