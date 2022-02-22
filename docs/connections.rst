@@ -43,3 +43,13 @@ Connection Pools
     :members:
 
 More connection examples can be found `here <examples/connection_examples.html>`_.
+
+Async Client
+************
+
+This client is used for communicating with Redis, asynchronously.
+
+.. autoclass:: redis.asyncio.connection.Connection
+    :members:
+
+More connection examples can be found `here <examples/asyncio_examples.html>`_
