@@ -2228,7 +2228,9 @@ class ListCommands(CommandsProtocol):
     see: https://redis.io/topics/data-types#lists
     """
 
-    def blpop(self, keys: List, timeout: Optional[int] = 0) -> Union[Awaitable[list], list]:
+    def blpop(
+        self, keys: List, timeout: Optional[int] = 0
+    ) -> Union[Awaitable[list], list]:
         """
         LPOP a value off of the first non-empty list
         named in the ``keys`` list.
@@ -2247,7 +2249,9 @@ class ListCommands(CommandsProtocol):
         keys.append(timeout)
         return self.execute_command("BLPOP", *keys)
 
-    def brpop(self, keys: List, timeout: Optional[int] = 0) -> Union[Awaitable[list], list]:
+    def brpop(
+        self, keys: List, timeout: Optional[int] = 0
+    ) -> Union[Awaitable[list], list]:
         """
         RPOP a value off of the first non-empty list
         named in the ``keys`` list.
@@ -2323,7 +2327,9 @@ class ListCommands(CommandsProtocol):
 
         return self.execute_command("LMPOP", *args)
 
-    def lindex(self, name: str, index: int) -> Union[Awaitable[Optional[str]], Optional[str]]:
+    def lindex(
+        self, name: str, index: int
+    ) -> Union[Awaitable[Optional[str]], Optional[str]]:
         """
         Return the item from list ``name`` at position ``index``
 
@@ -2334,7 +2340,9 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LINDEX", name, index)
 
-    def linsert(self, name: str, where: str, refvalue: str, value: str) -> Union[Awaitable[int], int]:
+    def linsert(
+        self, name: str, where: str, refvalue: str, value: str
+    ) -> Union[Awaitable[int], int]:
         """
         Insert ``value`` in list ``name`` either immediately before or after
         [``where``] ``refvalue``
@@ -2937,7 +2945,9 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(keys, args)
         return self.execute_command("SDIFF", *args)
 
-    def sdiffstore(self, dest: str, keys: List, *args: List) -> Union[Awaitable[int], int]:
+    def sdiffstore(
+        self, dest: str, keys: List, *args: List
+    ) -> Union[Awaitable[int], int]:
         """
         Store the difference of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
@@ -2956,7 +2966,9 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(keys, args)
         return self.execute_command("SINTER", *args)
 
-    def sintercard(self, numkeys: int, keys: List[str], limit: int = 0) -> Union[Awaitable[int], int]:
+    def sintercard(
+        self, numkeys: int, keys: List[str], limit: int = 0
+    ) -> Union[Awaitable[int], int]:
         """
         Return the cardinality of the intersect of multiple sets specified by ``keys`.
 
@@ -2969,7 +2981,9 @@ class SetCommands(CommandsProtocol):
         args = [numkeys, *keys, "LIMIT", limit]
         return self.execute_command("SINTERCARD", *args)
 
-    def sinterstore(self, dest: str, keys: List, *args: List) -> Union[Awaitable[int], int]:
+    def sinterstore(
+        self, dest: str, keys: List, *args: List
+    ) -> Union[Awaitable[int], int]:
         """
         Store the intersection of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
@@ -2995,7 +3009,9 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SMEMBERS", name)
 
-    def smismember(self, name: str, values: List, *args: List) -> Union[Awaitable[List[bool]], List[bool]]:
+    def smismember(
+        self, name: str, values: List, *args: List,
+    ) -> Union[Awaitable[List[bool]], List[bool]]:
         """
         Return whether each value in ``values`` is a member of the set ``name``
         as a list of ``bool`` in the order of ``values``
@@ -3056,7 +3072,9 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(keys, args)
         return self.execute_command("SUNION", *args)
 
-    def sunionstore(self, dest: str, keys: List, *args: List) -> Union[Awaitable[int], int]:
+    def sunionstore(
+        self, dest: str, keys: List, *args: List
+    ) -> Union[Awaitable[int], int]:
         """
         Store the union of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
@@ -3823,7 +3841,9 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self._zaggregate("ZINTERSTORE", dest, keys, aggregate)
 
-    def zintercard(self, numkeys: int, keys: List[str], limit: int = 0) -> Union[Awaitable[int], int]:
+    def zintercard(
+        self, numkeys: int, keys: List[str], limit: int = 0
+    ) -> Union[Awaitable[int], int]:
         """
         Return the cardinality of the intersect of multiple sorted sets
         specified by ``keys`.
@@ -4504,7 +4524,9 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HEXISTS", name, key)
 
-    def hget(self, name: str, key: str) -> Union[Awaitable[Optional[str]], Optional[str]]:
+    def hget(
+        self, name: str, key: str
+    ) -> Union[Awaitable[Optional[str]], Optional[str]]:
         """
         Return the value of ``key`` within the hash ``name``
 
@@ -4520,7 +4542,9 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HGETALL", name)
 
-    def hincrby(self, name: str, key: str, amount: int = 1) -> Union[Awaitable[int], int]:
+    def hincrby(
+        self, name: str, key: str, amount: int = 1
+    ) -> Union[Awaitable[int], int]:
         """
         Increment the value of ``key`` in hash ``name`` by ``amount``
 
@@ -4528,7 +4552,9 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HINCRBY", name, key, amount)
 
-    def hincrbyfloat(self, name: str, key: str, amount: float = 1.0) -> Union[Awaitable[float], float]:
+    def hincrbyfloat(
+        self, name: str, key: str, amount: float = 1.0
+    ) -> Union[Awaitable[float], float]:
         """
         Increment the value of ``key`` in hash ``name`` by floating ``amount``
 
@@ -4782,7 +4808,9 @@ class ScriptCommands(CommandsProtocol):
     ) -> Union[Awaitable[str], str]:
         return self.execute_command(command, script, numkeys, *keys_and_args)
 
-    def eval(self, script: str, numkeys: int, *keys_and_args: list) -> Union[Awaitable[str], str]:
+    def eval(
+        self, script: str, numkeys: int, *keys_and_args: list
+    ) -> Union[Awaitable[str], str]:
         """
         Execute the Lua ``script``, specifying the ``numkeys`` the script
         will touch and the key names and argument values in ``keys_and_args``.
@@ -4795,7 +4823,9 @@ class ScriptCommands(CommandsProtocol):
         """
         return self._eval("EVAL", script, numkeys, *keys_and_args)
 
-    def eval_ro(self, script: str, numkeys: int, *keys_and_args: list) -> Union[Awaitable[str], str]:
+    def eval_ro(
+        self, script: str, numkeys: int, *keys_and_args: list
+    ) -> Union[Awaitable[str], str]:
         """
         The read-only variant of the EVAL command
 
@@ -4812,7 +4842,9 @@ class ScriptCommands(CommandsProtocol):
     ) -> Union[Awaitable[str], str]:
         return self.execute_command(command, sha, numkeys, *keys_and_args)
 
-    def evalsha(self, sha: str, numkeys: int, *keys_and_args: list) -> Union[Awaitable[str], str]:
+    def evalsha(
+        self, sha: str, numkeys: int, *keys_and_args: list
+    ) -> Union[Awaitable[str], str]:
         """
         Use the ``sha`` to execute a Lua script already registered via EVAL
         or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
@@ -4826,7 +4858,9 @@ class ScriptCommands(CommandsProtocol):
         """
         return self._evalsha("EVALSHA", sha, numkeys, *keys_and_args)
 
-    def evalsha_ro(self, sha: str, numkeys: int, *keys_and_args: list) -> Union[Awaitable[str], str]:
+    def evalsha_ro(
+        self, sha: str, numkeys: int, *keys_and_args: list
+    ) -> Union[Awaitable[str], str]:
         """
         The read-only variant of the EVALSHA command
 
@@ -5552,7 +5586,9 @@ class FunctionCommands:
     ) -> Union[Awaitable[str], str]:
         return self.execute_command(command, function, numkeys, *keys_and_args)
 
-    def fcall(self, function, numkeys: int, *keys_and_args: Optional[List]) -> Union[Awaitable[str], str]:
+    def fcall(
+        self, function, numkeys: int, *keys_and_args: Optional[List]
+    ) -> Union[Awaitable[str], str]:
         """
         Invoke a function.
 
@@ -5560,7 +5596,9 @@ class FunctionCommands:
         """
         return self._fcall("FCALL", function, numkeys, *keys_and_args)
 
-    def fcall_ro(self, function, numkeys: int, *keys_and_args: Optional[List]) -> Union[Awaitable[str], str]:
+    def fcall_ro(
+        self, function, numkeys: int, *keys_and_args: Optional[List]
+    ) -> Union[Awaitable[str], str]:
         """
         This is a read-only variant of the FCALL command that cannot
         execute commands that modify data.
@@ -5582,7 +5620,9 @@ class FunctionCommands:
 
         return self.execute_command("FUNCTION DUMP", **options)
 
-    def function_restore(self, payload: str, policy: Optional[str] = "APPEND") -> Union[Awaitable[str], str]:
+    def function_restore(
+        self, payload: str, policy: Optional[str] = "APPEND"
+    ) -> Union[Awaitable[str], str]:
         """
         Restore libraries from the serialized ``payload``.
         You can use the optional policy argument to provide a policy
