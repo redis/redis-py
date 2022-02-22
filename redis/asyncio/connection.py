@@ -1,18 +1,38 @@
+import asyncio
 import copy
+import enum
 import errno
+import inspect
 import io
 import os
 import socket
+import ssl
+import sys
 import threading
 import weakref
 from itertools import chain
-from queue import Empty, Full, LifoQueue
-from time import time
-from urllib.parse import parse_qs, unquote, urlparse
+from types import MappingProxyType
+from typing import (
+    Any,
+    Callable,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+    cast,
+)
+from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
-from packaging.version import Version
+import async_timeout
 
+from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
+from redis.compat import Protocol, TypedDict
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -30,53 +50,40 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
-from redis.retry import Retry
-from redis.utils import CRYPTOGRAPHY_AVAILABLE, HIREDIS_AVAILABLE, str_if_bytes
+from redis.typing import EncodableT, EncodedT
+from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 
-try:
-    import ssl
-
-    ssl_available = True
-except ImportError:
-    ssl_available = False
-
-NONBLOCKING_EXCEPTION_ERROR_NUMBERS = {
-    BlockingIOError: errno.EWOULDBLOCK,
-}
-
-if ssl_available:
-    if hasattr(ssl, "SSLWantReadError"):
-        NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLWantReadError] = 2
-        NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLWantWriteError] = 2
-    else:
-        NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLError] = 2
-
-NONBLOCKING_EXCEPTIONS = tuple(NONBLOCKING_EXCEPTION_ERROR_NUMBERS.keys())
-
+hiredis = None
 if HIREDIS_AVAILABLE:
     import hiredis
 
-    hiredis_version = Version(hiredis.__version__)
-    HIREDIS_SUPPORTS_CALLABLE_ERRORS = hiredis_version >= Version("0.1.3")
-    HIREDIS_SUPPORTS_BYTE_BUFFER = hiredis_version >= Version("0.1.4")
-    HIREDIS_SUPPORTS_ENCODING_ERRORS = hiredis_version >= Version("1.0.0")
+NONBLOCKING_EXCEPTION_ERROR_NUMBERS = {
+    BlockingIOError: errno.EWOULDBLOCK,
+    ssl.SSLWantReadError: 2,
+    ssl.SSLWantWriteError: 2,
+    ssl.SSLError: 2,
+}
 
-    HIREDIS_USE_BYTE_BUFFER = True
-    # only use byte buffer if hiredis supports it
-    if not HIREDIS_SUPPORTS_BYTE_BUFFER:
-        HIREDIS_USE_BYTE_BUFFER = False
+NONBLOCKING_EXCEPTIONS = tuple(NONBLOCKING_EXCEPTION_ERROR_NUMBERS.keys())
+
 
 SYM_STAR = b"*"
 SYM_DOLLAR = b"$"
 SYM_CRLF = b"\r\n"
+SYM_LF = b"\n"
 SYM_EMPTY = b""
 
 SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
 
-SENTINEL = object()
-MODULE_LOAD_ERROR = "Error loading the extension. " "Please check the server logs."
+
+class _Sentinel(enum.Enum):
+    sentinel = object()
+
+
+SENTINEL = _Sentinel.sentinel
+MODULE_LOAD_ERROR = "Error loading the extension. Please check the server logs."
 NO_SUCH_MODULE_ERROR = "Error unloading module: no such module with that name"
-MODULE_UNLOAD_NOT_POSSIBLE_ERROR = "Error unloading module: operation not " "possible."
+MODULE_UNLOAD_NOT_POSSIBLE_ERROR = "Error unloading module: operation not possible."
 MODULE_EXPORTS_DATA_TYPES_ERROR = (
     "Error unloading module: the module "
     "exports one or more module-side data "
@@ -84,61 +91,73 @@ MODULE_EXPORTS_DATA_TYPES_ERROR = (
 )
 
 
-class Encoder:
-    "Encode strings to bytes-like and decode bytes-like to strings"
+class _HiredisReaderArgs(TypedDict, total=False):
+    protocolError: Callable[[str], Exception]
+    replyError: Callable[[str], Exception]
+    encoding: Optional[str]
+    errors: Optional[str]
 
-    def __init__(self, encoding, encoding_errors, decode_responses):
+
+class Encoder:
+    """Encode strings to bytes-like and decode bytes-like to strings"""
+
+    __slots__ = "encoding", "encoding_errors", "decode_responses"
+
+    def __init__(self, encoding: str, encoding_errors: str, decode_responses: bool):
         self.encoding = encoding
         self.encoding_errors = encoding_errors
         self.decode_responses = decode_responses
 
-    def encode(self, value):
-        "Return a bytestring or bytes-like representation of the value"
+    def encode(self, value: EncodableT) -> EncodedT:
+        """Return a bytestring or bytes-like representation of the value"""
         if isinstance(value, (bytes, memoryview)):
             return value
-        elif isinstance(value, bool):
+        if isinstance(value, bool):
             # special case bool since it is a subclass of int
             raise DataError(
-                "Invalid input of type: 'bool'. Convert to a "
-                "bytes, string, int or float first."
+                "Invalid input of type: 'bool'. "
+                "Convert to a bytes, string, int or float first."
             )
-        elif isinstance(value, (int, float)):
-            value = repr(value).encode()
-        elif not isinstance(value, str):
+        if isinstance(value, (int, float)):
+            return repr(value).encode()
+        if not isinstance(value, str):
             # a value we don't know how to deal with. throw an error
-            typename = type(value).__name__
+            typename = value.__class__.__name__  # type: ignore[unreachable]
             raise DataError(
-                f"Invalid input of type: '{typename}'. "
-                f"Convert to a bytes, string, int or float first."
+                f"Invalid input of type: {typename!r}. "
+                "Convert to a bytes, string, int or float first."
             )
-        if isinstance(value, str):
-            value = value.encode(self.encoding, self.encoding_errors)
-        return value
+        return value.encode(self.encoding, self.encoding_errors)
 
-    def decode(self, value, force=False):
-        "Return a unicode string from the bytes-like representation"
+    def decode(self, value: EncodableT, force=False) -> EncodableT:
+        """Return a unicode string from the bytes-like representation"""
         if self.decode_responses or force:
             if isinstance(value, memoryview):
-                value = value.tobytes()
+                return value.tobytes().decode(self.encoding, self.encoding_errors)
             if isinstance(value, bytes):
-                value = value.decode(self.encoding, self.encoding_errors)
+                return value.decode(self.encoding, self.encoding_errors)
         return value
+
+
+ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Exception]]]]
 
 
 class BaseParser:
-    EXCEPTION_CLASSES = {
+    """Plain Python parsing class"""
+
+    __slots__ = "_stream", "_buffer", "_read_size"
+
+    EXCEPTION_CLASSES: ExceptionMappingT = {
         "ERR": {
             "max number of clients reached": ConnectionError,
             "Client sent AUTH, but no password is set": AuthenticationError,
             "invalid password": AuthenticationError,
             # some Redis server versions report invalid command syntax
             # in lowercase
-            "wrong number of arguments "
-            "for 'auth' command": AuthenticationWrongNumberOfArgsError,
+            "wrong number of arguments for 'auth' command": AuthenticationWrongNumberOfArgsError,  # noqa: E501
             # some Redis server versions report invalid command syntax
             # in uppercase
-            "wrong number of arguments "
-            "for 'AUTH' command": AuthenticationWrongNumberOfArgsError,
+            "wrong number of arguments for 'AUTH' command": AuthenticationWrongNumberOfArgsError,  # noqa: E501
             MODULE_LOAD_ERROR: ModuleError,
             MODULE_EXPORTS_DATA_TYPES_ERROR: ModuleError,
             NO_SUCH_MODULE_ERROR: ModuleError,
@@ -152,8 +171,19 @@ class BaseParser:
         "NOPERM": NoPermissionError,
     }
 
-    def parse_error(self, response):
-        "Parse an error response"
+    def __init__(self, socket_read_size: int):
+        self._stream: Optional[asyncio.StreamReader] = None
+        self._buffer: Optional[SocketBuffer] = None
+        self._read_size = socket_read_size
+
+    def __del__(self):
+        try:
+            self.on_disconnect()
+        except Exception:
+            pass
+
+    def parse_error(self, response: str) -> ResponseError:
+        """Parse an error response"""
         error_code = response.split(" ")[0]
         if error_code in self.EXCEPTION_CLASSES:
             response = response[len(error_code) + 1 :]
@@ -163,13 +193,39 @@ class BaseParser:
             return exception_class(response)
         return ResponseError(response)
 
+    def on_disconnect(self):
+        raise NotImplementedError()
+
+    def on_connect(self, connection: "Connection"):
+        raise NotImplementedError()
+
+    async def can_read(self, timeout: float) -> bool:
+        raise NotImplementedError()
+
+    async def read_response(
+        self, disable_decoding: bool = False
+    ) -> Union[EncodableT, ResponseError, None, List[EncodableT]]:
+        raise NotImplementedError()
+
 
 class SocketBuffer:
-    def __init__(self, socket, socket_read_size, socket_timeout):
-        self._sock = socket
+    """Async-friendly re-impl of redis-py's SocketBuffer.
+
+    TODO: We're currently passing through two buffers,
+        the asyncio.StreamReader and this. I imagine we can reduce the layers here
+        while maintaining compliance with prior art.
+    """
+
+    def __init__(
+        self,
+        stream_reader: asyncio.StreamReader,
+        socket_read_size: int,
+        socket_timeout: Optional[float],
+    ):
+        self._stream: Optional[asyncio.StreamReader] = stream_reader
         self.socket_read_size = socket_read_size
         self.socket_timeout = socket_timeout
-        self._buffer = io.BytesIO()
+        self._buffer: Optional[io.BytesIO] = io.BytesIO()
         # number of bytes written to the buffer from the socket
         self.bytes_written = 0
         # number of bytes read from the buffer
@@ -179,19 +235,23 @@ class SocketBuffer:
     def length(self):
         return self.bytes_written - self.bytes_read
 
-    def _read_from_socket(self, length=None, timeout=SENTINEL, raise_on_timeout=True):
-        sock = self._sock
-        socket_read_size = self.socket_read_size
+    async def _read_from_socket(
+        self,
+        length: Optional[int] = None,
+        timeout: Union[float, None, _Sentinel] = SENTINEL,
+        raise_on_timeout: bool = True,
+    ) -> bool:
         buf = self._buffer
+        if buf is None or self._stream is None:
+            raise RedisError("Buffer is closed.")
         buf.seek(self.bytes_written)
         marker = 0
-        custom_timeout = timeout is not SENTINEL
+        timeout = timeout if timeout is not SENTINEL else self.socket_timeout
 
         try:
-            if custom_timeout:
-                sock.settimeout(timeout)
             while True:
-                data = self._sock.recv(socket_read_size)
+                async with async_timeout.timeout(timeout):
+                    data = await self._stream.read(self.socket_read_size)
                 # an empty string indicates the server shutdown the socket
                 if isinstance(data, bytes) and len(data) == 0:
                     raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
@@ -203,7 +263,7 @@ class SocketBuffer:
                 if length is not None and length > marker:
                     continue
                 return True
-        except socket.timeout:
+        except (socket.timeout, asyncio.TimeoutError):
             if raise_on_timeout:
                 raise TimeoutError("Timeout reading from socket")
             return False
@@ -216,20 +276,20 @@ class SocketBuffer:
             if not raise_on_timeout and ex.errno == allowed:
                 return False
             raise ConnectionError(f"Error while reading from socket: {ex.args}")
-        finally:
-            if custom_timeout:
-                sock.settimeout(self.socket_timeout)
 
-    def can_read(self, timeout):
-        return bool(self.length) or self._read_from_socket(
+    async def can_read(self, timeout: float) -> bool:
+        return bool(self.length) or await self._read_from_socket(
             timeout=timeout, raise_on_timeout=False
         )
 
-    def read(self, length):
+    async def read(self, length: int) -> bytes:
         length = length + 2  # make sure to read the \r\n terminator
         # make sure we've read enough data from the socket
         if length > self.length:
-            self._read_from_socket(length - self.length)
+            await self._read_from_socket(length - self.length)
+
+        if self._buffer is None:
+            raise RedisError("Buffer is closed.")
 
         self._buffer.seek(self.bytes_read)
         data = self._buffer.read(length)
@@ -242,13 +302,16 @@ class SocketBuffer:
 
         return data[:-2]
 
-    def readline(self):
+    async def readline(self) -> bytes:
         buf = self._buffer
+        if buf is None:
+            raise RedisError("Buffer is closed.")
+
         buf.seek(self.bytes_read)
         data = buf.readline()
         while not data.endswith(SYM_CRLF):
             # there's more data in the socket that we need
-            self._read_from_socket()
+            await self._read_from_socket()
             buf.seek(self.bytes_read)
             data = buf.readline()
 
@@ -262,6 +325,9 @@ class SocketBuffer:
         return data[:-2]
 
     def purge(self):
+        if self._buffer is None:
+            raise RedisError("Buffer is closed.")
+
         self._buffer.seek(0)
         self._buffer.truncate()
         self.bytes_written = 0
@@ -270,7 +336,7 @@ class SocketBuffer:
     def close(self):
         try:
             self.purge()
-            self._buffer.close()
+            self._buffer.close()  # type: ignore[union-attr]
         except Exception:
             # issue #633 suggests the purge/close somehow raised a
             # BadFileDescriptor error. Perhaps the client ran out of
@@ -279,48 +345,50 @@ class SocketBuffer:
             # removing the reference to the instance below.
             pass
         self._buffer = None
-        self._sock = None
+        self._stream = None
 
 
 class PythonParser(BaseParser):
-    "Plain Python parsing class"
+    """Plain Python parsing class"""
 
-    def __init__(self, socket_read_size):
-        self.socket_read_size = socket_read_size
-        self.encoder = None
-        self._sock = None
-        self._buffer = None
+    __slots__ = BaseParser.__slots__ + ("encoder",)
 
-    def __del__(self):
-        try:
-            self.on_disconnect()
-        except Exception:
-            pass
+    def __init__(self, socket_read_size: int):
+        super().__init__(socket_read_size)
+        self.encoder: Optional[Encoder] = None
 
-    def on_connect(self, connection):
-        "Called when the socket connects"
-        self._sock = connection._sock
+    def on_connect(self, connection: "Connection"):
+        """Called when the stream connects"""
+        self._stream = connection._reader
+        if self._stream is None:
+            raise RedisError("Buffer is closed.")
+
         self._buffer = SocketBuffer(
-            self._sock, self.socket_read_size, connection.socket_timeout
+            self._stream, self._read_size, connection.socket_timeout
         )
         self.encoder = connection.encoder
 
     def on_disconnect(self):
-        "Called when the socket disconnects"
-        self._sock = None
+        """Called when the stream disconnects"""
+        if self._stream is not None:
+            self._stream = None
         if self._buffer is not None:
             self._buffer.close()
             self._buffer = None
         self.encoder = None
 
-    def can_read(self, timeout):
-        return self._buffer and self._buffer.can_read(timeout)
+    async def can_read(self, timeout: float):
+        return self._buffer and bool(await self._buffer.can_read(timeout))
 
-    def read_response(self, disable_decoding=False):
-        raw = self._buffer.readline()
+    async def read_response(
+        self, disable_decoding: bool = False
+    ) -> Union[EncodableT, ResponseError, None]:
+        if not self._buffer or not self.encoder:
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+        raw = await self._buffer.readline()
         if not raw:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-
+        response: Any
         byte, response = raw[:1], raw[1:]
 
         if byte not in (b"-", b"+", b":", b"$", b"*"):
@@ -350,15 +418,14 @@ class PythonParser(BaseParser):
             length = int(response)
             if length == -1:
                 return None
-            response = self._buffer.read(length)
+            response = await self._buffer.read(length)
         # multi-bulk response
         elif byte == b"*":
             length = int(response)
             if length == -1:
                 return None
             response = [
-                self.read_response(disable_decoding=disable_decoding)
-                for i in range(length)
+                (await self.read_response(disable_decoding)) for _ in range(length)
             ]
         if isinstance(response, bytes) and disable_decoding is False:
             response = self.encoder.decode(response)
@@ -366,79 +433,71 @@ class PythonParser(BaseParser):
 
 
 class HiredisParser(BaseParser):
-    "Parser class for connections using Hiredis"
+    """Parser class for connections using Hiredis"""
 
-    def __init__(self, socket_read_size):
+    __slots__ = BaseParser.__slots__ + ("_next_response", "_reader", "_socket_timeout")
+
+    _next_response: bool
+
+    def __init__(self, socket_read_size: int):
         if not HIREDIS_AVAILABLE:
-            raise RedisError("Hiredis is not installed")
-        self.socket_read_size = socket_read_size
+            raise RedisError("Hiredis is not available.")
+        super().__init__(socket_read_size=socket_read_size)
+        self._reader: Optional[hiredis.Reader] = None
+        self._socket_timeout: Optional[float] = None
 
-        if HIREDIS_USE_BYTE_BUFFER:
-            self._buffer = bytearray(socket_read_size)
-
-    def __del__(self):
-        try:
-            self.on_disconnect()
-        except Exception:
-            pass
-
-    def on_connect(self, connection, **kwargs):
-        self._sock = connection._sock
-        self._socket_timeout = connection.socket_timeout
-        kwargs = {
+    def on_connect(self, connection: "Connection"):
+        self._stream = connection._reader
+        kwargs: _HiredisReaderArgs = {
             "protocolError": InvalidResponse,
             "replyError": self.parse_error,
         }
-
-        # hiredis < 0.1.3 doesn't support functions that create exceptions
-        if not HIREDIS_SUPPORTS_CALLABLE_ERRORS:
-            kwargs["replyError"] = ResponseError
-
         if connection.encoder.decode_responses:
             kwargs["encoding"] = connection.encoder.encoding
-        if HIREDIS_SUPPORTS_ENCODING_ERRORS:
             kwargs["errors"] = connection.encoder.encoding_errors
+
         self._reader = hiredis.Reader(**kwargs)
         self._next_response = False
+        self._socket_timeout = connection.socket_timeout
 
     def on_disconnect(self):
-        self._sock = None
+        self._stream = None
         self._reader = None
         self._next_response = False
 
-    def can_read(self, timeout):
+    async def can_read(self, timeout: float):
         if not self._reader:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
         if self._next_response is False:
             self._next_response = self._reader.gets()
-            if self._next_response is False:
-                return self.read_from_socket(timeout=timeout, raise_on_timeout=False)
+        if self._next_response is False:
+            return await self.read_from_socket(timeout=timeout, raise_on_timeout=False)
         return True
 
-    def read_from_socket(self, timeout=SENTINEL, raise_on_timeout=True):
-        sock = self._sock
-        custom_timeout = timeout is not SENTINEL
+    async def read_from_socket(
+        self,
+        timeout: Union[float, None, _Sentinel] = SENTINEL,
+        raise_on_timeout: bool = True,
+    ):
+        if self._stream is None or self._reader is None:
+            raise RedisError("Parser already closed.")
+
+        timeout = self._socket_timeout if timeout is SENTINEL else timeout
         try:
-            if custom_timeout:
-                sock.settimeout(timeout)
-            if HIREDIS_USE_BYTE_BUFFER:
-                bufflen = self._sock.recv_into(self._buffer)
-                if bufflen == 0:
-                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-                self._reader.feed(self._buffer, 0, bufflen)
-            else:
-                buffer = self._sock.recv(self.socket_read_size)
-                # an empty string indicates the server shutdown the socket
-                if not isinstance(buffer, bytes) or len(buffer) == 0:
-                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-                self._reader.feed(buffer)
+            async with async_timeout.timeout(timeout):
+                buffer = await self._stream.read(self._read_size)
+            if not isinstance(buffer, bytes) or len(buffer) == 0:
+                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
+            self._reader.feed(buffer)
             # data was read from the socket and added to the buffer.
             # return True to indicate that data was read.
             return True
-        except socket.timeout:
+        except asyncio.CancelledError:
+            raise
+        except (socket.timeout, asyncio.TimeoutError):
             if raise_on_timeout:
-                raise TimeoutError("Timeout reading from socket")
+                raise TimeoutError("Timeout reading from socket") from None
             return False
         except NONBLOCKING_EXCEPTIONS as ex:
             # if we're in nonblocking mode and the recv raises a
@@ -449,42 +508,28 @@ class HiredisParser(BaseParser):
             if not raise_on_timeout and ex.errno == allowed:
                 return False
             raise ConnectionError(f"Error while reading from socket: {ex.args}")
-        finally:
-            if custom_timeout:
-                sock.settimeout(self._socket_timeout)
 
-    def read_response(self, disable_decoding=False):
-        if not self._reader:
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+    async def read_response(
+        self, disable_decoding: bool = False
+    ) -> Union[EncodableT, List[EncodableT]]:
+        if not self._stream or not self._reader:
+            self.on_disconnect()
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
 
+        response: Union[
+            EncodableT, ConnectionError, List[Union[EncodableT, ConnectionError]]
+        ]
         # _next_response might be cached from a can_read() call
         if self._next_response is not False:
             response = self._next_response
             self._next_response = False
             return response
 
-        if disable_decoding:
-            response = self._reader.gets(False)
-        else:
+        response = self._reader.gets()
+        while response is False:
+            await self.read_from_socket()
             response = self._reader.gets()
 
-        while response is False:
-            self.read_from_socket()
-            if disable_decoding:
-                response = self._reader.gets(False)
-            else:
-                response = self._reader.gets()
-        # if an older version of hiredis is installed, we need to attempt
-        # to convert ResponseErrors to their appropriate types.
-        if not HIREDIS_SUPPORTS_CALLABLE_ERRORS:
-            if isinstance(response, ResponseError):
-                response = self.parse_error(response.args[0])
-            elif (
-                isinstance(response, list)
-                and response
-                and isinstance(response[0], ResponseError)
-            ):
-                response[0] = self.parse_error(response[0].args[0])
         # if the response is a ConnectionError or the response is a list and
         # the first item is a ConnectionError, raise it as something bad
         # happened
@@ -496,49 +541,88 @@ class HiredisParser(BaseParser):
             and isinstance(response[0], ConnectionError)
         ):
             raise response[0]
-        return response
+        # cast as there won't be a ConnectionError here.
+        return cast(Union[EncodableT, List[EncodableT]], response)
 
 
+DefaultParser: Type[Union[PythonParser, HiredisParser]]
 if HIREDIS_AVAILABLE:
     DefaultParser = HiredisParser
 else:
     DefaultParser = PythonParser
 
 
+class ConnectCallbackProtocol(Protocol):
+    def __call__(self, connection: "Connection"):
+        ...
+
+
+class AsyncConnectCallbackProtocol(Protocol):
+    async def __call__(self, connection: "Connection"):
+        ...
+
+
+ConnectCallbackT = Union[ConnectCallbackProtocol, AsyncConnectCallbackProtocol]
+
+
 class Connection:
-    "Manages TCP communication to and from a Redis server"
+    """Manages TCP communication to and from a Redis server"""
+
+    __slots__ = (
+        "pid",
+        "host",
+        "port",
+        "db",
+        "username",
+        "client_name",
+        "password",
+        "socket_timeout",
+        "socket_connect_timeout",
+        "socket_keepalive",
+        "socket_keepalive_options",
+        "socket_type",
+        "redis_connect_func",
+        "retry_on_timeout",
+        "health_check_interval",
+        "next_health_check",
+        "last_active_at",
+        "encoder",
+        "ssl_context",
+        "_reader",
+        "_writer",
+        "_parser",
+        "_connect_callbacks",
+        "_buffer_cutoff",
+        "_lock",
+        "_socket_read_size",
+        "__dict__",
+    )
 
     def __init__(
         self,
-        host="localhost",
-        port=6379,
-        db=0,
-        password=None,
-        socket_timeout=None,
-        socket_connect_timeout=None,
-        socket_keepalive=False,
-        socket_keepalive_options=None,
-        socket_type=0,
-        retry_on_timeout=False,
-        retry_on_error=[],
-        encoding="utf-8",
-        encoding_errors="strict",
-        decode_responses=False,
-        parser_class=DefaultParser,
-        socket_read_size=65536,
-        health_check_interval=0,
-        client_name=None,
-        username=None,
-        retry=None,
-        redis_connect_func=None,
+        *,
+        host: str = "localhost",
+        port: Union[str, int] = 6379,
+        db: Union[str, int] = 0,
+        password: Optional[str] = None,
+        socket_timeout: Optional[float] = None,
+        socket_connect_timeout: Optional[float] = None,
+        socket_keepalive: bool = False,
+        socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
+        socket_type: int = 0,
+        retry_on_timeout: bool = False,
+        encoding: str = "utf-8",
+        encoding_errors: str = "strict",
+        decode_responses: bool = False,
+        parser_class: Type[BaseParser] = DefaultParser,
+        socket_read_size: int = 65536,
+        health_check_interval: float = 0,
+        client_name: Optional[str] = None,
+        username: Optional[str] = None,
+        retry: Optional[Retry] = None,
+        redis_connect_func: Optional[ConnectCallbackT] = None,
+        encoder_class: Type[Encoder] = Encoder,
     ):
-        """
-        Initialize a new Connection.
-        To specify a retry policy for specific errors, first set
-        `retry_on_error` to a list of the error/s to retry on, then set
-        `retry` to a valid `Retry` object.
-        To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
-        """
         self.pid = os.getpid()
         self.host = host
         self.port = int(port)
@@ -547,37 +631,34 @@ class Connection:
         self.client_name = client_name
         self.password = password
         self.socket_timeout = socket_timeout
-        self.socket_connect_timeout = socket_connect_timeout or socket_timeout
+        self.socket_connect_timeout = socket_connect_timeout or socket_timeout or None
         self.socket_keepalive = socket_keepalive
         self.socket_keepalive_options = socket_keepalive_options or {}
         self.socket_type = socket_type
         self.retry_on_timeout = retry_on_timeout
         if retry_on_timeout:
-            # Add TimeoutError to the errors list to retry on
-            retry_on_error.append(TimeoutError)
-        self.retry_on_error = retry_on_error
-        if retry_on_error:
             if retry is None:
                 self.retry = Retry(NoBackoff(), 1)
             else:
                 # deep-copy the Retry object as it is mutable
                 self.retry = copy.deepcopy(retry)
-            # Update the retry's supported errors with the specified errors
-            self.retry.update_supported_erros(retry_on_error)
         else:
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
-        self.next_health_check = 0
+        self.next_health_check: float = -1
+        self.ssl_context: Optional[RedisSSLContext] = None
+        self.encoder = encoder_class(encoding, encoding_errors, decode_responses)
         self.redis_connect_func = redis_connect_func
-        self.encoder = Encoder(encoding, encoding_errors, decode_responses)
-        self._sock = None
+        self._reader: Optional[asyncio.StreamReader] = None
+        self._writer: Optional[asyncio.StreamWriter] = None
         self._socket_read_size = socket_read_size
         self.set_parser(parser_class)
-        self._connect_callbacks = []
+        self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
+        self._lock = asyncio.Lock()
 
     def __repr__(self):
-        repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
+        repr_args = ",".join((f"{k}={v}" for k, v in self.repr_pieces()))
         return f"{self.__class__.__name__}<{repr_args}>"
 
     def repr_pieces(self):
@@ -588,9 +669,19 @@ class Connection:
 
     def __del__(self):
         try:
-            self.disconnect()
+            if self.is_connected:
+                loop = asyncio.get_event_loop()
+                coro = self.disconnect()
+                if loop.is_running():
+                    loop.create_task(coro)
+                else:
+                    loop.run_until_complete(coro)
         except Exception:
             pass
+
+    @property
+    def is_connected(self):
+        return bool(self._reader and self._writer)
 
     def register_connect_callback(self, callback):
         self._connect_callbacks.append(weakref.WeakMethod(callback))
@@ -606,237 +697,253 @@ class Connection:
         """
         self._parser = parser_class(socket_read_size=self._socket_read_size)
 
-    def connect(self):
-        "Connects to the Redis server if not already connected"
-        if self._sock:
+    async def connect(self):
+        """Connects to the Redis server if not already connected"""
+        if self.is_connected:
             return
         try:
-            sock = self.retry.call_with_retry(
-                lambda: self._connect(), lambda error: self.disconnect(error)
-            )
-        except socket.timeout:
+            await self._connect()
+        except asyncio.CancelledError:
+            raise
+        except (socket.timeout, asyncio.TimeoutError):
             raise TimeoutError("Timeout connecting to server")
         except OSError as e:
             raise ConnectionError(self._error_message(e))
+        except Exception as exc:
+            raise ConnectionError(exc) from exc
 
-        self._sock = sock
         try:
             if self.redis_connect_func is None:
                 # Use the default on_connect function
-                self.on_connect()
+                await self.on_connect()
             else:
                 # Use the passed function redis_connect_func
-                self.redis_connect_func(self)
+                await self.redis_connect_func(self) if asyncio.iscoroutinefunction(
+                    self.redis_connect_func
+                ) else self.redis_connect_func(self)
         except RedisError:
             # clean up after any error in on_connect
-            self.disconnect()
+            await self.disconnect()
             raise
 
         # run any user callbacks. right now the only internal callback
         # is for pubsub channel/pattern resubscription
         for ref in self._connect_callbacks:
             callback = ref()
-            if callback:
-                callback(self)
+            task = callback(self)
+            if task and inspect.isawaitable(task):
+                await task
 
-    def _connect(self):
-        "Create a TCP socket connection"
-        # we want to mimic what socket.create_connection does to support
-        # ipv4/ipv6, but we want to set options prior to calling
-        # socket.connect()
-        err = None
-        for res in socket.getaddrinfo(
-            self.host, self.port, self.socket_type, socket.SOCK_STREAM
-        ):
-            family, socktype, proto, canonname, socket_address = res
-            sock = None
+    async def _connect(self):
+        """Create a TCP socket connection"""
+        async with async_timeout.timeout(self.socket_connect_timeout):
+            reader, writer = await asyncio.open_connection(
+                host=self.host,
+                port=self.port,
+                ssl=self.ssl_context.get() if self.ssl_context else None,
+            )
+        self._reader = reader
+        self._writer = writer
+        sock = writer.transport.get_extra_info("socket")
+        if sock is not None:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             try:
-                sock = socket.socket(family, socktype, proto)
-                # TCP_NODELAY
-                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-
                 # TCP_KEEPALIVE
                 if self.socket_keepalive:
                     sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                     for k, v in self.socket_keepalive_options.items():
-                        sock.setsockopt(socket.IPPROTO_TCP, k, v)
+                        sock.setsockopt(socket.SOL_TCP, k, v)
 
-                # set the socket_connect_timeout before we connect
-                sock.settimeout(self.socket_connect_timeout)
-
-                # connect
-                sock.connect(socket_address)
-
-                # set the socket_timeout now that we're connected
-                sock.settimeout(self.socket_timeout)
-                return sock
-
-            except OSError as _:
-                err = _
-                if sock is not None:
-                    sock.close()
-
-        if err is not None:
-            raise err
-        raise OSError("socket.getaddrinfo returned an empty list")
+            except (OSError, TypeError):
+                # `socket_keepalive_options` might contain invalid options
+                # causing an error. Do not leave the connection open.
+                writer.close()
+                raise
 
     def _error_message(self, exception):
         # args for socket.error can either be (errno, "message")
         # or just "message"
         if len(exception.args) == 1:
-            try:
-                return f"Error connecting to {self.host}:{self.port}. \
-                        {exception.args[0]}."
-            except AttributeError:
-                return f"Connection Error: {exception.args[0]}"
+            return f"Error connecting to {self.host}:{self.port}. {exception.args[0]}."
         else:
-            try:
-                return (
-                    f"Error {exception.args[0]} connecting to "
-                    f"{self.host}:{self.port}. {exception.args[1]}."
-                )
-            except AttributeError:
-                return f"Connection Error: {exception.args[0]}"
+            return (
+                f"Error {exception.args[0]} connecting to {self.host}:{self.port}. "
+                f"{exception.args[0]}."
+            )
 
-    def on_connect(self):
-        "Initialize the connection, authenticate and select a database"
+    async def on_connect(self):
+        """Initialize the connection, authenticate and select a database"""
         self._parser.on_connect(self)
 
         # if username and/or password are set, authenticate
         if self.username or self.password:
+            auth_args: Union[Tuple[str], Tuple[str, str]]
             if self.username:
                 auth_args = (self.username, self.password or "")
             else:
-                auth_args = (self.password,)
+                # Mypy bug: https://github.com/python/mypy/issues/10944
+                auth_args = (self.password or "",)
             # avoid checking health here -- PING will fail if we try
             # to check the health prior to the AUTH
-            self.send_command("AUTH", *auth_args, check_health=False)
+            await self.send_command("AUTH", *auth_args, check_health=False)
 
             try:
-                auth_response = self.read_response()
+                auth_response = await self.read_response()
             except AuthenticationWrongNumberOfArgsError:
                 # a username and password were specified but the Redis
                 # server seems to be < 6.0.0 which expects a single password
                 # arg. retry auth with just the password.
                 # https://github.com/andymccurdy/redis-py/issues/1274
-                self.send_command("AUTH", self.password, check_health=False)
-                auth_response = self.read_response()
+                await self.send_command("AUTH", self.password, check_health=False)
+                auth_response = await self.read_response()
 
             if str_if_bytes(auth_response) != "OK":
                 raise AuthenticationError("Invalid Username or Password")
 
         # if a client_name is given, set it
         if self.client_name:
-            self.send_command("CLIENT", "SETNAME", self.client_name)
-            if str_if_bytes(self.read_response()) != "OK":
+            await self.send_command("CLIENT", "SETNAME", self.client_name)
+            if str_if_bytes(await self.read_response()) != "OK":
                 raise ConnectionError("Error setting client name")
 
         # if a database is specified, switch to it
         if self.db:
-            self.send_command("SELECT", self.db)
-            if str_if_bytes(self.read_response()) != "OK":
+            await self.send_command("SELECT", self.db)
+            if str_if_bytes(await self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
-    def disconnect(self, *args):
-        "Disconnects from the Redis server"
-        self._parser.on_disconnect()
-        if self._sock is None:
-            return
-
-        if os.getpid() == self.pid:
-            try:
-                self._sock.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
-
+    async def disconnect(self):
+        """Disconnects from the Redis server"""
         try:
-            self._sock.close()
-        except OSError:
-            pass
-        self._sock = None
+            async with async_timeout.timeout(self.socket_connect_timeout):
+                self._parser.on_disconnect()
+                if not self.is_connected:
+                    return
+                try:
+                    if os.getpid() == self.pid:
+                        self._writer.close()  # type: ignore[union-attr]
+                        # py3.6 doesn't have this method
+                        if hasattr(self._writer, "wait_closed"):
+                            await self._writer.wait_closed()  # type: ignore[union-attr]
+                except OSError:
+                    pass
+                self._reader = None
+                self._writer = None
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                f"Timed out closing connection after {self.socket_connect_timeout}"
+            ) from None
 
-    def _send_ping(self):
+    async def _send_ping(self):
         """Send PING, expect PONG in return"""
-        self.send_command("PING", check_health=False)
-        if str_if_bytes(self.read_response()) != "PONG":
+        await self.send_command("PING", check_health=False)
+        if str_if_bytes(await self.read_response()) != "PONG":
             raise ConnectionError("Bad response from PING health check")
 
-    def _ping_failed(self, error):
+    async def _ping_failed(self, error):
         """Function to call when PING fails"""
-        self.disconnect()
+        await self.disconnect()
 
-    def check_health(self):
+    async def check_health(self):
         """Check the health of the connection with a PING/PONG"""
-        if self.health_check_interval and time() > self.next_health_check:
-            self.retry.call_with_retry(self._send_ping, self._ping_failed)
+        if sys.version_info[0:2] == (3, 6):
+            func = asyncio.get_event_loop
+        else:
+            func = asyncio.get_running_loop
 
-    def send_packed_command(self, command, check_health=True):
+        if self.health_check_interval and func().time() > self.next_health_check:
+            await self.retry.call_with_retry(self._send_ping, self._ping_failed)
+
+    async def _send_packed_command(self, command: Iterable[bytes]) -> None:
+        if self._writer is None:
+            raise RedisError("Connection already closed.")
+
+        self._writer.writelines(command)
+        await self._writer.drain()
+
+    async def send_packed_command(
+        self,
+        command: Union[bytes, str, Iterable[bytes]],
+        check_health: bool = True,
+    ):
         """Send an already packed command to the Redis server"""
-        if not self._sock:
-            self.connect()
+        if not self._writer:
+            await self.connect()
         # guard against health check recursion
         if check_health:
-            self.check_health()
+            await self.check_health()
         try:
             if isinstance(command, str):
+                command = command.encode()
+            if isinstance(command, bytes):
                 command = [command]
-            for item in command:
-                self._sock.sendall(item)
-        except socket.timeout:
-            self.disconnect()
-            raise TimeoutError("Timeout writing to socket")
+            await asyncio.wait_for(
+                self._send_packed_command(command),
+                self.socket_timeout,
+            )
+        except asyncio.TimeoutError:
+            await self.disconnect()
+            raise TimeoutError("Timeout writing to socket") from None
         except OSError as e:
-            self.disconnect()
+            await self.disconnect()
             if len(e.args) == 1:
-                errno, errmsg = "UNKNOWN", e.args[0]
+                err_no, errmsg = "UNKNOWN", e.args[0]
             else:
-                errno = e.args[0]
+                err_no = e.args[0]
                 errmsg = e.args[1]
-            raise ConnectionError(f"Error {errno} while writing to socket. {errmsg}.")
+            raise ConnectionError(
+                f"Error {err_no} while writing to socket. {errmsg}."
+            ) from e
         except BaseException:
-            self.disconnect()
+            await self.disconnect()
             raise
 
-    def send_command(self, *args, **kwargs):
+    async def send_command(self, *args, **kwargs):
         """Pack and send a command to the Redis server"""
-        self.send_packed_command(
+        if not self.is_connected:
+            await self.connect()
+        await self.send_packed_command(
             self.pack_command(*args), check_health=kwargs.get("check_health", True)
         )
 
-    def can_read(self, timeout=0):
+    async def can_read(self, timeout: float = 0):
         """Poll the socket to see if there's data that can be read."""
-        sock = self._sock
-        if not sock:
-            self.connect()
-        return self._parser.can_read(timeout)
+        if not self.is_connected:
+            await self.connect()
+        return await self._parser.can_read(timeout)
 
-    def read_response(self, disable_decoding=False):
+    async def read_response(self, disable_decoding: bool = False):
         """Read the response from a previously sent command"""
         try:
-            hosterr = f"{self.host}:{self.port}"
-        except AttributeError:
-            hosterr = "connection"
-
-        try:
-            response = self._parser.read_response(disable_decoding=disable_decoding)
-        except socket.timeout:
-            self.disconnect()
-            raise TimeoutError(f"Timeout reading from {hosterr}")
+            async with self._lock:
+                async with async_timeout.timeout(self.socket_timeout):
+                    response = await self._parser.read_response(
+                        disable_decoding=disable_decoding
+                    )
+        except asyncio.TimeoutError:
+            await self.disconnect()
+            raise TimeoutError(f"Timeout reading from {self.host}:{self.port}")
         except OSError as e:
-            self.disconnect()
-            raise ConnectionError(f"Error while reading from {hosterr}" f" : {e.args}")
+            await self.disconnect()
+            raise ConnectionError(
+                f"Error while reading from {self.host}:{self.port} : {e.args}"
+            )
         except BaseException:
-            self.disconnect()
+            await self.disconnect()
             raise
 
         if self.health_check_interval:
-            self.next_health_check = time() + self.health_check_interval
+            if sys.version_info[0:2] == (3, 6):
+                func = asyncio.get_event_loop
+            else:
+                func = asyncio.get_running_loop
+            self.next_health_check = func().time() + self.health_check_interval
 
         if isinstance(response, ResponseError):
-            raise response
+            raise response from None
         return response
 
-    def pack_command(self, *args):
+    def pack_command(self, *args: EncodableT) -> List[bytes]:
         """Pack a series of arguments into the Redis protocol"""
         output = []
         # the client might have included 1 or more literal arguments in
@@ -844,6 +951,7 @@ class Connection:
         # arguments to be sent separately, so split the first argument
         # manually. These arguments should be bytestrings so that they are
         # not encoded.
+        assert not isinstance(args[0], float)
         if isinstance(args[0], str):
             args = tuple(args[0].encode().split()) + args[1:]
         elif b" " in args[0]:
@@ -881,10 +989,10 @@ class Connection:
         output.append(buff)
         return output
 
-    def pack_commands(self, commands):
+    def pack_commands(self, commands: Iterable[Iterable[EncodableT]]) -> List[bytes]:
         """Pack multiple commands into the Redis protocol"""
-        output = []
-        pieces = []
+        output: List[bytes] = []
+        pieces: List[bytes] = []
         buffer_length = 0
         buffer_cutoff = self._buffer_cutoff
 
@@ -912,164 +1020,119 @@ class Connection:
 
 
 class SSLConnection(Connection):
-    """Manages SSL connections to and from the Redis server(s).
-    This class extends the Connection class, adding SSL functionality, and making
-    use of ssl.SSLContext (https://docs.python.org/3/library/ssl.html#ssl.SSLContext)
-    """  # noqa
+    def __init__(
+        self,
+        ssl_keyfile: Optional[str] = None,
+        ssl_certfile: Optional[str] = None,
+        ssl_cert_reqs: str = "required",
+        ssl_ca_certs: Optional[str] = None,
+        ssl_check_hostname: bool = False,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.ssl_context: RedisSSLContext = RedisSSLContext(
+            keyfile=ssl_keyfile,
+            certfile=ssl_certfile,
+            cert_reqs=ssl_cert_reqs,
+            ca_certs=ssl_ca_certs,
+            check_hostname=ssl_check_hostname,
+        )
+
+    @property
+    def keyfile(self):
+        return self.ssl_context.keyfile
+
+    @property
+    def certfile(self):
+        return self.ssl_context.certfile
+
+    @property
+    def cert_reqs(self):
+        return self.ssl_context.cert_reqs
+
+    @property
+    def ca_certs(self):
+        return self.ssl_context.ca_certs
+
+    @property
+    def check_hostname(self):
+        return self.ssl_context.check_hostname
+
+
+class RedisSSLContext:
+    __slots__ = (
+        "keyfile",
+        "certfile",
+        "cert_reqs",
+        "ca_certs",
+        "context",
+        "check_hostname",
+    )
 
     def __init__(
         self,
-        ssl_keyfile=None,
-        ssl_certfile=None,
-        ssl_cert_reqs="required",
-        ssl_ca_certs=None,
-        ssl_check_hostname=False,
-        ssl_ca_path=None,
-        ssl_password=None,
-        ssl_validate_ocsp=False,
-        ssl_validate_ocsp_stapled=False,
-        ssl_ocsp_context=None,
-        ssl_ocsp_expected_cert=None,
-        **kwargs,
+        keyfile: Optional[str] = None,
+        certfile: Optional[str] = None,
+        cert_reqs: Optional[str] = None,
+        ca_certs: Optional[str] = None,
+        check_hostname: bool = False,
     ):
-        """Constructor
-
-        Args:
-            ssl_keyfile: Path to an ssl private key. Defaults to None.
-            ssl_certfile: Path to an ssl certificate. Defaults to None.
-            ssl_cert_reqs: The string value for the SSLContext.verify_mode (none, optional, required). Defaults to "required".
-            ssl_ca_certs: The path to a file of concatenated CA certificates in PEM format. Defaults to None.
-            ssl_check_hostname: If set, match the hostname during the SSL handshake. Defaults to False.
-            ssl_ca_path: The path to a directory containing several CA certificates in PEM format. Defaults to None.
-            ssl_password: Password for unlocking an encrypted private key. Defaults to None.
-
-            ssl_validate_ocsp: If set, perform a full ocsp validation (i.e not a stapled verification)
-            ssl_validate_ocsp_stapled: If set, perform a validation on a stapled ocsp response
-            ssl_ocsp_context: A fully initialized OpenSSL.SSL.Context object to be used in verifying the ssl_ocsp_expected_cert
-            ssl_ocsp_expected_cert: A PEM armoured string containing the expected certificate to be returned from the ocsp verification service.
-
-        Raises:
-            RedisError
-        """  # noqa
-        if not ssl_available:
-            raise RedisError("Python wasn't built with SSL support")
-
-        super().__init__(**kwargs)
-
-        self.keyfile = ssl_keyfile
-        self.certfile = ssl_certfile
-        if ssl_cert_reqs is None:
-            ssl_cert_reqs = ssl.CERT_NONE
-        elif isinstance(ssl_cert_reqs, str):
+        self.keyfile = keyfile
+        self.certfile = certfile
+        if cert_reqs is None:
+            self.cert_reqs = ssl.CERT_NONE
+        elif isinstance(cert_reqs, str):
             CERT_REQS = {
                 "none": ssl.CERT_NONE,
                 "optional": ssl.CERT_OPTIONAL,
                 "required": ssl.CERT_REQUIRED,
             }
-            if ssl_cert_reqs not in CERT_REQS:
+            if cert_reqs not in CERT_REQS:
                 raise RedisError(
-                    f"Invalid SSL Certificate Requirements Flag: {ssl_cert_reqs}"
+                    f"Invalid SSL Certificate Requirements Flag: {cert_reqs}"
                 )
-            ssl_cert_reqs = CERT_REQS[ssl_cert_reqs]
-        self.cert_reqs = ssl_cert_reqs
-        self.ca_certs = ssl_ca_certs
-        self.ca_path = ssl_ca_path
-        self.check_hostname = ssl_check_hostname
-        self.certificate_password = ssl_password
-        self.ssl_validate_ocsp = ssl_validate_ocsp
-        self.ssl_validate_ocsp_stapled = ssl_validate_ocsp_stapled
-        self.ssl_ocsp_context = ssl_ocsp_context
-        self.ssl_ocsp_expected_cert = ssl_ocsp_expected_cert
+            self.cert_reqs = CERT_REQS[cert_reqs]
+        self.ca_certs = ca_certs
+        self.check_hostname = check_hostname
+        self.context: Optional[ssl.SSLContext] = None
 
-    def _connect(self):
-        "Wrap the socket with SSL support"
-        sock = super()._connect()
-        context = ssl.create_default_context()
-        context.check_hostname = self.check_hostname
-        context.verify_mode = self.cert_reqs
-        if self.certfile or self.keyfile:
-            context.load_cert_chain(
-                certfile=self.certfile,
-                keyfile=self.keyfile,
-                password=self.certificate_password,
-            )
-        if self.ca_certs is not None or self.ca_path is not None:
-            context.load_verify_locations(cafile=self.ca_certs, capath=self.ca_path)
-        sslsock = context.wrap_socket(sock, server_hostname=self.host)
-        if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE is False:
-            raise RedisError("cryptography is not installed.")
-
-        if self.ssl_validate_ocsp_stapled and self.ssl_validate_ocsp:
-            raise RedisError(
-                "Either an OCSP staple or pure OCSP connection must be validated "
-                "- not both."
-            )
-
-        # validation for the stapled case
-        if self.ssl_validate_ocsp_stapled:
-            import OpenSSL
-
-            from .ocsp import ocsp_staple_verifier
-
-            # if a context is provided use it - otherwise, a basic context
-            if self.ssl_ocsp_context is None:
-                staple_ctx = OpenSSL.SSL.Context(OpenSSL.SSL.SSLv23_METHOD)
-                staple_ctx.use_certificate_file(self.certfile)
-                staple_ctx.use_privatekey_file(self.keyfile)
-            else:
-                staple_ctx = self.ssl_ocsp_context
-
-            staple_ctx.set_ocsp_client_callback(
-                ocsp_staple_verifier,
-                self.ssl_ocsp_expected_cert,
-            )
-
-            #  need another socket
-            con = OpenSSL.SSL.Connection(staple_ctx, socket.socket())
-            con.request_ocsp()
-            con.connect((self.host, self.port))
-            con.do_handshake()
-            con.shutdown()
-            return sslsock
-
-        # pure ocsp validation
-        if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE:
-            from .ocsp import OCSPVerifier
-
-            o = OCSPVerifier(sslsock, self.host, self.port, self.ca_certs)
-            if o.is_valid():
-                return sslsock
-            else:
-                raise ConnectionError("ocsp validation error")
-        return sslsock
+    def get(self) -> ssl.SSLContext:
+        if not self.context:
+            context = ssl.create_default_context()
+            context.check_hostname = self.check_hostname
+            context.verify_mode = self.cert_reqs
+            if self.certfile and self.keyfile:
+                context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
+            if self.ca_certs:
+                context.load_verify_locations(self.ca_certs)
+            self.context = context
+        return self.context
 
 
-class UnixDomainSocketConnection(Connection):
+class UnixDomainSocketConnection(Connection):  # lgtm [py/missing-call-to-init]
     def __init__(
         self,
-        path="",
-        db=0,
-        username=None,
-        password=None,
-        socket_timeout=None,
-        encoding="utf-8",
-        encoding_errors="strict",
-        decode_responses=False,
-        retry_on_timeout=False,
-        retry_on_error=[],
-        parser_class=DefaultParser,
-        socket_read_size=65536,
-        health_check_interval=0,
-        client_name=None,
-        retry=None,
-        redis_connect_func=None,
+        *,
+        path: str = "",
+        db: Union[str, int] = 0,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        socket_timeout: Optional[float] = None,
+        socket_connect_timeout: Optional[float] = None,
+        encoding: str = "utf-8",
+        encoding_errors: str = "strict",
+        decode_responses: bool = False,
+        retry_on_timeout: bool = False,
+        parser_class: Type[BaseParser] = DefaultParser,
+        socket_read_size: int = 65536,
+        health_check_interval: float = 0.0,
+        client_name: str = None,
+        retry: Optional[Retry] = None,
     ):
         """
         Initialize a new UnixDomainSocketConnection.
-        To specify a retry policy for specific errors, first set
-        `retry_on_error` to a list of the error/s to retry on, then set
-        `retry` to a valid `Retry` object.
-        To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
+        To specify a retry policy, first set `retry_on_timeout` to `True`
+        then set `retry` to a valid `Retry` object
         """
         self.pid = os.getpid()
         self.path = path
@@ -1078,32 +1141,29 @@ class UnixDomainSocketConnection(Connection):
         self.client_name = client_name
         self.password = password
         self.socket_timeout = socket_timeout
+        self.socket_connect_timeout = socket_connect_timeout or socket_timeout or None
         self.retry_on_timeout = retry_on_timeout
         if retry_on_timeout:
-            # Add TimeoutError to the errors list to retry on
-            retry_on_error.append(TimeoutError)
-        self.retry_on_error = retry_on_error
-        if self.retry_on_error:
             if retry is None:
                 self.retry = Retry(NoBackoff(), 1)
             else:
                 # deep-copy the Retry object as it is mutable
                 self.retry = copy.deepcopy(retry)
-            # Update the retry's supported errors with the specified errors
-            self.retry.update_supported_erros(retry_on_error)
         else:
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
-        self.next_health_check = 0
-        self.redis_connect_func = redis_connect_func
+        self.next_health_check = -1
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
+        self._reader = None
+        self._writer = None
         self._socket_read_size = socket_read_size
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
+        self._lock = asyncio.Lock()
 
-    def repr_pieces(self):
+    def repr_pieces(self) -> Iterable[Tuple[str, Union[str, int]]]:
         pieces = [
             ("path", self.path),
             ("db", self.db),
@@ -1112,12 +1172,12 @@ class UnixDomainSocketConnection(Connection):
             pieces.append(("client_name", self.client_name))
         return pieces
 
-    def _connect(self):
-        "Create a Unix domain socket connection"
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(self.socket_timeout)
-        sock.connect(self.path)
-        return sock
+    async def _connect(self):
+        async with async_timeout.timeout(self.socket_connect_timeout):
+            reader, writer = await asyncio.open_unix_connection(path=self.path)
+        self._reader = reader
+        self._writer = writer
+        await self.on_connect()
 
     def _error_message(self, exception):
         # args for socket.error can either be (errno, "message")
@@ -1134,7 +1194,7 @@ class UnixDomainSocketConnection(Connection):
 FALSE_STRINGS = ("0", "F", "FALSE", "N", "NO")
 
 
-def to_bool(value):
+def to_bool(value) -> Optional[bool]:
     if value is None or value == "":
         return None
     if isinstance(value, str) and value.upper() in FALSE_STRINGS:
@@ -1142,79 +1202,94 @@ def to_bool(value):
     return bool(value)
 
 
-URL_QUERY_ARGUMENT_PARSERS = {
-    "db": int,
-    "socket_timeout": float,
-    "socket_connect_timeout": float,
-    "socket_keepalive": to_bool,
-    "retry_on_timeout": to_bool,
-    "retry_on_error": list,
-    "max_connections": int,
-    "health_check_interval": int,
-    "ssl_check_hostname": to_bool,
-}
+URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyType(
+    {
+        "db": int,
+        "socket_timeout": float,
+        "socket_connect_timeout": float,
+        "socket_keepalive": to_bool,
+        "retry_on_timeout": to_bool,
+        "max_connections": int,
+        "health_check_interval": int,
+        "ssl_check_hostname": to_bool,
+    }
+)
 
 
-def parse_url(url):
-    url = urlparse(url)
-    kwargs = {}
+class ConnectKwargs(TypedDict, total=False):
+    username: str
+    password: str
+    connection_class: Type[Connection]
+    host: str
+    port: int
+    db: int
+    path: str
 
-    for name, value in parse_qs(url.query).items():
-        if value and len(value) > 0:
-            value = unquote(value[0])
+
+def parse_url(url: str) -> ConnectKwargs:
+    parsed: ParseResult = urlparse(url)
+    kwargs: ConnectKwargs = {}
+
+    for name, value_list in parse_qs(parsed.query).items():
+        if value_list and len(value_list) > 0:
+            value = unquote(value_list[0])
             parser = URL_QUERY_ARGUMENT_PARSERS.get(name)
             if parser:
                 try:
-                    kwargs[name] = parser(value)
+                    # We can't type this.
+                    kwargs[name] = parser(value)  # type: ignore[misc]
                 except (TypeError, ValueError):
                     raise ValueError(f"Invalid value for `{name}` in connection URL.")
             else:
-                kwargs[name] = value
+                kwargs[name] = value  # type: ignore[misc]
 
-    if url.username:
-        kwargs["username"] = unquote(url.username)
-    if url.password:
-        kwargs["password"] = unquote(url.password)
+    if parsed.username:
+        kwargs["username"] = unquote(parsed.username)
+    if parsed.password:
+        kwargs["password"] = unquote(parsed.password)
 
     # We only support redis://, rediss:// and unix:// schemes.
-    if url.scheme == "unix":
-        if url.path:
-            kwargs["path"] = unquote(url.path)
+    if parsed.scheme == "unix":
+        if parsed.path:
+            kwargs["path"] = unquote(parsed.path)
         kwargs["connection_class"] = UnixDomainSocketConnection
 
-    elif url.scheme in ("redis", "rediss"):
-        if url.hostname:
-            kwargs["host"] = unquote(url.hostname)
-        if url.port:
-            kwargs["port"] = int(url.port)
+    elif parsed.scheme in ("redis", "rediss"):
+        if parsed.hostname:
+            kwargs["host"] = unquote(parsed.hostname)
+        if parsed.port:
+            kwargs["port"] = int(parsed.port)
 
         # If there's a path argument, use it as the db argument if a
         # querystring value wasn't specified
-        if url.path and "db" not in kwargs:
+        if parsed.path and "db" not in kwargs:
             try:
-                kwargs["db"] = int(unquote(url.path).replace("/", ""))
+                kwargs["db"] = int(unquote(parsed.path).replace("/", ""))
             except (AttributeError, ValueError):
                 pass
 
-        if url.scheme == "rediss":
+        if parsed.scheme == "rediss":
             kwargs["connection_class"] = SSLConnection
     else:
+        valid_schemes = "redis://, rediss://, unix://"
         raise ValueError(
-            "Redis URL must specify one of the following "
-            "schemes (redis://, rediss://, unix://)"
+            f"Redis URL must specify one of the following schemes ({valid_schemes})"
         )
 
     return kwargs
 
 
+_CP = TypeVar("_CP", bound="ConnectionPool")
+
+
 class ConnectionPool:
     """
     Create a connection pool. ``If max_connections`` is set, then this
-    object raises :py:class:`~redis.exceptions.ConnectionError` when the pool's
+    object raises :py:class:`~redis.ConnectionError` when the pool's
     limit is reached.
 
     By default, TCP connections are created unless ``connection_class``
-    is specified. Use class:`.UnixDomainSocketConnection` for
+    is specified. Use :py:class:`~redis.UnixDomainSocketConnection` for
     unix sockets.
 
     Any additional keyword arguments are passed to the constructor of
@@ -1222,7 +1297,7 @@ class ConnectionPool:
     """
 
     @classmethod
-    def from_url(cls, url, **kwargs):
+    def from_url(cls: Type[_CP], url: str, **kwargs) -> _CP:
         """
         Return a connection pool configured from the given URL.
 
@@ -1246,7 +1321,6 @@ class ConnectionPool:
 
         There are several ways to specify a database number. The first value
         found will be used:
-
             1. A ``db`` querystring option, e.g. redis://localhost?db=0
             2. If using the redis:// or rediss:// schemes, the path argument
                of the url, e.g. redis://localhost/0
@@ -1263,15 +1337,14 @@ class ConnectionPool:
         arguments always win.
         """
         url_options = parse_url(url)
-
-        if "connection_class" in kwargs:
-            url_options["connection_class"] = kwargs["connection_class"]
-
         kwargs.update(url_options)
         return cls(**kwargs)
 
     def __init__(
-        self, connection_class=Connection, max_connections=None, **connection_kwargs
+        self,
+        connection_class: Type[Connection] = Connection,
+        max_connections: Optional[int] = None,
+        **connection_kwargs,
     ):
         max_connections = max_connections or 2 ** 31
         if not isinstance(max_connections, int) or max_connections < 0:
@@ -1290,16 +1363,21 @@ class ConnectionPool:
         # will notice the first thread already did the work and simply
         # release the lock.
         self._fork_lock = threading.Lock()
-        self.reset()
+        self._lock = asyncio.Lock()
+        self._created_connections: int
+        self._available_connections: List[Connection]
+        self._in_use_connections: Set[Connection]
+        self.reset()  # lgtm [py/init-calls-subclass]
+        self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
 
     def __repr__(self):
         return (
-            f"{type(self).__name__}"
-            f"<{repr(self.connection_class(**self.connection_kwargs))}>"
+            f"{self.__class__.__name__}"
+            f"<{self.connection_class(**self.connection_kwargs)!r}>"
         )
 
     def reset(self):
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()
@@ -1362,10 +1440,10 @@ class ConnectionPool:
             finally:
                 self._fork_lock.release()
 
-    def get_connection(self, command_name, *keys, **options):
-        "Get a connection from the pool"
+    async def get_connection(self, command_name, *keys, **options):
+        """Get a connection from the pool"""
         self._checkpid()
-        with self._lock:
+        async with self._lock:
             try:
                 connection = self._available_connections.pop()
             except IndexError:
@@ -1374,47 +1452,47 @@ class ConnectionPool:
 
         try:
             # ensure this connection is connected to Redis
-            connection.connect()
+            await connection.connect()
             # connections that the pool provides should be ready to send
             # a command. if not, the connection was either returned to the
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
             try:
-                if connection.can_read():
-                    raise ConnectionError("Connection has data")
-            except (ConnectionError, OSError):
-                connection.disconnect()
-                connection.connect()
-                if connection.can_read():
-                    raise ConnectionError("Connection not ready")
+                if await connection.can_read():
+                    raise ConnectionError("Connection has data") from None
+            except ConnectionError:
+                await connection.disconnect()
+                await connection.connect()
+                if await connection.can_read():
+                    raise ConnectionError("Connection not ready") from None
         except BaseException:
             # release the connection back to the pool so that we don't
             # leak it
-            self.release(connection)
+            await self.release(connection)
             raise
 
         return connection
 
     def get_encoder(self):
-        "Return an encoder based on encoding settings"
+        """Return an encoder based on encoding settings"""
         kwargs = self.connection_kwargs
-        return Encoder(
+        return self.encoder_class(
             encoding=kwargs.get("encoding", "utf-8"),
             encoding_errors=kwargs.get("encoding_errors", "strict"),
             decode_responses=kwargs.get("decode_responses", False),
         )
 
     def make_connection(self):
-        "Create a new connection"
+        """Create a new connection"""
         if self._created_connections >= self.max_connections:
             raise ConnectionError("Too many connections")
         self._created_connections += 1
         return self.connection_class(**self.connection_kwargs)
 
-    def release(self, connection):
-        "Releases the connection back to the pool"
+    async def release(self, connection: Connection):
+        """Releases the connection back to the pool"""
         self._checkpid()
-        with self._lock:
+        async with self._lock:
             try:
                 self._in_use_connections.remove(connection)
             except KeyError:
@@ -1429,31 +1507,35 @@ class ConnectionPool:
                 # to the pool and decrement the count so that another
                 # connection can take its place if needed
                 self._created_connections -= 1
-                connection.disconnect()
+                await connection.disconnect()
                 return
 
-    def owns_connection(self, connection):
+    def owns_connection(self, connection: Connection):
         return connection.pid == self.pid
 
-    def disconnect(self, inuse_connections=True):
+    async def disconnect(self, inuse_connections: bool = True):
         """
         Disconnects connections in the pool
 
         If ``inuse_connections`` is True, disconnect connections that are
-        current in use, potentially by other threads. Otherwise only disconnect
+        current in use, potentially by other tasks. Otherwise only disconnect
         connections that are idle in the pool.
         """
         self._checkpid()
-        with self._lock:
+        async with self._lock:
             if inuse_connections:
-                connections = chain(
+                connections: Iterable[Connection] = chain(
                     self._available_connections, self._in_use_connections
                 )
             else:
                 connections = self._available_connections
-
-            for connection in connections:
-                connection.disconnect()
+            resp = await asyncio.gather(
+                *(connection.disconnect() for connection in connections),
+                return_exceptions=True,
+            )
+            exc = next((r for r in resp if isinstance(r, BaseException)), None)
+            if exc:
+                raise exc
 
 
 class BlockingConnectionPool(ConnectionPool):
@@ -1492,15 +1574,16 @@ class BlockingConnectionPool(ConnectionPool):
 
     def __init__(
         self,
-        max_connections=50,
-        timeout=20,
-        connection_class=Connection,
-        queue_class=LifoQueue,
+        max_connections: int = 50,
+        timeout: Optional[int] = 20,
+        connection_class: Type[Connection] = Connection,
+        queue_class: Type[asyncio.Queue] = asyncio.LifoQueue,
         **connection_kwargs,
     ):
 
         self.queue_class = queue_class
         self.timeout = timeout
+        self._connections: List[Connection]
         super().__init__(
             connection_class=connection_class,
             max_connections=max_connections,
@@ -1513,7 +1596,7 @@ class BlockingConnectionPool(ConnectionPool):
         while True:
             try:
                 self.pool.put_nowait(None)
-            except Full:
+            except asyncio.QueueFull:
                 break
 
         # Keep a list of actual connection instances so that we can
@@ -1532,12 +1615,12 @@ class BlockingConnectionPool(ConnectionPool):
         self.pid = os.getpid()
 
     def make_connection(self):
-        "Make a fresh connection."
+        """Make a fresh connection."""
         connection = self.connection_class(**self.connection_kwargs)
         self._connections.append(connection)
         return connection
 
-    def get_connection(self, command_name, *keys, **options):
+    async def get_connection(self, command_name, *keys, **options):
         """
         Get a connection, blocking for ``self.timeout`` until a connection
         is available from the pool.
@@ -1556,8 +1639,9 @@ class BlockingConnectionPool(ConnectionPool):
         # self.timeout then raise a ``ConnectionError``.
         connection = None
         try:
-            connection = self.pool.get(block=True, timeout=self.timeout)
-        except Empty:
+            async with async_timeout.timeout(self.timeout):
+                connection = await self.pool.get()
+        except (asyncio.QueueEmpty, asyncio.TimeoutError):
             # Note that this is not caught by the redis client and will be
             # raised unless handled by application code. If you want never to
             raise ConnectionError("No connection available.")
@@ -1569,28 +1653,28 @@ class BlockingConnectionPool(ConnectionPool):
 
         try:
             # ensure this connection is connected to Redis
-            connection.connect()
+            await connection.connect()
             # connections that the pool provides should be ready to send
             # a command. if not, the connection was either returned to the
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
             try:
-                if connection.can_read():
-                    raise ConnectionError("Connection has data")
+                if await connection.can_read():
+                    raise ConnectionError("Connection has data") from None
             except ConnectionError:
-                connection.disconnect()
-                connection.connect()
-                if connection.can_read():
-                    raise ConnectionError("Connection not ready")
+                await connection.disconnect()
+                await connection.connect()
+                if await connection.can_read():
+                    raise ConnectionError("Connection not ready") from None
         except BaseException:
             # release the connection back to the pool so that we don't leak it
-            self.release(connection)
+            await self.release(connection)
             raise
 
         return connection
 
-    def release(self, connection):
-        "Releases the connection back to the pool."
+    async def release(self, connection: Connection):
+        """Releases the connection back to the pool."""
         # Make sure we haven't changed process.
         self._checkpid()
         if not self.owns_connection(connection):
@@ -1598,20 +1682,26 @@ class BlockingConnectionPool(ConnectionPool):
             # to the pool. instead add a None value which is a placeholder
             # that will cause the pool to recreate the connection if
             # its needed.
-            connection.disconnect()
+            await connection.disconnect()
             self.pool.put_nowait(None)
             return
 
         # Put the connection back into the pool.
         try:
             self.pool.put_nowait(connection)
-        except Full:
+        except asyncio.QueueFull:
             # perhaps the pool has been reset() after a fork? regardless,
             # we don't want this connection
             pass
 
-    def disconnect(self):
-        "Disconnects all connections in the pool."
+    async def disconnect(self, inuse_connections: bool = True):
+        """Disconnects all connections in the pool."""
         self._checkpid()
-        for connection in self._connections:
-            connection.disconnect()
+        async with self._lock:
+            resp = await asyncio.gather(
+                *(connection.disconnect() for connection in self._connections),
+                return_exceptions=True,
+            )
+            exc = next((r for r in resp if isinstance(r, BaseException)), None)
+            if exc:
+                raise exc
