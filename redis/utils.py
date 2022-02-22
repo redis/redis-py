@@ -67,7 +67,7 @@ def merge_result(command, res):
     Merge all items in `res` into a list.
 
     This command is used when sending a command to multiple nodes
-    and they result from each node should be merged into a single list.
+    and the result from each node should be merged into a single list.
 
     res : 'dict'
     """

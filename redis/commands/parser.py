@@ -24,7 +24,14 @@ class CommandsParser:
     # https://github.com/redis/redis/pull/8324
     def get_keys(self, redis_conn, *args):
         """
-        Get the keys from the passed command
+        Get the keys from the passed command.
+
+        NOTE: Due to a bug in redis<7.0, this function does not work properly
+        for EVAL or EVALSHA when the `numkeys` arg is 0.
+         - issue: https://github.com/redis/redis/issues/9493
+         - fix: https://github.com/redis/redis/pull/9733
+
+        So, don't use this function with EVAL or EVALSHA.
         """
         if len(args) < 2:
             # The command has no keys in it
@@ -72,6 +79,14 @@ class CommandsParser:
         return keys
 
     def _get_moveable_keys(self, redis_conn, *args):
+        """
+        NOTE: Due to a bug in redis<7.0, this function does not work properly
+        for EVAL or EVALSHA when the `numkeys` arg is 0.
+         - issue: https://github.com/redis/redis/issues/9493
+         - fix: https://github.com/redis/redis/pull/9733
+
+        So, don't use this function with EVAL or EVALSHA.
+        """
         pieces = []
         cmd_name = args[0]
         # The command name should be splitted into separate arguments,
