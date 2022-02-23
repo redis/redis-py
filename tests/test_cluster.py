@@ -857,7 +857,7 @@ class TestClusterRedisCommands:
     def test_cluster_addslotsrange(self, unstable_r):
         node = unstable_r.get_random_node()
         mock_node_resp(node, "OK")
-        assert unstable_r.cluster_addslots(node, 1, 5) is True
+        assert unstable_r.cluster_addslots(node, 1, 5)
 
     def test_cluster_countkeysinslot(self, r):
         node = r.nodes_manager.get_node_from_slot(1)
