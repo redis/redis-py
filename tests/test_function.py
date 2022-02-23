@@ -62,7 +62,7 @@ class TestFunction:
         assert unstable_r.function_list(library="*lib") == res
         assert unstable_r.function_list(withcode=True)[0][9] == function
 
-    @pytest.mark.onlyoncluster
+    @pytest.mark.onlycluster
     def test_function_list_on_cluster(self, unstable_r):
         unstable_r.function_load("Lua", "mylib", function)
         function_list = [
