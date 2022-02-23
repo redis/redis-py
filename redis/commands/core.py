@@ -3010,7 +3010,10 @@ class SetCommands(CommandsProtocol):
         return self.execute_command("SMEMBERS", name)
 
     def smismember(
-        self, name: str, values: List, *args: List,
+        self,
+        name: str,
+        values: List,
+        *args: List,
     ) -> Union[Awaitable[List[bool]], List[bool]]:
         """
         Return whether each value in ``values`` is a member of the set ``name``
