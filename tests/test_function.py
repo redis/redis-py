@@ -10,7 +10,6 @@ get_function = "redis.register_function('get', function(keys, args) \
                 return redis.call('GET', keys[1]) end)"
 
 
-@pytest.mark.onlynoncluster
 # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
 class TestFunction:
     @pytest.fixture(autouse=True)
@@ -44,6 +43,7 @@ class TestFunction:
         with pytest.raises(ResponseError):
             unstable_r.function_flush("ABC")
 
+    @pytest.mark.onlynoncluster
     def test_function_list(self, unstable_r):
         unstable_r.function_load("Lua", "mylib", function)
         res = [
@@ -61,6 +61,30 @@ class TestFunction:
         assert unstable_r.function_list() == res
         assert unstable_r.function_list(library="*lib") == res
         assert unstable_r.function_list(withcode=True)[0][9] == function
+
+    @pytest.mark.onlynoncluster
+    def test_function_list_on_cluster(self, unstable_r):
+        unstable_r.function_load("Lua", "mylib", function)
+        function_list = [
+            [
+                "library_name",
+                "mylib",
+                "engine",
+                "LUA",
+                "description",
+                None,
+                "functions",
+                [["name", "myfunc", "description", None]],
+            ],
+        ]
+        primaries = unstable_r.get_primaries()
+        res = {}
+        for node in primaries:
+            res[node.name] = function_list
+        assert unstable_r.function_list() == res
+        assert unstable_r.function_list(library="*lib") == res
+        node = primaries[0].name
+        assert unstable_r.function_list(withcode=True)[node][0][9] == function
 
     def test_fcall(self, unstable_r):
         unstable_r.function_load("Lua", "mylib", set_function)

@@ -4,6 +4,7 @@ from redis.exceptions import RedisClusterException, RedisError
 from .core import (
     ACLCommands,
     DataAccessCommands,
+    FunctionCommands,
     ManagementCommands,
     PubSubCommands,
     ScriptCommands,
@@ -212,6 +213,7 @@ class RedisClusterCommands(
     PubSubCommands,
     ClusterDataAccessCommands,
     ScriptCommands,
+    FunctionCommands,
 ):
     """
     A class for all Redis Cluster commands

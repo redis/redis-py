@@ -289,11 +289,20 @@ class RedisCluster(RedisClusterCommands):
             [
                 "FLUSHALL",
                 "FLUSHDB",
+                "FUNCTION DELETE",
+                "FUNCTION FLUSH",
+                "FUNCTION LIST",
+                "FUNCTION LOAD",
+                "FUNCTION RESTORE",
                 "SCRIPT EXISTS",
                 "SCRIPT FLUSH",
                 "SCRIPT LOAD",
             ],
             PRIMARIES,
+        ),
+        list_keys_to_dict(
+            ["FUNCTION DUMP"],
+            RANDOM,
         ),
         list_keys_to_dict(
             [
@@ -843,6 +852,10 @@ class RedisCluster(RedisClusterCommands):
         else:
             keys = self._get_command_keys(*args)
             if keys is None or len(keys) == 0:
+                # FCALL can call a function with 0 keys, that means the function
+                #  can be run on any node so we can just return a random slot
+                if command in ("FCALL", "FCALL_RO"):
+                    return random.randrange(0, REDIS_CLUSTER_HASH_SLOTS)
                 raise RedisClusterException(
                     "No way to dispatch this command to Redis Cluster. "
                     "Missing key.\nYou can execute the command by specifying "
