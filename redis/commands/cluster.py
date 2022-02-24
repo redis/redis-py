@@ -396,6 +396,9 @@ class RedisClusterCommands(
         """
         return self.execute_command("CLUSTER SLOTS", target_nodes=target_nodes)
 
+    def cluster_links(self, target_node):
+        return self.execute_command("CLUSTER LINKS", target_nodes=target_node)
+
     def readonly(self, target_nodes=None):
         """
         Enables read queries.
