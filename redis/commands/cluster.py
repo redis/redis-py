@@ -267,6 +267,17 @@ class RedisClusterCommands(
         """
         return [self.execute_command("CLUSTER DELSLOTS", slot) for slot in slots]
 
+    def cluster_delslotsrange(self, *slots):
+        """
+        Similar to the CLUSTER DELSLOTS command.
+        The difference is that CLUSTER DELSLOTS takes a list of hash slots to remove
+        from the node, while CLUSTER DELSLOTSRANGE takes a list of slot ranges to remove 
+        from the node.
+
+        For more information check https://redis.io/commands/cluster-delslotsrange
+        """
+        return self.execute_command("CLUSTER DELSLOTSRANGE", *slots)
+
     def cluster_failover(self, target_node, option=None):
         """
         Forces a slave to perform a manual failover of its master
