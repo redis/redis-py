@@ -5485,6 +5485,9 @@ class ClusterCommands(CommandsProtocol):
         return self.execute_command("READONLY", **kwargs)
 
 
+AsyncClusterCommands = ClusterCommands
+
+
 class FunctionCommands:
     """
     Redis Function commands
@@ -5497,7 +5500,7 @@ class FunctionCommands:
         code: str,
         replace: Optional[bool] = False,
         description: Optional[str] = None,
-    ) -> str:
+    ) -> Union[Awaitable[str], str]:
         """
         Load a library to Redis.
         :param engine: the name of the execution engine for the library
@@ -5517,7 +5520,7 @@ class FunctionCommands:
         pieces.append(code)
         return self.execute_command("FUNCTION LOAD", *pieces)
 
-    def function_delete(self, library: str) -> str:
+    def function_delete(self, library: str) -> Union[Awaitable[str], str]:
         """
         Delete the library called ``library`` and all its functions.
 
@@ -5525,7 +5528,7 @@ class FunctionCommands:
         """
         return self.execute_command("FUNCTION DELETE", library)
 
-    def function_flush(self, mode: str = "SYNC") -> str:
+    def function_flush(self, mode: str = "SYNC") -> Union[Awaitable[str], str]:
         """
         Deletes all the libraries.
 
@@ -5535,7 +5538,7 @@ class FunctionCommands:
 
     def function_list(
         self, library: Optional[str] = "*", withcode: Optional[bool] = False
-    ) -> List:
+    ) -> Union[Awaitable[list], list]:
         """
         Return information about the functions and libraries.
         :param library: pecify a pattern for matching library names
@@ -5549,10 +5552,12 @@ class FunctionCommands:
 
     def _fcall(
         self, command: str, function, numkeys: int, *keys_and_args: Optional[List]
-    ) -> str:
+    ) -> Union[Awaitable[str], str]:
         return self.execute_command(command, function, numkeys, *keys_and_args)
 
-    def fcall(self, function, numkeys: int, *keys_and_args: Optional[List]) -> str:
+    def fcall(
+        self, function, numkeys: int, *keys_and_args: Optional[List]
+    ) -> Union[Awaitable[str], str]:
         """
         Invoke a function.
 
@@ -5560,7 +5565,9 @@ class FunctionCommands:
         """
         return self._fcall("FCALL", function, numkeys, *keys_and_args)
 
-    def fcall_ro(self, function, numkeys: int, *keys_and_args: Optional[List]) -> str:
+    def fcall_ro(
+        self, function, numkeys: int, *keys_and_args: Optional[List]
+    ) -> Union[Awaitable[str], str]:
         """
         This is a read-only variant of the FCALL command that cannot
         execute commands that modify data.
@@ -5569,7 +5576,7 @@ class FunctionCommands:
         """
         return self._fcall("FCALL_RO", function, numkeys, *keys_and_args)
 
-    def function_dump(self) -> str:
+    def function_dump(self) -> Union[Awaitable[str], str]:
         """
         Return the serialized payload of loaded libraries.
 
@@ -5582,7 +5589,9 @@ class FunctionCommands:
 
         return self.execute_command("FUNCTION DUMP", **options)
 
-    def function_restore(self, payload: str, policy: Optional[str] = "APPEND") -> str:
+    def function_restore(
+        self, payload: str, policy: Optional[str] = "APPEND"
+    ) -> Union[Awaitable[str], str]:
         """
         Restore libraries from the serialized ``payload``.
         You can use the optional policy argument to provide a policy
@@ -5592,7 +5601,7 @@ class FunctionCommands:
         """
         return self.execute_command("FUNCTION RESTORE", payload, policy)
 
-    def function_kill(self) -> str:
+    def function_kill(self) -> Union[Awaitable[str], str]:
         """
         Kill a function that is currently executing.
 
@@ -5600,7 +5609,7 @@ class FunctionCommands:
         """
         return self.execute_command("FUNCTION KILL")
 
-    def function_stats(self) -> list:
+    def function_stats(self) -> Union[Awaitable[list], list]:
         """
         Return information about the function that's currently running
         and information about the available execution engines.
@@ -5610,7 +5619,7 @@ class FunctionCommands:
         return self.execute_command("FUNCTION STATS")
 
 
-AsyncClusterCommands = ClusterCommands
+AsyncFunctionCommands = FunctionCommands
 
 
 class DataAccessCommands(
@@ -5671,6 +5680,7 @@ class AsyncCoreCommands(
     AsyncModuleCommands,
     AsyncPubSubCommands,
     AsyncScriptCommands,
+    AsyncFunctionCommands,
 ):
     """
     A class containing all of the implemented redis commands. This class is
