@@ -1,16 +1,16 @@
 name-template: 'Version $NEXT_PATCH_VERSION'
 tag-template: 'v$NEXT_PATCH_VERSION'
 autolabeler:
-  - label: 'chore'
+  - label: 'maintenance'
     files:
       - '*.md'
       - '.github/*'
   - label: 'bug'
     branch:
       - '/bug-.+'
-  - label: 'chore'
+  - label: 'maintenance'
     branch:
-      - '/chore-.+'
+      - '/maintenance-.+'
   - label: 'feature'
     branch:
       - '/feature-.+'
@@ -28,7 +28,7 @@ categories:
       - 'bugfix'
       - 'bug'
   - title: '🧰 Maintenance'
-    label: 'chore'
+    label: 'maintenance'
 change-template: '- $TITLE (#$NUMBER)'
 exclude-labels:
   - 'skip-changelog'
