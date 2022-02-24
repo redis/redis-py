@@ -5522,6 +5522,9 @@ class ClusterCommands(CommandsProtocol):
         return self.execute_command("READONLY", **kwargs)
 
 
+AsyncClusterCommands = ClusterCommands
+
+
 class FunctionCommands:
     """
     Redis Function commands
@@ -5653,7 +5656,7 @@ class FunctionCommands:
         return self.execute_command("FUNCTION STATS")
 
 
-AsyncClusterCommands = ClusterCommands
+AsyncFunctionCommands = FunctionCommands
 
 
 class DataAccessCommands(
@@ -5714,6 +5717,7 @@ class AsyncCoreCommands(
     AsyncModuleCommands,
     AsyncPubSubCommands,
     AsyncScriptCommands,
+    AsyncFunctionCommands,
 ):
     """
     A class containing all of the implemented redis commands. This class is
