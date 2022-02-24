@@ -271,7 +271,7 @@ class RedisClusterCommands(
         """
         Similar to the CLUSTER DELSLOTS command.
         The difference is that CLUSTER DELSLOTS takes a list of hash slots to remove
-        from the node, while CLUSTER DELSLOTSRANGE takes a list of slot ranges to remove 
+        from the node, while CLUSTER DELSLOTSRANGE takes a list of slot ranges to remove
         from the node.
 
         For more information check https://redis.io/commands/cluster-delslotsrange
