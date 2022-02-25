@@ -1063,7 +1063,7 @@ class TestRedisCommands:
     def test_expireat_option_nx(self, r):
         assert r.set("key", "val") is True
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
-        assert r.expireat("key", expire_at, "NX") is True        
+        assert r.expireat("key", expire_at, "NX") is True
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=2)
         assert r.expireat("key", expire_at, "NX") is False
 

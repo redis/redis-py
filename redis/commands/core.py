@@ -1503,8 +1503,9 @@ class BasicKeyCommands(CommandsProtocol):
 
     def expireat(self, name: KeyT, when: AbsExpiryT, option: str = None) -> ResponseT:
         """
-        Set an expire flag on key ``name`` with the given ``option``. ``when`` can be represented
-        as an integer indicating unix time or a Python datetime object.
+        Set an expire flag on key ``name`` with the given ``option``. ``when``
+        can be represented as an integer indicating unix time or a Python
+        datetime object.
 
         Valid options are:
             -> NX -- Set expiry only when the key has no expiry
