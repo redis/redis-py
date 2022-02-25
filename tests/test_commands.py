@@ -1059,6 +1059,43 @@ class TestRedisCommands:
         assert r.expireat("a", expire_at_seconds) is True
         assert 0 < r.ttl("a") <= 61
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_expireat_option_nx(self, r):
+        assert r.set("key", "val") is True
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
+        assert r.expireat("key", expire_at, "NX") is True        
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=2)
+        assert r.expireat("key", expire_at, "NX") is False
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_expireat_option_xx(self, r):
+        assert r.set("key", "val") is True
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
+        assert r.expireat("key", expire_at, "XX") is False
+        assert r.expireat("key", expire_at) is True
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=2)
+        assert r.expireat("key", expire_at, "XX") is True
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_expireat_option_gt(self, r):
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=2)
+        assert r.set("key", "val") is True
+        assert r.expireat("key", expire_at) is True
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
+        assert r.expireat("key", expire_at, "GT") is False
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=3)
+        assert r.expireat("key", expire_at, "GT") is True
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_expireat_option_lt(self, r):
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=2)
+        assert r.set("key", "val") is True
+        assert r.expireat("key", expire_at) is True
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=3)
+        assert r.expireat("key", expire_at, "LT") is False
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
+        assert r.expireat("key", expire_at, "LT") is True
+
     def test_get_and_set(self, r):
         # get and set can't be tested independently of each other
         assert r.get("a") is None
