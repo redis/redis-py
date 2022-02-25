@@ -8,10 +8,11 @@ setup(
     long_description_content_type="text/markdown",
     keywords=["Redis", "key-value store", "database"],
     license="MIT",
-    version="4.1.2",
+    version="4.2.0rc1",
     packages=find_packages(
         include=[
             "redis",
+            "redis.asyncio",
             "redis.commands",
             "redis.commands.bf",
             "redis.commands.json",
@@ -34,6 +35,8 @@ setup(
         "deprecated>=1.2.3",
         "packaging>=20.4",
         'importlib-metadata >= 1.0; python_version < "3.8"',
+        "typing-extensions",
+        "async-timeout>=4.0.2",
     ],
     classifiers=[
         "Development Status :: 5 - Production/Stable",

@@ -1,7 +1,13 @@
 from redis.crc import key_slot
 from redis.exceptions import RedisClusterException, RedisError
 
-from .core import ACLCommands, DataAccessCommands, ManagementCommands, PubSubCommands
+from .core import (
+    ACLCommands,
+    DataAccessCommands,
+    ManagementCommands,
+    PubSubCommands,
+    ScriptCommands,
+)
 from .helpers import list_or_args
 
 
@@ -205,6 +211,7 @@ class RedisClusterCommands(
     ACLCommands,
     PubSubCommands,
     ClusterDataAccessCommands,
+    ScriptCommands,
 ):
     """
     A class for all Redis Cluster commands

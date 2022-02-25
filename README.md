@@ -13,6 +13,11 @@ The Python interface to the Redis key-value store.
 
 ---------------------------------------------
 
+## Python Notice
+
+redis-py 4.2.x will be the last generation of redis-py to support python 3.6 as it has been [End of Life'd](https://www.python.org/dev/peps/pep-0494/#schedule-last-security-only-release).  Async support was introduced in redis-py 4.2.x thanks to [aioredis](https://github.com/aio-libs/aioredis-py), which necessitates this change. We will continue to maintain 3.6 support as long as possible - but the plan is for redis-py version 5+ to offically remove 3.6.
+
+---------------------------
 
 ## Installation
 
@@ -51,7 +56,7 @@ contributing](https://github.com/redis/redis-py/blob/master/CONTRIBUTING.md).
 
 ## Getting Started
 
-redis-py supports Python 3.6+.
+redis-py supports Python 3.7+.
 
 ``` pycon
 >>> import redis
@@ -857,7 +862,8 @@ Monitor object to block until a command is received.
 redis-py supports the EVAL, EVALSHA, and SCRIPT commands. However, there
 are a number of edge cases that make these commands tedious to use in
 real world scenarios. Therefore, redis-py exposes a Script object that
-makes scripting much easier to use.
+makes scripting much easier to use. (RedisClusters have limited support for
+scripting.)
 
 To create a Script instance, use the register_script
 function on a client instance passing the Lua code as the first
@@ -950,7 +956,7 @@ C 3
 
 ### Cluster Mode
 
-redis-py is now supports cluster mode and provides a client for
+redis-py now supports cluster mode and provides a client for
 [Redis Cluster](<https://redis.io/topics/cluster-tutorial>).
 
 The cluster client is based on Grokzen's
@@ -958,6 +964,8 @@ The cluster client is based on Grokzen's
 fixes, and now supersedes that library. Support for these changes is thanks to
 his contributions.
 
+To learn more about Redis Cluster, see
+[Redis Cluster specifications](https://redis.io/topics/cluster-spec).
 
 **Create RedisCluster:**
 
@@ -1203,7 +1211,7 @@ Please note:
 - The pipeline gets its 'read_from_replicas' value from the cluster's parameter.
 Thus, if read from replications is enabled in the cluster instance, the pipeline
 will also direct read commands to replicas.
-- The 'transcation' option is NOT supported in cluster-mode. In non-cluster mode,
+- The 'transaction' option is NOT supported in cluster-mode. In non-cluster mode,
 the 'transaction' option is available when executing pipelines. This wraps the
 pipeline commands with MULTI/EXEC commands, and effectively turns the pipeline
 commands into a single transaction block. This means that all commands are
@@ -1213,10 +1221,29 @@ according to their respective destination nodes. This means that we can not
 turn the pipeline commands into one transaction block, because in most cases
 they are split up into several smaller pipelines.
 
+**Lua Scripting in Cluster Mode**
 
-See [Redis Cluster tutorial](https://redis.io/topics/cluster-tutorial) and
-[Redis Cluster specifications](https://redis.io/topics/cluster-spec)
-to learn more about Redis Cluster.
+Cluster mode has limited support for lua scripting.
+
+The following commands are supported, with caveats:
+- `EVAL` and `EVALSHA`: The command is sent to the relevant node, depending on
+the keys (i.e., in `EVAL "<script>" num_keys key_1 ... key_n ...`). The keys
+_must_ all be on the same node. If the script requires 0 keys, _the command is
+sent to a random (primary) node_.
+- `SCRIPT EXISTS`: The command is sent to all primaries. The result is a list
+of booleans corresponding to the input SHA hashes. Each boolean is an AND of
+"does the script exist on each node?". In other words, each boolean is True iff
+the script exists on all nodes.
+- `SCRIPT FLUSH`: The command is sent to all primaries. The result is a bool
+AND over all nodes' responses.
+- `SCRIPT LOAD`: The command is sent to all primaries. The result is the SHA1
+digest.
+
+The following commands are not supported:
+- `EVAL_RO`
+- `EVALSHA_RO`
+
+Using scripting within pipelines in cluster mode is **not supported**.
 
 ### Author
 

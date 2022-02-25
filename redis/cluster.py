@@ -289,6 +289,9 @@ class RedisCluster(RedisClusterCommands):
             [
                 "FLUSHALL",
                 "FLUSHDB",
+                "SCRIPT EXISTS",
+                "SCRIPT FLUSH",
+                "SCRIPT LOAD",
             ],
             PRIMARIES,
         ),
@@ -378,6 +381,24 @@ class RedisCluster(RedisClusterCommands):
                 "SCAN",
             ],
             parse_scan_result,
+        ),
+        list_keys_to_dict(
+            [
+                "SCRIPT LOAD",
+            ],
+            lambda command, res: list(res.values()).pop(),
+        ),
+        list_keys_to_dict(
+            [
+                "SCRIPT EXISTS",
+            ],
+            lambda command, res: [all(k) for k in zip(*res.values())],
+        ),
+        list_keys_to_dict(
+            [
+                "SCRIPT FLUSH",
+            ],
+            lambda command, res: all(res.values()),
         ),
     )
 
@@ -712,6 +733,7 @@ class RedisCluster(RedisClusterCommands):
 
         return ClusterPipeline(
             nodes_manager=self.nodes_manager,
+            commands_parser=self.commands_parser,
             startup_nodes=self.nodes_manager.startup_nodes,
             result_callbacks=self.result_callbacks,
             cluster_response_callbacks=self.cluster_response_callbacks,
@@ -777,39 +799,69 @@ class RedisCluster(RedisClusterCommands):
         """
         Get the keys in the command. If the command has no keys in in, None is
         returned.
+
+        NOTE: Due to a bug in redis<7.0, this function does not work properly
+        for EVAL or EVALSHA when the `numkeys` arg is 0.
+         - issue: https://github.com/redis/redis/issues/9493
+         - fix: https://github.com/redis/redis/pull/9733
+
+        So, don't use this function with EVAL or EVALSHA.
         """
         redis_conn = self.get_default_node().redis_connection
         return self.commands_parser.get_keys(redis_conn, *args)
 
     def determine_slot(self, *args):
         """
-        Figure out what slot based on command and args
+        Figure out what slot to use based on args.
+
+        Raises a RedisClusterException if there's a missing key and we can't
+            determine what slots to map the command to; or, if the keys don't
+            all map to the same key slot.
         """
-        if self.command_flags.get(args[0]) == SLOT_ID:
+        command = args[0]
+        if self.command_flags.get(command) == SLOT_ID:
             # The command contains the slot ID
             return args[1]
 
         # Get the keys in the command
-        keys = self._get_command_keys(*args)
-        if keys is None or len(keys) == 0:
+
+        # EVAL and EVALSHA are common enough that it's wasteful to go to the
+        # redis server to parse the keys. Besides, there is a bug in redis<7.0
+        # where `self._get_command_keys()` fails anyway. So, we special case
+        # EVAL/EVALSHA.
+        if command in ("EVAL", "EVALSHA"):
+            # command syntax: EVAL "script body" num_keys ...
+            if len(args) <= 2:
+                raise RedisClusterException(f"Invalid args in command: {args}")
+            num_actual_keys = args[2]
+            eval_keys = args[3 : 3 + num_actual_keys]
+            # if there are 0 keys, that means the script can be run on any node
+            # so we can just return a random slot
+            if len(eval_keys) == 0:
+                return random.randrange(0, REDIS_CLUSTER_HASH_SLOTS)
+            keys = eval_keys
+        else:
+            keys = self._get_command_keys(*args)
+            if keys is None or len(keys) == 0:
+                raise RedisClusterException(
+                    "No way to dispatch this command to Redis Cluster. "
+                    "Missing key.\nYou can execute the command by specifying "
+                    f"target nodes.\nCommand: {args}"
+                )
+
+        # single key command
+        if len(keys) == 1:
+            return self.keyslot(keys[0])
+
+        # multi-key command; we need to make sure all keys are mapped to
+        # the same slot
+        slots = {self.keyslot(key) for key in keys}
+        if len(slots) != 1:
             raise RedisClusterException(
-                "No way to dispatch this command to Redis Cluster. "
-                "Missing key.\nYou can execute the command by specifying "
-                f"target nodes.\nCommand: {args}"
+                f"{command} - all keys must map to the same key slot"
             )
 
-        if len(keys) > 1:
-            # multi-key command, we need to make sure all keys are mapped to
-            # the same slot
-            slots = {self.keyslot(key) for key in keys}
-            if len(slots) != 1:
-                raise RedisClusterException(
-                    f"{args[0]} - all keys must map to the same key slot"
-                )
-            return slots.pop()
-        else:
-            # single key command
-            return self.keyslot(keys[0])
+        return slots.pop()
 
     def reinitialize_caches(self):
         self.nodes_manager.initialize()
@@ -1598,6 +1650,7 @@ class ClusterPipeline(RedisCluster):
     def __init__(
         self,
         nodes_manager,
+        commands_parser,
         result_callbacks=None,
         cluster_response_callbacks=None,
         startup_nodes=None,
@@ -1610,6 +1663,7 @@ class ClusterPipeline(RedisCluster):
         log.info("Creating new instance of ClusterPipeline")
         self.command_stack = []
         self.nodes_manager = nodes_manager
+        self.commands_parser = commands_parser
         self.refresh_table_asap = False
         self.result_callbacks = (
             result_callbacks or self.__class__.RESULT_CALLBACKS.copy()
@@ -1626,11 +1680,6 @@ class ClusterPipeline(RedisCluster):
             kwargs.get("encoding_errors", "strict"),
             kwargs.get("decode_responses", False),
         )
-
-        # The commands parser refers to the parent
-        # so that we don't push the COMMAND command
-        # onto the stack
-        self.commands_parser = CommandsParser(super())
 
     def __repr__(self):
         """ """
