@@ -3,10 +3,10 @@
 mkdir -p /nodes
 touch /nodes/nodemap
 if [ -z ${START_PORT} ]; then
-    START_PORT=16379
+    START_PORT=46379
 fi
 if [ -z ${END_PORT} ]; then
-    END_PORT=16384
+    END_PORT=46384
 fi
 if [ ! -z "$3" ]; then
     START_PORT=$2
