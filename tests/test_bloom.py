@@ -8,6 +8,7 @@ from redis.utils import HIREDIS_AVAILABLE
 def intlist(obj):
     return [int(v) for v in obj]
 
+@pytest.mark.onlynoncluster
 
 @pytest.fixture
 def client(modclient):

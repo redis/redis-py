@@ -29,6 +29,7 @@ TITLES_CSV = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "testdata", "titles.csv")
 )
 
+@pytest.mark.onlynoncluster
 
 def waitForIndex(env, idx, timeout=None):
     delay = 0.1
