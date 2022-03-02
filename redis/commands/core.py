@@ -369,14 +369,16 @@ class ManagementCommands(CommandsProtocol):
     Redis management commands
     """
 
-    def auth(self):
+    def auth(self, password, username=None, **kwargs):
         """
-        This function throws a NotImplementedError since it is intentionally
-        not supported.
+        Authenticates the user. If you do not pass username, Redis will try to
+        authenticate for the "default" user. If you do pass username, it will
+        authenticate for the given user.
+        For more information check https://redis.io/commands/auth
         """
-        raise NotImplementedError(
-            "AUTH is intentionally not implemented in the client."
-        )
+        if username:
+            return self.execute_command("AUTH", username, password, **kwargs)
+        return self.execute_command
 
     def bgrewriteaof(self, **kwargs):
         """Tell the Redis server to rewrite the AOF file from data in memory.
