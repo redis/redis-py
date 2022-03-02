@@ -5,7 +5,9 @@ import pytest
 
 from .conftest import skip_ifmodversion_lt
 
-@pytest.mark.onlynoncluster
+
+pytestmark = pytest.mark.onlynoncluster
+
 
 @pytest.fixture
 def client(modclient):

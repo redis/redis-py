@@ -5,10 +5,12 @@ from redis.exceptions import ModuleError, RedisError
 from redis.utils import HIREDIS_AVAILABLE
 
 
+pytestmark = pytest.mark.onlynoncluster
+
+
 def intlist(obj):
     return [int(v) for v in obj]
 
-@pytest.mark.onlynoncluster
 
 @pytest.fixture
 def client(modclient):
