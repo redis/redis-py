@@ -809,6 +809,10 @@ class RedisCluster(RedisClusterCommands):
             thread_local=thread_local,
         )
 
+    def set_response_callback(self, command, callback):
+        """Set a custom Response Callback"""
+        self.cluster_response_callbacks[command] = callback
+
     def _determine_nodes(self, *args, **kwargs):
         command = args[0]
         nodes_flag = kwargs.pop("nodes_flag", None)
@@ -2025,7 +2029,13 @@ class ClusterPipeline(RedisCluster):
 
         # turn the response back into a simple flat array that corresponds
         # to the sequence of commands issued in the stack in pipeline.execute()
-        response = [c.result for c in sorted(stack, key=lambda x: x.position)]
+        response = []
+        for c in sorted(stack, key=lambda x: x.position):
+            if c.args[0] in self.cluster_response_callbacks:
+                c.result = self.cluster_response_callbacks[c.args[0]](
+                    c.result, **c.options
+                )
+            response.append(c.result)
 
         if raise_on_error:
             self.raise_first_error(stack)
@@ -2038,6 +2048,9 @@ class ClusterPipeline(RedisCluster):
             raise RedisClusterException(
                 "ASK & MOVED redirection not allowed in this pipeline"
             )
+
+    def exists(self, *keys):
+        return self.execute_command("EXISTS", *keys)
 
     def eval(self):
         """ """
