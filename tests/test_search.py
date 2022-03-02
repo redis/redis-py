@@ -21,7 +21,6 @@ from redis.commands.search.suggestion import Suggestion
 
 from .conftest import default_redismod_url, skip_ifmodversion_lt
 
-
 pytestmark = pytest.mark.onlynoncluster
 
 

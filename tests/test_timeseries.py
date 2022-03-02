@@ -5,7 +5,6 @@ import pytest
 
 from .conftest import skip_ifmodversion_lt
 
-
 pytestmark = pytest.mark.onlynoncluster
 
 
