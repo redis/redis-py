@@ -228,6 +228,7 @@ class RedisCluster(RedisClusterCommands):
                 "ACL SETUSER",
                 "ACL USERS",
                 "ACL WHOAMI",
+                "AUTH",
                 "CLIENT LIST",
                 "CLIENT SETNAME",
                 "CLIENT GETNAME",
