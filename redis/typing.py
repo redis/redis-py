@@ -29,7 +29,7 @@ StreamIdT = Union[int, _StringLikeT]
 ScriptTextT = _StringLikeT
 TimeoutSecT = Union[int, float, _StringLikeT]
 # Mapping is not covariant in the key type, which prevents
-# Mapping[_StringLikeT, X from accepting arguments of type Dict[str, X]. Using
+# Mapping[_StringLikeT, X] from accepting arguments of type Dict[str, X]. Using
 # a TypeVar instead of a Union allows mappings with any of the permitted types
 # to be passed. Care is needed if there is more than one such mapping in a
 # type signature because they will all be required to be the same key type.
