@@ -1,5 +1,5 @@
 from asyncio import sleep
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Tuple, TypeVar
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Tuple, Type, TypeVar
 
 from redis.exceptions import ConnectionError, RedisError, TimeoutError
 
@@ -19,7 +19,7 @@ class Retry:
         self,
         backoff: "AbstractBackoff",
         retries: int,
-        supported_errors: Tuple[RedisError, ...] = (
+        supported_errors: Tuple[Type[RedisError], ...] = (
             ConnectionError,
             TimeoutError,
         ),
