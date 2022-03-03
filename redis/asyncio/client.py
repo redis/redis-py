@@ -348,7 +348,10 @@ class Redis(
         continue trying forever. ``blocking_timeout`` can be specified as a
         float or integer, both representing the number of seconds to wait.
 
-        ``lock_class`` forces the specified lock implementation.
+        ``lock_class`` forces the specified lock implementation. Note that as
+        of redis-py 3.0, the only lock class we implement is ``Lock`` (which is
+        a Lua-based lock). So, it's unlikely you'll need this parameter, unless
+        you have created your own custom lock class.
 
         ``thread_local`` indicates whether the lock token is placed in
         thread-local storage. By default, the token is placed in thread local

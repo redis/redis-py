@@ -65,16 +65,32 @@ class TestResponseCallbacks:
 
 
 class TestRedisCommands:
+    def test_auth(self, r, request):
+        username = "redis-py-auth"
+
+        def teardown():
+            r.acl_deluser(username)
+
+        request.addfinalizer(teardown)
+
+        assert r.acl_setuser(
+            username,
+            enabled=True,
+            passwords=["+strong_password"],
+            commands=["+acl"],
+        )
+
+        assert r.auth(username=username, password="strong_password") is True
+
+        with pytest.raises(exceptions.ResponseError):
+            r.auth(username=username, password="wrong_password")
+
     def test_command_on_invalid_key_type(self, r):
         r.lpush("a", "1")
         with pytest.raises(redis.ResponseError):
             r["a"]
 
     # SERVER INFORMATION
-    def test_auth_not_implemented(self, r):
-        with pytest.raises(NotImplementedError):
-            r.auth()
-
     @skip_if_server_version_lt("6.0.0")
     def test_acl_cat_no_category(self, r):
         categories = r.acl_cat()
