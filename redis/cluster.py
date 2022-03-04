@@ -1185,7 +1185,7 @@ class RedisCluster(RedisClusterCommands):
             return list(res.values())[0]
         else:
             return res
-    
+
     def load_external_module(
         self,
         funcname,
