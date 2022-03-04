@@ -284,6 +284,7 @@ class RedisCluster(RedisClusterCommands):
                 "READONLY",
                 "READWRITE",
                 "TIME",
+                "GRAPH.CONFIG",
             ],
             DEFAULT_NODE,
         ),

@@ -4,8 +4,6 @@ from redis.commands.graph import Edge, Node, Path
 from redis.commands.graph.execution_plan import Operation
 from redis.exceptions import ResponseError
 
-pytestmark = pytest.mark.onlynoncluster
-
 
 @pytest.fixture
 def client(modclient):
@@ -344,6 +342,7 @@ def test_config(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.onlynoncluster
 def test_list_keys(client):
     result = client.graph().list_keys()
     assert result == []

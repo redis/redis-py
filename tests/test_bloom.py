@@ -4,8 +4,6 @@ import redis.commands.bf
 from redis.exceptions import ModuleError, RedisError
 from redis.utils import HIREDIS_AVAILABLE
 
-pytestmark = pytest.mark.onlynoncluster
-
 
 def intlist(obj):
     return [int(v) for v in obj]
@@ -193,6 +191,7 @@ def test_cms(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.onlynoncluster
 def test_cms_merge(client):
     assert client.cms().initbydim("A", 1000, 5)
     assert client.cms().initbydim("B", 1000, 5)
