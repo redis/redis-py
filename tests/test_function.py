@@ -15,39 +15,39 @@ get_function = "redis.register_function('get', function(keys, args) \
 @skip_if_server_version_lt("7.0.0")
 class TestFunction:
     @pytest.fixture(autouse=True)
-    def reset_functions(self, unstable_r):
-        unstable_r.function_flush()
+    def reset_functions(self, r):
+        r.function_flush()
 
-    def test_function_load(self, unstable_r):
-        assert unstable_r.function_load("Lua", "mylib", function)
-        assert unstable_r.function_load("Lua", "mylib", function, replace=True)
+    def test_function_load(self, r):
+        assert r.function_load("Lua", "mylib", function)
+        assert r.function_load("Lua", "mylib", function, replace=True)
         with pytest.raises(ResponseError):
-            unstable_r.function_load("Lua", "mylib", function)
+            r.function_load("Lua", "mylib", function)
         with pytest.raises(ResponseError):
-            unstable_r.function_load("Lua", "mylib2", function)
+            r.function_load("Lua", "mylib2", function)
 
-    def test_function_delete(self, unstable_r):
-        unstable_r.function_load("Lua", "mylib", set_function)
+    def test_function_delete(self, r):
+        r.function_load("Lua", "mylib", set_function)
         with pytest.raises(ResponseError):
-            unstable_r.function_load("Lua", "mylib", set_function)
-        assert unstable_r.fcall("set", 1, "foo", "bar") == "OK"
-        assert unstable_r.function_delete("mylib")
+            r.function_load("Lua", "mylib", set_function)
+        assert r.fcall("set", 1, "foo", "bar") == "OK"
+        assert r.function_delete("mylib")
         with pytest.raises(ResponseError):
-            unstable_r.fcall("set", 1, "foo", "bar")
-        assert unstable_r.function_load("Lua", "mylib", set_function)
+            r.fcall("set", 1, "foo", "bar")
+        assert r.function_load("Lua", "mylib", set_function)
 
-    def test_function_flush(self, unstable_r):
-        unstable_r.function_load("Lua", "mylib", function)
-        assert unstable_r.fcall("myfunc", 0, "hello") == "hello"
-        assert unstable_r.function_flush()
+    def test_function_flush(self, r):
+        r.function_load("Lua", "mylib", function)
+        assert r.fcall("myfunc", 0, "hello") == "hello"
+        assert r.function_flush()
         with pytest.raises(ResponseError):
-            unstable_r.fcall("myfunc", 0, "hello")
+            r.fcall("myfunc", 0, "hello")
         with pytest.raises(ResponseError):
-            unstable_r.function_flush("ABC")
+            r.function_flush("ABC")
 
     @pytest.mark.onlynoncluster
-    def test_function_list(self, unstable_r):
-        unstable_r.function_load("Lua", "mylib", function)
+    def test_function_list(self, r):
+        r.function_load("Lua", "mylib", function)
         res = [
             [
                 "library_name",
@@ -60,13 +60,13 @@ class TestFunction:
                 [["name", "myfunc", "description", None]],
             ],
         ]
-        assert unstable_r.function_list() == res
-        assert unstable_r.function_list(library="*lib") == res
-        assert unstable_r.function_list(withcode=True)[0][9] == function
+        assert r.function_list() == res
+        assert r.function_list(library="*lib") == res
+        assert r.function_list(withcode=True)[0][9] == function
 
     @pytest.mark.onlycluster
-    def test_function_list_on_cluster(self, unstable_r):
-        unstable_r.function_load("Lua", "mylib", function)
+    def test_function_list_on_cluster(self, r):
+        r.function_load("Lua", "mylib", function)
         function_list = [
             [
                 "library_name",
@@ -79,42 +79,42 @@ class TestFunction:
                 [["name", "myfunc", "description", None]],
             ],
         ]
-        primaries = unstable_r.get_primaries()
+        primaries = r.get_primaries()
         res = {}
         for node in primaries:
             res[node.name] = function_list
-        assert unstable_r.function_list() == res
-        assert unstable_r.function_list(library="*lib") == res
+        assert r.function_list() == res
+        assert r.function_list(library="*lib") == res
         node = primaries[0].name
-        assert unstable_r.function_list(withcode=True)[node][0][9] == function
+        assert r.function_list(withcode=True)[node][0][9] == function
 
-    def test_fcall(self, unstable_r):
-        unstable_r.function_load("Lua", "mylib", set_function)
-        unstable_r.function_load("Lua", "mylib2", get_function)
-        assert unstable_r.fcall("set", 1, "foo", "bar") == "OK"
-        assert unstable_r.fcall("get", 1, "foo") == "bar"
+    def test_fcall(self, r):
+        r.function_load("Lua", "mylib", set_function)
+        r.function_load("Lua", "mylib2", get_function)
+        assert r.fcall("set", 1, "foo", "bar") == "OK"
+        assert r.fcall("get", 1, "foo") == "bar"
         with pytest.raises(ResponseError):
-            unstable_r.fcall("myfunc", 0, "hello")
+            r.fcall("myfunc", 0, "hello")
 
-    def test_fcall_ro(self, unstable_r):
-        unstable_r.function_load("Lua", "mylib", function)
-        assert unstable_r.fcall_ro("myfunc", 0, "hello") == "hello"
-        unstable_r.function_load("Lua", "mylib2", set_function)
+    def test_fcall_ro(self, r):
+        r.function_load("Lua", "mylib", function)
+        assert r.fcall_ro("myfunc", 0, "hello") == "hello"
+        r.function_load("Lua", "mylib2", set_function)
         with pytest.raises(ResponseError):
-            unstable_r.fcall_ro("set", 1, "foo", "bar")
+            r.fcall_ro("set", 1, "foo", "bar")
 
-    def test_function_dump_restore(self, unstable_r):
-        unstable_r.function_load("Lua", "mylib", set_function)
-        payload = unstable_r.function_dump()
-        assert unstable_r.fcall("set", 1, "foo", "bar") == "OK"
-        unstable_r.function_delete("mylib")
+    def test_function_dump_restore(self, r):
+        r.function_load("Lua", "mylib", set_function)
+        payload = r.function_dump()
+        assert r.fcall("set", 1, "foo", "bar") == "OK"
+        r.function_delete("mylib")
         with pytest.raises(ResponseError):
-            unstable_r.fcall("set", 1, "foo", "bar")
-        assert unstable_r.function_restore(payload)
-        assert unstable_r.fcall("set", 1, "foo", "bar") == "OK"
-        unstable_r.function_load("Lua", "mylib2", get_function)
-        assert unstable_r.fcall("get", 1, "foo") == "bar"
-        unstable_r.function_delete("mylib")
-        assert unstable_r.function_restore(payload, "FLUSH")
+            r.fcall("set", 1, "foo", "bar")
+        assert r.function_restore(payload)
+        assert r.fcall("set", 1, "foo", "bar") == "OK"
+        r.function_load("Lua", "mylib2", get_function)
+        assert r.fcall("get", 1, "foo") == "bar"
+        r.function_delete("mylib")
+        assert r.function_restore(payload, "FLUSH")
         with pytest.raises(ResponseError):
-            unstable_r.fcall("get", 1, "foo")
+            r.fcall("get", 1, "foo")
