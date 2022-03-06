@@ -1800,6 +1800,15 @@ class BasicKeyCommands(CommandsProtocol):
             when = int(time.mktime(when.timetuple())) * 1000 + ms
         return self.execute_command("PEXPIREAT", name, when)
 
+    def pexpiretime(self, key: str) -> int:
+        """
+        Returns the absolute Unix timestamp (since January 1, 1970) in milliseconds
+        at which the given key will expire.
+
+        For more information check https://redis.io/commands/pexpiretime
+        """
+        return self.execute_command("PEXPIRETIME", key)
+
     def psetex(
         self,
         name: KeyT,
