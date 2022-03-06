@@ -1497,7 +1497,7 @@ def test_profile(client):
     res, det = client.ft().profile(req)
     assert det["Iterators profile"]["Counter"] == 2.0
     assert det["Iterators profile"]["Type"] == "WILDCARD"
-    assert det["Parsing time"] < 0.5
+    assert isinstance(det["Parsing time"], float)
     assert len(res.rows) == 2  # check also the search result
 
 
