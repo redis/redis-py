@@ -2546,6 +2546,17 @@ class TestRedisCommands:
         assert r.hget("b", "2") == b"2"
         assert r.hget("b", "foo") == b"bar"
 
+    def test_hset_with_key_values_passed_as_list(self, r):
+        r.hset("a", items=["1", 1, "2", 2, "3", 3])
+        assert r.hget("a", "1") == b"1"
+        assert r.hget("a", "2") == b"2"
+        assert r.hget("a", "3") == b"3"
+
+        r.hset("b", "foo", "bar", items=["1", 1, "2", 2])
+        assert r.hget("b", "1") == b"1"
+        assert r.hget("b", "2") == b"2"
+        assert r.hget("b", "foo") == b"bar"
+
     def test_hset_without_data(self, r):
         with pytest.raises(exceptions.DataError):
             r.hset("x")
