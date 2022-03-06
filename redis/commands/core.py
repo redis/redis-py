@@ -1523,7 +1523,6 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("EXPIRETIME", key)
 
-
     def get(self, name: KeyT) -> ResponseT:
         """
         Return the value at key ``name``, or None if the key doesn't exist
