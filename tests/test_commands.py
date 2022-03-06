@@ -4239,6 +4239,11 @@ class TestRedisCommands:
         assert isinstance(res, int)
         assert res >= 100
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_command_docs(self, r):
+        with pytest.raises(NotImplementedError):
+            r.command_docs("set")
+
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.13")
     def test_command_getkeys(self, r):

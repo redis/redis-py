@@ -743,6 +743,15 @@ class ManagementCommands(CommandsProtocol):
     def command_count(self, **kwargs) -> ResponseT:
         return self.execute_command("COMMAND COUNT", **kwargs)
 
+    def command_docs(self, *args):
+        """
+        This function throws a NotImplementedError since it is intentionally
+        not supported.
+        """
+        raise NotImplementedError(
+            "COMMAND DOCS is intentionally not implemented in the client."
+        )
+
     def config_get(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
         """
         Return a dictionary of configuration based on the ``pattern``
