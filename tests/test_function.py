@@ -1,6 +1,7 @@
 import pytest
 
 from redis.exceptions import ResponseError
+from .conftest import skip_if_server_version_lt
 
 function = "redis.register_function('myfunc', function(keys, args) return args[1] end)"
 function2 = "redis.register_function('hello', function() return 'Hello World' end)"
@@ -10,7 +11,7 @@ get_function = "redis.register_function('get', function(keys, args) \
                 return redis.call('GET', keys[1]) end)"
 
 
-# @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+@skip_if_server_version_lt("7.0.0")
 class TestFunction:
     @pytest.fixture(autouse=True)
     def reset_functions(self, unstable_r):
