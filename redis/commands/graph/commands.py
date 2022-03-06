@@ -2,6 +2,7 @@ from redis import DataError
 from redis.exceptions import ResponseError
 
 from .exceptions import VersionMismatchException
+from .execution_plan import ExecutionPlan
 from .query_result import QueryResult
 
 
@@ -35,7 +36,7 @@ class GraphCommands:
 
         Args:
 
-        q :
+        q : str
             The query.
         params : dict
             Query parameters.
@@ -118,25 +119,6 @@ class GraphCommands:
         self.nodes = {}
         self.edges = []
 
-    def explain(self, query, params=None):
-        """
-        Get the execution plan for given query,
-        Returns an array of operations.
-        For more information see `GRAPH.EXPLAIN <https://oss.redis.com/redisgraph/master/commands/#graphexplain>`_. # noqa
-
-        Args:
-
-        query:
-            The query that will be executed.
-        params: dict
-            Query parameters.
-        """
-        if params is not None:
-            query = self._build_params_header(params) + query
-
-        plan = self.execute_command("GRAPH.EXPLAIN", self.name, query)
-        return "\n".join(plan)
-
     def bulk(self, **kwargs):
         """Internal only. Not supported."""
         raise NotImplementedError(
@@ -178,7 +160,7 @@ class GraphCommands:
         name : str
             The name of the configuration
         value :
-            The value we want to ser (can be used only when `set` is on)
+            The value we want to set (can be used only when `set` is on)
         set : bool
             Turn on to set a configuration. Default behavior is get.
         """
@@ -198,3 +180,33 @@ class GraphCommands:
         For more information see `GRAPH.LIST <https://oss.redis.com/redisgraph/master/commands/#graphlist>`_. # noqa
         """
         return self.execute_command("GRAPH.LIST")
+
+    def execution_plan(self, query, params=None):
+        """
+        Get the execution plan for given query,
+        GRAPH.EXPLAIN returns an array of operations.
+
+        Args:
+            query: the query that will be executed
+            params: query parameters
+        """
+        if params is not None:
+            query = self._build_params_header(params) + query
+
+        plan = self.execute_command("GRAPH.EXPLAIN", self.name, query)
+        return "\n".join(plan)
+
+    def explain(self, query, params=None):
+        """
+        Get the execution plan for given query,
+        GRAPH.EXPLAIN returns ExecutionPlan object.
+
+        Args:
+            query: the query that will be executed
+            params: query parameters
+        """
+        if params is not None:
+            query = self._build_params_header(params) + query
+
+        plan = self.execute_command("GRAPH.EXPLAIN", self.name, query)
+        return ExecutionPlan(plan)

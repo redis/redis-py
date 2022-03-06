@@ -3,7 +3,7 @@
 The Python interface to the Redis key-value store.
 
 [![CI](https://github.com/redis/redis-py/workflows/CI/badge.svg?branch=master)](https://github.com/redis/redis-py/actions?query=workflow%3ACI+branch%3Amaster)
-[![docs](https://readthedocs.org/projects/redis-py/badge/?version=stable&style=flat)](https://redis-py.readthedocs.io/en/stable/)
+[![docs](https://readthedocs.org/projects/redis/badge/?version=stable&style=flat)](https://redis-py.readthedocs.io/en/stable/)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![pypi](https://badge.fury.io/py/redis.svg)](https://pypi.org/project/redis/)
 [![codecov](https://codecov.io/gh/redis/redis-py/branch/master/graph/badge.svg?token=yenl5fzxxr)](https://codecov.io/gh/redis/redis-py)
@@ -13,6 +13,11 @@ The Python interface to the Redis key-value store.
 
 ---------------------------------------------
 
+## Python Notice
+
+redis-py 4.2.x will be the last generation of redis-py to support python 3.6 as it has been [End of Life'd](https://www.python.org/dev/peps/pep-0494/#schedule-last-security-only-release).  Async support was introduced in redis-py 4.2.x thanks to [aioredis](https://github.com/aio-libs/aioredis-py), which necessitates this change. We will continue to maintain 3.6 support as long as possible - but the plan is for redis-py version 5+ to offically remove 3.6.
+
+---------------------------
 
 ## Installation
 
@@ -41,6 +46,8 @@ or from source:
 $ python setup.py install
 ```
 
+View the current documentation [here](https://readthedocs.org/projects/redis/).
+
 ## Contributing
 
 Want to contribute a feature, bug fix, or report an issue? Check out
@@ -49,7 +56,7 @@ contributing](https://github.com/redis/redis-py/blob/master/CONTRIBUTING.md).
 
 ## Getting Started
 
-redis-py supports Python 3.6+.
+redis-py supports Python 3.7+.
 
 ``` pycon
 >>> import redis
@@ -855,7 +862,8 @@ Monitor object to block until a command is received.
 redis-py supports the EVAL, EVALSHA, and SCRIPT commands. However, there
 are a number of edge cases that make these commands tedious to use in
 real world scenarios. Therefore, redis-py exposes a Script object that
-makes scripting much easier to use.
+makes scripting much easier to use. (RedisClusters have limited support for
+scripting.)
 
 To create a Script instance, use the register_script
 function on a client instance passing the Lua code as the first
@@ -948,7 +956,7 @@ C 3
 
 ### Cluster Mode
 
-redis-py is now supports cluster mode and provides a client for
+redis-py now supports cluster mode and provides a client for
 [Redis Cluster](<https://redis.io/topics/cluster-tutorial>).
 
 The cluster client is based on Grokzen's
@@ -956,6 +964,8 @@ The cluster client is based on Grokzen's
 fixes, and now supersedes that library. Support for these changes is thanks to
 his contributions.
 
+To learn more about Redis Cluster, see
+[Redis Cluster specifications](https://redis.io/topics/cluster-spec).
 
 **Create RedisCluster:**
 
@@ -966,25 +976,25 @@ instance can be created:
 - Using 'host' and 'port' arguments:
 
 ``` pycon
-    >>> from redis.cluster import RedisCluster as Redis
-    >>> rc = Redis(host='localhost', port=6379)
-    >>> print(rc.get_nodes())
+>>> from redis.cluster import RedisCluster as Redis
+>>> rc = Redis(host='localhost', port=6379)
+>>> print(rc.get_nodes())
     [[host=127.0.0.1,port=6379,name=127.0.0.1:6379,server_type=primary,redis_connection=Redis<ConnectionPool<Connection<host=127.0.0.1,port=6379,db=0>>>], [host=127.0.0.1,port=6378,name=127.0.0.1:6378,server_type=primary,redis_connection=Redis<ConnectionPool<Connection<host=127.0.0.1,port=6378,db=0>>>], [host=127.0.0.1,port=6377,name=127.0.0.1:6377,server_type=replica,redis_connection=Redis<ConnectionPool<Connection<host=127.0.0.1,port=6377,db=0>>>]]
 ```
 - Using the Redis URL specification:
 
 ``` pycon
-    >>> from redis.cluster import RedisCluster as Redis
-    >>> rc = Redis.from_url("redis://localhost:6379/0")
+>>> from redis.cluster import RedisCluster as Redis
+>>> rc = Redis.from_url("redis://localhost:6379/0")
 ```
 
 - Directly, via the ClusterNode class:
 
 ``` pycon
-    >>> from redis.cluster import RedisCluster as Redis
-    >>> from redis.cluster import ClusterNode
-    >>> nodes = [ClusterNode('localhost', 6379), ClusterNode('localhost', 6378)]
-    >>> rc = Redis(startup_nodes=nodes)
+>>> from redis.cluster import RedisCluster as Redis
+>>> from redis.cluster import ClusterNode
+>>> nodes = [ClusterNode('localhost', 6379), ClusterNode('localhost', 6378)]
+>>> rc = Redis(startup_nodes=nodes)
 ```
 
 When a RedisCluster instance is being created it first attempts to establish a
@@ -1014,18 +1024,18 @@ The 'target_nodes' parameter is explained in the following section,
 'Specifying Target Nodes'.
 
 ``` pycon
-    >>> # target-nodes: the node that holds 'foo1's key slot
-    >>> rc.set('foo1', 'bar1')
-    >>> # target-nodes: the node that holds 'foo2's key slot
-    >>> rc.set('foo2', 'bar2')
-    >>> # target-nodes: the node that holds 'foo1's key slot
-    >>> print(rc.get('foo1'))
-    b'bar'
-    >>> # target-node: default-node
-    >>> print(rc.keys())
-    [b'foo1']
-    >>> # target-node: default-node
-    >>> rc.ping()
+>>> # target-nodes: the node that holds 'foo1's key slot
+>>> rc.set('foo1', 'bar1')
+>>> # target-nodes: the node that holds 'foo2's key slot
+>>> rc.set('foo2', 'bar2')
+>>> # target-nodes: the node that holds 'foo1's key slot
+>>> print(rc.get('foo1'))
+b'bar'
+>>> # target-node: default-node
+>>> print(rc.keys())
+[b'foo1']
+>>> # target-node: default-node
+>>> rc.ping()
 ```
 
 **Specifying Target Nodes:**
@@ -1041,18 +1051,18 @@ the client will be able to resolve the nodes flag again with the new topology
 and attempt to retry executing the command.
 
 ``` pycon
-    >>> from redis.cluster import RedisCluster as Redis
-    >>> # run cluster-meet command on all of the cluster's nodes
-    >>> rc.cluster_meet('127.0.0.1', 6379, target_nodes=Redis.ALL_NODES)
-    >>> # ping all replicas
-    >>> rc.ping(target_nodes=Redis.REPLICAS)
-    >>> # ping a random node
-    >>> rc.ping(target_nodes=Redis.RANDOM)
-    >>> # get the keys from all cluster nodes
-    >>> rc.keys(target_nodes=Redis.ALL_NODES)
-    [b'foo1', b'foo2']
-    >>> # execute bgsave in all primaries
-    >>> rc.bgsave(Redis.PRIMARIES)
+>>> from redis.cluster import RedisCluster as Redis
+>>> # run cluster-meet command on all of the cluster's nodes
+>>> rc.cluster_meet('127.0.0.1', 6379, target_nodes=Redis.ALL_NODES)
+>>> # ping all replicas
+>>> rc.ping(target_nodes=Redis.REPLICAS)
+>>> # ping a random node
+>>> rc.ping(target_nodes=Redis.RANDOM)
+>>> # get the keys from all cluster nodes
+>>> rc.keys(target_nodes=Redis.ALL_NODES)
+[b'foo1', b'foo2']
+>>> # execute bgsave in all primaries
+>>> rc.bgsave(Redis.PRIMARIES)
 ```
 
 You could also pass ClusterNodes directly if you want to execute a command on a
@@ -1062,12 +1072,12 @@ will not be made, since the passed target node/s may no longer be valid, and
 the relevant cluster or connection error will be returned.
 
 ``` pycon
-    >>> node = rc.get_node('localhost', 6379)
-    >>> # Get the keys only for that specific node
-    >>> rc.keys(target_nodes=node)
-    >>> # get Redis info from a subset of primaries
-    >>> subset_primaries = [node for node in rc.get_primaries() if node.port > 6378]
-    >>> rc.info(target_nodes=subset_primaries)
+>>> node = rc.get_node('localhost', 6379)
+>>> # Get the keys only for that specific node
+>>> rc.keys(target_nodes=node)
+>>> # get Redis info from a subset of primaries
+>>> subset_primaries = [node for node in rc.get_primaries() if node.port > 6378]
+>>> rc.info(target_nodes=subset_primaries)
 ```
 
 In addition, the RedisCluster instance can query the Redis instance of a
@@ -1075,15 +1085,15 @@ specific node and execute commands on that node directly. The Redis client,
 however, does not handle cluster failures and retries.
 
 ``` pycon
-    >>> cluster_node = rc.get_node(host='localhost', port=6379)
-    >>> print(cluster_node)
-    [host=127.0.0.1,port=6379,name=127.0.0.1:6379,server_type=primary,redis_connection=Redis<ConnectionPool<Connection<host=127.0.0.1,port=6379,db=0>>>]
-    >>> r = cluster_node.redis_connection
-    >>> r.client_list()
-    [{'id': '276', 'addr': '127.0.0.1:64108', 'fd': '16', 'name': '', 'age': '0', 'idle': '0', 'flags': 'N', 'db': '0', 'sub': '0', 'psub': '0', 'multi': '-1', 'qbuf': '26', 'qbuf-free': '32742', 'argv-mem': '10', 'obl': '0', 'oll': '0', 'omem': '0', 'tot-mem': '54298', 'events': 'r', 'cmd': 'client', 'user': 'default'}]
-    >>> # Get the keys only for that specific node
-    >>> r.keys()
-    [b'foo1']
+>>> cluster_node = rc.get_node(host='localhost', port=6379)
+>>> print(cluster_node)
+[host=127.0.0.1,port=6379,name=127.0.0.1:6379,server_type=primary,redis_connection=Redis<ConnectionPool<Connection<host=127.0.0.1,port=6379,db=0>>>]
+>>> r = cluster_node.redis_connection
+>>> r.client_list()
+[{'id': '276', 'addr': '127.0.0.1:64108', 'fd': '16', 'name': '', 'age': '0', 'idle': '0', 'flags': 'N', 'db': '0', 'sub': '0', 'psub': '0', 'multi': '-1', 'qbuf': '26', 'qbuf-free': '32742', 'argv-mem': '10', 'obl': '0', 'oll': '0', 'omem': '0', 'tot-mem': '54298', 'events': 'r', 'cmd': 'client', 'user': 'default'}]
+>>> # Get the keys only for that specific node
+>>> r.keys()
+[b'foo1']
 ```
 
 **Multi-key commands:**
@@ -1103,14 +1113,14 @@ operations batch the keys according to their hash value, and then each batch is
 sent separately to the slot's owner.
 
 ``` pycon
-    #  Atomic operations can be used when all keys are mapped to the same slot
-    >>> rc.mset({'{foo}1': 'bar1', '{foo}2': 'bar2'})
-    >>> rc.mget('{foo}1', '{foo}2')
-    [b'bar1', b'bar2']
-    # Non-atomic multi-key operations splits the keys into different slots
-    >>> rc.mset_nonatomic({'foo': 'value1', 'bar': 'value2', 'zzz': 'value3')
-    >>> rc.mget_nonatomic('foo', 'bar', 'zzz')
-    [b'value1', b'value2', b'value3']
+# Atomic operations can be used when all keys are mapped to the same slot
+>>> rc.mset({'{foo}1': 'bar1', '{foo}2': 'bar2'})
+>>> rc.mget('{foo}1', '{foo}2')
+[b'bar1', b'bar2']
+# Non-atomic multi-key operations splits the keys into different slots
+>>> rc.mset_nonatomic({'foo': 'value1', 'bar': 'value2', 'zzz': 'value3')
+>>> rc.mget_nonatomic('foo', 'bar', 'zzz')
+[b'value1', b'value2', b'value3']
 ```
 
 **Cluster PubSub:**
@@ -1133,11 +1143,11 @@ See [redis-py-cluster documentation](https://redis-py-cluster.readthedocs.io/en/
  for more.
 
 ``` pycon
-    >>> p1 = rc.pubsub()
-    # p1 connection will be set to the node that holds 'foo' keyslot
-    >>> p1.subscribe('foo')
-    # p2 connection will be set to node 'localhost:6379'
-    >>> p2 = rc.pubsub(rc.get_node('localhost', 6379))
+>>> p1 = rc.pubsub()
+# p1 connection will be set to the node that holds 'foo' keyslot
+>>> p1.subscribe('foo')
+# p2 connection will be set to node 'localhost:6379'
+>>> p2 = rc.pubsub(rc.get_node('localhost', 6379))
 ```
 
 **Read Only Mode**
@@ -1155,20 +1165,20 @@ target_nodes='replicas', and read-write access can be restored by calling the
 readwrite() method.
 
 ``` pycon
-    >>> from cluster import RedisCluster as Redis
-    # Use 'debug' log level to print the node that the command is executed on
-    >>> rc_readonly = Redis(startup_nodes=startup_nodes,
-                    read_from_replicas=True)
-    >>> rc_readonly.set('{foo}1', 'bar1')
-    >>> for i in range(0, 4):
-            # Assigns read command to the slot's hosts in a Round-Robin manner
-    >>>     rc_readonly.get('{foo}1')
-    # set command would be directed only to the slot's primary node
-    >>> rc_readonly.set('{foo}2', 'bar2')
-    # reset READONLY flag
-    >>> rc_readonly.readwrite(target_nodes='replicas')
-    # now the get command would be directed only to the slot's primary node
-    >>> rc_readonly.get('{foo}1')
+>>> from cluster import RedisCluster as Redis
+# Use 'debug' log level to print the node that the command is executed on
+>>> rc_readonly = Redis(startup_nodes=startup_nodes,
+...                     read_from_replicas=True)
+>>> rc_readonly.set('{foo}1', 'bar1')
+>>> for i in range(0, 4):
+...     # Assigns read command to the slot's hosts in a Round-Robin manner
+...     rc_readonly.get('{foo}1')
+# set command would be directed only to the slot's primary node
+>>> rc_readonly.set('{foo}2', 'bar2')
+# reset READONLY flag
+>>> rc_readonly.readwrite(target_nodes='replicas')
+# now the get command would be directed only to the slot's primary node
+>>> rc_readonly.get('{foo}1')
 ```
 
 **Cluster Pipeline**
@@ -1185,22 +1195,23 @@ by significantly reducing the the number of network round trips between the
 client and the server.
 
 ``` pycon
-    >>> with rc.pipeline() as pipe:
-    >>>     pipe.set('foo', 'value1')
-    >>>     pipe.set('bar', 'value2')
-    >>>     pipe.get('foo')
-    >>>     pipe.get('bar')
-    >>>     print(pipe.execute())
-    [True, True, b'value1', b'value2']
-    >>>     pipe.set('foo1', 'bar1').get('foo1').execute()
-    [True, b'bar1']
+>>> with rc.pipeline() as pipe:
+...     pipe.set('foo', 'value1')
+...     pipe.set('bar', 'value2')
+...     pipe.get('foo')
+...     pipe.get('bar')
+...     print(pipe.execute())
+[True, True, b'value1', b'value2']
+...     pipe.set('foo1', 'bar1').get('foo1').execute()
+[True, b'bar1']
 ```
+
 Please note:
 - RedisCluster pipelines currently only support key-based commands.
 - The pipeline gets its 'read_from_replicas' value from the cluster's parameter.
 Thus, if read from replications is enabled in the cluster instance, the pipeline
 will also direct read commands to replicas.
-- The 'transcation' option is NOT supported in cluster-mode. In non-cluster mode,
+- The 'transaction' option is NOT supported in cluster-mode. In non-cluster mode,
 the 'transaction' option is available when executing pipelines. This wraps the
 pipeline commands with MULTI/EXEC commands, and effectively turns the pipeline
 commands into a single transaction block. This means that all commands are
@@ -1210,10 +1221,29 @@ according to their respective destination nodes. This means that we can not
 turn the pipeline commands into one transaction block, because in most cases
 they are split up into several smaller pipelines.
 
+**Lua Scripting in Cluster Mode**
 
-See [Redis Cluster tutorial](https://redis.io/topics/cluster-tutorial) and
-[Redis Cluster specifications](https://redis.io/topics/cluster-spec)
-to learn more about Redis Cluster.
+Cluster mode has limited support for lua scripting.
+
+The following commands are supported, with caveats:
+- `EVAL` and `EVALSHA`: The command is sent to the relevant node, depending on
+the keys (i.e., in `EVAL "<script>" num_keys key_1 ... key_n ...`). The keys
+_must_ all be on the same node. If the script requires 0 keys, _the command is
+sent to a random (primary) node_.
+- `SCRIPT EXISTS`: The command is sent to all primaries. The result is a list
+of booleans corresponding to the input SHA hashes. Each boolean is an AND of
+"does the script exist on each node?". In other words, each boolean is True iff
+the script exists on all nodes.
+- `SCRIPT FLUSH`: The command is sent to all primaries. The result is a bool
+AND over all nodes' responses.
+- `SCRIPT LOAD`: The command is sent to all primaries. The result is the SHA1
+digest.
+
+The following commands are not supported:
+- `EVAL_RO`
+- `EVALSHA_RO`
+
+Using scripting within pipelines in cluster mode is **not supported**.
 
 ### Author
 

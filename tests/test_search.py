@@ -21,6 +21,9 @@ from redis.commands.search.suggestion import Suggestion
 
 from .conftest import default_redismod_url, skip_ifmodversion_lt
 
+pytestmark = pytest.mark.onlynoncluster
+
+
 WILL_PLAY_TEXT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "testdata", "will_play_text.csv.bz2")
 )
@@ -964,7 +967,7 @@ def test_aggregations_groupby(client):
 
     res = client.ft().aggregate(req).rows[0]
     assert res[1] == "redis"
-    assert res[3] == "10"
+    assert res[3] == "8"  # median of 3,8,10
 
     req = aggregations.AggregateRequest("redis").group_by(
         "@parent",
@@ -1155,6 +1158,72 @@ def test_index_definition(client):
 
 
 @pytest.mark.redismod
+def testExpire(client):
+    client.ft().create_index((TextField("txt", sortable=True),), temporary=4)
+    ttl = client.execute_command("ft.debug", "TTL", "idx")
+    assert ttl > 2
+
+    while ttl > 2:
+        ttl = client.execute_command("ft.debug", "TTL", "idx")
+        time.sleep(0.01)
+
+    # add document - should reset the ttl
+    client.ft().add_document("doc", txt="foo bar", text="this is a simple test")
+    ttl = client.execute_command("ft.debug", "TTL", "idx")
+    assert ttl > 2
+    try:
+        while True:
+            ttl = client.execute_command("ft.debug", "TTL", "idx")
+            time.sleep(0.5)
+    except redis.exceptions.ResponseError:
+        assert ttl == 0
+
+
+@pytest.mark.redismod
+def testSkipInitialScan(client):
+    client.hset("doc1", "foo", "bar")
+    q = Query("@foo:bar")
+
+    client.ft().create_index((TextField("foo"),), skip_initial_scan=True)
+    assert 0 == client.ft().search(q).total
+
+
+@pytest.mark.redismod
+def testSummarizeDisabled_nooffset(client):
+    client.ft().create_index((TextField("txt"),), no_term_offsets=True)
+    client.ft().add_document("doc1", txt="foo bar")
+    with pytest.raises(Exception):
+        client.ft().search(Query("foo").summarize(fields=["txt"]))
+
+
+@pytest.mark.redismod
+def testSummarizeDisabled_nohl(client):
+    client.ft().create_index((TextField("txt"),), no_highlight=True)
+    client.ft().add_document("doc1", txt="foo bar")
+    with pytest.raises(Exception):
+        client.ft().search(Query("foo").summarize(fields=["txt"]))
+
+
+@pytest.mark.redismod
+def testMaxTextFields(client):
+    # Creating the index definition
+    client.ft().create_index((TextField("f0"),))
+    for x in range(1, 32):
+        client.ft().alter_schema_add((TextField(f"f{x}"),))
+
+    # Should be too many indexes
+    with pytest.raises(redis.ResponseError):
+        client.ft().alter_schema_add((TextField(f"f{x}"),))
+
+    client.ft().dropindex("idx")
+    # Creating the index definition
+    client.ft().create_index((TextField("f0"),), max_text_fields=True)
+    # Fill the index with fields
+    for x in range(1, 50):
+        client.ft().alter_schema_add((TextField(f"f{x}"),))
+
+
+@pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
 def test_create_client_definition(client):
     """
@@ -1200,8 +1269,8 @@ def test_create_client_definition_json(client):
     definition = IndexDefinition(prefix=["king:"], index_type=IndexType.JSON)
     client.ft().create_index((TextField("$.name"),), definition=definition)
 
-    client.json().set("king:1", Path.rootPath(), {"name": "henry"})
-    client.json().set("king:2", Path.rootPath(), {"name": "james"})
+    client.json().set("king:1", Path.root_path(), {"name": "henry"})
+    client.json().set("king:2", Path.root_path(), {"name": "james"})
 
     res = client.ft().search("henry")
     assert res.docs[0].id == "king:1"
@@ -1222,7 +1291,7 @@ def test_fields_as_name(client):
     client.ft().create_index(SCHEMA, definition=definition)
 
     # insert json data
-    res = client.json().set("doc:1", Path.rootPath(), {"name": "Jon", "age": 25})
+    res = client.json().set("doc:1", Path.root_path(), {"name": "Jon", "age": 25})
     assert res
 
     total = client.ft().search(Query("Jon").return_fields("name", "just_a_number")).docs
@@ -1237,7 +1306,7 @@ def test_fields_as_name(client):
 def test_search_return_fields(client):
     res = client.json().set(
         "doc:1",
-        Path.rootPath(),
+        Path.root_path(),
         {"t": "riceratops", "t2": "telmatosaurus", "n": 9072, "flt": 97.2},
     )
     assert res
@@ -1323,8 +1392,8 @@ def test_create_json_with_alias(client):
         definition=definition,
     )
 
-    client.json().set("king:1", Path.rootPath(), {"name": "henry", "num": 42})
-    client.json().set("king:2", Path.rootPath(), {"name": "james", "num": 3.14})
+    client.json().set("king:1", Path.root_path(), {"name": "henry", "num": 42})
+    client.json().set("king:2", Path.root_path(), {"name": "james", "num": 3.14})
 
     res = client.ft().search("@name:henry")
     assert res.docs[0].id == "king:1"
@@ -1355,7 +1424,7 @@ def test_json_with_multipath(client):
     )
 
     client.json().set(
-        "king:1", Path.rootPath(), {"name": "henry", "country": {"name": "england"}}
+        "king:1", Path.root_path(), {"name": "henry", "country": {"name": "england"}}
     )
 
     res = client.ft().search("@name:{henry}")
@@ -1381,7 +1450,7 @@ def test_json_with_jsonpath(client):
         definition=definition,
     )
 
-    client.json().set("doc:1", Path.rootPath(), {"prod:name": "RediSearch"})
+    client.json().set("doc:1", Path.root_path(), {"prod:name": "RediSearch"})
 
     # query for a supported field succeeds
     res = client.ft().search(Query("@name:RediSearch"))
@@ -1431,7 +1500,7 @@ def test_profile(client):
     res, det = client.ft().profile(req)
     assert det["Iterators profile"]["Counter"] == 2.0
     assert det["Iterators profile"]["Type"] == "WILDCARD"
-    assert det["Parsing time"] < 0.5
+    assert isinstance(det["Parsing time"], float)
     assert len(res.rows) == 2  # check also the search result
 
 
@@ -1455,3 +1524,56 @@ def test_profile_limited(client):
     )
     assert det["Iterators profile"]["Type"] == "INTERSECT"
     assert len(res.docs) == 3  # check also the search result
+
+
+@pytest.mark.redismod
+def test_text_params(modclient):
+    modclient.flushdb()
+    modclient.ft().create_index((TextField("name"),))
+
+    modclient.ft().add_document("doc1", name="Alice")
+    modclient.ft().add_document("doc2", name="Bob")
+    modclient.ft().add_document("doc3", name="Carol")
+
+    params_dict = {"name1": "Alice", "name2": "Bob"}
+    q = Query("@name:($name1 | $name2 )")
+    res = modclient.ft().search(q, query_params=params_dict)
+    assert 2 == res.total
+    assert "doc1" == res.docs[0].id
+    assert "doc2" == res.docs[1].id
+
+
+@pytest.mark.redismod
+def test_numeric_params(modclient):
+    modclient.flushdb()
+    modclient.ft().create_index((NumericField("numval"),))
+
+    modclient.ft().add_document("doc1", numval=101)
+    modclient.ft().add_document("doc2", numval=102)
+    modclient.ft().add_document("doc3", numval=103)
+
+    params_dict = {"min": 101, "max": 102}
+    q = Query("@numval:[$min $max]")
+    res = modclient.ft().search(q, query_params=params_dict)
+
+    assert 2 == res.total
+    assert "doc1" == res.docs[0].id
+    assert "doc2" == res.docs[1].id
+
+
+@pytest.mark.redismod
+def test_geo_params(modclient):
+
+    modclient.flushdb()
+    modclient.ft().create_index((GeoField("g")))
+    modclient.ft().add_document("doc1", g="29.69465, 34.95126")
+    modclient.ft().add_document("doc2", g="29.69350, 34.94737")
+    modclient.ft().add_document("doc3", g="29.68746, 34.94882")
+
+    params_dict = {"lat": "34.95126", "lon": "29.69465", "radius": 1000, "units": "km"}
+    q = Query("@g:[$lon $lat $radius $units]")
+    res = modclient.ft().search(q, query_params=params_dict)
+    assert 3 == res.total
+    assert "doc1" == res.docs[0].id
+    assert "doc2" == res.docs[1].id
+    assert "doc3" == res.docs[2].id

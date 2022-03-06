@@ -1,5 +1,7 @@
+import argparse
 import random
 import time
+from typing import Callable, TypeVar
 from unittest.mock import Mock
 from urllib.parse import urlparse
 
@@ -20,6 +22,54 @@ default_redis_unstable_url = "redis://localhost:6378"
 # default ssl client ignores verification for the purpose of testing
 default_redis_ssl_url = "rediss://localhost:6666"
 default_cluster_nodes = 6
+
+_DecoratedTest = TypeVar("_DecoratedTest", bound="Callable")
+_TestDecorator = Callable[[_DecoratedTest], _DecoratedTest]
+
+
+# Taken from python3.9
+class BooleanOptionalAction(argparse.Action):
+    def __init__(
+        self,
+        option_strings,
+        dest,
+        default=None,
+        type=None,
+        choices=None,
+        required=False,
+        help=None,
+        metavar=None,
+    ):
+
+        _option_strings = []
+        for option_string in option_strings:
+            _option_strings.append(option_string)
+
+            if option_string.startswith("--"):
+                option_string = "--no-" + option_string[2:]
+                _option_strings.append(option_string)
+
+        if help is not None and default is not None:
+            help += f" (default: {default})"
+
+        super().__init__(
+            option_strings=_option_strings,
+            dest=dest,
+            nargs=0,
+            default=default,
+            type=type,
+            choices=choices,
+            required=required,
+            help=help,
+            metavar=metavar,
+        )
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if option_string in self.option_strings:
+            setattr(namespace, self.dest, not option_string.startswith("--no-"))
+
+    def format_usage(self):
+        return " | ".join(self.option_strings)
 
 
 def pytest_addoption(parser):
@@ -62,6 +112,9 @@ def pytest_addoption(parser):
         help="Redis unstable (latest version) connection string "
         "defaults to %(default)s`",
     )
+    parser.addoption(
+        "--uvloop", action=BooleanOptionalAction, help="Run tests with uvloop"
+    )
 
 
 def _get_info(redis_url):
@@ -101,8 +154,20 @@ def pytest_sessionstart(session):
         cluster_nodes = session.config.getoption("--redis-cluster-nodes")
         wait_for_cluster_creation(redis_url, cluster_nodes)
 
+    use_uvloop = session.config.getoption("--uvloop")
 
-def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=20):
+    if use_uvloop:
+        try:
+            import uvloop
+
+            uvloop.install()
+        except ImportError as e:
+            raise RuntimeError(
+                "Can not import uvloop, make sure it is installed"
+            ) from e
+
+
+def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=60):
     """
     Waits for the cluster creation to complete.
     As soon as all :cluster_nodes: nodes become available, the cluster will be
@@ -133,19 +198,19 @@ def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=20):
         )
 
 
-def skip_if_server_version_lt(min_version):
+def skip_if_server_version_lt(min_version: str) -> _TestDecorator:
     redis_version = REDIS_INFO["version"]
     check = Version(redis_version) < Version(min_version)
     return pytest.mark.skipif(check, reason=f"Redis version required >= {min_version}")
 
 
-def skip_if_server_version_gte(min_version):
+def skip_if_server_version_gte(min_version: str) -> _TestDecorator:
     redis_version = REDIS_INFO["version"]
     check = Version(redis_version) >= Version(min_version)
     return pytest.mark.skipif(check, reason=f"Redis version required < {min_version}")
 
 
-def skip_unless_arch_bits(arch_bits):
+def skip_unless_arch_bits(arch_bits: int) -> _TestDecorator:
     return pytest.mark.skipif(
         REDIS_INFO["arch_bits"] != arch_bits, reason=f"server is not {arch_bits}-bit"
     )
@@ -169,17 +234,17 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
     raise AttributeError(f"No redis module named {module_name}")
 
 
-def skip_if_redis_enterprise():
+def skip_if_redis_enterprise() -> _TestDecorator:
     check = REDIS_INFO["enterprise"] is True
     return pytest.mark.skipif(check, reason="Redis enterprise")
 
 
-def skip_ifnot_redis_enterprise():
+def skip_ifnot_redis_enterprise() -> _TestDecorator:
     check = REDIS_INFO["enterprise"] is False
     return pytest.mark.skipif(check, reason="Not running in redis enterprise")
 
 
-def skip_if_nocryptography():
+def skip_if_nocryptography() -> _TestDecorator:
     try:
         import cryptography  # noqa
 
@@ -188,7 +253,7 @@ def skip_if_nocryptography():
         return pytest.mark.skipif(True, reason="No cryptography dependency")
 
 
-def skip_if_cryptography():
+def skip_if_cryptography() -> _TestDecorator:
     try:
         import cryptography  # noqa
 
@@ -369,7 +434,9 @@ def master_host(request):
 @pytest.fixture()
 def unstable_r(request):
     url = request.config.getoption("--redis-unstable-url")
-    with _get_client(redis.Redis, request, from_url=url) as client:
+    with _get_client(
+        redis.Redis, request, from_url=url, decode_responses=True
+    ) as client:
         yield client
 
 

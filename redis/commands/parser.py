@@ -17,14 +17,28 @@ class CommandsParser:
         self.initialize(redis_connection)
 
     def initialize(self, r):
-        self.commands = r.execute_command("COMMAND")
+        commands = r.execute_command("COMMAND")
+        uppercase_commands = []
+        for cmd in commands:
+            if any(x.isupper() for x in cmd):
+                uppercase_commands.append(cmd)
+        for cmd in uppercase_commands:
+            commands[cmd.lower()] = commands.pop(cmd)
+        self.commands = commands
 
     # As soon as this PR is merged into Redis, we should reimplement
     # our logic to use COMMAND INFO changes to determine the key positions
     # https://github.com/redis/redis/pull/8324
     def get_keys(self, redis_conn, *args):
         """
-        Get the keys from the passed command
+        Get the keys from the passed command.
+
+        NOTE: Due to a bug in redis<7.0, this function does not work properly
+        for EVAL or EVALSHA when the `numkeys` arg is 0.
+         - issue: https://github.com/redis/redis/issues/9493
+         - fix: https://github.com/redis/redis/pull/9733
+
+        So, don't use this function with EVAL or EVALSHA.
         """
         if len(args) < 2:
             # The command has no keys in it
@@ -72,6 +86,14 @@ class CommandsParser:
         return keys
 
     def _get_moveable_keys(self, redis_conn, *args):
+        """
+        NOTE: Due to a bug in redis<7.0, this function does not work properly
+        for EVAL or EVALSHA when the `numkeys` arg is 0.
+         - issue: https://github.com/redis/redis/issues/9493
+         - fix: https://github.com/redis/redis/pull/9733
+
+        So, don't use this function with EVAL or EVALSHA.
+        """
         pieces = []
         cmd_name = args[0]
         # The command name should be splitted into separate arguments,
@@ -103,6 +125,7 @@ class CommandsParser:
             return None
         args = [str_if_bytes(arg) for arg in args]
         command = args[0].upper()
+        keys = None
         if command == "PUBSUB":
             # the second argument is a part of the command name, e.g.
             # ['PUBSUB', 'NUMSUB', 'foo'].
@@ -117,6 +140,4 @@ class CommandsParser:
             # format example:
             # PUBLISH channel message
             keys = [args[1]]
-        else:
-            keys = None
         return keys

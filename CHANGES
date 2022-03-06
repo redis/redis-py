@@ -1,11 +1,167 @@
-# DEPRECATED
 
-This file is historic. Starting with redis-py 4.0.0b1, please see the GitHub releases page at
-https://github.com/redis/redis-py/releases.
+    * Add `items` parameter to `hset` signature
+  	* Create codeql-analysis.yml (#1988). Thanks @chayim
+    * Add limited support for Lua scripting with RedisCluster
+    * Implement `.lock()` method on RedisCluster
 
-------------------------------------------------------------------------------------------------
-
-* (in development)
+* 4.1.3 (Feb 8, 2022)
+    * Fix flushdb and flushall (#1926)
+    * Add redis5 and redis4 dockers (#1871)
+    * Change json.clear test multi to be up to date with redisjson (#1922)
+    * Fixing volume for unstable_cluster docker (#1914)
+    * Update changes file with changes since 4.0.0-beta2 (#1915)
+* 4.1.2 (Jan 27, 2022)
+    * Invalid OCSP certificates should raise ConnectionError on failed validation (#1907)
+    * Added retry mechanism on socket timeouts when connecting to the server (#1895)
+    * LMOVE, BLMOVE return incorrect responses (#1906)
+    * Fixing AttributeError in UnixDomainSocketConnection (#1903)
+    * Fixing TypeError in GraphCommands.explain (#1901)
+    * For tests, increasing wait time for the cluster (#1908)
+    * Increased pubsub's wait_for_messages timeout to prevent flaky tests (#1893)
+    * README code snippets formatted to highlight properly (#1888)
+    * Fix link in the main page (#1897)
+    * Documentation fixes: JSON Example, SSL Connection Examples, RTD version (#1887)
+    * Direct link to readthedocs (#1885)
+* 4.1.1 (Jan 17, 2022)
+    * Add retries to connections in Sentinel Pools (#1879)
+    * OCSP Stapling Support (#1873)
+    * Define incr/decr as aliases of incrby/decrby (#1874)
+    * FT.CREATE - support MAXTEXTFIELDS, TEMPORARY, NOHL, NOFREQS, SKIPINITIALSCAN (#1847)
+    * Timeseries docs fix (#1877)
+    * get_connection: catch OSError too (#1832)
+    * Set keys var otherwise variable not created (#1853)
+    * Clusters should optionally require full slot coverage (#1845)
+    * Triple quote docstrings in client.py PEP 257 (#1876)
+    * syncing requirements (#1870)
+    * Typo and typing in GraphCommands documentation (#1855)
+    * Allowing poetry and redis-py to install together (#1854)
+    * setup.py: Add project_urls for PyPI (#1867)
+    * Support test with redis unstable docker (#1850)
+    * Connection examples (#1835)
+    * Documentation cleanup (#1841)
+* 4.1.0 (Dec 26, 2021)
+    * OCSP stapling support (#1820)
+    * Support for SELECT (#1825)
+    * Support for specifying error types with retry (#1817)
+    * Support for RESET command since Redis 6.2.0 (#1824)
+    * Support CLIENT TRACKING (#1612)
+    * Support WRITE in CLIENT PAUSE (#1549)
+    * JSON set_file and set_path support (#1818)
+    * Allow ssl_ca_path with rediss:// urls (#1814)
+    * Support for password-encrypted SSL private keys (#1782)
+    * Support SYNC and PSYNC (#1741)
+    * Retry on error exception and timeout fixes (#1821)
+    * Fixing read race condition during pubsub (#1737)
+    * Fixing exception in listen (#1823)
+    * Fixed MovedError, and stopped iterating through startup nodes when slots are fully covered (#1819)
+    * Socket not closing after server disconnect (#1797)
+    * Single sourcing the package version (#1791)
+    * Ensure redis_connect_func is set on uds connection (#1794)
+    * SRTALGO - Skip for redis versions greater than 7.0.0 (#1831)
+    * Documentation updates (#1822)
+    * Add CI action to install package from repository commit hash (#1781) (#1790)
+    * Fix link in lmove docstring (#1793)
+    * Disabling JSON.DEBUG tests (#1787)
+    * Migrated targeted nodes to kwargs in Cluster Mode (#1762)
+    * Added support for MONITOR in clusters (#1756)
+    * Adding ROLE Command (#1610)
+    * Integrate RedisBloom support (#1683)
+    * Adding RedisGraph support (#1556)
+    * Allow overriding connection class via keyword arguments (#1752)
+    * Aggregation LOAD * support for RediSearch (#1735)
+    * Adding cluster, bloom, and graph docs (#1779)
+    * Add packaging to setup_requires, and use >= to play nice to setup.py (fixes #1625) (#1780)
+    * Fixing the license link in the readme (#1778)
+    * Removing distutils from tests (#1773)
+    * Fix cluster ACL tests (#1774)
+    * Improved RedisCluster's reinitialize_steps and documentation (#1765)
+    * Added black and isort (#1734)
+    * Link Documents for all module commands (#1711)
+    * Pyupgrade + flynt + f-strings (#1759)
+    * Remove unused aggregation subclasses in RediSearch (#1754)
+    * Adding RedisCluster client to support Redis Cluster Mode (#1660)
+    * Support RediSearch FT.PROFILE command (#1727)
+    * Adding support for non-decodable commands (#1731)
+    * COMMAND GETKEYS support (#1738)
+    * RedisJSON 2.0.4 behaviour support (#1747)
+    * Removing deprecating distutils (PEP 632) (#1730)
+    * Updating PR template (#1745)
+    * Removing duplication of Script class (#1751)
+    * Splitting documentation for read the docs (#1743)
+    * Improve code coverage for aggregation tests (#1713)
+    * Fixing COMMAND GETKEYS tests (#1750)
+    * GitHub release improvements (#1684)
+* 4.0.2 (Nov 22, 2021)
+    * Restoring Sentinel commands to redis client (#1723)
+    * Better removal of hiredis warning (#1726)
+    * Adding links to redis documents in function calls (#1719)
+* 4.0.1 (Nov 17, 2021)
+    * Removing command on initial connections (#1722)
+    * Removing hiredis warning when not installed (#1721)
+* 4.0.0 (Nov 15, 2021)
+    * FT.EXPLAINCLI intentionally raising NotImplementedError
+    * Restoring ZRANGE desc for Redis < 6.2.0 (#1697)
+    * Response parsing occasionally fails to parse floats (#1692)
+    * Re-enabling read-the-docs (#1707)
+    * Call HSET after FT.CREATE to avoid keyspace scan (#1706)
+    * Unit tests fixes for compatibility (#1703)
+    * Improve documentation about Locks (#1701)
+    * Fixes to allow --redis-url to pass through all tests (#1700)
+    * Fix unit tests running against Redis 4.0.0 (#1699)
+    * Search alias test fix (#1695)
+    * Adding RediSearch/RedisJSON tests (#1691)
+    * Updating codecov rules (#1689)
+    * Tests to validate custom JSON decoders (#1681)
+    * Added breaking icon to release drafter (#1702)
+    * Removing dependency on six (#1676)
+    * Re-enable pipeline support for JSON and TimeSeries (#1674)
+    * Export Sentinel, and SSL like other classes (#1671)
+    * Restore zrange functionality for older versions of Redis (#1670)
+    * Fixed garbage collection deadlock (#1578)
+    * Tests to validate built python packages (#1678)
+    * Sleep for flaky search test (#1680)
+    * Test function renames, to match standards (#1679)
+    * Docstring improvements for Redis class (#1675)
+    * Fix georadius tests (#1672)
+    * Improvements to JSON coverage (#1666)
+    * Add python_requires setuptools check for python > 3.6 (#1656)
+    * SMISMEMBER support (#1667)
+    * Exposing the module version in loaded_modules (#1648)
+    * RedisTimeSeries support (#1652)
+    * Support for json multipath ($) (#1663)
+    * Added boolean parsing to PEXPIRE and PEXPIREAT (#1665)
+    * Add python_requires setuptools check for python > 3.6 (#1656)
+    * Adding vulture for static analysis (#1655)
+    * Starting to clean the docs (#1657)
+    * Update README.md (#1654)
+    * Adding description format for package (#1651)
+    * Publish to pypi as releases are generated with the release drafter (#1647)
+    * Restore actions to prs (#1653)
+    * Fixing the package to include commands (#1649)
+    * Re-enabling codecov as part of CI process (#1646)
+    * Adding support for redisearch (#1640) Thanks @chayim
+    * redisjson support (#1636) Thanks @chayim
+    * Sentinel: Add SentinelManagedSSLConnection (#1419) Thanks @AbdealiJK
+    * Enable floating parameters in SET (ex and px) (#1635) Thanks @AvitalFineRedis
+    * Add warning when hiredis not installed. Recommend installation. (#1621) Thanks @adiamzn
+    * Raising NotImplementedError for SCRIPT DEBUG and DEBUG SEGFAULT (#1624) Thanks @chayim
+    * CLIENT REDIR command support (#1623) Thanks @chayim
+    * REPLICAOF command implementation (#1622) Thanks @chayim
+    * Add support to NX XX and CH to GEOADD (#1605) Thanks @AvitalFineRedis
+    * Add support to ZRANGE and ZRANGESTORE parameters (#1603) Thanks @AvitalFineRedis
+    * Pre 6.2 redis should default to None for script flush (#1641) Thanks @chayim
+    * Add FULL option to XINFO SUMMARY (#1638) Thanks @agusdmb
+    * Geosearch test should use any=True (#1594) Thanks @Andrew-Chen-Wang
+    * Removing packaging dependency (#1626) Thanks @chayim
+    * Fix client_kill_filter docs for skimpy (#1596) Thanks @Andrew-Chen-Wang
+    * Normalize minid and maxlen docs (#1593) Thanks @Andrew-Chen-Wang
+    * Update docs for multiple usernames for ACL DELUSER (#1595) Thanks @Andrew-Chen-Wang
+    * Fix grammar of get param in set command (#1588) Thanks @Andrew-Chen-Wang
+    * Fix docs for client_kill_filter (#1584) Thanks @Andrew-Chen-Wang
+    * Convert README & CONTRIBUTING from rst to md (#1633) Thanks @davidylee
+    * Test BYLEX param in zrangestore (#1634) Thanks @AvitalFineRedis
+    * Tox integrations with invoke and docker (#1632) Thanks @chayim
+    * Adding the release drafter to help simplify release notes (#1618). Thanks @chayim
     * BACKWARDS INCOMPATIBLE: Removed support for end of life Python 2.7. #1318
     * BACKWARDS INCOMPATIBLE: All values within Redis URLs are unquoted via
       urllib.parse.unquote. Prior versions of redis-py supported this by

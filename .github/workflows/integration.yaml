@@ -8,9 +8,11 @@ on:
       - '**/*.md'
     branches:
       - master
+      - '[0-9].[0-9]'
   pull_request:
     branches:
       - master
+      - '[0-9].[0-9]'
 
 jobs:
 
@@ -30,8 +32,9 @@ jobs:
 
    run-tests:
      runs-on: ubuntu-latest
+     timeout-minutes: 30
      strategy:
-       max-parallel: 6
+       max-parallel: 15
        matrix:
          python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
          test-type: ['standalone', 'cluster']
@@ -47,8 +50,8 @@ jobs:
            python-version: ${{ matrix.python-version }}
        - name: run tests
          run: |
+           pip install -U setuptools wheel
            pip install -r dev_requirements.txt
-           bash docker/stunnel/create_certs.sh
            tox -e ${{matrix.test-type}}-${{matrix.connection-type}}
        - name: Upload codecov coverage
          uses: codecov/codecov-action@v2

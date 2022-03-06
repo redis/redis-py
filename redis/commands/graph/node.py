@@ -37,7 +37,7 @@ class Node:
 
         self.properties = properties or {}
 
-    def toString(self):
+    def to_string(self):
         res = ""
         if self.properties:
             props = ",".join(
