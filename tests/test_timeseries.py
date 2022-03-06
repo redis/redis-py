@@ -264,6 +264,7 @@ def test_rev_range(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.onlynoncluster
 def testMultiRange(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
     client.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
@@ -293,6 +294,7 @@ def testMultiRange(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 def test_multi_range_advanced(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
@@ -349,6 +351,7 @@ def test_multi_range_advanced(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 def test_multi_reverse_range(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
@@ -442,6 +445,7 @@ def test_get(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.onlynoncluster
 def test_mget(client):
     client.ts().create(1, labels={"Test": "This"})
     client.ts().create(2, labels={"Test": "This", "Taste": "That"})
@@ -483,6 +487,7 @@ def testInfoDuplicatePolicy(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.onlynoncluster
 def test_query_index(client):
     client.ts().create(1, labels={"Test": "This"})
     client.ts().create(2, labels={"Test": "This", "Taste": "That"})
