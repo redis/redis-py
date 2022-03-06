@@ -21,6 +21,9 @@ from redis.commands.search.suggestion import Suggestion
 
 from .conftest import default_redismod_url, skip_ifmodversion_lt
 
+pytestmark = pytest.mark.onlynoncluster
+
+
 WILL_PLAY_TEXT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "testdata", "will_play_text.csv.bz2")
 )

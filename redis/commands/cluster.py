@@ -10,6 +10,7 @@ from .core import (
     ScriptCommands,
 )
 from .helpers import list_or_args
+from .redismodules import RedisModuleCommands
 
 
 class ClusterMultiKeyCommands:
@@ -214,6 +215,7 @@ class RedisClusterCommands(
     ClusterDataAccessCommands,
     ScriptCommands,
     FunctionCommands,
+    RedisModuleCommands,
 ):
     """
     A class for all Redis Cluster commands
