@@ -463,10 +463,17 @@ class HiredisParser(BaseParser):
             self._next_response = False
             return response
 
-        response = self._reader.gets()
+        if disable_decoding:
+            response = self._reader.gets(False)
+        else:
+            response = self._reader.gets()
+
         while response is False:
             self.read_from_socket()
-            response = self._reader.gets()
+            if disable_decoding:
+                response = self._reader.gets(False)
+            else:
+                response = self._reader.gets()
         # if an older version of hiredis is installed, we need to attempt
         # to convert ResponseErrors to their appropriate types.
         if not HIREDIS_SUPPORTS_CALLABLE_ERRORS:
@@ -604,7 +611,9 @@ class Connection:
         if self._sock:
             return
         try:
-            sock = self._connect()
+            sock = self.retry.call_with_retry(
+                lambda: self._connect(), lambda error: self.disconnect(error)
+            )
         except socket.timeout:
             raise TimeoutError("Timeout connecting to server")
         except OSError as e:
@@ -675,12 +684,19 @@ class Connection:
         # args for socket.error can either be (errno, "message")
         # or just "message"
         if len(exception.args) == 1:
-            return f"Error connecting to {self.host}:{self.port}. {exception.args[0]}."
+            try:
+                return f"Error connecting to {self.host}:{self.port}. \
+                        {exception.args[0]}."
+            except AttributeError:
+                return f"Connection Error: {exception.args[0]}"
         else:
-            return (
-                f"Error {exception.args[0]} connecting to "
-                f"{self.host}:{self.port}. {exception.args[1]}."
-            )
+            try:
+                return (
+                    f"Error {exception.args[0]} connecting to "
+                    f"{self.host}:{self.port}. {exception.args[1]}."
+                )
+            except AttributeError:
+                return f"Connection Error: {exception.args[0]}"
 
     def on_connect(self):
         "Initialize the connection, authenticate and select a database"
@@ -721,7 +737,7 @@ class Connection:
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
-    def disconnect(self):
+    def disconnect(self, *args):
         "Disconnects from the Redis server"
         self._parser.on_disconnect()
         if self._sock is None:
@@ -797,15 +813,18 @@ class Connection:
     def read_response(self, disable_decoding=False):
         """Read the response from a previously sent command"""
         try:
+            hosterr = f"{self.host}:{self.port}"
+        except AttributeError:
+            hosterr = "connection"
+
+        try:
             response = self._parser.read_response(disable_decoding=disable_decoding)
         except socket.timeout:
             self.disconnect()
-            raise TimeoutError(f"Timeout reading from {self.host}:{self.port}")
+            raise TimeoutError(f"Timeout reading from {hosterr}")
         except OSError as e:
             self.disconnect()
-            raise ConnectionError(
-                f"Error while reading from {self.host}:{self.port}" f" : {e.args}"
-            )
+            raise ConnectionError(f"Error while reading from {hosterr}" f" : {e.args}")
         except BaseException:
             self.disconnect()
             raise
@@ -908,6 +927,9 @@ class SSLConnection(Connection):
         ssl_ca_path=None,
         ssl_password=None,
         ssl_validate_ocsp=False,
+        ssl_validate_ocsp_stapled=False,
+        ssl_ocsp_context=None,
+        ssl_ocsp_expected_cert=None,
         **kwargs,
     ):
         """Constructor
@@ -920,6 +942,11 @@ class SSLConnection(Connection):
             ssl_check_hostname: If set, match the hostname during the SSL handshake. Defaults to False.
             ssl_ca_path: The path to a directory containing several CA certificates in PEM format. Defaults to None.
             ssl_password: Password for unlocking an encrypted private key. Defaults to None.
+
+            ssl_validate_ocsp: If set, perform a full ocsp validation (i.e not a stapled verification)
+            ssl_validate_ocsp_stapled: If set, perform a validation on a stapled ocsp response
+            ssl_ocsp_context: A fully initialized OpenSSL.SSL.Context object to be used in verifying the ssl_ocsp_expected_cert
+            ssl_ocsp_expected_cert: A PEM armoured string containing the expected certificate to be returned from the ocsp verification service.
 
         Raises:
             RedisError
@@ -950,6 +977,9 @@ class SSLConnection(Connection):
         self.check_hostname = ssl_check_hostname
         self.certificate_password = ssl_password
         self.ssl_validate_ocsp = ssl_validate_ocsp
+        self.ssl_validate_ocsp_stapled = ssl_validate_ocsp_stapled
+        self.ssl_ocsp_context = ssl_ocsp_context
+        self.ssl_ocsp_expected_cert = ssl_ocsp_expected_cert
 
     def _connect(self):
         "Wrap the socket with SSL support"
@@ -968,7 +998,42 @@ class SSLConnection(Connection):
         sslsock = context.wrap_socket(sock, server_hostname=self.host)
         if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE is False:
             raise RedisError("cryptography is not installed.")
-        elif self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE:
+
+        if self.ssl_validate_ocsp_stapled and self.ssl_validate_ocsp:
+            raise RedisError(
+                "Either an OCSP staple or pure OCSP connection must be validated "
+                "- not both."
+            )
+
+        # validation for the stapled case
+        if self.ssl_validate_ocsp_stapled:
+            import OpenSSL
+
+            from .ocsp import ocsp_staple_verifier
+
+            # if a context is provided use it - otherwise, a basic context
+            if self.ssl_ocsp_context is None:
+                staple_ctx = OpenSSL.SSL.Context(OpenSSL.SSL.SSLv23_METHOD)
+                staple_ctx.use_certificate_file(self.certfile)
+                staple_ctx.use_privatekey_file(self.keyfile)
+            else:
+                staple_ctx = self.ssl_ocsp_context
+
+            staple_ctx.set_ocsp_client_callback(
+                ocsp_staple_verifier,
+                self.ssl_ocsp_expected_cert,
+            )
+
+            #  need another socket
+            con = OpenSSL.SSL.Connection(staple_ctx, socket.socket())
+            con.request_ocsp()
+            con.connect((self.host, self.port))
+            con.do_handshake()
+            con.shutdown()
+            return sslsock
+
+        # pure ocsp validation
+        if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE:
             from .ocsp import OCSPVerifier
 
             o = OCSPVerifier(sslsock, self.host, self.port, self.ca_certs)
@@ -1317,7 +1382,7 @@ class ConnectionPool:
             try:
                 if connection.can_read():
                     raise ConnectionError("Connection has data")
-            except ConnectionError:
+            except (ConnectionError, OSError):
                 connection.disconnect()
                 connection.connect()
                 if connection.can_read():
@@ -1512,7 +1577,7 @@ class BlockingConnectionPool(ConnectionPool):
             try:
                 if connection.can_read():
                     raise ConnectionError("Connection has data")
-            except ConnectionError:
+            except (ConnectionError, OSError):
                 connection.disconnect()
                 connection.connect()
                 if connection.can_read():

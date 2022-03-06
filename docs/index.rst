@@ -9,7 +9,7 @@ Welcome to redis-py's documentation!
 Getting Started
 ****************
 
-`redis-py <https://pypi.org/project/redis>`_ requires a running Redis server, and Python 3.6+. See the `Redis
+`redis-py <https://pypi.org/project/redis>`_ requires a running Redis server, and Python 3.7+. See the `Redis
 quickstart <https://redis.io/topics/quickstart>`_ for Redis installation instructions.
 
 redis-py can be installed using pip via ``pip install redis``.
@@ -44,7 +44,7 @@ There are two quick ways to connect to Redis.
    r = redis.from_url('redis://foo.bar.com:12345')
    r.ping()
 
-After that, you probably want to `run redis commands <redis_core_commands.html>`_.
+After that, you probably want to `run redis commands <commands.html>`_.
 
 .. toctree::
    :hidden:

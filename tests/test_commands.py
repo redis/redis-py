@@ -65,6 +65,26 @@ class TestResponseCallbacks:
 
 
 class TestRedisCommands:
+    def test_auth(self, r, request):
+        username = "redis-py-auth"
+
+        def teardown():
+            r.acl_deluser(username)
+
+        request.addfinalizer(teardown)
+
+        assert r.acl_setuser(
+            username,
+            enabled=True,
+            passwords=["+strong_password"],
+            commands=["+acl"],
+        )
+
+        assert r.auth(username=username, password="strong_password") is True
+
+        with pytest.raises(exceptions.ResponseError):
+            r.auth(username=username, password="wrong_password")
+
     def test_command_on_invalid_key_type(self, r):
         r.lpush("a", "1")
         with pytest.raises(redis.ResponseError):
@@ -82,6 +102,19 @@ class TestRedisCommands:
         commands = r.acl_cat("read")
         assert isinstance(commands, list)
         assert "get" in commands
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_acl_dryrun(self, r):
+        username = "redis-py-user"
+        r.acl_setuser(
+            username,
+            keys=["*"],
+            commands=["+set"],
+        )
+        assert r.acl_dryrun(username, "set", "key", "value") == b"OK"
+        assert r.acl_dryrun(username, "get", "key").startswith(
+            b"This user has no permissions to run the"
+        )
 
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
@@ -593,6 +626,13 @@ class TestRedisCommands:
         assert r.client_unpause() == b"OK"
 
     @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_client_no_evict(self, unstable_r):
+        assert unstable_r.client_no_evict("ON") == "OK"
+        with pytest.raises(TypeError):
+            unstable_r.client_no_evict()
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("3.2.0")
     def test_client_reply(self, r, r_timeout):
         assert r_timeout.client_reply("ON") == b"OK"
@@ -612,6 +652,11 @@ class TestRedisCommands:
     def test_client_getredir(self, r):
         assert isinstance(r.client_getredir(), int)
         assert r.client_getredir() == -1
+
+    @skip_if_server_version_lt("6.0.0")
+    def test_hello_notI_implemented(self, r):
+        with pytest.raises(NotImplementedError):
+            r.hello()
 
     def test_config_get(self, r):
         data = r.config_get()
@@ -635,6 +680,11 @@ class TestRedisCommands:
         assert r.config_get()["timeout"] == "70"
         assert r.config_set("timeout", 0)
         assert r.config_get()["timeout"] == "0"
+
+    @skip_if_server_version_lt("6.0.0")
+    def test_failover(self, r):
+        with pytest.raises(NotImplementedError):
+            r.failover()
 
     @pytest.mark.onlynoncluster
     def test_dbsize(self, r):
@@ -946,6 +996,17 @@ class TestRedisCommands:
         assert r.unlink("a", "b") == 2
         assert r.get("a") is None
         assert r.get("b") is None
+
+    @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_lcs(self, unstable_r):
+        unstable_r.mset({"foo": "ohmytext", "bar": "mynewtext"})
+        assert unstable_r.lcs("foo", "bar") == "mytext"
+        assert unstable_r.lcs("foo", "bar", len=True) == 6
+        result = ["matches", [[[4, 7], [5, 8]]], "len", 6]
+        assert unstable_r.lcs("foo", "bar", idx=True, minmatchlen=3) == result
+        with pytest.raises(redis.ResponseError):
+            assert unstable_r.lcs("foo", "bar", len=True, idx=True)
 
     @skip_if_server_version_lt("2.6.0")
     def test_dump_and_restore(self, r):
@@ -1479,6 +1540,29 @@ class TestRedisCommands:
         r.rpush("a", "")
         assert r.brpoplpush("a", "b") == b""
 
+    @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_blmpop(self, unstable_r):
+        unstable_r.rpush("a", "1", "2", "3", "4", "5")
+        res = ["a", ["1", "2"]]
+        assert unstable_r.blmpop(1, "2", "b", "a", direction="LEFT", count=2) == res
+        with pytest.raises(TypeError):
+            unstable_r.blmpop(1, "2", "b", "a", count=2)
+        unstable_r.rpush("b", "6", "7", "8", "9")
+        assert unstable_r.blmpop(0, "2", "b", "a", direction="LEFT") == ["b", ["6"]]
+        assert unstable_r.blmpop(1, "2", "foo", "bar", direction="RIGHT") is None
+
+    @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_lmpop(self, unstable_r):
+        unstable_r.rpush("foo", "1", "2", "3", "4", "5")
+        result = ["foo", ["1", "2"]]
+        assert unstable_r.lmpop("2", "bar", "foo", direction="LEFT", count=2) == result
+        with pytest.raises(redis.ResponseError):
+            unstable_r.lmpop("2", "bar", "foo", direction="up", count=2)
+        unstable_r.rpush("bar", "a", "b", "c", "d")
+        assert unstable_r.lmpop("2", "bar", "foo", direction="LEFT") == ["bar", ["a"]]
+
     def test_lindex(self, r):
         r.rpush("a", "1", "2", "3")
         assert r.lindex("a", "0") == b"1"
@@ -1748,6 +1832,15 @@ class TestRedisCommands:
         assert r.sinter("a", "b") == {b"2", b"3"}
 
     @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_sintercard(self, unstable_r):
+        unstable_r.sadd("a", 1, 2, 3)
+        unstable_r.sadd("b", 1, 2, 3)
+        unstable_r.sadd("c", 1, 3, 4)
+        assert unstable_r.sintercard(3, ["a", "b", "c"]) == 2
+        assert unstable_r.sintercard(3, ["a", "b", "c"], limit=1) == 1
+
+    @pytest.mark.onlynoncluster
     def test_sinterstore(self, r):
         r.sadd("a", "1", "2", "3")
         assert r.sinterstore("c", "a", "b") == 0
@@ -1979,6 +2072,15 @@ class TestRedisCommands:
         ]
 
     @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_zintercard(self, unstable_r):
+        unstable_r.zadd("a", {"a1": 1, "a2": 2, "a3": 1})
+        unstable_r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        unstable_r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert unstable_r.zintercard(3, ["a", "b", "c"]) == 2
+        assert unstable_r.zintercard(3, ["a", "b", "c"], limit=1) == 1
+
+    @pytest.mark.onlynoncluster
     def test_zinterstore_sum(self, r):
         r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -2063,6 +2165,30 @@ class TestRedisCommands:
         assert r.bzpopmin(["b", "a"], timeout=1) is None
         r.zadd("c", {"c1": 100})
         assert r.bzpopmin("c", timeout=1) == (b"c", b"c1", 100)
+
+    @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_zmpop(self, unstable_r):
+        unstable_r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
+        res = ["a", [["a1", "1"], ["a2", "2"]]]
+        assert unstable_r.zmpop("2", ["b", "a"], min=True, count=2) == res
+        with pytest.raises(redis.DataError):
+            unstable_r.zmpop("2", ["b", "a"], count=2)
+        unstable_r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
+        assert unstable_r.zmpop("2", ["b", "a"], max=True) == ["b", [["b1", "10"]]]
+
+    @pytest.mark.onlynoncluster
+    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    def test_bzmpop(self, unstable_r):
+        unstable_r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
+        res = ["a", [["a1", "1"], ["a2", "2"]]]
+        assert unstable_r.bzmpop(1, "2", ["b", "a"], min=True, count=2) == res
+        with pytest.raises(redis.DataError):
+            unstable_r.bzmpop(1, "2", ["b", "a"], count=2)
+        unstable_r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
+        res = ["b", [["b1", "10"]]]
+        assert unstable_r.bzmpop(0, "2", ["b", "a"], max=True) == res
+        assert unstable_r.bzmpop(1, "2", ["foo", "bar"], max=True) is None
 
     def test_zrange(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
@@ -2422,6 +2548,17 @@ class TestRedisCommands:
         assert r.hget("a", "3") == b"3"
 
         r.hset("b", "foo", "bar", mapping={"1": 1, "2": 2})
+        assert r.hget("b", "1") == b"1"
+        assert r.hget("b", "2") == b"2"
+        assert r.hget("b", "foo") == b"bar"
+
+    def test_hset_with_key_values_passed_as_list(self, r):
+        r.hset("a", items=["1", 1, "2", 2, "3", 3])
+        assert r.hget("a", "1") == b"1"
+        assert r.hget("a", "2") == b"2"
+        assert r.hget("a", "3") == b"3"
+
+        r.hset("b", "foo", "bar", items=["1", 1, "2", 2])
         assert r.hget("b", "1") == b"1"
         assert r.hget("b", "2") == b"2"
         assert r.hget("b", "foo") == b"bar"

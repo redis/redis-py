@@ -1,6 +1,7 @@
 import pytest
 
 from redis.commands.graph import Edge, Node, Path
+from redis.commands.graph.execution_plan import Operation
 from redis.exceptions import ResponseError
 
 
@@ -260,21 +261,6 @@ def test_cached_execution(client):
 
 
 @pytest.mark.redismod
-def test_explain(client):
-    create_query = """CREATE (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
-    (:Rider {name:'Dani Pedrosa'})-[:rides]->(:Team {name:'Honda'}),
-    (:Rider {name:'Andrea Dovizioso'})-[:rides]->(:Team {name:'Ducati'})"""
-    client.graph().query(create_query)
-
-    result = client.graph().explain(
-        "MATCH (r:Rider)-[:rides]->(t:Team) WHERE t.name = $name RETURN r.name, t.name, $params",  # noqa
-        {"name": "Yehuda"},
-    )
-    expected = "Results\n    Project\n        Conditional Traverse | (t:Team)->(r:Rider)\n            Filter\n                Node By Label Scan | (t:Team)"  # noqa
-    assert result == expected
-
-
-@pytest.mark.redismod
 def test_slowlog(client):
     create_query = """CREATE (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
     (:Rider {name:'Dani Pedrosa'})-[:rides]->(:Team {name:'Honda'}),
@@ -356,6 +342,7 @@ def test_config(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.onlynoncluster
 def test_list_keys(client):
     result = client.graph().list_keys()
     assert result == []
@@ -440,13 +427,13 @@ def test_cache_sync(client):
 
     assert len(A._labels) == 2
     assert len(A._properties) == 2
-    assert len(A._relationshipTypes) == 2
+    assert len(A._relationship_types) == 2
     assert A._labels[0] == "L"
     assert A._labels[1] == "K"
     assert A._properties[0] == "x"
     assert A._properties[1] == "q"
-    assert A._relationshipTypes[0] == "R"
-    assert A._relationshipTypes[1] == "S"
+    assert A._relationship_types[0] == "R"
+    assert A._relationship_types[1] == "S"
 
     # Have client B reconstruct the graph in a different order.
     B.delete()
@@ -468,10 +455,121 @@ def test_cache_sync(client):
 
     assert len(A._labels) == 2
     assert len(A._properties) == 2
-    assert len(A._relationshipTypes) == 2
+    assert len(A._relationship_types) == 2
     assert A._labels[0] == "K"
     assert A._labels[1] == "L"
     assert A._properties[0] == "q"
     assert A._properties[1] == "x"
-    assert A._relationshipTypes[0] == "S"
-    assert A._relationshipTypes[1] == "R"
+    assert A._relationship_types[0] == "S"
+    assert A._relationship_types[1] == "R"
+
+
+@pytest.mark.redismod
+def test_execution_plan(client):
+    redis_graph = client.graph("execution_plan")
+    create_query = """CREATE (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
+    (:Rider {name:'Dani Pedrosa'})-[:rides]->(:Team {name:'Honda'}),
+    (:Rider {name:'Andrea Dovizioso'})-[:rides]->(:Team {name:'Ducati'})"""
+    redis_graph.query(create_query)
+
+    result = redis_graph.execution_plan(
+        "MATCH (r:Rider)-[:rides]->(t:Team) WHERE t.name = $name RETURN r.name, t.name, $params",  # noqa
+        {"name": "Yehuda"},
+    )
+    expected = "Results\n    Project\n        Conditional Traverse | (t:Team)->(r:Rider)\n            Filter\n                Node By Label Scan | (t:Team)"  # noqa
+    assert result == expected
+
+    redis_graph.delete()
+
+
+@pytest.mark.redismod
+def test_explain(client):
+    redis_graph = client.graph("execution_plan")
+    # graph creation / population
+    create_query = """CREATE
+(:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
+(:Rider {name:'Dani Pedrosa'})-[:rides]->(:Team {name:'Honda'}),
+(:Rider {name:'Andrea Dovizioso'})-[:rides]->(:Team {name:'Ducati'})"""
+    redis_graph.query(create_query)
+
+    result = redis_graph.explain(
+        """MATCH (r:Rider)-[:rides]->(t:Team)
+WHERE t.name = $name
+RETURN r.name, t.name
+UNION
+MATCH (r:Rider)-[:rides]->(t:Team)
+WHERE t.name = $name
+RETURN r.name, t.name""",
+        {"name": "Yamaha"},
+    )
+    expected = """\
+Results
+Distinct
+    Join
+        Project
+            Conditional Traverse | (t:Team)->(r:Rider)
+                Filter
+                    Node By Label Scan | (t:Team)
+        Project
+            Conditional Traverse | (t:Team)->(r:Rider)
+                Filter
+                    Node By Label Scan | (t:Team)"""
+    assert str(result).replace(" ", "").replace("\n", "") == expected.replace(
+        " ", ""
+    ).replace("\n", "")
+
+    expected = Operation("Results").append_child(
+        Operation("Distinct").append_child(
+            Operation("Join")
+            .append_child(
+                Operation("Project").append_child(
+                    Operation(
+                        "Conditional Traverse", "(t:Team)->(r:Rider)"
+                    ).append_child(
+                        Operation("Filter").append_child(
+                            Operation("Node By Label Scan", "(t:Team)")
+                        )
+                    )
+                )
+            )
+            .append_child(
+                Operation("Project").append_child(
+                    Operation(
+                        "Conditional Traverse", "(t:Team)->(r:Rider)"
+                    ).append_child(
+                        Operation("Filter").append_child(
+                            Operation("Node By Label Scan", "(t:Team)")
+                        )
+                    )
+                )
+            )
+        )
+    )
+
+    assert result.structured_plan == expected
+
+    result = redis_graph.explain(
+        """MATCH (r:Rider), (t:Team)
+                                    RETURN r.name, t.name"""
+    )
+    expected = """\
+Results
+Project
+    Cartesian Product
+        Node By Label Scan | (r:Rider)
+        Node By Label Scan | (t:Team)"""
+    assert str(result).replace(" ", "").replace("\n", "") == expected.replace(
+        " ", ""
+    ).replace("\n", "")
+
+    expected = Operation("Results").append_child(
+        Operation("Project").append_child(
+            Operation("Cartesian Product")
+            .append_child(Operation("Node By Label Scan"))
+            .append_child(Operation("Node By Label Scan"))
+        )
+    )
+
+    assert result.structured_plan == expected
+
+    redis_graph.delete()

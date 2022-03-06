@@ -22,7 +22,7 @@ class Graph(GraphCommands):
         self.edges = []
         self._labels = []  # List of node labels.
         self._properties = []  # List of properties.
-        self._relationshipTypes = []  # List of relation types.
+        self._relationship_types = []  # List of relation types.
         self.version = 0  # Graph version
 
     @property
@@ -32,7 +32,7 @@ class Graph(GraphCommands):
     def _clear_schema(self):
         self._labels = []
         self._properties = []
-        self._relationshipTypes = []
+        self._relationship_types = []
 
     def _refresh_schema(self):
         self._clear_schema()
@@ -49,15 +49,15 @@ class Graph(GraphCommands):
             self._labels[i] = l[0]
 
     def _refresh_relations(self):
-        rels = self.relationshipTypes()
+        rels = self.relationship_types()
 
         # Unpack data.
-        self._relationshipTypes = [None] * len(rels)
+        self._relationship_types = [None] * len(rels)
         for i, r in enumerate(rels):
-            self._relationshipTypes[i] = r[0]
+            self._relationship_types[i] = r[0]
 
     def _refresh_attributes(self):
-        props = self.propertyKeys()
+        props = self.property_keys()
 
         # Unpack data.
         self._properties = [None] * len(props)
@@ -91,11 +91,11 @@ class Graph(GraphCommands):
             The index of the relation
         """
         try:
-            relationship_type = self._relationshipTypes[idx]
+            relationship_type = self._relationship_types[idx]
         except IndexError:
             # Refresh relationship types.
             self._refresh_relations()
-            relationship_type = self._relationshipTypes[idx]
+            relationship_type = self._relationship_types[idx]
         return relationship_type
 
     def get_property(self, idx):
@@ -155,8 +155,8 @@ class Graph(GraphCommands):
     def labels(self):
         return self.call_procedure("db.labels", read_only=True).result_set
 
-    def relationshipTypes(self):
+    def relationship_types(self):
         return self.call_procedure("db.relationshipTypes", read_only=True).result_set
 
-    def propertyKeys(self):
+    def property_keys(self):
         return self.call_procedure("db.propertyKeys", read_only=True).result_set

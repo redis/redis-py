@@ -8,10 +8,11 @@ setup(
     long_description_content_type="text/markdown",
     keywords=["Redis", "key-value store", "database"],
     license="MIT",
-    version="4.1.0",
+    version="4.2.0rc1",
     packages=find_packages(
         include=[
             "redis",
+            "redis.asyncio",
             "redis.commands",
             "redis.commands.bf",
             "redis.commands.json",
@@ -21,13 +22,21 @@ setup(
         ]
     ),
     url="https://github.com/redis/redis-py",
+    project_urls={
+        "Documentation": "https://redis.readthedocs.io/en/latest/",
+        "Changes": "https://github.com/redis/redis-py/releases",
+        "Code": "https://github.com/redis/redis-py",
+        "Issue tracker": "https://github.com/redis/redis-py/issues",
+    },
     author="Redis Inc.",
     author_email="oss@redis.com",
     python_requires=">=3.6",
     install_requires=[
         "deprecated>=1.2.3",
-        "packaging>=21.3",
+        "packaging>=20.4",
         'importlib-metadata >= 1.0; python_version < "3.8"',
+        "typing-extensions",
+        "async-timeout>=4.0.2",
     ],
     classifiers=[
         "Development Status :: 5 - Production/Stable",
@@ -48,6 +57,6 @@ setup(
     ],
     extras_require={
         "hiredis": ["hiredis>=1.0.0"],
-        "cryptography": ["cryptography>=36.0.1", "requests>=2.26.0"],
+        "ocsp": ["cryptography>=36.0.1", "pyopenssl==20.0.1", "requests>=2.26.0"],
     },
 )
