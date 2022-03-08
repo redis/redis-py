@@ -1501,9 +1501,15 @@ class BasicKeyCommands(CommandsProtocol):
             time = int(time.total_seconds())
         return self.execute_command("EXPIRE", name, time)
 
-    def expireat(self, name: KeyT, when: AbsExpiryT, option: str = None) -> ResponseT:
+    def expireat(self,
+        name: KeyT,
+        when: AbsExpiryT,
+        option: Union[
+            Literal["NX"], Literal["XX"], Literal["GT"], Literal["LT"]
+        ] = None,
+    ) -> ResponseT:
         """
-        Set an expire flag on key ``name`` with the given ``option``. ``when``
+        Set an expire flag on key ``name`` with given ``option``. ``when``
         can be represented as an integer indicating unix time or a Python
         datetime object.
 
@@ -1517,6 +1523,10 @@ class BasicKeyCommands(CommandsProtocol):
         """
         if isinstance(when, datetime.datetime):
             when = int(time.mktime(when.timetuple()))
+
+        options = ["NX", "XX", "GT", "LT"]
+        if option and option not in options:
+            raise DataError(f"OPTION must be one of {options}")
 
         exp_option = list()
         if option is not None:
