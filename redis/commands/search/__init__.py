@@ -1,3 +1,5 @@
+import redis
+
 from .commands import SearchCommands
 
 
@@ -17,7 +19,7 @@ class Search(SearchCommands):
 
             self.client = client
             self.execute_command = client.execute_command
-            self.pipeline = client.pipeline(transaction=False, shard_hint=None)
+            self._pipeline = client.pipeline(transaction=False, shard_hint=None)
             self.total = 0
             self.chunk_size = chunk_size
             self.current_chunk = 0
@@ -42,7 +44,7 @@ class Search(SearchCommands):
             """
             self.client._add_document(
                 doc_id,
-                conn=self.pipeline,
+                conn=self._pipeline,
                 nosave=nosave,
                 score=score,
                 payload=payload,
@@ -67,7 +69,7 @@ class Search(SearchCommands):
             """
             self.client._add_document_hash(
                 doc_id,
-                conn=self.pipeline,
+                conn=self._pipeline,
                 score=score,
                 replace=replace,
             )
@@ -80,7 +82,7 @@ class Search(SearchCommands):
             """
             Manually commit and flush the batch indexing query
             """
-            self.pipeline.execute()
+            self._pipeline.execute()
             self.current_chunk = 0
 
     def __init__(self, client, index_name="idx"):
@@ -90,7 +92,25 @@ class Search(SearchCommands):
 
         If conn is not None, we employ an already existing redis connection
         """
+        self.MODULE_CALLBACKS = {}
         self.client = client
         self.index_name = index_name
         self.execute_command = client.execute_command
-        self.pipeline = client.pipeline
+        self._pipeline = client.pipeline
+
+    def pipeline(self, transaction=True, shard_hint=None):
+        """Creates a pipeline for the SEARCH module, that can be used for executing
+        SEARCH commands, as well as classic core commands.
+        """
+        p = Pipeline(
+            connection_pool=self.client.connection_pool,
+            response_callbacks=self.MODULE_CALLBACKS,
+            transaction=transaction,
+            shard_hint=shard_hint,
+        )
+        p.index_name = self.index_name
+        return p
+
+
+class Pipeline(SearchCommands, redis.client.Pipeline):
+    """Pipeline for the module."""

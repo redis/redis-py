@@ -191,6 +191,7 @@ def test_cms(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.onlynoncluster
 def test_cms_merge(client):
     assert client.cms().initbydim("A", 1000, 5)
     assert client.cms().initbydim("B", 1000, 5)

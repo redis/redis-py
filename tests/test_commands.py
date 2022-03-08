@@ -65,16 +65,32 @@ class TestResponseCallbacks:
 
 
 class TestRedisCommands:
+    def test_auth(self, r, request):
+        username = "redis-py-auth"
+
+        def teardown():
+            r.acl_deluser(username)
+
+        request.addfinalizer(teardown)
+
+        assert r.acl_setuser(
+            username,
+            enabled=True,
+            passwords=["+strong_password"],
+            commands=["+acl"],
+        )
+
+        assert r.auth(username=username, password="strong_password") is True
+
+        with pytest.raises(exceptions.ResponseError):
+            r.auth(username=username, password="wrong_password")
+
     def test_command_on_invalid_key_type(self, r):
         r.lpush("a", "1")
         with pytest.raises(redis.ResponseError):
             r["a"]
 
     # SERVER INFORMATION
-    def test_auth_not_implemented(self, r):
-        with pytest.raises(NotImplementedError):
-            r.auth()
-
     @skip_if_server_version_lt("6.0.0")
     def test_acl_cat_no_category(self, r):
         categories = r.acl_cat()
@@ -1059,6 +1075,12 @@ class TestRedisCommands:
         assert r.expireat("a", expire_at_seconds) is True
         assert 0 < r.ttl("a") <= 61
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_expiretime(self, r):
+        r.set("a", "foo")
+        r.expireat("a", 33177117420)
+        assert r.expiretime("a") == 33177117420
+
     def test_get_and_set(self, r):
         # get and set can't be tested independently of each other
         assert r.get("a") is None
@@ -1258,6 +1280,12 @@ class TestRedisCommands:
         expire_at_seconds = int(time.mktime(expire_at.timetuple())) * 1000
         assert r.pexpireat("a", expire_at_seconds) is True
         assert 0 < r.pttl("a") <= 61000
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_pexpiretime(self, r):
+        r.set("a", "foo")
+        r.pexpireat("a", 33177117420000)
+        assert r.pexpiretime("a") == 33177117420000
 
     @skip_if_server_version_lt("2.6.0")
     def test_psetex(self, r):
@@ -2553,6 +2581,17 @@ class TestRedisCommands:
         assert r.hget("a", "3") == b"3"
 
         r.hset("b", "foo", "bar", mapping={"1": 1, "2": 2})
+        assert r.hget("b", "1") == b"1"
+        assert r.hget("b", "2") == b"2"
+        assert r.hget("b", "foo") == b"bar"
+
+    def test_hset_with_key_values_passed_as_list(self, r):
+        r.hset("a", items=["1", 1, "2", 2, "3", 3])
+        assert r.hget("a", "1") == b"1"
+        assert r.hget("a", "2") == b"2"
+        assert r.hget("a", "3") == b"3"
+
+        r.hset("b", "foo", "bar", items=["1", 1, "2", 2])
         assert r.hget("b", "1") == b"1"
         assert r.hget("b", "2") == b"2"
         assert r.hget("b", "foo") == b"bar"
@@ -4238,6 +4277,11 @@ class TestRedisCommands:
         res = r.command_count()
         assert isinstance(res, int)
         assert res >= 100
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_command_docs(self, r):
+        with pytest.raises(NotImplementedError):
+            r.command_docs("set")
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.13")
