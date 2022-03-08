@@ -853,7 +853,7 @@ class TestClusterRedisCommands:
         mock_node_resp(node, "OK")
         assert r.cluster_addslots(node, 1, 2, 3) is True
 
-    @skip_if_server_version_lt("7.0.0)
+    @skip_if_server_version_lt("7.0.0")
     def test_cluster_addslotsrange(self, r):
         node = r.get_random_node()
         mock_node_resp(node, "OK")
