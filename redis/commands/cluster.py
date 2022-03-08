@@ -4,11 +4,13 @@ from redis.exceptions import RedisClusterException, RedisError
 from .core import (
     ACLCommands,
     DataAccessCommands,
+    FunctionCommands,
     ManagementCommands,
     PubSubCommands,
     ScriptCommands,
 )
 from .helpers import list_or_args
+from .redismodules import RedisModuleCommands
 
 
 class ClusterMultiKeyCommands:
@@ -212,6 +214,8 @@ class RedisClusterCommands(
     PubSubCommands,
     ClusterDataAccessCommands,
     ScriptCommands,
+    FunctionCommands,
+    RedisModuleCommands,
 ):
     """
     A class for all Redis Cluster commands

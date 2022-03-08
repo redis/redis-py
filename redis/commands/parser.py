@@ -17,7 +17,14 @@ class CommandsParser:
         self.initialize(redis_connection)
 
     def initialize(self, r):
-        self.commands = r.execute_command("COMMAND")
+        commands = r.execute_command("COMMAND")
+        uppercase_commands = []
+        for cmd in commands:
+            if any(x.isupper() for x in cmd):
+                uppercase_commands.append(cmd)
+        for cmd in uppercase_commands:
+            commands[cmd.lower()] = commands.pop(cmd)
+        self.commands = commands
 
     # As soon as this PR is merged into Redis, we should reimplement
     # our logic to use COMMAND INFO changes to determine the key positions
