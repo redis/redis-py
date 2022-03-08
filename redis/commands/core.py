@@ -369,14 +369,16 @@ class ManagementCommands(CommandsProtocol):
     Redis management commands
     """
 
-    def auth(self):
+    def auth(self, password, username=None, **kwargs):
         """
-        This function throws a NotImplementedError since it is intentionally
-        not supported.
+        Authenticates the user. If you do not pass username, Redis will try to
+        authenticate for the "default" user. If you do pass username, it will
+        authenticate for the given user.
+        For more information check https://redis.io/commands/auth
         """
-        raise NotImplementedError(
-            "AUTH is intentionally not implemented in the client."
-        )
+        if username:
+            return self.execute_command("AUTH", username, password, **kwargs)
+        return self.execute_command
 
     def bgrewriteaof(self, **kwargs):
         """Tell the Redis server to rewrite the AOF file from data in memory.
@@ -740,6 +742,15 @@ class ManagementCommands(CommandsProtocol):
 
     def command_count(self, **kwargs) -> ResponseT:
         return self.execute_command("COMMAND COUNT", **kwargs)
+
+    def command_docs(self, *args):
+        """
+        This function throws a NotImplementedError since it is intentionally
+        not supported.
+        """
+        raise NotImplementedError(
+            "COMMAND DOCS is intentionally not implemented in the client."
+        )
 
     def config_get(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
         """
@@ -1512,6 +1523,15 @@ class BasicKeyCommands(CommandsProtocol):
             when = int(time.mktime(when.timetuple()))
         return self.execute_command("EXPIREAT", name, when)
 
+    def expiretime(self, key: str) -> int:
+        """
+        Returns the absolute Unix timestamp (since January 1, 1970) in seconds
+        at which the given key will expire.
+
+        For more information check https://redis.io/commands/expiretime
+        """
+        return self.execute_command("EXPIRETIME", key)
+
     def get(self, name: KeyT) -> ResponseT:
         """
         Return the value at key ``name``, or None if the key doesn't exist
@@ -1779,6 +1799,15 @@ class BasicKeyCommands(CommandsProtocol):
             ms = int(when.microsecond / 1000)
             when = int(time.mktime(when.timetuple())) * 1000 + ms
         return self.execute_command("PEXPIREAT", name, when)
+
+    def pexpiretime(self, key: str) -> int:
+        """
+        Returns the absolute Unix timestamp (since January 1, 1970) in milliseconds
+        at which the given key will expire.
+
+        For more information check https://redis.io/commands/pexpiretime
+        """
+        return self.execute_command("PEXPIRETIME", key)
 
     def psetex(
         self,
@@ -4587,18 +4616,21 @@ class HashCommands(CommandsProtocol):
         key: Optional[str] = None,
         value: Optional[str] = None,
         mapping: Optional[dict] = None,
+        items: Optional[list] = None,
     ) -> Union[Awaitable[int], int]:
         """
         Set ``key`` to ``value`` within hash ``name``,
         ``mapping`` accepts a dict of key/value pairs that will be
         added to hash ``name``.
+        ``items`` accepts a list of key/value pairs that will be
+        added to hash ``name``.
         Returns the number of fields that were added.
 
         For more information check https://redis.io/commands/hset
         """
-        if key is None and not mapping:
+        if key is None and not mapping and not items:
             raise DataError("'hset' with no key value pairs")
-        items = []
+        items = items or []
         if key is not None:
             items.extend((key, value))
         if mapping:
