@@ -853,11 +853,11 @@ class TestClusterRedisCommands:
         mock_node_resp(node, "OK")
         assert r.cluster_addslots(node, 1, 2, 3) is True
 
-    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
-    def test_cluster_addslotsrange(self, unstable_r):
-        node = unstable_r.get_random_node()
+    @skip_if_server_version_lt("7.0.0)
+    def test_cluster_addslotsrange(self, r):
+        node = r.get_random_node()
         mock_node_resp(node, "OK")
-        assert unstable_r.cluster_addslotsrange(node, 1, 5)
+        assert r.cluster_addslotsrange(node, 1, 5)
 
     def test_cluster_countkeysinslot(self, r):
         node = r.nodes_manager.get_node_from_slot(1)
