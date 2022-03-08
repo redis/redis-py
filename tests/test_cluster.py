@@ -1016,9 +1016,10 @@ class TestClusterRedisCommands:
             == "r4xfga22229cf3c652b6fca0d09ff69f3e0d4d"
         )
 
-    def test_cluster_links(self, unstable_r):
-        node = unstable_r.get_random_node()
-        res = unstable_r.cluster_links(node)
+    @skip_if_server_version_lt("7.0.0")
+    def test_cluster_links(self, r):
+        node = r.get_random_node()
+        res = r.cluster_links(node)
         links_to = sum(x.count("to") for x in res)
         links_for = sum(x.count("from") for x in res)
         assert links_to == links_for
