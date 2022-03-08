@@ -1512,7 +1512,8 @@ class BasicKeyCommands(CommandsProtocol):
             time = int(time.total_seconds())
         return self.execute_command("EXPIRE", name, time)
 
-    def expireat(self,
+    def expireat(
+        self,
         name: KeyT,
         when: AbsExpiryT,
         option: Union[

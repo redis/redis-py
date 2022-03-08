@@ -1075,11 +1075,12 @@ class TestRedisCommands:
         assert r.expireat("a", expire_at_seconds) is True
         assert 0 < r.ttl("a") <= 61
 
+    @skip_if_server_version_lt("7.0.0")
     def test_expiretime(self, r):
         r.set("a", "foo")
         r.expireat("a", 33177117420)
         assert r.expiretime("a") == 33177117420
-        
+
     @skip_if_server_version_lt("7.0.0")
     def test_expireat_option_nx(self, r):
         assert r.set("key", "val") is True
