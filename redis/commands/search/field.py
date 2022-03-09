@@ -103,6 +103,6 @@ class VectorField(Field):
         Field.__init__(
             self,
             name,
-            args=[Field.VECTOR, algorithm, len(attributes), attributes],
+            args=[Field.VECTOR, algorithm, len(attributes), *attributes],
             **kwargs,
         )
