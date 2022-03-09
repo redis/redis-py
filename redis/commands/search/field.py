@@ -98,7 +98,11 @@ class VectorField(Field):
     Allows vector similarity queries against the value in this attribute.
     See https://oss.redis.com/redisearch/Vectors/#vector_fields.
     """
+
     def __init__(self, name, algorithm, attributes, **kwargs):
         Field.__init__(
-            self, name, args=[Field.VECTOR, algorithm, len(attributes), attributes], **kwargs
+            self,
+            name,
+            args=[Field.VECTOR, algorithm, len(attributes), attributes],
+            **kwargs,
         )
