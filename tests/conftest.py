@@ -183,7 +183,7 @@ def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=60):
     while now < end_time:
         try:
             client = redis.RedisCluster.from_url(redis_url)
-            if len(client.get_nodes()) == cluster_nodes:
+            if len(client.get_nodes()) == int(cluster_nodes):
                 print("All nodes are available!")
                 break
         except RedisClusterException:

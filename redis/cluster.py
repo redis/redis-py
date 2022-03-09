@@ -850,6 +850,8 @@ class RedisCluster(RedisClusterCommands):
         elif command_flag == self.__class__.DEFAULT_NODE:
             # return the cluster's default node
             return [self.nodes_manager.default_node]
+        elif command[:2] == "FT":
+            return [self.nodes_manager.default_node]
         else:
             # get the node that holds the key's slot
             slot = self.determine_slot(*args)
@@ -1952,17 +1954,14 @@ class ClusterPipeline(RedisCluster):
             # refer to our internal node -> slot table that
             # tells us where a given
             # command should route to.
-            slot = self.determine_slot(*c.args)
-            node = self.nodes_manager.get_node_from_slot(
-                slot, self.read_from_replicas and c.args[0] in READ_COMMANDS
-            )
+            node = self._determine_nodes(*c.args)
 
             # now that we know the name of the node
             # ( it's just a string in the form of host:port )
             # we can build a list of commands for each node.
-            node_name = node.name
+            node_name = node[0].name
             if node_name not in nodes:
-                redis_node = self.get_redis_connection(node)
+                redis_node = self.get_redis_connection(node[0])
                 connection = get_connection(redis_node, c.args)
                 nodes[node_name] = NodeCommands(
                     redis_node.parse_response, redis_node.connection_pool, connection
