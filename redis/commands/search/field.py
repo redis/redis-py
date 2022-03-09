@@ -5,6 +5,7 @@ class Field:
     WEIGHT = "WEIGHT"
     GEO = "GEO"
     TAG = "TAG"
+    VECTOR = "VECTOR"
     SORTABLE = "SORTABLE"
     NOINDEX = "NOINDEX"
     AS = "AS"
@@ -89,4 +90,15 @@ class TagField(Field):
     def __init__(self, name, separator=",", **kwargs):
         Field.__init__(
             self, name, args=[Field.TAG, self.SEPARATOR, separator], **kwargs
+        )
+
+
+class VectorField(Field):
+    """
+    Allows vector similarity queries against the value in this attribute.
+    See https://oss.redis.com/redisearch/Vectors/#vector_fields.
+    """
+    def __init__(self, name, algorithm, attributes, **kwargs):
+        Field.__init__(
+            self, name, args=[Field.VECTOR, algorithm, len(attributes), attributes], **kwargs
         )
