@@ -1107,7 +1107,6 @@ def test_aggregations_filter(client):
 
 
 @pytest.mark.redismod
-@pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.0.0", "search")
 def test_index_definition(client):
     """
@@ -1255,7 +1254,6 @@ def test_create_client_definition_hash(client):
 
 
 @pytest.mark.redismod
-@pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.2.0", "search")
 def test_create_client_definition_json(client):
     """
@@ -1276,7 +1274,6 @@ def test_create_client_definition_json(client):
 
 
 @pytest.mark.redismod
-@pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.2.0", "search")
 def test_fields_as_name(client):
     # create index
@@ -1299,7 +1296,6 @@ def test_fields_as_name(client):
 
 
 @pytest.mark.redismod
-@pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.2.0", "search")
 def test_search_return_fields(client):
     res = client.json().set(
@@ -1378,7 +1374,6 @@ def test_syndump(client):
 
 
 @pytest.mark.redismod
-@pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.2.0", "search")
 def test_create_json_with_alias(client):
     """
@@ -1411,7 +1406,6 @@ def test_create_json_with_alias(client):
 
 
 @pytest.mark.redismod
-@pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.2.0", "search")
 def test_json_with_multipath(client):
     """
@@ -1439,7 +1433,6 @@ def test_json_with_multipath(client):
 
 
 @pytest.mark.redismod
-@pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.2.0", "search")
 def test_json_with_jsonpath(client):
     definition = IndexDefinition(index_type=IndexType.JSON)

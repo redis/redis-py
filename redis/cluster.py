@@ -318,6 +318,40 @@ class RedisCluster(RedisClusterCommands):
         ),
     )
 
+    SEARCH_COMMANDS = [
+        "FT.CREATE",
+        "FT.SEARCH",
+        "FT.AGGREGATE",
+        "FT.EXPLAIN",
+        "FT.EXPLAINCLI",
+        "FT,PROFILE",
+        "FT.ALTER",
+        "FT.DROPINDEX",
+        "FT.ALIASADD",
+        "FT.ALIASUPDATE",
+        "FT.ALIASDEL",
+        "FT.TAGVALS",
+        "FT.SUGADD",
+        "FT.SUGGET",
+        "FT.SUGDEL",
+        "FT.SUGLEN",
+        "FT.SYNUPDATE",
+        "FT.SYNDUMP",
+        "FT.SPELLCHECK",
+        "FT.DICTADD",
+        "FT.DICTDEL",
+        "FT.DICTDUMP",
+        "FT.INFO",
+        "FT._LIST",
+        "FT.CONFIG",
+        "FT.ADD",
+        "FT.DEL",
+        "FT.DROP",
+        "FT.GET",
+        "FT.MGET",
+        "FT.SYNADD",
+    ],
+
     CLUSTER_COMMANDS_RESPONSE_CALLBACKS = {
         "CLUSTER ADDSLOTS": bool,
         "CLUSTER COUNT-FAILURE-REPORTS": int,
@@ -850,7 +884,7 @@ class RedisCluster(RedisClusterCommands):
         elif command_flag == self.__class__.DEFAULT_NODE:
             # return the cluster's default node
             return [self.nodes_manager.default_node]
-        elif command[:2] == "FT":
+        elif command in self.__class__.SEARCH_COMMANDS[0]:
             return [self.nodes_manager.default_node]
         else:
             # get the node that holds the key's slot
