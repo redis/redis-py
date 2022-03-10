@@ -470,7 +470,7 @@ class SearchCommands:
         An `AggregateResult` object is returned. You can access the rows from
         its `rows` property, which will always yield the rows of the result.
 
-        Fpr more information: https://oss.redis.com/redisearch/Commands/#ftaggregate
+        For more information: https://oss.redis.com/redisearch/Commands/#ftaggregate
         """  # noqa
         if isinstance(query, AggregateRequest):
             has_cursor = bool(query._cursor)
