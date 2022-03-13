@@ -1055,6 +1055,10 @@ class SSLConnection(Connection):
     @property
     def ca_certs(self):
         return self.ssl_context.ca_certs
+    
+    @property
+    def ca_data(self):
+        return self.ssl_context.ca_data
 
     @property
     def check_hostname(self):
@@ -1067,6 +1071,7 @@ class RedisSSLContext:
         "certfile",
         "cert_reqs",
         "ca_certs",
+        "ca_data",
         "context",
         "check_hostname",
     )
