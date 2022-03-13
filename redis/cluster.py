@@ -116,6 +116,7 @@ REDIS_ALLOWED_KEYS = (
     "socket_timeout",
     "ssl",
     "ssl_ca_certs",
+    "ssl_ca_data",
     "ssl_certfile",
     "ssl_cert_reqs",
     "ssl_keyfile",

@@ -53,7 +53,7 @@ class TestSSL:
             r.ping()
             assert "Connection closed by server" in str(e)
 
-    def test_validating_self_signed_certificate(self, request):
+    def test_validating_self_signed_file_certificate(self, request):
         ssl_url = request.config.option.redis_ssl_url
         p = urlparse(ssl_url)[1].split(":")
         r = redis.Redis(
@@ -64,6 +64,22 @@ class TestSSL:
             ssl_keyfile=self.SERVER_KEY,
             ssl_cert_reqs="required",
             ssl_ca_certs=self.SERVER_CERT,
+        )
+        assert r.ping()
+
+    def test_validating_self_signed_string_certificate(self, request):
+        f = open(self.SERVER_CERT)
+        cert_data = f.read()
+        ssl_url = request.config.option.redis_ssl_url
+        p = urlparse(ssl_url)[1].split(":")
+        r = redis.Redis(
+            host=p[0],
+            port=p[1],
+            ssl=True,
+            ssl_certfile=self.SERVER_CERT,
+            ssl_keyfile=self.SERVER_KEY,
+            ssl_cert_reqs="required",
+            ssl_ca_data=cert_data,
         )
         assert r.ping()
 
