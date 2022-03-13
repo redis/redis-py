@@ -1055,7 +1055,7 @@ class SSLConnection(Connection):
     @property
     def ca_certs(self):
         return self.ssl_context.ca_certs
-    
+
     @property
     def ca_data(self):
         return self.ssl_context.ca_data
