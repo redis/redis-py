@@ -1,0 +1,6 @@
+sphinx<2
+docutils<0.18
+sphinx-rtd-theme
+nbsphinx
+sphinx_gallery
+ipython
