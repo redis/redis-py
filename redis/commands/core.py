@@ -1788,16 +1788,19 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("PEXPIRE", name, time)
 
     def pexpireat(
-            self,
-            name: KeyT,
-            when: AbsExpiryT,
-            option: str = None
-        ) -> ResponseT:
+        self,
+        name: KeyT,
+        when: AbsExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
         """
         Set an expire flag on key ``name`` with given ``option``. ``when``
         can be represented as an integer representing unix time in
         milliseconds (unix time * 1000) or a Python datetime object.
-        
+
         Valid options are:
             NX -> Set expiry only when the key has no expiry
             XX -> Set expiry only when the key has an existing expiry
@@ -1810,8 +1813,14 @@ class BasicKeyCommands(CommandsProtocol):
             ms = int(when.microsecond / 1000)
             when = int(time.mktime(when.timetuple())) * 1000 + ms
         exp_option = list()
-        if option is not None:
-            exp_option.append(option)
+        if nx:
+            exp_option.append("NX")
+        if xx:
+            exp_option.append("XX")
+        if gt:
+            exp_option.append("GT")
+        if lt:
+            exp_option.append("LT")
         return self.execute_command("PEXPIREAT", name, when, *exp_option)
 
     def pexpiretime(self, key: str) -> int:

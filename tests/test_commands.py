@@ -1258,16 +1258,16 @@ class TestRedisCommands:
     def test_pexpireat_option_nx(self, r):
         assert r.set("key", "val") is True
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
-        assert r.pexpireat("key", expire_at, "NX") is True
-        assert r.pexpireat("key", expire_at, "NX") is False
+        assert r.pexpireat("key", expire_at, nx=True) is True
+        assert r.pexpireat("key", expire_at, nx=True) is False
 
     @skip_if_server_version_lt("7.0.0")
     def test_pexpireat_option_xx(self, r):
         assert r.set("key", "val") is True
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
-        assert r.pexpireat("key", expire_at, "XX") is False
+        assert r.pexpireat("key", expire_at, xx=True) is False
         assert r.pexpireat("key", expire_at) is True
-        assert r.pexpireat("key", expire_at, "XX") is True
+        assert r.pexpireat("key", expire_at, xx=True) is True
 
     @skip_if_server_version_lt("7.0.0")
     def test_pexpireat_option_gt(self, r):
@@ -1275,9 +1275,9 @@ class TestRedisCommands:
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=2)
         assert r.pexpireat("key", expire_at) is True
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
-        assert r.pexpireat("key", expire_at, "GT") is False
+        assert r.pexpireat("key", expire_at, gt=True) is False
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=3)
-        assert r.pexpireat("key", expire_at, "GT") is True
+        assert r.pexpireat("key", expire_at, gt=True) is True
 
     @skip_if_server_version_lt("7.0.0")
     def test_pexpireat_option_lt(self, r):
@@ -1285,9 +1285,9 @@ class TestRedisCommands:
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=2)
         assert r.pexpireat("key", expire_at) is True
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=3)
-        assert r.pexpireat("key", expire_at, "LT") is False
+        assert r.pexpireat("key", expire_at, lt=True) is False
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
-        assert r.pexpireat("key", expire_at, "LT") is True
+        assert r.pexpireat("key", expire_at, lt=True) is True
 
     @skip_if_server_version_lt("7.0.0")
     def test_pexpiretime(self, r):
