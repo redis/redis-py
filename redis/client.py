@@ -1152,7 +1152,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         # In case a connection property does not yet exist
         # (due to a crash earlier in the Redis() constructor), return
         # immediately as there is nothing to clean-up.
-        if not hasattr(self, 'connection'):
+        if not hasattr(self, "connection"):
             return
 
         conn = self.connection
