@@ -1128,6 +1128,7 @@ class UnixDomainSocketConnection(Connection):  # lgtm [py/missing-call-to-init]
         health_check_interval: float = 0.0,
         client_name: str = None,
         retry: Optional[Retry] = None,
+        redis_connect_func=None,
     ):
         """
         Initialize a new UnixDomainSocketConnection.
@@ -1153,6 +1154,7 @@ class UnixDomainSocketConnection(Connection):  # lgtm [py/missing-call-to-init]
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
         self.next_health_check = -1
+        self.redis_connect_func = redis_connect_func
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
         self._reader = None
