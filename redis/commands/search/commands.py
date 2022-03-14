@@ -2,6 +2,8 @@ import itertools
 import time
 from typing import Dict, Union
 
+from redis.client import Pipeline
+
 from ..helpers import parse_to_dict
 from ._util import to_string
 from .aggregation import AggregateRequest, AggregateResult, Cursor
@@ -186,8 +188,6 @@ class SearchCommands:
         """
         Internal add_document used for both batch and single doc indexing
         """
-        if conn is None:
-            conn = self.client
 
         if partial or no_create:
             replace = True
@@ -208,7 +208,11 @@ class SearchCommands:
             args += ["LANGUAGE", language]
         args.append("FIELDS")
         args += list(itertools.chain(*fields.items()))
-        return conn.execute_command(*args)
+
+        if conn is not None:
+            return conn.execute_command(*args)
+
+        return self.execute_command(*args)
 
     def _add_document_hash(
         self,
@@ -221,8 +225,6 @@ class SearchCommands:
         """
         Internal add_document_hash used for both batch and single doc indexing
         """
-        if conn is None:
-            conn = self.client
 
         args = [ADDHASH_CMD, self.index_name, doc_id, score]
 
@@ -232,7 +234,10 @@ class SearchCommands:
         if language:
             args += ["LANGUAGE", language]
 
-        return conn.execute_command(*args)
+        if conn is not None:
+            return conn.execute_command(*args)
+
+        return self.execute_command(*args)
 
     def add_document(
         self,
@@ -331,12 +336,13 @@ class SearchCommands:
         For more information: https://oss.redis.com/redisearch/Commands/#ftdel
         """  # noqa
         args = [DEL_CMD, self.index_name, doc_id]
-        if conn is None:
-            conn = self.client
         if delete_actual_document:
             args.append("DD")
 
-        return conn.execute_command(*args)
+        if conn is not None:
+            return conn.execute_command(*args)
+
+        return self.execute_command(*args)
 
     def load_document(self, id):
         """
@@ -364,7 +370,7 @@ class SearchCommands:
         For more information https://oss.redis.com/redisearch/Commands/#ftget
         """
 
-        return self.client.execute_command(MGET_CMD, self.index_name, *ids)
+        return self.execute_command(MGET_CMD, self.index_name, *ids)
 
     def info(self):
         """
@@ -374,7 +380,7 @@ class SearchCommands:
         For more information https://oss.redis.com/redisearch/Commands/#ftinfo
         """
 
-        res = self.client.execute_command(INFO_CMD, self.index_name)
+        res = self.execute_command(INFO_CMD, self.index_name)
         it = map(to_string, res)
         return dict(zip(it, it))
 
@@ -423,6 +429,9 @@ class SearchCommands:
         st = time.time()
         res = self.execute_command(SEARCH_CMD, *args)
 
+        if isinstance(res, Pipeline):
+            return res
+
         return Result(
             res,
             not query._no_content,
@@ -461,7 +470,7 @@ class SearchCommands:
         An `AggregateResult` object is returned. You can access the rows from
         its `rows` property, which will always yield the rows of the result.
 
-        Fpr more information: https://oss.redis.com/redisearch/Commands/#ftaggregate
+        For more information: https://oss.redis.com/redisearch/Commands/#ftaggregate
         """  # noqa
         if isinstance(query, AggregateRequest):
             has_cursor = bool(query._cursor)

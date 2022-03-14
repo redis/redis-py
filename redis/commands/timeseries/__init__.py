@@ -1,4 +1,4 @@
-import redis.client
+import redis
 
 from ..helpers import parse_to_list
 from .commands import (
@@ -67,13 +67,30 @@ class TimeSeries(TimeSeriesCommands):
         pipeline.execute()
 
         """
-        p = Pipeline(
-            connection_pool=self.client.connection_pool,
-            response_callbacks=self.MODULE_CALLBACKS,
-            transaction=transaction,
-            shard_hint=shard_hint,
-        )
+        if isinstance(self.client, redis.RedisCluster):
+            p = ClusterPipeline(
+                nodes_manager=self.client.nodes_manager,
+                commands_parser=self.client.commands_parser,
+                startup_nodes=self.client.nodes_manager.startup_nodes,
+                result_callbacks=self.client.result_callbacks,
+                cluster_response_callbacks=self.client.cluster_response_callbacks,
+                cluster_error_retry_attempts=self.client.cluster_error_retry_attempts,
+                read_from_replicas=self.client.read_from_replicas,
+                reinitialize_steps=self.client.reinitialize_steps,
+            )
+
+        else:
+            p = Pipeline(
+                connection_pool=self.client.connection_pool,
+                response_callbacks=self.MODULE_CALLBACKS,
+                transaction=transaction,
+                shard_hint=shard_hint,
+            )
         return p
+
+
+class ClusterPipeline(TimeSeriesCommands, redis.cluster.ClusterPipeline):
+    """Cluster pipeline for the module."""
 
 
 class Pipeline(TimeSeriesCommands, redis.client.Pipeline):
