@@ -1149,7 +1149,8 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         self.close()
 
     def close(self):
-        # In case a connection property does not yet exist (due to a crash earlier in the Redis() constructor), return
+        # In case a connection property does not yet exist
+        # (due to a crash earlier in the Redis() constructor), return
         # immediately as there is nothing to clean-up.
         if not hasattr(self, 'connection'):
             return
