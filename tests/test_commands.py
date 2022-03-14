@@ -1296,6 +1296,33 @@ class TestRedisCommands:
         assert r.persist("a")
         assert r.pttl("a") == -1
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_pexpire_option_nx(self, r):
+        assert r.set("key", "val") is True
+        assert r.pexpire("key", 60000, nx=True) is True
+        assert r.pexpire("key", 60000, nx=True) is False
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_pexpire_option_xx(self, r):
+        assert r.set("key", "val") is True
+        assert r.pexpire("key", 60000, xx=True) is False
+        assert r.pexpire("key", 60000) is True
+        assert r.pexpire("key", 70000, xx=True) is True
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_pexpire_option_gt(self, r):
+        assert r.set("key", "val") is True
+        assert r.pexpire("key", 60000) is True
+        assert r.pexpire("key", 70000, gt=True) is True
+        assert r.pexpire("key", 50000, gt=True) is False
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_pexpire_option_lt(self, r):
+        assert r.set("key", "val") is True
+        assert r.pexpire("key", 60000) is True
+        assert r.pexpire("key", 50000, lt=True) is True
+        assert r.pexpire("key", 70000, lt=True) is False
+
     @skip_if_server_version_lt("2.6.0")
     def test_pexpireat_datetime(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
