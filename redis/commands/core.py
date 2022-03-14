@@ -1538,16 +1538,42 @@ class BasicKeyCommands(CommandsProtocol):
 
         return self.execute_command("EXPIRE", name, time, *exp_option)
 
-    def expireat(self, name: KeyT, when: AbsExpiryT) -> ResponseT:
+    def expireat(
+        self,
+        name: KeyT,
+        when: AbsExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
         """
-        Set an expire flag on key ``name``. ``when`` can be represented
-        as an integer indicating unix time or a Python datetime object.
+        Set an expire flag on key ``name`` with given ``option``. ``when``
+        can be represented as an integer indicating unix time or a Python
+        datetime object.
+
+        Valid options are:
+            -> NX -- Set expiry only when the key has no expiry
+            -> XX -- Set expiry only when the key has an existing expiry
+            -> GT -- Set expiry only when the new expiry is greater than current one
+            -> LT -- Set expiry only when the new expiry is less than current one
 
         For more information check https://redis.io/commands/expireat
         """
         if isinstance(when, datetime.datetime):
             when = int(time.mktime(when.timetuple()))
-        return self.execute_command("EXPIREAT", name, when)
+
+        exp_option = list()
+        if nx:
+            exp_option.append("NX")
+        if xx:
+            exp_option.append("XX")
+        if gt:
+            exp_option.append("GT")
+        if lt:
+            exp_option.append("LT")
+
+        return self.execute_command("EXPIREAT", name, when, *exp_option)
 
     def expiretime(self, key: str) -> int:
         """
