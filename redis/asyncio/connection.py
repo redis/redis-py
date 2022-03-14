@@ -1026,6 +1026,7 @@ class SSLConnection(Connection):
         ssl_certfile: Optional[str] = None,
         ssl_cert_reqs: str = "required",
         ssl_ca_certs: Optional[str] = None,
+        ssl_ca_data: Optional[str] = None,
         ssl_check_hostname: bool = False,
         **kwargs,
     ):
@@ -1035,6 +1036,7 @@ class SSLConnection(Connection):
             certfile=ssl_certfile,
             cert_reqs=ssl_cert_reqs,
             ca_certs=ssl_ca_certs,
+            ca_data=ssl_ca_data,
             check_hostname=ssl_check_hostname,
         )
 
@@ -1055,6 +1057,10 @@ class SSLConnection(Connection):
         return self.ssl_context.ca_certs
 
     @property
+    def ca_data(self):
+        return self.ssl_context.ca_data
+
+    @property
     def check_hostname(self):
         return self.ssl_context.check_hostname
 
@@ -1065,6 +1071,7 @@ class RedisSSLContext:
         "certfile",
         "cert_reqs",
         "ca_certs",
+        "ca_data",
         "context",
         "check_hostname",
     )
@@ -1075,6 +1082,7 @@ class RedisSSLContext:
         certfile: Optional[str] = None,
         cert_reqs: Optional[str] = None,
         ca_certs: Optional[str] = None,
+        ca_data: Optional[str] = None,
         check_hostname: bool = False,
     ):
         self.keyfile = keyfile
@@ -1093,6 +1101,7 @@ class RedisSSLContext:
                 )
             self.cert_reqs = CERT_REQS[cert_reqs]
         self.ca_certs = ca_certs
+        self.ca_data = ca_data
         self.check_hostname = check_hostname
         self.context: Optional[ssl.SSLContext] = None
 
@@ -1103,8 +1112,8 @@ class RedisSSLContext:
             context.verify_mode = self.cert_reqs
             if self.certfile and self.keyfile:
                 context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
-            if self.ca_certs:
-                context.load_verify_locations(self.ca_certs)
+            if self.ca_certs or self.ca_data:
+                context.load_verify_locations(cafile=self.ca_certs, cadata=self.ca_data)
             self.context = context
         return self.context
 
@@ -1128,6 +1137,7 @@ class UnixDomainSocketConnection(Connection):  # lgtm [py/missing-call-to-init]
         health_check_interval: float = 0.0,
         client_name: str = None,
         retry: Optional[Retry] = None,
+        redis_connect_func=None,
     ):
         """
         Initialize a new UnixDomainSocketConnection.
@@ -1153,6 +1163,7 @@ class UnixDomainSocketConnection(Connection):  # lgtm [py/missing-call-to-init]
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
         self.next_health_check = -1
+        self.redis_connect_func = redis_connect_func
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
         self._reader = None

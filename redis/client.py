@@ -710,9 +710,11 @@ class AbstractRedis:
         "CLIENT GETREDIR": int,
         "CLIENT TRACKINGINFO": lambda r: list(map(str_if_bytes, r)),
         "CLUSTER ADDSLOTS": bool_ok,
+        "CLUSTER ADDSLOTSRANGE": bool_ok,
         "CLUSTER COUNT-FAILURE-REPORTS": lambda x: int(x),
         "CLUSTER COUNTKEYSINSLOT": lambda x: int(x),
         "CLUSTER DELSLOTS": bool_ok,
+        "CLUSTER DELSLOTSRANGE": bool_ok,
         "CLUSTER FAILOVER": bool_ok,
         "CLUSTER FORGET": bool_ok,
         "CLUSTER INFO": parse_cluster_info,
@@ -883,6 +885,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         ssl_cert_reqs="required",
         ssl_ca_certs=None,
         ssl_ca_path=None,
+        ssl_ca_data=None,
         ssl_check_hostname=False,
         ssl_password=None,
         ssl_validate_ocsp=False,
@@ -964,6 +967,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_certfile": ssl_certfile,
                             "ssl_cert_reqs": ssl_cert_reqs,
                             "ssl_ca_certs": ssl_ca_certs,
+                            "ssl_ca_data": ssl_ca_data,
                             "ssl_check_hostname": ssl_check_hostname,
                             "ssl_password": ssl_password,
                             "ssl_ca_path": ssl_ca_path,
@@ -1149,6 +1153,12 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         self.close()
 
     def close(self):
+        # In case a connection property does not yet exist
+        # (due to a crash earlier in the Redis() constructor), return
+        # immediately as there is nothing to clean-up.
+        if not hasattr(self, "connection"):
+            return
+
         conn = self.connection
         if conn:
             self.connection = None
