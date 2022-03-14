@@ -1029,6 +1029,17 @@ class TestClusterRedisCommands:
             == "r4xfga22229cf3c652b6fca0d09ff69f3e0d4d"
         )
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_cluster_links(self, r):
+        node = r.get_random_node()
+        res = r.cluster_links(node)
+        links_to = sum(x.count("to") for x in res)
+        links_for = sum(x.count("from") for x in res)
+        assert links_to == links_for
+        print(res)
+        for i in range(0, len(res) - 1, 2):
+            assert res[i][3] == res[i + 1][3]
+
     def test_readonly(self):
         r = get_mocked_redis_client(host=default_host, port=default_port)
         mock_all_nodes_resp(r, "OK")

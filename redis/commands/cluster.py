@@ -427,6 +427,18 @@ class RedisClusterCommands(
         """
         return self.execute_command("CLUSTER SLOTS", target_nodes=target_nodes)
 
+    def cluster_links(self, target_node):
+        """
+        Each node in a Redis Cluster maintains a pair of long-lived TCP link with each
+        peer in the cluster: One for sending outbound messages towards the peer and one
+        for receiving inbound messages from the peer.
+
+        This command outputs information of all such peer links as an array.
+
+        For more information check https://redis.io/commands/cluster-links
+        """
+        return self.execute_command("CLUSTER LINKS", target_nodes=target_node)
+
     def readonly(self, target_nodes=None):
         """
         Enables read queries.
