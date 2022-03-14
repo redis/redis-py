@@ -1516,9 +1516,10 @@ class BasicKeyCommands(CommandsProtocol):
         self,
         name: KeyT,
         when: AbsExpiryT,
-        option: Union[
-            Literal["NX"], Literal["XX"], Literal["GT"], Literal["LT"]
-        ] = None,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
     ) -> ResponseT:
         """
         Set an expire flag on key ``name`` with given ``option``. ``when``
@@ -1536,13 +1537,15 @@ class BasicKeyCommands(CommandsProtocol):
         if isinstance(when, datetime.datetime):
             when = int(time.mktime(when.timetuple()))
 
-        options = ["NX", "XX", "GT", "LT"]
-        if option and option not in options:
-            raise DataError(f"OPTION must be one of {options}")
-
         exp_option = list()
-        if option is not None:
-            exp_option.append(option)
+        if nx:
+            exp_option.append("NX")
+        if xx:
+            exp_option.append("XX")
+        if gt:
+            exp_option.append("GT")
+        if lt:
+            exp_option.append("LT")
 
         return self.execute_command("EXPIREAT", name, when, *exp_option)
 
