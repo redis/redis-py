@@ -248,6 +248,22 @@ class RedisClusterCommands(
             "CLUSTER ADDSLOTS", *slots, target_nodes=target_node
         )
 
+    def cluster_addslotsrange(self, target_node, *slots):
+        """
+        Similar to the CLUSTER ADDSLOTS command.
+        The difference between the two commands is that ADDSLOTS takes a list of slots
+        to assign to the node, while ADDSLOTSRANGE takes a list of slot ranges
+        (specified by start and end slots) to assign to the node.
+
+        :target_node: 'ClusterNode'
+            The node to execute the command on
+
+        For more information check https://redis.io/commands/cluster-addslotsrange
+        """
+        return self.execute_command(
+            "CLUSTER ADDSLOTSRANGE", *slots, target_nodes=target_node
+        )
+
     def cluster_countkeysinslot(self, slot_id):
         """
         Return the number of local keys in the specified hash slot

@@ -320,6 +320,7 @@ class RedisCluster(RedisClusterCommands):
 
     CLUSTER_COMMANDS_RESPONSE_CALLBACKS = {
         "CLUSTER ADDSLOTS": bool,
+        "CLUSTER ADDSLOTSRANGE": bool,
         "CLUSTER COUNT-FAILURE-REPORTS": int,
         "CLUSTER COUNTKEYSINSLOT": int,
         "CLUSTER DELSLOTS": bool,

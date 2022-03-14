@@ -710,6 +710,7 @@ class AbstractRedis:
         "CLIENT GETREDIR": int,
         "CLIENT TRACKINGINFO": lambda r: list(map(str_if_bytes, r)),
         "CLUSTER ADDSLOTS": bool_ok,
+        "CLUSTER ADDSLOTSRANGE": bool_ok,
         "CLUSTER COUNT-FAILURE-REPORTS": lambda x: int(x),
         "CLUSTER COUNTKEYSINSLOT": lambda x: int(x),
         "CLUSTER DELSLOTS": bool_ok,
