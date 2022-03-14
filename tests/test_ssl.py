@@ -53,7 +53,7 @@ class TestSSL:
             r.ping()
             assert "Connection closed by server" in str(e)
 
-    def test_validating_self_signed_file_certificate(self, request):
+    def test_validating_self_signed_certificate(self, request):
         ssl_url = request.config.option.redis_ssl_url
         p = urlparse(ssl_url)[1].split(":")
         r = redis.Redis(
