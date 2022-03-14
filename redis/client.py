@@ -714,6 +714,7 @@ class AbstractRedis:
         "CLUSTER COUNT-FAILURE-REPORTS": lambda x: int(x),
         "CLUSTER COUNTKEYSINSLOT": lambda x: int(x),
         "CLUSTER DELSLOTS": bool_ok,
+        "CLUSTER DELSLOTSRANGE": bool_ok,
         "CLUSTER FAILOVER": bool_ok,
         "CLUSTER FORGET": bool_ok,
         "CLUSTER INFO": parse_cluster_info,

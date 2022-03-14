@@ -891,6 +891,13 @@ class TestClusterRedisCommands:
         assert node0.redis_connection.connection.read_response.called
         assert node1.redis_connection.connection.read_response.called
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_cluster_delslotsrange(self, r):
+        node = r.get_random_node()
+        mock_node_resp(node, "OK")
+        r.cluster_addslots(node, 1, 2, 3, 4, 5)
+        assert r.cluster_delslotsrange(1, 5)
+
     def test_cluster_failover(self, r):
         node = r.get_random_node()
         mock_node_resp(node, "OK")

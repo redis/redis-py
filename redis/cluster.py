@@ -311,6 +311,7 @@ class RedisCluster(RedisClusterCommands):
             [
                 "CLUSTER COUNTKEYSINSLOT",
                 "CLUSTER DELSLOTS",
+                "CLUSTER DELSLOTSRANGE",
                 "CLUSTER GETKEYSINSLOT",
                 "CLUSTER SETSLOT",
             ],
@@ -324,6 +325,7 @@ class RedisCluster(RedisClusterCommands):
         "CLUSTER COUNT-FAILURE-REPORTS": int,
         "CLUSTER COUNTKEYSINSLOT": int,
         "CLUSTER DELSLOTS": bool,
+        "CLUSTER DELSLOTSRANGE": bool,
         "CLUSTER FAILOVER": bool,
         "CLUSTER FORGET": bool,
         "CLUSTER GETKEYSINSLOT": list,
