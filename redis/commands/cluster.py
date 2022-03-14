@@ -248,6 +248,22 @@ class RedisClusterCommands(
             "CLUSTER ADDSLOTS", *slots, target_nodes=target_node
         )
 
+    def cluster_addslotsrange(self, target_node, *slots):
+        """
+        Similar to the CLUSTER ADDSLOTS command.
+        The difference between the two commands is that ADDSLOTS takes a list of slots
+        to assign to the node, while ADDSLOTSRANGE takes a list of slot ranges
+        (specified by start and end slots) to assign to the node.
+
+        :target_node: 'ClusterNode'
+            The node to execute the command on
+
+        For more information check https://redis.io/commands/cluster-addslotsrange
+        """
+        return self.execute_command(
+            "CLUSTER ADDSLOTSRANGE", *slots, target_nodes=target_node
+        )
+
     def cluster_countkeysinslot(self, slot_id):
         """
         Return the number of local keys in the specified hash slot
@@ -270,6 +286,17 @@ class RedisClusterCommands(
         Returns a list of the results for each processed slot.
         """
         return [self.execute_command("CLUSTER DELSLOTS", slot) for slot in slots]
+
+    def cluster_delslotsrange(self, *slots):
+        """
+        Similar to the CLUSTER DELSLOTS command.
+        The difference is that CLUSTER DELSLOTS takes a list of hash slots to remove
+        from the node, while CLUSTER DELSLOTSRANGE takes a list of slot ranges to remove
+        from the node.
+
+        For more information check https://redis.io/commands/cluster-delslotsrange
+        """
+        return self.execute_command("CLUSTER DELSLOTSRANGE", *slots)
 
     def cluster_failover(self, target_node, option=None):
         """
@@ -399,6 +426,18 @@ class RedisClusterCommands(
         Get array of Cluster slot to node mappings
         """
         return self.execute_command("CLUSTER SLOTS", target_nodes=target_nodes)
+
+    def cluster_links(self, target_node):
+        """
+        Each node in a Redis Cluster maintains a pair of long-lived TCP link with each
+        peer in the cluster: One for sending outbound messages towards the peer and one
+        for receiving inbound messages from the peer.
+
+        This command outputs information of all such peer links as an array.
+
+        For more information check https://redis.io/commands/cluster-links
+        """
+        return self.execute_command("CLUSTER LINKS", target_nodes=target_node)
 
     def readonly(self, target_nodes=None):
         """
