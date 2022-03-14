@@ -1779,9 +1779,10 @@ class BasicKeyCommands(CommandsProtocol):
         self,
         name: KeyT,
         time: ExpiryT,
-        option: Union[
-            Literal["NX"], Literal["XX"], Literal["GT"], Literal["LT"]
-        ] = None,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
     ) -> ResponseT:
         """
         Set an expire flag on key ``name`` for ``time`` milliseconds
@@ -1799,13 +1800,15 @@ class BasicKeyCommands(CommandsProtocol):
         if isinstance(time, datetime.timedelta):
             time = int(time.total_seconds() * 1000)
 
-        options = ["NX", "XX", "GT", "LT"]
-        if option and option not in options:
-            raise DataError(f"OPTION must be one of {options}")
-
         exp_option = list()
-        if option is not None:
-            exp_option.append(option)
+        if nx:
+            exp_option.append("NX")
+        if xx:
+            exp_option.append("XX")
+        if gt:
+            exp_option.append("GT")
+        if lt:
+            exp_option.append("LT")
         return self.execute_command("PEXPIRE", name, time, *exp_option)
 
     def pexpireat(self, name: KeyT, when: AbsExpiryT) -> ResponseT:
