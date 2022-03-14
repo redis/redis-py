@@ -853,6 +853,12 @@ class TestClusterRedisCommands:
         mock_node_resp(node, "OK")
         assert r.cluster_addslots(node, 1, 2, 3) is True
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_cluster_addslotsrange(self, r):
+        node = r.get_random_node()
+        mock_node_resp(node, "OK")
+        assert r.cluster_addslotsrange(node, 1, 5)
+
     def test_cluster_countkeysinslot(self, r):
         node = r.nodes_manager.get_node_from_slot(1)
         mock_node_resp(node, 2)
@@ -884,6 +890,13 @@ class TestClusterRedisCommands:
         assert r.cluster_delslots(0, 8192) == [True, True]
         assert node0.redis_connection.connection.read_response.called
         assert node1.redis_connection.connection.read_response.called
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_cluster_delslotsrange(self, r):
+        node = r.get_random_node()
+        mock_node_resp(node, "OK")
+        r.cluster_addslots(node, 1, 2, 3, 4, 5)
+        assert r.cluster_delslotsrange(1, 5)
 
     def test_cluster_failover(self, r):
         node = r.get_random_node()
@@ -1015,6 +1028,17 @@ class TestClusterRedisCommands:
             replicas.get("127.0.0.1:6378").get("node_id")
             == "r4xfga22229cf3c652b6fca0d09ff69f3e0d4d"
         )
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_cluster_links(self, r):
+        node = r.get_random_node()
+        res = r.cluster_links(node)
+        links_to = sum(x.count("to") for x in res)
+        links_for = sum(x.count("from") for x in res)
+        assert links_to == links_for
+        print(res)
+        for i in range(0, len(res) - 1, 2):
+            assert res[i][3] == res[i + 1][3]
 
     def test_readonly(self):
         r = get_mocked_redis_client(host=default_host, port=default_port)

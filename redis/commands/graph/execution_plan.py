@@ -67,6 +67,9 @@ class ExecutionPlan:
         if not isinstance(plan, list):
             raise Exception("plan must be an array")
 
+        if isinstance(plan[0], bytes):
+            plan = [b.decode() for b in plan]
+
         self.plan = plan
         self.structured_plan = self._operation_tree()
 
