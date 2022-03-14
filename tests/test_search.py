@@ -1538,7 +1538,7 @@ def test_vector_field(modclient):
     modclient.ft().create_index(
         (
             VectorField(
-                "v", "HNSW", ["TYPE", "FLOAT32", "DIM", 2, "DISTANCE_METRIC", "L2"]
+                "v", "HNSW", {"TYPE": "FLOAT32", "DIM": 2, "DISTANCE_METRIC": "L2"}
             ),
         )
     )

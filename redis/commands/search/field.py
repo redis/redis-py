@@ -100,9 +100,15 @@ class VectorField(Field):
     """
 
     def __init__(self, name, algorithm, attributes, **kwargs):
+
+        attr_li = []
+
+        for key, value in attributes.items():
+            attr_li.append([key, value])
+
         Field.__init__(
             self,
             name,
-            args=[Field.VECTOR, algorithm, len(attributes), *attributes],
+            args=[Field.VECTOR, algorithm, len(attr_li), *attr_li],
             **kwargs,
         )
