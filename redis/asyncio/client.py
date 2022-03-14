@@ -163,6 +163,7 @@ class Redis(
         ssl_certfile: Optional[str] = None,
         ssl_cert_reqs: str = "required",
         ssl_ca_certs: Optional[str] = None,
+        ssl_ca_data: Optional[str] = None,
         ssl_check_hostname: bool = False,
         max_connections: Optional[int] = None,
         single_connection_client: bool = False,
@@ -228,6 +229,7 @@ class Redis(
                             "ssl_certfile": ssl_certfile,
                             "ssl_cert_reqs": ssl_cert_reqs,
                             "ssl_ca_certs": ssl_ca_certs,
+                            "ssl_ca_data": ssl_ca_data,
                             "ssl_check_hostname": ssl_check_hostname,
                         }
                     )

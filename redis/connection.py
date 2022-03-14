@@ -923,6 +923,7 @@ class SSLConnection(Connection):
         ssl_certfile=None,
         ssl_cert_reqs="required",
         ssl_ca_certs=None,
+        ssl_ca_data=None,
         ssl_check_hostname=False,
         ssl_ca_path=None,
         ssl_password=None,
@@ -939,6 +940,7 @@ class SSLConnection(Connection):
             ssl_certfile: Path to an ssl certificate. Defaults to None.
             ssl_cert_reqs: The string value for the SSLContext.verify_mode (none, optional, required). Defaults to "required".
             ssl_ca_certs: The path to a file of concatenated CA certificates in PEM format. Defaults to None.
+            ssl_ca_data: Either an ASCII string of one or more PEM-encoded certificates or a bytes-like object of DER-encoded certificates.
             ssl_check_hostname: If set, match the hostname during the SSL handshake. Defaults to False.
             ssl_ca_path: The path to a directory containing several CA certificates in PEM format. Defaults to None.
             ssl_password: Password for unlocking an encrypted private key. Defaults to None.
@@ -973,6 +975,7 @@ class SSLConnection(Connection):
             ssl_cert_reqs = CERT_REQS[ssl_cert_reqs]
         self.cert_reqs = ssl_cert_reqs
         self.ca_certs = ssl_ca_certs
+        self.ca_data = ssl_ca_data
         self.ca_path = ssl_ca_path
         self.check_hostname = ssl_check_hostname
         self.certificate_password = ssl_password
@@ -993,8 +996,14 @@ class SSLConnection(Connection):
                 keyfile=self.keyfile,
                 password=self.certificate_password,
             )
-        if self.ca_certs is not None or self.ca_path is not None:
-            context.load_verify_locations(cafile=self.ca_certs, capath=self.ca_path)
+        if (
+            self.ca_certs is not None
+            or self.ca_path is not None
+            or self.ca_data is not None
+        ):
+            context.load_verify_locations(
+                cafile=self.ca_certs, capath=self.ca_path, cadata=self.ca_data
+            )
         sslsock = context.wrap_socket(sock, server_hostname=self.host)
         if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE is False:
             raise RedisError("cryptography is not installed.")
