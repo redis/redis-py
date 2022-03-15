@@ -1,3 +1,5 @@
+from typing import List
+
 from redis import DataError
 
 
@@ -16,7 +18,7 @@ class Field:
     def __init__(
         self,
         name: str,
-        args: list[str] = None,
+        args: List[str] = None,
         sortable: bool = False,
         no_index: bool = False,
         as_name: str = None,
@@ -145,7 +147,7 @@ class VectorField(Field):
         attr_li = []
 
         for key, value in attributes.items():
-            attr_li.append([key, value])
+            attr_li.extend([key, value])
 
         Field.__init__(
             self,
