@@ -138,7 +138,7 @@ class VectorField(Field):
                 "Cannot set 'sortable' or 'no_index' in Vector fields."
             )
 
-        if algorithm not in ["FLAT", "HNSW"]:
+        if algorithm.upper() not in ["FLAT", "HNSW"]:
             raise DataError(
                 "Realtime vector indexing supporting 2 Indexing Methods:"
                 "'FLAT' and 'HNSW'."

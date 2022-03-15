@@ -1552,11 +1552,23 @@ def test_vector_field(modclient):
 @pytest.mark.redismod
 def test_vector_field_error(modclient):
     modclient.flushdb()
+
+    # sortable tag
     with pytest.raises(Exception):
         modclient.ft().create_index(
             (
                 VectorField(
                     "v", "HNSW", {}, sortable=True
+                ),
+            )
+        )
+
+    # not supported algorithm
+    with pytest.raises(Exception):
+        modclient.ft().create_index(
+            (
+                VectorField(
+                    "v", "SORT", {}
                 ),
             )
         )
