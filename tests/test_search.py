@@ -1550,6 +1550,19 @@ def test_vector_field(modclient):
 
 
 @pytest.mark.redismod
+def test_vector_field_error(modclient):
+    modclient.flushdb()
+    with pytest.raises(Exception):
+        modclient.ft().create_index(
+            (
+                VectorField(
+                    "v", "HNSW", {}, sortable=True
+                ),
+            )
+        )
+
+
+@pytest.mark.redismod
 def test_text_params(modclient):
     modclient.flushdb()
     modclient.ft().create_index((TextField("name"),))
