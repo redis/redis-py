@@ -19,7 +19,7 @@ class Field:
         args: list[str] = None,
         sortable: bool = False,
         no_index: bool = False,
-        as_name: str = None
+        as_name: str = None,
     ):
         if args is None:
             args = []
@@ -62,7 +62,7 @@ class TextField(Field):
         weight: float = 1.0,
         no_stem: bool = False,
         phonetic_matcher: str = None,
-        **kwargs
+        **kwargs,
     ):
         Field.__init__(self, name, args=[Field.TEXT, Field.WEIGHT, weight], **kwargs)
 
@@ -130,13 +130,11 @@ class VectorField(Field):
         https://oss.redis.com/redisearch/master/Vectors/#specific_creation_attributes_per_algorithm
         for more information.
         """
-        sort = kwargs.get('sortable', False)
-        noindex = kwargs.get('no_index', False)
+        sort = kwargs.get("sortable", False)
+        noindex = kwargs.get("no_index", False)
 
         if sort or noindex:
-            raise DataError(
-                "Cannot set 'sortable' or 'no_index' in Vector fields."
-            )
+            raise DataError("Cannot set 'sortable' or 'no_index' in Vector fields.")
 
         if algorithm.upper() not in ["FLAT", "HNSW"]:
             raise DataError(
