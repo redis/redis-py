@@ -626,11 +626,11 @@ class TestRedisCommands:
         assert r.client_unpause() == b"OK"
 
     @pytest.mark.onlynoncluster
-    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
-    def test_client_no_evict(self, unstable_r):
-        assert unstable_r.client_no_evict("ON") == "OK"
+    @skip_if_server_version_lt("7.0.0")
+    def test_client_no_evict(self, r):
+        assert r.client_no_evict("ON") == "OK"
         with pytest.raises(TypeError):
-            unstable_r.client_no_evict()
+            r.client_no_evict()
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("3.2.0")
@@ -998,15 +998,15 @@ class TestRedisCommands:
         assert r.get("b") is None
 
     @pytest.mark.onlynoncluster
-    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
-    def test_lcs(self, unstable_r):
-        unstable_r.mset({"foo": "ohmytext", "bar": "mynewtext"})
-        assert unstable_r.lcs("foo", "bar") == "mytext"
-        assert unstable_r.lcs("foo", "bar", len=True) == 6
+    @skip_if_server_version_lt("7.0.0")
+    def test_lcs(self, r):
+        r.mset({"foo": "ohmytext", "bar": "mynewtext"})
+        assert r.lcs("foo", "bar") == "mytext"
+        assert r.lcs("foo", "bar", len=True) == 6
         result = ["matches", [[[4, 7], [5, 8]]], "len", 6]
-        assert unstable_r.lcs("foo", "bar", idx=True, minmatchlen=3) == result
+        assert r.lcs("foo", "bar", idx=True, minmatchlen=3) == result
         with pytest.raises(redis.ResponseError):
-            assert unstable_r.lcs("foo", "bar", len=True, idx=True)
+            assert r.lcs("foo", "bar", len=True, idx=True)
 
     @skip_if_server_version_lt("2.6.0")
     def test_dump_and_restore(self, r):
@@ -1547,27 +1547,27 @@ class TestRedisCommands:
         assert r.brpoplpush("a", "b") == b""
 
     @pytest.mark.onlynoncluster
-    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
-    def test_blmpop(self, unstable_r):
-        unstable_r.rpush("a", "1", "2", "3", "4", "5")
+    @skip_if_server_version_lt("7.0.0")
+    def test_blmpop(self, r):
+        r.rpush("a", "1", "2", "3", "4", "5")
         res = ["a", ["1", "2"]]
-        assert unstable_r.blmpop(1, "2", "b", "a", direction="LEFT", count=2) == res
+        assert r.blmpop(1, "2", "b", "a", direction="LEFT", count=2) == res
         with pytest.raises(TypeError):
-            unstable_r.blmpop(1, "2", "b", "a", count=2)
-        unstable_r.rpush("b", "6", "7", "8", "9")
-        assert unstable_r.blmpop(0, "2", "b", "a", direction="LEFT") == ["b", ["6"]]
-        assert unstable_r.blmpop(1, "2", "foo", "bar", direction="RIGHT") is None
+            r.blmpop(1, "2", "b", "a", count=2)
+        r.rpush("b", "6", "7", "8", "9")
+        assert r.blmpop(0, "2", "b", "a", direction="LEFT") == ["b", ["6"]]
+        assert r.blmpop(1, "2", "foo", "bar", direction="RIGHT") is None
 
     @pytest.mark.onlynoncluster
-    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
-    def test_lmpop(self, unstable_r):
-        unstable_r.rpush("foo", "1", "2", "3", "4", "5")
+    @skip_if_server_version_lt("7.0.0")
+    def test_lmpop(self, r):
+        r.rpush("foo", "1", "2", "3", "4", "5")
         result = ["foo", ["1", "2"]]
-        assert unstable_r.lmpop("2", "bar", "foo", direction="LEFT", count=2) == result
+        assert r.lmpop("2", "bar", "foo", direction="LEFT", count=2) == result
         with pytest.raises(redis.ResponseError):
-            unstable_r.lmpop("2", "bar", "foo", direction="up", count=2)
-        unstable_r.rpush("bar", "a", "b", "c", "d")
-        assert unstable_r.lmpop("2", "bar", "foo", direction="LEFT") == ["bar", ["a"]]
+            r.lmpop("2", "bar", "foo", direction="up", count=2)
+        r.rpush("bar", "a", "b", "c", "d")
+        assert r.lmpop("2", "bar", "foo", direction="LEFT") == ["bar", ["a"]]
 
     def test_lindex(self, r):
         r.rpush("a", "1", "2", "3")
@@ -1838,13 +1838,13 @@ class TestRedisCommands:
         assert r.sinter("a", "b") == {b"2", b"3"}
 
     @pytest.mark.onlynoncluster
-    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
-    def test_sintercard(self, unstable_r):
-        unstable_r.sadd("a", 1, 2, 3)
-        unstable_r.sadd("b", 1, 2, 3)
-        unstable_r.sadd("c", 1, 3, 4)
-        assert unstable_r.sintercard(3, ["a", "b", "c"]) == 2
-        assert unstable_r.sintercard(3, ["a", "b", "c"], limit=1) == 1
+    @skip_if_server_version_lt("7.0.0")
+    def test_sintercard(self, r):
+        r.sadd("a", 1, 2, 3)
+        r.sadd("b", 1, 2, 3)
+        r.sadd("c", 1, 3, 4)
+        assert r.sintercard(3, ["a", "b", "c"]) == 2
+        assert r.sintercard(3, ["a", "b", "c"], limit=1) == 1
 
     @pytest.mark.onlynoncluster
     def test_sinterstore(self, r):
@@ -2078,13 +2078,13 @@ class TestRedisCommands:
         ]
 
     @pytest.mark.onlynoncluster
-    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
-    def test_zintercard(self, unstable_r):
-        unstable_r.zadd("a", {"a1": 1, "a2": 2, "a3": 1})
-        unstable_r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
-        unstable_r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
-        assert unstable_r.zintercard(3, ["a", "b", "c"]) == 2
-        assert unstable_r.zintercard(3, ["a", "b", "c"], limit=1) == 1
+    @skip_if_server_version_lt("7.0.0")
+    def test_zintercard(self, r):
+        r.zadd("a", {"a1": 1, "a2": 2, "a3": 1})
+        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert r.zintercard(3, ["a", "b", "c"]) == 2
+        assert r.zintercard(3, ["a", "b", "c"], limit=1) == 1
 
     @pytest.mark.onlynoncluster
     def test_zinterstore_sum(self, r):
@@ -2173,28 +2173,28 @@ class TestRedisCommands:
         assert r.bzpopmin("c", timeout=1) == (b"c", b"c1", 100)
 
     @pytest.mark.onlynoncluster
-    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
-    def test_zmpop(self, unstable_r):
-        unstable_r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
+    @skip_if_server_version_lt("7.0.0")
+    def test_zmpop(self, r):
+        r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         res = ["a", [["a1", "1"], ["a2", "2"]]]
-        assert unstable_r.zmpop("2", ["b", "a"], min=True, count=2) == res
+        assert r.zmpop("2", ["b", "a"], min=True, count=2) == res
         with pytest.raises(redis.DataError):
-            unstable_r.zmpop("2", ["b", "a"], count=2)
-        unstable_r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
-        assert unstable_r.zmpop("2", ["b", "a"], max=True) == ["b", [["b1", "10"]]]
+            r.zmpop("2", ["b", "a"], count=2)
+        r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
+        assert r.zmpop("2", ["b", "a"], max=True) == ["b", [["b1", "10"]]]
 
     @pytest.mark.onlynoncluster
-    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
-    def test_bzmpop(self, unstable_r):
-        unstable_r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
+    @skip_if_server_version_lt("7.0.0")
+    def test_bzmpop(self, r):
+        r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         res = ["a", [["a1", "1"], ["a2", "2"]]]
-        assert unstable_r.bzmpop(1, "2", ["b", "a"], min=True, count=2) == res
+        assert r.bzmpop(1, "2", ["b", "a"], min=True, count=2) == res
         with pytest.raises(redis.DataError):
-            unstable_r.bzmpop(1, "2", ["b", "a"], count=2)
-        unstable_r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
+            r.bzmpop(1, "2", ["b", "a"], count=2)
+        r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
         res = ["b", [["b1", "10"]]]
-        assert unstable_r.bzmpop(0, "2", ["b", "a"], max=True) == res
-        assert unstable_r.bzmpop(1, "2", ["foo", "bar"], max=True) is None
+        assert r.bzmpop(0, "2", ["b", "a"], max=True) == res
+        assert r.bzmpop(1, "2", ["foo", "bar"], max=True) is None
 
     def test_zrange(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
@@ -4347,12 +4347,14 @@ class TestRedisCommands:
             assert r.replicaof("NO ONE")
         assert r.replicaof("NO", "ONE")
 
+    @pytest.mark.replica
     @skip_if_server_version_lt("2.8.0")
     def test_sync(self, r):
         r2 = redis.Redis(port=6380, decode_responses=False)
         res = r2.sync()
         assert b"REDIS" in res
 
+    @pytest.mark.replica
     @skip_if_server_version_lt("2.8.0")
     def test_psync(self, r):
         r2 = redis.Redis(port=6380, decode_responses=False)
