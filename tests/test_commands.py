@@ -1058,6 +1058,31 @@ class TestRedisCommands:
         assert r.persist("a")
         assert r.ttl("a") == -1
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_expire_option_nx(self, r):
+        r.set("key", "val")
+        assert r.expire("key", 100, nx=True) == 1
+        assert r.expire("key", 500, nx=True) == 0
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_expire_option_xx(self, r):
+        r.set("key", "val")
+        assert r.expire("key", 100, xx=True) == 0
+        assert r.expire("key", 100)
+        assert r.expire("key", 500, nx=True) == 1
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_expire_option_gt(self, r):
+        r.set("key", "val", 100)
+        assert r.expire("key", 50, gt=True) == 0
+        assert r.expire("key", 500, gt=True) == 1
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_expire_option_lt(self, r):
+        r.set("key", "val", 100)
+        assert r.expire("key", 50, lt=True) == 1
+        assert r.expire("key", 150, lt=True) == 0
+
     def test_expireat_datetime(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         r["a"] = "foo"
@@ -1080,6 +1105,43 @@ class TestRedisCommands:
         r.set("a", "foo")
         r.expireat("a", 33177117420)
         assert r.expiretime("a") == 33177117420
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_expireat_option_nx(self, r):
+        assert r.set("key", "val") is True
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
+        assert r.expireat("key", expire_at, nx=True) is True
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=2)
+        assert r.expireat("key", expire_at, nx=True) is False
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_expireat_option_xx(self, r):
+        assert r.set("key", "val") is True
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
+        assert r.expireat("key", expire_at, xx=True) is False
+        assert r.expireat("key", expire_at) is True
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=2)
+        assert r.expireat("key", expire_at, xx=True) is True
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_expireat_option_gt(self, r):
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=2)
+        assert r.set("key", "val") is True
+        assert r.expireat("key", expire_at) is True
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
+        assert r.expireat("key", expire_at, gt=True) is False
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=3)
+        assert r.expireat("key", expire_at, gt=True) is True
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_expireat_option_lt(self, r):
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=2)
+        assert r.set("key", "val") is True
+        assert r.expireat("key", expire_at) is True
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=3)
+        assert r.expireat("key", expire_at, lt=True) is False
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
+        assert r.expireat("key", expire_at, lt=True) is True
 
     def test_get_and_set(self, r):
         # get and set can't be tested independently of each other
@@ -1234,6 +1296,33 @@ class TestRedisCommands:
         assert r.persist("a")
         assert r.pttl("a") == -1
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_pexpire_option_nx(self, r):
+        assert r.set("key", "val") is True
+        assert r.pexpire("key", 60000, nx=True) is True
+        assert r.pexpire("key", 60000, nx=True) is False
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_pexpire_option_xx(self, r):
+        assert r.set("key", "val") is True
+        assert r.pexpire("key", 60000, xx=True) is False
+        assert r.pexpire("key", 60000) is True
+        assert r.pexpire("key", 70000, xx=True) is True
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_pexpire_option_gt(self, r):
+        assert r.set("key", "val") is True
+        assert r.pexpire("key", 60000) is True
+        assert r.pexpire("key", 70000, gt=True) is True
+        assert r.pexpire("key", 50000, gt=True) is False
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_pexpire_option_lt(self, r):
+        assert r.set("key", "val") is True
+        assert r.pexpire("key", 60000) is True
+        assert r.pexpire("key", 50000, lt=True) is True
+        assert r.pexpire("key", 70000, lt=True) is False
+
     @skip_if_server_version_lt("2.6.0")
     def test_pexpireat_datetime(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
@@ -1253,6 +1342,41 @@ class TestRedisCommands:
         expire_at_seconds = int(time.mktime(expire_at.timetuple())) * 1000
         assert r.pexpireat("a", expire_at_seconds) is True
         assert 0 < r.pttl("a") <= 61000
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_pexpireat_option_nx(self, r):
+        assert r.set("key", "val") is True
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
+        assert r.pexpireat("key", expire_at, nx=True) is True
+        assert r.pexpireat("key", expire_at, nx=True) is False
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_pexpireat_option_xx(self, r):
+        assert r.set("key", "val") is True
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
+        assert r.pexpireat("key", expire_at, xx=True) is False
+        assert r.pexpireat("key", expire_at) is True
+        assert r.pexpireat("key", expire_at, xx=True) is True
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_pexpireat_option_gt(self, r):
+        assert r.set("key", "val") is True
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=2)
+        assert r.pexpireat("key", expire_at) is True
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
+        assert r.pexpireat("key", expire_at, gt=True) is False
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=3)
+        assert r.pexpireat("key", expire_at, gt=True) is True
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_pexpireat_option_lt(self, r):
+        assert r.set("key", "val") is True
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=2)
+        assert r.pexpireat("key", expire_at) is True
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=3)
+        assert r.pexpireat("key", expire_at, lt=True) is False
+        expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
+        assert r.pexpireat("key", expire_at, lt=True) is True
 
     @skip_if_server_version_lt("7.0.0")
     def test_pexpiretime(self, r):
@@ -2787,6 +2911,16 @@ class TestRedisCommands:
         )
         assert num == 4
         assert r.lrange("sorted", 0, 10) == [b"vodka", b"milk", b"gin", b"apple juice"]
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_sort_ro(self, r):
+        r["score:1"] = 8
+        r["score:2"] = 3
+        r["score:3"] = 5
+        r.rpush("a", "3", "2", "1")
+        assert r.sort_ro("a", by="score:*") == [b"2", b"3", b"1"]
+        r.rpush("b", "2", "3", "1")
+        assert r.sort_ro("b", desc=True) == [b"3", b"2", b"1"]
 
     def test_sort_issue_924(self, r):
         # Tests for issue https://github.com/andymccurdy/redis-py/issues/924

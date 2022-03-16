@@ -1501,27 +1501,79 @@ class BasicKeyCommands(CommandsProtocol):
 
     __contains__ = exists
 
-    def expire(self, name: KeyT, time: ExpiryT) -> ResponseT:
+    def expire(
+        self,
+        name: KeyT,
+        time: ExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
         """
-        Set an expire flag on key ``name`` for ``time`` seconds. ``time``
-        can be represented by an integer or a Python timedelta object.
+        Set an expire flag on key ``name`` for ``time`` seconds with given
+        ``option``. ``time`` can be represented by an integer or a Python timedelta
+        object.
+
+        Valid options are:
+            NX -> Set expiry only when the key has no expiry
+            XX -> Set expiry only when the key has an existing expiry
+            GT -> Set expiry only when the new expiry is greater than current one
+            LT -> Set expiry only when the new expiry is less than current one
 
         For more information check https://redis.io/commands/expire
         """
         if isinstance(time, datetime.timedelta):
             time = int(time.total_seconds())
-        return self.execute_command("EXPIRE", name, time)
 
-    def expireat(self, name: KeyT, when: AbsExpiryT) -> ResponseT:
+        exp_option = list()
+        if nx:
+            exp_option.append("NX")
+        if xx:
+            exp_option.append("XX")
+        if gt:
+            exp_option.append("GT")
+        if lt:
+            exp_option.append("LT")
+
+        return self.execute_command("EXPIRE", name, time, *exp_option)
+
+    def expireat(
+        self,
+        name: KeyT,
+        when: AbsExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
         """
-        Set an expire flag on key ``name``. ``when`` can be represented
-        as an integer indicating unix time or a Python datetime object.
+        Set an expire flag on key ``name`` with given ``option``. ``when``
+        can be represented as an integer indicating unix time or a Python
+        datetime object.
+
+        Valid options are:
+            -> NX -- Set expiry only when the key has no expiry
+            -> XX -- Set expiry only when the key has an existing expiry
+            -> GT -- Set expiry only when the new expiry is greater than current one
+            -> LT -- Set expiry only when the new expiry is less than current one
 
         For more information check https://redis.io/commands/expireat
         """
         if isinstance(when, datetime.datetime):
             when = int(time.mktime(when.timetuple()))
-        return self.execute_command("EXPIREAT", name, when)
+
+        exp_option = list()
+        if nx:
+            exp_option.append("NX")
+        if xx:
+            exp_option.append("XX")
+        if gt:
+            exp_option.append("GT")
+        if lt:
+            exp_option.append("LT")
+
+        return self.execute_command("EXPIREAT", name, when, *exp_option)
 
     def expiretime(self, key: str) -> int:
         """
@@ -1775,30 +1827,77 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("PERSIST", name)
 
-    def pexpire(self, name: KeyT, time: ExpiryT) -> ResponseT:
+    def pexpire(
+        self,
+        name: KeyT,
+        time: ExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
         """
-        Set an expire flag on key ``name`` for ``time`` milliseconds.
-        ``time`` can be represented by an integer or a Python timedelta
-        object.
+        Set an expire flag on key ``name`` for ``time`` milliseconds
+        with given ``option``. ``time`` can be represented by an
+        integer or a Python timedelta object.
+
+        Valid options are:
+            NX -> Set expiry only when the key has no expiry
+            XX -> Set expiry only when the key has an existing expiry
+            GT -> Set expiry only when the new expiry is greater than current one
+            LT -> Set expiry only when the new expiry is less than current one
 
         For more information check https://redis.io/commands/pexpire
         """
         if isinstance(time, datetime.timedelta):
             time = int(time.total_seconds() * 1000)
-        return self.execute_command("PEXPIRE", name, time)
 
-    def pexpireat(self, name: KeyT, when: AbsExpiryT) -> ResponseT:
+        exp_option = list()
+        if nx:
+            exp_option.append("NX")
+        if xx:
+            exp_option.append("XX")
+        if gt:
+            exp_option.append("GT")
+        if lt:
+            exp_option.append("LT")
+        return self.execute_command("PEXPIRE", name, time, *exp_option)
+
+    def pexpireat(
+        self,
+        name: KeyT,
+        when: AbsExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
         """
-        Set an expire flag on key ``name``. ``when`` can be represented
-        as an integer representing unix time in milliseconds (unix time * 1000)
-        or a Python datetime object.
+        Set an expire flag on key ``name`` with given ``option``. ``when``
+        can be represented as an integer representing unix time in
+        milliseconds (unix time * 1000) or a Python datetime object.
+
+        Valid options are:
+            NX -> Set expiry only when the key has no expiry
+            XX -> Set expiry only when the key has an existing expiry
+            GT -> Set expiry only when the new expiry is greater than current one
+            LT -> Set expiry only when the new expiry is less than current one
 
         For more information check https://redis.io/commands/pexpireat
         """
         if isinstance(when, datetime.datetime):
             ms = int(when.microsecond / 1000)
             when = int(time.mktime(when.timetuple())) * 1000 + ms
-        return self.execute_command("PEXPIREAT", name, when)
+        exp_option = list()
+        if nx:
+            exp_option.append("NX")
+        if xx:
+            exp_option.append("XX")
+        if gt:
+            exp_option.append("GT")
+        if lt:
+            exp_option.append("LT")
+        return self.execute_command("PEXPIREAT", name, when, *exp_option)
 
     def pexpiretime(self, key: str) -> int:
         """
@@ -2624,6 +2723,39 @@ class ListCommands(CommandsProtocol):
 
         options = {"groups": len(get) if groups else None}
         return self.execute_command("SORT", *pieces, **options)
+
+    def sort_ro(
+        self,
+        key: str,
+        start: Optional[int] = None,
+        num: Optional[int] = None,
+        by: Optional[str] = None,
+        get: Optional[List[str]] = None,
+        desc: bool = False,
+        alpha: bool = False,
+    ) -> list:
+        """
+        Returns the elements contained in the list, set or sorted set at key.
+        (read-only variant of the SORT command)
+
+        ``start`` and ``num`` allow for paging through the sorted data
+
+        ``by`` allows using an external key to weight and sort the items.
+            Use an "*" to indicate where in the key the item value is located
+
+        ``get`` allows for returning items from external keys rather than the
+            sorted data itself.  Use an "*" to indicate where in the key
+            the item value is located
+
+        ``desc`` allows for reversing the sort
+
+        ``alpha`` allows for sorting lexicographically rather than numerically
+
+        For more information check https://redis.io/commands/sort_ro
+        """
+        return self.sort(
+            key, start=start, num=num, by=by, get=get, desc=desc, alpha=alpha
+        )
 
 
 AsyncListCommands = ListCommands

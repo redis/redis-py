@@ -3,7 +3,7 @@ import warnings
 
 class SentinelCommands:
     """
-    A class containing the commands specific to redis sentinal. This class is
+    A class containing the commands specific to redis sentinel. This class is
     to be used as a mixin.
     """
 
