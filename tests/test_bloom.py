@@ -35,6 +35,7 @@ def test_create(client):
     assert client.cms().initbyprob("cmsProb", 0.01, 0.01)
     assert client.topk().reserve("topk", 5, 100, 5, 0.9)
 
+
 @pytest.mark.redismod
 @pytest.mark.experimental
 def test_tdigest_create(client):
