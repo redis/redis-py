@@ -1810,13 +1810,23 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.8.0")
     def test_cluster_scan_iter(self, r):
-        r.set("a", 1)
-        r.set("b", 2)
-        r.set("c", 3)
-        keys = list(r.scan_iter(target_nodes="primaries"))
-        assert set(keys) == {b"a", b"b", b"c"}
-        keys = list(r.scan_iter(match="a", target_nodes="primaries"))
-        assert set(keys) == {b"a"}
+        keys_all = []
+        keys_1 = []
+        for i in range(100):
+            s = str(i)
+            r.set(s, 1)
+            keys_all.append(s.encode("utf-8"))
+            if s.startswith("1"):
+                keys_1.append(s.encode("utf-8"))
+        keys_all.sort()
+        keys_1.sort()
+
+        for target_nodes in ["primaries", "replicas"]:
+            keys = r.scan_iter(target_nodes=target_nodes)
+            assert sorted(keys) == keys_all
+
+            keys = r.scan_iter(match="1*", target_nodes=target_nodes)
+            assert sorted(keys) == keys_1
 
     def test_cluster_randomkey(self, r):
         node = r.get_node_from_key("{foo}")
