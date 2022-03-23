@@ -518,8 +518,6 @@ class RedisCluster(RedisClusterCommands):
              RedisClusterException:
                  - db (Redis do not support database SELECT in cluster mode)
         """
-        log.info("Creating a new instance of RedisCluster client")
-
         if startup_nodes is None:
             startup_nodes = []
 
@@ -1670,7 +1668,6 @@ class ClusterPubSub(PubSub):
         :type host: str
         :type port: int
         """
-        log.info("Creating new instance of ClusterPubSub")
         self.node = None
         self.set_pubsub_node(redis_cluster, node, host, port)
         connection_pool = (
@@ -1802,7 +1799,6 @@ class ClusterPipeline(RedisCluster):
         **kwargs,
     ):
         """ """
-        log.info("Creating new instance of ClusterPipeline")
         self.command_stack = []
         self.nodes_manager = nodes_manager
         self.commands_parser = commands_parser
