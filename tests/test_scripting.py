@@ -65,13 +65,13 @@ class TestScripting:
         # 2 * 3 == 6
         assert r.eval(multiply_script, 1, "a", 3) == 6
 
-    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    @skip_if_server_version_lt("7.0.0")
     @pytest.mark.onlynoncluster
-    def test_eval_ro(self, unstable_r):
-        unstable_r.set("a", "b")
-        assert unstable_r.eval_ro("return redis.call('GET', KEYS[1])", 1, "a") == "b"
+    def test_eval_ro(self, r):
+        r.set("a", "b")
+        assert r.eval_ro("return redis.call('GET', KEYS[1])", 1, "a") == "b"
         with pytest.raises(redis.ResponseError):
-            unstable_r.eval_ro("return redis.call('DEL', KEYS[1])", 1, "a")
+            r.eval_ro("return redis.call('DEL', KEYS[1])", 1, "a")
 
     def test_eval_msgpack(self, r):
         msgpack_message_dumped = b"\x81\xa4name\xa3Joe"
@@ -154,15 +154,15 @@ class TestScripting:
         # 2 * 3 == 6
         assert r.evalsha(sha, 1, "a", 3) == 6
 
-    # @skip_if_server_version_lt("7.0.0") turn on after redis 7 release
+    @skip_if_server_version_lt("7.0.0")
     @pytest.mark.onlynoncluster
-    def test_evalsha_ro(self, unstable_r):
-        unstable_r.set("a", "b")
-        get_sha = unstable_r.script_load("return redis.call('GET', KEYS[1])")
-        del_sha = unstable_r.script_load("return redis.call('DEL', KEYS[1])")
-        assert unstable_r.evalsha_ro(get_sha, 1, "a") == "b"
+    def test_evalsha_ro(self, r):
+        r.set("a", "b")
+        get_sha = r.script_load("return redis.call('GET', KEYS[1])")
+        del_sha = r.script_load("return redis.call('DEL', KEYS[1])")
+        assert r.evalsha_ro(get_sha, 1, "a") == "b"
         with pytest.raises(redis.ResponseError):
-            unstable_r.evalsha_ro(del_sha, 1, "a")
+            r.evalsha_ro(del_sha, 1, "a")
 
     def test_evalsha_script_not_loaded(self, r):
         r.set("a", 2)

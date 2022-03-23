@@ -12,7 +12,13 @@ import redis.commands.search.aggregation as aggregations
 import redis.commands.search.reducers as reducers
 from redis.commands.json.path import Path
 from redis.commands.search import Search
-from redis.commands.search.field import GeoField, NumericField, TagField, TextField
+from redis.commands.search.field import (
+    GeoField,
+    NumericField,
+    TagField,
+    TextField,
+    VectorField,
+)
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType
 from redis.commands.search.query import GeoFilter, NumericFilter, Query
 from redis.commands.search.result import Result
@@ -1520,6 +1526,40 @@ def test_profile_limited(client):
     )
     assert det["Iterators profile"]["Type"] == "INTERSECT"
     assert len(res.docs) == 3  # check also the search result
+
+
+@pytest.mark.redismod
+def test_vector_field(modclient):
+    modclient.flushdb()
+    modclient.ft().create_index(
+        (
+            VectorField(
+                "v", "HNSW", {"TYPE": "FLOAT32", "DIM": 2, "DISTANCE_METRIC": "L2"}
+            ),
+        )
+    )
+    modclient.hset("a", "v", "aaaaaaaa")
+    modclient.hset("b", "v", "aaaabaaa")
+    modclient.hset("c", "v", "aaaaabaa")
+
+    q = Query("*=>[KNN 2 @v $vec]").return_field("__v_score").sort_by("__v_score", True)
+    res = modclient.ft().search(q, query_params={"vec": "aaaaaaaa"})
+
+    assert "a" == res.docs[0].id
+    assert "0" == res.docs[0].__getattribute__("__v_score")
+
+
+@pytest.mark.redismod
+def test_vector_field_error(modclient):
+    modclient.flushdb()
+
+    # sortable tag
+    with pytest.raises(Exception):
+        modclient.ft().create_index((VectorField("v", "HNSW", {}, sortable=True),))
+
+    # not supported algorithm
+    with pytest.raises(Exception):
+        modclient.ft().create_index((VectorField("v", "SORT", {}),))
 
 
 @pytest.mark.redismod
