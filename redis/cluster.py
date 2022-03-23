@@ -7,7 +7,7 @@ import threading
 import time
 from collections import OrderedDict
 
-from redis.client import CaseInsensitiveDict, PubSub, Redis
+from redis.client import CaseInsensitiveDict, PubSub, Redis, parse_scan
 from redis.commands import CommandsParser, RedisClusterCommands
 from redis.connection import ConnectionPool, DefaultParser, Encoder, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
@@ -51,10 +51,14 @@ def get_connection(redis_node, *args, **options):
 
 
 def parse_scan_result(command, res, **options):
-    keys_list = []
-    for primary_res in res.values():
-        keys_list += primary_res[1]
-    return 0, keys_list
+    cursors = {}
+    ret = []
+    for node_name, response in res.items():
+        cursor, r = parse_scan(response, **options)
+        cursors[node_name] = cursor
+        ret += r
+
+    return cursors, ret
 
 
 def parse_pubsub_numsub(command, res, **options):
@@ -244,7 +248,6 @@ class RedisCluster(RedisClusterCommands):
                 "INFO",
                 "SHUTDOWN",
                 "KEYS",
-                "SCAN",
                 "DBSIZE",
                 "BGSAVE",
                 "SLOWLOG GET",
@@ -298,6 +301,7 @@ class RedisCluster(RedisClusterCommands):
                 "FUNCTION LIST",
                 "FUNCTION LOAD",
                 "FUNCTION RESTORE",
+                "SCAN",
                 "SCRIPT EXISTS",
                 "SCRIPT FLUSH",
                 "SCRIPT LOAD",

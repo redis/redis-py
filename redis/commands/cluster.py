@@ -1,5 +1,8 @@
+from typing import Iterator, Union
+
 from redis.crc import key_slot
 from redis.exceptions import RedisClusterException, RedisError
+from redis.typing import PatternT
 
 from .core import (
     ACLCommands,
@@ -205,6 +208,41 @@ class ClusterDataAccessCommands(DataAccessCommands):
             withmatchlen,
             **kwargs,
         )
+
+    def scan_iter(
+        self,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+        _type: Union[str, None] = None,
+        **kwargs,
+    ) -> Iterator:
+        # Do the first query with cursor=0 for all nodes
+        cursors, data = self.scan(match=match, count=count, _type=_type, **kwargs)
+        yield from data
+
+        cursors = {name: cursor for name, cursor in cursors.items() if cursor != 0}
+        if cursors:
+            # Get nodes by name
+            nodes = {name: self.get_node(node_name=name) for name in cursors.keys()}
+
+            # Iterate over each node till its cursor is 0
+            kwargs.pop("target_nodes", None)
+            while cursors:
+                for name, cursor in cursors.items():
+                    cur, data = self.scan(
+                        cursor=cursor,
+                        match=match,
+                        count=count,
+                        _type=_type,
+                        target_nodes=nodes[name],
+                        **kwargs,
+                    )
+                    yield from data
+                    cursors[name] = cur[name]
+
+                cursors = {
+                    name: cursor for name, cursor in cursors.items() if cursor != 0
+                }
 
 
 class RedisClusterCommands(

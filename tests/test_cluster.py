@@ -1773,29 +1773,60 @@ class TestClusterRedisCommands:
         r.set("a", 1)
         r.set("b", 2)
         r.set("c", 3)
-        cursor, keys = r.scan(target_nodes="primaries")
-        assert cursor == 0
-        assert set(keys) == {b"a", b"b", b"c"}
-        _, keys = r.scan(match="a", target_nodes="primaries")
-        assert set(keys) == {b"a"}
+
+        for target_nodes, nodes in zip(
+            ["primaries", "replicas"], [r.get_primaries(), r.get_replicas()]
+        ):
+            cursors, keys = r.scan(target_nodes=target_nodes)
+            assert sorted(keys) == [b"a", b"b", b"c"]
+            assert sorted(cursors.keys()) == sorted(node.name for node in nodes)
+            assert all(cursor == 0 for cursor in cursors.values())
+
+            cursors, keys = r.scan(match="a*", target_nodes=target_nodes)
+            assert sorted(keys) == [b"a"]
+            assert sorted(cursors.keys()) == sorted(node.name for node in nodes)
+            assert all(cursor == 0 for cursor in cursors.values())
 
     @skip_if_server_version_lt("6.0.0")
     def test_cluster_scan_type(self, r):
         r.sadd("a-set", 1)
+        r.sadd("b-set", 1)
+        r.sadd("c-set", 1)
         r.hset("a-hash", "foo", 2)
         r.lpush("a-list", "aux", 3)
-        _, keys = r.scan(match="a*", _type="SET", target_nodes="primaries")
-        assert set(keys) == {b"a-set"}
+
+        for target_nodes, nodes in zip(
+            ["primaries", "replicas"], [r.get_primaries(), r.get_replicas()]
+        ):
+            cursors, keys = r.scan(_type="SET", target_nodes=target_nodes)
+            assert sorted(keys) == [b"a-set", b"b-set", b"c-set"]
+            assert sorted(cursors.keys()) == sorted(node.name for node in nodes)
+            assert all(cursor == 0 for cursor in cursors.values())
+
+            cursors, keys = r.scan(_type="SET", match="a*", target_nodes=target_nodes)
+            assert sorted(keys) == [b"a-set"]
+            assert sorted(cursors.keys()) == sorted(node.name for node in nodes)
+            assert all(cursor == 0 for cursor in cursors.values())
 
     @skip_if_server_version_lt("2.8.0")
     def test_cluster_scan_iter(self, r):
-        r.set("a", 1)
-        r.set("b", 2)
-        r.set("c", 3)
-        keys = list(r.scan_iter(target_nodes="primaries"))
-        assert set(keys) == {b"a", b"b", b"c"}
-        keys = list(r.scan_iter(match="a", target_nodes="primaries"))
-        assert set(keys) == {b"a"}
+        keys_all = []
+        keys_1 = []
+        for i in range(100):
+            s = str(i)
+            r.set(s, 1)
+            keys_all.append(s.encode("utf-8"))
+            if s.startswith("1"):
+                keys_1.append(s.encode("utf-8"))
+        keys_all.sort()
+        keys_1.sort()
+
+        for target_nodes in ["primaries", "replicas"]:
+            keys = r.scan_iter(target_nodes=target_nodes)
+            assert sorted(keys) == keys_all
+
+            keys = r.scan_iter(match="1*", target_nodes=target_nodes)
+            assert sorted(keys) == keys_1
 
     def test_cluster_randomkey(self, r):
         node = r.get_node_from_key("{foo}")
