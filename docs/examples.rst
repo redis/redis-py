@@ -10,3 +10,4 @@ Examples
    examples/asyncio_examples
    examples/search_json_examples
    examples/set_and_get_examples
+   examples/search_vector_similarity_examples
