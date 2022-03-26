@@ -827,8 +827,9 @@ class Connection:
                             await self._writer.wait_closed()  # type: ignore[union-attr]
                 except OSError:
                     pass
-                self._reader = None
-                self._writer = None
+                finally:
+                    self._reader = None
+                    self._writer = None
         except asyncio.TimeoutError:
             raise TimeoutError(
                 f"Timed out closing connection after {self.socket_connect_timeout}"
