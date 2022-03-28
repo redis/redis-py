@@ -221,6 +221,22 @@ class ClusterDataAccessCommands(DataAccessCommands):
         **kwargs,
     ):
         """
+        Implements complex algorithms that operate on strings.
+        Right now the only algorithm implemented is the LCS algorithm
+        (longest common substring). However new algorithms could be
+        implemented in the future.
+
+        ``algo`` Right now must be LCS
+        ``value1`` and ``value2`` Can be two strings or two keys
+        ``specific_argument`` Specifying if the arguments to the algorithm
+        will be keys or strings. strings is the default.
+        ``len`` Returns just the len of the match.
+        ``idx`` Returns the match positions in each string.
+        ``minmatchlen`` Restrict the list of matches to the ones of a given
+        minimal length. Can be provided only when ``idx`` set to True.
+        ``withmatchlen`` Returns the matches with the len of the match.
+        Can be provided only when ``idx`` set to True.
+
         For more information check https://redis.io/commands/stralgo
         """
         target_nodes = kwargs.pop("target_nodes", None)
