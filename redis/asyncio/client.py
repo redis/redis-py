@@ -485,7 +485,7 @@ class Redis(
         """Parses a response from the Redis server"""
         try:
             if NEVER_DECODE in options:
-                response = await connection.read_response(disable_encoding=True)
+                response = await connection.read_response(disable_decoding=True)
             else:
                 response = await connection.read_response()
         except ResponseError:
