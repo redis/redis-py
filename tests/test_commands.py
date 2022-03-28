@@ -854,6 +854,15 @@ class TestRedisCommands:
         assert r.bitcount("a", -2, -1) == 2
         assert r.bitcount("a", 1, 1) == 1
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_bitcount_mode(self, r):
+        r.set("mykey", "foobar")
+        assert r.bitcount("mykey") == 26
+        assert r.bitcount("mykey", 1, 1, "byte") == 6
+        assert r.bitcount("mykey", 5, 30, "bit") == 17
+        with pytest.raises(redis.ResponseError):
+            assert r.bitcount("mykey", 5, 30, "but")
+
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_not_empty_string(self, r):
@@ -925,6 +934,15 @@ class TestRedisCommands:
             r.bitpos(key, 0, end=1) == 12
         with pytest.raises(exceptions.RedisError):
             r.bitpos(key, 7) == 12
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_bitpos_mode(self, r):
+        r.set("mykey", b"\x00\xff\xf0")
+        assert r.bitpos("mykey", 1, 0) == 8
+        assert r.bitpos("mykey", 1, 2, -1, "byte") == 16
+        assert r.bitpos("mykey", 0, 7, 15, "bit") == 7
+        with pytest.raises(redis.ResponseError):
+            r.bitpos("mykey", 1, 7, 15, "bite")
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")

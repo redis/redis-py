@@ -1363,6 +1363,7 @@ class BasicKeyCommands(CommandsProtocol):
         key: KeyT,
         start: Union[int, None] = None,
         end: Union[int, None] = None,
+        mode: Optional[str] = None,
     ) -> ResponseT:
         """
         Returns the count of set bits in the value of ``key``.  Optional
@@ -1376,6 +1377,8 @@ class BasicKeyCommands(CommandsProtocol):
             params.append(end)
         elif (start is not None and end is None) or (end is not None and start is None):
             raise DataError("Both start and end must be specified")
+        if mode is not None:
+            params.append(mode)
         return self.execute_command("BITCOUNT", *params)
 
     def bitfield(
@@ -1411,6 +1414,7 @@ class BasicKeyCommands(CommandsProtocol):
         bit: int,
         start: Union[int, None] = None,
         end: Union[int, None] = None,
+        mode: Optional[str] = None,
     ) -> ResponseT:
         """
         Return the position of the first bit set to 1 or 0 in a string.
@@ -1430,6 +1434,9 @@ class BasicKeyCommands(CommandsProtocol):
             params.append(end)
         elif start is None and end is not None:
             raise DataError("start argument is not set, " "when end is specified")
+        
+        if mode is not None:
+            params.append(mode)
         return self.execute_command("BITPOS", *params)
 
     def copy(
