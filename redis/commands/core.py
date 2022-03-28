@@ -1434,7 +1434,7 @@ class BasicKeyCommands(CommandsProtocol):
             params.append(end)
         elif start is None and end is not None:
             raise DataError("start argument is not set, " "when end is specified")
-        
+
         if mode is not None:
             params.append(mode)
         return self.execute_command("BITPOS", *params)
