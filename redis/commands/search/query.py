@@ -291,7 +291,7 @@ class Query:
         self._expander = expander
         return self
 
-    def dialect(self, dialect):
+    def dialect(self, dialect: int) -> "Query":
         """
         Add a dialect field to the query.
 
