@@ -462,11 +462,41 @@ def parse_cluster_info(response, **options):
     return dict(line.split(":") for line in response.splitlines() if line)
 
 
+def _parse_open_slots(open_slots):
+    """
+    Change the expression of the open slot to dictionary.
+    ref: https://redis.io/commands/cluster-nodes/#special-slot-entries
+    """
+
+    migrating = {}
+    importing = {}
+
+    for slot_exp in open_slots:
+        # examples
+        # migrating: [77->-e7d1eecce10fd6bb5eb35b9f99a514335d9ba9ca]
+        # importing: [93-<-292f8b365bb7edb5e285caf0b7e6ddc7265d2f4f] 
+        slot, direction, node_id = slot_exp[1:-1].split("-")
+
+        # migrating
+        if direction == ">":
+           migrating[slot] = node_id
+        # importing
+        elif direction == "<":
+           importing[slot] = node_id
+
+    return migrating, importing
+
+
 def _parse_node_line(line):
     line_items = line.split(" ")
     node_id, addr, flags, master_id, ping, pong, epoch, connected = line.split(" ")[:8]
     addr = addr.split("@")[0]
     slots = [sl.split("-") for sl in line_items[8:]]
+    slots = [sl.split("-") for sl in line_items[8:] if not sl.startswith("[")]
+
+    open_slots = [sl for sl in line_items[8:] if sl.startswith("[")]
+    migrating, importing = _parse_open_slots(open_slots)
+
     node_dict = {
         "node_id": node_id,
         "flags": flags,
@@ -475,6 +505,8 @@ def _parse_node_line(line):
         "last_pong_rcvd": pong,
         "epoch": epoch,
         "slots": slots,
+        "migrating": migrating,
+        "importing": importing,
         "connected": True if connected == "connected" else False,
     }
     return addr, node_dict
@@ -485,9 +517,8 @@ def parse_cluster_nodes(response, **options):
     @see: https://redis.io/commands/cluster-nodes  # string
     @see: https://redis.io/commands/cluster-replicas # list of string
     """
-    if isinstance(response, str):
-        response = response.splitlines()
-    return dict(_parse_node_line(str_if_bytes(node)) for node in response)
+    response = str_if_bytes(response)
+    return dict(_parse_node_line(node) for node in response.splitlines())
 
 
 def parse_geosearch_generic(response, **options):
