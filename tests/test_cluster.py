@@ -840,6 +840,11 @@ class TestClusterRedisCommands:
         channels = [(b"foo", 1), (b"bar", 2), (b"baz", 3)]
         assert r.pubsub_numsub("foo", "bar", "baz", target_nodes="all") == channels
 
+    def test_cluster_myid(self, r):
+        node = r.get_random_node()
+        myid = r.cluster_myid(node)
+        assert len(myid) == 40
+
     def test_cluster_slots(self, r):
         mock_all_nodes_resp(r, default_cluster_slots)
         cluster_slots = r.cluster_slots()
