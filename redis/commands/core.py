@@ -1682,7 +1682,7 @@ class BasicKeyCommands(CommandsProtocol):
 
     def getbit(self, name: KeyT, offset: int) -> ResponseT:
         """
-        Returns a boolean indicating the value of ``offset`` in ``name``
+        Returns an integer indicating the value of ``offset`` in ``name``
 
         For more information check https://redis.io/commands/getbit
         """
@@ -2124,7 +2124,7 @@ class BasicKeyCommands(CommandsProtocol):
 
     def setbit(self, name: KeyT, offset: int, value: int) -> ResponseT:
         """
-        Flag the ``offset`` in ``name`` as ``value``. Returns a boolean
+        Flag the ``offset`` in ``name`` as ``value``. Returns an integer
         indicating the previous value of ``offset``.
 
         For more information check https://redis.io/commands/setbit
