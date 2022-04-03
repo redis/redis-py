@@ -1641,3 +1641,48 @@ def test_search_commands_in_pipeline(client):
     assert "foo baz" == res[3][2]
     assert res[3][5] is None
     assert res[3][3] == res[3][6] == ["txt", "foo bar"]
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_ifmodversion_lt("2.4.3", "search")
+def test_dialect_config(modclient: redis.Redis):
+    assert modclient.ft().config_get("DEFAULT_DIALECT") == {"DEFAULT_DIALECT": "1"}
+    assert modclient.ft().config_set("DEFAULT_DIALECT", 2)
+    assert modclient.ft().config_get("DEFAULT_DIALECT") == {"DEFAULT_DIALECT": "2"}
+    with pytest.raises(redis.ResponseError):
+        modclient.ft().config_set("DEFAULT_DIALECT", 0)
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.4.3", "search")
+def test_dialect(modclient: redis.Redis):
+    modclient.ft().create_index(
+        (
+            TagField("title"),
+            TextField("t1"),
+            TextField("t2"),
+            NumericField("num"),
+            VectorField(
+                "v", "HNSW", {"TYPE": "FLOAT32", "DIM": 1, "DISTANCE_METRIC": "COSINE"}
+            ),
+        )
+    )
+    modclient.hset("h", "t1", "hello")
+    with pytest.raises(redis.ResponseError) as err:
+        modclient.ft().explain(Query("(*)").dialect(1))
+    assert "Syntax error" in str(err)
+    assert "WILDCARD" in modclient.ft().explain(Query("(*)").dialect(2))
+
+    with pytest.raises(redis.ResponseError) as err:
+        modclient.ft().explain(Query("$hello").dialect(1))
+    assert "Syntax error" in str(err)
+    q = Query("$hello").dialect(2)
+    expected = "UNION {\n  hello\n  +hello(expanded)\n}\n"
+    assert expected in modclient.ft().explain(q, query_params={"hello": "hello"})
+
+    expected = "NUMERIC {0.000000 <= @num <= 10.000000}\n"
+    assert expected in modclient.ft().explain(Query("@title:(@num:[0 10])").dialect(1))
+    with pytest.raises(redis.ResponseError) as err:
+        modclient.ft().explain(Query("@title:(@num:[0 10])").dialect(2))
+    assert "Syntax error" in str(err)

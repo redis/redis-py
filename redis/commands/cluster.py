@@ -275,6 +275,17 @@ class RedisClusterCommands(
         r.cluster_info(target_nodes=RedisCluster.ALL_NODES)
     """
 
+    def cluster_myid(self, target_node):
+        """
+        Returns the node’s id.
+
+        :target_node: 'ClusterNode'
+            The node to execute the command on
+
+        For more information check https://redis.io/commands/cluster-myid/
+        """
+        return self.execute_command("CLUSTER MYID", target_nodes=target_node)
+
     def cluster_addslots(self, target_node, *slots):
         """
         Assign new hash slots to receiving node. Sends to specified node.
