@@ -121,7 +121,7 @@ def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
     info = client.info()
     try:
-        client.dping()
+        client.execute_command("DPING")
         info["enterprise"] = True
     except redis.ResponseError:
         info["enterprise"] = False

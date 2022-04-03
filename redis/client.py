@@ -735,7 +735,6 @@ class AbstractRedis:
         "CONFIG RESETSTAT": bool_ok,
         "CONFIG SET": bool_ok,
         "DEBUG OBJECT": parse_debug_object,
-        "DPING": bool_ok,
         "FUNCTION DELETE": bool_ok,
         "FUNCTION FLUSH": bool_ok,
         "FUNCTION LOAD": bool_ok,
