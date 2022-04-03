@@ -3,7 +3,7 @@ import pytest
 import redis
 from redis import exceptions
 from redis.commands.core import Script
-from tests.conftest import skip_if_server_version_lt
+from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
 multiply_script = """
 local value = redis.call('GET', KEYS[1])
@@ -66,6 +66,7 @@ class TestScripting:
         assert r.eval(multiply_script, 1, "a", 3) == 6
 
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     @pytest.mark.onlynoncluster
     def test_eval_ro(self, r):
         r.set("a", "b")
@@ -155,6 +156,7 @@ class TestScripting:
         assert r.evalsha(sha, 1, "a", 3) == 6
 
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     @pytest.mark.onlynoncluster
     def test_evalsha_ro(self, r):
         r.set("a", "b")

@@ -1052,6 +1052,9 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("PING", **kwargs)
 
+    def dping(self) -> bool:
+        return self.execute_command("DPING")
+
     def quit(self, **kwargs) -> ResponseT:
         """
         Ask the server to close the connection.

@@ -24,7 +24,7 @@ from redis.commands.search.query import GeoFilter, NumericFilter, Query
 from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
 
-from .conftest import skip_ifmodversion_lt
+from .conftest import skip_if_redis_enterprise, skip_ifmodversion_lt
 
 WILL_PLAY_TEXT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "testdata", "will_play_text.csv.bz2")
@@ -389,6 +389,7 @@ def test_example(client):
 
 
 @pytest.mark.redismod
+@skip_if_redis_enterprise()
 def test_auto_complete(client):
     n = 0
     with open(TITLES_CSV) as f:
@@ -948,7 +949,8 @@ def test_aggregations_groupby(client):
 
     res = client.ft().aggregate(req).rows[0]
     assert res[1] == "redis"
-    assert res[3] == "7"  # (10+3+8)/3
+    index = res.index("__generated_aliasavgrandom_num")
+    assert res[index + 1] == "7"  # (10+3+8)/3
 
     req = aggregations.AggregateRequest("redis").group_by(
         "@parent",
@@ -1158,6 +1160,7 @@ def test_index_definition(client):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 def testExpire(client):
     client.ft().create_index((TextField("txt", sortable=True),), temporary=4)
     ttl = client.execute_command("ft.debug", "TTL", "idx")
@@ -1478,6 +1481,7 @@ def test_json_with_jsonpath(client):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 def test_profile(client):
     client.ft().create_index((TextField("t"),))
     client.ft().client.hset("1", "t", "hello")
@@ -1529,6 +1533,7 @@ def test_profile_limited(client):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("2.4.3", "search")
 def test_vector_field(modclient):
     modclient.flushdb()
     modclient.ft().create_index(
@@ -1550,6 +1555,7 @@ def test_vector_field(modclient):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("2.4.3", "search")
 def test_vector_field_error(modclient):
     modclient.flushdb()
 
@@ -1563,6 +1569,7 @@ def test_vector_field_error(modclient):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("2.4.3", "search")
 def test_text_params(modclient):
     modclient.flushdb()
     modclient.ft().create_index((TextField("name"),))
@@ -1580,6 +1587,7 @@ def test_text_params(modclient):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("2.4.3", "search")
 def test_numeric_params(modclient):
     modclient.flushdb()
     modclient.ft().create_index((NumericField("numval"),))
@@ -1598,6 +1606,7 @@ def test_numeric_params(modclient):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("2.4.3", "search")
 def test_geo_params(modclient):
 
     modclient.flushdb()
@@ -1616,6 +1625,7 @@ def test_geo_params(modclient):
 
 
 @pytest.mark.redismod
+@skip_if_redis_enterprise()
 def test_search_commands_in_pipeline(client):
     p = client.ft().pipeline()
     p.create_index((TextField("txt"),))

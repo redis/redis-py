@@ -65,6 +65,7 @@ class TestResponseCallbacks:
 
 
 class TestRedisCommands:
+    @skip_if_redis_enterprise()
     def test_auth(self, r, request):
         username = "redis-py-auth"
 
@@ -104,6 +105,7 @@ class TestRedisCommands:
         assert "get" in commands
 
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     def test_acl_dryrun(self, r):
         username = "redis-py-user"
         r.acl_setuser(
@@ -424,6 +426,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
     def test_client_trackinginfo(self, r):
         res = r.client_trackinginfo()
         assert len(res) > 2
@@ -431,6 +434,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
+    @skip_if_redis_enterprise()
     def test_client_tracking(self, r, r2):
 
         # simple case
@@ -613,6 +617,7 @@ class TestRedisCommands:
             r.client_pause(timeout="not an integer")
 
     @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
     def test_client_pause_all(self, r, r2):
         assert r.client_pause(1, all=False)
         assert r2.set("foo", "bar")
@@ -682,6 +687,7 @@ class TestRedisCommands:
         assert r.config_get()["timeout"] == "0"
 
     @skip_if_server_version_lt("6.0.0")
+    @skip_if_redis_enterprise()
     def test_failover(self, r):
         with pytest.raises(NotImplementedError):
             r.failover()
@@ -721,6 +727,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
     def test_reset(self, r):
         assert r.reset() == "RESET"
 
@@ -739,6 +746,7 @@ class TestRedisCommands:
         assert r.quit()
 
     @skip_if_server_version_lt("2.8.12")
+    @skip_if_redis_enterprise()
     @pytest.mark.onlynoncluster
     def test_role(self, r):
         assert r.role()[0] == b"master"
@@ -746,6 +754,7 @@ class TestRedisCommands:
         assert isinstance(r.role()[2], list)
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_select(self, r):
         assert r.select(5)
         assert r.select(2)
@@ -1544,6 +1553,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("6.0.0")
     @skip_if_server_version_gte("7.0.0")
+    @skip_if_redis_enterprise()
     def test_stralgo_lcs(self, r):
         key1 = "{foo}key1"
         key2 = "{foo}key2"
@@ -1577,6 +1587,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("6.0.0")
     @skip_if_server_version_gte("7.0.0")
+    @skip_if_redis_enterprise()
     def test_stralgo_negative(self, r):
         with pytest.raises(exceptions.DataError):
             r.stralgo("ISSUB", "value1", "value2")
@@ -2057,12 +2068,14 @@ class TestRedisCommands:
         assert r.smembers("c") == {b"1", b"2", b"3"}
 
     @skip_if_server_version_lt("1.0.0")
+    @skip_if_redis_enterprise()
     def test_debug_segfault(self, r):
         with pytest.raises(NotImplementedError):
             r.debug_segfault()
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("3.2.0")
+    @skip_if_redis_enterprise()
     def test_script_debug(self, r):
         with pytest.raises(NotImplementedError):
             r.script_debug()
@@ -2928,64 +2941,79 @@ class TestRedisCommands:
         r.execute_command("SORT", "issue#924")
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_cluster_addslots(self, mock_cluster_resp_ok):
         assert mock_cluster_resp_ok.cluster("ADDSLOTS", 1) is True
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_cluster_count_failure_reports(self, mock_cluster_resp_int):
         assert isinstance(
             mock_cluster_resp_int.cluster("COUNT-FAILURE-REPORTS", "node"), int
         )
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_cluster_countkeysinslot(self, mock_cluster_resp_int):
         assert isinstance(mock_cluster_resp_int.cluster("COUNTKEYSINSLOT", 2), int)
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_cluster_delslots(self, mock_cluster_resp_ok):
         assert mock_cluster_resp_ok.cluster("DELSLOTS", 1) is True
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_cluster_failover(self, mock_cluster_resp_ok):
         assert mock_cluster_resp_ok.cluster("FAILOVER", 1) is True
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_cluster_forget(self, mock_cluster_resp_ok):
         assert mock_cluster_resp_ok.cluster("FORGET", 1) is True
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_cluster_info(self, mock_cluster_resp_info):
         assert isinstance(mock_cluster_resp_info.cluster("info"), dict)
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_cluster_keyslot(self, mock_cluster_resp_int):
         assert isinstance(mock_cluster_resp_int.cluster("keyslot", "asdf"), int)
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_cluster_meet(self, mock_cluster_resp_ok):
         assert mock_cluster_resp_ok.cluster("meet", "ip", "port", 1) is True
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_cluster_nodes(self, mock_cluster_resp_nodes):
         assert isinstance(mock_cluster_resp_nodes.cluster("nodes"), dict)
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_cluster_replicate(self, mock_cluster_resp_ok):
         assert mock_cluster_resp_ok.cluster("replicate", "nodeid") is True
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_cluster_reset(self, mock_cluster_resp_ok):
         assert mock_cluster_resp_ok.cluster("reset", "hard") is True
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_cluster_saveconfig(self, mock_cluster_resp_ok):
         assert mock_cluster_resp_ok.cluster("saveconfig") is True
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_cluster_setslot(self, mock_cluster_resp_ok):
         assert mock_cluster_resp_ok.cluster("setslot", 1, "IMPORTING", "nodeid") is True
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_cluster_slaves(self, mock_cluster_resp_slaves):
         assert isinstance(mock_cluster_resp_slaves.cluster("slaves", "nodeid"), dict)
 
@@ -3003,6 +3031,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("3.0.0")
+    @skip_if_redis_enterprise()
     def test_readonly(self, mock_cluster_resp_ok):
         assert mock_cluster_resp_ok.readonly() is True
 
@@ -4341,6 +4370,7 @@ class TestRedisCommands:
             r.memory_doctor()
 
     @skip_if_server_version_lt("4.0.0")
+    @skip_if_redis_enterprise()
     def test_memory_malloc_stats(self, r):
         if skip_if_redis_enterprise().args[0] is True:
             with pytest.raises(redis.exceptions.ResponseError):
@@ -4350,6 +4380,7 @@ class TestRedisCommands:
         assert r.memory_malloc_stats()
 
     @skip_if_server_version_lt("4.0.0")
+    @skip_if_redis_enterprise()
     def test_memory_stats(self, r):
         # put a key into the current db to make sure that "db.<current-db>"
         # has data
@@ -4380,6 +4411,7 @@ class TestRedisCommands:
             assert isinstance(x, dict)
 
     @skip_if_server_version_lt("2.8.13")
+    @skip_if_redis_enterprise()
     def test_command_count(self, r):
         res = r.command_count()
         assert isinstance(res, int)
@@ -4392,6 +4424,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.13")
+    @skip_if_redis_enterprise()
     def test_command_getkeys(self, r):
         res = r.command_getkeys("MSET", "a", "b", "c", "d", "e", "f")
         assert res == ["a", "c", "e"]
@@ -4483,6 +4516,7 @@ class TestRedisCommands:
 
     @pytest.mark.replica
     @skip_if_server_version_lt("2.8.0")
+    @skip_if_redis_enterprise()
     def test_sync(self, r):
         r2 = redis.Redis(port=6380, decode_responses=False)
         res = r2.sync()
@@ -4490,6 +4524,7 @@ class TestRedisCommands:
 
     @pytest.mark.replica
     @skip_if_server_version_lt("2.8.0")
+    @skip_if_redis_enterprise()
     def test_psync(self, r):
         r2 = redis.Redis(port=6380, decode_responses=False)
         res = r2.psync(r2.client_id(), 1)

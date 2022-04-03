@@ -629,6 +629,7 @@ class TestRedisClusterObj:
             assert replica.server_type == REPLICA
             assert replica in slot_nodes
 
+    @skip_if_redis_enterprise()
     def test_not_require_full_coverage_cluster_down_error(self, r):
         """
         When require_full_coverage is set to False (default client config) and not
@@ -840,6 +841,7 @@ class TestClusterRedisCommands:
         channels = [(b"foo", 1), (b"bar", 2), (b"baz", 3)]
         assert r.pubsub_numsub("foo", "bar", "baz", target_nodes="all") == channels
 
+    @skip_if_redis_enterprise()
     def test_cluster_slots(self, r):
         mock_all_nodes_resp(r, default_cluster_slots)
         cluster_slots = r.cluster_slots()
@@ -848,17 +850,20 @@ class TestClusterRedisCommands:
         assert cluster_slots.get((0, 8191)) is not None
         assert cluster_slots.get((0, 8191)).get("primary") == ("127.0.0.1", 7000)
 
+    @skip_if_redis_enterprise()
     def test_cluster_addslots(self, r):
         node = r.get_random_node()
         mock_node_resp(node, "OK")
         assert r.cluster_addslots(node, 1, 2, 3) is True
 
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     def test_cluster_addslotsrange(self, r):
         node = r.get_random_node()
         mock_node_resp(node, "OK")
         assert r.cluster_addslotsrange(node, 1, 5)
 
+    @skip_if_redis_enterprise()
     def test_cluster_countkeysinslot(self, r):
         node = r.nodes_manager.get_node_from_slot(1)
         mock_node_resp(node, 2)
@@ -868,6 +873,7 @@ class TestClusterRedisCommands:
         mock_all_nodes_resp(r, 0)
         assert r.cluster_count_failure_report("node_0") == 0
 
+    @skip_if_redis_enterprise()
     def test_cluster_delslots(self):
         cluster_slots = [
             [
@@ -892,12 +898,14 @@ class TestClusterRedisCommands:
         assert node1.redis_connection.connection.read_response.called
 
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     def test_cluster_delslotsrange(self, r):
         node = r.get_random_node()
         mock_node_resp(node, "OK")
         r.cluster_addslots(node, 1, 2, 3, 4, 5)
         assert r.cluster_delslotsrange(1, 5)
 
+    @skip_if_redis_enterprise()
     def test_cluster_failover(self, r):
         node = r.get_random_node()
         mock_node_resp(node, "OK")
@@ -907,20 +915,24 @@ class TestClusterRedisCommands:
         with pytest.raises(RedisError):
             r.cluster_failover(node, "FORCT")
 
+    @skip_if_redis_enterprise()
     def test_cluster_info(self, r):
         info = r.cluster_info()
         assert isinstance(info, dict)
         assert info["cluster_state"] == "ok"
 
+    @skip_if_redis_enterprise()
     def test_cluster_keyslot(self, r):
         mock_all_nodes_resp(r, 12182)
         assert r.cluster_keyslot("foo") == 12182
 
+    @skip_if_redis_enterprise()
     def test_cluster_meet(self, r):
         node = r.get_default_node()
         mock_node_resp(node, "OK")
         assert r.cluster_meet("127.0.0.1", 6379) is True
 
+    @skip_if_redis_enterprise()
     def test_cluster_nodes(self, r):
         response = (
             "c8253bae761cb1ecb2b61857d85dfe455a0fec8b 172.17.0.7:7006 "
@@ -949,6 +961,7 @@ class TestClusterRedisCommands:
             == "c8253bae761cb1ecb2b61857d85dfe455a0fec8b"
         )
 
+    @skip_if_redis_enterprise()
     def test_cluster_replicate(self, r):
         node = r.get_random_node()
         all_replicas = r.get_replicas()
@@ -961,6 +974,7 @@ class TestClusterRedisCommands:
         else:
             assert results is True
 
+    @skip_if_redis_enterprise()
     def test_cluster_reset(self, r):
         mock_all_nodes_resp(r, "OK")
         assert r.cluster_reset() is True
@@ -969,6 +983,7 @@ class TestClusterRedisCommands:
         for res in all_results.values():
             assert res is True
 
+    @skip_if_redis_enterprise()
     def test_cluster_save_config(self, r):
         node = r.get_random_node()
         all_nodes = r.get_nodes()
@@ -978,6 +993,7 @@ class TestClusterRedisCommands:
         for res in all_results.values():
             assert res is True
 
+    @skip_if_redis_enterprise()
     def test_cluster_get_keys_in_slot(self, r):
         response = [b"{foo}1", b"{foo}2"]
         node = r.nodes_manager.get_node_from_slot(12182)
@@ -985,6 +1001,7 @@ class TestClusterRedisCommands:
         keys = r.cluster_get_keys_in_slot(12182, 4)
         assert keys == response
 
+    @skip_if_redis_enterprise()
     def test_cluster_set_config_epoch(self, r):
         mock_all_nodes_resp(r, "OK")
         assert r.cluster_set_config_epoch(3) is True
@@ -992,6 +1009,7 @@ class TestClusterRedisCommands:
         for res in all_results.values():
             assert res is True
 
+    @skip_if_redis_enterprise()
     def test_cluster_setslot(self, r):
         node = r.get_random_node()
         mock_node_resp(node, "OK")
@@ -1009,6 +1027,7 @@ class TestClusterRedisCommands:
         assert r.cluster_setslot_stable(12182) is True
         assert node.redis_connection.connection.read_response.called
 
+    @skip_if_redis_enterprise()
     def test_cluster_replicas(self, r):
         response = [
             b"01eca22229cf3c652b6fca0d09ff6941e0d2e3 "
@@ -1040,6 +1059,7 @@ class TestClusterRedisCommands:
         for i in range(0, len(res) - 1, 2):
             assert res[i][3] == res[i + 1][3]
 
+    @skip_if_redis_enterprise()
     def test_readonly(self):
         r = get_mocked_redis_client(host=default_host, port=default_port)
         mock_all_nodes_resp(r, "OK")
@@ -1050,6 +1070,7 @@ class TestClusterRedisCommands:
         for replica in r.get_replicas():
             assert replica.redis_connection.connection.read_response.called
 
+    @skip_if_redis_enterprise()
     def test_readwrite(self):
         r = get_mocked_redis_client(host=default_host, port=default_port)
         mock_all_nodes_resp(r, "OK")
@@ -1060,6 +1081,7 @@ class TestClusterRedisCommands:
         for replica in r.get_replicas():
             assert replica.redis_connection.connection.read_response.called
 
+    @skip_if_redis_enterprise()
     def test_bgsave(self, r):
         assert r.bgsave()
         sleep(0.3)
@@ -1144,10 +1166,12 @@ class TestClusterRedisCommands:
         assert isinstance(r.memory_usage("foo"), int)
 
     @skip_if_server_version_lt("4.0.0")
+    @skip_if_redis_enterprise()
     def test_memory_malloc_stats(self, r):
         assert r.memory_malloc_stats()
 
     @skip_if_server_version_lt("4.0.0")
+    @skip_if_redis_enterprise()
     def test_memory_stats(self, r):
         # put a key into the current db to make sure that "db.<current-db>"
         # has data
@@ -1169,6 +1193,7 @@ class TestClusterRedisCommands:
         with pytest.raises(NotImplementedError):
             r.memory_doctor()
 
+    @skip_if_redis_enterprise()
     def test_lastsave(self, r):
         node = r.get_primaries()[0]
         assert isinstance(r.lastsave(target_nodes=node), datetime.datetime)
@@ -1211,6 +1236,7 @@ class TestClusterRedisCommands:
             r.client_pause(timeout="not an integer", target_nodes=node)
 
     @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
     def test_client_unpause(self, r):
         assert r.client_unpause()
 
