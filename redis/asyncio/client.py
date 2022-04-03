@@ -30,6 +30,8 @@ from redis.asyncio.connection import (
     SSLConnection,
     UnixDomainSocketConnection,
 )
+from redis.asyncio.lock import Lock
+from redis.asyncio.retry import Retry
 from redis.client import (
     EMPTY_RESPONSE,
     NEVER_DECODE,
@@ -53,8 +55,6 @@ from redis.exceptions import (
     TimeoutError,
     WatchError,
 )
-from redis.asyncio.lock import Lock
-from redis.asyncio.retry import Retry
 from redis.typing import ChannelT, EncodableT, KeyT
 from redis.utils import safe_str, str_if_bytes
 
