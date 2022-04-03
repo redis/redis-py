@@ -35,6 +35,7 @@ class Query:
         self._highlight_fields = []
         self._language = None
         self._expander = None
+        self._dialect = None
 
     def query_string(self):
         """Return the query string of this query only."""
@@ -202,6 +203,8 @@ class Query:
             args += ["LANGUAGE", self._language]
         if self._expander:
             args += ["EXPANDER", self._expander]
+        if self._dialect:
+            args += ["DIALECT", self._dialect]
 
         return args
 
@@ -286,6 +289,15 @@ class Query:
         - **expander** - the name of the expander
         """
         self._expander = expander
+        return self
+
+    def dialect(self, dialect: int) -> "Query":
+        """
+        Add a dialect field to the query.
+
+        - **dialect** - dialect version to execute the query under
+        """
+        self._dialect = dialect
         return self
 
 

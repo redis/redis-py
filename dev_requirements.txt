@@ -1,3 +1,4 @@
+click==8.0.4
 black==21.11b1
 flake8==4.0.1
 flynt~=0.69.0
