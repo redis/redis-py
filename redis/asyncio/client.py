@@ -53,8 +53,8 @@ from redis.exceptions import (
     TimeoutError,
     WatchError,
 )
-from redis.lock import Lock
-from redis.retry import Retry
+from redis.asyncio.lock import Lock
+from redis.asyncio.retry import Retry
 from redis.typing import ChannelT, EncodableT, KeyT
 from redis.utils import safe_str, str_if_bytes
 
