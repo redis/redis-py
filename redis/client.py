@@ -466,7 +466,6 @@ def _parse_node_line(line):
     line_items = line.split(" ")
     node_id, addr, flags, master_id, ping, pong, epoch, connected = line.split(" ")[:8]
     addr = addr.split("@")[0]
-    slots = [sl.split("-") for sl in line_items[8:]]
     node_dict = {
         "node_id": node_id,
         "flags": flags,
@@ -474,18 +473,42 @@ def _parse_node_line(line):
         "last_ping_sent": ping,
         "last_pong_rcvd": pong,
         "epoch": epoch,
-        "slots": slots,
+        "slots": [],
+        "migrations": [],
         "connected": True if connected == "connected" else False,
     }
+    if len(line_items) >= 9:
+        slots, migrations = _parse_slots(line_items[8:])
+        node_dict["slots"], node_dict["migrations"] = slots, migrations
     return addr, node_dict
+
+
+def _parse_slots(slot_ranges):
+    slots, migrations = [], []
+    for s_range in slot_ranges:
+        if "->-" in s_range:
+            slot_id, dst_node_id = s_range[1:-1].split("->-", 1)
+            migrations.append(
+                {"slot": slot_id, "node_id": dst_node_id, "state": "migrating"}
+            )
+        elif "-<-" in s_range:
+            slot_id, src_node_id = s_range[1:-1].split("-<-", 1)
+            migrations.append(
+                {"slot": slot_id, "node_id": src_node_id, "state": "importing"}
+            )
+        else:
+            s_range = [sl for sl in s_range.split("-")]
+            slots.append(s_range)
+
+    return slots, migrations
 
 
 def parse_cluster_nodes(response, **options):
     """
-    @see: https://redis.io/commands/cluster-nodes  # string
-    @see: https://redis.io/commands/cluster-replicas # list of string
+    @see: https://redis.io/commands/cluster-nodes  # string / bytes
+    @see: https://redis.io/commands/cluster-replicas # list of string / bytes
     """
-    if isinstance(response, str):
+    if isinstance(response, (str, bytes)):
         response = response.splitlines()
     return dict(_parse_node_line(str_if_bytes(node)) for node in response)
 
