@@ -41,6 +41,8 @@ class ClusterMultiKeyCommands:
         if keys belong to more than one slot.
 
         Returns a list of values ordered identically to ``keys``
+
+        For more information see https://redis.io/commands/mget
         """
 
         from redis.client import EMPTY_RESPONSE
@@ -77,6 +79,8 @@ class ClusterMultiKeyCommands:
         Splits the keys into different slots and then calls MSET
         for the keys of every slot. This operation will not be atomic
         if keys belong to more than one slot.
+
+        For more information see https://redis.io/commands/mset
         """
 
         # Partition the keys by slot
@@ -115,6 +119,8 @@ class ClusterMultiKeyCommands:
         Returns the number of ``names`` that exist in the
         whole cluster. The keys are first split up into slots
         and then an EXISTS command is sent for every slot
+
+        For more information see https://redis.io/commands/exists
         """
         return self._split_command_across_slots("EXISTS", *keys)
 
@@ -126,6 +132,8 @@ class ClusterMultiKeyCommands:
 
         Non-existant keys are ignored.
         Returns the number of keys that were deleted.
+
+        For more information see https://redis.io/commands/del
         """
         return self._split_command_across_slots("DEL", *keys)
 
@@ -139,6 +147,8 @@ class ClusterMultiKeyCommands:
 
         Non-existant keys are ignored.
         Returns the number of keys that were touched.
+
+        For more information see https://redis.io/commands/touch
         """
         return self._split_command_across_slots("TOUCH", *keys)
 
@@ -151,6 +161,8 @@ class ClusterMultiKeyCommands:
 
         Non-existant keys are ignored.
         Returns the number of keys that were unlinked.
+
+        For more information see https://redis.io/commands/unlink
         """
         return self._split_command_across_slots("UNLINK", *keys)
 
@@ -164,12 +176,27 @@ class ClusterManagementCommands(ManagementCommands):
     """
 
     def slaveof(self, *args, **kwargs):
+        """
+        Make the server a replica of another instance, or promote it as master.
+
+        For more information see https://redis.io/commands/slaveof
+        """
         raise RedisClusterException("SLAVEOF is not supported in cluster mode")
 
     def replicaof(self, *args, **kwargs):
+        """
+        Make the server a replica of another instance, or promote it as master.
+
+        For more information see https://redis.io/commands/replicaof
+        """
         raise RedisClusterException("REPLICAOF is not supported in cluster" " mode")
 
     def swapdb(self, *args, **kwargs):
+        """
+        Swaps two Redis databases.
+
+        For more information see https://redis.io/commands/swapdb
+        """
         raise RedisClusterException("SWAPDB is not supported in cluster" " mode")
 
 
@@ -193,6 +220,25 @@ class ClusterDataAccessCommands(DataAccessCommands):
         withmatchlen=False,
         **kwargs,
     ):
+        """
+        Implements complex algorithms that operate on strings.
+        Right now the only algorithm implemented is the LCS algorithm
+        (longest common substring). However new algorithms could be
+        implemented in the future.
+
+        ``algo`` Right now must be LCS
+        ``value1`` and ``value2`` Can be two strings or two keys
+        ``specific_argument`` Specifying if the arguments to the algorithm
+        will be keys or strings. strings is the default.
+        ``len`` Returns just the len of the match.
+        ``idx`` Returns the match positions in each string.
+        ``minmatchlen`` Restrict the list of matches to the ones of a given
+        minimal length. Can be provided only when ``idx`` set to True.
+        ``withmatchlen`` Returns the matches with the len of the match.
+        Can be provided only when ``idx`` set to True.
+
+        For more information see https://redis.io/commands/stralgo
+        """
         target_nodes = kwargs.pop("target_nodes", None)
         if specific_argument == "strings" and target_nodes is None:
             target_nodes = "default-node"
@@ -292,6 +338,8 @@ class RedisClusterCommands(
 
         :target_node: 'ClusterNode'
             The node to execute the command on
+
+        For more information see https://redis.io/commands/cluster-addslots
         """
         return self.execute_command(
             "CLUSTER ADDSLOTS", *slots, target_nodes=target_node
@@ -307,7 +355,7 @@ class RedisClusterCommands(
         :target_node: 'ClusterNode'
             The node to execute the command on
 
-        For more information check https://redis.io/commands/cluster-addslotsrange
+        For more information see https://redis.io/commands/cluster-addslotsrange
         """
         return self.execute_command(
             "CLUSTER ADDSLOTSRANGE", *slots, target_nodes=target_node
@@ -317,6 +365,8 @@ class RedisClusterCommands(
         """
         Return the number of local keys in the specified hash slot
         Send to node based on specified slot_id
+
+        For more information see https://redis.io/commands/cluster-countkeysinslot
         """
         return self.execute_command("CLUSTER COUNTKEYSINSLOT", slot_id)
 
@@ -324,6 +374,8 @@ class RedisClusterCommands(
         """
         Return the number of failure reports active for a given node
         Sends to a random node
+
+        For more information see https://redis.io/commands/cluster-count-failure-reports
         """
         return self.execute_command("CLUSTER COUNT-FAILURE-REPORTS", node_id)
 
@@ -333,6 +385,8 @@ class RedisClusterCommands(
         It determines by it self what node the slot is in and sends it there
 
         Returns a list of the results for each processed slot.
+
+        For more information see https://redis.io/commands/cluster-delslots
         """
         return [self.execute_command("CLUSTER DELSLOTS", slot) for slot in slots]
 
@@ -343,7 +397,7 @@ class RedisClusterCommands(
         from the node, while CLUSTER DELSLOTSRANGE takes a list of slot ranges to remove
         from the node.
 
-        For more information check https://redis.io/commands/cluster-delslotsrange
+        For more information see https://redis.io/commands/cluster-delslotsrange
         """
         return self.execute_command("CLUSTER DELSLOTSRANGE", *slots)
 
@@ -354,6 +408,8 @@ class RedisClusterCommands(
 
         :target_node: 'ClusterNode'
             The node to execute the command on
+
+        For more information see https://redis.io/commands/cluster-failover
         """
         if option:
             if option.upper() not in ["FORCE", "TAKEOVER"]:
@@ -372,6 +428,8 @@ class RedisClusterCommands(
         Provides info about Redis Cluster node state.
         The command will be sent to a random node in the cluster if no target
         node is specified.
+
+        For more information see https://redis.io/commands/cluster-info
         """
         return self.execute_command("CLUSTER INFO", target_nodes=target_nodes)
 
@@ -379,6 +437,8 @@ class RedisClusterCommands(
         """
         Returns the hash slot of the specified key
         Sends to random node in the cluster
+
+        For more information see https://redis.io/commands/cluster-keyslot
         """
         return self.execute_command("CLUSTER KEYSLOT", key)
 
@@ -386,6 +446,8 @@ class RedisClusterCommands(
         """
         Force a node cluster to handshake with another node.
         Sends to specified node.
+
+        For more information see https://redis.io/commands/cluster-meet
         """
         return self.execute_command(
             "CLUSTER MEET", host, port, target_nodes=target_nodes
@@ -393,15 +455,18 @@ class RedisClusterCommands(
 
     def cluster_nodes(self):
         """
-        Force a node cluster to handshake with another node
-
+        Get Cluster config for the node.
         Sends to random node in the cluster
+
+        For more information see https://redis.io/commands/cluster-nodes
         """
         return self.execute_command("CLUSTER NODES")
 
     def cluster_replicate(self, target_nodes, node_id):
         """
         Reconfigure a node as a slave of the specified master node
+
+        For more information see https://redis.io/commands/cluster-replicate
         """
         return self.execute_command(
             "CLUSTER REPLICATE", node_id, target_nodes=target_nodes
@@ -413,6 +478,8 @@ class RedisClusterCommands(
 
         If 'soft' is True then it will send 'SOFT' argument
         If 'soft' is False then it will send 'HARD' argument
+
+        For more information see https://redis.io/commands/cluster-reset
         """
         return self.execute_command(
             "CLUSTER RESET", b"SOFT" if soft else b"HARD", target_nodes=target_nodes
@@ -421,18 +488,24 @@ class RedisClusterCommands(
     def cluster_save_config(self, target_nodes=None):
         """
         Forces the node to save cluster state on disk
+
+        For more information see https://redis.io/commands/cluster-saveconfig
         """
         return self.execute_command("CLUSTER SAVECONFIG", target_nodes=target_nodes)
 
     def cluster_get_keys_in_slot(self, slot, num_keys):
         """
         Returns the number of keys in the specified cluster slot
+
+        For more information see https://redis.io/commands/cluster-getkeysinslot
         """
         return self.execute_command("CLUSTER GETKEYSINSLOT", slot, num_keys)
 
     def cluster_set_config_epoch(self, epoch, target_nodes=None):
         """
         Set the configuration epoch in a new node
+
+        For more information see https://redis.io/commands/cluster-set-config-epoch
         """
         return self.execute_command(
             "CLUSTER SET-CONFIG-EPOCH", epoch, target_nodes=target_nodes
@@ -444,6 +517,8 @@ class RedisClusterCommands(
 
         :target_node: 'ClusterNode'
             The node to execute the command on
+
+        For more information see https://redis.io/commands/cluster-setslot
         """
         if state.upper() in ("IMPORTING", "NODE", "MIGRATING"):
             return self.execute_command(
@@ -458,6 +533,8 @@ class RedisClusterCommands(
         """
         Clears migrating / importing state from the slot.
         It determines by it self what node the slot is in and sends it there.
+
+        For more information see https://redis.io/commands/cluster-setslot
         """
         return self.execute_command("CLUSTER SETSLOT", slot_id, "STABLE")
 
@@ -465,6 +542,8 @@ class RedisClusterCommands(
         """
         Provides a list of replica nodes replicating from the specified primary
         target node.
+
+        For more information see https://redis.io/commands/cluster-replicas
         """
         return self.execute_command(
             "CLUSTER REPLICAS", node_id, target_nodes=target_nodes
@@ -473,6 +552,8 @@ class RedisClusterCommands(
     def cluster_slots(self, target_nodes=None):
         """
         Get array of Cluster slot to node mappings
+
+        For more information see https://redis.io/commands/cluster-slots
         """
         return self.execute_command("CLUSTER SLOTS", target_nodes=target_nodes)
 
@@ -484,7 +565,7 @@ class RedisClusterCommands(
 
         This command outputs information of all such peer links as an array.
 
-        For more information check https://redis.io/commands/cluster-links
+        For more information see https://redis.io/commands/cluster-links
         """
         return self.execute_command("CLUSTER LINKS", target_nodes=target_node)
 
@@ -493,6 +574,8 @@ class RedisClusterCommands(
         Enables read queries.
         The command will be sent to the default cluster node if target_nodes is
         not specified.
+
+        For more information see https://redis.io/commands/readonly
         """
         if target_nodes == "replicas" or target_nodes == "all":
             # read_from_replicas will only be enabled if the READONLY command
@@ -505,6 +588,8 @@ class RedisClusterCommands(
         Disables read queries.
         The command will be sent to the default cluster node if target_nodes is
         not specified.
+
+        For more information see https://redis.io/commands/readwrite
         """
         # Reset read from replicas flag
         self.read_from_replicas = False
