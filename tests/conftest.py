@@ -120,10 +120,10 @@ def pytest_addoption(parser):
 def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
     info = client.info()
-    cmds = [command.upper() for command in client.command().keys()]
-    if "dping" in cmds:
+    try:
+        client.execute_command("DPING")
         info["enterprise"] = True
-    else:
+    except redis.ResponseError:
         info["enterprise"] = False
     client.connection_pool.disconnect()
     return info

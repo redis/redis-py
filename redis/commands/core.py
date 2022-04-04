@@ -66,7 +66,7 @@ class ACLCommands(CommandsProtocol):
         If ``category`` is supplied, returns a list of all commands within
         that category.
 
-        For more information check https://redis.io/commands/acl-cat
+        For more information see https://redis.io/commands/acl-cat
         """
         pieces: list[EncodableT] = [category] if category else []
         return self.execute_command("ACL CAT", *pieces, **kwargs)
@@ -75,7 +75,7 @@ class ACLCommands(CommandsProtocol):
         """
         Simulate the execution of a given command by a given ``username``.
 
-        For more information check https://redis.io/commands/acl-dryrun
+        For more information see https://redis.io/commands/acl-dryrun
         """
         return self.execute_command("ACL DRYRUN", username, *args, **kwargs)
 
@@ -83,7 +83,7 @@ class ACLCommands(CommandsProtocol):
         """
         Delete the ACL for the specified ``username``s
 
-        For more information check https://redis.io/commands/acl-deluser
+        For more information see https://redis.io/commands/acl-deluser
         """
         return self.execute_command("ACL DELUSER", *username, **kwargs)
 
@@ -111,7 +111,7 @@ class ACLCommands(CommandsProtocol):
 
         If ``username`` does not exist, return None
 
-        For more information check https://redis.io/commands/acl-getuser
+        For more information see https://redis.io/commands/acl-getuser
         """
         return self.execute_command("ACL GETUSER", username, **kwargs)
 
@@ -119,7 +119,7 @@ class ACLCommands(CommandsProtocol):
         """The ACL HELP command returns helpful text describing
         the different subcommands.
 
-        For more information check https://redis.io/commands/acl-help
+        For more information see https://redis.io/commands/acl-help
         """
         return self.execute_command("ACL HELP", **kwargs)
 
@@ -127,7 +127,7 @@ class ACLCommands(CommandsProtocol):
         """
         Return a list of all ACLs on the server
 
-        For more information check https://redis.io/commands/acl-list
+        For more information see https://redis.io/commands/acl-list
         """
         return self.execute_command("ACL LIST", **kwargs)
 
@@ -137,7 +137,7 @@ class ACLCommands(CommandsProtocol):
         :param int count: Get logs[0:count].
         :rtype: List.
 
-        For more information check https://redis.io/commands/acl-log
+        For more information see https://redis.io/commands/acl-log
         """
         args = []
         if count is not None:
@@ -152,7 +152,7 @@ class ACLCommands(CommandsProtocol):
         Reset ACL logs.
         :rtype: Boolean.
 
-        For more information check https://redis.io/commands/acl-log
+        For more information see https://redis.io/commands/acl-log
         """
         args = [b"RESET"]
         return self.execute_command("ACL LOG", *args, **kwargs)
@@ -164,7 +164,7 @@ class ACLCommands(CommandsProtocol):
         Note that the server must be configured with the ``aclfile``
         directive to be able to load ACL rules from an aclfile.
 
-        For more information check https://redis.io/commands/acl-load
+        For more information see https://redis.io/commands/acl-load
         """
         return self.execute_command("ACL LOAD", **kwargs)
 
@@ -175,7 +175,7 @@ class ACLCommands(CommandsProtocol):
         Note that the server must be configured with the ``aclfile``
         directive to be able to save ACL rules to an aclfile.
 
-        For more information check https://redis.io/commands/acl-save
+        For more information see https://redis.io/commands/acl-save
         """
         return self.execute_command("ACL SAVE", **kwargs)
 
@@ -253,7 +253,7 @@ class ACLCommands(CommandsProtocol):
         and 'nopass' status will be kept and any new specified passwords
         or hashed_passwords will be applied on top.
 
-        For more information check https://redis.io/commands/acl-setuser
+        For more information see https://redis.io/commands/acl-setuser
         """
         encoder = self.get_encoder()
         pieces: list[str | bytes] = [username]
@@ -349,14 +349,14 @@ class ACLCommands(CommandsProtocol):
     def acl_users(self, **kwargs) -> ResponseT:
         """Returns a list of all registered users on the server.
 
-        For more information check https://redis.io/commands/acl-users
+        For more information see https://redis.io/commands/acl-users
         """
         return self.execute_command("ACL USERS", **kwargs)
 
     def acl_whoami(self, **kwargs) -> ResponseT:
         """Get the username for the current connection
 
-        For more information check https://redis.io/commands/acl-whoami
+        For more information see https://redis.io/commands/acl-whoami
         """
         return self.execute_command("ACL WHOAMI", **kwargs)
 
@@ -374,7 +374,7 @@ class ManagementCommands(CommandsProtocol):
         Authenticates the user. If you do not pass username, Redis will try to
         authenticate for the "default" user. If you do pass username, it will
         authenticate for the given user.
-        For more information check https://redis.io/commands/auth
+        For more information see https://redis.io/commands/auth
         """
         if username:
             return self.execute_command("AUTH", username, password, **kwargs)
@@ -383,7 +383,7 @@ class ManagementCommands(CommandsProtocol):
     def bgrewriteaof(self, **kwargs):
         """Tell the Redis server to rewrite the AOF file from data in memory.
 
-        For more information check https://redis.io/commands/bgrewriteaof
+        For more information see https://redis.io/commands/bgrewriteaof
         """
         return self.execute_command("BGREWRITEAOF", **kwargs)
 
@@ -392,7 +392,7 @@ class ManagementCommands(CommandsProtocol):
         Tell the Redis server to save its data to disk.  Unlike save(),
         this method is asynchronous and returns immediately.
 
-        For more information check https://redis.io/commands/bgsave
+        For more information see https://redis.io/commands/bgsave
         """
         pieces = []
         if schedule:
@@ -405,14 +405,14 @@ class ManagementCommands(CommandsProtocol):
         the context of replication, by returning if the instance
         is currently a master, slave, or sentinel.
 
-        For more information check https://redis.io/commands/role
+        For more information see https://redis.io/commands/role
         """
         return self.execute_command("ROLE")
 
     def client_kill(self, address: str, **kwargs) -> ResponseT:
         """Disconnects the client at ``address`` (ip:port)
 
-        For more information check https://redis.io/commands/client-kill
+        For more information see https://redis.io/commands/client-kill
         """
         return self.execute_command("CLIENT KILL", address, **kwargs)
 
@@ -471,7 +471,7 @@ class ManagementCommands(CommandsProtocol):
         Returns information and statistics about the current
         client connection.
 
-        For more information check https://redis.io/commands/client-info
+        For more information see https://redis.io/commands/client-info
         """
         return self.execute_command("CLIENT INFO", **kwargs)
 
@@ -488,7 +488,7 @@ class ManagementCommands(CommandsProtocol):
          replica, pubsub)
         :param client_id: optional. a list of client ids
 
-        For more information check https://redis.io/commands/client-list
+        For more information see https://redis.io/commands/client-list
         """
         args = []
         if _type is not None:
@@ -508,7 +508,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Returns the current connection name
 
-        For more information check https://redis.io/commands/client-getname
+        For more information see https://redis.io/commands/client-getname
         """
         return self.execute_command("CLIENT GETNAME", **kwargs)
 
@@ -550,7 +550,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Returns the current connection id
 
-        For more information check https://redis.io/commands/client-id
+        For more information see https://redis.io/commands/client-id
         """
         return self.execute_command("CLIENT ID", **kwargs)
 
@@ -665,7 +665,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Sets the current connection name
 
-        For more information check https://redis.io/commands/client-setname
+        For more information see https://redis.io/commands/client-setname
         """
         return self.execute_command("CLIENT SETNAME", name, **kwargs)
 
@@ -681,7 +681,7 @@ class ManagementCommands(CommandsProtocol):
         If ``error`` is False (default), the client is unblocked using the
         regular timeout mechanism.
 
-        For more information check https://redis.io/commands/client-unblock
+        For more information see https://redis.io/commands/client-unblock
         """
         args = ["CLIENT UNBLOCK", int(client_id)]
         if error:
@@ -693,7 +693,7 @@ class ManagementCommands(CommandsProtocol):
         Suspend all the Redis clients for the specified amount of time
         :param timeout: milliseconds to pause clients
 
-        For more information check https://redis.io/commands/client-pause
+        For more information see https://redis.io/commands/client-pause
         :param all: If true (default) all client commands are blocked.
              otherwise, clients are only blocked if they attempt to execute
              a write command.
@@ -715,7 +715,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Unpause all redis clients
 
-        For more information check https://redis.io/commands/client-unpause
+        For more information see https://redis.io/commands/client-unpause
         """
         return self.execute_command("CLIENT UNPAUSE", **kwargs)
 
@@ -723,7 +723,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Sets the client eviction mode for the current connection.
 
-        For more information check https://redis.io/commands/client-no-evict
+        For more information see https://redis.io/commands/client-no-evict
         """
         return self.execute_command("CLIENT NO-EVICT", mode)
 
@@ -731,7 +731,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Returns dict reply of details about all Redis commands.
 
-        For more information check https://redis.io/commands/command
+        For more information see https://redis.io/commands/command
         """
         return self.execute_command("COMMAND", **kwargs)
 
@@ -756,14 +756,14 @@ class ManagementCommands(CommandsProtocol):
         """
         Return a dictionary of configuration based on the ``pattern``
 
-        For more information check https://redis.io/commands/config-get
+        For more information see https://redis.io/commands/config-get
         """
         return self.execute_command("CONFIG GET", pattern, **kwargs)
 
     def config_set(self, name: KeyT, value: EncodableT, **kwargs) -> ResponseT:
         """Set config item ``name`` with ``value``
 
-        For more information check https://redis.io/commands/config-set
+        For more information see https://redis.io/commands/config-set
         """
         return self.execute_command("CONFIG SET", name, value, **kwargs)
 
@@ -771,7 +771,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Reset runtime statistics
 
-        For more information check https://redis.io/commands/config-resetstat
+        For more information see https://redis.io/commands/config-resetstat
         """
         return self.execute_command("CONFIG RESETSTAT", **kwargs)
 
@@ -779,7 +779,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Rewrite config file with the minimal change to reflect running config.
 
-        For more information check https://redis.io/commands/config-rewrite
+        For more information see https://redis.io/commands/config-rewrite
         """
         return self.execute_command("CONFIG REWRITE", **kwargs)
 
@@ -787,7 +787,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Returns the number of keys in the current database
 
-        For more information check https://redis.io/commands/dbsize
+        For more information see https://redis.io/commands/dbsize
         """
         return self.execute_command("DBSIZE", **kwargs)
 
@@ -795,7 +795,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Returns version specific meta information about a given key
 
-        For more information check https://redis.io/commands/debug-object
+        For more information see https://redis.io/commands/debug-object
         """
         return self.execute_command("DEBUG OBJECT", key, **kwargs)
 
@@ -804,7 +804,7 @@ class ManagementCommands(CommandsProtocol):
             """
             DEBUG SEGFAULT is intentionally not implemented in the client.
 
-            For more information check https://redis.io/commands/debug-segfault
+            For more information see https://redis.io/commands/debug-segfault
             """
         )
 
@@ -812,7 +812,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Echo the string back from the server
 
-        For more information check https://redis.io/commands/echo
+        For more information see https://redis.io/commands/echo
         """
         return self.execute_command("ECHO", value, **kwargs)
 
@@ -823,7 +823,7 @@ class ManagementCommands(CommandsProtocol):
         ``asynchronous`` indicates whether the operation is
         executed asynchronously by the server.
 
-        For more information check https://redis.io/commands/flushall
+        For more information see https://redis.io/commands/flushall
         """
         args = []
         if asynchronous:
@@ -837,7 +837,7 @@ class ManagementCommands(CommandsProtocol):
         ``asynchronous`` indicates whether the operation is
         executed asynchronously by the server.
 
-        For more information check https://redis.io/commands/flushdb
+        For more information see https://redis.io/commands/flushdb
         """
         args = []
         if asynchronous:
@@ -848,7 +848,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Initiates a replication stream from the master.
 
-        For more information check https://redis.io/commands/sync
+        For more information see https://redis.io/commands/sync
         """
         from redis.client import NEVER_DECODE
 
@@ -861,7 +861,7 @@ class ManagementCommands(CommandsProtocol):
         Initiates a replication stream from the master.
         Newer version for `sync`.
 
-        For more information check https://redis.io/commands/sync
+        For more information see https://redis.io/commands/sync
         """
         from redis.client import NEVER_DECODE
 
@@ -873,7 +873,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Swap two databases
 
-        For more information check https://redis.io/commands/swapdb
+        For more information see https://redis.io/commands/swapdb
         """
         return self.execute_command("SWAPDB", first, second, **kwargs)
 
@@ -894,7 +894,7 @@ class ManagementCommands(CommandsProtocol):
         The section option is not supported by older versions of Redis Server,
         and will generate ResponseError
 
-        For more information check https://redis.io/commands/info
+        For more information see https://redis.io/commands/info
         """
         if section is None:
             return self.execute_command("INFO", **kwargs)
@@ -906,7 +906,7 @@ class ManagementCommands(CommandsProtocol):
         Return a Python datetime object representing the last time the
         Redis database was saved to disk
 
-        For more information check https://redis.io/commands/lastsave
+        For more information see https://redis.io/commands/lastsave
         """
         return self.execute_command("LASTSAVE", **kwargs)
 
@@ -957,7 +957,7 @@ class ManagementCommands(CommandsProtocol):
         If ``auth`` is specified, authenticate to the destination server with
         the password provided.
 
-        For more information check https://redis.io/commands/migrate
+        For more information see https://redis.io/commands/migrate
         """
         keys = list_or_args(keys, [])
         if not keys:
@@ -989,7 +989,7 @@ class ManagementCommands(CommandsProtocol):
             """
             MEMORY DOCTOR is intentionally not implemented in the client.
 
-            For more information check https://redis.io/commands/memory-doctor
+            For more information see https://redis.io/commands/memory-doctor
             """
         )
 
@@ -998,7 +998,7 @@ class ManagementCommands(CommandsProtocol):
             """
             MEMORY HELP is intentionally not implemented in the client.
 
-            For more information check https://redis.io/commands/memory-help
+            For more information see https://redis.io/commands/memory-help
             """
         )
 
@@ -1006,7 +1006,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Return a dictionary of memory stats
 
-        For more information check https://redis.io/commands/memory-stats
+        For more information see https://redis.io/commands/memory-stats
         """
         return self.execute_command("MEMORY STATS", **kwargs)
 
@@ -1029,7 +1029,7 @@ class ManagementCommands(CommandsProtocol):
         sample. If left unspecified, the server's default is 5. Use 0 to sample
         all elements.
 
-        For more information check https://redis.io/commands/memory-usage
+        For more information see https://redis.io/commands/memory-usage
         """
         args = []
         if isinstance(samples, int):
@@ -1040,7 +1040,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Attempts to purge dirty pages for reclamation by allocator
 
-        For more information check https://redis.io/commands/memory-purge
+        For more information see https://redis.io/commands/memory-purge
         """
         return self.execute_command("MEMORY PURGE", **kwargs)
 
@@ -1048,7 +1048,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Ping the Redis server
 
-        For more information check https://redis.io/commands/ping
+        For more information see https://redis.io/commands/ping
         """
         return self.execute_command("PING", **kwargs)
 
@@ -1056,7 +1056,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Ask the server to close the connection.
 
-        For more information check https://redis.io/commands/quit
+        For more information see https://redis.io/commands/quit
         """
         return self.execute_command("QUIT", **kwargs)
 
@@ -1067,7 +1067,7 @@ class ManagementCommands(CommandsProtocol):
             NO ONE (set no replication)
             host port (set to the host and port of a redis server)
 
-        For more information check  https://redis.io/commands/replicaof
+        For more information see  https://redis.io/commands/replicaof
         """
         return self.execute_command("REPLICAOF", *args, **kwargs)
 
@@ -1076,7 +1076,7 @@ class ManagementCommands(CommandsProtocol):
         Tell the Redis server to save its data to disk,
         blocking until the save is complete
 
-        For more information check https://redis.io/commands/save
+        For more information see https://redis.io/commands/save
         """
         return self.execute_command("SAVE", **kwargs)
 
@@ -1087,7 +1087,7 @@ class ManagementCommands(CommandsProtocol):
         configured.  If the "nosave" option is set, no data flush will be
         attempted.  The "save" and "nosave" options cannot both be set.
 
-        For more information check https://redis.io/commands/shutdown
+        For more information see https://redis.io/commands/shutdown
         """
         if save and nosave:
             raise DataError("SHUTDOWN save and nosave cannot both be set")
@@ -1111,7 +1111,7 @@ class ManagementCommands(CommandsProtocol):
         by the ``host`` and ``port``. If called without arguments, the
         instance is promoted to a master instead.
 
-        For more information check https://redis.io/commands/slaveof
+        For more information see https://redis.io/commands/slaveof
         """
         if host is None and port is None:
             return self.execute_command("SLAVEOF", b"NO", b"ONE", **kwargs)
@@ -1122,7 +1122,7 @@ class ManagementCommands(CommandsProtocol):
         Get the entries from the slowlog. If ``num`` is specified, get the
         most recent ``num`` items.
 
-        For more information check https://redis.io/commands/slowlog-get
+        For more information see https://redis.io/commands/slowlog-get
         """
         from redis.client import NEVER_DECODE
 
@@ -1138,7 +1138,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Get the number of items in the slowlog
 
-        For more information check https://redis.io/commands/slowlog-len
+        For more information see https://redis.io/commands/slowlog-len
         """
         return self.execute_command("SLOWLOG LEN", **kwargs)
 
@@ -1146,7 +1146,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Remove all items in the slowlog
 
-        For more information check https://redis.io/commands/slowlog-reset
+        For more information see https://redis.io/commands/slowlog-reset
         """
         return self.execute_command("SLOWLOG RESET", **kwargs)
 
@@ -1155,7 +1155,7 @@ class ManagementCommands(CommandsProtocol):
         Returns the server time as a 2-item tuple of ints:
         (seconds since epoch, microseconds into this second).
 
-        For more information check https://redis.io/commands/time
+        For more information see https://redis.io/commands/time
         """
         return self.execute_command("TIME", **kwargs)
 
@@ -1166,7 +1166,7 @@ class ManagementCommands(CommandsProtocol):
         we finally have at least ``num_replicas``, or when the ``timeout`` was
         reached.
 
-        For more information check https://redis.io/commands/wait
+        For more information see https://redis.io/commands/wait
         """
         return self.execute_command("WAIT", num_replicas, timeout, **kwargs)
 
@@ -1214,7 +1214,7 @@ class AsyncManagementCommands(ManagementCommands):
         configured.  If the "nosave" option is set, no data flush will be
         attempted.  The "save" and "nosave" options cannot both be set.
 
-        For more information check https://redis.io/commands/shutdown
+        For more information see https://redis.io/commands/shutdown
         """
         if save and nosave:
             raise DataError("SHUTDOWN save and nosave cannot both be set")
@@ -1354,7 +1354,7 @@ class BasicKeyCommands(CommandsProtocol):
         doesn't already exist, create it with a value of ``value``.
         Returns the new length of the value at ``key``.
 
-        For more information check https://redis.io/commands/append
+        For more information see https://redis.io/commands/append
         """
         return self.execute_command("APPEND", key, value)
 
@@ -1363,12 +1363,13 @@ class BasicKeyCommands(CommandsProtocol):
         key: KeyT,
         start: Union[int, None] = None,
         end: Union[int, None] = None,
+        mode: Optional[str] = None,
     ) -> ResponseT:
         """
         Returns the count of set bits in the value of ``key``.  Optional
         ``start`` and ``end`` parameters indicate which bytes to consider
 
-        For more information check https://redis.io/commands/bitcount
+        For more information see https://redis.io/commands/bitcount
         """
         params = [key]
         if start is not None and end is not None:
@@ -1376,6 +1377,8 @@ class BasicKeyCommands(CommandsProtocol):
             params.append(end)
         elif (start is not None and end is None) or (end is not None and start is None):
             raise DataError("Both start and end must be specified")
+        if mode is not None:
+            params.append(mode)
         return self.execute_command("BITCOUNT", *params)
 
     def bitfield(
@@ -1387,7 +1390,7 @@ class BasicKeyCommands(CommandsProtocol):
         Return a BitFieldOperation instance to conveniently construct one or
         more bitfield operations on ``key``.
 
-        For more information check https://redis.io/commands/bitfield
+        For more information see https://redis.io/commands/bitfield
         """
         return BitFieldOperation(self, key, default_overflow=default_overflow)
 
@@ -1401,7 +1404,7 @@ class BasicKeyCommands(CommandsProtocol):
         Perform a bitwise operation using ``operation`` between ``keys`` and
         store the result in ``dest``.
 
-        For more information check https://redis.io/commands/bitop
+        For more information see https://redis.io/commands/bitop
         """
         return self.execute_command("BITOP", operation, dest, *keys)
 
@@ -1411,6 +1414,7 @@ class BasicKeyCommands(CommandsProtocol):
         bit: int,
         start: Union[int, None] = None,
         end: Union[int, None] = None,
+        mode: Optional[str] = None,
     ) -> ResponseT:
         """
         Return the position of the first bit set to 1 or 0 in a string.
@@ -1418,7 +1422,7 @@ class BasicKeyCommands(CommandsProtocol):
         as a range of bytes and not a range of bits, so start=0 and end=2
         means to look at the first three bytes.
 
-        For more information check https://redis.io/commands/bitpos
+        For more information see https://redis.io/commands/bitpos
         """
         if bit not in (0, 1):
             raise DataError("bit must be 0 or 1")
@@ -1430,6 +1434,9 @@ class BasicKeyCommands(CommandsProtocol):
             params.append(end)
         elif start is None and end is not None:
             raise DataError("start argument is not set, " "when end is specified")
+
+        if mode is not None:
+            params.append(mode)
         return self.execute_command("BITPOS", *params)
 
     def copy(
@@ -1449,7 +1456,7 @@ class BasicKeyCommands(CommandsProtocol):
         copying the value to it. By default, the value is not copied if
         the ``destination`` key already exists.
 
-        For more information check https://redis.io/commands/copy
+        For more information see https://redis.io/commands/copy
         """
         params = [source, destination]
         if destination_db is not None:
@@ -1463,7 +1470,7 @@ class BasicKeyCommands(CommandsProtocol):
         Decrements the value of ``key`` by ``amount``.  If no key exists,
         the value will be initialized as 0 - ``amount``
 
-        For more information check https://redis.io/commands/decrby
+        For more information see https://redis.io/commands/decrby
         """
         return self.execute_command("DECRBY", name, amount)
 
@@ -1483,7 +1490,7 @@ class BasicKeyCommands(CommandsProtocol):
         Return a serialized version of the value stored at the specified key.
         If key does not exist a nil bulk reply is returned.
 
-        For more information check https://redis.io/commands/dump
+        For more information see https://redis.io/commands/dump
         """
         from redis.client import NEVER_DECODE
 
@@ -1495,7 +1502,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Returns the number of ``names`` that exist
 
-        For more information check https://redis.io/commands/exists
+        For more information see https://redis.io/commands/exists
         """
         return self.execute_command("EXISTS", *names)
 
@@ -1521,7 +1528,7 @@ class BasicKeyCommands(CommandsProtocol):
             GT -> Set expiry only when the new expiry is greater than current one
             LT -> Set expiry only when the new expiry is less than current one
 
-        For more information check https://redis.io/commands/expire
+        For more information see https://redis.io/commands/expire
         """
         if isinstance(time, datetime.timedelta):
             time = int(time.total_seconds())
@@ -1558,7 +1565,7 @@ class BasicKeyCommands(CommandsProtocol):
             -> GT -- Set expiry only when the new expiry is greater than current one
             -> LT -- Set expiry only when the new expiry is less than current one
 
-        For more information check https://redis.io/commands/expireat
+        For more information see https://redis.io/commands/expireat
         """
         if isinstance(when, datetime.datetime):
             when = int(time.mktime(when.timetuple()))
@@ -1580,7 +1587,7 @@ class BasicKeyCommands(CommandsProtocol):
         Returns the absolute Unix timestamp (since January 1, 1970) in seconds
         at which the given key will expire.
 
-        For more information check https://redis.io/commands/expiretime
+        For more information see https://redis.io/commands/expiretime
         """
         return self.execute_command("EXPIRETIME", key)
 
@@ -1588,7 +1595,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Return the value at key ``name``, or None if the key doesn't exist
 
-        For more information check https://redis.io/commands/get
+        For more information see https://redis.io/commands/get
         """
         return self.execute_command("GET", name)
 
@@ -1599,7 +1606,7 @@ class BasicKeyCommands(CommandsProtocol):
         the key on success (if and only if the key's value type
         is a string).
 
-        For more information check https://redis.io/commands/getdel
+        For more information see https://redis.io/commands/getdel
         """
         return self.execute_command("GETDEL", name)
 
@@ -1630,7 +1637,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         ``persist`` remove the time to live associated with ``name``.
 
-        For more information check https://redis.io/commands/getex
+        For more information see https://redis.io/commands/getex
         """
 
         opset = {ex, px, exat, pxat}
@@ -1682,9 +1689,9 @@ class BasicKeyCommands(CommandsProtocol):
 
     def getbit(self, name: KeyT, offset: int) -> ResponseT:
         """
-        Returns a boolean indicating the value of ``offset`` in ``name``
+        Returns an integer indicating the value of ``offset`` in ``name``
 
-        For more information check https://redis.io/commands/getbit
+        For more information see https://redis.io/commands/getbit
         """
         return self.execute_command("GETBIT", name, offset)
 
@@ -1693,7 +1700,7 @@ class BasicKeyCommands(CommandsProtocol):
         Returns the substring of the string value stored at ``key``,
         determined by the offsets ``start`` and ``end`` (both are inclusive)
 
-        For more information check https://redis.io/commands/getrange
+        For more information see https://redis.io/commands/getrange
         """
         return self.execute_command("GETRANGE", key, start, end)
 
@@ -1705,7 +1712,7 @@ class BasicKeyCommands(CommandsProtocol):
         As per Redis 6.2, GETSET is considered deprecated.
         Please use SET with GET parameter in new code.
 
-        For more information check https://redis.io/commands/getset
+        For more information see https://redis.io/commands/getset
         """
         return self.execute_command("GETSET", name, value)
 
@@ -1714,7 +1721,7 @@ class BasicKeyCommands(CommandsProtocol):
         Increments the value of ``key`` by ``amount``.  If no key exists,
         the value will be initialized as ``amount``
 
-        For more information check https://redis.io/commands/incrby
+        For more information see https://redis.io/commands/incrby
         """
         return self.execute_command("INCRBY", name, amount)
 
@@ -1725,7 +1732,7 @@ class BasicKeyCommands(CommandsProtocol):
         Increments the value at key ``name`` by floating ``amount``.
         If no key exists, the value will be initialized as ``amount``
 
-        For more information check https://redis.io/commands/incrbyfloat
+        For more information see https://redis.io/commands/incrbyfloat
         """
         return self.execute_command("INCRBYFLOAT", name, amount)
 
@@ -1733,7 +1740,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Returns a list of keys matching ``pattern``
 
-        For more information check https://redis.io/commands/keys
+        For more information see https://redis.io/commands/keys
         """
         return self.execute_command("KEYS", pattern, **kwargs)
 
@@ -1749,7 +1756,7 @@ class BasicKeyCommands(CommandsProtocol):
         pushing it as the first/last element on the destination list.
         Returns the element being popped and pushed.
 
-        For more information check https://redis.io/commands/lmove
+        For more information see https://redis.io/commands/lmove
         """
         params = [first_list, second_list, src, dest]
         return self.execute_command("LMOVE", *params)
@@ -1765,7 +1772,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Blocking version of lmove.
 
-        For more information check https://redis.io/commands/blmove
+        For more information see https://redis.io/commands/blmove
         """
         params = [first_list, second_list, src, dest, timeout]
         return self.execute_command("BLMOVE", *params)
@@ -1774,7 +1781,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Returns a list of values ordered identically to ``keys``
 
-        For more information check https://redis.io/commands/mget
+        For more information see https://redis.io/commands/mget
         """
         from redis.client import EMPTY_RESPONSE
 
@@ -1790,7 +1797,7 @@ class BasicKeyCommands(CommandsProtocol):
         key/value pairs. Both keys and values should be strings or types that
         can be cast to a string via str().
 
-        For more information check https://redis.io/commands/mset
+        For more information see https://redis.io/commands/mset
         """
         items = []
         for pair in mapping.items():
@@ -1804,7 +1811,7 @@ class BasicKeyCommands(CommandsProtocol):
         should be strings or types that can be cast to a string via str().
         Returns a boolean indicating if the operation was successful.
 
-        For more information check https://redis.io/commands/msetnx
+        For more information see https://redis.io/commands/msetnx
         """
         items = []
         for pair in mapping.items():
@@ -1815,7 +1822,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Moves the key ``name`` to a different Redis database ``db``
 
-        For more information check https://redis.io/commands/move
+        For more information see https://redis.io/commands/move
         """
         return self.execute_command("MOVE", name, db)
 
@@ -1823,7 +1830,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Removes an expiration on ``name``
 
-        For more information check https://redis.io/commands/persist
+        For more information see https://redis.io/commands/persist
         """
         return self.execute_command("PERSIST", name)
 
@@ -1847,7 +1854,7 @@ class BasicKeyCommands(CommandsProtocol):
             GT -> Set expiry only when the new expiry is greater than current one
             LT -> Set expiry only when the new expiry is less than current one
 
-        For more information check https://redis.io/commands/pexpire
+        For more information see https://redis.io/commands/pexpire
         """
         if isinstance(time, datetime.timedelta):
             time = int(time.total_seconds() * 1000)
@@ -1883,7 +1890,7 @@ class BasicKeyCommands(CommandsProtocol):
             GT -> Set expiry only when the new expiry is greater than current one
             LT -> Set expiry only when the new expiry is less than current one
 
-        For more information check https://redis.io/commands/pexpireat
+        For more information see https://redis.io/commands/pexpireat
         """
         if isinstance(when, datetime.datetime):
             ms = int(when.microsecond / 1000)
@@ -1904,7 +1911,7 @@ class BasicKeyCommands(CommandsProtocol):
         Returns the absolute Unix timestamp (since January 1, 1970) in milliseconds
         at which the given key will expire.
 
-        For more information check https://redis.io/commands/pexpiretime
+        For more information see https://redis.io/commands/pexpiretime
         """
         return self.execute_command("PEXPIRETIME", key)
 
@@ -1919,7 +1926,7 @@ class BasicKeyCommands(CommandsProtocol):
         milliseconds. ``time_ms`` can be represented by an integer or a Python
         timedelta object
 
-        For more information check https://redis.io/commands/psetex
+        For more information see https://redis.io/commands/psetex
         """
         if isinstance(time_ms, datetime.timedelta):
             time_ms = int(time_ms.total_seconds() * 1000)
@@ -1929,7 +1936,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Returns the number of milliseconds until the key ``name`` will expire
 
-        For more information check https://redis.io/commands/pttl
+        For more information see https://redis.io/commands/pttl
         """
         return self.execute_command("PTTL", name)
 
@@ -1950,7 +1957,7 @@ class BasicKeyCommands(CommandsProtocol):
         withvalues: The optional WITHVALUES modifier changes the reply so it
         includes the respective values of the randomly selected hash fields.
 
-        For more information check https://redis.io/commands/hrandfield
+        For more information see https://redis.io/commands/hrandfield
         """
         params = []
         if count is not None:
@@ -1964,7 +1971,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Returns the name of a random key
 
-        For more information check https://redis.io/commands/randomkey
+        For more information see https://redis.io/commands/randomkey
         """
         return self.execute_command("RANDOMKEY", **kwargs)
 
@@ -1972,7 +1979,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Rename key ``src`` to ``dst``
 
-        For more information check https://redis.io/commands/rename
+        For more information see https://redis.io/commands/rename
         """
         return self.execute_command("RENAME", src, dst)
 
@@ -1980,7 +1987,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist
 
-        For more information check https://redis.io/commands/renamenx
+        For more information see https://redis.io/commands/renamenx
         """
         return self.execute_command("RENAMENX", src, dst)
 
@@ -2011,7 +2018,7 @@ class BasicKeyCommands(CommandsProtocol):
         ``frequency`` Used for eviction, this is the frequency counter of
         the object stored at the key, prior to execution.
 
-        For more information check https://redis.io/commands/restore
+        For more information see https://redis.io/commands/restore
         """
         params = [name, ttl, value]
         if replace:
@@ -2073,7 +2080,7 @@ class BasicKeyCommands(CommandsProtocol):
         ``pxat`` sets an expire flag on key ``name`` for ``ex`` milliseconds,
             specified in unix time.
 
-        For more information check https://redis.io/commands/set
+        For more information see https://redis.io/commands/set
         """
         pieces: list[EncodableT] = [name, value]
         options = {}
@@ -2124,10 +2131,10 @@ class BasicKeyCommands(CommandsProtocol):
 
     def setbit(self, name: KeyT, offset: int, value: int) -> ResponseT:
         """
-        Flag the ``offset`` in ``name`` as ``value``. Returns a boolean
+        Flag the ``offset`` in ``name`` as ``value``. Returns an integer
         indicating the previous value of ``offset``.
 
-        For more information check https://redis.io/commands/setbit
+        For more information see https://redis.io/commands/setbit
         """
         value = value and 1 or 0
         return self.execute_command("SETBIT", name, offset, value)
@@ -2138,7 +2145,7 @@ class BasicKeyCommands(CommandsProtocol):
         seconds. ``time`` can be represented by an integer or a Python
         timedelta object.
 
-        For more information check https://redis.io/commands/setex
+        For more information see https://redis.io/commands/setex
         """
         if isinstance(time, datetime.timedelta):
             time = int(time.total_seconds())
@@ -2148,7 +2155,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Set the value of key ``name`` to ``value`` if key doesn't exist
 
-        For more information check https://redis.io/commands/setnx
+        For more information see https://redis.io/commands/setnx
         """
         return self.execute_command("SETNX", name, value)
 
@@ -2168,7 +2175,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         Returns the length of the new string.
 
-        For more information check https://redis.io/commands/setrange
+        For more information see https://redis.io/commands/setrange
         """
         return self.execute_command("SETRANGE", name, offset, value)
 
@@ -2201,7 +2208,7 @@ class BasicKeyCommands(CommandsProtocol):
         ``withmatchlen`` Returns the matches with the len of the match.
         Can be provided only when ``idx`` set to True.
 
-        For more information check https://redis.io/commands/stralgo
+        For more information see https://redis.io/commands/stralgo
         """
         # check validity
         supported_algo = ["LCS"]
@@ -2240,7 +2247,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Return the number of bytes stored in the value of ``name``
 
-        For more information check https://redis.io/commands/strlen
+        For more information see https://redis.io/commands/strlen
         """
         return self.execute_command("STRLEN", name)
 
@@ -2256,7 +2263,7 @@ class BasicKeyCommands(CommandsProtocol):
         Alters the last access time of a key(s) ``*args``. A key is ignored
         if it does not exist.
 
-        For more information check https://redis.io/commands/touch
+        For more information see https://redis.io/commands/touch
         """
         return self.execute_command("TOUCH", *args)
 
@@ -2264,7 +2271,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Returns the number of seconds until the key ``name`` will expire
 
-        For more information check https://redis.io/commands/ttl
+        For more information see https://redis.io/commands/ttl
         """
         return self.execute_command("TTL", name)
 
@@ -2272,7 +2279,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Returns the type of key ``name``
 
-        For more information check https://redis.io/commands/type
+        For more information see https://redis.io/commands/type
         """
         return self.execute_command("TYPE", name)
 
@@ -2280,7 +2287,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Watches the values at keys ``names``, or None if the key doesn't exist
 
-        For more information check https://redis.io/commands/watch
+        For more information see https://redis.io/commands/watch
         """
         warnings.warn(DeprecationWarning("Call WATCH from a Pipeline object"))
 
@@ -2288,7 +2295,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Unwatches the value at key ``name``, or None of the key doesn't exist
 
-        For more information check https://redis.io/commands/unwatch
+        For more information see https://redis.io/commands/unwatch
         """
         warnings.warn(DeprecationWarning("Call UNWATCH from a Pipeline object"))
 
@@ -2296,7 +2303,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Unlink one or more keys specified by ``names``
 
-        For more information check https://redis.io/commands/unlink
+        For more information see https://redis.io/commands/unlink
         """
         return self.execute_command("UNLINK", *names)
 
@@ -2316,7 +2323,7 @@ class BasicKeyCommands(CommandsProtocol):
         ``minmatchlen`` restrict the list of matches to the ones of
         the given ``minmatchlen``.
         If ``withmatchlen`` the length of the match also will be returned.
-        For more information check https://redis.io/commands/lcs
+        For more information see https://redis.io/commands/lcs
         """
         pieces = [key1, key2]
         if len:
@@ -2369,7 +2376,7 @@ class ListCommands(CommandsProtocol):
 
         If timeout is 0, then block indefinitely.
 
-        For more information check https://redis.io/commands/blpop
+        For more information see https://redis.io/commands/blpop
         """
         if timeout is None:
             timeout = 0
@@ -2390,7 +2397,7 @@ class ListCommands(CommandsProtocol):
 
         If timeout is 0, then block indefinitely.
 
-        For more information check https://redis.io/commands/brpop
+        For more information see https://redis.io/commands/brpop
         """
         if timeout is None:
             timeout = 0
@@ -2409,7 +2416,7 @@ class ListCommands(CommandsProtocol):
         seconds elapse, whichever is first. A ``timeout`` value of 0 blocks
         forever.
 
-        For more information check https://redis.io/commands/brpoplpush
+        For more information see https://redis.io/commands/brpoplpush
         """
         if timeout is None:
             timeout = 0
@@ -2430,7 +2437,7 @@ class ListCommands(CommandsProtocol):
         When all lists are empty this command blocks the connection until another
         client pushes to it or until the timeout, timeout of 0 blocks indefinitely
 
-        For more information check https://redis.io/commands/blmpop
+        For more information see https://redis.io/commands/blmpop
         """
         args = [timeout, numkeys, *args, direction, "COUNT", count]
 
@@ -2447,7 +2454,7 @@ class ListCommands(CommandsProtocol):
         Pop ``count`` values (default 1) first non-empty list key from the list
         of args provided key names.
 
-        For more information check https://redis.io/commands/lmpop
+        For more information see https://redis.io/commands/lmpop
         """
         args = [num_keys] + list(args) + [direction]
         if count != 1:
@@ -2464,7 +2471,7 @@ class ListCommands(CommandsProtocol):
         Negative indexes are supported and will return an item at the
         end of the list
 
-        For more information check https://redis.io/commands/lindex
+        For more information see https://redis.io/commands/lindex
         """
         return self.execute_command("LINDEX", name, index)
 
@@ -2478,7 +2485,7 @@ class ListCommands(CommandsProtocol):
         Returns the new length of the list on success or -1 if ``refvalue``
         is not in the list.
 
-        For more information check https://redis.io/commands/linsert
+        For more information see https://redis.io/commands/linsert
         """
         return self.execute_command("LINSERT", name, where, refvalue, value)
 
@@ -2486,7 +2493,7 @@ class ListCommands(CommandsProtocol):
         """
         Return the length of the list ``name``
 
-        For more information check https://redis.io/commands/llen
+        For more information see https://redis.io/commands/llen
         """
         return self.execute_command("LLEN", name)
 
@@ -2498,7 +2505,7 @@ class ListCommands(CommandsProtocol):
         the list. When provided with the optional ``count`` argument, the reply
         will consist of up to count elements, depending on the list's length.
 
-        For more information check https://redis.io/commands/lpop
+        For more information see https://redis.io/commands/lpop
         """
         if count is not None:
             return self.execute_command("LPOP", name, count)
@@ -2509,7 +2516,7 @@ class ListCommands(CommandsProtocol):
         """
         Push ``values`` onto the head of the list ``name``
 
-        For more information check https://redis.io/commands/lpush
+        For more information see https://redis.io/commands/lpush
         """
         return self.execute_command("LPUSH", name, *values)
 
@@ -2517,7 +2524,7 @@ class ListCommands(CommandsProtocol):
         """
         Push ``value`` onto the head of the list ``name`` if ``name`` exists
 
-        For more information check https://redis.io/commands/lpushx
+        For more information see https://redis.io/commands/lpushx
         """
         return self.execute_command("LPUSHX", name, *values)
 
@@ -2529,7 +2536,7 @@ class ListCommands(CommandsProtocol):
         ``start`` and ``end`` can be negative numbers just like
         Python slicing notation
 
-        For more information check https://redis.io/commands/lrange
+        For more information see https://redis.io/commands/lrange
         """
         return self.execute_command("LRANGE", name, start, end)
 
@@ -2543,7 +2550,7 @@ class ListCommands(CommandsProtocol):
             count < 0: Remove elements equal to value moving from tail to head.
             count = 0: Remove all elements equal to value.
 
-            For more information check https://redis.io/commands/lrem
+            For more information see https://redis.io/commands/lrem
         """
         return self.execute_command("LREM", name, count, value)
 
@@ -2551,7 +2558,7 @@ class ListCommands(CommandsProtocol):
         """
         Set element at ``index`` of list ``name`` to ``value``
 
-        For more information check https://redis.io/commands/lset
+        For more information see https://redis.io/commands/lset
         """
         return self.execute_command("LSET", name, index, value)
 
@@ -2563,7 +2570,7 @@ class ListCommands(CommandsProtocol):
         ``start`` and ``end`` can be negative numbers just like
         Python slicing notation
 
-        For more information check https://redis.io/commands/ltrim
+        For more information see https://redis.io/commands/ltrim
         """
         return self.execute_command("LTRIM", name, start, end)
 
@@ -2575,7 +2582,7 @@ class ListCommands(CommandsProtocol):
         When provided with the optional ``count`` argument, the reply will
         consist of up to count elements, depending on the list's length.
 
-        For more information check https://redis.io/commands/rpop
+        For more information see https://redis.io/commands/rpop
         """
         if count is not None:
             return self.execute_command("RPOP", name, count)
@@ -2587,7 +2594,7 @@ class ListCommands(CommandsProtocol):
         RPOP a value off of the ``src`` list and atomically LPUSH it
         on to the ``dst`` list.  Returns the value.
 
-        For more information check https://redis.io/commands/rpoplpush
+        For more information see https://redis.io/commands/rpoplpush
         """
         return self.execute_command("RPOPLPUSH", src, dst)
 
@@ -2595,7 +2602,7 @@ class ListCommands(CommandsProtocol):
         """
         Push ``values`` onto the tail of the list ``name``
 
-        For more information check https://redis.io/commands/rpush
+        For more information see https://redis.io/commands/rpush
         """
         return self.execute_command("RPUSH", name, *values)
 
@@ -2603,7 +2610,7 @@ class ListCommands(CommandsProtocol):
         """
         Push ``value`` onto the tail of the list ``name`` if ``name`` exists
 
-        For more information check https://redis.io/commands/rpushx
+        For more information see https://redis.io/commands/rpushx
         """
         return self.execute_command("RPUSHX", name, value)
 
@@ -2638,7 +2645,7 @@ class ListCommands(CommandsProtocol):
          position(s) of items within the first 1000 entries in the list.
          A ``maxlen`` of 0 (the default) will scan the entire list.
 
-         For more information check https://redis.io/commands/lpos
+         For more information see https://redis.io/commands/lpos
         """
         pieces: list[EncodableT] = [name, value]
         if rank is not None:
@@ -2687,7 +2694,7 @@ class ListCommands(CommandsProtocol):
             elements, sort will return a list of tuples, each containing the
             values fetched from the arguments to ``get``.
 
-        For more information check https://redis.io/commands/sort
+        For more information see https://redis.io/commands/sort
         """
         if (start is not None and num is None) or (num is not None and start is None):
             raise DataError("``start`` and ``num`` must both be specified")
@@ -2751,7 +2758,7 @@ class ListCommands(CommandsProtocol):
 
         ``alpha`` allows for sorting lexicographically rather than numerically
 
-        For more information check https://redis.io/commands/sort_ro
+        For more information see https://redis.io/commands/sort_ro
         """
         return self.sort(
             key, start=start, num=num, by=by, get=get, desc=desc, alpha=alpha
@@ -2789,7 +2796,7 @@ class ScanCommands(CommandsProtocol):
             HASH, LIST, SET, STREAM, STRING, ZSET
             Additionally, Redis modules can expose other types as well.
 
-        For more information check https://redis.io/commands/scan
+        For more information see https://redis.io/commands/scan
         """
         pieces: list[EncodableT] = [cursor]
         if match is not None:
@@ -2843,7 +2850,7 @@ class ScanCommands(CommandsProtocol):
 
         ``count`` allows for hint the minimum number of returns
 
-        For more information check https://redis.io/commands/sscan
+        For more information see https://redis.io/commands/sscan
         """
         pieces: list[EncodableT] = [name, cursor]
         if match is not None:
@@ -2886,7 +2893,7 @@ class ScanCommands(CommandsProtocol):
 
         ``count`` allows for hint the minimum number of returns
 
-        For more information check https://redis.io/commands/hscan
+        For more information see https://redis.io/commands/hscan
         """
         pieces: list[EncodableT] = [name, cursor]
         if match is not None:
@@ -2932,7 +2939,7 @@ class ScanCommands(CommandsProtocol):
 
         ``score_cast_func`` a callable used to cast the score return value
 
-        For more information check https://redis.io/commands/zscan
+        For more information see https://redis.io/commands/zscan
         """
         pieces = [name, cursor]
         if match is not None:
@@ -3085,7 +3092,7 @@ class SetCommands(CommandsProtocol):
         """
         Add ``value(s)`` to set ``name``
 
-        For more information check https://redis.io/commands/sadd
+        For more information see https://redis.io/commands/sadd
         """
         return self.execute_command("SADD", name, *values)
 
@@ -3093,7 +3100,7 @@ class SetCommands(CommandsProtocol):
         """
         Return the number of elements in set ``name``
 
-        For more information check https://redis.io/commands/scard
+        For more information see https://redis.io/commands/scard
         """
         return self.execute_command("SCARD", name)
 
@@ -3101,7 +3108,7 @@ class SetCommands(CommandsProtocol):
         """
         Return the difference of sets specified by ``keys``
 
-        For more information check https://redis.io/commands/sdiff
+        For more information see https://redis.io/commands/sdiff
         """
         args = list_or_args(keys, args)
         return self.execute_command("SDIFF", *args)
@@ -3113,7 +3120,7 @@ class SetCommands(CommandsProtocol):
         Store the difference of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
 
-        For more information check https://redis.io/commands/sdiffstore
+        For more information see https://redis.io/commands/sdiffstore
         """
         args = list_or_args(keys, args)
         return self.execute_command("SDIFFSTORE", dest, *args)
@@ -3122,7 +3129,7 @@ class SetCommands(CommandsProtocol):
         """
         Return the intersection of sets specified by ``keys``
 
-        For more information check https://redis.io/commands/sinter
+        For more information see https://redis.io/commands/sinter
         """
         args = list_or_args(keys, args)
         return self.execute_command("SINTER", *args)
@@ -3137,7 +3144,7 @@ class SetCommands(CommandsProtocol):
         cardinality reaches limit partway through the computation, the algorithm will
         exit and yield limit as the cardinality
 
-        For more information check https://redis.io/commands/sintercard
+        For more information see https://redis.io/commands/sintercard
         """
         args = [numkeys, *keys, "LIMIT", limit]
         return self.execute_command("SINTERCARD", *args)
@@ -3149,7 +3156,7 @@ class SetCommands(CommandsProtocol):
         Store the intersection of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
 
-        For more information check https://redis.io/commands/sinterstore
+        For more information see https://redis.io/commands/sinterstore
         """
         args = list_or_args(keys, args)
         return self.execute_command("SINTERSTORE", dest, *args)
@@ -3158,7 +3165,7 @@ class SetCommands(CommandsProtocol):
         """
         Return a boolean indicating if ``value`` is a member of set ``name``
 
-        For more information check https://redis.io/commands/sismember
+        For more information see https://redis.io/commands/sismember
         """
         return self.execute_command("SISMEMBER", name, value)
 
@@ -3166,7 +3173,7 @@ class SetCommands(CommandsProtocol):
         """
         Return all members of the set ``name``
 
-        For more information check https://redis.io/commands/smembers
+        For more information see https://redis.io/commands/smembers
         """
         return self.execute_command("SMEMBERS", name)
 
@@ -3180,7 +3187,7 @@ class SetCommands(CommandsProtocol):
         Return whether each value in ``values`` is a member of the set ``name``
         as a list of ``bool`` in the order of ``values``
 
-        For more information check https://redis.io/commands/smismember
+        For more information see https://redis.io/commands/smismember
         """
         args = list_or_args(values, args)
         return self.execute_command("SMISMEMBER", name, *args)
@@ -3189,7 +3196,7 @@ class SetCommands(CommandsProtocol):
         """
         Move ``value`` from set ``src`` to set ``dst`` atomically
 
-        For more information check https://redis.io/commands/smove
+        For more information see https://redis.io/commands/smove
         """
         return self.execute_command("SMOVE", src, dst, value)
 
@@ -3197,7 +3204,7 @@ class SetCommands(CommandsProtocol):
         """
         Remove and return a random member of set ``name``
 
-        For more information check https://redis.io/commands/spop
+        For more information see https://redis.io/commands/spop
         """
         args = (count is not None) and [count] or []
         return self.execute_command("SPOP", name, *args)
@@ -3214,7 +3221,7 @@ class SetCommands(CommandsProtocol):
         members of set ``name``. Note this is only available when running
         Redis 2.6+.
 
-        For more information check https://redis.io/commands/srandmember
+        For more information see https://redis.io/commands/srandmember
         """
         args = (number is not None) and [number] or []
         return self.execute_command("SRANDMEMBER", name, *args)
@@ -3223,7 +3230,7 @@ class SetCommands(CommandsProtocol):
         """
         Remove ``values`` from set ``name``
 
-        For more information check https://redis.io/commands/srem
+        For more information see https://redis.io/commands/srem
         """
         return self.execute_command("SREM", name, *values)
 
@@ -3231,7 +3238,7 @@ class SetCommands(CommandsProtocol):
         """
         Return the union of sets specified by ``keys``
 
-        For more information check https://redis.io/commands/sunion
+        For more information see https://redis.io/commands/sunion
         """
         args = list_or_args(keys, args)
         return self.execute_command("SUNION", *args)
@@ -3243,7 +3250,7 @@ class SetCommands(CommandsProtocol):
         Store the union of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
 
-        For more information check https://redis.io/commands/sunionstore
+        For more information see https://redis.io/commands/sunionstore
         """
         args = list_or_args(keys, args)
         return self.execute_command("SUNIONSTORE", dest, *args)
@@ -3270,7 +3277,7 @@ class StreamCommands(CommandsProtocol):
         groupname: name of the consumer group.
         *ids: message ids to acknowledge.
 
-        For more information check https://redis.io/commands/xack
+        For more information see https://redis.io/commands/xack
         """
         return self.execute_command("XACK", name, groupname, *ids)
 
@@ -3298,7 +3305,7 @@ class StreamCommands(CommandsProtocol):
         Can't be specified with maxlen.
         limit: specifies the maximum number of entries to retrieve
 
-        For more information check https://redis.io/commands/xadd
+        For more information see https://redis.io/commands/xadd
         """
         pieces: list[EncodableT] = []
         if maxlen is not None and minid is not None:
@@ -3355,7 +3362,7 @@ class StreamCommands(CommandsProtocol):
         justid: optional boolean, false by default. Return just an array of IDs
         of messages successfully claimed, without returning the actual message
 
-        For more information check https://redis.io/commands/xautoclaim
+        For more information see https://redis.io/commands/xautoclaim
         """
         try:
             if int(min_idle_time) < 0:
@@ -3415,7 +3422,7 @@ class StreamCommands(CommandsProtocol):
         justid: optional boolean, false by default. Return just an array of IDs
          of messages successfully claimed, without returning the actual message
 
-         For more information check https://redis.io/commands/xclaim
+         For more information see https://redis.io/commands/xclaim
         """
         if not isinstance(min_idle_time, int) or min_idle_time < 0:
             raise DataError("XCLAIM min_idle_time must be a non negative " "integer")
@@ -3459,7 +3466,7 @@ class StreamCommands(CommandsProtocol):
         name: name of the stream.
         *ids: message ids to delete.
 
-        For more information check https://redis.io/commands/xdel
+        For more information see https://redis.io/commands/xdel
         """
         return self.execute_command("XDEL", name, *ids)
 
@@ -3476,7 +3483,7 @@ class StreamCommands(CommandsProtocol):
         groupname: name of the consumer group.
         id: ID of the last item in the stream to consider already delivered.
 
-        For more information check https://redis.io/commands/xgroup-create
+        For more information see https://redis.io/commands/xgroup-create
         """
         pieces: list[EncodableT] = ["XGROUP CREATE", name, groupname, id]
         if mkstream:
@@ -3497,7 +3504,7 @@ class StreamCommands(CommandsProtocol):
         groupname: name of the consumer group.
         consumername: name of consumer to delete
 
-        For more information check https://redis.io/commands/xgroup-delconsumer
+        For more information see https://redis.io/commands/xgroup-delconsumer
         """
         return self.execute_command("XGROUP DELCONSUMER", name, groupname, consumername)
 
@@ -3507,7 +3514,7 @@ class StreamCommands(CommandsProtocol):
         name: name of the stream.
         groupname: name of the consumer group.
 
-        For more information check https://redis.io/commands/xgroup-destroy
+        For more information see https://redis.io/commands/xgroup-destroy
         """
         return self.execute_command("XGROUP DESTROY", name, groupname)
 
@@ -3543,7 +3550,7 @@ class StreamCommands(CommandsProtocol):
         groupname: name of the consumer group.
         id: ID of the last item in the stream to consider already delivered.
 
-        For more information check https://redis.io/commands/xgroup-setid
+        For more information see https://redis.io/commands/xgroup-setid
         """
         return self.execute_command("XGROUP SETID", name, groupname, id)
 
@@ -3553,7 +3560,7 @@ class StreamCommands(CommandsProtocol):
         name: name of the stream.
         groupname: name of the consumer group.
 
-        For more information check https://redis.io/commands/xinfo-consumers
+        For more information see https://redis.io/commands/xinfo-consumers
         """
         return self.execute_command("XINFO CONSUMERS", name, groupname)
 
@@ -3562,7 +3569,7 @@ class StreamCommands(CommandsProtocol):
         Returns general information about the consumer groups of the stream.
         name: name of the stream.
 
-        For more information check https://redis.io/commands/xinfo-groups
+        For more information see https://redis.io/commands/xinfo-groups
         """
         return self.execute_command("XINFO GROUPS", name)
 
@@ -3572,7 +3579,7 @@ class StreamCommands(CommandsProtocol):
         name: name of the stream.
         full: optional boolean, false by default. Return full summary
 
-        For more information check https://redis.io/commands/xinfo-stream
+        For more information see https://redis.io/commands/xinfo-stream
         """
         pieces = [name]
         options = {}
@@ -3585,7 +3592,7 @@ class StreamCommands(CommandsProtocol):
         """
         Returns the number of elements in a given stream.
 
-        For more information check https://redis.io/commands/xlen
+        For more information see https://redis.io/commands/xlen
         """
         return self.execute_command("XLEN", name)
 
@@ -3595,7 +3602,7 @@ class StreamCommands(CommandsProtocol):
         name: name of the stream.
         groupname: name of the consumer group.
 
-        For more information check https://redis.io/commands/xpending
+        For more information see https://redis.io/commands/xpending
         """
         return self.execute_command("XPENDING", name, groupname)
 
@@ -3673,7 +3680,7 @@ class StreamCommands(CommandsProtocol):
         count: if set, only return this many items, beginning with the
                earliest available.
 
-        For more information check https://redis.io/commands/xrange
+        For more information see https://redis.io/commands/xrange
         """
         pieces = [min, max]
         if count is not None:
@@ -3698,7 +3705,7 @@ class StreamCommands(CommandsProtocol):
                earliest available.
         block: number of milliseconds to wait, if nothing already present.
 
-        For more information check https://redis.io/commands/xread
+        For more information see https://redis.io/commands/xread
         """
         pieces = []
         if block is not None:
@@ -3739,7 +3746,7 @@ class StreamCommands(CommandsProtocol):
         block: number of milliseconds to wait, if nothing already present.
         noack: do not add messages to the PEL
 
-        For more information check https://redis.io/commands/xreadgroup
+        For more information see https://redis.io/commands/xreadgroup
         """
         pieces: list[EncodableT] = [b"GROUP", groupname, consumername]
         if count is not None:
@@ -3778,7 +3785,7 @@ class StreamCommands(CommandsProtocol):
         count: if set, only return this many items, beginning with the
                latest available.
 
-        For more information check https://redis.io/commands/xrevrange
+        For more information see https://redis.io/commands/xrevrange
         """
         pieces: list[EncodableT] = [max, min]
         if count is not None:
@@ -3807,7 +3814,7 @@ class StreamCommands(CommandsProtocol):
         Can't be specified with maxlen.
         limit: specifies the maximum number of entries to retrieve
 
-        For more information check https://redis.io/commands/xtrim
+        For more information see https://redis.io/commands/xtrim
         """
         pieces: list[EncodableT] = []
         if maxlen is not None and minid is not None:
@@ -3919,7 +3926,7 @@ class SortedSetCommands(CommandsProtocol):
         """
         Return the number of elements in the sorted set ``name``
 
-        For more information check https://redis.io/commands/zcard
+        For more information see https://redis.io/commands/zcard
         """
         return self.execute_command("ZCARD", name)
 
@@ -3928,7 +3935,7 @@ class SortedSetCommands(CommandsProtocol):
         Returns the number of elements in the sorted set at key ``name`` with
         a score between ``min`` and ``max``.
 
-        For more information check https://redis.io/commands/zcount
+        For more information see https://redis.io/commands/zcount
         """
         return self.execute_command("ZCOUNT", name, min, max)
 
@@ -3937,7 +3944,7 @@ class SortedSetCommands(CommandsProtocol):
         Returns the difference between the first and all successive input
         sorted sets provided in ``keys``.
 
-        For more information check https://redis.io/commands/zdiff
+        For more information see https://redis.io/commands/zdiff
         """
         pieces = [len(keys), *keys]
         if withscores:
@@ -3949,7 +3956,7 @@ class SortedSetCommands(CommandsProtocol):
         Computes the difference between the first and all successive input
         sorted sets provided in ``keys`` and stores the result in ``dest``.
 
-        For more information check https://redis.io/commands/zdiffstore
+        For more information see https://redis.io/commands/zdiffstore
         """
         pieces = [len(keys), *keys]
         return self.execute_command("ZDIFFSTORE", dest, *pieces)
@@ -3963,7 +3970,7 @@ class SortedSetCommands(CommandsProtocol):
         """
         Increment the score of ``value`` in sorted set ``name`` by ``amount``
 
-        For more information check https://redis.io/commands/zincrby
+        For more information see https://redis.io/commands/zincrby
         """
         return self.execute_command("ZINCRBY", name, amount, value)
 
@@ -3982,7 +3989,7 @@ class SortedSetCommands(CommandsProtocol):
         set will contain the minimum or maximum score of an element across
         the inputs where it exists.
 
-        For more information check https://redis.io/commands/zinter
+        For more information see https://redis.io/commands/zinter
         """
         return self._zaggregate("ZINTER", None, keys, aggregate, withscores=withscores)
 
@@ -4001,7 +4008,7 @@ class SortedSetCommands(CommandsProtocol):
         contain the minimum or maximum score of an element across the inputs
         where it exists.
 
-        For more information check https://redis.io/commands/zinterstore
+        For more information see https://redis.io/commands/zinterstore
         """
         return self._zaggregate("ZINTERSTORE", dest, keys, aggregate)
 
@@ -4015,7 +4022,7 @@ class SortedSetCommands(CommandsProtocol):
         cardinality reaches limit partway through the computation, the algorithm will
         exit and yield limit as the cardinality
 
-        For more information check https://redis.io/commands/zintercard
+        For more information see https://redis.io/commands/zintercard
         """
         args = [numkeys, *keys, "LIMIT", limit]
         return self.execute_command("ZINTERCARD", *args)
@@ -4025,7 +4032,7 @@ class SortedSetCommands(CommandsProtocol):
         Return the number of items in the sorted set ``name`` between the
         lexicographical range ``min`` and ``max``.
 
-        For more information check https://redis.io/commands/zlexcount
+        For more information see https://redis.io/commands/zlexcount
         """
         return self.execute_command("ZLEXCOUNT", name, min, max)
 
@@ -4038,7 +4045,7 @@ class SortedSetCommands(CommandsProtocol):
         Remove and return up to ``count`` members with the highest scores
         from the sorted set ``name``.
 
-        For more information check https://redis.io/commands/zpopmax
+        For more information see https://redis.io/commands/zpopmax
         """
         args = (count is not None) and [count] or []
         options = {"withscores": True}
@@ -4053,7 +4060,7 @@ class SortedSetCommands(CommandsProtocol):
         Remove and return up to ``count`` members with the lowest scores
         from the sorted set ``name``.
 
-        For more information check https://redis.io/commands/zpopmin
+        For more information see https://redis.io/commands/zpopmin
         """
         args = (count is not None) and [count] or []
         options = {"withscores": True}
@@ -4078,7 +4085,7 @@ class SortedSetCommands(CommandsProtocol):
         includes the respective scores of the randomly selected elements from
         the sorted set.
 
-        For more information check https://redis.io/commands/zrandmember
+        For more information see https://redis.io/commands/zrandmember
         """
         params = []
         if count is not None:
@@ -4099,7 +4106,7 @@ class SortedSetCommands(CommandsProtocol):
 
         If timeout is 0, then block indefinitely.
 
-        For more information check https://redis.io/commands/bzpopmax
+        For more information see https://redis.io/commands/bzpopmax
         """
         if timeout is None:
             timeout = 0
@@ -4118,7 +4125,7 @@ class SortedSetCommands(CommandsProtocol):
 
         If timeout is 0, then block indefinitely.
 
-        For more information check https://redis.io/commands/bzpopmin
+        For more information see https://redis.io/commands/bzpopmin
         """
         if timeout is None:
             timeout = 0
@@ -4137,7 +4144,7 @@ class SortedSetCommands(CommandsProtocol):
         """
         Pop ``count`` values (default 1) off of the first non-empty sorted set
         named in the ``keys`` list.
-        For more information check https://redis.io/commands/zmpop
+        For more information see https://redis.io/commands/zmpop
         """
         args = [num_keys] + keys
         if (min and max) or (not min and not max):
@@ -4170,7 +4177,7 @@ class SortedSetCommands(CommandsProtocol):
 
         If timeout is 0, then block indefinitely.
 
-        For more information check https://redis.io/commands/bzmpop
+        For more information see https://redis.io/commands/bzmpop
         """
         args = [timeout, numkeys, *keys]
         if (min and max) or (not min and not max):
@@ -4264,7 +4271,7 @@ class SortedSetCommands(CommandsProtocol):
         ``offset`` and ``num`` are specified, then return a slice of the range.
         Can't be provided when using ``bylex``.
 
-        For more information check https://redis.io/commands/zrange
+        For more information see https://redis.io/commands/zrange
         """
         # Need to support ``desc`` also when using old redis version
         # because it was supported in 3.5.3 (of redis-py)
@@ -4305,7 +4312,7 @@ class SortedSetCommands(CommandsProtocol):
 
         ``score_cast_func`` a callable used to cast the score return value
 
-        For more information check https://redis.io/commands/zrevrange
+        For more information see https://redis.io/commands/zrevrange
         """
         pieces = ["ZREVRANGE", name, start, end]
         if withscores:
@@ -4346,7 +4353,7 @@ class SortedSetCommands(CommandsProtocol):
         ``offset`` and ``num`` are specified, then return a slice of the range.
         Can't be provided when using ``bylex``.
 
-        For more information check https://redis.io/commands/zrangestore
+        For more information see https://redis.io/commands/zrangestore
         """
         return self._zrange(
             "ZRANGESTORE",
@@ -4378,7 +4385,7 @@ class SortedSetCommands(CommandsProtocol):
         If ``start`` and ``num`` are specified, then return a slice of the
         range.
 
-        For more information check https://redis.io/commands/zrangebylex
+        For more information see https://redis.io/commands/zrangebylex
         """
         if (start is not None and num is None) or (num is not None and start is None):
             raise DataError("``start`` and ``num`` must both be specified")
@@ -4402,7 +4409,7 @@ class SortedSetCommands(CommandsProtocol):
         If ``start`` and ``num`` are specified, then return a slice of the
         range.
 
-        For more information check https://redis.io/commands/zrevrangebylex
+        For more information see https://redis.io/commands/zrevrangebylex
         """
         if (start is not None and num is None) or (num is not None and start is None):
             raise DataError("``start`` and ``num`` must both be specified")
@@ -4433,7 +4440,7 @@ class SortedSetCommands(CommandsProtocol):
 
         `score_cast_func`` a callable used to cast the score return value
 
-        For more information check https://redis.io/commands/zrangebyscore
+        For more information see https://redis.io/commands/zrangebyscore
         """
         if (start is not None and num is None) or (num is not None and start is None):
             raise DataError("``start`` and ``num`` must both be specified")
@@ -4467,7 +4474,7 @@ class SortedSetCommands(CommandsProtocol):
 
         ``score_cast_func`` a callable used to cast the score return value
 
-        For more information check https://redis.io/commands/zrevrangebyscore
+        For more information see https://redis.io/commands/zrevrangebyscore
         """
         if (start is not None and num is None) or (num is not None and start is None):
             raise DataError("``start`` and ``num`` must both be specified")
@@ -4484,7 +4491,7 @@ class SortedSetCommands(CommandsProtocol):
         Returns a 0-based value indicating the rank of ``value`` in sorted set
         ``name``
 
-        For more information check https://redis.io/commands/zrank
+        For more information see https://redis.io/commands/zrank
         """
         return self.execute_command("ZRANK", name, value)
 
@@ -4492,7 +4499,7 @@ class SortedSetCommands(CommandsProtocol):
         """
         Remove member ``values`` from sorted set ``name``
 
-        For more information check https://redis.io/commands/zrem
+        For more information see https://redis.io/commands/zrem
         """
         return self.execute_command("ZREM", name, *values)
 
@@ -4503,7 +4510,7 @@ class SortedSetCommands(CommandsProtocol):
 
         Returns the number of elements removed.
 
-        For more information check https://redis.io/commands/zremrangebylex
+        For more information see https://redis.io/commands/zremrangebylex
         """
         return self.execute_command("ZREMRANGEBYLEX", name, min, max)
 
@@ -4514,7 +4521,7 @@ class SortedSetCommands(CommandsProtocol):
         to largest. Values can be negative indicating the highest scores.
         Returns the number of elements removed
 
-        For more information check https://redis.io/commands/zremrangebyrank
+        For more information see https://redis.io/commands/zremrangebyrank
         """
         return self.execute_command("ZREMRANGEBYRANK", name, min, max)
 
@@ -4525,7 +4532,7 @@ class SortedSetCommands(CommandsProtocol):
         Remove all elements in the sorted set ``name`` with scores
         between ``min`` and ``max``. Returns the number of elements removed.
 
-        For more information check https://redis.io/commands/zremrangebyscore
+        For more information see https://redis.io/commands/zremrangebyscore
         """
         return self.execute_command("ZREMRANGEBYSCORE", name, min, max)
 
@@ -4534,7 +4541,7 @@ class SortedSetCommands(CommandsProtocol):
         Returns a 0-based value indicating the descending rank of
         ``value`` in sorted set ``name``
 
-        For more information check https://redis.io/commands/zrevrank
+        For more information see https://redis.io/commands/zrevrank
         """
         return self.execute_command("ZREVRANK", name, value)
 
@@ -4542,7 +4549,7 @@ class SortedSetCommands(CommandsProtocol):
         """
         Return the score of element ``value`` in sorted set ``name``
 
-        For more information check https://redis.io/commands/zscore
+        For more information see https://redis.io/commands/zscore
         """
         return self.execute_command("ZSCORE", name, value)
 
@@ -4558,7 +4565,7 @@ class SortedSetCommands(CommandsProtocol):
         Scores will be aggregated based on the ``aggregate``, or SUM if
         none is provided.
 
-        For more information check https://redis.io/commands/zunion
+        For more information see https://redis.io/commands/zunion
         """
         return self._zaggregate("ZUNION", None, keys, aggregate, withscores=withscores)
 
@@ -4573,7 +4580,7 @@ class SortedSetCommands(CommandsProtocol):
         a new sorted set, ``dest``. Scores in the destination will be
         aggregated based on the ``aggregate``, or SUM if none is provided.
 
-        For more information check https://redis.io/commands/zunionstore
+        For more information see https://redis.io/commands/zunionstore
         """
         return self._zaggregate("ZUNIONSTORE", dest, keys, aggregate)
 
@@ -4590,7 +4597,7 @@ class SortedSetCommands(CommandsProtocol):
         If the member does not exist, a None will be returned
         in corresponding position.
 
-        For more information check https://redis.io/commands/zmscore
+        For more information see https://redis.io/commands/zmscore
         """
         if not members:
             raise DataError("ZMSCORE members must be a non-empty list")
@@ -4641,7 +4648,7 @@ class HyperlogCommands(CommandsProtocol):
         """
         Adds the specified elements to the specified HyperLogLog.
 
-        For more information check https://redis.io/commands/pfadd
+        For more information see https://redis.io/commands/pfadd
         """
         return self.execute_command("PFADD", name, *values)
 
@@ -4650,7 +4657,7 @@ class HyperlogCommands(CommandsProtocol):
         Return the approximated cardinality of
         the set observed by the HyperLogLog at key(s).
 
-        For more information check https://redis.io/commands/pfcount
+        For more information see https://redis.io/commands/pfcount
         """
         return self.execute_command("PFCOUNT", *sources)
 
@@ -4658,7 +4665,7 @@ class HyperlogCommands(CommandsProtocol):
         """
         Merge N different HyperLogLogs into a single one.
 
-        For more information check https://redis.io/commands/pfmerge
+        For more information see https://redis.io/commands/pfmerge
         """
         return self.execute_command("PFMERGE", dest, *sources)
 
@@ -4676,7 +4683,7 @@ class HashCommands(CommandsProtocol):
         """
         Delete ``keys`` from hash ``name``
 
-        For more information check https://redis.io/commands/hdel
+        For more information see https://redis.io/commands/hdel
         """
         return self.execute_command("HDEL", name, *keys)
 
@@ -4684,7 +4691,7 @@ class HashCommands(CommandsProtocol):
         """
         Returns a boolean indicating if ``key`` exists within hash ``name``
 
-        For more information check https://redis.io/commands/hexists
+        For more information see https://redis.io/commands/hexists
         """
         return self.execute_command("HEXISTS", name, key)
 
@@ -4694,7 +4701,7 @@ class HashCommands(CommandsProtocol):
         """
         Return the value of ``key`` within the hash ``name``
 
-        For more information check https://redis.io/commands/hget
+        For more information see https://redis.io/commands/hget
         """
         return self.execute_command("HGET", name, key)
 
@@ -4702,7 +4709,7 @@ class HashCommands(CommandsProtocol):
         """
         Return a Python dict of the hash's name/value pairs
 
-        For more information check https://redis.io/commands/hgetall
+        For more information see https://redis.io/commands/hgetall
         """
         return self.execute_command("HGETALL", name)
 
@@ -4712,7 +4719,7 @@ class HashCommands(CommandsProtocol):
         """
         Increment the value of ``key`` in hash ``name`` by ``amount``
 
-        For more information check https://redis.io/commands/hincrby
+        For more information see https://redis.io/commands/hincrby
         """
         return self.execute_command("HINCRBY", name, key, amount)
 
@@ -4722,7 +4729,7 @@ class HashCommands(CommandsProtocol):
         """
         Increment the value of ``key`` in hash ``name`` by floating ``amount``
 
-        For more information check https://redis.io/commands/hincrbyfloat
+        For more information see https://redis.io/commands/hincrbyfloat
         """
         return self.execute_command("HINCRBYFLOAT", name, key, amount)
 
@@ -4730,7 +4737,7 @@ class HashCommands(CommandsProtocol):
         """
         Return the list of keys within hash ``name``
 
-        For more information check https://redis.io/commands/hkeys
+        For more information see https://redis.io/commands/hkeys
         """
         return self.execute_command("HKEYS", name)
 
@@ -4738,7 +4745,7 @@ class HashCommands(CommandsProtocol):
         """
         Return the number of elements in hash ``name``
 
-        For more information check https://redis.io/commands/hlen
+        For more information see https://redis.io/commands/hlen
         """
         return self.execute_command("HLEN", name)
 
@@ -4758,7 +4765,7 @@ class HashCommands(CommandsProtocol):
         added to hash ``name``.
         Returns the number of fields that were added.
 
-        For more information check https://redis.io/commands/hset
+        For more information see https://redis.io/commands/hset
         """
         if key is None and not mapping and not items:
             raise DataError("'hset' with no key value pairs")
@@ -4776,7 +4783,7 @@ class HashCommands(CommandsProtocol):
         Set ``key`` to ``value`` within hash ``name`` if ``key`` does not
         exist.  Returns 1 if HSETNX created a field, otherwise 0.
 
-        For more information check https://redis.io/commands/hsetnx
+        For more information see https://redis.io/commands/hsetnx
         """
         return self.execute_command("HSETNX", name, key, value)
 
@@ -4785,7 +4792,7 @@ class HashCommands(CommandsProtocol):
         Set key to value within hash ``name`` for each corresponding
         key and value from the ``mapping`` dict.
 
-        For more information check https://redis.io/commands/hmset
+        For more information see https://redis.io/commands/hmset
         """
         warnings.warn(
             f"{self.__class__.__name__}.hmset() is deprecated. "
@@ -4804,7 +4811,7 @@ class HashCommands(CommandsProtocol):
         """
         Returns a list of values ordered identically to ``keys``
 
-        For more information check https://redis.io/commands/hmget
+        For more information see https://redis.io/commands/hmget
         """
         args = list_or_args(keys, args)
         return self.execute_command("HMGET", name, *args)
@@ -4813,7 +4820,7 @@ class HashCommands(CommandsProtocol):
         """
         Return the list of values within hash ``name``
 
-        For more information check https://redis.io/commands/hvals
+        For more information see https://redis.io/commands/hvals
         """
         return self.execute_command("HVALS", name)
 
@@ -4822,7 +4829,7 @@ class HashCommands(CommandsProtocol):
         Return the number of bytes stored in the value of ``key``
         within hash ``name``
 
-        For more information check https://redis.io/commands/hstrlen
+        For more information see https://redis.io/commands/hstrlen
         """
         return self.execute_command("HSTRLEN", name, key)
 
@@ -4931,7 +4938,7 @@ class PubSubCommands(CommandsProtocol):
         Publish ``message`` on ``channel``.
         Returns the number of subscribers the message was delivered to.
 
-        For more information check https://redis.io/commands/publish
+        For more information see https://redis.io/commands/publish
         """
         return self.execute_command("PUBLISH", channel, message, **kwargs)
 
@@ -4939,7 +4946,7 @@ class PubSubCommands(CommandsProtocol):
         """
         Return a list of channels that have at least one subscriber
 
-        For more information check https://redis.io/commands/pubsub-channels
+        For more information see https://redis.io/commands/pubsub-channels
         """
         return self.execute_command("PUBSUB CHANNELS", pattern, **kwargs)
 
@@ -4947,7 +4954,7 @@ class PubSubCommands(CommandsProtocol):
         """
         Returns the number of subscriptions to patterns
 
-        For more information check https://redis.io/commands/pubsub-numpat
+        For more information see https://redis.io/commands/pubsub-numpat
         """
         return self.execute_command("PUBSUB NUMPAT", **kwargs)
 
@@ -4956,7 +4963,7 @@ class PubSubCommands(CommandsProtocol):
         Return a list of (channel, number of subscribers) tuples
         for each channel given in ``*args``
 
-        For more information check https://redis.io/commands/pubsub-numsub
+        For more information see https://redis.io/commands/pubsub-numsub
         """
         return self.execute_command("PUBSUB NUMSUB", *args, **kwargs)
 
@@ -4986,7 +4993,7 @@ class ScriptCommands(CommandsProtocol):
         In practice, use the object returned by ``register_script``. This
         function exists purely for Redis API completion.
 
-        For more information check  https://redis.io/commands/eval
+        For more information see  https://redis.io/commands/eval
         """
         return self._eval("EVAL", script, numkeys, *keys_and_args)
 
@@ -5000,7 +5007,7 @@ class ScriptCommands(CommandsProtocol):
         will touch and the key names and argument values in ``keys_and_args``.
         Returns the result of the script.
 
-        For more information check  https://redis.io/commands/eval_ro
+        For more information see  https://redis.io/commands/eval_ro
         """
         return self._eval("EVAL_RO", script, numkeys, *keys_and_args)
 
@@ -5021,7 +5028,7 @@ class ScriptCommands(CommandsProtocol):
         In practice, use the object returned by ``register_script``. This
         function exists purely for Redis API completion.
 
-        For more information check  https://redis.io/commands/evalsha
+        For more information see  https://redis.io/commands/evalsha
         """
         return self._evalsha("EVALSHA", sha, numkeys, *keys_and_args)
 
@@ -5036,7 +5043,7 @@ class ScriptCommands(CommandsProtocol):
         key names and argument values in ``keys_and_args``. Returns the result
         of the script.
 
-        For more information check  https://redis.io/commands/evalsha_ro
+        For more information see  https://redis.io/commands/evalsha_ro
         """
         return self._evalsha("EVALSHA_RO", sha, numkeys, *keys_and_args)
 
@@ -5046,7 +5053,7 @@ class ScriptCommands(CommandsProtocol):
         each script as ``args``. Returns a list of boolean values indicating if
         if each already script exists in the cache.
 
-        For more information check  https://redis.io/commands/script-exists
+        For more information see  https://redis.io/commands/script-exists
         """
         return self.execute_command("SCRIPT EXISTS", *args)
 
@@ -5061,7 +5068,7 @@ class ScriptCommands(CommandsProtocol):
         """Flush all scripts from the script cache.
         ``sync_type`` is by default SYNC (synchronous) but it can also be
                       ASYNC.
-        For more information check  https://redis.io/commands/script-flush
+        For more information see  https://redis.io/commands/script-flush
         """
 
         # Redis pre 6 had no sync_type.
@@ -5081,7 +5088,7 @@ class ScriptCommands(CommandsProtocol):
         """
         Kill the currently executing Lua script
 
-        For more information check https://redis.io/commands/script-kill
+        For more information see https://redis.io/commands/script-kill
         """
         return self.execute_command("SCRIPT KILL")
 
@@ -5089,7 +5096,7 @@ class ScriptCommands(CommandsProtocol):
         """
         Load a Lua ``script`` into the script cache. Returns the SHA.
 
-        For more information check https://redis.io/commands/script-load
+        For more information see https://redis.io/commands/script-load
         """
         return self.execute_command("SCRIPT LOAD", script)
 
@@ -5149,7 +5156,7 @@ class GeoCommands(CommandsProtocol):
         Changed elements include new elements that were added and elements
         whose scores changed.
 
-        For more information check https://redis.io/commands/geoadd
+        For more information see https://redis.io/commands/geoadd
         """
         if nx and xx:
             raise DataError("GEOADD allows either 'nx' or 'xx', not both")
@@ -5178,7 +5185,7 @@ class GeoCommands(CommandsProtocol):
         The units must be one of the following : m, km mi, ft. By default
         meters are used.
 
-        For more information check https://redis.io/commands/geodist
+        For more information see https://redis.io/commands/geodist
         """
         pieces: list[EncodableT] = [name, place1, place2]
         if unit and unit not in ("m", "km", "mi", "ft"):
@@ -5192,7 +5199,7 @@ class GeoCommands(CommandsProtocol):
         Return the geo hash string for each item of ``values`` members of
         the specified key identified by the ``name`` argument.
 
-        For more information check https://redis.io/commands/geohash
+        For more information see https://redis.io/commands/geohash
         """
         return self.execute_command("GEOHASH", name, *values)
 
@@ -5202,7 +5209,7 @@ class GeoCommands(CommandsProtocol):
         the specified key identified by the ``name`` argument. Each position
         is represented by the pairs lon and lat.
 
-        For more information check https://redis.io/commands/geopos
+        For more information see https://redis.io/commands/geopos
         """
         return self.execute_command("GEOPOS", name, *values)
 
@@ -5250,7 +5257,7 @@ class GeoCommands(CommandsProtocol):
         named with a specific key, instead of ``store`` the sorted set
         destination score is set with the distance.
 
-        For more information check https://redis.io/commands/georadius
+        For more information see https://redis.io/commands/georadius
         """
         return self._georadiusgeneric(
             "GEORADIUS",
@@ -5290,7 +5297,7 @@ class GeoCommands(CommandsProtocol):
         and latitude value, it takes the name of a member already existing
         inside the geospatial index represented by the sorted set.
 
-        For more information check https://redis.io/commands/georadiusbymember
+        For more information see https://redis.io/commands/georadiusbymember
         """
         return self._georadiusgeneric(
             "GEORADIUSBYMEMBER",
@@ -5408,7 +5415,7 @@ class GeoCommands(CommandsProtocol):
         each place.
         ``withhash`` indicates to return the geohash string of each place.
 
-        For more information check https://redis.io/commands/geosearch
+        For more information see https://redis.io/commands/geosearch
         """
 
         return self._geosearchgeneric(
@@ -5455,7 +5462,7 @@ class GeoCommands(CommandsProtocol):
         items in a sorted set populated with their distance from the
         center of the circle or box, as a floating-point number.
 
-        For more information check https://redis.io/commands/geosearchstore
+        For more information see https://redis.io/commands/geosearchstore
         """
         return self._geosearchgeneric(
             "GEOSEARCHSTORE",
@@ -5563,7 +5570,7 @@ class ModuleCommands(CommandsProtocol):
         Passes all ``*args`` to the module, during loading.
         Raises ``ModuleError`` if a module is not found at ``path``.
 
-        For more information check https://redis.io/commands/module-load
+        For more information see https://redis.io/commands/module-load
         """
         return self.execute_command("MODULE LOAD", path, *args)
 
@@ -5572,7 +5579,7 @@ class ModuleCommands(CommandsProtocol):
         Unloads the module ``name``.
         Raises ``ModuleError`` if ``name`` is not in loaded modules.
 
-        For more information check https://redis.io/commands/module-unload
+        For more information see https://redis.io/commands/module-unload
         """
         return self.execute_command("MODULE UNLOAD", name)
 
@@ -5581,7 +5588,7 @@ class ModuleCommands(CommandsProtocol):
         Returns a list of dictionaries containing the name and version of
         all loaded modules.
 
-        For more information check https://redis.io/commands/module-list
+        For more information see https://redis.io/commands/module-list
         """
         return self.execute_command("MODULE LIST")
 
@@ -5673,7 +5680,7 @@ class ClusterCommands(CommandsProtocol):
         """
         Disables read queries for a connection to a Redis Cluster slave node.
 
-        For more information check https://redis.io/commands/readwrite
+        For more information see https://redis.io/commands/readwrite
         """
         return self.execute_command("READWRITE", **kwargs)
 
@@ -5681,7 +5688,7 @@ class ClusterCommands(CommandsProtocol):
         """
         Enables read queries for a connection to a Redis Cluster replica node.
 
-        For more information check https://redis.io/commands/readonly
+        For more information see https://redis.io/commands/readonly
         """
         return self.execute_command("READONLY", **kwargs)
 
@@ -5711,7 +5718,7 @@ class FunctionCommands:
          ``library`` already exists
         :param description: description to the library
 
-        For more information check https://redis.io/commands/function-load
+        For more information see https://redis.io/commands/function-load
         """
         pieces = [engine, library]
         if replace:
@@ -5725,7 +5732,7 @@ class FunctionCommands:
         """
         Delete the library called ``library`` and all its functions.
 
-        For more information check https://redis.io/commands/function-delete
+        For more information see https://redis.io/commands/function-delete
         """
         return self.execute_command("FUNCTION DELETE", library)
 
@@ -5733,7 +5740,7 @@ class FunctionCommands:
         """
         Deletes all the libraries.
 
-        For more information check https://redis.io/commands/function-flush
+        For more information see https://redis.io/commands/function-flush
         """
         return self.execute_command("FUNCTION FLUSH", mode)
 
@@ -5762,7 +5769,7 @@ class FunctionCommands:
         """
         Invoke a function.
 
-        For more information check https://redis.io/commands/fcall
+        For more information see https://redis.io/commands/fcall
         """
         return self._fcall("FCALL", function, numkeys, *keys_and_args)
 
@@ -5773,7 +5780,7 @@ class FunctionCommands:
         This is a read-only variant of the FCALL command that cannot
         execute commands that modify data.
 
-        For more information check https://redis.io/commands/fcal_ro
+        For more information see https://redis.io/commands/fcal_ro
         """
         return self._fcall("FCALL_RO", function, numkeys, *keys_and_args)
 
@@ -5781,7 +5788,7 @@ class FunctionCommands:
         """
         Return the serialized payload of loaded libraries.
 
-        For more information check https://redis.io/commands/function-dump
+        For more information see https://redis.io/commands/function-dump
         """
         from redis.client import NEVER_DECODE
 
@@ -5798,7 +5805,7 @@ class FunctionCommands:
         You can use the optional policy argument to provide a policy
         for handling existing libraries.
 
-        For more information check https://redis.io/commands/function-restore
+        For more information see https://redis.io/commands/function-restore
         """
         return self.execute_command("FUNCTION RESTORE", payload, policy)
 
@@ -5806,7 +5813,7 @@ class FunctionCommands:
         """
         Kill a function that is currently executing.
 
-        For more information check https://redis.io/commands/function-kill
+        For more information see https://redis.io/commands/function-kill
         """
         return self.execute_command("FUNCTION KILL")
 
@@ -5815,7 +5822,7 @@ class FunctionCommands:
         Return information about the function that's currently running
         and information about the available execution engines.
 
-        For more information check https://redis.io/commands/function-stats
+        For more information see https://redis.io/commands/function-stats
         """
         return self.execute_command("FUNCTION STATS")
 
