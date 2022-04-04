@@ -968,6 +968,43 @@ class TestClusterRedisCommands:
         )
 
     @skip_if_redis_enterprise()
+    def test_cluster_nodes_importing_migrating(self, r):
+        response = (
+            "488ead2fcce24d8c0f158f9172cb1f4a9e040fe5 127.0.0.1:16381@26381 "
+            "master - 0 1648975557664 3 connected 10923-16383\n"
+            "8ae2e70812db80776f739a72374e57fc4ae6f89d 127.0.0.1:16380@26380 "
+            "master - 0 1648975555000 2 connected 1 5461-10922 ["
+            "2-<-ed8007ccfa2d91a7b76f8e6fba7ba7e257034a16]\n"
+            "ed8007ccfa2d91a7b76f8e6fba7ba7e257034a16 127.0.0.1:16379@26379 "
+            "myself,master - 0 1648975556000 1 connected 0 2-5460 ["
+            "2->-8ae2e70812db80776f739a72374e57fc4ae6f89d]\n"
+        )
+        mock_all_nodes_resp(r, response)
+        nodes = r.cluster_nodes()
+        assert len(nodes) == 3
+        node_16379 = nodes.get("127.0.0.1:16379")
+        node_16380 = nodes.get("127.0.0.1:16380")
+        node_16381 = nodes.get("127.0.0.1:16381")
+        assert node_16379.get("migrations") == [
+            {
+                "slot": "2",
+                "node_id": "8ae2e70812db80776f739a72374e57fc4ae6f89d",
+                "state": "migrating",
+            }
+        ]
+        assert node_16379.get("slots") == [["0"], ["2", "5460"]]
+        assert node_16380.get("migrations") == [
+            {
+                "slot": "2",
+                "node_id": "ed8007ccfa2d91a7b76f8e6fba7ba7e257034a16",
+                "state": "importing",
+            }
+        ]
+        assert node_16380.get("slots") == [["1"], ["5461", "10922"]]
+        assert node_16381.get("slots") == [["10923", "16383"]]
+        assert node_16381.get("migrations") == []
+
+    @skip_if_redis_enterprise()
     def test_cluster_replicate(self, r):
         node = r.get_random_node()
         all_replicas = r.get_replicas()
