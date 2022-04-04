@@ -1547,7 +1547,8 @@ def test_vector_field(modclient):
     modclient.hset("b", "v", "aaaabaaa")
     modclient.hset("c", "v", "aaaaabaa")
 
-    q = Query("*=>[KNN 2 @v $vec]").return_field("__v_score").sort_by("__v_score", True)
+    query = "*=>[KNN 2 @v $vec]"
+    q = Query(query).return_field("__v_score").sort_by("__v_score", True).dialect(2)
     res = modclient.ft().search(q, query_params={"vec": "aaaaaaaa"})
 
     assert "a" == res.docs[0].id
@@ -1579,7 +1580,7 @@ def test_text_params(modclient):
     modclient.ft().add_document("doc3", name="Carol")
 
     params_dict = {"name1": "Alice", "name2": "Bob"}
-    q = Query("@name:($name1 | $name2 )")
+    q = Query("@name:($name1 | $name2 )").dialect(2)
     res = modclient.ft().search(q, query_params=params_dict)
     assert 2 == res.total
     assert "doc1" == res.docs[0].id
@@ -1597,7 +1598,7 @@ def test_numeric_params(modclient):
     modclient.ft().add_document("doc3", numval=103)
 
     params_dict = {"min": 101, "max": 102}
-    q = Query("@numval:[$min $max]")
+    q = Query("@numval:[$min $max]").dialect(2)
     res = modclient.ft().search(q, query_params=params_dict)
 
     assert 2 == res.total
@@ -1616,7 +1617,7 @@ def test_geo_params(modclient):
     modclient.ft().add_document("doc3", g="29.68746, 34.94882")
 
     params_dict = {"lat": "34.95126", "lon": "29.69465", "radius": 1000, "units": "km"}
-    q = Query("@g:[$lon $lat $radius $units]")
+    q = Query("@g:[$lon $lat $radius $units]").dialect(2)
     res = modclient.ft().search(q, query_params=params_dict)
     assert 3 == res.total
     assert "doc1" == res.docs[0].id
