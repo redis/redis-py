@@ -2,7 +2,7 @@ import pytest
 
 from redis.commands import CommandsParser
 
-from .conftest import skip_if_server_version_lt
+from .conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
 
 class TestCommandsParser:
@@ -21,6 +21,7 @@ class TestCommandsParser:
         assert commands_parser.get_keys(r, *args3) == ["foo", "bar", "foobar"]
 
     @pytest.mark.filterwarnings("ignore:ResponseError")
+    @skip_if_redis_enterprise()
     def test_get_moveable_keys(self, r):
         commands_parser = CommandsParser(r)
         args1 = [
