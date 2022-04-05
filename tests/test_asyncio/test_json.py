@@ -3,9 +3,7 @@ import pytest
 import redis.asyncio as redis
 from redis import exceptions
 from redis.commands.json.path import Path
-
 from tests.conftest import skip_ifmodversion_lt
-
 
 pytestmark = pytest.mark.asyncio
 
