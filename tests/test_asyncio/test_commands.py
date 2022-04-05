@@ -21,7 +21,7 @@ from tests.conftest import (
 REDIS_6_VERSION = "5.9.0"
 
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.onlynoncluster]
 
 
 @pytest.fixture()
