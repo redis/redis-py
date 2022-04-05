@@ -100,7 +100,7 @@ class TestLock:
     def test_blocking_timeout(self, r):
         lock1 = self.get_lock(r, "foo")
         assert lock1.acquire(blocking=False)
-        bt = 0.2
+        bt = 0.4
         sleep = 0.05
         lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
         start = time.monotonic()
