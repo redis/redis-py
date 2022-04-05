@@ -1,5 +1,4 @@
 import asyncio
-from os import popen
 import random
 import sys
 from typing import Union
@@ -113,7 +112,9 @@ async def r2(create_redis):
 
 @pytest_asyncio.fixture()
 async def modclient(request, create_redis):
-    yield await create_redis(url=request.config.getoption("--redismod-url"), decode_responses=True)
+    yield await create_redis(
+        url=request.config.getoption("--redismod-url"), decode_responses=True
+    )
 
 
 def _gen_cluster_mock_resp(r, response):
