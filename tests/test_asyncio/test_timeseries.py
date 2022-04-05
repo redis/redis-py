@@ -72,7 +72,8 @@ async def test_add(modclient: redis.Redis):
     assert 4 == await modclient.ts().add(
         4, 4, 2, retention_msecs=10, labels={"Redis": "Labs", "Time": "Series"}
     )
-    assert round(time.time()) == round(float(await modclient.ts().add(5, "*", 1)) / 1000)
+    res = await modclient.ts().add(5, "*", 1)
+    assert round(time.time()) == round(float(res) / 1000)
 
     info = await modclient.ts().info(4)
     assert 10 == info.retention_msecs
@@ -91,7 +92,9 @@ async def test_add_duplicate_policy(modclient: redis.Redis):
     # Test for duplicate policy BLOCK
     assert 1 == await modclient.ts().add("time-serie-add-ooo-block", 1, 5.0)
     with pytest.raises(Exception):
-        await modclient.ts().add("time-serie-add-ooo-block", 1, 5.0, duplicate_policy="block")
+        await modclient.ts().add(
+            "time-serie-add-ooo-block", 1, 5.0, duplicate_policy="block"
+        )
 
     # Test for duplicate policy LAST
     assert 1 == await modclient.ts().add("time-serie-add-ooo-last", 1, 5.0)
@@ -129,7 +132,9 @@ async def test_add_duplicate_policy(modclient: redis.Redis):
 @pytest.mark.redismod
 async def test_madd(modclient: redis.Redis):
     await modclient.ts().create("a")
-    assert [1, 2, 3] == await modclient.ts().madd([("a", 1, 5), ("a", 2, 10), ("a", 3, 15)])
+    assert [1, 2, 3] == await modclient.ts().madd(
+        [("a", 1, 5), ("a", 2, 10), ("a", 3, 15)]
+    )
 
 
 @pytest.mark.redismod
@@ -207,7 +212,9 @@ async def test_range(modclient: redis.Redis):
     assert 200 == len(await modclient.ts().range(1, 0, 500))
     # last sample isn't returned
     assert 20 == len(
-        await modclient.ts().range(1, 0, 500, aggregation_type="avg", bucket_size_msec=10)
+        await modclient.ts().range(
+            1, 0, 500, aggregation_type="avg", bucket_size_msec=10
+        )
     )
     assert 10 == len(await modclient.ts().range(1, 0, 500, count=10))
 
@@ -248,7 +255,9 @@ async def test_rev_range(modclient: redis.Redis):
     assert 200 == len(await modclient.ts().range(1, 0, 500))
     # first sample isn't returned
     assert 20 == len(
-        await modclient.ts().revrange(1, 0, 500, aggregation_type="avg", bucket_size_msec=10)
+        await modclient.ts().revrange(
+            1, 0, 500, aggregation_type="avg", bucket_size_msec=10
+        )
     )
     assert 10 == len(await modclient.ts().revrange(1, 0, 500, count=10))
     assert 2 == len(
@@ -273,7 +282,9 @@ async def test_rev_range(modclient: redis.Redis):
 @pytest.mark.onlynoncluster
 async def testMultiRange(modclient: redis.Redis):
     await modclient.ts().create(1, labels={"Test": "This", "team": "ny"})
-    await modclient.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
+    await modclient.ts().create(
+        2, labels={"Test": "This", "Taste": "That", "team": "sf"}
+    )
     for i in range(100):
         await modclient.ts().add(1, i, i % 7)
         await modclient.ts().add(2, i, i % 11)
@@ -304,13 +315,17 @@ async def testMultiRange(modclient: redis.Redis):
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 async def test_multi_range_advanced(modclient: redis.Redis):
     await modclient.ts().create(1, labels={"Test": "This", "team": "ny"})
-    await modclient.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
+    await modclient.ts().create(
+        2, labels={"Test": "This", "Taste": "That", "team": "sf"}
+    )
     for i in range(100):
         await modclient.ts().add(1, i, i % 7)
         await modclient.ts().add(2, i, i % 11)
 
     # test with selected labels
-    res = await modclient.ts().mrange(0, 200, filters=["Test=This"], select_labels=["team"])
+    res = await modclient.ts().mrange(
+        0, 200, filters=["Test=This"], select_labels=["team"]
+    )
     assert {"team": "ny"} == res[0]["1"][0]
     assert {"team": "sf"} == res[1]["2"][0]
 
@@ -326,11 +341,17 @@ async def test_multi_range_advanced(modclient: redis.Redis):
     assert [(15, 1.0), (16, 2.0)] == res[0]["1"][1]
 
     # test groupby
-    res = await modclient.ts().mrange(0, 3, filters=["Test=This"], groupby="Test", reduce="sum")
+    res = await modclient.ts().mrange(
+        0, 3, filters=["Test=This"], groupby="Test", reduce="sum"
+    )
     assert [(0, 0.0), (1, 2.0), (2, 4.0), (3, 6.0)] == res[0]["Test=This"][1]
-    res = await modclient.ts().mrange(0, 3, filters=["Test=This"], groupby="Test", reduce="max")
+    res = await modclient.ts().mrange(
+        0, 3, filters=["Test=This"], groupby="Test", reduce="max"
+    )
     assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[0]["Test=This"][1]
-    res = await modclient.ts().mrange(0, 3, filters=["Test=This"], groupby="team", reduce="min")
+    res = await modclient.ts().mrange(
+        0, 3, filters=["Test=This"], groupby="team", reduce="min"
+    )
     assert 2 == len(res)
     assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[0]["team=ny"][1]
     assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[1]["team=sf"][1]
@@ -361,7 +382,9 @@ async def test_multi_range_advanced(modclient: redis.Redis):
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 async def test_multi_reverse_range(modclient: redis.Redis):
     await modclient.ts().create(1, labels={"Test": "This", "team": "ny"})
-    await modclient.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
+    await modclient.ts().create(
+        2, labels={"Test": "This", "Taste": "That", "team": "sf"}
+    )
     for i in range(100):
         await modclient.ts().add(1, i, i % 7)
         await modclient.ts().add(2, i, i % 11)
@@ -383,11 +406,15 @@ async def test_multi_reverse_range(modclient: redis.Redis):
     assert {} == res[0]["1"][0]
 
     # test withlabels
-    res = await modclient.ts().mrevrange(0, 200, filters=["Test=This"], with_labels=True)
+    res = await modclient.ts().mrevrange(
+        0, 200, filters=["Test=This"], with_labels=True
+    )
     assert {"Test": "This", "team": "ny"} == res[0]["1"][0]
 
     # test with selected labels
-    res = await modclient.ts().mrevrange(0, 200, filters=["Test=This"], select_labels=["team"])
+    res = await modclient.ts().mrevrange(
+        0, 200, filters=["Test=This"], select_labels=["team"]
+    )
     assert {"team": "ny"} == res[0]["1"][0]
     assert {"team": "sf"} == res[1]["2"][0]
 
@@ -474,7 +501,9 @@ async def test_mget(modclient: redis.Redis):
 
 @pytest.mark.redismod
 async def test_info(modclient: redis.Redis):
-    await modclient.ts().create(1, retention_msecs=5, labels={"currentLabel": "currentData"})
+    await modclient.ts().create(
+        1, retention_msecs=5, labels={"currentLabel": "currentData"}
+    )
     info = await modclient.ts().info(1)
     assert 5 == info.retention_msecs
     assert info.labels["currentLabel"] == "currentData"
@@ -483,7 +512,9 @@ async def test_info(modclient: redis.Redis):
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
 async def testInfoDuplicatePolicy(modclient: redis.Redis):
-    await modclient.ts().create(1, retention_msecs=5, labels={"currentLabel": "currentData"})
+    await modclient.ts().create(
+        1, retention_msecs=5, labels={"currentLabel": "currentData"}
+    )
     info = await modclient.ts().info(1)
     assert info.duplicate_policy is None
 

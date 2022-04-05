@@ -291,7 +291,8 @@ async def test_topk(modclient: redis.Redis):
         "E",
     )
     assert ["A", "B", "E"] == await modclient.topk().list("topklist")
-    assert ["A", 4, "B", 3, "E", 3] == await modclient.topk().list("topklist", withcount=True)
+    res = await modclient.topk().list("topklist", withcount=True)
+    assert ["A", 4, "B", 3, "E", 3] == res
     info = await modclient.topk().info("topklist")
     assert 3 == info.k
     assert 50 == info.width
@@ -306,7 +307,8 @@ async def test_topk_incrby(modclient: redis.Redis):
     assert [None, None, None] == await modclient.topk().incrby(
         "topk", ["bar", "baz", "42"], [3, 6, 2]
     )
-    assert [None, "bar"] == await modclient.topk().incrby("topk", ["42", "xyzzy"], [8, 4])
+    res = await modclient.topk().incrby("topk", ["42", "xyzzy"], [8, 4])
+    assert [None, "bar"] == res
     assert [3, 6, 10, 4, 0] == await modclient.topk().count(
         "topk", "bar", "baz", "42", "xyzzy", 4
     )
@@ -363,8 +365,10 @@ async def test_tdigest_quantile(modclient: redis.Redis):
         "tDigest", list([x * 0.01 for x in range(1, 10000)]), [1.0] * 10000
     )
     # assert min min/max have same result as quantile 0 and 1
-    assert await modclient.tdigest().max("tDigest") == await modclient.tdigest().quantile("tDigest", 1.0)
-    assert await modclient.tdigest().min("tDigest") == await modclient.tdigest().quantile("tDigest", 0.0)
+    assert (await modclient.tdigest().max("tDigest") == 
+            await modclient.tdigest().quantile("tDigest", 1.0))
+    assert (await modclient.tdigest().min("tDigest") == 
+            await modclient.tdigest().quantile("tDigest", 0.0))
 
     assert 1.0 == round(await modclient.tdigest().quantile("tDigest", 0.01), 2)
     assert 99.0 == round(await modclient.tdigest().quantile("tDigest", 0.99), 2)

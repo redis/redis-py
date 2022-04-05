@@ -2,7 +2,6 @@ import pytest
 
 import redis.asyncio as redis
 from redis import exceptions
-from redis.commands.json.decoders import decode_list, unstring
 from redis.commands.json.path import Path
 
 from tests.conftest import skip_ifmodversion_lt
@@ -17,6 +16,7 @@ async def test_json_setbinarykey(modclient: redis.Redis):
     with pytest.raises(TypeError):
         modclient.json().set("somekey", Path.root_path(), d)
     assert await modclient.json().set("somekey", Path.root_path(), d, decode_keys=True)
+
 
 @pytest.mark.redismod
 async def test_json_setgetdeleteforget(modclient: redis.Redis):
@@ -411,10 +411,12 @@ async def test_json_mget_dollar(modclient: redis.Redis):
     # Test mget with single path
     await modclient.json().mget("doc1", "$..a") == [1, 3, None]
     # Test mget with multi path
-    await modclient.json().mget(["doc1", "doc2"], "$..a") == [[1, 3, None], [4, 6, [None]]]
+    res = await modclient.json().mget(["doc1", "doc2"], "$..a")
+    assert res == [[1, 3, None], [4, 6, [None]]]
 
     # Test missing key
-    await modclient.json().mget(["doc1", "missing_doc"], "$..a") == [[1, 3, None], None]
+    res = await modclient.json().mget(["doc1", "missing_doc"], "$..a")
+    assert res == [[1, 3, None], None]
     res = await modclient.json().mget(["missing_doc1", "missing_doc2"], "$..a")
     assert res == [None, None]
 
@@ -423,11 +425,14 @@ async def test_json_mget_dollar(modclient: redis.Redis):
 async def test_numby_commands_dollar(modclient: redis.Redis):
 
     # Test NUMINCRBY
-    await modclient.json().set("doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]})
+    await modclient.json().set(
+        "doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]}
+    )
     # Test multi
     assert await modclient.json().numincrby("doc1", "$..a", 2) == [None, 4, 7.0, None]
 
-    assert await modclient.json().numincrby("doc1", "$..a", 2.5) == [None, 6.5, 9.5, None]
+    res = await modclient.json().numincrby("doc1", "$..a", 2.5)
+    assert res == [None, 6.5, 9.5, None]
     # Test single
     assert await modclient.json().numincrby("doc1", "$.b[1].a", 2) == [11.5]
 
@@ -435,12 +440,16 @@ async def test_numby_commands_dollar(modclient: redis.Redis):
     assert await modclient.json().numincrby("doc1", "$.b[1].a", 3.5) == [15.0]
 
     # Test NUMMULTBY
-    await modclient.json().set("doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]})
+    await modclient.json().set(
+        "doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]}
+    )
 
     # test list
     with pytest.deprecated_call():
-        assert await modclient.json().nummultby("doc1", "$..a", 2) == [None, 4, 10, None]
-        assert await modclient.json().nummultby("doc1", "$..a", 2.5) == [None, 10.0, 25.0, None]
+        res = await modclient.json().nummultby("doc1", "$..a", 2)
+        assert res == [None, 4, 10, None]
+        res = await modclient.json().nummultby("doc1", "$..a", 2.5)
+        assert res == [None, 10.0, 25.0, None]
 
     # Test single
     with pytest.deprecated_call():
@@ -454,11 +463,15 @@ async def test_numby_commands_dollar(modclient: redis.Redis):
         await modclient.json().nummultby("non_existing_doc", "$..a", 2)
 
     # Test legacy NUMINCRBY
-    await modclient.json().set("doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]})
+    await modclient.json().set(
+        "doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]}
+    )
     await modclient.json().numincrby("doc1", ".b[0].a", 3) == 5
 
     # Test legacy NUMMULTBY
-    await modclient.json().set("doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]})
+    await modclient.json().set(
+        "doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]}
+    )
 
     with pytest.deprecated_call():
         await modclient.json().nummultby("doc1", ".b[0].a", 3) == 6
@@ -602,7 +615,8 @@ async def test_arrinsert_dollar(modclient: redis.Redis):
         },
     )
     # Test multi
-    assert await modclient.json().arrinsert("doc1", "$..a", "1", "bar", "racuda") == [3, 5, None]
+    res = await modclient.json().arrinsert("doc1", "$..a", "1", "bar", "racuda")
+    assert res == [3, 5, None]
 
     assert await modclient.json().get("doc1", "$") == [
         {
@@ -641,11 +655,8 @@ async def test_arrlen_dollar(modclient: redis.Redis):
 
     # Test multi
     assert await modclient.json().arrlen("doc1", "$..a") == [1, 3, None]
-    assert await modclient.json().arrappend("doc1", "$..a", "non", "abba", "stanza") == [
-        4,
-        6,
-        None,
-    ]
+    res = await modclient.json().arrappend("doc1", "$..a", "non", "abba", "stanza")
+    assert res == [4, 6, None]
 
     await modclient.json().clear("doc1", "$.a")
     assert await modclient.json().arrlen("doc1", "$..a") == [0, 6, None]
