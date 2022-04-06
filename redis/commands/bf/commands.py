@@ -18,6 +18,7 @@ CF_ADDNX = "CF.ADDNX"
 CF_INSERT = "CF.INSERT"
 CF_INSERTNX = "CF.INSERTNX"
 CF_EXISTS = "CF.EXISTS"
+CF_MEXISTS = "CF.MEXISTS"
 CF_DEL = "CF.DEL"
 CF_COUNT = "CF.COUNT"
 CF_SCANDUMP = "CF.SCANDUMP"
@@ -232,6 +233,15 @@ class CFCommands:
         """  # noqa
         params = [key, item]
         return self.execute_command(CF_EXISTS, *params)
+
+    def mexists(self, key, *items):
+        """
+        Check whether `items` exist in Cuckoo Filter `key`.
+        For more information see `CF.MEXISTS <https://oss.redis.com/redisbloom/master/Cuckoo_Commands/#cfmexists>`_.
+        """  # noqa
+        params = [key]
+        params += items
+        return self.execute_command(CF_MEXISTS, *params)
 
     def delete(self, key, item):
         """
