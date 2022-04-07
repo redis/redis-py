@@ -41,8 +41,8 @@ from redis.client import (
 )
 from redis.commands import (
     AsyncCoreCommands,
-    AsyncSentinelCommands,
     AsyncRedisModuleCommands,
+    AsyncSentinelCommands,
     list_or_args,
 )
 from redis.compat import Protocol, TypedDict

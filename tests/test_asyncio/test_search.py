@@ -16,9 +16,7 @@ from redis.commands.search.indexDefinition import IndexDefinition
 from redis.commands.search.query import GeoFilter, NumericFilter, Query
 from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
-
 from tests.conftest import skip_ifmodversion_lt
-
 
 pytestmark = pytest.mark.asyncio
 
