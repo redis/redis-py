@@ -158,9 +158,7 @@ async def test_client(modclient: redis.Redis):
         (
             await (
                 modclient.ft()
-                .search(Query("henry")
-                .no_content()
-                .limit_fields("play", "txt"))
+                .search(Query("henry").no_content().limit_fields("play", "txt"))
             )
         ).total
     )
