@@ -67,9 +67,23 @@ class TestResponseCallbacks:
 class TestRedisCommands:
     @skip_if_redis_enterprise()
     def test_auth(self, r, request):
+        # first, test for default user (`username` is supposed to be optional)
+        default_username = "default"
+        temp_pass = "temp_pass"
+        r.config_set("requirepass", temp_pass)
+
+        assert r.auth(temp_pass, default_username) is True
+        assert r.auth(temp_pass) is True
+
+        # test for other users
         username = "redis-py-auth"
 
         def teardown():
+            try:
+                r.auth(temp_pass)
+            except exceptions.ResponseError:
+                r.auth("default", "")
+            r.config_set("requirepass", "")
             r.acl_deluser(username)
 
         request.addfinalizer(teardown)
