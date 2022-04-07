@@ -10,10 +10,9 @@ import redis.asyncio as redis
 import redis.commands.search
 import redis.commands.search.aggregation as aggregations
 import redis.commands.search.reducers as reducers
-from redis.commands.json.path import Path
 from redis.commands.search import AsyncSearch
 from redis.commands.search.field import GeoField, NumericField, TagField, TextField
-from redis.commands.search.indexDefinition import IndexDefinition, IndexType
+from redis.commands.search.indexDefinition import IndexDefinition
 from redis.commands.search.query import GeoFilter, NumericFilter, Query
 from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
@@ -95,7 +94,6 @@ async def createIndex(modclient, num_docs=100, definition=None):
     await indexer.commit()
 
 
-
 @pytest.mark.redismod
 async def test_client(modclient: redis.Redis):
     num_docs = 500
@@ -157,11 +155,13 @@ async def test_client(modclient: redis.Redis):
         await modclient.ft().search(Query("henry").no_content().limit_fields("play"))
     ).total
     both_total = (
-        (await (
-            modclient.ft()
-            .search(Query("henry")
-            .no_content()
-            .limit_fields("play", "txt")))
+        (
+            await (
+                modclient.ft()
+                .search(Query("henry")
+                .no_content()
+                .limit_fields("play", "txt"))
+            )
         ).total
     )
     assert 129 == txt_total
@@ -209,6 +209,7 @@ async def test_client(modclient: redis.Redis):
     res = await modclient.ft().search(Query("death of a salesman"))
     assert 1 == res.total
     await modclient.ft().delete_document("doc-5ghs2")
+
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")

@@ -82,6 +82,7 @@ class RedisModuleCommands:
         g = Graph(client=self, name=index_name)
         return g
 
+
 class AsyncRedisModuleCommands(RedisModuleCommands):
 
     def ft(self, index_name="idx"):

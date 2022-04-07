@@ -871,7 +871,7 @@ class AsyncSearchCommands(SearchCommands):
         res = await self.execute_command(INFO_CMD, self.index_name)
         it = map(to_string, res)
         return dict(zip(it, it))
-    
+
     async def search(
         self,
         query: Union[str, Query],
@@ -980,7 +980,7 @@ class AsyncSearchCommands(SearchCommands):
             ]
 
         return corrections
-    
+
     async def config_set(self, option, value):
         """Set runtime configuration option.
 
@@ -1011,7 +1011,7 @@ class AsyncSearchCommands(SearchCommands):
             for kvs in raw:
                 res[kvs[0]] = kvs[1]
         return res
-    
+
     async def load_document(self, id):
         """
         Load a single document by id

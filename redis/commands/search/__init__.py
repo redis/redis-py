@@ -154,7 +154,7 @@ class AsyncSearch(Search, AsyncSearchCommands):
             """
             await self._pipeline.execute()
             self.current_chunk = 0
-    
+
     def pipeline(self, transaction=True, shard_hint=None):
         """Creates a pipeline for the SEARCH module, that can be used for executing
         SEARCH commands, as well as classic core commands.
@@ -171,6 +171,7 @@ class AsyncSearch(Search, AsyncSearchCommands):
 
 class Pipeline(SearchCommands, redis.client.Pipeline):
     """Pipeline for the module."""
+
 
 class AsyncPipeline(AsyncSearchCommands, redis.asyncio.client.Pipeline):
     """AsyncPipeline for the module."""
