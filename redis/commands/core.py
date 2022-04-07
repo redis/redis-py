@@ -369,16 +369,14 @@ class ManagementCommands(CommandsProtocol):
     Redis management commands
     """
 
-    def auth(self, password, username=None, **kwargs):
+    def auth(self, password, username="default", **kwargs):
         """
         Authenticates the user. If you do not pass username, Redis will try to
         authenticate for the "default" user. If you do pass username, it will
         authenticate for the given user.
         For more information see https://redis.io/commands/auth
         """
-        if username:
-            return self.execute_command("AUTH", username, password, **kwargs)
-        return self.execute_command
+        return self.execute_command("AUTH", username, password, **kwargs)
 
     def bgrewriteaof(self, **kwargs):
         """Tell the Redis server to rewrite the AOF file from data in memory.

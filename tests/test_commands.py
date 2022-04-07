@@ -67,6 +67,13 @@ class TestResponseCallbacks:
 class TestRedisCommands:
     @skip_if_redis_enterprise()
     def test_auth(self, r, request):
+        # first, test for default user (`username` is supposed to be optional)
+        username = "default"
+
+        assert r.auth("", username) is True
+        assert r.auth("") is True
+
+        # test for other users
         username = "redis-py-auth"
 
         def teardown():
