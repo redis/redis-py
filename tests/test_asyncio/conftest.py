@@ -20,6 +20,8 @@ from redis.asyncio.connection import (
     PythonParser,
     parse_url,
 )
+from redis.asyncio.retry import Retry
+from redis.backoff import NoBackoff
 from tests.conftest import REDIS_INFO
 
 from .compat import mock
@@ -97,7 +99,7 @@ def create_redis(request, event_loop: asyncio.BaseEventLoop):
 
 
 @pytest_asyncio.fixture()
-async def r(create_redis):
+async def r(request, create_redis):
     yield await create_redis()
 
 
@@ -107,8 +109,16 @@ async def r2(create_redis):
     yield await create_redis()
 
 
+@pytest_asyncio.fixture()
+async def modclient(request, create_redis):
+    yield await create_redis(
+        url=request.config.getoption("--redismod-url"), decode_responses=True
+    )
+
+
 def _gen_cluster_mock_resp(r, response):
     connection = mock.AsyncMock()
+    connection.retry = Retry(NoBackoff(), 0)
     connection.read_response.return_value = response
     r.connection = connection
     return r
