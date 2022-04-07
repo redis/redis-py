@@ -100,7 +100,6 @@ def create_redis(request, event_loop: asyncio.BaseEventLoop):
 
 @pytest_asyncio.fixture()
 async def r(request, create_redis):
-    print(request.config.getoption("--redis-url"))
     yield await create_redis()
 
 
