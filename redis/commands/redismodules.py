@@ -84,7 +84,6 @@ class RedisModuleCommands:
 
 
 class AsyncRedisModuleCommands(RedisModuleCommands):
-
     def ft(self, index_name="idx"):
         """Access the search namespace, providing support for redis search."""
 

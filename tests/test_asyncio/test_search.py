@@ -155,13 +155,12 @@ async def test_client(modclient: redis.Redis):
         await modclient.ft().search(Query("henry").no_content().limit_fields("play"))
     ).total
     both_total = (
-        (
-            await (
-                modclient.ft()
-                .search(Query("henry").no_content().limit_fields("play", "txt"))
+        await (
+            modclient.ft().search(
+                Query("henry").no_content().limit_fields("play", "txt")
             )
-        ).total
-    )
+        )
+    ).total
     assert 129 == txt_total
     assert 494 == play_total
     assert 494 == both_total
@@ -184,12 +183,13 @@ async def test_client(modclient: redis.Redis):
 
     # test slop and in order
     assert 193 == (await modclient.ft().search(Query("henry king"))).total
-    assert 3 == (
-        await modclient.ft().search(Query("henry king").slop(0).in_order())
-    ).total
-    assert 52 == (
-        await modclient.ft().search(Query("king henry").slop(0).in_order())
-    ).total
+    assert (
+        3 == (await modclient.ft().search(Query("henry king").slop(0).in_order())).total
+    )
+    assert (
+        52
+        == (await modclient.ft().search(Query("king henry").slop(0).in_order())).total
+    )
     assert 53 == (await modclient.ft().search(Query("henry king").slop(0))).total
     assert 167 == (await modclient.ft().search(Query("henry king").slop(100))).total
 
@@ -285,12 +285,14 @@ async def test_stopwords(modclient: redis.Redis):
 @pytest.mark.redismod
 async def test_filters(modclient: redis.Redis):
     await (
-        modclient.ft()
-        .create_index((TextField("txt"), NumericField("num"), GeoField("loc")))
+        modclient.ft().create_index(
+            (TextField("txt"), NumericField("num"), GeoField("loc"))
+        )
     )
     await (
-        modclient.ft()
-        .add_document("doc1", txt="foo bar", num=3.141, loc="-0.441,51.458")
+        modclient.ft().add_document(
+            "doc1", txt="foo bar", num=3.141, loc="-0.441,51.458"
+        )
     )
     await modclient.ft().add_document("doc2", txt="foo baz", num=2, loc="-0.1,51.2")
 
@@ -338,8 +340,9 @@ async def test_payloads_with_no_content(modclient: redis.Redis):
 @pytest.mark.redismod
 async def test_sort_by(modclient: redis.Redis):
     await (
-        modclient.ft()
-        .create_index((TextField("txt"), NumericField("num", sortable=True)))
+        modclient.ft().create_index(
+            (TextField("txt"), NumericField("num", sortable=True))
+        )
     )
     await modclient.ft().add_document("doc1", txt="foo bar", num=1)
     await modclient.ft().add_document("doc2", txt="foo baz", num=2)
@@ -383,8 +386,7 @@ async def test_drop_index(modclient: redis.Redis):
 async def test_example(modclient: redis.Redis):
     # Creating the index definition and schema
     await (
-        modclient.ft()
-        .create_index((TextField("title", weight=5.0), TextField("body")))
+        modclient.ft().create_index((TextField("title", weight=5.0), TextField("body")))
     )
 
     # Indexing a document
@@ -508,8 +510,7 @@ async def test_no_index(modclient: redis.Redis):
 @pytest.mark.redismod
 async def test_partial(modclient: redis.Redis):
     await (
-        modclient.ft()
-        .create_index((TextField("f1"), TextField("f2"), TextField("f3")))
+        modclient.ft().create_index((TextField("f1"), TextField("f2"), TextField("f3")))
     )
     await modclient.ft().add_document("doc1", f1="f1_val", f2="f2_val")
     await modclient.ft().add_document("doc2", f1="f1_val", f2="f2_val")
@@ -529,8 +530,7 @@ async def test_partial(modclient: redis.Redis):
 @pytest.mark.redismod
 async def test_no_create(modclient: redis.Redis):
     await (
-        modclient.ft().
-        create_index((TextField("f1"), TextField("f2"), TextField("f3")))
+        modclient.ft().create_index((TextField("f1"), TextField("f2"), TextField("f3")))
     )
     await modclient.ft().add_document("doc1", f1="f1_val", f2="f2_val")
     await modclient.ft().add_document("doc2", f1="f1_val", f2="f2_val")
@@ -548,16 +548,16 @@ async def test_no_create(modclient: redis.Redis):
 
     with pytest.raises(redis.ResponseError):
         await (
-            modclient.ft()
-            .add_document("doc3", f2="f2_val", f3="f3_val", no_create=True)
+            modclient.ft().add_document(
+                "doc3", f2="f2_val", f3="f3_val", no_create=True
+            )
         )
 
 
 @pytest.mark.redismod
 async def test_explain(modclient: redis.Redis):
     await (
-        modclient.ft()
-        .create_index((TextField("f1"), TextField("f2"), TextField("f3")))
+        modclient.ft().create_index((TextField("f1"), TextField("f2"), TextField("f3")))
     )
     res = await modclient.ft().explain("@f3:f3_val @f2:f2_val @f1:f1_val")
     assert res
@@ -740,8 +740,9 @@ async def test_spell_check(modclient: redis.Redis):
     await modclient.ft().create_index((TextField("f1"), TextField("f2")))
 
     await (
-        modclient.ft().
-        add_document("doc1", f1="some valid content", f2="this is sample text")
+        modclient.ft().add_document(
+            "doc1", f1="some valid content", f2="this is sample text"
+        )
     )
     await modclient.ft().add_document("doc2", f1="very important", f2="lorem ipsum")
     await waitForIndex(modclient, "idx")

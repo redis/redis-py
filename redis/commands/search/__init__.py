@@ -118,6 +118,7 @@ class AsyncSearch(Search, AsyncSearchCommands):
         A batch indexer allows you to automatically batch
         document indexing in pipelines, flushing it every N documents.
         """
+
         async def add_document(
             self,
             doc_id,
