@@ -3799,7 +3799,7 @@ class StreamCommands(CommandsProtocol):
     def xtrim(
         self,
         name: KeyT,
-        maxlen: int,
+        maxlen: Union[int, None],
         approximate: bool = True,
         minid: Union[StreamIdT, None] = None,
         limit: Union[int, None] = None,
