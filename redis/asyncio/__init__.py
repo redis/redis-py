@@ -1,4 +1,5 @@
 from redis.asyncio.client import Redis, StrictRedis
+from redis.asyncio.cluster import RedisCluster
 from redis.asyncio.connection import (
     BlockingConnectionPool,
     Connection,
@@ -6,6 +7,7 @@ from redis.asyncio.connection import (
     SSLConnection,
     UnixDomainSocketConnection,
 )
+from redis.asyncio.parser import CommandsParser
 from redis.asyncio.sentinel import (
     Sentinel,
     SentinelConnectionPool,
@@ -35,6 +37,7 @@ __all__ = [
     "BlockingConnectionPool",
     "BusyLoadingError",
     "ChildDeadlockedError",
+    "CommandsParser",
     "Connection",
     "ConnectionError",
     "ConnectionPool",
@@ -44,6 +47,7 @@ __all__ = [
     "PubSubError",
     "ReadOnlyError",
     "Redis",
+    "RedisCluster",
     "RedisError",
     "ResponseError",
     "Sentinel",

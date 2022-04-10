@@ -1,3 +1,4 @@
+import asyncio
 from typing import Iterator, Union
 
 from redis.crc import key_slot
@@ -6,6 +7,11 @@ from redis.typing import PatternT
 
 from .core import (
     ACLCommands,
+    AsyncACLCommands,
+    AsyncDataAccessCommands,
+    AsyncFunctionCommands,
+    AsyncManagementCommands,
+    AsyncScriptCommands,
     DataAccessCommands,
     FunctionCommands,
     ManagementCommands,
@@ -185,7 +191,7 @@ class AsyncClusterMultiKeyCommands:
 
         return slots_to_keys
 
-    def mget_nonatomic(self, keys, *args):
+    async def mget_nonatomic(self, keys, *args):
         """
         Splits the keys into different slots and then calls MGET
         for the keys of every slot. This operation will not be atomic
@@ -210,18 +216,22 @@ class AsyncClusterMultiKeyCommands:
         # Call MGET for every slot and concatenate
         # the results
         # We must make sure that the keys are returned in order
-        all_results = {}
-        for slot_keys in slots_to_keys.values():
-            slot_values = self.execute_command("MGET", *slot_keys, **options)
+        all_values = await asyncio.gather(
+            *[
+                self.execute_command("MGET", *slot_keys, **options)
+                for slot_keys in slots_to_keys.values()
+            ]
+        )
 
-            slot_results = dict(zip(slot_keys, slot_values))
-            all_results.update(slot_results)
+        all_results = {}
+        for slot_keys, slot_values in zip(slots_to_keys.values(), all_values):
+            all_results.update(dict(zip(slot_keys, slot_values)))
 
         # Sort the results
         vals_in_order = [all_results[key] for key in keys]
         return vals_in_order
 
-    def mset_nonatomic(self, mapping):
+    async def mset_nonatomic(self, mapping):
         """
         Sets key/values based on a mapping. Mapping is a dictionary of
         key/value pairs. Both keys and values should be strings or types that
@@ -244,13 +254,11 @@ class AsyncClusterMultiKeyCommands:
 
         # Call MSET for every slot and concatenate
         # the results (one result per slot)
-        res = []
-        for pairs in slots_to_pairs.values():
-            res.append(self.execute_command("MSET", *pairs))
+        return await asyncio.gather(
+            *[self.execute_command("MSET", *pairs) for pairs in slots_to_pairs.values()]
+        )
 
-        return res
-
-    def _split_command_across_slots(self, command, *keys):
+    async def _split_command_across_slots(self, command, *keys):
         """
         Runs the given command once for the keys
         of each slot. Returns the sum of the return values.
@@ -259,11 +267,14 @@ class AsyncClusterMultiKeyCommands:
         slots_to_keys = self._partition_keys_by_slot(keys)
 
         # Sum up the reply from each command
-        total = 0
-        for slot_keys in slots_to_keys.values():
-            total += self.execute_command(command, *slot_keys)
-
-        return total
+        return sum(
+            await asyncio.gather(
+                *[
+                    self.execute_command(command, *slot_keys)
+                    for slot_keys in slots_to_keys.values()
+                ]
+            )
+        )
 
     def exists(self, *keys):
         """
@@ -351,7 +362,7 @@ class ClusterManagementCommands(ManagementCommands):
         raise RedisClusterException("SWAPDB is not supported in cluster" " mode")
 
 
-class AsyncClusterManagementCommands(ManagementCommands):
+class AsyncClusterManagementCommands(AsyncManagementCommands):
     """
     A class for Redis Cluster management commands
 
@@ -475,7 +486,7 @@ class ClusterDataAccessCommands(DataAccessCommands):
                 }
 
 
-class AsyncClusterDataAccessCommands(DataAccessCommands):
+class AsyncClusterDataAccessCommands(AsyncDataAccessCommands):
     """
     A class for Redis Cluster Data Access Commands
 
@@ -530,7 +541,7 @@ class AsyncClusterDataAccessCommands(DataAccessCommands):
             **kwargs,
         )
 
-    def scan_iter(
+    async def scan_iter(
         self,
         match: Union[PatternT, None] = None,
         count: Union[int, None] = None,
@@ -538,8 +549,9 @@ class AsyncClusterDataAccessCommands(DataAccessCommands):
         **kwargs,
     ) -> Iterator:
         # Do the first query with cursor=0 for all nodes
-        cursors, data = self.scan(match=match, count=count, _type=_type, **kwargs)
-        yield from data
+        cursors, data = await self.scan(match=match, count=count, _type=_type, **kwargs)
+        for value in data:
+            yield value
 
         cursors = {name: cursor for name, cursor in cursors.items() if cursor != 0}
         if cursors:
@@ -550,7 +562,7 @@ class AsyncClusterDataAccessCommands(DataAccessCommands):
             kwargs.pop("target_nodes", None)
             while cursors:
                 for name, cursor in cursors.items():
-                    cur, data = self.scan(
+                    cur, data = await self.scan(
                         cursor=cursor,
                         match=match,
                         count=count,
@@ -558,7 +570,8 @@ class AsyncClusterDataAccessCommands(DataAccessCommands):
                         target_nodes=nodes[name],
                         **kwargs,
                     )
-                    yield from data
+                    for value in data:
+                        yield value
                     cursors[name] = cur[name]
 
                 cursors = {
@@ -872,14 +885,12 @@ class RedisClusterCommands(
 
 
 class AsyncRedisClusterCommands(
-    ClusterMultiKeyCommands,
-    ClusterManagementCommands,
-    ACLCommands,
-    PubSubCommands,
-    ClusterDataAccessCommands,
-    ScriptCommands,
-    FunctionCommands,
-    RedisModuleCommands,
+    AsyncClusterMultiKeyCommands,
+    AsyncClusterManagementCommands,
+    AsyncACLCommands,
+    AsyncClusterDataAccessCommands,
+    AsyncScriptCommands,
+    AsyncFunctionCommands,
 ):
     """
     A class for all Redis Cluster commands
@@ -959,7 +970,7 @@ class AsyncRedisClusterCommands(
         """
         return self.execute_command("CLUSTER COUNT-FAILURE-REPORTS", node_id)
 
-    def cluster_delslots(self, *slots):
+    async def cluster_delslots(self, *slots):
         """
         Set hash slots as unbound in the cluster.
         It determines by it self what node the slot is in and sends it there
@@ -968,7 +979,9 @@ class AsyncRedisClusterCommands(
 
         For more information see https://redis.io/commands/cluster-delslots
         """
-        return [self.execute_command("CLUSTER DELSLOTS", slot) for slot in slots]
+        return await asyncio.gather(
+            *[self.execute_command("CLUSTER DELSLOTS", slot) for slot in slots]
+        )
 
     def cluster_delslotsrange(self, *slots):
         """

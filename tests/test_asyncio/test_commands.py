@@ -4,10 +4,16 @@ Tests async overrides of commands from their mixins
 import binascii
 import datetime
 import re
+import sys
 import time
 from string import ascii_letters
 
 import pytest
+
+if sys.version_info[0:2] == (3, 6):
+    import pytest as pytest_asyncio
+else:
+    import pytest_asyncio
 
 import redis
 from redis import exceptions
@@ -21,10 +27,10 @@ from tests.conftest import (
 REDIS_6_VERSION = "5.9.0"
 
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.onlynoncluster]
+pytestmark = pytest.mark.asyncio
 
 
-@pytest.fixture()
+@pytest_asyncio.fixture()
 async def slowlog(r: redis.Redis, event_loop):
     current_config = await r.config_get()
     old_slower_than_value = current_config["slowlog-log-slower-than"]
@@ -1923,7 +1929,8 @@ class TestRedisCommands:
 
     async def test_hmset(self, r: redis.Redis):
         warning_message = (
-            r"^Redis\.hmset\(\) is deprecated\. " r"Use Redis\.hset\(\) instead\.$"
+            r"^Redis(?:Cluster)*\.hmset\(\) is deprecated\. "
+            r"Use Redis(?:Cluster)*\.hset\(\) instead\.$"
         )
         h = {b"a": b"1", b"b": b"2", b"c": b"3"}
         with pytest.warns(DeprecationWarning, match=warning_message):
@@ -2929,6 +2936,7 @@ class TestRedisCommands:
         # 1 message is trimmed
         assert await r.xtrim(stream, 3, approximate=False) == 1
 
+    @pytest.mark.onlynoncluster
     async def test_bitfield_operations(self, r: redis.Redis):
         # comments show affected bits
         await r.execute_command("SELECT", 10)

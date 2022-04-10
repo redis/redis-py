@@ -204,7 +204,7 @@ class ClusterParser(DefaultParser):
     )
 
 
-class RedisCluster(RedisClusterCommands):
+class AbstractRedisCluster:
     RedisClusterRequestTTL = 16
 
     PRIMARIES = "primaries"
@@ -418,6 +418,8 @@ class RedisCluster(RedisClusterCommands):
 
     ERRORS_ALLOW_RETRY = (ConnectionError, TimeoutError, ClusterDownError)
 
+
+class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
     @classmethod
     def from_url(cls, url, **kwargs):
         """
@@ -947,9 +949,6 @@ class RedisCluster(RedisClusterCommands):
 
         return slots.pop()
 
-    def reinitialize_caches(self):
-        self.nodes_manager.initialize()
-
     def get_encoder(self):
         """
         Get the connections' encoder
@@ -1036,7 +1035,7 @@ class RedisCluster(RedisClusterCommands):
                 # Return the processed result
                 return self._process_result(args[0], res, **kwargs)
             except BaseException as e:
-                if type(e) in RedisCluster.ERRORS_ALLOW_RETRY:
+                if type(e) in AbstractRedisCluster.ERRORS_ALLOW_RETRY:
                     # The nodes and slots cache were reinitialized.
                     # Try again with the new cluster setup.
                     exception = e

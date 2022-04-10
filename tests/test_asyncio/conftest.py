@@ -36,12 +36,18 @@ async def _get_info(redis_url):
 
 @pytest_asyncio.fixture(
     params=[
-        (True, PythonParser),
+        pytest.param(
+            (True, PythonParser),
+            marks=pytest.mark.skipif(
+                REDIS_INFO["cluster_enabled"], reason="cluster mode enabled"
+            ),
+        ),
         (False, PythonParser),
         pytest.param(
             (True, HiredisParser),
             marks=pytest.mark.skipif(
-                not HIREDIS_AVAILABLE, reason="hiredis is not installed"
+                not HIREDIS_AVAILABLE or REDIS_INFO["cluster_enabled"],
+                reason="hiredis is not installed or cluster mode enabled",
             ),
         ),
         pytest.param(
@@ -62,29 +68,51 @@ def create_redis(request, event_loop: asyncio.BaseEventLoop):
     """Wrapper around redis.create_redis."""
     single_connection, parser_cls = request.param
 
-    async def f(url: str = request.config.getoption("--redis-url"), **kwargs):
-        single = kwargs.pop("single_connection_client", False) or single_connection
-        parser_class = kwargs.pop("parser_class", None) or parser_cls
-        url_options = parse_url(url)
-        url_options.update(kwargs)
-        pool = redis.ConnectionPool(parser_class=parser_class, **url_options)
-        client: redis.Redis = redis.Redis(connection_pool=pool)
+    async def f(
+        url: str = request.config.getoption("--redis-url"),
+        cls=redis.Redis,
+        flushdb=True,
+        **kwargs,
+    ):
+        cluster_mode = REDIS_INFO["cluster_enabled"]
+        if not cluster_mode:
+            single = kwargs.pop("single_connection_client", False) or single_connection
+            parser_class = kwargs.pop("parser_class", None) or parser_cls
+            url_options = parse_url(url)
+            url_options.update(kwargs)
+            pool = redis.ConnectionPool(parser_class=parser_class, **url_options)
+            client = cls(connection_pool=pool)
+        else:
+            client = redis.RedisCluster.from_url(url, **kwargs)
+            await client.initialize()
+            single = False
         if single:
             client = client.client()
             await client.initialize()
 
         def teardown():
             async def ateardown():
-                if "username" in kwargs:
-                    return
-                try:
-                    await client.flushdb()
-                except redis.ConnectionError:
-                    # handle cases where a test disconnected a client
-                    # just manually retry the flushdb
-                    await client.flushdb()
-                await client.close()
-                await client.connection_pool.disconnect()
+                if not cluster_mode:
+                    if "username" in kwargs:
+                        return
+                    if flushdb:
+                        try:
+                            await client.flushdb()
+                        except redis.ConnectionError:
+                            # handle cases where a test disconnected a client
+                            # just manually retry the flushdb
+                            await client.flushdb()
+                    await client.close()
+                    await client.connection_pool.disconnect()
+                else:
+                    if flushdb:
+                        try:
+                            await client.flushdb(target_nodes="primaries")
+                        except redis.ConnectionError:
+                            # handle cases where a test disconnected a client
+                            # just manually retry the flushdb
+                            await client.flushdb(target_nodes="primaries")
+                    await client.close()
 
             if event_loop.is_running():
                 event_loop.create_task(ateardown())

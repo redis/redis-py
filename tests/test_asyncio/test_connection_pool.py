@@ -20,6 +20,7 @@ from .test_pubsub import wait_for_message
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.mark.onlynoncluster
 class TestRedisAutoReleaseConnectionPool:
     @pytest_asyncio.fixture
     async def r(self, create_redis) -> redis.Redis:
@@ -112,7 +113,6 @@ class DummyConnection(Connection):
         return False
 
 
-@pytest.mark.onlynoncluster
 class TestConnectionPool:
     def get_pool(
         self,
@@ -189,7 +189,6 @@ class TestConnectionPool:
         assert repr(pool) == expected
 
 
-@pytest.mark.onlynoncluster
 class TestBlockingConnectionPool:
     def get_pool(self, connection_kwargs=None, max_connections=10, timeout=20):
         connection_kwargs = connection_kwargs or {}
@@ -296,7 +295,6 @@ class TestBlockingConnectionPool:
         assert repr(pool) == expected
 
 
-@pytest.mark.onlynoncluster
 class TestConnectionPoolURLParsing:
     def test_hostname(self):
         pool = redis.ConnectionPool.from_url("redis://my.host")
@@ -439,7 +437,6 @@ class TestConnectionPoolURLParsing:
         )
 
 
-@pytest.mark.onlynoncluster
 class TestConnectionPoolUnixSocketURLParsing:
     def test_defaults(self):
         pool = redis.ConnectionPool.from_url("unix:///socket")
@@ -508,7 +505,6 @@ class TestConnectionPoolUnixSocketURLParsing:
         assert pool.connection_kwargs == {"path": "/socket", "a": "1", "b": "2"}
 
 
-@pytest.mark.onlynoncluster
 class TestSSLConnectionURLParsing:
     def test_host(self):
         pool = redis.ConnectionPool.from_url("rediss://my.host")
@@ -538,7 +534,6 @@ class TestSSLConnectionURLParsing:
         assert pool.get_connection("_").check_hostname is True
 
 
-@pytest.mark.onlynoncluster
 class TestConnection:
     async def test_on_connect_error(self):
         """
