@@ -48,6 +48,14 @@ jobs:
          uses: actions/setup-python@v2
          with:
            python-version: ${{ matrix.python-version }}
+       - name: Cache dependencies
+         uses: actions/cache@v2
+         with:
+           path: |
+             ~/.cache/pip
+             ~/.cache/pypoetry
+             .tox
+            key: redis-${{hashFiles('pyproject.toml'}}-${{matrix.python-version}}-${{matrix.connection-type}}
        - name: run tests
          run: |
            pip install -U setuptools wheel
