@@ -46,7 +46,6 @@ jobs:
              experimental: true
              test-type: standalone
              connection-type: plain
-             experimental: true
      env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
      name: Python ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}} tests
