@@ -2,6 +2,8 @@ import pytest
 
 from redis.commands import CommandsParser
 
+from .conftest import skip_if_redis_enterprise, skip_if_server_version_lt
+
 
 class TestCommandsParser:
     def test_init_commands(self, r):
@@ -19,6 +21,7 @@ class TestCommandsParser:
         assert commands_parser.get_keys(r, *args3) == ["foo", "bar", "foobar"]
 
     @pytest.mark.filterwarnings("ignore:ResponseError")
+    @skip_if_redis_enterprise()
     def test_get_moveable_keys(self, r):
         commands_parser = CommandsParser(r)
         args1 = [
@@ -67,6 +70,19 @@ class TestCommandsParser:
         assert commands_parser.get_keys(r, *args7).sort() == ["key1"].sort()
         assert commands_parser.get_keys(r, *args8) is None
         assert commands_parser.get_keys(r, *args9).sort() == ["key1", "key2"].sort()
+
+    # A bug in redis<7.0 causes this to fail: https://github.com/redis/redis/issues/9493
+    @skip_if_server_version_lt("7.0.0")
+    def test_get_eval_keys_with_0_keys(self, r):
+        commands_parser = CommandsParser(r)
+        args = [
+            "EVAL",
+            "return {ARGV[1],ARGV[2]}",
+            0,
+            "key1",
+            "key2",
+        ]
+        assert commands_parser.get_keys(r, *args) == []
 
     def test_get_pubsub_keys(self, r):
         commands_parser = CommandsParser(r)

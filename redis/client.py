@@ -466,7 +466,6 @@ def _parse_node_line(line):
     line_items = line.split(" ")
     node_id, addr, flags, master_id, ping, pong, epoch, connected = line.split(" ")[:8]
     addr = addr.split("@")[0]
-    slots = [sl.split("-") for sl in line_items[8:]]
     node_dict = {
         "node_id": node_id,
         "flags": flags,
@@ -474,18 +473,42 @@ def _parse_node_line(line):
         "last_ping_sent": ping,
         "last_pong_rcvd": pong,
         "epoch": epoch,
-        "slots": slots,
+        "slots": [],
+        "migrations": [],
         "connected": True if connected == "connected" else False,
     }
+    if len(line_items) >= 9:
+        slots, migrations = _parse_slots(line_items[8:])
+        node_dict["slots"], node_dict["migrations"] = slots, migrations
     return addr, node_dict
+
+
+def _parse_slots(slot_ranges):
+    slots, migrations = [], []
+    for s_range in slot_ranges:
+        if "->-" in s_range:
+            slot_id, dst_node_id = s_range[1:-1].split("->-", 1)
+            migrations.append(
+                {"slot": slot_id, "node_id": dst_node_id, "state": "migrating"}
+            )
+        elif "-<-" in s_range:
+            slot_id, src_node_id = s_range[1:-1].split("-<-", 1)
+            migrations.append(
+                {"slot": slot_id, "node_id": src_node_id, "state": "importing"}
+            )
+        else:
+            s_range = [sl for sl in s_range.split("-")]
+            slots.append(s_range)
+
+    return slots, migrations
 
 
 def parse_cluster_nodes(response, **options):
     """
-    @see: https://redis.io/commands/cluster-nodes  # string
-    @see: https://redis.io/commands/cluster-replicas # list of string
+    @see: https://redis.io/commands/cluster-nodes  # string / bytes
+    @see: https://redis.io/commands/cluster-replicas # list of string / bytes
     """
-    if isinstance(response, str):
+    if isinstance(response, (str, bytes)):
         response = response.splitlines()
     return dict(_parse_node_line(str_if_bytes(node)) for node in response)
 
@@ -642,19 +665,7 @@ def parse_set_result(response, **options):
     return response and str_if_bytes(response) == "OK"
 
 
-class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
-    """
-    Implementation of the Redis protocol.
-
-    This abstract class provides a Python interface to all Redis commands
-    and an implementation of the Redis protocol.
-
-    Pipelines derive from this, implementing how
-    the commands are sent and received to the Redis server. Based on
-    configuration, an instance will either use a ConnectionPool, or
-    Connection object to talk to redis.
-    """
-
+class AbstractRedis:
     RESPONSE_CALLBACKS = {
         **string_keys_to_dict(
             "AUTH COPY EXPIRE EXPIREAT PEXPIRE PEXPIREAT "
@@ -722,9 +733,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         "CLIENT GETREDIR": int,
         "CLIENT TRACKINGINFO": lambda r: list(map(str_if_bytes, r)),
         "CLUSTER ADDSLOTS": bool_ok,
+        "CLUSTER ADDSLOTSRANGE": bool_ok,
         "CLUSTER COUNT-FAILURE-REPORTS": lambda x: int(x),
         "CLUSTER COUNTKEYSINSLOT": lambda x: int(x),
         "CLUSTER DELSLOTS": bool_ok,
+        "CLUSTER DELSLOTSRANGE": bool_ok,
         "CLUSTER FAILOVER": bool_ok,
         "CLUSTER FORGET": bool_ok,
         "CLUSTER INFO": parse_cluster_info,
@@ -745,6 +758,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         "CONFIG RESETSTAT": bool_ok,
         "CONFIG SET": bool_ok,
         "DEBUG OBJECT": parse_debug_object,
+        "FUNCTION DELETE": bool_ok,
+        "FUNCTION FLUSH": bool_ok,
+        "FUNCTION LOAD": bool_ok,
+        "FUNCTION RESTORE": bool_ok,
         "GEOHASH": lambda r: list(map(str_if_bytes, r)),
         "GEOPOS": lambda r: list(
             map(lambda ll: (float(ll[0]), float(ll[1])) if ll is not None else None, r)
@@ -806,6 +823,20 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         "ZSCAN": parse_zscan,
         "ZMSCORE": parse_zmscore,
     }
+
+
+class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
+    """
+    Implementation of the Redis protocol.
+
+    This abstract class provides a Python interface to all Redis commands
+    and an implementation of the Redis protocol.
+
+    Pipelines derive from this, implementing how
+    the commands are sent and received to the Redis server. Based on
+    configuration, an instance will either use a ConnectionPool, or
+    Connection object to talk to redis.
+    """
 
     @classmethod
     def from_url(cls, url, **kwargs):
@@ -877,6 +908,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ssl_cert_reqs="required",
         ssl_ca_certs=None,
         ssl_ca_path=None,
+        ssl_ca_data=None,
         ssl_check_hostname=False,
         ssl_password=None,
         ssl_validate_ocsp=False,
@@ -958,6 +990,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_certfile": ssl_certfile,
                             "ssl_cert_reqs": ssl_cert_reqs,
                             "ssl_ca_certs": ssl_ca_certs,
+                            "ssl_ca_data": ssl_ca_data,
                             "ssl_check_hostname": ssl_check_hostname,
                             "ssl_password": ssl_password,
                             "ssl_ca_path": ssl_ca_path,
@@ -1076,7 +1109,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         continue trying forever. ``blocking_timeout`` can be specified as a
         float or integer, both representing the number of seconds to wait.
 
-        ``lock_class`` forces the specified lock implementation.
+        ``lock_class`` forces the specified lock implementation. Note that as
+        of redis-py 3.0, the only lock class we implement is ``Lock`` (which is
+        a Lua-based lock). So, it's unlikely you'll need this parameter, unless
+        you have created your own custom lock class.
 
         ``thread_local`` indicates whether the lock token is placed in
         thread-local storage. By default, the token is placed in thread local
@@ -1140,6 +1176,12 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         self.close()
 
     def close(self):
+        # In case a connection property does not yet exist
+        # (due to a crash earlier in the Redis() constructor), return
+        # immediately as there is nothing to clean-up.
+        if not hasattr(self, "connection"):
+            return
+
         conn = self.connection
         if conn:
             self.connection = None

@@ -1,21 +1,64 @@
+# from __future__ import annotations
+
 import datetime
 import hashlib
 import time
 import warnings
-from typing import List, Optional, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
+from redis.compat import Literal
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
+from redis.typing import (
+    AbsExpiryT,
+    AnyKeyT,
+    BitfieldOffsetT,
+    ChannelT,
+    CommandsProtocol,
+    ConsumerT,
+    EncodableT,
+    ExpiryT,
+    FieldT,
+    GroupT,
+    KeysT,
+    KeyT,
+    PatternT,
+    ScriptTextT,
+    StreamIdT,
+    TimeoutSecT,
+    ZScoreBoundT,
+)
 
 from .helpers import list_or_args
 
+if TYPE_CHECKING:
+    from redis.asyncio.client import Redis as AsyncRedis
+    from redis.client import Redis
 
-class ACLCommands:
+ResponseT = Union[Awaitable, Any]
+
+
+class ACLCommands(CommandsProtocol):
     """
     Redis Access Control List (ACL) commands.
     see: https://redis.io/topics/acl
     """
 
-    def acl_cat(self, category=None, **kwargs):
+    def acl_cat(self, category: Union[str, None] = None, **kwargs) -> ResponseT:
         """
         Returns a list of categories or commands within a category.
 
@@ -23,20 +66,28 @@ class ACLCommands:
         If ``category`` is supplied, returns a list of all commands within
         that category.
 
-        For more information check https://redis.io/commands/acl-cat
+        For more information see https://redis.io/commands/acl-cat
         """
-        pieces = [category] if category else []
+        pieces: list[EncodableT] = [category] if category else []
         return self.execute_command("ACL CAT", *pieces, **kwargs)
 
-    def acl_deluser(self, *username, **kwargs):
+    def acl_dryrun(self, username, *args, **kwargs):
+        """
+        Simulate the execution of a given command by a given ``username``.
+
+        For more information see https://redis.io/commands/acl-dryrun
+        """
+        return self.execute_command("ACL DRYRUN", username, *args, **kwargs)
+
+    def acl_deluser(self, *username: str, **kwargs) -> ResponseT:
         """
         Delete the ACL for the specified ``username``s
 
-        For more information check https://redis.io/commands/acl-deluser
+        For more information see https://redis.io/commands/acl-deluser
         """
         return self.execute_command("ACL DELUSER", *username, **kwargs)
 
-    def acl_genpass(self, bits=None, **kwargs):
+    def acl_genpass(self, bits: Union[int, None] = None, **kwargs) -> ResponseT:
         """Generate a random password value.
         If ``bits`` is supplied then use this number of bits, rounded to
         the next multiple of 4.
@@ -54,39 +105,39 @@ class ACLCommands:
                 )
         return self.execute_command("ACL GENPASS", *pieces, **kwargs)
 
-    def acl_getuser(self, username, **kwargs):
+    def acl_getuser(self, username: str, **kwargs) -> ResponseT:
         """
         Get the ACL details for the specified ``username``.
 
         If ``username`` does not exist, return None
 
-        For more information check https://redis.io/commands/acl-getuser
+        For more information see https://redis.io/commands/acl-getuser
         """
         return self.execute_command("ACL GETUSER", username, **kwargs)
 
-    def acl_help(self, **kwargs):
+    def acl_help(self, **kwargs) -> ResponseT:
         """The ACL HELP command returns helpful text describing
         the different subcommands.
 
-        For more information check https://redis.io/commands/acl-help
+        For more information see https://redis.io/commands/acl-help
         """
         return self.execute_command("ACL HELP", **kwargs)
 
-    def acl_list(self, **kwargs):
+    def acl_list(self, **kwargs) -> ResponseT:
         """
         Return a list of all ACLs on the server
 
-        For more information check https://redis.io/commands/acl-list
+        For more information see https://redis.io/commands/acl-list
         """
         return self.execute_command("ACL LIST", **kwargs)
 
-    def acl_log(self, count=None, **kwargs):
+    def acl_log(self, count: Union[int, None] = None, **kwargs) -> ResponseT:
         """
         Get ACL logs as a list.
         :param int count: Get logs[0:count].
         :rtype: List.
 
-        For more information check https://redis.io/commands/acl-log
+        For more information see https://redis.io/commands/acl-log
         """
         args = []
         if count is not None:
@@ -96,53 +147,53 @@ class ACLCommands:
 
         return self.execute_command("ACL LOG", *args, **kwargs)
 
-    def acl_log_reset(self, **kwargs):
+    def acl_log_reset(self, **kwargs) -> ResponseT:
         """
         Reset ACL logs.
         :rtype: Boolean.
 
-        For more information check https://redis.io/commands/acl-log
+        For more information see https://redis.io/commands/acl-log
         """
         args = [b"RESET"]
         return self.execute_command("ACL LOG", *args, **kwargs)
 
-    def acl_load(self, **kwargs):
+    def acl_load(self, **kwargs) -> ResponseT:
         """
         Load ACL rules from the configured ``aclfile``.
 
         Note that the server must be configured with the ``aclfile``
         directive to be able to load ACL rules from an aclfile.
 
-        For more information check https://redis.io/commands/acl-load
+        For more information see https://redis.io/commands/acl-load
         """
         return self.execute_command("ACL LOAD", **kwargs)
 
-    def acl_save(self, **kwargs):
+    def acl_save(self, **kwargs) -> ResponseT:
         """
         Save ACL rules to the configured ``aclfile``.
 
         Note that the server must be configured with the ``aclfile``
         directive to be able to save ACL rules to an aclfile.
 
-        For more information check https://redis.io/commands/acl-save
+        For more information see https://redis.io/commands/acl-save
         """
         return self.execute_command("ACL SAVE", **kwargs)
 
     def acl_setuser(
         self,
-        username,
-        enabled=False,
-        nopass=False,
-        passwords=None,
-        hashed_passwords=None,
-        categories=None,
-        commands=None,
-        keys=None,
-        reset=False,
-        reset_keys=False,
-        reset_passwords=False,
+        username: str,
+        enabled: bool = False,
+        nopass: bool = False,
+        passwords: Union[str, Iterable[str], None] = None,
+        hashed_passwords: Union[str, Iterable[str], None] = None,
+        categories: Union[Iterable[str], None] = None,
+        commands: Union[Iterable[str], None] = None,
+        keys: Union[Iterable[KeyT], None] = None,
+        reset: bool = False,
+        reset_keys: bool = False,
+        reset_passwords: bool = False,
         **kwargs,
-    ):
+    ) -> ResponseT:
         """
         Create or update an ACL user.
 
@@ -202,10 +253,10 @@ class ACLCommands:
         and 'nopass' status will be kept and any new specified passwords
         or hashed_passwords will be applied on top.
 
-        For more information check https://redis.io/commands/acl-setuser
+        For more information see https://redis.io/commands/acl-setuser
         """
         encoder = self.get_encoder()
-        pieces = [username]
+        pieces: list[str | bytes] = [username]
 
         if reset:
             pieces.append(b"reset")
@@ -295,85 +346,90 @@ class ACLCommands:
 
         return self.execute_command("ACL SETUSER", *pieces, **kwargs)
 
-    def acl_users(self, **kwargs):
+    def acl_users(self, **kwargs) -> ResponseT:
         """Returns a list of all registered users on the server.
 
-        For more information check https://redis.io/commands/acl-users
+        For more information see https://redis.io/commands/acl-users
         """
         return self.execute_command("ACL USERS", **kwargs)
 
-    def acl_whoami(self, **kwargs):
+    def acl_whoami(self, **kwargs) -> ResponseT:
         """Get the username for the current connection
 
-        For more information check https://redis.io/commands/acl-whoami
+        For more information see https://redis.io/commands/acl-whoami
         """
         return self.execute_command("ACL WHOAMI", **kwargs)
 
 
-class ManagementCommands:
+AsyncACLCommands = ACLCommands
+
+
+class ManagementCommands(CommandsProtocol):
     """
     Redis management commands
     """
 
-    def auth(self):
+    def auth(self, password, username=None, **kwargs):
         """
-        This function throws a NotImplementedError since it is intentionally
-        not supported.
+        Authenticates the user. If you do not pass username, Redis will try to
+        authenticate for the "default" user. If you do pass username, it will
+        authenticate for the given user.
+        For more information see https://redis.io/commands/auth
         """
-        raise NotImplementedError(
-            "AUTH is intentionally not implemented in the client."
-        )
+        if username:
+            return self.execute_command("AUTH", username, password, **kwargs)
+        return self.execute_command
 
     def bgrewriteaof(self, **kwargs):
         """Tell the Redis server to rewrite the AOF file from data in memory.
 
-        For more information check https://redis.io/commands/bgrewriteaof
+        For more information see https://redis.io/commands/bgrewriteaof
         """
         return self.execute_command("BGREWRITEAOF", **kwargs)
 
-    def bgsave(self, schedule=True, **kwargs):
+    def bgsave(self, schedule: bool = True, **kwargs) -> ResponseT:
         """
         Tell the Redis server to save its data to disk.  Unlike save(),
         this method is asynchronous and returns immediately.
 
-        For more information check https://redis.io/commands/bgsave
+        For more information see https://redis.io/commands/bgsave
         """
         pieces = []
         if schedule:
             pieces.append("SCHEDULE")
         return self.execute_command("BGSAVE", *pieces, **kwargs)
 
-    def role(self):
+    def role(self) -> ResponseT:
         """
         Provide information on the role of a Redis instance in
         the context of replication, by returning if the instance
         is currently a master, slave, or sentinel.
 
-        For more information check https://redis.io/commands/role
+        For more information see https://redis.io/commands/role
         """
         return self.execute_command("ROLE")
 
-    def client_kill(self, address, **kwargs):
+    def client_kill(self, address: str, **kwargs) -> ResponseT:
         """Disconnects the client at ``address`` (ip:port)
 
-        For more information check https://redis.io/commands/client-kill
+        For more information see https://redis.io/commands/client-kill
         """
         return self.execute_command("CLIENT KILL", address, **kwargs)
 
     def client_kill_filter(
         self,
-        _id=None,
-        _type=None,
-        addr=None,
-        skipme=None,
-        laddr=None,
-        user=None,
+        _id: Union[str, None] = None,
+        _type: Union[str, None] = None,
+        addr: Union[str, None] = None,
+        skipme: Union[bool, None] = None,
+        laddr: Union[bool, None] = None,
+        user: str = None,
         **kwargs,
-    ):
+    ) -> ResponseT:
         """
         Disconnects client(s) using a variety of filter options
-        :param id: Kills a client by its unique ID field
-        :param type: Kills a client by type where type is one of 'normal',
+        :param _id: Kills a client by its unique ID field
+        :param _type: Kills a client by type where type is one of 'normal',
         'master', 'slave' or 'pubsub'
         :param addr: Kills a client by its 'address:port'
         :param skipme: If True, then the client calling the command
@@ -410,16 +466,21 @@ class ManagementCommands:
             )
         return self.execute_command("CLIENT KILL", *args, **kwargs)
 
-    def client_info(self, **kwargs):
+    def client_info(self, **kwargs) -> ResponseT:
         """
         Returns information and statistics about the current
         client connection.
 
-        For more information check https://redis.io/commands/client-info
+        For more information see https://redis.io/commands/client-info
         """
         return self.execute_command("CLIENT INFO", **kwargs)
 
-    def client_list(self, _type=None, client_id=[], **kwargs):
+    def client_list(
+        self,
+        _type: Union[str, None] = None,
+        client_id: List[EncodableT] = [],
+        **kwargs,
+    ) -> ResponseT:
         """
         Returns a list of currently connected clients.
         If type of client specified, only that type will be returned.
@@ -427,7 +488,7 @@ class ManagementCommands:
          replica, pubsub)
         :param client_id: optional. a list of client ids
 
-        For more information check https://redis.io/commands/client-list
+        For more information see https://redis.io/commands/client-list
         """
         args = []
         if _type is not None:
@@ -438,20 +499,20 @@ class ManagementCommands:
             args.append(_type)
         if not isinstance(client_id, list):
             raise DataError("client_id must be a list")
-        if client_id != []:
+        if client_id:
             args.append(b"ID")
             args.append(" ".join(client_id))
         return self.execute_command("CLIENT LIST", *args, **kwargs)
 
-    def client_getname(self, **kwargs):
+    def client_getname(self, **kwargs) -> ResponseT:
         """
         Returns the current connection name
 
-        For more information check https://redis.io/commands/client-getname
+        For more information see https://redis.io/commands/client-getname
         """
         return self.execute_command("CLIENT GETNAME", **kwargs)
 
-    def client_getredir(self, **kwargs):
+    def client_getredir(self, **kwargs) -> ResponseT:
         """
         Returns the ID (an integer) of the client to whom we are
         redirecting tracking notifications.
@@ -460,7 +521,11 @@ class ManagementCommands:
         """
         return self.execute_command("CLIENT GETREDIR", **kwargs)
 
-    def client_reply(self, reply, **kwargs):
+    def client_reply(
+        self,
+        reply: Union[Literal["ON"], Literal["OFF"], Literal["SKIP"]],
+        **kwargs,
+    ) -> ResponseT:
         """
         Enable and disable redis server replies.
         ``reply`` Must be ON OFF or SKIP,
@@ -481,23 +546,23 @@ class ManagementCommands:
             raise DataError(f"CLIENT REPLY must be one of {replies!r}")
         return self.execute_command("CLIENT REPLY", reply, **kwargs)
 
-    def client_id(self, **kwargs):
+    def client_id(self, **kwargs) -> ResponseT:
         """
         Returns the current connection id
 
-        For more information check https://redis.io/commands/client-id
+        For more information see https://redis.io/commands/client-id
         """
         return self.execute_command("CLIENT ID", **kwargs)
 
     def client_tracking_on(
         self,
-        clientid=None,
-        prefix=[],
-        bcast=False,
-        optin=False,
-        optout=False,
-        noloop=False,
-    ):
+        clientid: Union[int, None] = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+    ) -> ResponseT:
         """
         Turn on the tracking mode.
         For more information about the options look at client_tracking func.
@@ -510,13 +575,13 @@ class ManagementCommands:
 
     def client_tracking_off(
         self,
-        clientid=None,
-        prefix=[],
-        bcast=False,
-        optin=False,
-        optout=False,
-        noloop=False,
-    ):
+        clientid: Union[int, None] = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+    ) -> ResponseT:
         """
         Turn off the tracking mode.
         For more information about the options look at client_tracking func.
@@ -529,15 +594,15 @@ class ManagementCommands:
 
     def client_tracking(
         self,
-        on=True,
-        clientid=None,
-        prefix=[],
-        bcast=False,
-        optin=False,
-        optout=False,
-        noloop=False,
+        on: bool = True,
+        clientid: Union[int, None] = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
         **kwargs,
-    ):
+    ) -> ResponseT:
         """
         Enables the tracking feature of the Redis server, that is used
         for server assisted client side caching.
@@ -587,7 +652,7 @@ class ManagementCommands:
 
         return self.execute_command("CLIENT TRACKING", *pieces)
 
-    def client_trackinginfo(self, **kwargs):
+    def client_trackinginfo(self, **kwargs) -> ResponseT:
         """
         Returns the information about the current client connection's
         use of the server assisted client side cache.
@@ -596,34 +661,39 @@ class ManagementCommands:
         """
         return self.execute_command("CLIENT TRACKINGINFO", **kwargs)
 
-    def client_setname(self, name, **kwargs):
+    def client_setname(self, name: str, **kwargs) -> ResponseT:
         """
         Sets the current connection name
 
-        For more information check https://redis.io/commands/client-setname
+        For more information see https://redis.io/commands/client-setname
         """
         return self.execute_command("CLIENT SETNAME", name, **kwargs)
 
-    def client_unblock(self, client_id, error=False, **kwargs):
+    def client_unblock(
+        self,
+        client_id: int,
+        error: bool = False,
+        **kwargs,
+    ) -> ResponseT:
         """
         Unblocks a connection by its client id.
         If ``error`` is True, unblocks the client with a special error message.
         If ``error`` is False (default), the client is unblocked using the
         regular timeout mechanism.
 
-        For more information check https://redis.io/commands/client-unblock
+        For more information see https://redis.io/commands/client-unblock
         """
         args = ["CLIENT UNBLOCK", int(client_id)]
         if error:
             args.append(b"ERROR")
         return self.execute_command(*args, **kwargs)
 
-    def client_pause(self, timeout, all=True, **kwargs):
+    def client_pause(self, timeout: int, all: bool = True, **kwargs) -> ResponseT:
         """
         Suspend all the Redis clients for the specified amount of time
         :param timeout: milliseconds to pause clients
 
-        For more information check https://redis.io/commands/client-pause
+        For more information see https://redis.io/commands/client-pause
         :param all: If true (default) all client commands are blocked.
              otherwise, clients are only blocked if they attempt to execute
              a write command.
@@ -641,19 +711,19 @@ class ManagementCommands:
             args.append("WRITE")
         return self.execute_command(*args, **kwargs)
 
-    def client_unpause(self, **kwargs):
+    def client_unpause(self, **kwargs) -> ResponseT:
         """
         Unpause all redis clients
 
-        For more information check https://redis.io/commands/client-unpause
+        For more information see https://redis.io/commands/client-unpause
         """
         return self.execute_command("CLIENT UNPAUSE", **kwargs)
 
-    def client_no_evict(self, mode: str) -> str:
+    def client_no_evict(self, mode: str) -> Union[Awaitable[str], str]:
         """
         Sets the client eviction mode for the current connection.
 
-        For more information check https://redis.io/commands/client-no-evict
+        For more information see https://redis.io/commands/client-no-evict
         """
         return self.execute_command("CLIENT NO-EVICT", mode)
 
@@ -661,115 +731,124 @@ class ManagementCommands:
         """
         Returns dict reply of details about all Redis commands.
 
-        For more information check https://redis.io/commands/command
+        For more information see https://redis.io/commands/command
         """
         return self.execute_command("COMMAND", **kwargs)
 
-    def command_info(self, **kwargs):
+    def command_info(self, **kwargs) -> None:
         raise NotImplementedError(
             "COMMAND INFO is intentionally not implemented in the client."
         )
 
-    def command_count(self, **kwargs):
+    def command_count(self, **kwargs) -> ResponseT:
         return self.execute_command("COMMAND COUNT", **kwargs)
 
-    def config_get(self, pattern="*", **kwargs):
+    def command_docs(self, *args):
+        """
+        This function throws a NotImplementedError since it is intentionally
+        not supported.
+        """
+        raise NotImplementedError(
+            "COMMAND DOCS is intentionally not implemented in the client."
+        )
+
+    def config_get(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
         """
         Return a dictionary of configuration based on the ``pattern``
 
-        For more information check https://redis.io/commands/config-get
+        For more information see https://redis.io/commands/config-get
         """
         return self.execute_command("CONFIG GET", pattern, **kwargs)
 
-    def config_set(self, name, value, **kwargs):
+    def config_set(self, name: KeyT, value: EncodableT, **kwargs) -> ResponseT:
         """Set config item ``name`` with ``value``
 
-        For more information check https://redis.io/commands/config-set
+        For more information see https://redis.io/commands/config-set
         """
         return self.execute_command("CONFIG SET", name, value, **kwargs)
 
-    def config_resetstat(self, **kwargs):
+    def config_resetstat(self, **kwargs) -> ResponseT:
         """
         Reset runtime statistics
 
-        For more information check https://redis.io/commands/config-resetstat
+        For more information see https://redis.io/commands/config-resetstat
         """
         return self.execute_command("CONFIG RESETSTAT", **kwargs)
 
-    def config_rewrite(self, **kwargs):
+    def config_rewrite(self, **kwargs) -> ResponseT:
         """
         Rewrite config file with the minimal change to reflect running config.
 
-        For more information check https://redis.io/commands/config-rewrite
+        For more information see https://redis.io/commands/config-rewrite
         """
         return self.execute_command("CONFIG REWRITE", **kwargs)
 
-    def dbsize(self, **kwargs):
+    def dbsize(self, **kwargs) -> ResponseT:
         """
         Returns the number of keys in the current database
 
-        For more information check https://redis.io/commands/dbsize
+        For more information see https://redis.io/commands/dbsize
         """
         return self.execute_command("DBSIZE", **kwargs)
 
-    def debug_object(self, key, **kwargs):
+    def debug_object(self, key: KeyT, **kwargs) -> ResponseT:
         """
         Returns version specific meta information about a given key
 
-        For more information check https://redis.io/commands/debug-object
+        For more information see https://redis.io/commands/debug-object
         """
         return self.execute_command("DEBUG OBJECT", key, **kwargs)
 
-    def debug_segfault(self, **kwargs):
+    def debug_segfault(self, **kwargs) -> None:
         raise NotImplementedError(
             """
             DEBUG SEGFAULT is intentionally not implemented in the client.
 
-            For more information check https://redis.io/commands/debug-segfault
+            For more information see https://redis.io/commands/debug-segfault
             """
         )
 
-    def echo(self, value, **kwargs):
+    def echo(self, value: EncodableT, **kwargs) -> ResponseT:
         """
         Echo the string back from the server
 
-        For more information check https://redis.io/commands/echo
+        For more information see https://redis.io/commands/echo
         """
         return self.execute_command("ECHO", value, **kwargs)
 
-    def flushall(self, asynchronous=False, **kwargs):
+    def flushall(self, asynchronous: bool = False, **kwargs) -> ResponseT:
         """
         Delete all keys in all databases on the current host.
 
         ``asynchronous`` indicates whether the operation is
         executed asynchronously by the server.
 
-        For more information check https://redis.io/commands/flushall
+        For more information see https://redis.io/commands/flushall
         """
         args = []
         if asynchronous:
             args.append(b"ASYNC")
         return self.execute_command("FLUSHALL", *args, **kwargs)
 
-    def flushdb(self, asynchronous=False, **kwargs):
+    def flushdb(self, asynchronous: bool = False, **kwargs) -> ResponseT:
         """
         Delete all keys in the current database.
 
         ``asynchronous`` indicates whether the operation is
         executed asynchronously by the server.
 
-        For more information check https://redis.io/commands/flushdb
+        For more information see https://redis.io/commands/flushdb
         """
         args = []
         if asynchronous:
             args.append(b"ASYNC")
         return self.execute_command("FLUSHDB", *args, **kwargs)
 
-    def sync(self):
+    def sync(self) -> ResponseT:
         """
         Initiates a replication stream from the master.
 
-        For more information check https://redis.io/commands/sync
+        For more information see https://redis.io/commands/sync
         """
         from redis.client import NEVER_DECODE
 
@@ -777,12 +856,12 @@ class ManagementCommands:
         options[NEVER_DECODE] = []
         return self.execute_command("SYNC", **options)
 
-    def psync(self, replicationid, offset):
+    def psync(self, replicationid: str, offset: int):
         """
         Initiates a replication stream from the master.
         Newer version for `sync`.
 
-        For more information check https://redis.io/commands/sync
+        For more information see https://redis.io/commands/sync
         """
         from redis.client import NEVER_DECODE
 
@@ -790,22 +869,22 @@ class ManagementCommands:
         options[NEVER_DECODE] = []
         return self.execute_command("PSYNC", replicationid, offset, **options)
 
-    def swapdb(self, first, second, **kwargs):
+    def swapdb(self, first: int, second: int, **kwargs) -> ResponseT:
         """
         Swap two databases
 
-        For more information check https://redis.io/commands/swapdb
+        For more information see https://redis.io/commands/swapdb
         """
         return self.execute_command("SWAPDB", first, second, **kwargs)
 
-    def select(self, index, **kwargs):
+    def select(self, index: int, **kwargs) -> ResponseT:
         """Select the Redis logical database at index.
 
         See: https://redis.io/commands/select
         """
         return self.execute_command("SELECT", index, **kwargs)
 
-    def info(self, section=None, **kwargs):
+    def info(self, section: Union[str, None] = None, **kwargs) -> ResponseT:
         """
         Returns a dictionary containing information about the Redis server
 
@@ -815,23 +894,23 @@ class ManagementCommands:
         The section option is not supported by older versions of Redis Server,
         and will generate ResponseError
 
-        For more information check https://redis.io/commands/info
+        For more information see https://redis.io/commands/info
         """
         if section is None:
             return self.execute_command("INFO", **kwargs)
         else:
             return self.execute_command("INFO", section, **kwargs)
 
-    def lastsave(self, **kwargs):
+    def lastsave(self, **kwargs) -> ResponseT:
         """
         Return a Python datetime object representing the last time the
         Redis database was saved to disk
 
-        For more information check https://redis.io/commands/lastsave
+        For more information see https://redis.io/commands/lastsave
         """
         return self.execute_command("LASTSAVE", **kwargs)
 
-    def lolwut(self, *version_numbers, **kwargs):
+    def lolwut(self, *version_numbers: Union[str, float], **kwargs) -> ResponseT:
         """
         Get the Redis version and a piece of generative computer art
 
@@ -842,7 +921,7 @@ class ManagementCommands:
         else:
             return self.execute_command("LOLWUT", **kwargs)
 
-    def reset(self):
+    def reset(self) -> ResponseT:
         """Perform a full reset on the connection's server side contenxt.
 
         See: https://redis.io/commands/reset
@@ -851,16 +930,16 @@ class ManagementCommands:
 
     def migrate(
         self,
-        host,
-        port,
-        keys,
-        destination_db,
-        timeout,
-        copy=False,
-        replace=False,
-        auth=None,
+        host: str,
+        port: int,
+        keys: KeysT,
+        destination_db: int,
+        timeout: int,
+        copy: bool = False,
+        replace: bool = False,
+        auth: Union[str, None] = None,
         **kwargs,
-    ):
+    ) -> ResponseT:
         """
         Migrate 1 or more keys from the current Redis server to a different
         server specified by the ``host``, ``port`` and ``destination_db``.
@@ -878,7 +957,7 @@ class ManagementCommands:
         If ``auth`` is specified, authenticate to the destination server with
         the password provided.
 
-        For more information check https://redis.io/commands/migrate
+        For more information see https://redis.io/commands/migrate
         """
         keys = list_or_args(keys, [])
         if not keys:
@@ -897,7 +976,7 @@ class ManagementCommands:
             "MIGRATE", host, port, "", destination_db, timeout, *pieces, **kwargs
         )
 
-    def object(self, infotype, key, **kwargs):
+    def object(self, infotype: str, key: KeyT, **kwargs) -> ResponseT:
         """
         Return the encoding, idletime, or refcount about the key
         """
@@ -905,33 +984,33 @@ class ManagementCommands:
             "OBJECT", infotype, key, infotype=infotype, **kwargs
         )
 
-    def memory_doctor(self, **kwargs):
+    def memory_doctor(self, **kwargs) -> None:
         raise NotImplementedError(
             """
             MEMORY DOCTOR is intentionally not implemented in the client.
 
-            For more information check https://redis.io/commands/memory-doctor
+            For more information see https://redis.io/commands/memory-doctor
             """
         )
 
-    def memory_help(self, **kwargs):
+    def memory_help(self, **kwargs) -> None:
         raise NotImplementedError(
             """
             MEMORY HELP is intentionally not implemented in the client.
 
-            For more information check https://redis.io/commands/memory-help
+            For more information see https://redis.io/commands/memory-help
             """
         )
 
-    def memory_stats(self, **kwargs):
+    def memory_stats(self, **kwargs) -> ResponseT:
         """
         Return a dictionary of memory stats
 
-        For more information check https://redis.io/commands/memory-stats
+        For more information see https://redis.io/commands/memory-stats
         """
         return self.execute_command("MEMORY STATS", **kwargs)
 
-    def memory_malloc_stats(self, **kwargs):
+    def memory_malloc_stats(self, **kwargs) -> ResponseT:
         """
         Return an internal statistics report from the memory allocator.
 
@@ -939,7 +1018,9 @@ class ManagementCommands:
         """
         return self.execute_command("MEMORY MALLOC-STATS", **kwargs)
 
-    def memory_usage(self, key, samples=None, **kwargs):
+    def memory_usage(
+        self, key: KeyT, samples: Union[int, None] = None, **kwargs
+    ) -> ResponseT:
         """
         Return the total memory usage for key, its value and associated
         administrative overheads.
@@ -948,65 +1029,65 @@ class ManagementCommands:
         sample. If left unspecified, the server's default is 5. Use 0 to sample
         all elements.
 
-        For more information check https://redis.io/commands/memory-usage
+        For more information see https://redis.io/commands/memory-usage
         """
         args = []
         if isinstance(samples, int):
             args.extend([b"SAMPLES", samples])
         return self.execute_command("MEMORY USAGE", key, *args, **kwargs)
 
-    def memory_purge(self, **kwargs):
+    def memory_purge(self, **kwargs) -> ResponseT:
         """
         Attempts to purge dirty pages for reclamation by allocator
 
-        For more information check https://redis.io/commands/memory-purge
+        For more information see https://redis.io/commands/memory-purge
         """
         return self.execute_command("MEMORY PURGE", **kwargs)
 
-    def ping(self, **kwargs):
+    def ping(self, **kwargs) -> ResponseT:
         """
         Ping the Redis server
 
-        For more information check https://redis.io/commands/ping
+        For more information see https://redis.io/commands/ping
         """
         return self.execute_command("PING", **kwargs)
 
-    def quit(self, **kwargs):
+    def quit(self, **kwargs) -> ResponseT:
         """
         Ask the server to close the connection.
 
-        For more information check https://redis.io/commands/quit
+        For more information see https://redis.io/commands/quit
         """
         return self.execute_command("QUIT", **kwargs)
 
-    def replicaof(self, *args, **kwargs):
+    def replicaof(self, *args, **kwargs) -> ResponseT:
         """
         Update the replication settings of a redis replica, on the fly.
         Examples of valid arguments include:
             NO ONE (set no replication)
             host port (set to the host and port of a redis server)
 
-        For more information check  https://redis.io/commands/replicaof
+        For more information see  https://redis.io/commands/replicaof
         """
         return self.execute_command("REPLICAOF", *args, **kwargs)
 
-    def save(self, **kwargs):
+    def save(self, **kwargs) -> ResponseT:
         """
         Tell the Redis server to save its data to disk,
         blocking until the save is complete
 
-        For more information check https://redis.io/commands/save
+        For more information see https://redis.io/commands/save
         """
         return self.execute_command("SAVE", **kwargs)
 
-    def shutdown(self, save=False, nosave=False, **kwargs):
+    def shutdown(self, save: bool = False, nosave: bool = False, **kwargs) -> None:
         """Shutdown the Redis server.  If Redis has persistence configured,
         data will be flushed before shutdown.  If the "save" option is set,
         a data flush will be attempted even if there is no persistence
         configured.  If the "nosave" option is set, no data flush will be
         attempted.  The "save" and "nosave" options cannot both be set.
 
-        For more information check https://redis.io/commands/shutdown
+        For more information see https://redis.io/commands/shutdown
         """
         if save and nosave:
             raise DataError("SHUTDOWN save and nosave cannot both be set")
@@ -1022,24 +1103,26 @@ class ManagementCommands:
             return
         raise RedisError("SHUTDOWN seems to have failed.")
 
-    def slaveof(self, host=None, port=None, **kwargs):
+    def slaveof(
+        self, host: Union[str, None] = None, port: Union[int, None] = None, **kwargs
+    ) -> ResponseT:
         """
         Set the server to be a replicated slave of the instance identified
         by the ``host`` and ``port``. If called without arguments, the
         instance is promoted to a master instead.
 
-        For more information check https://redis.io/commands/slaveof
+        For more information see https://redis.io/commands/slaveof
         """
         if host is None and port is None:
             return self.execute_command("SLAVEOF", b"NO", b"ONE", **kwargs)
         return self.execute_command("SLAVEOF", host, port, **kwargs)
 
-    def slowlog_get(self, num=None, **kwargs):
+    def slowlog_get(self, num: Union[int, None] = None, **kwargs) -> ResponseT:
         """
         Get the entries from the slowlog. If ``num`` is specified, get the
         most recent ``num`` items.
 
-        For more information check https://redis.io/commands/slowlog-get
+        For more information see https://redis.io/commands/slowlog-get
         """
         from redis.client import NEVER_DECODE
 
@@ -1051,39 +1134,39 @@ class ManagementCommands:
             kwargs[NEVER_DECODE] = []
         return self.execute_command(*args, **kwargs)
 
-    def slowlog_len(self, **kwargs):
+    def slowlog_len(self, **kwargs) -> ResponseT:
         """
         Get the number of items in the slowlog
 
-        For more information check https://redis.io/commands/slowlog-len
+        For more information see https://redis.io/commands/slowlog-len
         """
         return self.execute_command("SLOWLOG LEN", **kwargs)
 
-    def slowlog_reset(self, **kwargs):
+    def slowlog_reset(self, **kwargs) -> ResponseT:
         """
         Remove all items in the slowlog
 
-        For more information check https://redis.io/commands/slowlog-reset
+        For more information see https://redis.io/commands/slowlog-reset
         """
         return self.execute_command("SLOWLOG RESET", **kwargs)
 
-    def time(self, **kwargs):
+    def time(self, **kwargs) -> ResponseT:
         """
         Returns the server time as a 2-item tuple of ints:
         (seconds since epoch, microseconds into this second).
 
-        For more information check https://redis.io/commands/time
+        For more information see https://redis.io/commands/time
         """
         return self.execute_command("TIME", **kwargs)
 
-    def wait(self, num_replicas, timeout, **kwargs):
+    def wait(self, num_replicas: int, timeout: int, **kwargs) -> ResponseT:
         """
         Redis synchronous replication
         That returns the number of replicas that processed the query when
         we finally have at least ``num_replicas``, or when the ``timeout`` was
         reached.
 
-        For more information check https://redis.io/commands/wait
+        For more information see https://redis.io/commands/wait
         """
         return self.execute_command("WAIT", num_replicas, timeout, **kwargs)
 
@@ -1106,27 +1189,187 @@ class ManagementCommands:
         )
 
 
-class BasicKeyCommands:
+AsyncManagementCommands = ManagementCommands
+
+
+class AsyncManagementCommands(ManagementCommands):
+    async def command_info(self, **kwargs) -> None:
+        return super().command_info(**kwargs)
+
+    async def debug_segfault(self, **kwargs) -> None:
+        return super().debug_segfault(**kwargs)
+
+    async def memory_doctor(self, **kwargs) -> None:
+        return super().memory_doctor(**kwargs)
+
+    async def memory_help(self, **kwargs) -> None:
+        return super().memory_help(**kwargs)
+
+    async def shutdown(
+        self, save: bool = False, nosave: bool = False, **kwargs
+    ) -> None:
+        """Shutdown the Redis server.  If Redis has persistence configured,
+        data will be flushed before shutdown.  If the "save" option is set,
+        a data flush will be attempted even if there is no persistence
+        configured.  If the "nosave" option is set, no data flush will be
+        attempted.  The "save" and "nosave" options cannot both be set.
+
+        For more information see https://redis.io/commands/shutdown
+        """
+        if save and nosave:
+            raise DataError("SHUTDOWN save and nosave cannot both be set")
+        args = ["SHUTDOWN"]
+        if save:
+            args.append("SAVE")
+        if nosave:
+            args.append("NOSAVE")
+        try:
+            await self.execute_command(*args, **kwargs)
+        except ConnectionError:
+            # a ConnectionError here is expected
+            return
+        raise RedisError("SHUTDOWN seems to have failed.")
+
+
+class BitFieldOperation:
+    """
+    Command builder for BITFIELD commands.
+    """
+
+    def __init__(
+        self,
+        client: Union["Redis", "AsyncRedis"],
+        key: str,
+        default_overflow: Union[str, None] = None,
+    ):
+        self.client = client
+        self.key = key
+        self._default_overflow = default_overflow
+        # for typing purposes, run the following in constructor and in reset()
+        self.operations: list[tuple[EncodableT, ...]] = []
+        self._last_overflow = "WRAP"
+        self.reset()
+
+    def reset(self):
+        """
+        Reset the state of the instance to when it was constructed
+        """
+        self.operations = []
+        self._last_overflow = "WRAP"
+        self.overflow(self._default_overflow or self._last_overflow)
+
+    def overflow(self, overflow: str):
+        """
+        Update the overflow algorithm of successive INCRBY operations
+        :param overflow: Overflow algorithm, one of WRAP, SAT, FAIL. See the
+            Redis docs for descriptions of these algorithmsself.
+        :returns: a :py:class:`BitFieldOperation` instance.
+        """
+        overflow = overflow.upper()
+        if overflow != self._last_overflow:
+            self._last_overflow = overflow
+            self.operations.append(("OVERFLOW", overflow))
+        return self
+
+    def incrby(
+        self,
+        fmt: str,
+        offset: BitfieldOffsetT,
+        increment: int,
+        overflow: Union[str, None] = None,
+    ):
+        """
+        Increment a bitfield by a given amount.
+        :param fmt: format-string for the bitfield being updated, e.g. 'u8'
+            for an unsigned 8-bit integer.
+        :param offset: offset (in number of bits). If prefixed with a
+            '#', this is an offset multiplier, e.g. given the arguments
+            fmt='u8', offset='#2', the offset will be 16.
+        :param int increment: value to increment the bitfield by.
+        :param str overflow: overflow algorithm. Defaults to WRAP, but other
+            acceptable values are SAT and FAIL. See the Redis docs for
+            descriptions of these algorithms.
+        :returns: a :py:class:`BitFieldOperation` instance.
+        """
+        if overflow is not None:
+            self.overflow(overflow)
+
+        self.operations.append(("INCRBY", fmt, offset, increment))
+        return self
+
+    def get(self, fmt: str, offset: BitfieldOffsetT):
+        """
+        Get the value of a given bitfield.
+        :param fmt: format-string for the bitfield being read, e.g. 'u8' for
+            an unsigned 8-bit integer.
+        :param offset: offset (in number of bits). If prefixed with a
+            '#', this is an offset multiplier, e.g. given the arguments
+            fmt='u8', offset='#2', the offset will be 16.
+        :returns: a :py:class:`BitFieldOperation` instance.
+        """
+        self.operations.append(("GET", fmt, offset))
+        return self
+
+    def set(self, fmt: str, offset: BitfieldOffsetT, value: int):
+        """
+        Set the value of a given bitfield.
+        :param fmt: format-string for the bitfield being read, e.g. 'u8' for
+            an unsigned 8-bit integer.
+        :param offset: offset (in number of bits). If prefixed with a
+            '#', this is an offset multiplier, e.g. given the arguments
+            fmt='u8', offset='#2', the offset will be 16.
+        :param int value: value to set at the given position.
+        :returns: a :py:class:`BitFieldOperation` instance.
+        """
+        self.operations.append(("SET", fmt, offset, value))
+        return self
+
+    @property
+    def command(self):
+        cmd = ["BITFIELD", self.key]
+        for ops in self.operations:
+            cmd.extend(ops)
+        return cmd
+
+    def execute(self) -> ResponseT:
+        """
+        Execute the operation(s) in a single BITFIELD command. The return value
+        is a list of values corresponding to each operation. If the client
+        used to create this instance was a pipeline, the list of values
+        will be present within the pipeline's execute.
+        """
+        command = self.command
+        self.reset()
+        return self.client.execute_command(*command)
+
+
+class BasicKeyCommands(CommandsProtocol):
     """
     Redis basic key-based commands
     """
 
-    def append(self, key, value):
+    def append(self, key: KeyT, value: EncodableT) -> ResponseT:
         """
         Appends the string ``value`` to the value at ``key``. If ``key``
         doesn't already exist, create it with a value of ``value``.
         Returns the new length of the value at ``key``.
 
-        For more information check https://redis.io/commands/append
+        For more information see https://redis.io/commands/append
         """
         return self.execute_command("APPEND", key, value)
 
-    def bitcount(self, key, start=None, end=None):
+    def bitcount(
+        self,
+        key: KeyT,
+        start: Union[int, None] = None,
+        end: Union[int, None] = None,
+        mode: Optional[str] = None,
+    ) -> ResponseT:
         """
         Returns the count of set bits in the value of ``key``.  Optional
         ``start`` and ``end`` parameters indicate which bytes to consider
 
-        For more information check https://redis.io/commands/bitcount
+        For more information see https://redis.io/commands/bitcount
         """
         params = [key]
         if start is not None and end is not None:
@@ -1134,34 +1377,52 @@ class BasicKeyCommands:
             params.append(end)
         elif (start is not None and end is None) or (end is not None and start is None):
             raise DataError("Both start and end must be specified")
+        if mode is not None:
+            params.append(mode)
         return self.execute_command("BITCOUNT", *params)
 
-    def bitfield(self, key, default_overflow=None):
+    def bitfield(
+        self: Union["Redis", "AsyncRedis"],
+        key: KeyT,
+        default_overflow: Union[str, None] = None,
+    ) -> BitFieldOperation:
         """
         Return a BitFieldOperation instance to conveniently construct one or
         more bitfield operations on ``key``.
 
-        For more information check https://redis.io/commands/bitfield
+        For more information see https://redis.io/commands/bitfield
         """
         return BitFieldOperation(self, key, default_overflow=default_overflow)
 
-    def bitop(self, operation, dest, *keys):
+    def bitop(
+        self,
+        operation: str,
+        dest: KeyT,
+        *keys: KeyT,
+    ) -> ResponseT:
         """
         Perform a bitwise operation using ``operation`` between ``keys`` and
         store the result in ``dest``.
 
-        For more information check https://redis.io/commands/bitop
+        For more information see https://redis.io/commands/bitop
         """
         return self.execute_command("BITOP", operation, dest, *keys)
 
-    def bitpos(self, key, bit, start=None, end=None):
+    def bitpos(
+        self,
+        key: KeyT,
+        bit: int,
+        start: Union[int, None] = None,
+        end: Union[int, None] = None,
+        mode: Optional[str] = None,
+    ) -> ResponseT:
         """
         Return the position of the first bit set to 1 or 0 in a string.
         ``start`` and ``end`` defines search range. The range is interpreted
         as a range of bytes and not a range of bits, so start=0 and end=2
         means to look at the first three bytes.
 
-        For more information check https://redis.io/commands/bitpos
+        For more information see https://redis.io/commands/bitpos
         """
         if bit not in (0, 1):
             raise DataError("bit must be 0 or 1")
@@ -1173,9 +1434,18 @@ class BasicKeyCommands:
             params.append(end)
         elif start is None and end is not None:
             raise DataError("start argument is not set, " "when end is specified")
+
+        if mode is not None:
+            params.append(mode)
         return self.execute_command("BITPOS", *params)
 
-    def copy(self, source, destination, destination_db=None, replace=False):
+    def copy(
+        self,
+        source: str,
+        destination: str,
+        destination_db: Union[str, None] = None,
+        replace: bool = False,
+    ) -> ResponseT:
         """
         Copy the value stored in the ``source`` key to the ``destination`` key.
 
@@ -1186,7 +1456,7 @@ class BasicKeyCommands:
         copying the value to it. By default, the value is not copied if
         the ``destination`` key already exists.
 
-        For more information check https://redis.io/commands/copy
+        For more information see https://redis.io/commands/copy
         """
         params = [source, destination]
         if destination_db is not None:
@@ -1195,32 +1465,32 @@ class BasicKeyCommands:
             params.append("REPLACE")
         return self.execute_command("COPY", *params)
 
-    def decrby(self, name, amount=1):
+    def decrby(self, name: KeyT, amount: int = 1) -> ResponseT:
         """
         Decrements the value of ``key`` by ``amount``.  If no key exists,
         the value will be initialized as 0 - ``amount``
 
-        For more information check https://redis.io/commands/decrby
+        For more information see https://redis.io/commands/decrby
         """
         return self.execute_command("DECRBY", name, amount)
 
     decr = decrby
 
-    def delete(self, *names):
+    def delete(self, *names: KeyT) -> ResponseT:
         """
         Delete one or more keys specified by ``names``
         """
         return self.execute_command("DEL", *names)
 
-    def __delitem__(self, name):
+    def __delitem__(self, name: KeyT):
         self.delete(name)
 
-    def dump(self, name):
+    def dump(self, name: KeyT) -> ResponseT:
         """
         Return a serialized version of the value stored at the specified key.
         If key does not exist a nil bulk reply is returned.
 
-        For more information check https://redis.io/commands/dump
+        For more information see https://redis.io/commands/dump
         """
         from redis.client import NEVER_DECODE
 
@@ -1228,58 +1498,127 @@ class BasicKeyCommands:
         options[NEVER_DECODE] = []
         return self.execute_command("DUMP", name, **options)
 
-    def exists(self, *names):
+    def exists(self, *names: KeyT) -> ResponseT:
         """
         Returns the number of ``names`` that exist
 
-        For more information check https://redis.io/commands/exists
+        For more information see https://redis.io/commands/exists
         """
         return self.execute_command("EXISTS", *names)
 
     __contains__ = exists
 
-    def expire(self, name, time):
+    def expire(
+        self,
+        name: KeyT,
+        time: ExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
         """
-        Set an expire flag on key ``name`` for ``time`` seconds. ``time``
-        can be represented by an integer or a Python timedelta object.
+        Set an expire flag on key ``name`` for ``time`` seconds with given
+        ``option``. ``time`` can be represented by an integer or a Python timedelta
+        object.
 
-        For more information check https://redis.io/commands/expire
+        Valid options are:
+            NX -> Set expiry only when the key has no expiry
+            XX -> Set expiry only when the key has an existing expiry
+            GT -> Set expiry only when the new expiry is greater than current one
+            LT -> Set expiry only when the new expiry is less than current one
+
+        For more information see https://redis.io/commands/expire
         """
         if isinstance(time, datetime.timedelta):
             time = int(time.total_seconds())
-        return self.execute_command("EXPIRE", name, time)
 
-    def expireat(self, name, when):
+        exp_option = list()
+        if nx:
+            exp_option.append("NX")
+        if xx:
+            exp_option.append("XX")
+        if gt:
+            exp_option.append("GT")
+        if lt:
+            exp_option.append("LT")
+
+        return self.execute_command("EXPIRE", name, time, *exp_option)
+
+    def expireat(
+        self,
+        name: KeyT,
+        when: AbsExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
         """
-        Set an expire flag on key ``name``. ``when`` can be represented
-        as an integer indicating unix time or a Python datetime object.
+        Set an expire flag on key ``name`` with given ``option``. ``when``
+        can be represented as an integer indicating unix time or a Python
+        datetime object.
 
-        For more information check https://redis.io/commands/expireat
+        Valid options are:
+            -> NX -- Set expiry only when the key has no expiry
+            -> XX -- Set expiry only when the key has an existing expiry
+            -> GT -- Set expiry only when the new expiry is greater than current one
+            -> LT -- Set expiry only when the new expiry is less than current one
+
+        For more information see https://redis.io/commands/expireat
         """
         if isinstance(when, datetime.datetime):
             when = int(time.mktime(when.timetuple()))
-        return self.execute_command("EXPIREAT", name, when)
 
-    def get(self, name):
+        exp_option = list()
+        if nx:
+            exp_option.append("NX")
+        if xx:
+            exp_option.append("XX")
+        if gt:
+            exp_option.append("GT")
+        if lt:
+            exp_option.append("LT")
+
+        return self.execute_command("EXPIREAT", name, when, *exp_option)
+
+    def expiretime(self, key: str) -> int:
+        """
+        Returns the absolute Unix timestamp (since January 1, 1970) in seconds
+        at which the given key will expire.
+
+        For more information see https://redis.io/commands/expiretime
+        """
+        return self.execute_command("EXPIRETIME", key)
+
+    def get(self, name: KeyT) -> ResponseT:
         """
         Return the value at key ``name``, or None if the key doesn't exist
 
-        For more information check https://redis.io/commands/get
+        For more information see https://redis.io/commands/get
         """
         return self.execute_command("GET", name)
 
-    def getdel(self, name):
+    def getdel(self, name: KeyT) -> ResponseT:
         """
         Get the value at key ``name`` and delete the key. This command
         is similar to GET, except for the fact that it also deletes
         the key on success (if and only if the key's value type
         is a string).
 
-        For more information check https://redis.io/commands/getdel
+        For more information see https://redis.io/commands/getdel
         """
         return self.execute_command("GETDEL", name)
 
-    def getex(self, name, ex=None, px=None, exat=None, pxat=None, persist=False):
+    def getex(
+        self,
+        name: KeyT,
+        ex: Union[ExpiryT, None] = None,
+        px: Union[ExpiryT, None] = None,
+        exat: Union[AbsExpiryT, None] = None,
+        pxat: Union[AbsExpiryT, None] = None,
+        persist: bool = False,
+    ) -> ResponseT:
         """
         Get the value of key and optionally set its expiration.
         GETEX is similar to GET, but is a write command with
@@ -1298,7 +1637,7 @@ class BasicKeyCommands:
 
         ``persist`` remove the time to live associated with ``name``.
 
-        For more information check https://redis.io/commands/getex
+        For more information see https://redis.io/commands/getex
         """
 
         opset = {ex, px, exat, pxat}
@@ -1308,7 +1647,7 @@ class BasicKeyCommands:
                 "and ``persist`` are mutually exclusive."
             )
 
-        pieces = []
+        pieces: list[EncodableT] = []
         # similar to set command
         if ex is not None:
             pieces.append("EX")
@@ -1338,7 +1677,7 @@ class BasicKeyCommands:
 
         return self.execute_command("GETEX", name, *pieces)
 
-    def __getitem__(self, name):
+    def __getitem__(self, name: KeyT):
         """
         Return the value at key ``name``, raises a KeyError if the key
         doesn't exist.
@@ -1348,24 +1687,24 @@ class BasicKeyCommands:
             return value
         raise KeyError(name)
 
-    def getbit(self, name, offset):
+    def getbit(self, name: KeyT, offset: int) -> ResponseT:
         """
-        Returns a boolean indicating the value of ``offset`` in ``name``
+        Returns an integer indicating the value of ``offset`` in ``name``
 
-        For more information check https://redis.io/commands/getbit
+        For more information see https://redis.io/commands/getbit
         """
         return self.execute_command("GETBIT", name, offset)
 
-    def getrange(self, key, start, end):
+    def getrange(self, key: KeyT, start: int, end: int) -> ResponseT:
         """
         Returns the substring of the string value stored at ``key``,
         determined by the offsets ``start`` and ``end`` (both are inclusive)
 
-        For more information check https://redis.io/commands/getrange
+        For more information see https://redis.io/commands/getrange
         """
         return self.execute_command("GETRANGE", key, start, end)
 
-    def getset(self, name, value):
+    def getset(self, name: KeyT, value: EncodableT) -> ResponseT:
         """
         Sets the value at key ``name`` to ``value``
         and returns the old value at key ``name`` atomically.
@@ -1373,63 +1712,76 @@ class BasicKeyCommands:
         As per Redis 6.2, GETSET is considered deprecated.
         Please use SET with GET parameter in new code.
 
-        For more information check https://redis.io/commands/getset
+        For more information see https://redis.io/commands/getset
         """
         return self.execute_command("GETSET", name, value)
 
-    def incrby(self, name, amount=1):
+    def incrby(self, name: KeyT, amount: int = 1) -> ResponseT:
         """
         Increments the value of ``key`` by ``amount``.  If no key exists,
         the value will be initialized as ``amount``
 
-        For more information check https://redis.io/commands/incrby
+        For more information see https://redis.io/commands/incrby
         """
         return self.execute_command("INCRBY", name, amount)
 
     incr = incrby
 
-    def incrbyfloat(self, name, amount=1.0):
+    def incrbyfloat(self, name: KeyT, amount: float = 1.0) -> ResponseT:
         """
         Increments the value at key ``name`` by floating ``amount``.
         If no key exists, the value will be initialized as ``amount``
 
-        For more information check https://redis.io/commands/incrbyfloat
+        For more information see https://redis.io/commands/incrbyfloat
         """
         return self.execute_command("INCRBYFLOAT", name, amount)
 
-    def keys(self, pattern="*", **kwargs):
+    def keys(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
         """
         Returns a list of keys matching ``pattern``
 
-        For more information check https://redis.io/commands/keys
+        For more information see https://redis.io/commands/keys
         """
         return self.execute_command("KEYS", pattern, **kwargs)
 
-    def lmove(self, first_list, second_list, src="LEFT", dest="RIGHT"):
+    def lmove(
+        self,
+        first_list: str,
+        second_list: str,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+    ) -> ResponseT:
         """
         Atomically returns and removes the first/last element of a list,
         pushing it as the first/last element on the destination list.
         Returns the element being popped and pushed.
 
-        For more information check https://redis.io/commands/lmove
+        For more information see https://redis.io/commands/lmove
         """
         params = [first_list, second_list, src, dest]
         return self.execute_command("LMOVE", *params)
 
-    def blmove(self, first_list, second_list, timeout, src="LEFT", dest="RIGHT"):
+    def blmove(
+        self,
+        first_list: str,
+        second_list: str,
+        timeout: int,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+    ) -> ResponseT:
         """
         Blocking version of lmove.
 
-        For more information check https://redis.io/commands/blmove
+        For more information see https://redis.io/commands/blmove
         """
         params = [first_list, second_list, src, dest, timeout]
         return self.execute_command("BLMOVE", *params)
 
-    def mget(self, keys, *args):
+    def mget(self, keys: KeysT, *args: EncodableT) -> ResponseT:
         """
         Returns a list of values ordered identically to ``keys``
 
-        For more information check https://redis.io/commands/mget
+        For more information see https://redis.io/commands/mget
         """
         from redis.client import EMPTY_RESPONSE
 
@@ -1439,95 +1791,161 @@ class BasicKeyCommands:
             options[EMPTY_RESPONSE] = []
         return self.execute_command("MGET", *args, **options)
 
-    def mset(self, mapping):
+    def mset(self, mapping: Mapping[AnyKeyT, EncodableT]) -> ResponseT:
         """
         Sets key/values based on a mapping. Mapping is a dictionary of
         key/value pairs. Both keys and values should be strings or types that
         can be cast to a string via str().
 
-        For more information check https://redis.io/commands/mset
+        For more information see https://redis.io/commands/mset
         """
         items = []
         for pair in mapping.items():
             items.extend(pair)
         return self.execute_command("MSET", *items)
 
-    def msetnx(self, mapping):
+    def msetnx(self, mapping: Mapping[AnyKeyT, EncodableT]) -> ResponseT:
         """
         Sets key/values based on a mapping if none of the keys are already set.
         Mapping is a dictionary of key/value pairs. Both keys and values
         should be strings or types that can be cast to a string via str().
         Returns a boolean indicating if the operation was successful.
 
-        For more information check https://redis.io/commands/msetnx
+        For more information see https://redis.io/commands/msetnx
         """
         items = []
         for pair in mapping.items():
             items.extend(pair)
         return self.execute_command("MSETNX", *items)
 
-    def move(self, name, db):
+    def move(self, name: KeyT, db: int) -> ResponseT:
         """
         Moves the key ``name`` to a different Redis database ``db``
 
-        For more information check https://redis.io/commands/move
+        For more information see https://redis.io/commands/move
         """
         return self.execute_command("MOVE", name, db)
 
-    def persist(self, name):
+    def persist(self, name: KeyT) -> ResponseT:
         """
         Removes an expiration on ``name``
 
-        For more information check https://redis.io/commands/persist
+        For more information see https://redis.io/commands/persist
         """
         return self.execute_command("PERSIST", name)
 
-    def pexpire(self, name, time):
+    def pexpire(
+        self,
+        name: KeyT,
+        time: ExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
         """
-        Set an expire flag on key ``name`` for ``time`` milliseconds.
-        ``time`` can be represented by an integer or a Python timedelta
-        object.
+        Set an expire flag on key ``name`` for ``time`` milliseconds
+        with given ``option``. ``time`` can be represented by an
+        integer or a Python timedelta object.
 
-        For more information check https://redis.io/commands/pexpire
+        Valid options are:
+            NX -> Set expiry only when the key has no expiry
+            XX -> Set expiry only when the key has an existing expiry
+            GT -> Set expiry only when the new expiry is greater than current one
+            LT -> Set expiry only when the new expiry is less than current one
+
+        For more information see https://redis.io/commands/pexpire
         """
         if isinstance(time, datetime.timedelta):
             time = int(time.total_seconds() * 1000)
-        return self.execute_command("PEXPIRE", name, time)
 
-    def pexpireat(self, name, when):
+        exp_option = list()
+        if nx:
+            exp_option.append("NX")
+        if xx:
+            exp_option.append("XX")
+        if gt:
+            exp_option.append("GT")
+        if lt:
+            exp_option.append("LT")
+        return self.execute_command("PEXPIRE", name, time, *exp_option)
+
+    def pexpireat(
+        self,
+        name: KeyT,
+        when: AbsExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
         """
-        Set an expire flag on key ``name``. ``when`` can be represented
-        as an integer representing unix time in milliseconds (unix time * 1000)
-        or a Python datetime object.
+        Set an expire flag on key ``name`` with given ``option``. ``when``
+        can be represented as an integer representing unix time in
+        milliseconds (unix time * 1000) or a Python datetime object.
 
-        For more information check https://redis.io/commands/pexpireat
+        Valid options are:
+            NX -> Set expiry only when the key has no expiry
+            XX -> Set expiry only when the key has an existing expiry
+            GT -> Set expiry only when the new expiry is greater than current one
+            LT -> Set expiry only when the new expiry is less than current one
+
+        For more information see https://redis.io/commands/pexpireat
         """
         if isinstance(when, datetime.datetime):
             ms = int(when.microsecond / 1000)
             when = int(time.mktime(when.timetuple())) * 1000 + ms
-        return self.execute_command("PEXPIREAT", name, when)
+        exp_option = list()
+        if nx:
+            exp_option.append("NX")
+        if xx:
+            exp_option.append("XX")
+        if gt:
+            exp_option.append("GT")
+        if lt:
+            exp_option.append("LT")
+        return self.execute_command("PEXPIREAT", name, when, *exp_option)
 
-    def psetex(self, name, time_ms, value):
+    def pexpiretime(self, key: str) -> int:
+        """
+        Returns the absolute Unix timestamp (since January 1, 1970) in milliseconds
+        at which the given key will expire.
+
+        For more information see https://redis.io/commands/pexpiretime
+        """
+        return self.execute_command("PEXPIRETIME", key)
+
+    def psetex(
+        self,
+        name: KeyT,
+        time_ms: ExpiryT,
+        value: EncodableT,
+    ):
         """
         Set the value of key ``name`` to ``value`` that expires in ``time_ms``
         milliseconds. ``time_ms`` can be represented by an integer or a Python
         timedelta object
 
-        For more information check https://redis.io/commands/psetex
+        For more information see https://redis.io/commands/psetex
         """
         if isinstance(time_ms, datetime.timedelta):
             time_ms = int(time_ms.total_seconds() * 1000)
         return self.execute_command("PSETEX", name, time_ms, value)
 
-    def pttl(self, name):
+    def pttl(self, name: KeyT) -> ResponseT:
         """
         Returns the number of milliseconds until the key ``name`` will expire
 
-        For more information check https://redis.io/commands/pttl
+        For more information see https://redis.io/commands/pttl
         """
         return self.execute_command("PTTL", name)
 
-    def hrandfield(self, key, count=None, withvalues=False):
+    def hrandfield(
+        self,
+        key: str,
+        count: int = None,
+        withvalues: bool = False,
+    ) -> ResponseT:
         """
         Return a random field from the hash value stored at key.
 
@@ -1539,7 +1957,7 @@ class BasicKeyCommands:
         withvalues: The optional WITHVALUES modifier changes the reply so it
         includes the respective values of the randomly selected hash fields.
 
-        For more information check https://redis.io/commands/hrandfield
+        For more information see https://redis.io/commands/hrandfield
         """
         params = []
         if count is not None:
@@ -1549,40 +1967,40 @@ class BasicKeyCommands:
 
         return self.execute_command("HRANDFIELD", key, *params)
 
-    def randomkey(self, **kwargs):
+    def randomkey(self, **kwargs) -> ResponseT:
         """
         Returns the name of a random key
 
-        For more information check https://redis.io/commands/randomkey
+        For more information see https://redis.io/commands/randomkey
         """
         return self.execute_command("RANDOMKEY", **kwargs)
 
-    def rename(self, src, dst):
+    def rename(self, src: KeyT, dst: KeyT) -> ResponseT:
         """
         Rename key ``src`` to ``dst``
 
-        For more information check https://redis.io/commands/rename
+        For more information see https://redis.io/commands/rename
         """
         return self.execute_command("RENAME", src, dst)
 
-    def renamenx(self, src, dst):
+    def renamenx(self, src: KeyT, dst: KeyT):
         """
         Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist
 
-        For more information check https://redis.io/commands/renamenx
+        For more information see https://redis.io/commands/renamenx
         """
         return self.execute_command("RENAMENX", src, dst)
 
     def restore(
         self,
-        name,
-        ttl,
-        value,
-        replace=False,
-        absttl=False,
-        idletime=None,
-        frequency=None,
-    ):
+        name: KeyT,
+        ttl: float,
+        value: EncodableT,
+        replace: bool = False,
+        absttl: bool = False,
+        idletime: Union[int, None] = None,
+        frequency: Union[int, None] = None,
+    ) -> ResponseT:
         """
         Create a key using the provided serialized value, previously obtained
         using DUMP.
@@ -1600,7 +2018,7 @@ class BasicKeyCommands:
         ``frequency`` Used for eviction, this is the frequency counter of
         the object stored at the key, prior to execution.
 
-        For more information check https://redis.io/commands/restore
+        For more information see https://redis.io/commands/restore
         """
         params = [name, ttl, value]
         if replace:
@@ -1625,17 +2043,17 @@ class BasicKeyCommands:
 
     def set(
         self,
-        name,
-        value,
-        ex=None,
-        px=None,
-        nx=False,
-        xx=False,
-        keepttl=False,
-        get=False,
-        exat=None,
-        pxat=None,
-    ):
+        name: KeyT,
+        value: EncodableT,
+        ex: Union[ExpiryT, None] = None,
+        px: Union[ExpiryT, None] = None,
+        nx: bool = False,
+        xx: bool = False,
+        keepttl: bool = False,
+        get: bool = False,
+        exat: Union[AbsExpiryT, None] = None,
+        pxat: Union[AbsExpiryT, None] = None,
+    ) -> ResponseT:
         """
         Set the value at key ``name`` to ``value``
 
@@ -1662,9 +2080,9 @@ class BasicKeyCommands:
         ``pxat`` sets an expire flag on key ``name`` for ``ex`` milliseconds,
             specified in unix time.
 
-        For more information check https://redis.io/commands/set
+        For more information see https://redis.io/commands/set
         """
-        pieces = [name, value]
+        pieces: list[EncodableT] = [name, value]
         options = {}
         if ex is not None:
             pieces.append("EX")
@@ -1708,40 +2126,45 @@ class BasicKeyCommands:
 
         return self.execute_command("SET", *pieces, **options)
 
-    def __setitem__(self, name, value):
+    def __setitem__(self, name: KeyT, value: EncodableT):
         self.set(name, value)
 
-    def setbit(self, name, offset, value):
+    def setbit(self, name: KeyT, offset: int, value: int) -> ResponseT:
         """
-        Flag the ``offset`` in ``name`` as ``value``. Returns a boolean
+        Flag the ``offset`` in ``name`` as ``value``. Returns an integer
         indicating the previous value of ``offset``.
 
-        For more information check https://redis.io/commands/setbit
+        For more information see https://redis.io/commands/setbit
         """
         value = value and 1 or 0
         return self.execute_command("SETBIT", name, offset, value)
 
-    def setex(self, name, time, value):
+    def setex(self, name: KeyT, time: ExpiryT, value: EncodableT) -> ResponseT:
         """
         Set the value of key ``name`` to ``value`` that expires in ``time``
         seconds. ``time`` can be represented by an integer or a Python
         timedelta object.
 
-        For more information check https://redis.io/commands/setex
+        For more information see https://redis.io/commands/setex
         """
         if isinstance(time, datetime.timedelta):
             time = int(time.total_seconds())
         return self.execute_command("SETEX", name, time, value)
 
-    def setnx(self, name, value):
+    def setnx(self, name: KeyT, value: EncodableT) -> ResponseT:
         """
         Set the value of key ``name`` to ``value`` if key doesn't exist
 
-        For more information check https://redis.io/commands/setnx
+        For more information see https://redis.io/commands/setnx
         """
         return self.execute_command("SETNX", name, value)
 
-    def setrange(self, name, offset, value):
+    def setrange(
+        self,
+        name: KeyT,
+        offset: int,
+        value: EncodableT,
+    ) -> ResponseT:
         """
         Overwrite bytes in the value of ``name`` starting at ``offset`` with
         ``value``. If ``offset`` plus the length of ``value`` exceeds the
@@ -1752,22 +2175,22 @@ class BasicKeyCommands:
 
         Returns the length of the new string.
 
-        For more information check https://redis.io/commands/setrange
+        For more information see https://redis.io/commands/setrange
         """
         return self.execute_command("SETRANGE", name, offset, value)
 
     def stralgo(
         self,
-        algo,
-        value1,
-        value2,
-        specific_argument="strings",
-        len=False,
-        idx=False,
-        minmatchlen=None,
-        withmatchlen=False,
+        algo: Literal["LCS"],
+        value1: KeyT,
+        value2: KeyT,
+        specific_argument: Union[Literal["strings"], Literal["keys"]] = "strings",
+        len: bool = False,
+        idx: bool = False,
+        minmatchlen: Union[int, None] = None,
+        withmatchlen: bool = False,
         **kwargs,
-    ):
+    ) -> ResponseT:
         """
         Implements complex algorithms that operate on strings.
         Right now the only algorithm implemented is the LCS algorithm
@@ -1785,7 +2208,7 @@ class BasicKeyCommands:
         ``withmatchlen`` Returns the matches with the len of the match.
         Can be provided only when ``idx`` set to True.
 
-        For more information check https://redis.io/commands/stralgo
+        For more information see https://redis.io/commands/stralgo
         """
         # check validity
         supported_algo = ["LCS"]
@@ -1797,7 +2220,7 @@ class BasicKeyCommands:
         if len and idx:
             raise DataError("len and idx cannot be provided together.")
 
-        pieces = [algo, specific_argument.upper(), value1, value2]
+        pieces: list[EncodableT] = [algo, specific_argument.upper(), value1, value2]
         if len:
             pieces.append(b"LEN")
         if idx:
@@ -1820,67 +2243,67 @@ class BasicKeyCommands:
             **kwargs,
         )
 
-    def strlen(self, name):
+    def strlen(self, name: KeyT) -> ResponseT:
         """
         Return the number of bytes stored in the value of ``name``
 
-        For more information check https://redis.io/commands/strlen
+        For more information see https://redis.io/commands/strlen
         """
         return self.execute_command("STRLEN", name)
 
-    def substr(self, name, start, end=-1):
+    def substr(self, name: KeyT, start: int, end: int = -1) -> ResponseT:
         """
         Return a substring of the string at key ``name``. ``start`` and ``end``
         are 0-based integers specifying the portion of the string to return.
         """
         return self.execute_command("SUBSTR", name, start, end)
 
-    def touch(self, *args):
+    def touch(self, *args: KeyT) -> ResponseT:
         """
         Alters the last access time of a key(s) ``*args``. A key is ignored
         if it does not exist.
 
-        For more information check https://redis.io/commands/touch
+        For more information see https://redis.io/commands/touch
         """
         return self.execute_command("TOUCH", *args)
 
-    def ttl(self, name):
+    def ttl(self, name: KeyT) -> ResponseT:
         """
         Returns the number of seconds until the key ``name`` will expire
 
-        For more information check https://redis.io/commands/ttl
+        For more information see https://redis.io/commands/ttl
         """
         return self.execute_command("TTL", name)
 
-    def type(self, name):
+    def type(self, name: KeyT) -> ResponseT:
         """
         Returns the type of key ``name``
 
-        For more information check https://redis.io/commands/type
+        For more information see https://redis.io/commands/type
         """
         return self.execute_command("TYPE", name)
 
-    def watch(self, *names):
+    def watch(self, *names: KeyT) -> None:
         """
         Watches the values at keys ``names``, or None if the key doesn't exist
 
-        For more information check https://redis.io/commands/watch
+        For more information see https://redis.io/commands/watch
         """
         warnings.warn(DeprecationWarning("Call WATCH from a Pipeline object"))
 
-    def unwatch(self):
+    def unwatch(self) -> None:
         """
         Unwatches the value at key ``name``, or None of the key doesn't exist
 
-        For more information check https://redis.io/commands/unwatch
+        For more information see https://redis.io/commands/unwatch
         """
         warnings.warn(DeprecationWarning("Call UNWATCH from a Pipeline object"))
 
-    def unlink(self, *names):
+    def unlink(self, *names: KeyT) -> ResponseT:
         """
         Unlink one or more keys specified by ``names``
 
-        For more information check https://redis.io/commands/unlink
+        For more information see https://redis.io/commands/unlink
         """
         return self.execute_command("UNLINK", *names)
 
@@ -1900,7 +2323,7 @@ class BasicKeyCommands:
         ``minmatchlen`` restrict the list of matches to the ones of
         the given ``minmatchlen``.
         If ``withmatchlen`` the length of the match also will be returned.
-        For more information check https://redis.io/commands/lcs
+        For more information see https://redis.io/commands/lcs
         """
         pieces = [key1, key2]
         if len:
@@ -1914,13 +2337,35 @@ class BasicKeyCommands:
         return self.execute_command("LCS", *pieces)
 
 
-class ListCommands:
+class AsyncBasicKeyCommands(BasicKeyCommands):
+    def __delitem__(self, name: KeyT):
+        raise TypeError("Async Redis client does not support class deletion")
+
+    def __contains__(self, name: KeyT):
+        raise TypeError("Async Redis client does not support class inclusion")
+
+    def __getitem__(self, name: KeyT):
+        raise TypeError("Async Redis client does not support class retrieval")
+
+    def __setitem__(self, name: KeyT, value: EncodableT):
+        raise TypeError("Async Redis client does not support class assignment")
+
+    async def watch(self, *names: KeyT) -> None:
+        return super().watch(*names)
+
+    async def unwatch(self) -> None:
+        return super().unwatch()
+
+
+class ListCommands(CommandsProtocol):
     """
     Redis commands for List data type.
     see: https://redis.io/topics/data-types#lists
     """
 
-    def blpop(self, keys: List, timeout: Optional[int] = 0) -> List:
+    def blpop(
+        self, keys: List, timeout: Optional[int] = 0
+    ) -> Union[Awaitable[list], list]:
         """
         LPOP a value off of the first non-empty list
         named in the ``keys`` list.
@@ -1931,7 +2376,7 @@ class ListCommands:
 
         If timeout is 0, then block indefinitely.
 
-        For more information check https://redis.io/commands/blpop
+        For more information see https://redis.io/commands/blpop
         """
         if timeout is None:
             timeout = 0
@@ -1939,7 +2384,9 @@ class ListCommands:
         keys.append(timeout)
         return self.execute_command("BLPOP", *keys)
 
-    def brpop(self, keys: List, timeout: Optional[int] = 0) -> List:
+    def brpop(
+        self, keys: List, timeout: Optional[int] = 0
+    ) -> Union[Awaitable[list], list]:
         """
         RPOP a value off of the first non-empty list
         named in the ``keys`` list.
@@ -1950,7 +2397,7 @@ class ListCommands:
 
         If timeout is 0, then block indefinitely.
 
-        For more information check https://redis.io/commands/brpop
+        For more information see https://redis.io/commands/brpop
         """
         if timeout is None:
             timeout = 0
@@ -1960,7 +2407,7 @@ class ListCommands:
 
     def brpoplpush(
         self, src: str, dst: str, timeout: Optional[int] = 0
-    ) -> Optional[str]:
+    ) -> Union[Awaitable[Optional[str]], Optional[str]]:
         """
         Pop a value off the tail of ``src``, push it on the head of ``dst``
         and then return it.
@@ -1969,7 +2416,7 @@ class ListCommands:
         seconds elapse, whichever is first. A ``timeout`` value of 0 blocks
         forever.
 
-        For more information check https://redis.io/commands/brpoplpush
+        For more information see https://redis.io/commands/brpoplpush
         """
         if timeout is None:
             timeout = 0
@@ -1990,7 +2437,7 @@ class ListCommands:
         When all lists are empty this command blocks the connection until another
         client pushes to it or until the timeout, timeout of 0 blocks indefinitely
 
-        For more information check https://redis.io/commands/blmpop
+        For more information see https://redis.io/commands/blmpop
         """
         args = [timeout, numkeys, *args, direction, "COUNT", count]
 
@@ -2002,12 +2449,12 @@ class ListCommands:
         *args: List[str],
         direction: str = None,
         count: Optional[int] = 1,
-    ) -> List:
+    ) -> Union[Awaitable[list], list]:
         """
         Pop ``count`` values (default 1) first non-empty list key from the list
         of args provided key names.
 
-        For more information check https://redis.io/commands/lmpop
+        For more information see https://redis.io/commands/lmpop
         """
         args = [num_keys] + list(args) + [direction]
         if count != 1:
@@ -2015,18 +2462,22 @@ class ListCommands:
 
         return self.execute_command("LMPOP", *args)
 
-    def lindex(self, name: str, index: int) -> Optional[str]:
+    def lindex(
+        self, name: str, index: int
+    ) -> Union[Awaitable[Optional[str]], Optional[str]]:
         """
         Return the item from list ``name`` at position ``index``
 
         Negative indexes are supported and will return an item at the
         end of the list
 
-        For more information check https://redis.io/commands/lindex
+        For more information see https://redis.io/commands/lindex
         """
         return self.execute_command("LINDEX", name, index)
 
-    def linsert(self, name: str, where: str, refvalue: str, value: str) -> int:
+    def linsert(
+        self, name: str, where: str, refvalue: str, value: str
+    ) -> Union[Awaitable[int], int]:
         """
         Insert ``value`` in list ``name`` either immediately before or after
         [``where``] ``refvalue``
@@ -2034,15 +2485,15 @@ class ListCommands:
         Returns the new length of the list on success or -1 if ``refvalue``
         is not in the list.
 
-        For more information check https://redis.io/commands/linsert
+        For more information see https://redis.io/commands/linsert
         """
         return self.execute_command("LINSERT", name, where, refvalue, value)
 
-    def llen(self, name: str) -> int:
+    def llen(self, name: str) -> Union[Awaitable[int], int]:
         """
         Return the length of the list ``name``
 
-        For more information check https://redis.io/commands/llen
+        For more information see https://redis.io/commands/llen
         """
         return self.execute_command("LLEN", name)
 
@@ -2054,30 +2505,30 @@ class ListCommands:
         the list. When provided with the optional ``count`` argument, the reply
         will consist of up to count elements, depending on the list's length.
 
-        For more information check https://redis.io/commands/lpop
+        For more information see https://redis.io/commands/lpop
         """
         if count is not None:
             return self.execute_command("LPOP", name, count)
         else:
             return self.execute_command("LPOP", name)
 
-    def lpush(self, name: str, *values: List) -> int:
+    def lpush(self, name: str, *values: List) -> Union[Awaitable[int], int]:
         """
         Push ``values`` onto the head of the list ``name``
 
-        For more information check https://redis.io/commands/lpush
+        For more information see https://redis.io/commands/lpush
         """
         return self.execute_command("LPUSH", name, *values)
 
-    def lpushx(self, name: str, *values: List) -> int:
+    def lpushx(self, name: str, *values: List) -> Union[Awaitable[int], int]:
         """
         Push ``value`` onto the head of the list ``name`` if ``name`` exists
 
-        For more information check https://redis.io/commands/lpushx
+        For more information see https://redis.io/commands/lpushx
         """
         return self.execute_command("LPUSHX", name, *values)
 
-    def lrange(self, name: str, start: int, end: int) -> List:
+    def lrange(self, name: str, start: int, end: int) -> Union[Awaitable[list], list]:
         """
         Return a slice of the list ``name`` between
         position ``start`` and ``end``
@@ -2085,11 +2536,11 @@ class ListCommands:
         ``start`` and ``end`` can be negative numbers just like
         Python slicing notation
 
-        For more information check https://redis.io/commands/lrange
+        For more information see https://redis.io/commands/lrange
         """
         return self.execute_command("LRANGE", name, start, end)
 
-    def lrem(self, name: str, count: int, value: str) -> int:
+    def lrem(self, name: str, count: int, value: str) -> Union[Awaitable[int], int]:
         """
         Remove the first ``count`` occurrences of elements equal to ``value``
         from the list stored at ``name``.
@@ -2099,19 +2550,19 @@ class ListCommands:
             count < 0: Remove elements equal to value moving from tail to head.
             count = 0: Remove all elements equal to value.
 
-            For more information check https://redis.io/commands/lrem
+            For more information see https://redis.io/commands/lrem
         """
         return self.execute_command("LREM", name, count, value)
 
-    def lset(self, name: str, index: int, value: str) -> str:
+    def lset(self, name: str, index: int, value: str) -> Union[Awaitable[str], str]:
         """
         Set element at ``index`` of list ``name`` to ``value``
 
-        For more information check https://redis.io/commands/lset
+        For more information see https://redis.io/commands/lset
         """
         return self.execute_command("LSET", name, index, value)
 
-    def ltrim(self, name: str, start: int, end: int) -> str:
+    def ltrim(self, name: str, start: int, end: int) -> Union[Awaitable[str], str]:
         """
         Trim the list ``name``, removing all values not within the slice
         between ``start`` and ``end``
@@ -2119,7 +2570,7 @@ class ListCommands:
         ``start`` and ``end`` can be negative numbers just like
         Python slicing notation
 
-        For more information check https://redis.io/commands/ltrim
+        For more information see https://redis.io/commands/ltrim
         """
         return self.execute_command("LTRIM", name, start, end)
 
@@ -2131,35 +2582,35 @@ class ListCommands:
         When provided with the optional ``count`` argument, the reply will
         consist of up to count elements, depending on the list's length.
 
-        For more information check https://redis.io/commands/rpop
+        For more information see https://redis.io/commands/rpop
         """
         if count is not None:
             return self.execute_command("RPOP", name, count)
         else:
             return self.execute_command("RPOP", name)
 
-    def rpoplpush(self, src: str, dst: str) -> str:
+    def rpoplpush(self, src: str, dst: str) -> Union[Awaitable[str], str]:
         """
         RPOP a value off of the ``src`` list and atomically LPUSH it
         on to the ``dst`` list.  Returns the value.
 
-        For more information check https://redis.io/commands/rpoplpush
+        For more information see https://redis.io/commands/rpoplpush
         """
         return self.execute_command("RPOPLPUSH", src, dst)
 
-    def rpush(self, name: str, *values: List) -> int:
+    def rpush(self, name: str, *values: List) -> Union[Awaitable[int], int]:
         """
         Push ``values`` onto the tail of the list ``name``
 
-        For more information check https://redis.io/commands/rpush
+        For more information see https://redis.io/commands/rpush
         """
         return self.execute_command("RPUSH", name, *values)
 
-    def rpushx(self, name: str, value: str) -> int:
+    def rpushx(self, name: str, value: str) -> Union[Awaitable[int], int]:
         """
         Push ``value`` onto the tail of the list ``name`` if ``name`` exists
 
-        For more information check https://redis.io/commands/rpushx
+        For more information see https://redis.io/commands/rpushx
         """
         return self.execute_command("RPUSHX", name, value)
 
@@ -2194,9 +2645,9 @@ class ListCommands:
          position(s) of items within the first 1000 entries in the list.
          A ``maxlen`` of 0 (the default) will scan the entire list.
 
-         For more information check https://redis.io/commands/lpos
+         For more information see https://redis.io/commands/lpos
         """
-        pieces = [name, value]
+        pieces: list[EncodableT] = [name, value]
         if rank is not None:
             pieces.extend(["RANK", rank])
 
@@ -2243,12 +2694,12 @@ class ListCommands:
             elements, sort will return a list of tuples, each containing the
             values fetched from the arguments to ``get``.
 
-        For more information check https://redis.io/commands/sort
+        For more information see https://redis.io/commands/sort
         """
         if (start is not None and num is None) or (num is not None and start is None):
             raise DataError("``start`` and ``num`` must both be specified")
 
-        pieces = [name]
+        pieces: list[EncodableT] = [name]
         if by is not None:
             pieces.extend([b"BY", by])
         if start is not None and num is not None:
@@ -2280,14 +2731,57 @@ class ListCommands:
         options = {"groups": len(get) if groups else None}
         return self.execute_command("SORT", *pieces, **options)
 
+    def sort_ro(
+        self,
+        key: str,
+        start: Optional[int] = None,
+        num: Optional[int] = None,
+        by: Optional[str] = None,
+        get: Optional[List[str]] = None,
+        desc: bool = False,
+        alpha: bool = False,
+    ) -> list:
+        """
+        Returns the elements contained in the list, set or sorted set at key.
+        (read-only variant of the SORT command)
 
-class ScanCommands:
+        ``start`` and ``num`` allow for paging through the sorted data
+
+        ``by`` allows using an external key to weight and sort the items.
+            Use an "*" to indicate where in the key the item value is located
+
+        ``get`` allows for returning items from external keys rather than the
+            sorted data itself.  Use an "*" to indicate where in the key
+            the item value is located
+
+        ``desc`` allows for reversing the sort
+
+        ``alpha`` allows for sorting lexicographically rather than numerically
+
+        For more information see https://redis.io/commands/sort_ro
+        """
+        return self.sort(
+            key, start=start, num=num, by=by, get=get, desc=desc, alpha=alpha
+        )
+
+
+AsyncListCommands = ListCommands
+
+
+class ScanCommands(CommandsProtocol):
     """
     Redis SCAN commands.
     see: https://redis.io/commands/scan
     """
 
-    def scan(self, cursor=0, match=None, count=None, _type=None, **kwargs):
+    def scan(
+        self,
+        cursor: int = 0,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+        _type: Union[str, None] = None,
+        **kwargs,
+    ) -> ResponseT:
         """
         Incrementally return lists of key names. Also return a cursor
         indicating the scan position.
@@ -2302,9 +2796,9 @@ class ScanCommands:
             HASH, LIST, SET, STREAM, STRING, ZSET
             Additionally, Redis modules can expose other types as well.
 
-        For more information check https://redis.io/commands/scan
+        For more information see https://redis.io/commands/scan
         """
-        pieces = [cursor]
+        pieces: list[EncodableT] = [cursor]
         if match is not None:
             pieces.extend([b"MATCH", match])
         if count is not None:
@@ -2313,7 +2807,13 @@ class ScanCommands:
             pieces.extend([b"TYPE", _type])
         return self.execute_command("SCAN", *pieces, **kwargs)
 
-    def scan_iter(self, match=None, count=None, _type=None, **kwargs):
+    def scan_iter(
+        self,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+        _type: Union[str, None] = None,
+        **kwargs,
+    ) -> Iterator:
         """
         Make an iterator using the SCAN command so that the client doesn't
         need to remember the cursor position.
@@ -2335,7 +2835,13 @@ class ScanCommands:
             )
             yield from data
 
-    def sscan(self, name, cursor=0, match=None, count=None):
+    def sscan(
+        self,
+        name: KeyT,
+        cursor: int = 0,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+    ) -> ResponseT:
         """
         Incrementally return lists of elements in a set. Also return a cursor
         indicating the scan position.
@@ -2344,16 +2850,21 @@ class ScanCommands:
 
         ``count`` allows for hint the minimum number of returns
 
-        For more information check https://redis.io/commands/sscan
+        For more information see https://redis.io/commands/sscan
         """
-        pieces = [name, cursor]
+        pieces: list[EncodableT] = [name, cursor]
         if match is not None:
             pieces.extend([b"MATCH", match])
         if count is not None:
             pieces.extend([b"COUNT", count])
         return self.execute_command("SSCAN", *pieces)
 
-    def sscan_iter(self, name, match=None, count=None):
+    def sscan_iter(
+        self,
+        name: KeyT,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+    ) -> Iterator:
         """
         Make an iterator using the SSCAN command so that the client doesn't
         need to remember the cursor position.
@@ -2367,7 +2878,13 @@ class ScanCommands:
             cursor, data = self.sscan(name, cursor=cursor, match=match, count=count)
             yield from data
 
-    def hscan(self, name, cursor=0, match=None, count=None):
+    def hscan(
+        self,
+        name: KeyT,
+        cursor: int = 0,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+    ) -> ResponseT:
         """
         Incrementally return key/value slices in a hash. Also return a cursor
         indicating the scan position.
@@ -2376,16 +2893,21 @@ class ScanCommands:
 
         ``count`` allows for hint the minimum number of returns
 
-        For more information check https://redis.io/commands/hscan
+        For more information see https://redis.io/commands/hscan
         """
-        pieces = [name, cursor]
+        pieces: list[EncodableT] = [name, cursor]
         if match is not None:
             pieces.extend([b"MATCH", match])
         if count is not None:
             pieces.extend([b"COUNT", count])
         return self.execute_command("HSCAN", *pieces)
 
-    def hscan_iter(self, name, match=None, count=None):
+    def hscan_iter(
+        self,
+        name: str,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+    ) -> Iterator:
         """
         Make an iterator using the HSCAN command so that the client doesn't
         need to remember the cursor position.
@@ -2399,7 +2921,14 @@ class ScanCommands:
             cursor, data = self.hscan(name, cursor=cursor, match=match, count=count)
             yield from data.items()
 
-    def zscan(self, name, cursor=0, match=None, count=None, score_cast_func=float):
+    def zscan(
+        self,
+        name: KeyT,
+        cursor: int = 0,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+        score_cast_func: Union[type, Callable] = float,
+    ) -> ResponseT:
         """
         Incrementally return lists of elements in a sorted set. Also return a
         cursor indicating the scan position.
@@ -2410,7 +2939,7 @@ class ScanCommands:
 
         ``score_cast_func`` a callable used to cast the score return value
 
-        For more information check https://redis.io/commands/zscan
+        For more information see https://redis.io/commands/zscan
         """
         pieces = [name, cursor]
         if match is not None:
@@ -2420,7 +2949,13 @@ class ScanCommands:
         options = {"score_cast_func": score_cast_func}
         return self.execute_command("ZSCAN", *pieces, **options)
 
-    def zscan_iter(self, name, match=None, count=None, score_cast_func=float):
+    def zscan_iter(
+        self,
+        name: KeyT,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+        score_cast_func: Union[type, Callable] = float,
+    ) -> Iterator:
         """
         Make an iterator using the ZSCAN command so that the client doesn't
         need to remember the cursor position.
@@ -2443,57 +2978,165 @@ class ScanCommands:
             yield from data
 
 
-class SetCommands:
+class AsyncScanCommands(ScanCommands):
+    async def scan_iter(
+        self,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+        _type: Union[str, None] = None,
+        **kwargs,
+    ) -> AsyncIterator:
+        """
+        Make an iterator using the SCAN command so that the client doesn't
+        need to remember the cursor position.
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` provides a hint to Redis about the number of keys to
+            return per batch.
+
+        ``_type`` filters the returned values by a particular Redis type.
+            Stock Redis instances allow for the following types:
+            HASH, LIST, SET, STREAM, STRING, ZSET
+            Additionally, Redis modules can expose other types as well.
+        """
+        cursor = "0"
+        while cursor != 0:
+            cursor, data = await self.scan(
+                cursor=cursor, match=match, count=count, _type=_type, **kwargs
+            )
+            for d in data:
+                yield d
+
+    async def sscan_iter(
+        self,
+        name: KeyT,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+    ) -> AsyncIterator:
+        """
+        Make an iterator using the SSCAN command so that the client doesn't
+        need to remember the cursor position.
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+        """
+        cursor = "0"
+        while cursor != 0:
+            cursor, data = await self.sscan(
+                name, cursor=cursor, match=match, count=count
+            )
+            for d in data:
+                yield d
+
+    async def hscan_iter(
+        self,
+        name: str,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+    ) -> AsyncIterator:
+        """
+        Make an iterator using the HSCAN command so that the client doesn't
+        need to remember the cursor position.
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+        """
+        cursor = "0"
+        while cursor != 0:
+            cursor, data = await self.hscan(
+                name, cursor=cursor, match=match, count=count
+            )
+            for it in data.items():
+                yield it
+
+    async def zscan_iter(
+        self,
+        name: KeyT,
+        match: Union[PatternT, None] = None,
+        count: Union[int, None] = None,
+        score_cast_func: Union[type, Callable] = float,
+    ) -> AsyncIterator:
+        """
+        Make an iterator using the ZSCAN command so that the client doesn't
+        need to remember the cursor position.
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` allows for hint the minimum number of returns
+
+        ``score_cast_func`` a callable used to cast the score return value
+        """
+        cursor = "0"
+        while cursor != 0:
+            cursor, data = await self.zscan(
+                name,
+                cursor=cursor,
+                match=match,
+                count=count,
+                score_cast_func=score_cast_func,
+            )
+            for d in data:
+                yield d
+
+
+class SetCommands(CommandsProtocol):
     """
     Redis commands for Set data type.
     see: https://redis.io/topics/data-types#sets
     """
 
-    def sadd(self, name: str, *values: List) -> int:
+    def sadd(self, name: str, *values: List) -> Union[Awaitable[int], int]:
         """
         Add ``value(s)`` to set ``name``
 
-        For more information check https://redis.io/commands/sadd
+        For more information see https://redis.io/commands/sadd
         """
         return self.execute_command("SADD", name, *values)
 
-    def scard(self, name: str) -> int:
+    def scard(self, name: str) -> Union[Awaitable[int], int]:
         """
         Return the number of elements in set ``name``
 
-        For more information check https://redis.io/commands/scard
+        For more information see https://redis.io/commands/scard
         """
         return self.execute_command("SCARD", name)
 
-    def sdiff(self, keys: List, *args: List) -> List:
+    def sdiff(self, keys: List, *args: List) -> Union[Awaitable[list], list]:
         """
         Return the difference of sets specified by ``keys``
 
-        For more information check https://redis.io/commands/sdiff
+        For more information see https://redis.io/commands/sdiff
         """
         args = list_or_args(keys, args)
         return self.execute_command("SDIFF", *args)
 
-    def sdiffstore(self, dest: str, keys: List, *args: List) -> int:
+    def sdiffstore(
+        self, dest: str, keys: List, *args: List
+    ) -> Union[Awaitable[int], int]:
         """
         Store the difference of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
 
-        For more information check https://redis.io/commands/sdiffstore
+        For more information see https://redis.io/commands/sdiffstore
         """
         args = list_or_args(keys, args)
         return self.execute_command("SDIFFSTORE", dest, *args)
 
-    def sinter(self, keys: List, *args: List) -> List:
+    def sinter(self, keys: List, *args: List) -> Union[Awaitable[list], list]:
         """
         Return the intersection of sets specified by ``keys``
 
-        For more information check https://redis.io/commands/sinter
+        For more information see https://redis.io/commands/sinter
         """
         args = list_or_args(keys, args)
         return self.execute_command("SINTER", *args)
 
-    def sintercard(self, numkeys: int, keys: List[str], limit: int = 0) -> int:
+    def sintercard(
+        self, numkeys: int, keys: List[str], limit: int = 0
+    ) -> Union[Awaitable[int], int]:
         """
         Return the cardinality of the intersect of multiple sets specified by ``keys`.
 
@@ -2501,52 +3144,59 @@ class SetCommands:
         cardinality reaches limit partway through the computation, the algorithm will
         exit and yield limit as the cardinality
 
-        For more information check https://redis.io/commands/sintercard
+        For more information see https://redis.io/commands/sintercard
         """
         args = [numkeys, *keys, "LIMIT", limit]
         return self.execute_command("SINTERCARD", *args)
 
-    def sinterstore(self, dest: str, keys: List, *args: List) -> int:
+    def sinterstore(
+        self, dest: str, keys: List, *args: List
+    ) -> Union[Awaitable[int], int]:
         """
         Store the intersection of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
 
-        For more information check https://redis.io/commands/sinterstore
+        For more information see https://redis.io/commands/sinterstore
         """
         args = list_or_args(keys, args)
         return self.execute_command("SINTERSTORE", dest, *args)
 
-    def sismember(self, name: str, value: str) -> bool:
+    def sismember(self, name: str, value: str) -> Union[Awaitable[bool], bool]:
         """
         Return a boolean indicating if ``value`` is a member of set ``name``
 
-        For more information check https://redis.io/commands/sismember
+        For more information see https://redis.io/commands/sismember
         """
         return self.execute_command("SISMEMBER", name, value)
 
-    def smembers(self, name: str) -> List:
+    def smembers(self, name: str) -> Union[Awaitable[list], list]:
         """
         Return all members of the set ``name``
 
-        For more information check https://redis.io/commands/smembers
+        For more information see https://redis.io/commands/smembers
         """
         return self.execute_command("SMEMBERS", name)
 
-    def smismember(self, name: str, values: List, *args: List) -> List[bool]:
+    def smismember(
+        self,
+        name: str,
+        values: List,
+        *args: List,
+    ) -> Union[Awaitable[List[bool]], List[bool]]:
         """
         Return whether each value in ``values`` is a member of the set ``name``
         as a list of ``bool`` in the order of ``values``
 
-        For more information check https://redis.io/commands/smismember
+        For more information see https://redis.io/commands/smismember
         """
         args = list_or_args(values, args)
         return self.execute_command("SMISMEMBER", name, *args)
 
-    def smove(self, src: str, dst: str, value: str) -> bool:
+    def smove(self, src: str, dst: str, value: str) -> Union[Awaitable[bool], bool]:
         """
         Move ``value`` from set ``src`` to set ``dst`` atomically
 
-        For more information check https://redis.io/commands/smove
+        For more information see https://redis.io/commands/smove
         """
         return self.execute_command("SMOVE", src, dst, value)
 
@@ -2554,7 +3204,7 @@ class SetCommands:
         """
         Remove and return a random member of set ``name``
 
-        For more information check https://redis.io/commands/spop
+        For more information see https://redis.io/commands/spop
         """
         args = (count is not None) and [count] or []
         return self.execute_command("SPOP", name, *args)
@@ -2571,67 +3221,77 @@ class SetCommands:
         members of set ``name``. Note this is only available when running
         Redis 2.6+.
 
-        For more information check https://redis.io/commands/srandmember
+        For more information see https://redis.io/commands/srandmember
         """
         args = (number is not None) and [number] or []
         return self.execute_command("SRANDMEMBER", name, *args)
 
-    def srem(self, name: str, *values: List) -> int:
+    def srem(self, name: str, *values: List) -> Union[Awaitable[int], int]:
         """
         Remove ``values`` from set ``name``
 
-        For more information check https://redis.io/commands/srem
+        For more information see https://redis.io/commands/srem
         """
         return self.execute_command("SREM", name, *values)
 
-    def sunion(self, keys: List, *args: List) -> List:
+    def sunion(self, keys: List, *args: List) -> Union[Awaitable[List], List]:
         """
         Return the union of sets specified by ``keys``
 
-        For more information check https://redis.io/commands/sunion
+        For more information see https://redis.io/commands/sunion
         """
         args = list_or_args(keys, args)
         return self.execute_command("SUNION", *args)
 
-    def sunionstore(self, dest: str, keys: List, *args: List) -> int:
+    def sunionstore(
+        self, dest: str, keys: List, *args: List
+    ) -> Union[Awaitable[int], int]:
         """
         Store the union of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
 
-        For more information check https://redis.io/commands/sunionstore
+        For more information see https://redis.io/commands/sunionstore
         """
         args = list_or_args(keys, args)
         return self.execute_command("SUNIONSTORE", dest, *args)
 
 
-class StreamCommands:
+AsyncSetCommands = SetCommands
+
+
+class StreamCommands(CommandsProtocol):
     """
     Redis commands for Stream data type.
     see: https://redis.io/topics/streams-intro
     """
 
-    def xack(self, name, groupname, *ids):
+    def xack(
+        self,
+        name: KeyT,
+        groupname: GroupT,
+        *ids: StreamIdT,
+    ) -> ResponseT:
         """
         Acknowledges the successful processing of one or more messages.
         name: name of the stream.
         groupname: name of the consumer group.
         *ids: message ids to acknowledge.
 
-        For more information check https://redis.io/commands/xack
+        For more information see https://redis.io/commands/xack
         """
         return self.execute_command("XACK", name, groupname, *ids)
 
     def xadd(
         self,
-        name,
-        fields,
-        id="*",
-        maxlen=None,
-        approximate=True,
-        nomkstream=False,
-        minid=None,
-        limit=None,
-    ):
+        name: KeyT,
+        fields: Dict[FieldT, EncodableT],
+        id: StreamIdT = "*",
+        maxlen: Union[int, None] = None,
+        approximate: bool = True,
+        nomkstream: bool = False,
+        minid: Union[StreamIdT, None] = None,
+        limit: Union[int, None] = None,
+    ) -> ResponseT:
         """
         Add to a stream.
         name: name of the stream
@@ -2645,9 +3305,9 @@ class StreamCommands:
         Can't be specified with maxlen.
         limit: specifies the maximum number of entries to retrieve
 
-        For more information check https://redis.io/commands/xadd
+        For more information see https://redis.io/commands/xadd
         """
-        pieces = []
+        pieces: list[EncodableT] = []
         if maxlen is not None and minid is not None:
             raise DataError(
                 "Only one of ```maxlen``` or ```minid``` " "may be specified"
@@ -2678,14 +3338,14 @@ class StreamCommands:
 
     def xautoclaim(
         self,
-        name,
-        groupname,
-        consumername,
-        min_idle_time,
-        start_id=0,
-        count=None,
-        justid=False,
-    ):
+        name: KeyT,
+        groupname: GroupT,
+        consumername: ConsumerT,
+        min_idle_time: int,
+        start_id: int = 0,
+        count: Union[int, None] = None,
+        justid: bool = False,
+    ) -> ResponseT:
         """
         Transfers ownership of pending stream entries that match the specified
         criteria. Conceptually, equivalent to calling XPENDING and then XCLAIM,
@@ -2702,7 +3362,7 @@ class StreamCommands:
         justid: optional boolean, false by default. Return just an array of IDs
         of messages successfully claimed, without returning the actual message
 
-        For more information check https://redis.io/commands/xautoclaim
+        For more information see https://redis.io/commands/xautoclaim
         """
         try:
             if int(min_idle_time) < 0:
@@ -2729,17 +3389,17 @@ class StreamCommands:
 
     def xclaim(
         self,
-        name,
-        groupname,
-        consumername,
-        min_idle_time,
-        message_ids,
-        idle=None,
-        time=None,
-        retrycount=None,
-        force=False,
-        justid=False,
-    ):
+        name: KeyT,
+        groupname: GroupT,
+        consumername: ConsumerT,
+        min_idle_time: int,
+        message_ids: [List[StreamIdT], Tuple[StreamIdT]],
+        idle: Union[int, None] = None,
+        time: Union[int, None] = None,
+        retrycount: Union[int, None] = None,
+        force: bool = False,
+        justid: bool = False,
+    ) -> ResponseT:
         """
         Changes the ownership of a pending message.
         name: name of the stream.
@@ -2762,7 +3422,7 @@ class StreamCommands:
         justid: optional boolean, false by default. Return just an array of IDs
          of messages successfully claimed, without returning the actual message
 
-         For more information check https://redis.io/commands/xclaim
+         For more information see https://redis.io/commands/xclaim
         """
         if not isinstance(min_idle_time, int) or min_idle_time < 0:
             raise DataError("XCLAIM min_idle_time must be a non negative " "integer")
@@ -2773,7 +3433,7 @@ class StreamCommands:
             )
 
         kwargs = {}
-        pieces = [name, groupname, consumername, str(min_idle_time)]
+        pieces: list[EncodableT] = [name, groupname, consumername, str(min_idle_time)]
         pieces.extend(list(message_ids))
 
         if idle is not None:
@@ -2800,31 +3460,42 @@ class StreamCommands:
             kwargs["parse_justid"] = True
         return self.execute_command("XCLAIM", *pieces, **kwargs)
 
-    def xdel(self, name, *ids):
+    def xdel(self, name: KeyT, *ids: StreamIdT) -> ResponseT:
         """
         Deletes one or more messages from a stream.
         name: name of the stream.
         *ids: message ids to delete.
 
-        For more information check https://redis.io/commands/xdel
+        For more information see https://redis.io/commands/xdel
         """
         return self.execute_command("XDEL", name, *ids)
 
-    def xgroup_create(self, name, groupname, id="$", mkstream=False):
+    def xgroup_create(
+        self,
+        name: KeyT,
+        groupname: GroupT,
+        id: StreamIdT = "$",
+        mkstream: bool = False,
+    ) -> ResponseT:
         """
         Create a new consumer group associated with a stream.
         name: name of the stream.
         groupname: name of the consumer group.
         id: ID of the last item in the stream to consider already delivered.
 
-        For more information check https://redis.io/commands/xgroup-create
+        For more information see https://redis.io/commands/xgroup-create
         """
-        pieces = ["XGROUP CREATE", name, groupname, id]
+        pieces: list[EncodableT] = ["XGROUP CREATE", name, groupname, id]
         if mkstream:
             pieces.append(b"MKSTREAM")
         return self.execute_command(*pieces)
 
-    def xgroup_delconsumer(self, name, groupname, consumername):
+    def xgroup_delconsumer(
+        self,
+        name: KeyT,
+        groupname: GroupT,
+        consumername: ConsumerT,
+    ) -> ResponseT:
         """
         Remove a specific consumer from a consumer group.
         Returns the number of pending messages that the consumer had before it
@@ -2833,21 +3504,26 @@ class StreamCommands:
         groupname: name of the consumer group.
         consumername: name of consumer to delete
 
-        For more information check https://redis.io/commands/xgroup-delconsumer
+        For more information see https://redis.io/commands/xgroup-delconsumer
         """
         return self.execute_command("XGROUP DELCONSUMER", name, groupname, consumername)
 
-    def xgroup_destroy(self, name, groupname):
+    def xgroup_destroy(self, name: KeyT, groupname: GroupT) -> ResponseT:
         """
         Destroy a consumer group.
         name: name of the stream.
         groupname: name of the consumer group.
 
-        For more information check https://redis.io/commands/xgroup-destroy
+        For more information see https://redis.io/commands/xgroup-destroy
         """
         return self.execute_command("XGROUP DESTROY", name, groupname)
 
-    def xgroup_createconsumer(self, name, groupname, consumername):
+    def xgroup_createconsumer(
+        self,
+        name: KeyT,
+        groupname: GroupT,
+        consumername: ConsumerT,
+    ) -> ResponseT:
         """
         Consumers in a consumer group are auto-created every time a new
         consumer name is mentioned by some command.
@@ -2862,43 +3538,48 @@ class StreamCommands:
             "XGROUP CREATECONSUMER", name, groupname, consumername
         )
 
-    def xgroup_setid(self, name, groupname, id):
+    def xgroup_setid(
+        self,
+        name: KeyT,
+        groupname: GroupT,
+        id: StreamIdT,
+    ) -> ResponseT:
         """
         Set the consumer group last delivered ID to something else.
         name: name of the stream.
         groupname: name of the consumer group.
         id: ID of the last item in the stream to consider already delivered.
 
-        For more information check https://redis.io/commands/xgroup-setid
+        For more information see https://redis.io/commands/xgroup-setid
         """
         return self.execute_command("XGROUP SETID", name, groupname, id)
 
-    def xinfo_consumers(self, name, groupname):
+    def xinfo_consumers(self, name: KeyT, groupname: GroupT) -> ResponseT:
         """
         Returns general information about the consumers in the group.
         name: name of the stream.
         groupname: name of the consumer group.
 
-        For more information check https://redis.io/commands/xinfo-consumers
+        For more information see https://redis.io/commands/xinfo-consumers
         """
         return self.execute_command("XINFO CONSUMERS", name, groupname)
 
-    def xinfo_groups(self, name):
+    def xinfo_groups(self, name: KeyT) -> ResponseT:
         """
         Returns general information about the consumer groups of the stream.
         name: name of the stream.
 
-        For more information check https://redis.io/commands/xinfo-groups
+        For more information see https://redis.io/commands/xinfo-groups
         """
         return self.execute_command("XINFO GROUPS", name)
 
-    def xinfo_stream(self, name, full=False):
+    def xinfo_stream(self, name: KeyT, full: bool = False) -> ResponseT:
         """
         Returns general information about the stream.
         name: name of the stream.
         full: optional boolean, false by default. Return full summary
 
-        For more information check https://redis.io/commands/xinfo-stream
+        For more information see https://redis.io/commands/xinfo-stream
         """
         pieces = [name]
         options = {}
@@ -2907,34 +3588,34 @@ class StreamCommands:
             options = {"full": full}
         return self.execute_command("XINFO STREAM", *pieces, **options)
 
-    def xlen(self, name):
+    def xlen(self, name: KeyT) -> ResponseT:
         """
         Returns the number of elements in a given stream.
 
-        For more information check https://redis.io/commands/xlen
+        For more information see https://redis.io/commands/xlen
         """
         return self.execute_command("XLEN", name)
 
-    def xpending(self, name, groupname):
+    def xpending(self, name: KeyT, groupname: GroupT) -> ResponseT:
         """
         Returns information about pending messages of a group.
         name: name of the stream.
         groupname: name of the consumer group.
 
-        For more information check https://redis.io/commands/xpending
+        For more information see https://redis.io/commands/xpending
         """
         return self.execute_command("XPENDING", name, groupname)
 
     def xpending_range(
         self,
-        name,
-        groupname,
-        idle=None,
-        min=None,
-        max=None,
-        count=None,
-        consumername=None,
-    ):
+        name: KeyT,
+        groupname: GroupT,
+        min: StreamIdT,
+        max: StreamIdT,
+        count: int,
+        consumername: Union[ConsumerT, None] = None,
+        idle: Union[int, None] = None,
+    ) -> ResponseT:
         """
         Returns information about pending messages, in a range.
 
@@ -2982,7 +3663,13 @@ class StreamCommands:
 
         return self.execute_command("XPENDING", *pieces, parse_detail=True)
 
-    def xrange(self, name, min="-", max="+", count=None):
+    def xrange(
+        self,
+        name: KeyT,
+        min: StreamIdT = "-",
+        max: StreamIdT = "+",
+        count: Union[int, None] = None,
+    ) -> ResponseT:
         """
         Read stream values within an interval.
         name: name of the stream.
@@ -2993,7 +3680,7 @@ class StreamCommands:
         count: if set, only return this many items, beginning with the
                earliest available.
 
-        For more information check https://redis.io/commands/xrange
+        For more information see https://redis.io/commands/xrange
         """
         pieces = [min, max]
         if count is not None:
@@ -3004,7 +3691,12 @@ class StreamCommands:
 
         return self.execute_command("XRANGE", name, *pieces)
 
-    def xread(self, streams, count=None, block=None):
+    def xread(
+        self,
+        streams: Dict[KeyT, StreamIdT],
+        count: Union[int, None] = None,
+        block: Union[int, None] = None,
+    ) -> ResponseT:
         """
         Block and monitor multiple streams for new data.
         streams: a dict of stream names to stream IDs, where
@@ -3013,7 +3705,7 @@ class StreamCommands:
                earliest available.
         block: number of milliseconds to wait, if nothing already present.
 
-        For more information check https://redis.io/commands/xread
+        For more information see https://redis.io/commands/xread
         """
         pieces = []
         if block is not None:
@@ -3035,8 +3727,14 @@ class StreamCommands:
         return self.execute_command("XREAD", *pieces)
 
     def xreadgroup(
-        self, groupname, consumername, streams, count=None, block=None, noack=False
-    ):
+        self,
+        groupname: str,
+        consumername: str,
+        streams: Dict[KeyT, StreamIdT],
+        count: Union[int, None] = None,
+        block: Union[int, None] = None,
+        noack: bool = False,
+    ) -> ResponseT:
         """
         Read from a stream via a consumer group.
         groupname: name of the consumer group.
@@ -3048,9 +3746,9 @@ class StreamCommands:
         block: number of milliseconds to wait, if nothing already present.
         noack: do not add messages to the PEL
 
-        For more information check https://redis.io/commands/xreadgroup
+        For more information see https://redis.io/commands/xreadgroup
         """
-        pieces = [b"GROUP", groupname, consumername]
+        pieces: list[EncodableT] = [b"GROUP", groupname, consumername]
         if count is not None:
             if not isinstance(count, int) or count < 1:
                 raise DataError("XREADGROUP count must be a positive integer")
@@ -3070,7 +3768,13 @@ class StreamCommands:
         pieces.extend(streams.values())
         return self.execute_command("XREADGROUP", *pieces)
 
-    def xrevrange(self, name, max="+", min="-", count=None):
+    def xrevrange(
+        self,
+        name: KeyT,
+        max: StreamIdT = "+",
+        min: StreamIdT = "-",
+        count: Union[int, None] = None,
+    ) -> ResponseT:
         """
         Read stream values within an interval, in reverse order.
         name: name of the stream
@@ -3081,9 +3785,9 @@ class StreamCommands:
         count: if set, only return this many items, beginning with the
                latest available.
 
-        For more information check https://redis.io/commands/xrevrange
+        For more information see https://redis.io/commands/xrevrange
         """
-        pieces = [max, min]
+        pieces: list[EncodableT] = [max, min]
         if count is not None:
             if not isinstance(count, int) or count < 1:
                 raise DataError("XREVRANGE count must be a positive integer")
@@ -3092,7 +3796,14 @@ class StreamCommands:
 
         return self.execute_command("XREVRANGE", name, *pieces)
 
-    def xtrim(self, name, maxlen=None, approximate=True, minid=None, limit=None):
+    def xtrim(
+        self,
+        name: KeyT,
+        maxlen: int,
+        approximate: bool = True,
+        minid: Union[StreamIdT, None] = None,
+        limit: Union[int, None] = None,
+    ) -> ResponseT:
         """
         Trims old messages from a stream.
         name: name of the stream.
@@ -3103,9 +3814,9 @@ class StreamCommands:
         Can't be specified with maxlen.
         limit: specifies the maximum number of entries to retrieve
 
-        For more information check https://redis.io/commands/xtrim
+        For more information see https://redis.io/commands/xtrim
         """
-        pieces = []
+        pieces: list[EncodableT] = []
         if maxlen is not None and minid is not None:
             raise DataError("Only one of ``maxlen`` or ``minid`` " "may be specified")
 
@@ -3126,15 +3837,26 @@ class StreamCommands:
         return self.execute_command("XTRIM", name, *pieces)
 
 
-class SortedSetCommands:
+AsyncStreamCommands = StreamCommands
+
+
+class SortedSetCommands(CommandsProtocol):
     """
     Redis commands for Sorted Sets data type.
     see: https://redis.io/topics/data-types-intro#redis-sorted-sets
     """
 
     def zadd(
-        self, name, mapping, nx=False, xx=False, ch=False, incr=False, gt=None, lt=None
-    ):
+        self,
+        name: KeyT,
+        mapping: Mapping[AnyKeyT, EncodableT],
+        nx: bool = False,
+        xx: bool = False,
+        ch: bool = False,
+        incr: bool = False,
+        gt: bool = None,
+        lt: bool = None,
+    ) -> ResponseT:
         """
         Set any number of element-name, score pairs to the key ``name``. Pairs
         are specified as a dict of element-names keys to score values.
@@ -3180,7 +3902,7 @@ class SortedSetCommands:
         if nx is True and (gt is not None or lt is not None):
             raise DataError("Only one of 'nx', 'lt', or 'gr' may be defined.")
 
-        pieces = []
+        pieces: list[EncodableT] = []
         options = {}
         if nx:
             pieces.append(b"NX")
@@ -3200,54 +3922,64 @@ class SortedSetCommands:
             pieces.append(pair[0])
         return self.execute_command("ZADD", name, *pieces, **options)
 
-    def zcard(self, name):
+    def zcard(self, name: KeyT) -> ResponseT:
         """
         Return the number of elements in the sorted set ``name``
 
-        For more information check https://redis.io/commands/zcard
+        For more information see https://redis.io/commands/zcard
         """
         return self.execute_command("ZCARD", name)
 
-    def zcount(self, name, min, max):
+    def zcount(self, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT) -> ResponseT:
         """
         Returns the number of elements in the sorted set at key ``name`` with
         a score between ``min`` and ``max``.
 
-        For more information check https://redis.io/commands/zcount
+        For more information see https://redis.io/commands/zcount
         """
         return self.execute_command("ZCOUNT", name, min, max)
 
-    def zdiff(self, keys, withscores=False):
+    def zdiff(self, keys: KeysT, withscores: bool = False) -> ResponseT:
         """
         Returns the difference between the first and all successive input
         sorted sets provided in ``keys``.
 
-        For more information check https://redis.io/commands/zdiff
+        For more information see https://redis.io/commands/zdiff
         """
         pieces = [len(keys), *keys]
         if withscores:
             pieces.append("WITHSCORES")
         return self.execute_command("ZDIFF", *pieces)
 
-    def zdiffstore(self, dest, keys):
+    def zdiffstore(self, dest: KeyT, keys: KeysT) -> ResponseT:
         """
         Computes the difference between the first and all successive input
         sorted sets provided in ``keys`` and stores the result in ``dest``.
 
-        For more information check https://redis.io/commands/zdiffstore
+        For more information see https://redis.io/commands/zdiffstore
         """
         pieces = [len(keys), *keys]
         return self.execute_command("ZDIFFSTORE", dest, *pieces)
 
-    def zincrby(self, name, amount, value):
+    def zincrby(
+        self,
+        name: KeyT,
+        amount: float,
+        value: EncodableT,
+    ) -> ResponseT:
         """
         Increment the score of ``value`` in sorted set ``name`` by ``amount``
 
-        For more information check https://redis.io/commands/zincrby
+        For more information see https://redis.io/commands/zincrby
         """
         return self.execute_command("ZINCRBY", name, amount, value)
 
-    def zinter(self, keys, aggregate=None, withscores=False):
+    def zinter(
+        self,
+        keys: KeysT,
+        aggregate: Union[str, None] = None,
+        withscores: bool = False,
+    ) -> ResponseT:
         """
         Return the intersect of multiple sorted sets specified by ``keys``.
         With the ``aggregate`` option, it is possible to specify how the
@@ -3257,11 +3989,16 @@ class SortedSetCommands:
         set will contain the minimum or maximum score of an element across
         the inputs where it exists.
 
-        For more information check https://redis.io/commands/zinter
+        For more information see https://redis.io/commands/zinter
         """
         return self._zaggregate("ZINTER", None, keys, aggregate, withscores=withscores)
 
-    def zinterstore(self, dest, keys, aggregate=None):
+    def zinterstore(
+        self,
+        dest: KeyT,
+        keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
+        aggregate: Union[str, None] = None,
+    ) -> ResponseT:
         """
         Intersect multiple sorted sets specified by ``keys`` into a new
         sorted set, ``dest``. Scores in the destination will be aggregated
@@ -3271,11 +4008,13 @@ class SortedSetCommands:
         contain the minimum or maximum score of an element across the inputs
         where it exists.
 
-        For more information check https://redis.io/commands/zinterstore
+        For more information see https://redis.io/commands/zinterstore
         """
         return self._zaggregate("ZINTERSTORE", dest, keys, aggregate)
 
-    def zintercard(self, numkeys: int, keys: List[str], limit: int = 0) -> int:
+    def zintercard(
+        self, numkeys: int, keys: List[str], limit: int = 0
+    ) -> Union[Awaitable[int], int]:
         """
         Return the cardinality of the intersect of multiple sorted sets
         specified by ``keys`.
@@ -3283,7 +4022,7 @@ class SortedSetCommands:
         cardinality reaches limit partway through the computation, the algorithm will
         exit and yield limit as the cardinality
 
-        For more information check https://redis.io/commands/zintercard
+        For more information see https://redis.io/commands/zintercard
         """
         args = [numkeys, *keys, "LIMIT", limit]
         return self.execute_command("ZINTERCARD", *args)
@@ -3293,33 +4032,46 @@ class SortedSetCommands:
         Return the number of items in the sorted set ``name`` between the
         lexicographical range ``min`` and ``max``.
 
-        For more information check https://redis.io/commands/zlexcount
+        For more information see https://redis.io/commands/zlexcount
         """
         return self.execute_command("ZLEXCOUNT", name, min, max)
 
-    def zpopmax(self, name, count=None):
+    def zpopmax(
+        self,
+        name: KeyT,
+        count: Union[int, None] = None,
+    ) -> ResponseT:
         """
         Remove and return up to ``count`` members with the highest scores
         from the sorted set ``name``.
 
-        For more information check https://redis.io/commands/zpopmax
+        For more information see https://redis.io/commands/zpopmax
         """
         args = (count is not None) and [count] or []
         options = {"withscores": True}
         return self.execute_command("ZPOPMAX", name, *args, **options)
 
-    def zpopmin(self, name, count=None):
+    def zpopmin(
+        self,
+        name: KeyT,
+        count: Union[int, None] = None,
+    ) -> ResponseT:
         """
         Remove and return up to ``count`` members with the lowest scores
         from the sorted set ``name``.
 
-        For more information check https://redis.io/commands/zpopmin
+        For more information see https://redis.io/commands/zpopmin
         """
         args = (count is not None) and [count] or []
         options = {"withscores": True}
         return self.execute_command("ZPOPMIN", name, *args, **options)
 
-    def zrandmember(self, key, count=None, withscores=False):
+    def zrandmember(
+        self,
+        key: KeyT,
+        count: int = None,
+        withscores: bool = False,
+    ) -> ResponseT:
         """
         Return a random element from the sorted set value stored at key.
 
@@ -3333,7 +4085,7 @@ class SortedSetCommands:
         includes the respective scores of the randomly selected elements from
         the sorted set.
 
-        For more information check https://redis.io/commands/zrandmember
+        For more information see https://redis.io/commands/zrandmember
         """
         params = []
         if count is not None:
@@ -3343,7 +4095,7 @@ class SortedSetCommands:
 
         return self.execute_command("ZRANDMEMBER", key, *params)
 
-    def bzpopmax(self, keys, timeout=0):
+    def bzpopmax(self, keys: KeysT, timeout: TimeoutSecT = 0) -> ResponseT:
         """
         ZPOPMAX a value off of the first non-empty sorted set
         named in the ``keys`` list.
@@ -3354,7 +4106,7 @@ class SortedSetCommands:
 
         If timeout is 0, then block indefinitely.
 
-        For more information check https://redis.io/commands/bzpopmax
+        For more information see https://redis.io/commands/bzpopmax
         """
         if timeout is None:
             timeout = 0
@@ -3362,7 +4114,7 @@ class SortedSetCommands:
         keys.append(timeout)
         return self.execute_command("BZPOPMAX", *keys)
 
-    def bzpopmin(self, keys, timeout=0):
+    def bzpopmin(self, keys: KeysT, timeout: TimeoutSecT = 0) -> ResponseT:
         """
         ZPOPMIN a value off of the first non-empty sorted set
         named in the ``keys`` list.
@@ -3373,11 +4125,11 @@ class SortedSetCommands:
 
         If timeout is 0, then block indefinitely.
 
-        For more information check https://redis.io/commands/bzpopmin
+        For more information see https://redis.io/commands/bzpopmin
         """
         if timeout is None:
             timeout = 0
-        keys = list_or_args(keys, None)
+        keys: list[EncodableT] = list_or_args(keys, None)
         keys.append(timeout)
         return self.execute_command("BZPOPMIN", *keys)
 
@@ -3388,11 +4140,11 @@ class SortedSetCommands:
         min: Optional[bool] = False,
         max: Optional[bool] = False,
         count: Optional[int] = 1,
-    ) -> list:
+    ) -> Union[Awaitable[list], list]:
         """
         Pop ``count`` values (default 1) off of the first non-empty sorted set
         named in the ``keys`` list.
-        For more information check https://redis.io/commands/zmpop
+        For more information see https://redis.io/commands/zmpop
         """
         args = [num_keys] + keys
         if (min and max) or (not min and not max):
@@ -3425,7 +4177,7 @@ class SortedSetCommands:
 
         If timeout is 0, then block indefinitely.
 
-        For more information check https://redis.io/commands/bzmpop
+        For more information see https://redis.io/commands/bzmpop
         """
         args = [timeout, numkeys, *keys]
         if (min and max) or (not min and not max):
@@ -3441,18 +4193,18 @@ class SortedSetCommands:
     def _zrange(
         self,
         command,
-        dest,
-        name,
-        start,
-        end,
-        desc=False,
-        byscore=False,
-        bylex=False,
-        withscores=False,
-        score_cast_func=float,
-        offset=None,
-        num=None,
-    ):
+        dest: Union[KeyT, None],
+        name: KeyT,
+        start: int,
+        end: int,
+        desc: bool = False,
+        byscore: bool = False,
+        bylex: bool = False,
+        withscores: bool = False,
+        score_cast_func: Union[type, Callable, None] = float,
+        offset: Union[int, None] = None,
+        num: Union[int, None] = None,
+    ) -> ResponseT:
         if byscore and bylex:
             raise DataError(
                 "``byscore`` and ``bylex`` can not be " "specified together."
@@ -3482,17 +4234,17 @@ class SortedSetCommands:
 
     def zrange(
         self,
-        name,
-        start,
-        end,
-        desc=False,
-        withscores=False,
-        score_cast_func=float,
-        byscore=False,
-        bylex=False,
-        offset=None,
-        num=None,
-    ):
+        name: KeyT,
+        start: int,
+        end: int,
+        desc: bool = False,
+        withscores: bool = False,
+        score_cast_func: Union[type, Callable] = float,
+        byscore: bool = False,
+        bylex: bool = False,
+        offset: int = None,
+        num: int = None,
+    ) -> ResponseT:
         """
         Return a range of values from sorted set ``name`` between
         ``start`` and ``end`` sorted in ascending order.
@@ -3519,7 +4271,7 @@ class SortedSetCommands:
         ``offset`` and ``num`` are specified, then return a slice of the range.
         Can't be provided when using ``bylex``.
 
-        For more information check https://redis.io/commands/zrange
+        For more information see https://redis.io/commands/zrange
         """
         # Need to support ``desc`` also when using old redis version
         # because it was supported in 3.5.3 (of redis-py)
@@ -3541,7 +4293,14 @@ class SortedSetCommands:
             num,
         )
 
-    def zrevrange(self, name, start, end, withscores=False, score_cast_func=float):
+    def zrevrange(
+        self,
+        name: KeyT,
+        start: int,
+        end: int,
+        withscores: bool = False,
+        score_cast_func: Union[type, Callable] = float,
+    ) -> ResponseT:
         """
         Return a range of values from sorted set ``name`` between
         ``start`` and ``end`` sorted in descending order.
@@ -3553,7 +4312,7 @@ class SortedSetCommands:
 
         ``score_cast_func`` a callable used to cast the score return value
 
-        For more information check https://redis.io/commands/zrevrange
+        For more information see https://redis.io/commands/zrevrange
         """
         pieces = ["ZREVRANGE", name, start, end]
         if withscores:
@@ -3563,16 +4322,16 @@ class SortedSetCommands:
 
     def zrangestore(
         self,
-        dest,
-        name,
-        start,
-        end,
-        byscore=False,
-        bylex=False,
-        desc=False,
-        offset=None,
-        num=None,
-    ):
+        dest: KeyT,
+        name: KeyT,
+        start: int,
+        end: int,
+        byscore: bool = False,
+        bylex: bool = False,
+        desc: bool = False,
+        offset: Union[int, None] = None,
+        num: Union[int, None] = None,
+    ) -> ResponseT:
         """
         Stores in ``dest`` the result of a range of values from sorted set
         ``name`` between ``start`` and ``end`` sorted in ascending order.
@@ -3594,7 +4353,7 @@ class SortedSetCommands:
         ``offset`` and ``num`` are specified, then return a slice of the range.
         Can't be provided when using ``bylex``.
 
-        For more information check https://redis.io/commands/zrangestore
+        For more information see https://redis.io/commands/zrangestore
         """
         return self._zrange(
             "ZRANGESTORE",
@@ -3611,7 +4370,14 @@ class SortedSetCommands:
             num,
         )
 
-    def zrangebylex(self, name, min, max, start=None, num=None):
+    def zrangebylex(
+        self,
+        name: KeyT,
+        min: EncodableT,
+        max: EncodableT,
+        start: Union[int, None] = None,
+        num: Union[int, None] = None,
+    ) -> ResponseT:
         """
         Return the lexicographical range of values from sorted set ``name``
         between ``min`` and ``max``.
@@ -3619,7 +4385,7 @@ class SortedSetCommands:
         If ``start`` and ``num`` are specified, then return a slice of the
         range.
 
-        For more information check https://redis.io/commands/zrangebylex
+        For more information see https://redis.io/commands/zrangebylex
         """
         if (start is not None and num is None) or (num is not None and start is None):
             raise DataError("``start`` and ``num`` must both be specified")
@@ -3628,7 +4394,14 @@ class SortedSetCommands:
             pieces.extend([b"LIMIT", start, num])
         return self.execute_command(*pieces)
 
-    def zrevrangebylex(self, name, max, min, start=None, num=None):
+    def zrevrangebylex(
+        self,
+        name: KeyT,
+        max: EncodableT,
+        min: EncodableT,
+        start: Union[int, None] = None,
+        num: Union[int, None] = None,
+    ) -> ResponseT:
         """
         Return the reversed lexicographical range of values from sorted set
         ``name`` between ``max`` and ``min``.
@@ -3636,7 +4409,7 @@ class SortedSetCommands:
         If ``start`` and ``num`` are specified, then return a slice of the
         range.
 
-        For more information check https://redis.io/commands/zrevrangebylex
+        For more information see https://redis.io/commands/zrevrangebylex
         """
         if (start is not None and num is None) or (num is not None and start is None):
             raise DataError("``start`` and ``num`` must both be specified")
@@ -3647,14 +4420,14 @@ class SortedSetCommands:
 
     def zrangebyscore(
         self,
-        name,
-        min,
-        max,
-        start=None,
-        num=None,
-        withscores=False,
-        score_cast_func=float,
-    ):
+        name: KeyT,
+        min: ZScoreBoundT,
+        max: ZScoreBoundT,
+        start: Union[int, None] = None,
+        num: Union[int, None] = None,
+        withscores: bool = False,
+        score_cast_func: Union[type, Callable] = float,
+    ) -> ResponseT:
         """
         Return a range of values from the sorted set ``name`` with scores
         between ``min`` and ``max``.
@@ -3667,7 +4440,7 @@ class SortedSetCommands:
 
         `score_cast_func`` a callable used to cast the score return value
 
-        For more information check https://redis.io/commands/zrangebyscore
+        For more information see https://redis.io/commands/zrangebyscore
         """
         if (start is not None and num is None) or (num is not None and start is None):
             raise DataError("``start`` and ``num`` must both be specified")
@@ -3681,13 +4454,13 @@ class SortedSetCommands:
 
     def zrevrangebyscore(
         self,
-        name,
-        max,
-        min,
-        start=None,
-        num=None,
-        withscores=False,
-        score_cast_func=float,
+        name: KeyT,
+        max: ZScoreBoundT,
+        min: ZScoreBoundT,
+        start: Union[int, None] = None,
+        num: Union[int, None] = None,
+        withscores: bool = False,
+        score_cast_func: Union[type, Callable] = float,
     ):
         """
         Return a range of values from the sorted set ``name`` with scores
@@ -3701,7 +4474,7 @@ class SortedSetCommands:
 
         ``score_cast_func`` a callable used to cast the score return value
 
-        For more information check https://redis.io/commands/zrevrangebyscore
+        For more information see https://redis.io/commands/zrevrangebyscore
         """
         if (start is not None and num is None) or (num is not None and start is None):
             raise DataError("``start`` and ``num`` must both be specified")
@@ -3713,93 +4486,109 @@ class SortedSetCommands:
         options = {"withscores": withscores, "score_cast_func": score_cast_func}
         return self.execute_command(*pieces, **options)
 
-    def zrank(self, name, value):
+    def zrank(self, name: KeyT, value: EncodableT) -> ResponseT:
         """
         Returns a 0-based value indicating the rank of ``value`` in sorted set
         ``name``
 
-        For more information check https://redis.io/commands/zrank
+        For more information see https://redis.io/commands/zrank
         """
         return self.execute_command("ZRANK", name, value)
 
-    def zrem(self, name, *values):
+    def zrem(self, name: KeyT, *values: EncodableT) -> ResponseT:
         """
         Remove member ``values`` from sorted set ``name``
 
-        For more information check https://redis.io/commands/zrem
+        For more information see https://redis.io/commands/zrem
         """
         return self.execute_command("ZREM", name, *values)
 
-    def zremrangebylex(self, name, min, max):
+    def zremrangebylex(self, name: KeyT, min: EncodableT, max: EncodableT) -> ResponseT:
         """
         Remove all elements in the sorted set ``name`` between the
         lexicographical range specified by ``min`` and ``max``.
 
         Returns the number of elements removed.
 
-        For more information check https://redis.io/commands/zremrangebylex
+        For more information see https://redis.io/commands/zremrangebylex
         """
         return self.execute_command("ZREMRANGEBYLEX", name, min, max)
 
-    def zremrangebyrank(self, name, min, max):
+    def zremrangebyrank(self, name: KeyT, min: int, max: int) -> ResponseT:
         """
         Remove all elements in the sorted set ``name`` with ranks between
         ``min`` and ``max``. Values are 0-based, ordered from smallest score
         to largest. Values can be negative indicating the highest scores.
         Returns the number of elements removed
 
-        For more information check https://redis.io/commands/zremrangebyrank
+        For more information see https://redis.io/commands/zremrangebyrank
         """
         return self.execute_command("ZREMRANGEBYRANK", name, min, max)
 
-    def zremrangebyscore(self, name, min, max):
+    def zremrangebyscore(
+        self, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT
+    ) -> ResponseT:
         """
         Remove all elements in the sorted set ``name`` with scores
         between ``min`` and ``max``. Returns the number of elements removed.
 
-        For more information check https://redis.io/commands/zremrangebyscore
+        For more information see https://redis.io/commands/zremrangebyscore
         """
         return self.execute_command("ZREMRANGEBYSCORE", name, min, max)
 
-    def zrevrank(self, name, value):
+    def zrevrank(self, name: KeyT, value: EncodableT) -> ResponseT:
         """
         Returns a 0-based value indicating the descending rank of
         ``value`` in sorted set ``name``
 
-        For more information check https://redis.io/commands/zrevrank
+        For more information see https://redis.io/commands/zrevrank
         """
         return self.execute_command("ZREVRANK", name, value)
 
-    def zscore(self, name, value):
+    def zscore(self, name: KeyT, value: EncodableT) -> ResponseT:
         """
         Return the score of element ``value`` in sorted set ``name``
 
-        For more information check https://redis.io/commands/zscore
+        For more information see https://redis.io/commands/zscore
         """
         return self.execute_command("ZSCORE", name, value)
 
-    def zunion(self, keys, aggregate=None, withscores=False):
+    def zunion(
+        self,
+        keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
+        aggregate: Union[str, None] = None,
+        withscores: bool = False,
+    ) -> ResponseT:
         """
         Return the union of multiple sorted sets specified by ``keys``.
         ``keys`` can be provided as dictionary of keys and their weights.
         Scores will be aggregated based on the ``aggregate``, or SUM if
         none is provided.
 
-        For more information check https://redis.io/commands/zunion
+        For more information see https://redis.io/commands/zunion
         """
         return self._zaggregate("ZUNION", None, keys, aggregate, withscores=withscores)
 
-    def zunionstore(self, dest, keys, aggregate=None):
+    def zunionstore(
+        self,
+        dest: KeyT,
+        keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
+        aggregate: Union[str, None] = None,
+    ) -> ResponseT:
         """
         Union multiple sorted sets specified by ``keys`` into
         a new sorted set, ``dest``. Scores in the destination will be
         aggregated based on the ``aggregate``, or SUM if none is provided.
 
-        For more information check https://redis.io/commands/zunionstore
+        For more information see https://redis.io/commands/zunionstore
         """
         return self._zaggregate("ZUNIONSTORE", dest, keys, aggregate)
 
-    def zmscore(self, key, members):
+    def zmscore(
+        self,
+        key: KeyT,
+        members: List[str],
+    ) -> ResponseT:
         """
         Returns the scores associated with the specified members
         in the sorted set stored at key.
@@ -3808,15 +4597,22 @@ class SortedSetCommands:
         If the member does not exist, a None will be returned
         in corresponding position.
 
-        For more information check https://redis.io/commands/zmscore
+        For more information see https://redis.io/commands/zmscore
         """
         if not members:
             raise DataError("ZMSCORE members must be a non-empty list")
         pieces = [key] + members
         return self.execute_command("ZMSCORE", *pieces)
 
-    def _zaggregate(self, command, dest, keys, aggregate=None, **options):
-        pieces = [command]
+    def _zaggregate(
+        self,
+        command: str,
+        dest: Union[KeyT, None],
+        keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
+        aggregate: Union[str, None] = None,
+        **options,
+    ) -> ResponseT:
+        pieces: list[EncodableT] = [command]
         if dest is not None:
             pieces.append(dest)
         pieces.append(len(keys))
@@ -3839,105 +4635,117 @@ class SortedSetCommands:
         return self.execute_command(*pieces, **options)
 
 
-class HyperlogCommands:
+AsyncSortedSetCommands = SortedSetCommands
+
+
+class HyperlogCommands(CommandsProtocol):
     """
     Redis commands of HyperLogLogs data type.
     see: https://redis.io/topics/data-types-intro#hyperloglogs
     """
 
-    def pfadd(self, name, *values):
+    def pfadd(self, name: KeyT, *values: EncodableT) -> ResponseT:
         """
         Adds the specified elements to the specified HyperLogLog.
 
-        For more information check https://redis.io/commands/pfadd
+        For more information see https://redis.io/commands/pfadd
         """
         return self.execute_command("PFADD", name, *values)
 
-    def pfcount(self, *sources):
+    def pfcount(self, *sources: KeyT) -> ResponseT:
         """
         Return the approximated cardinality of
         the set observed by the HyperLogLog at key(s).
 
-        For more information check https://redis.io/commands/pfcount
+        For more information see https://redis.io/commands/pfcount
         """
         return self.execute_command("PFCOUNT", *sources)
 
-    def pfmerge(self, dest, *sources):
+    def pfmerge(self, dest: KeyT, *sources: KeyT) -> ResponseT:
         """
         Merge N different HyperLogLogs into a single one.
 
-        For more information check https://redis.io/commands/pfmerge
+        For more information see https://redis.io/commands/pfmerge
         """
         return self.execute_command("PFMERGE", dest, *sources)
 
 
-class HashCommands:
+AsyncHyperlogCommands = HyperlogCommands
+
+
+class HashCommands(CommandsProtocol):
     """
     Redis commands for Hash data type.
     see: https://redis.io/topics/data-types-intro#redis-hashes
     """
 
-    def hdel(self, name: str, *keys: List) -> int:
+    def hdel(self, name: str, *keys: List) -> Union[Awaitable[int], int]:
         """
         Delete ``keys`` from hash ``name``
 
-        For more information check https://redis.io/commands/hdel
+        For more information see https://redis.io/commands/hdel
         """
         return self.execute_command("HDEL", name, *keys)
 
-    def hexists(self, name: str, key: str) -> bool:
+    def hexists(self, name: str, key: str) -> Union[Awaitable[bool], bool]:
         """
         Returns a boolean indicating if ``key`` exists within hash ``name``
 
-        For more information check https://redis.io/commands/hexists
+        For more information see https://redis.io/commands/hexists
         """
         return self.execute_command("HEXISTS", name, key)
 
-    def hget(self, name: str, key: str) -> Optional[str]:
+    def hget(
+        self, name: str, key: str
+    ) -> Union[Awaitable[Optional[str]], Optional[str]]:
         """
         Return the value of ``key`` within the hash ``name``
 
-        For more information check https://redis.io/commands/hget
+        For more information see https://redis.io/commands/hget
         """
         return self.execute_command("HGET", name, key)
 
-    def hgetall(self, name: str) -> dict:
+    def hgetall(self, name: str) -> Union[Awaitable[dict], dict]:
         """
         Return a Python dict of the hash's name/value pairs
 
-        For more information check https://redis.io/commands/hgetall
+        For more information see https://redis.io/commands/hgetall
         """
         return self.execute_command("HGETALL", name)
 
-    def hincrby(self, name: str, key: str, amount: int = 1) -> int:
+    def hincrby(
+        self, name: str, key: str, amount: int = 1
+    ) -> Union[Awaitable[int], int]:
         """
         Increment the value of ``key`` in hash ``name`` by ``amount``
 
-        For more information check https://redis.io/commands/hincrby
+        For more information see https://redis.io/commands/hincrby
         """
         return self.execute_command("HINCRBY", name, key, amount)
 
-    def hincrbyfloat(self, name: str, key: str, amount: float = 1.0) -> float:
+    def hincrbyfloat(
+        self, name: str, key: str, amount: float = 1.0
+    ) -> Union[Awaitable[float], float]:
         """
         Increment the value of ``key`` in hash ``name`` by floating ``amount``
 
-        For more information check https://redis.io/commands/hincrbyfloat
+        For more information see https://redis.io/commands/hincrbyfloat
         """
         return self.execute_command("HINCRBYFLOAT", name, key, amount)
 
-    def hkeys(self, name: str) -> List:
+    def hkeys(self, name: str) -> Union[Awaitable[List], List]:
         """
         Return the list of keys within hash ``name``
 
-        For more information check https://redis.io/commands/hkeys
+        For more information see https://redis.io/commands/hkeys
         """
         return self.execute_command("HKEYS", name)
 
-    def hlen(self, name: str) -> int:
+    def hlen(self, name: str) -> Union[Awaitable[int], int]:
         """
         Return the number of elements in hash ``name``
 
-        For more information check https://redis.io/commands/hlen
+        For more information see https://redis.io/commands/hlen
         """
         return self.execute_command("HLEN", name)
 
@@ -3947,18 +4755,21 @@ class HashCommands:
         key: Optional[str] = None,
         value: Optional[str] = None,
         mapping: Optional[dict] = None,
-    ) -> int:
+        items: Optional[list] = None,
+    ) -> Union[Awaitable[int], int]:
         """
         Set ``key`` to ``value`` within hash ``name``,
         ``mapping`` accepts a dict of key/value pairs that will be
         added to hash ``name``.
+        ``items`` accepts a list of key/value pairs that will be
+        added to hash ``name``.
         Returns the number of fields that were added.
 
-        For more information check https://redis.io/commands/hset
+        For more information see https://redis.io/commands/hset
         """
-        if key is None and not mapping:
+        if key is None and not mapping and not items:
             raise DataError("'hset' with no key value pairs")
-        items = []
+        items = items or []
         if key is not None:
             items.extend((key, value))
         if mapping:
@@ -3967,21 +4778,21 @@ class HashCommands:
 
         return self.execute_command("HSET", name, *items)
 
-    def hsetnx(self, name: str, key: str, value: str) -> bool:
+    def hsetnx(self, name: str, key: str, value: str) -> Union[Awaitable[bool], bool]:
         """
         Set ``key`` to ``value`` within hash ``name`` if ``key`` does not
         exist.  Returns 1 if HSETNX created a field, otherwise 0.
 
-        For more information check https://redis.io/commands/hsetnx
+        For more information see https://redis.io/commands/hsetnx
         """
         return self.execute_command("HSETNX", name, key, value)
 
-    def hmset(self, name: str, mapping: dict) -> str:
+    def hmset(self, name: str, mapping: dict) -> Union[Awaitable[str], str]:
         """
         Set key to value within hash ``name`` for each corresponding
         key and value from the ``mapping`` dict.
 
-        For more information check https://redis.io/commands/hmset
+        For more information see https://redis.io/commands/hmset
         """
         warnings.warn(
             f"{self.__class__.__name__}.hmset() is deprecated. "
@@ -3996,75 +4807,171 @@ class HashCommands:
             items.extend(pair)
         return self.execute_command("HMSET", name, *items)
 
-    def hmget(self, name: str, keys: List, *args: List) -> List:
+    def hmget(self, name: str, keys: List, *args: List) -> Union[Awaitable[List], List]:
         """
         Returns a list of values ordered identically to ``keys``
 
-        For more information check https://redis.io/commands/hmget
+        For more information see https://redis.io/commands/hmget
         """
         args = list_or_args(keys, args)
         return self.execute_command("HMGET", name, *args)
 
-    def hvals(self, name: str) -> List:
+    def hvals(self, name: str) -> Union[Awaitable[List], List]:
         """
         Return the list of values within hash ``name``
 
-        For more information check https://redis.io/commands/hvals
+        For more information see https://redis.io/commands/hvals
         """
         return self.execute_command("HVALS", name)
 
-    def hstrlen(self, name: str, key: str) -> int:
+    def hstrlen(self, name: str, key: str) -> Union[Awaitable[int], int]:
         """
         Return the number of bytes stored in the value of ``key``
         within hash ``name``
 
-        For more information check https://redis.io/commands/hstrlen
+        For more information see https://redis.io/commands/hstrlen
         """
         return self.execute_command("HSTRLEN", name, key)
 
 
-class PubSubCommands:
+AsyncHashCommands = HashCommands
+
+
+class Script:
+    """
+    An executable Lua script object returned by ``register_script``
+    """
+
+    def __init__(self, registered_client: "Redis", script: ScriptTextT):
+        self.registered_client = registered_client
+        self.script = script
+        # Precalculate and store the SHA1 hex digest of the script.
+
+        if isinstance(script, str):
+            # We need the encoding from the client in order to generate an
+            # accurate byte representation of the script
+            encoder = registered_client.connection_pool.get_encoder()
+            script = encoder.encode(script)
+        self.sha = hashlib.sha1(script).hexdigest()
+
+    def __call__(
+        self,
+        keys: Union[Sequence[KeyT], None] = None,
+        args: Union[Iterable[EncodableT], None] = None,
+        client: Union["Redis", None] = None,
+    ):
+        """Execute the script, passing any required ``args``"""
+        keys = keys or []
+        args = args or []
+        if client is None:
+            client = self.registered_client
+        args = tuple(keys) + tuple(args)
+        # make sure the Redis server knows about the script
+        from redis.client import Pipeline
+
+        if isinstance(client, Pipeline):
+            # Make sure the pipeline can register the script before executing.
+            client.scripts.add(self)
+        try:
+            return client.evalsha(self.sha, len(keys), *args)
+        except NoScriptError:
+            # Maybe the client is pointed to a different server than the client
+            # that created this instance?
+            # Overwrite the sha just in case there was a discrepancy.
+            self.sha = client.script_load(self.script)
+            return client.evalsha(self.sha, len(keys), *args)
+
+
+class AsyncScript:
+    """
+    An executable Lua script object returned by ``register_script``
+    """
+
+    def __init__(self, registered_client: "AsyncRedis", script: ScriptTextT):
+        self.registered_client = registered_client
+        self.script = script
+        # Precalculate and store the SHA1 hex digest of the script.
+
+        if isinstance(script, str):
+            # We need the encoding from the client in order to generate an
+            # accurate byte representation of the script
+            encoder = registered_client.connection_pool.get_encoder()
+            script = encoder.encode(script)
+        self.sha = hashlib.sha1(script).hexdigest()
+
+    async def __call__(
+        self,
+        keys: Union[Sequence[KeyT], None] = None,
+        args: Union[Iterable[EncodableT], None] = None,
+        client: Union["AsyncRedis", None] = None,
+    ):
+        """Execute the script, passing any required ``args``"""
+        keys = keys or []
+        args = args or []
+        if client is None:
+            client = self.registered_client
+        args = tuple(keys) + tuple(args)
+        # make sure the Redis server knows about the script
+        from redis.asyncio.client import Pipeline
+
+        if isinstance(client, Pipeline):
+            # Make sure the pipeline can register the script before executing.
+            client.scripts.add(self)
+        try:
+            return await client.evalsha(self.sha, len(keys), *args)
+        except NoScriptError:
+            # Maybe the client is pointed to a different server than the client
+            # that created this instance?
+            # Overwrite the sha just in case there was a discrepancy.
+            self.sha = await client.script_load(self.script)
+            return await client.evalsha(self.sha, len(keys), *args)
+
+
+class PubSubCommands(CommandsProtocol):
     """
     Redis PubSub commands.
     see https://redis.io/topics/pubsub
     """
 
-    def publish(self, channel, message, **kwargs):
+    def publish(self, channel: ChannelT, message: EncodableT, **kwargs) -> ResponseT:
         """
         Publish ``message`` on ``channel``.
         Returns the number of subscribers the message was delivered to.
 
-        For more information check https://redis.io/commands/publish
+        For more information see https://redis.io/commands/publish
         """
         return self.execute_command("PUBLISH", channel, message, **kwargs)
 
-    def pubsub_channels(self, pattern="*", **kwargs):
+    def pubsub_channels(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
         """
         Return a list of channels that have at least one subscriber
 
-        For more information check https://redis.io/commands/pubsub-channels
+        For more information see https://redis.io/commands/pubsub-channels
         """
         return self.execute_command("PUBSUB CHANNELS", pattern, **kwargs)
 
-    def pubsub_numpat(self, **kwargs):
+    def pubsub_numpat(self, **kwargs) -> ResponseT:
         """
         Returns the number of subscriptions to patterns
 
-        For more information check https://redis.io/commands/pubsub-numpat
+        For more information see https://redis.io/commands/pubsub-numpat
         """
         return self.execute_command("PUBSUB NUMPAT", **kwargs)
 
-    def pubsub_numsub(self, *args, **kwargs):
+    def pubsub_numsub(self, *args: ChannelT, **kwargs) -> ResponseT:
         """
         Return a list of (channel, number of subscribers) tuples
         for each channel given in ``*args``
 
-        For more information check https://redis.io/commands/pubsub-numsub
+        For more information see https://redis.io/commands/pubsub-numsub
         """
         return self.execute_command("PUBSUB NUMSUB", *args, **kwargs)
 
 
-class ScriptCommands:
+AsyncPubSubCommands = PubSubCommands
+
+
+class ScriptCommands(CommandsProtocol):
     """
     Redis Lua script commands. see:
     https://redis.com/ebook/part-3-next-steps/chapter-11-scripting-redis-with-lua/
@@ -4072,10 +4979,12 @@ class ScriptCommands:
 
     def _eval(
         self, command: str, script: str, numkeys: int, *keys_and_args: list
-    ) -> str:
+    ) -> Union[Awaitable[str], str]:
         return self.execute_command(command, script, numkeys, *keys_and_args)
 
-    def eval(self, script: str, numkeys: int, *keys_and_args: list) -> str:
+    def eval(
+        self, script: str, numkeys: int, *keys_and_args: list
+    ) -> Union[Awaitable[str], str]:
         """
         Execute the Lua ``script``, specifying the ``numkeys`` the script
         will touch and the key names and argument values in ``keys_and_args``.
@@ -4084,11 +4993,13 @@ class ScriptCommands:
         In practice, use the object returned by ``register_script``. This
         function exists purely for Redis API completion.
 
-        For more information check  https://redis.io/commands/eval
+        For more information see  https://redis.io/commands/eval
         """
         return self._eval("EVAL", script, numkeys, *keys_and_args)
 
-    def eval_ro(self, script: str, numkeys: int, *keys_and_args: list) -> str:
+    def eval_ro(
+        self, script: str, numkeys: int, *keys_and_args: list
+    ) -> Union[Awaitable[str], str]:
         """
         The read-only variant of the EVAL command
 
@@ -4096,16 +5007,18 @@ class ScriptCommands:
         will touch and the key names and argument values in ``keys_and_args``.
         Returns the result of the script.
 
-        For more information check  https://redis.io/commands/eval_ro
+        For more information see  https://redis.io/commands/eval_ro
         """
         return self._eval("EVAL_RO", script, numkeys, *keys_and_args)
 
     def _evalsha(
         self, command: str, sha: str, numkeys: int, *keys_and_args: list
-    ) -> str:
+    ) -> Union[Awaitable[str], str]:
         return self.execute_command(command, sha, numkeys, *keys_and_args)
 
-    def evalsha(self, sha: str, numkeys: int, *keys_and_args: list) -> str:
+    def evalsha(
+        self, sha: str, numkeys: int, *keys_and_args: list
+    ) -> Union[Awaitable[str], str]:
         """
         Use the ``sha`` to execute a Lua script already registered via EVAL
         or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
@@ -4115,11 +5028,13 @@ class ScriptCommands:
         In practice, use the object returned by ``register_script``. This
         function exists purely for Redis API completion.
 
-        For more information check  https://redis.io/commands/evalsha
+        For more information see  https://redis.io/commands/evalsha
         """
         return self._evalsha("EVALSHA", sha, numkeys, *keys_and_args)
 
-    def evalsha_ro(self, sha: str, numkeys: int, *keys_and_args: list) -> str:
+    def evalsha_ro(
+        self, sha: str, numkeys: int, *keys_and_args: list
+    ) -> Union[Awaitable[str], str]:
         """
         The read-only variant of the EVALSHA command
 
@@ -4128,30 +5043,32 @@ class ScriptCommands:
         key names and argument values in ``keys_and_args``. Returns the result
         of the script.
 
-        For more information check  https://redis.io/commands/evalsha_ro
+        For more information see  https://redis.io/commands/evalsha_ro
         """
         return self._evalsha("EVALSHA_RO", sha, numkeys, *keys_and_args)
 
-    def script_exists(self, *args):
+    def script_exists(self, *args: str) -> ResponseT:
         """
         Check if a script exists in the script cache by specifying the SHAs of
         each script as ``args``. Returns a list of boolean values indicating if
         if each already script exists in the cache.
 
-        For more information check  https://redis.io/commands/script-exists
+        For more information see  https://redis.io/commands/script-exists
         """
         return self.execute_command("SCRIPT EXISTS", *args)
 
-    def script_debug(self, *args):
+    def script_debug(self, *args) -> None:
         raise NotImplementedError(
             "SCRIPT DEBUG is intentionally not implemented in the client."
         )
 
-    def script_flush(self, sync_type=None):
+    def script_flush(
+        self, sync_type: Union[Literal["SYNC"], Literal["ASYNC"]] = None
+    ) -> ResponseT:
         """Flush all scripts from the script cache.
         ``sync_type`` is by default SYNC (synchronous) but it can also be
                       ASYNC.
-        For more information check  https://redis.io/commands/script-flush
+        For more information see  https://redis.io/commands/script-flush
         """
 
         # Redis pre 6 had no sync_type.
@@ -4167,23 +5084,23 @@ class ScriptCommands:
             pieces = [sync_type]
         return self.execute_command("SCRIPT FLUSH", *pieces)
 
-    def script_kill(self):
+    def script_kill(self) -> ResponseT:
         """
         Kill the currently executing Lua script
 
-        For more information check https://redis.io/commands/script-kill
+        For more information see https://redis.io/commands/script-kill
         """
         return self.execute_command("SCRIPT KILL")
 
-    def script_load(self, script):
+    def script_load(self, script: ScriptTextT) -> ResponseT:
         """
         Load a Lua ``script`` into the script cache. Returns the SHA.
 
-        For more information check https://redis.io/commands/script-load
+        For more information see https://redis.io/commands/script-load
         """
         return self.execute_command("SCRIPT LOAD", script)
 
-    def register_script(self, script):
+    def register_script(self: "Redis", script: ScriptTextT) -> Script:
         """
         Register a Lua ``script`` specifying the ``keys`` it will touch.
         Returns a Script object that is callable and hides the complexity of
@@ -4193,13 +5110,34 @@ class ScriptCommands:
         return Script(self, script)
 
 
-class GeoCommands:
+class AsyncScriptCommands(ScriptCommands):
+    async def script_debug(self, *args) -> None:
+        return super().script_debug()
+
+    def register_script(self: "AsyncRedis", script: ScriptTextT) -> AsyncScript:
+        """
+        Register a Lua ``script`` specifying the ``keys`` it will touch.
+        Returns a Script object that is callable and hides the complexity of
+        deal with scripts, keys, and shas. This is the preferred way to work
+        with Lua scripts.
+        """
+        return AsyncScript(self, script)
+
+
+class GeoCommands(CommandsProtocol):
     """
     Redis Geospatial commands.
     see: https://redis.com/redis-best-practices/indexing-patterns/geospatial/
     """
 
-    def geoadd(self, name, values, nx=False, xx=False, ch=False):
+    def geoadd(
+        self,
+        name: KeyT,
+        values: Sequence[EncodableT],
+        nx: bool = False,
+        xx: bool = False,
+        ch: bool = False,
+    ) -> ResponseT:
         """
         Add the specified geospatial items to the specified key identified
         by the ``name`` argument. The Geospatial items are given as ordered
@@ -4218,7 +5156,7 @@ class GeoCommands:
         Changed elements include new elements that were added and elements
         whose scores changed.
 
-        For more information check https://redis.io/commands/geoadd
+        For more information see https://redis.io/commands/geoadd
         """
         if nx and xx:
             raise DataError("GEOADD allows either 'nx' or 'xx', not both")
@@ -4234,57 +5172,63 @@ class GeoCommands:
         pieces.extend(values)
         return self.execute_command("GEOADD", *pieces)
 
-    def geodist(self, name, place1, place2, unit=None):
+    def geodist(
+        self,
+        name: KeyT,
+        place1: FieldT,
+        place2: FieldT,
+        unit: Union[str, None] = None,
+    ) -> ResponseT:
         """
         Return the distance between ``place1`` and ``place2`` members of the
         ``name`` key.
         The units must be one of the following : m, km mi, ft. By default
         meters are used.
 
-        For more information check https://redis.io/commands/geodist
+        For more information see https://redis.io/commands/geodist
         """
-        pieces = [name, place1, place2]
+        pieces: list[EncodableT] = [name, place1, place2]
         if unit and unit not in ("m", "km", "mi", "ft"):
             raise DataError("GEODIST invalid unit")
         elif unit:
             pieces.append(unit)
         return self.execute_command("GEODIST", *pieces)
 
-    def geohash(self, name, *values):
+    def geohash(self, name: KeyT, *values: FieldT) -> ResponseT:
         """
         Return the geo hash string for each item of ``values`` members of
         the specified key identified by the ``name`` argument.
 
-        For more information check https://redis.io/commands/geohash
+        For more information see https://redis.io/commands/geohash
         """
         return self.execute_command("GEOHASH", name, *values)
 
-    def geopos(self, name, *values):
+    def geopos(self, name: KeyT, *values: FieldT) -> ResponseT:
         """
         Return the positions of each item of ``values`` as members of
         the specified key identified by the ``name`` argument. Each position
         is represented by the pairs lon and lat.
 
-        For more information check https://redis.io/commands/geopos
+        For more information see https://redis.io/commands/geopos
         """
         return self.execute_command("GEOPOS", name, *values)
 
     def georadius(
         self,
-        name,
-        longitude,
-        latitude,
-        radius,
-        unit=None,
-        withdist=False,
-        withcoord=False,
-        withhash=False,
-        count=None,
-        sort=None,
-        store=None,
-        store_dist=None,
-        any=False,
-    ):
+        name: KeyT,
+        longitude: float,
+        latitude: float,
+        radius: float,
+        unit: Union[str, None] = None,
+        withdist: bool = False,
+        withcoord: bool = False,
+        withhash: bool = False,
+        count: Union[int, None] = None,
+        sort: Union[str, None] = None,
+        store: Union[KeyT, None] = None,
+        store_dist: Union[KeyT, None] = None,
+        any: bool = False,
+    ) -> ResponseT:
         """
         Return the members of the specified key identified by the
         ``name`` argument which are within the borders of the area specified
@@ -4313,7 +5257,7 @@ class GeoCommands:
         named with a specific key, instead of ``store`` the sorted set
         destination score is set with the distance.
 
-        For more information check https://redis.io/commands/georadius
+        For more information see https://redis.io/commands/georadius
         """
         return self._georadiusgeneric(
             "GEORADIUS",
@@ -4334,26 +5278,26 @@ class GeoCommands:
 
     def georadiusbymember(
         self,
-        name,
-        member,
-        radius,
-        unit=None,
-        withdist=False,
-        withcoord=False,
-        withhash=False,
-        count=None,
-        sort=None,
-        store=None,
-        store_dist=None,
-        any=False,
-    ):
+        name: KeyT,
+        member: FieldT,
+        radius: float,
+        unit: Union[str, None] = None,
+        withdist: bool = False,
+        withcoord: bool = False,
+        withhash: bool = False,
+        count: Union[int, None] = None,
+        sort: Union[str, None] = None,
+        store: Union[KeyT, None] = None,
+        store_dist: Union[KeyT, None] = None,
+        any: bool = False,
+    ) -> ResponseT:
         """
         This command is exactly like ``georadius`` with the sole difference
         that instead of taking, as the center of the area to query, a longitude
         and latitude value, it takes the name of a member already existing
         inside the geospatial index represented by the sorted set.
 
-        For more information check https://redis.io/commands/georadiusbymember
+        For more information see https://redis.io/commands/georadiusbymember
         """
         return self._georadiusgeneric(
             "GEORADIUSBYMEMBER",
@@ -4371,7 +5315,12 @@ class GeoCommands:
             any=any,
         )
 
-    def _georadiusgeneric(self, command, *args, **kwargs):
+    def _georadiusgeneric(
+        self,
+        command: str,
+        *args: EncodableT,
+        **kwargs: Union[EncodableT, None],
+    ) -> ResponseT:
         pieces = list(args)
         if kwargs["unit"] and kwargs["unit"] not in ("m", "km", "mi", "ft"):
             raise DataError("GEORADIUS invalid unit")
@@ -4419,21 +5368,21 @@ class GeoCommands:
 
     def geosearch(
         self,
-        name,
-        member=None,
-        longitude=None,
-        latitude=None,
-        unit="m",
-        radius=None,
-        width=None,
-        height=None,
-        sort=None,
-        count=None,
-        any=False,
-        withcoord=False,
-        withdist=False,
-        withhash=False,
-    ):
+        name: KeyT,
+        member: Union[FieldT, None] = None,
+        longitude: Union[float, None] = None,
+        latitude: Union[float, None] = None,
+        unit: str = "m",
+        radius: Union[float, None] = None,
+        width: Union[float, None] = None,
+        height: Union[float, None] = None,
+        sort: Union[str, None] = None,
+        count: Union[int, None] = None,
+        any: bool = False,
+        withcoord: bool = False,
+        withdist: bool = False,
+        withhash: bool = False,
+    ) -> ResponseT:
         """
         Return the members of specified key identified by the
         ``name`` argument, which are within the borders of the
@@ -4466,7 +5415,7 @@ class GeoCommands:
         each place.
         ``withhash`` indicates to return the geohash string of each place.
 
-        For more information check https://redis.io/commands/geosearch
+        For more information see https://redis.io/commands/geosearch
         """
 
         return self._geosearchgeneric(
@@ -4491,20 +5440,20 @@ class GeoCommands:
 
     def geosearchstore(
         self,
-        dest,
-        name,
-        member=None,
-        longitude=None,
-        latitude=None,
-        unit="m",
-        radius=None,
-        width=None,
-        height=None,
-        sort=None,
-        count=None,
-        any=False,
-        storedist=False,
-    ):
+        dest: KeyT,
+        name: KeyT,
+        member: Union[FieldT, None] = None,
+        longitude: Union[float, None] = None,
+        latitude: Union[float, None] = None,
+        unit: str = "m",
+        radius: Union[float, None] = None,
+        width: Union[float, None] = None,
+        height: Union[float, None] = None,
+        sort: Union[str, None] = None,
+        count: Union[int, None] = None,
+        any: bool = False,
+        storedist: bool = False,
+    ) -> ResponseT:
         """
         This command is like GEOSEARCH, but stores the result in
         ``dest``. By default, it stores the results in the destination
@@ -4513,7 +5462,7 @@ class GeoCommands:
         items in a sorted set populated with their distance from the
         center of the circle or box, as a floating-point number.
 
-        For more information check https://redis.io/commands/geosearchstore
+        For more information see https://redis.io/commands/geosearchstore
         """
         return self._geosearchgeneric(
             "GEOSEARCHSTORE",
@@ -4536,7 +5485,12 @@ class GeoCommands:
             store_dist=storedist,
         )
 
-    def _geosearchgeneric(self, command, *args, **kwargs):
+    def _geosearchgeneric(
+        self,
+        command: str,
+        *args: EncodableT,
+        **kwargs: Union[EncodableT, None],
+    ) -> ResponseT:
         pieces = list(args)
 
         # FROMMEMBER or FROMLONLAT
@@ -4601,52 +5555,55 @@ class GeoCommands:
         return self.execute_command(command, *pieces, **kwargs)
 
 
-class ModuleCommands:
+AsyncGeoCommands = GeoCommands
+
+
+class ModuleCommands(CommandsProtocol):
     """
     Redis Module commands.
     see: https://redis.io/topics/modules-intro
     """
 
-    def module_load(self, path, *args):
+    def module_load(self, path, *args) -> ResponseT:
         """
         Loads the module from ``path``.
         Passes all ``*args`` to the module, during loading.
         Raises ``ModuleError`` if a module is not found at ``path``.
 
-        For more information check https://redis.io/commands/module-load
+        For more information see https://redis.io/commands/module-load
         """
         return self.execute_command("MODULE LOAD", path, *args)
 
-    def module_unload(self, name):
+    def module_unload(self, name) -> ResponseT:
         """
         Unloads the module ``name``.
         Raises ``ModuleError`` if ``name`` is not in loaded modules.
 
-        For more information check https://redis.io/commands/module-unload
+        For more information see https://redis.io/commands/module-unload
         """
         return self.execute_command("MODULE UNLOAD", name)
 
-    def module_list(self):
+    def module_list(self) -> ResponseT:
         """
         Returns a list of dictionaries containing the name and version of
         all loaded modules.
 
-        For more information check https://redis.io/commands/module-list
+        For more information see https://redis.io/commands/module-list
         """
         return self.execute_command("MODULE LIST")
 
-    def command_info(self):
+    def command_info(self) -> None:
         raise NotImplementedError(
             "COMMAND INFO is intentionally not implemented in the client."
         )
 
-    def command_count(self):
+    def command_count(self) -> ResponseT:
         return self.execute_command("COMMAND COUNT")
 
-    def command_getkeys(self, *args):
+    def command_getkeys(self, *args) -> ResponseT:
         return self.execute_command("COMMAND GETKEYS", *args)
 
-    def command(self):
+    def command(self) -> ResponseT:
         return self.execute_command("COMMAND")
 
 
@@ -4663,7 +5620,7 @@ class Script:
         if isinstance(script, str):
             # We need the encoding from the client in order to generate an
             # accurate byte representation of the script
-            encoder = registered_client.connection_pool.get_encoder()
+            encoder = self.get_encoder()
             script = encoder.encode(script)
         self.sha = hashlib.sha1(script).hexdigest()
 
@@ -4687,128 +5644,190 @@ class Script:
             self.sha = client.script_load(self.script)
             return client.evalsha(self.sha, len(keys), *args)
 
-
-class BitFieldOperation:
-    """
-    Command builder for BITFIELD commands.
-    """
-
-    def __init__(self, client, key, default_overflow=None):
-        self.client = client
-        self.key = key
-        self._default_overflow = default_overflow
-        self.reset()
-
-    def reset(self):
-        """
-        Reset the state of the instance to when it was constructed
-        """
-        self.operations = []
-        self._last_overflow = "WRAP"
-        self.overflow(self._default_overflow or self._last_overflow)
-
-    def overflow(self, overflow):
-        """
-        Update the overflow algorithm of successive INCRBY operations
-        :param overflow: Overflow algorithm, one of WRAP, SAT, FAIL. See the
-            Redis docs for descriptions of these algorithmsself.
-        :returns: a :py:class:`BitFieldOperation` instance.
-        """
-        overflow = overflow.upper()
-        if overflow != self._last_overflow:
-            self._last_overflow = overflow
-            self.operations.append(("OVERFLOW", overflow))
-        return self
-
-    def incrby(self, fmt, offset, increment, overflow=None):
-        """
-        Increment a bitfield by a given amount.
-        :param fmt: format-string for the bitfield being updated, e.g. 'u8'
-            for an unsigned 8-bit integer.
-        :param offset: offset (in number of bits). If prefixed with a
-            '#', this is an offset multiplier, e.g. given the arguments
-            fmt='u8', offset='#2', the offset will be 16.
-        :param int increment: value to increment the bitfield by.
-        :param str overflow: overflow algorithm. Defaults to WRAP, but other
-            acceptable values are SAT and FAIL. See the Redis docs for
-            descriptions of these algorithms.
-        :returns: a :py:class:`BitFieldOperation` instance.
-        """
-        if overflow is not None:
-            self.overflow(overflow)
-
-        self.operations.append(("INCRBY", fmt, offset, increment))
-        return self
-
-    def get(self, fmt, offset):
-        """
-        Get the value of a given bitfield.
-        :param fmt: format-string for the bitfield being read, e.g. 'u8' for
-            an unsigned 8-bit integer.
-        :param offset: offset (in number of bits). If prefixed with a
-            '#', this is an offset multiplier, e.g. given the arguments
-            fmt='u8', offset='#2', the offset will be 16.
-        :returns: a :py:class:`BitFieldOperation` instance.
-        """
-        self.operations.append(("GET", fmt, offset))
-        return self
-
-    def set(self, fmt, offset, value):
-        """
-        Set the value of a given bitfield.
-        :param fmt: format-string for the bitfield being read, e.g. 'u8' for
-            an unsigned 8-bit integer.
-        :param offset: offset (in number of bits). If prefixed with a
-            '#', this is an offset multiplier, e.g. given the arguments
-            fmt='u8', offset='#2', the offset will be 16.
-        :param int value: value to set at the given position.
-        :returns: a :py:class:`BitFieldOperation` instance.
-        """
-        self.operations.append(("SET", fmt, offset, value))
-        return self
-
-    @property
-    def command(self):
-        cmd = ["BITFIELD", self.key]
-        for ops in self.operations:
-            cmd.extend(ops)
-        return cmd
-
-    def execute(self):
-        """
-        Execute the operation(s) in a single BITFIELD command. The return value
-        is a list of values corresponding to each operation. If the client
-        used to create this instance was a pipeline, the list of values
-        will be present within the pipeline's execute.
-        """
-        command = self.command
-        self.reset()
-        return self.client.execute_command(*command)
+    def get_encoder(self):
+        """Get the encoder to encode string scripts into bytes."""
+        try:
+            return self.registered_client.get_encoder()
+        except AttributeError:
+            # DEPRECATED
+            # In version <=4.1.2, this was the code we used to get the encoder.
+            # However, after 4.1.2 we added support for scripting in clustered
+            # redis. ClusteredRedis doesn't have a `.connection_pool` attribute
+            # so we changed the Script class to use
+            # `self.registered_client.get_encoder` (see above).
+            # However, that is technically a breaking change, as consumers who
+            # use Scripts directly might inject a `registered_client` that
+            # doesn't have a `.get_encoder` field. This try/except prevents us
+            # from breaking backward-compatibility. Ideally, it would be
+            # removed in the next major release.
+            return self.registered_client.connection_pool.get_encoder()
 
 
-class ClusterCommands:
+class AsyncModuleCommands(ModuleCommands):
+    async def command_info(self) -> None:
+        return super().command_info()
+
+
+class ClusterCommands(CommandsProtocol):
     """
     Class for Redis Cluster commands
     """
 
-    def cluster(self, cluster_arg, *args, **kwargs):
+    def cluster(self, cluster_arg, *args, **kwargs) -> ResponseT:
         return self.execute_command(f"CLUSTER {cluster_arg.upper()}", *args, **kwargs)
 
-    def readwrite(self, **kwargs):
+    def readwrite(self, **kwargs) -> ResponseT:
         """
         Disables read queries for a connection to a Redis Cluster slave node.
 
-        For more information check https://redis.io/commands/readwrite
+        For more information see https://redis.io/commands/readwrite
         """
         return self.execute_command("READWRITE", **kwargs)
 
-    def readonly(self, **kwargs):
+    def readonly(self, **kwargs) -> ResponseT:
         """
         Enables read queries for a connection to a Redis Cluster replica node.
 
-        For more information check https://redis.io/commands/readonly
+        For more information see https://redis.io/commands/readonly
         """
         return self.execute_command("READONLY", **kwargs)
+
+
+AsyncClusterCommands = ClusterCommands
+
+
+class FunctionCommands:
+    """
+    Redis Function commands
+    """
+
+    def function_load(
+        self,
+        engine: str,
+        library: str,
+        code: str,
+        replace: Optional[bool] = False,
+        description: Optional[str] = None,
+    ) -> Union[Awaitable[str], str]:
+        """
+        Load a library to Redis.
+        :param engine: the name of the execution engine for the library
+        :param library: the unique name of the library
+        :param code: the source code
+        :param replace: changes the behavior to replace the library if a library called
+         ``library`` already exists
+        :param description: description to the library
+
+        For more information see https://redis.io/commands/function-load
+        """
+        pieces = [engine, library]
+        if replace:
+            pieces.append("REPLACE")
+        if description is not None:
+            pieces.append(description)
+        pieces.append(code)
+        return self.execute_command("FUNCTION LOAD", *pieces)
+
+    def function_delete(self, library: str) -> Union[Awaitable[str], str]:
+        """
+        Delete the library called ``library`` and all its functions.
+
+        For more information see https://redis.io/commands/function-delete
+        """
+        return self.execute_command("FUNCTION DELETE", library)
+
+    def function_flush(self, mode: str = "SYNC") -> Union[Awaitable[str], str]:
+        """
+        Deletes all the libraries.
+
+        For more information see https://redis.io/commands/function-flush
+        """
+        return self.execute_command("FUNCTION FLUSH", mode)
+
+    def function_list(
+        self, library: Optional[str] = "*", withcode: Optional[bool] = False
+    ) -> Union[Awaitable[List], List]:
+        """
+        Return information about the functions and libraries.
+        :param library: pecify a pattern for matching library names
+        :param withcode: cause the server to include the libraries source
+         implementation in the reply
+        """
+        args = ["LIBRARYNAME", library]
+        if withcode:
+            args.append("WITHCODE")
+        return self.execute_command("FUNCTION LIST", *args)
+
+    def _fcall(
+        self, command: str, function, numkeys: int, *keys_and_args: Optional[List]
+    ) -> Union[Awaitable[str], str]:
+        return self.execute_command(command, function, numkeys, *keys_and_args)
+
+    def fcall(
+        self, function, numkeys: int, *keys_and_args: Optional[List]
+    ) -> Union[Awaitable[str], str]:
+        """
+        Invoke a function.
+
+        For more information see https://redis.io/commands/fcall
+        """
+        return self._fcall("FCALL", function, numkeys, *keys_and_args)
+
+    def fcall_ro(
+        self, function, numkeys: int, *keys_and_args: Optional[List]
+    ) -> Union[Awaitable[str], str]:
+        """
+        This is a read-only variant of the FCALL command that cannot
+        execute commands that modify data.
+
+        For more information see https://redis.io/commands/fcal_ro
+        """
+        return self._fcall("FCALL_RO", function, numkeys, *keys_and_args)
+
+    def function_dump(self) -> Union[Awaitable[str], str]:
+        """
+        Return the serialized payload of loaded libraries.
+
+        For more information see https://redis.io/commands/function-dump
+        """
+        from redis.client import NEVER_DECODE
+
+        options = {}
+        options[NEVER_DECODE] = []
+
+        return self.execute_command("FUNCTION DUMP", **options)
+
+    def function_restore(
+        self, payload: str, policy: Optional[str] = "APPEND"
+    ) -> Union[Awaitable[str], str]:
+        """
+        Restore libraries from the serialized ``payload``.
+        You can use the optional policy argument to provide a policy
+        for handling existing libraries.
+
+        For more information see https://redis.io/commands/function-restore
+        """
+        return self.execute_command("FUNCTION RESTORE", payload, policy)
+
+    def function_kill(self) -> Union[Awaitable[str], str]:
+        """
+        Kill a function that is currently executing.
+
+        For more information see https://redis.io/commands/function-kill
+        """
+        return self.execute_command("FUNCTION KILL")
+
+    def function_stats(self) -> Union[Awaitable[List], List]:
+        """
+        Return information about the function that's currently running
+        and information about the available execution engines.
+
+        For more information see https://redis.io/commands/function-stats
+        """
+        return self.execute_command("FUNCTION STATS")
+
+
+AsyncFunctionCommands = FunctionCommands
 
 
 class DataAccessCommands(
@@ -4824,7 +5843,24 @@ class DataAccessCommands(
 ):
     """
     A class containing all of the implemented data access redis commands.
-    This class is to be used as a mixin.
+    This class is to be used as a mixin for synchronous Redis clients.
+    """
+
+
+class AsyncDataAccessCommands(
+    AsyncBasicKeyCommands,
+    AsyncHyperlogCommands,
+    AsyncHashCommands,
+    AsyncGeoCommands,
+    AsyncListCommands,
+    AsyncScanCommands,
+    AsyncSetCommands,
+    AsyncStreamCommands,
+    AsyncSortedSetCommands,
+):
+    """
+    A class containing all of the implemented data access redis commands.
+    This class is to be used as a mixin for asynchronous Redis clients.
     """
 
 
@@ -4836,8 +5872,25 @@ class CoreCommands(
     ModuleCommands,
     PubSubCommands,
     ScriptCommands,
+    FunctionCommands,
 ):
     """
     A class containing all of the implemented redis commands. This class is
-    to be used as a mixin.
+    to be used as a mixin for synchronous Redis clients.
+    """
+
+
+class AsyncCoreCommands(
+    AsyncACLCommands,
+    AsyncClusterCommands,
+    AsyncDataAccessCommands,
+    AsyncManagementCommands,
+    AsyncModuleCommands,
+    AsyncPubSubCommands,
+    AsyncScriptCommands,
+    AsyncFunctionCommands,
+):
+    """
+    A class containing all of the implemented redis commands. This class is
+    to be used as a mixin for asynchronous Redis clients.
     """

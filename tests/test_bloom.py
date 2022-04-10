@@ -34,6 +34,11 @@ def test_create(client):
     assert client.cms().initbydim("cmsDim", 100, 5)
     assert client.cms().initbyprob("cmsProb", 0.01, 0.01)
     assert client.topk().reserve("topk", 5, 100, 5, 0.9)
+
+
+@pytest.mark.redismod
+@pytest.mark.experimental
+def test_tdigest_create(client):
     assert client.tdigest().create("tDigest", 100)
 
 
@@ -191,6 +196,7 @@ def test_cms(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.onlynoncluster
 def test_cms_merge(client):
     assert client.cms().initbydim("A", 1000, 5)
     assert client.cms().initbydim("B", 1000, 5)
@@ -305,6 +311,7 @@ def test_topk_incrby(client):
 
 # region Test T-Digest
 @pytest.mark.redismod
+@pytest.mark.experimental
 def test_tdigest_reset(client):
     assert client.tdigest().create("tDigest", 10)
     # reset on empty histogram
@@ -318,6 +325,7 @@ def test_tdigest_reset(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.experimental
 def test_tdigest_merge(client):
     assert client.tdigest().create("to-tDigest", 10)
     assert client.tdigest().create("from-tDigest", 10)
@@ -333,6 +341,7 @@ def test_tdigest_merge(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.experimental
 def test_tdigest_min_and_max(client):
     assert client.tdigest().create("tDigest", 100)
     # insert data-points into sketch
@@ -343,6 +352,7 @@ def test_tdigest_min_and_max(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.experimental
 def test_tdigest_quantile(client):
     assert client.tdigest().create("tDigest", 500)
     # insert data-points into sketch
@@ -358,6 +368,7 @@ def test_tdigest_quantile(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.experimental
 def test_tdigest_cdf(client):
     assert client.tdigest().create("tDigest", 100)
     # insert data-points into sketch

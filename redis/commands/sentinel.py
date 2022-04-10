@@ -3,44 +3,44 @@ import warnings
 
 class SentinelCommands:
     """
-    A class containing the commands specific to redis sentinal. This class is
+    A class containing the commands specific to redis sentinel. This class is
     to be used as a mixin.
     """
 
     def sentinel(self, *args):
-        "Redis Sentinel's SENTINEL command."
+        """Redis Sentinel's SENTINEL command."""
         warnings.warn(DeprecationWarning("Use the individual sentinel_* methods"))
 
     def sentinel_get_master_addr_by_name(self, service_name):
-        "Returns a (host, port) pair for the given ``service_name``"
+        """Returns a (host, port) pair for the given ``service_name``"""
         return self.execute_command("SENTINEL GET-MASTER-ADDR-BY-NAME", service_name)
 
     def sentinel_master(self, service_name):
-        "Returns a dictionary containing the specified masters state."
+        """Returns a dictionary containing the specified masters state."""
         return self.execute_command("SENTINEL MASTER", service_name)
 
     def sentinel_masters(self):
-        "Returns a list of dictionaries containing each master's state."
+        """Returns a list of dictionaries containing each master's state."""
         return self.execute_command("SENTINEL MASTERS")
 
     def sentinel_monitor(self, name, ip, port, quorum):
-        "Add a new master to Sentinel to be monitored"
+        """Add a new master to Sentinel to be monitored"""
         return self.execute_command("SENTINEL MONITOR", name, ip, port, quorum)
 
     def sentinel_remove(self, name):
-        "Remove a master from Sentinel's monitoring"
+        """Remove a master from Sentinel's monitoring"""
         return self.execute_command("SENTINEL REMOVE", name)
 
     def sentinel_sentinels(self, service_name):
-        "Returns a list of sentinels for ``service_name``"
+        """Returns a list of sentinels for ``service_name``"""
         return self.execute_command("SENTINEL SENTINELS", service_name)
 
     def sentinel_set(self, name, option, value):
-        "Set Sentinel monitoring parameters for a given master"
+        """Set Sentinel monitoring parameters for a given master"""
         return self.execute_command("SENTINEL SET", name, option, value)
 
     def sentinel_slaves(self, service_name):
-        "Returns a list of slaves for ``service_name``"
+        """Returns a list of slaves for ``service_name``"""
         return self.execute_command("SENTINEL SLAVES", service_name)
 
     def sentinel_reset(self, pattern):
@@ -91,3 +91,9 @@ class SentinelCommands:
         completely missing.
         """
         return self.execute_command("SENTINEL FLUSHCONFIG")
+
+
+class AsyncSentinelCommands(SentinelCommands):
+    async def sentinel(self, *args) -> None:
+        """Redis Sentinel's SENTINEL command."""
+        super().sentinel(*args)

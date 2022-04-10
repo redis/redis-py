@@ -9,7 +9,6 @@ from redis.lock import Lock
 from .conftest import _get_client
 
 
-@pytest.mark.onlynoncluster
 class TestLock:
     @pytest.fixture()
     def r_decoded(self, request):
@@ -101,7 +100,7 @@ class TestLock:
     def test_blocking_timeout(self, r):
         lock1 = self.get_lock(r, "foo")
         assert lock1.acquire(blocking=False)
-        bt = 0.2
+        bt = 0.4
         sleep = 0.05
         lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
         start = time.monotonic()
@@ -223,7 +222,6 @@ class TestLock:
             lock.reacquire()
 
 
-@pytest.mark.onlynoncluster
 class TestLockClassSelection:
     def test_lock_class_argument(self, r):
         class MyLock:
