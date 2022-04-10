@@ -42,7 +42,7 @@ jobs:
          connection-type: ['hiredis', 'plain']
          experimental: [false]
          include:
-           - python-version: 3.11.0-alpha.7
+           - python-version: 3.11.0-alpha.6
              experimental: true
              test-type: standalone
              connection-type: plain
