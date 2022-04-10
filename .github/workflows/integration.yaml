@@ -22,7 +22,7 @@ jobs:
      steps:
        - uses: actions/checkout@v2
        - name: install python
-         uses: actions/setup-python@v2
+         uses: actions/setup-python@v3
          with:
            python-version: 3.9
        - name: run code linters
@@ -42,15 +42,18 @@ jobs:
          connection-type: ['hiredis', 'plain']
          experimental: [false]
          include:
-           - python-version: 3.11.0-alpha.5
-           - experimental: true
+           - python-version: 3.11.0-alpha.7
+             experimental: true
+             test-type: standalone
+             connection-type: plain
+             experimental: true
      env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
      name: Python ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}} tests
      steps:
        - uses: actions/checkout@v2
        - name: install python
-         uses: actions/setup-python@v2
+         uses: actions/setup-python@v3
          with:
            python-version: ${{ matrix.python-version }}
        - name: run tests
@@ -73,7 +76,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: install python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v3
         with:
           python-version: 3.9
       - name: Run installed unit tests
@@ -94,7 +97,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: install python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v3
         with:
           python-version: ${{ matrix.python-version }}
       - name: install from pip
