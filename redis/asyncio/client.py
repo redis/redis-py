@@ -263,11 +263,7 @@ class Redis(
         """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
 
-    def load_external_module(
-        self,
-        funcname,
-        func,
-    ):
+    def load_external_module(self, funcname, func):
         """
         This function can be used to add externally defined redis modules,
         and their namespaces to the redis client.
@@ -426,9 +422,7 @@ class Redis(
     def __del__(self, _warnings: Any = warnings) -> None:
         if self.connection is not None:
             _warnings.warn(
-                f"Unclosed client session {self!r}",
-                ResourceWarning,
-                source=self,
+                f"Unclosed client session {self!r}", ResourceWarning, source=self
             )
             context = {"client": self, "message": self._DEL_MESSAGE}
             asyncio.get_event_loop().call_exception_handler(context)
