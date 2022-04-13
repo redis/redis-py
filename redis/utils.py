@@ -1,4 +1,8 @@
 from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from redis.client import Redis
 
 try:
     import hiredis  # noqa
@@ -15,7 +19,7 @@ except ImportError:
     CRYPTOGRAPHY_AVAILABLE = False
 
 
-def from_url(url, **kwargs):
+def from_url(url: str, **kwargs: Any) -> Redis:
     """
     Returns an active Redis client generated from the given database URL.
 
