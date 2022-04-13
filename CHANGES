@@ -1,4 +1,6 @@
 
+    * Fully type `from_url` functions
+    * Add `py.typed` marker
     * Add `items` parameter to `hset` signature
     * Create codeql-analysis.yml (#1988). Thanks @chayim
     * Add limited support for Lua scripting with RedisCluster
