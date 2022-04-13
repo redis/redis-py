@@ -60,4 +60,7 @@ setup(
         "hiredis": ["hiredis>=1.0.0"],
         "ocsp": ["cryptography>=36.0.1", "pyopenssl==20.0.1", "requests>=2.26.0"],
     },
+    package_data={
+        "redis": ["py.typed"],
+    },
 )
