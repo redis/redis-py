@@ -1232,9 +1232,15 @@ class ConnectionPool:
     """
 
     __slots__ = (
-        '_fork_lock', '_lock', '_created_connections',
-        '_available_connections', '_in_use_connections', 'pid',
-        'connection_class', 'connection_kwargs', 'max_connections'
+        "_fork_lock",
+        "_lock",
+        "_created_connections",
+        "_available_connections",
+        "_in_use_connections",
+        "pid",
+        "connection_class",
+        "connection_kwargs",
+        "max_connections",
     )
 
     @classmethod
@@ -1290,7 +1296,7 @@ class ConnectionPool:
         self,
         connection_class: Type[Connection] = Connection,
         max_connections: Optional[int] = None,
-        **connection_kwargs: Any
+        **connection_kwargs: Any,
     ) -> None:
         max_connections = max_connections or 2 ** 31
         if not isinstance(max_connections, int) or max_connections < 0:
@@ -1386,7 +1392,7 @@ class ConnectionPool:
         command_name: str,
         # TODO: Type the next two parameters.
         *keys,
-        **options
+        **options,
     ) -> Connection:
         "Get a connection from the pool"
         self._checkpid()
