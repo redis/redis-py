@@ -5,6 +5,7 @@ import os
 import socket
 import threading
 import weakref
+import sys
 from itertools import chain
 from queue import Empty, Full, LifoQueue, Queue
 from time import time
@@ -1487,6 +1488,13 @@ class ConnectionPool:
                 connection.disconnect()
 
 
+# After Python 3.9, ``Queue`` class is a generic and expects a type argument.
+if sys.version_info >= (3, 9):
+    QueueT = Queue[Optional[Connection]]
+else:
+    QueueT = Queue
+
+
 class BlockingConnectionPool(ConnectionPool):
     """
     Thread-safe blocking connection pool::
@@ -1528,7 +1536,7 @@ class BlockingConnectionPool(ConnectionPool):
         max_connections: int = 50,
         timeout: Optional[int] = 20,
         connection_class: Type[Connection] = Connection,
-        queue_class: Type[Queue[Optional[Connection]]] = LifoQueue,
+        queue_class: Type[QueueT] = LifoQueue,
         **connection_kwargs: Any,
     ) -> None:
 
