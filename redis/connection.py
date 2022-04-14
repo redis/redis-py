@@ -6,7 +6,7 @@ import socket
 import threading
 import weakref
 from itertools import chain
-from queue import Empty, Full, LifoQueue
+from queue import Empty, Full, LifoQueue, Queue
 from time import time
 from urllib.parse import parse_qs, unquote, urlparse
 from typing import Any, Dict, List, Optional, Set, Type
@@ -1515,14 +1515,16 @@ class BlockingConnectionPool(ConnectionPool):
         >>> pool = BlockingConnectionPool(timeout=5)
     """
 
+    __slots__ = ('_connections', 'queue_class', 'timeout', 'pool')
+
     def __init__(
         self,
-        max_connections=50,
-        timeout=20,
-        connection_class=Connection,
-        queue_class=LifoQueue,
-        **connection_kwargs,
-    ):
+        max_connections: int = 50,
+        timeout: Optional[int] = 20,
+        connection_class: Type[Connection] = Connection,
+        queue_class: Type[Queue[Optional[Connection]]] = LifoQueue,
+        **connection_kwargs: Any,
+    ) -> None:
 
         self.queue_class = queue_class
         self.timeout = timeout
@@ -1543,7 +1545,7 @@ class BlockingConnectionPool(ConnectionPool):
 
         # Keep a list of actual connection instances so that we can
         # disconnect them later.
-        self._connections = []
+        self._connections: List[Connection] = []
 
         # this must be the last operation in this method. while reset() is
         # called when holding _fork_lock, other threads in this process
@@ -1562,7 +1564,13 @@ class BlockingConnectionPool(ConnectionPool):
         self._connections.append(connection)
         return connection
 
-    def get_connection(self, command_name, *keys, **options):
+    def get_connection(
+        self,
+        command_name: str,
+        # TODO: Type the next two parameters.
+        *keys,
+        **options,
+    ) -> Connection:
         """
         Get a connection, blocking for ``self.timeout`` until a connection
         is available from the pool.
@@ -1614,7 +1622,7 @@ class BlockingConnectionPool(ConnectionPool):
 
         return connection
 
-    def release(self, connection):
+    def release(self, connection: Connection) -> None:
         "Releases the connection back to the pool."
         # Make sure we haven't changed process.
         self._checkpid()
@@ -1635,7 +1643,7 @@ class BlockingConnectionPool(ConnectionPool):
             # we don't want this connection
             pass
 
-    def disconnect(self):
+    def disconnect(self) -> None:
         "Disconnects all connections in the pool."
         self._checkpid()
         for connection in self._connections:
