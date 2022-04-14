@@ -5,12 +5,23 @@ import os
 import socket
 import sys
 import threading
-import weakref
 from itertools import chain
 from queue import Empty, Full, LifoQueue, Queue
 from time import time
-from typing import Any, Dict, List, Optional, Set, Type
+from typing import (
+    Any,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    Set,
+    Tuple,
+    Type,
+    Union,
+)
 from urllib.parse import parse_qs, unquote, urlparse
+from weakref import WeakMethod
 
 from packaging.version import Version
 
@@ -84,6 +95,11 @@ MODULE_EXPORTS_DATA_TYPES_ERROR = (
     "exports one or more module-side data "
     "types, can't unload"
 )
+
+
+class ConnectCallbackProtocol(Protocol):
+    def __call__(self, connection: "Connection") -> None:
+        ...
 
 
 class Encoder:
@@ -510,30 +526,60 @@ else:
 class Connection:
     "Manages TCP communication to and from a Redis server"
 
+    __slots__ = (
+        "pid",
+        "host",
+        "port",
+        "db",
+        "username",
+        "client_name",
+        "password",
+        "socket_timeout",
+        "socket_connect_timeout",
+        "socket_keepalive",
+        "socket_keepalive_options",
+        "socket_type",
+        "retry_on_timeout",
+        "retry_on_error",
+        "retry",
+        "health_check_interval",
+        "next_health_check",
+        "redis_connect_func",
+        "encoder",
+        "_sock",
+        "_socket_read_size",
+        "_connect_callbacks",
+        "_buffer_cutoff",
+        "_parser",
+    )
+
     def __init__(
         self,
-        host="localhost",
-        port=6379,
-        db=0,
-        password=None,
-        socket_timeout=None,
-        socket_connect_timeout=None,
-        socket_keepalive=False,
-        socket_keepalive_options=None,
-        socket_type=0,
-        retry_on_timeout=False,
-        retry_on_error=[],
-        encoding="utf-8",
-        encoding_errors="strict",
-        decode_responses=False,
-        parser_class=DefaultParser,
-        socket_read_size=65536,
-        health_check_interval=0,
-        client_name=None,
-        username=None,
-        retry=None,
-        redis_connect_func=None,
-    ):
+        *,
+        host: str = "localhost",
+        port: Union[str, int] = 6379,
+        db: Union[str, int] = 0,
+        password: Optional[str] = None,
+        socket_timeout: Optional[float] = None,
+        socket_connect_timeout: Optional[float] = None,
+        socket_keepalive: bool = False,
+        socket_keepalive_options: Optional[
+            Mapping[int, Union[int, bytes]]
+        ] = None,
+        socket_type: int = 0,
+        retry_on_timeout: bool = False,
+        retry_on_error: List[Type[Exception]] = [],
+        encoding: str = "utf-8",
+        encoding_errors: str = "strict",
+        decode_responses: bool = False,
+        parser_class: Type[BaseParser] = DefaultParser,
+        socket_read_size: int = 65536,
+        health_check_interval: float = 0,
+        client_name: Optional[str] = None,
+        username: Optional[str] = None,
+        retry: Optional[Retry] = None,
+        redis_connect_func: Optional[ConnectCallbackProtocol] = None,
+    ) -> None:
         """
         Initialize a new Connection.
         To specify a retry policy for specific errors, first set
@@ -541,23 +587,27 @@ class Connection:
         `retry` to a valid `Retry` object.
         To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
         """
-        self.pid = os.getpid()
-        self.host = host
-        self.port = int(port)
-        self.db = db
-        self.username = username
-        self.client_name = client_name
-        self.password = password
-        self.socket_timeout = socket_timeout
-        self.socket_connect_timeout = socket_connect_timeout or socket_timeout
-        self.socket_keepalive = socket_keepalive
-        self.socket_keepalive_options = socket_keepalive_options or {}
-        self.socket_type = socket_type
-        self.retry_on_timeout = retry_on_timeout
+        self.pid: int = os.getpid()
+        self.host: str = host
+        self.port: int = int(port)
+        self.db: Union[str, int] = db
+        self.username: Optional[str] = username
+        self.client_name: Optional[str] = client_name
+        self.password: Optional[str] = password
+        self.socket_timeout: Optional[float] = socket_timeout
+        self.socket_connect_timeout: Optional[float] = (
+            socket_connect_timeout or socket_timeout
+        )
+        self.socket_keepalive: bool = socket_keepalive
+        self.socket_keepalive_options: Optional[
+            Mapping[int, Union[int, bytes]]
+        ] = socket_keepalive_options or {}
+        self.socket_type: int = socket_type
+        self.retry_on_timeout: bool = retry_on_timeout
         if retry_on_timeout:
             # Add TimeoutError to the errors list to retry on
             retry_on_error.append(TimeoutError)
-        self.retry_on_error = retry_on_error
+        self.retry_on_error: List[Type[Exception]] = retry_on_error
         if retry_on_error:
             if retry is None:
                 self.retry = Retry(NoBackoff(), 1)
@@ -568,39 +618,48 @@ class Connection:
             self.retry.update_supported_erros(retry_on_error)
         else:
             self.retry = Retry(NoBackoff(), 0)
-        self.health_check_interval = health_check_interval
-        self.next_health_check = 0
+        self.health_check_interval: float = health_check_interval
+        self.next_health_check: float = 0
         self.redis_connect_func = redis_connect_func
-        self.encoder = Encoder(encoding, encoding_errors, decode_responses)
-        self._sock = None
-        self._socket_read_size = socket_read_size
+        self.encoder: Encoder = Encoder(
+            encoding, encoding_errors, decode_responses
+        )
+        self._sock: Optional[socket.socket] = None
+        self._socket_read_size: int = socket_read_size
         self.set_parser(parser_class)
-        self._connect_callbacks = []
-        self._buffer_cutoff = 6000
+        self._connect_callbacks: List[
+            WeakMethod[ConnectCallbackProtocol]
+        ] = []
+        self._buffer_cutoff: int = 6000
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
         return f"{self.__class__.__name__}<{repr_args}>"
 
-    def repr_pieces(self):
-        pieces = [("host", self.host), ("port", self.port), ("db", self.db)]
+    def repr_pieces(self) -> List[Tuple[str, Union[str, int]]]:
+        pieces: List[Tuple[str, Union[str, int]]] = [
+            ("host", self.host), ("port", self.port), ("db", self.db)
+        ]
         if self.client_name:
             pieces.append(("client_name", self.client_name))
         return pieces
 
-    def __del__(self):
+    def __del__(self) -> None:
         try:
             self.disconnect()
         except Exception:
             pass
 
-    def register_connect_callback(self, callback):
-        self._connect_callbacks.append(weakref.WeakMethod(callback))
+    def register_connect_callback(
+        self,
+        callback: ConnectCallbackProtocol,
+    ) -> None:
+        self._connect_callbacks.append(WeakMethod(callback))
 
-    def clear_connect_callbacks(self):
+    def clear_connect_callbacks(self) -> None:
         self._connect_callbacks = []
 
-    def set_parser(self, parser_class):
+    def set_parser(self, parser_class: Type[BaseParser]) -> None:
         """
         Creates a new instance of parser_class with socket size:
         _socket_read_size and assigns it to the parser for the connection
@@ -608,7 +667,7 @@ class Connection:
         """
         self._parser = parser_class(socket_read_size=self._socket_read_size)
 
-    def connect(self):
+    def connect(self) -> None:
         "Connects to the Redis server if not already connected"
         if self._sock:
             return
@@ -641,7 +700,7 @@ class Connection:
             if callback:
                 callback(self)
 
-    def _connect(self):
+    def _connect(self) -> socket.socket:
         "Create a TCP socket connection"
         # we want to mimic what socket.create_connection does to support
         # ipv4/ipv6, but we want to set options prior to calling
@@ -682,7 +741,7 @@ class Connection:
             raise err
         raise OSError("socket.getaddrinfo returned an empty list")
 
-    def _error_message(self, exception):
+    def _error_message(self, exception: Exception) -> str:
         # args for socket.error can either be (errno, "message")
         # or just "message"
         if len(exception.args) == 1:
@@ -700,15 +759,18 @@ class Connection:
             except AttributeError:
                 return f"Connection Error: {exception.args[0]}"
 
-    def on_connect(self):
+    def on_connect(self) -> None:
         "Initialize the connection, authenticate and select a database"
         self._parser.on_connect(self)
 
         # if username and/or password are set, authenticate
         if self.username or self.password:
+            auth_args: Tuple[str, ...]
+
             if self.username:
                 auth_args = (self.username, self.password or "")
             else:
+                assert self.password is not None
                 auth_args = (self.password,)
             # avoid checking health here -- PING will fail if we try
             # to check the health prior to the AUTH
@@ -739,7 +801,7 @@ class Connection:
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
-    def disconnect(self, *args):
+    def disconnect(self, *args) -> None:
         "Disconnects from the Redis server"
         self._parser.on_disconnect()
         if self._sock is None:
@@ -757,7 +819,7 @@ class Connection:
             pass
         self._sock = None
 
-    def _send_ping(self):
+    def _send_ping(self) -> None:
         """Send PING, expect PONG in return"""
         self.send_command("PING", check_health=False)
         if str_if_bytes(self.read_response()) != "PONG":
@@ -767,12 +829,16 @@ class Connection:
         """Function to call when PING fails"""
         self.disconnect()
 
-    def check_health(self):
+    def check_health(self) -> None:
         """Check the health of the connection with a PING/PONG"""
         if self.health_check_interval and time() > self.next_health_check:
             self.retry.call_with_retry(self._send_ping, self._ping_failed)
 
-    def send_packed_command(self, command, check_health=True):
+    def send_packed_command(
+        self,
+        command: Union[str, List[Union[str, bytes, memoryview]]],
+        check_health: bool = True
+    ) -> None:
         """Send an already packed command to the Redis server"""
         if not self._sock:
             self.connect()
@@ -799,20 +865,20 @@ class Connection:
             self.disconnect()
             raise
 
-    def send_command(self, *args, **kwargs):
+    def send_command(self, *args: Union[str, bytes], **kwargs: Any) -> None:
         """Pack and send a command to the Redis server"""
         self.send_packed_command(
             self.pack_command(*args), check_health=kwargs.get("check_health", True)
         )
 
-    def can_read(self, timeout=0):
+    def can_read(self, timeout: int = 0):
         """Poll the socket to see if there's data that can be read."""
         sock = self._sock
         if not sock:
             self.connect()
         return self._parser.can_read(timeout)
 
-    def read_response(self, disable_decoding=False):
+    def read_response(self, disable_decoding: bool = False):
         """Read the response from a previously sent command"""
         try:
             hosterr = f"{self.host}:{self.port}"
@@ -838,9 +904,12 @@ class Connection:
             raise response
         return response
 
-    def pack_command(self, *args):
+    def pack_command(
+        self,
+        *args: Union[str, bytes],
+    ) -> List[Union[str, bytes, memoryview]]:
         """Pack a series of arguments into the Redis protocol"""
-        output = []
+        output: List[Union[str, bytes, memoryview]] = []
         # the client might have included 1 or more literal arguments in
         # the command name, e.g., 'CONFIG GET'. The Redis server expects these
         # arguments to be sent separately, so split the first argument
