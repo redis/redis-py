@@ -1540,7 +1540,7 @@ class BlockingConnectionPool(ConnectionPool):
             **connection_kwargs,
         )
 
-    def reset(self):
+    def reset(self) -> None:
         # Create and fill up a thread safe queue with ``None`` values.
         self.pool = self.queue_class(self.max_connections)
         while True:
