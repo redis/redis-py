@@ -9,7 +9,7 @@ from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
 from urllib.parse import parse_qs, unquote, urlparse
-from typing import Any, Dict, List, Optional, Set, Type, Union
+from typing import Any, Dict, List, Optional, Set, Type
 
 from packaging.version import Version
 
