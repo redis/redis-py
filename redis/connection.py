@@ -1521,7 +1521,7 @@ class BlockingConnectionPool(ConnectionPool):
         >>> pool = BlockingConnectionPool(timeout=5)
     """
 
-    __slots__ = ('_connections', 'queue_class', 'timeout', 'pool')
+    __slots__ = ("_connections", "queue_class", "timeout", "pool")
 
     def __init__(
         self,
