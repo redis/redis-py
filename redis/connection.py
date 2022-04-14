@@ -9,6 +9,7 @@ from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
 from urllib.parse import parse_qs, unquote, urlparse
+from typing import Any, Dict, List, Optional, Set, Type, Union
 
 from packaging.version import Version
 
@@ -1230,8 +1231,14 @@ class ConnectionPool:
     ``connection_class``.
     """
 
+    __slots__ = (
+        '_fork_lock', '_lock', '_created_connections',
+        '_available_connections', '_in_use_connections', 'pid',
+        'connection_class', 'connection_kwargs', 'max_connections'
+    )
+
     @classmethod
-    def from_url(cls, url, **kwargs):
+    def from_url(cls, url: str, **kwargs: Any) -> "ConnectionPool":
         """
         Return a connection pool configured from the given URL.
 
@@ -1280,15 +1287,18 @@ class ConnectionPool:
         return cls(**kwargs)
 
     def __init__(
-        self, connection_class=Connection, max_connections=None, **connection_kwargs
-    ):
+        self,
+        connection_class: Type[Connection] = Connection,
+        max_connections: Optional[int] = None,
+        **connection_kwargs: Any
+    ) -> None:
         max_connections = max_connections or 2 ** 31
         if not isinstance(max_connections, int) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
 
-        self.connection_class = connection_class
-        self.connection_kwargs = connection_kwargs
-        self.max_connections = max_connections
+        self.connection_class: Type[Connection] = connection_class
+        self.connection_kwargs: Dict[str, Any] = connection_kwargs
+        self.max_connections: int = max_connections
 
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as
@@ -1298,20 +1308,20 @@ class ConnectionPool:
         # object of this pool. subsequent threads acquiring this lock
         # will notice the first thread already did the work and simply
         # release the lock.
-        self._fork_lock = threading.Lock()
+        self._fork_lock: threading.Lock = threading.Lock()
         self.reset()
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"{type(self).__name__}"
             f"<{repr(self.connection_class(**self.connection_kwargs))}>"
         )
 
-    def reset(self):
-        self._lock = threading.Lock()
-        self._created_connections = 0
-        self._available_connections = []
-        self._in_use_connections = set()
+    def reset(self) -> None:
+        self._lock: threading.Lock = threading.Lock()
+        self._created_connections: int = 0
+        self._available_connections: List[Connection] = []
+        self._in_use_connections: Set[Connection] = set()
 
         # this must be the last operation in this method. while reset() is
         # called when holding _fork_lock, other threads in this process
@@ -1324,7 +1334,7 @@ class ConnectionPool:
         # reset() and they will immediately release _fork_lock and continue on.
         self.pid = os.getpid()
 
-    def _checkpid(self):
+    def _checkpid(self) -> None:
         # _checkpid() attempts to keep ConnectionPool fork-safe on modern
         # systems. this is called by all ConnectionPool methods that
         # manipulate the pool's state such as get_connection() and release().
@@ -1371,7 +1381,13 @@ class ConnectionPool:
             finally:
                 self._fork_lock.release()
 
-    def get_connection(self, command_name, *keys, **options):
+    def get_connection(
+        self,
+        command_name: str,
+        # TODO: Type the next two parameters.
+        *keys,
+        **options
+    ) -> Connection:
         "Get a connection from the pool"
         self._checkpid()
         with self._lock:
@@ -1404,7 +1420,7 @@ class ConnectionPool:
 
         return connection
 
-    def get_encoder(self):
+    def get_encoder(self) -> Encoder:
         "Return an encoder based on encoding settings"
         kwargs = self.connection_kwargs
         return Encoder(
@@ -1413,14 +1429,14 @@ class ConnectionPool:
             decode_responses=kwargs.get("decode_responses", False),
         )
 
-    def make_connection(self):
+    def make_connection(self) -> Connection:
         "Create a new connection"
         if self._created_connections >= self.max_connections:
             raise ConnectionError("Too many connections")
         self._created_connections += 1
         return self.connection_class(**self.connection_kwargs)
 
-    def release(self, connection):
+    def release(self, connection: Connection) -> None:
         "Releases the connection back to the pool"
         self._checkpid()
         with self._lock:
@@ -1441,10 +1457,10 @@ class ConnectionPool:
                 connection.disconnect()
                 return
 
-    def owns_connection(self, connection):
+    def owns_connection(self, connection: Connection) -> bool:
         return connection.pid == self.pid
 
-    def disconnect(self, inuse_connections=True):
+    def disconnect(self, inuse_connections: bool = True) -> None:
         """
         Disconnects connections in the pool
 
