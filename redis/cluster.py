@@ -1035,7 +1035,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 # Return the processed result
                 return self._process_result(args[0], res, **kwargs)
             except BaseException as e:
-                if type(e) in AbstractRedisCluster.ERRORS_ALLOW_RETRY:
+                if type(e) in self.__class__.ERRORS_ALLOW_RETRY:
                     # The nodes and slots cache were reinitialized.
                     # Try again with the new cluster setup.
                     exception = e
