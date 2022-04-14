@@ -1338,7 +1338,7 @@ class ConnectionPool:
         # release _fork_lock. when each of these threads eventually acquire
         # _fork_lock, they will notice that another thread already called
         # reset() and they will immediately release _fork_lock and continue on.
-        self.pid = os.getpid()
+        self.pid: int = os.getpid()
 
     def _checkpid(self) -> None:
         # _checkpid() attempts to keep ConnectionPool fork-safe on modern
