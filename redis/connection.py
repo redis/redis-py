@@ -3,14 +3,14 @@ import errno
 import io
 import os
 import socket
+import sys
 import threading
 import weakref
-import sys
 from itertools import chain
 from queue import Empty, Full, LifoQueue, Queue
 from time import time
-from urllib.parse import parse_qs, unquote, urlparse
 from typing import Any, Dict, List, Optional, Set, Type
+from urllib.parse import parse_qs, unquote, urlparse
 
 from packaging.version import Version
 
