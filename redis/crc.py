@@ -1,5 +1,7 @@
 from binascii import crc_hqx
 
+from redis.typing import EncodedT
+
 # Redis Cluster's key space is divided into 16384 slots.
 # For more information see: https://github.com/redis/redis/issues/2576
 REDIS_CLUSTER_HASH_SLOTS = 16384
@@ -7,7 +9,7 @@ REDIS_CLUSTER_HASH_SLOTS = 16384
 __all__ = ["key_slot", "REDIS_CLUSTER_HASH_SLOTS"]
 
 
-def key_slot(key, bucket=REDIS_CLUSTER_HASH_SLOTS):
+def key_slot(key: EncodedT, bucket: int = REDIS_CLUSTER_HASH_SLOTS) -> int:
     """Calculate key slot for a given key.
     See Keys distribution model in https://redis.io/topics/cluster-spec
     :param key - bytes

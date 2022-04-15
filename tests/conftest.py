@@ -199,20 +199,21 @@ def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=60):
 
 
 def skip_if_server_version_lt(min_version: str) -> _TestDecorator:
-    redis_version = REDIS_INFO["version"]
+    redis_version = REDIS_INFO.get("version", "0")
     check = Version(redis_version) < Version(min_version)
     return pytest.mark.skipif(check, reason=f"Redis version required >= {min_version}")
 
 
 def skip_if_server_version_gte(min_version: str) -> _TestDecorator:
-    redis_version = REDIS_INFO["version"]
+    redis_version = REDIS_INFO.get("version", "0")
     check = Version(redis_version) >= Version(min_version)
     return pytest.mark.skipif(check, reason=f"Redis version required < {min_version}")
 
 
 def skip_unless_arch_bits(arch_bits: int) -> _TestDecorator:
     return pytest.mark.skipif(
-        REDIS_INFO["arch_bits"] != arch_bits, reason=f"server is not {arch_bits}-bit"
+        REDIS_INFO.get("arch_bits", "") != arch_bits,
+        reason=f"server is not {arch_bits}-bit",
     )
 
 
@@ -235,12 +236,12 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
 
 
 def skip_if_redis_enterprise() -> _TestDecorator:
-    check = REDIS_INFO["enterprise"] is True
+    check = REDIS_INFO.get("enterprise", False) is True
     return pytest.mark.skipif(check, reason="Redis enterprise")
 
 
 def skip_ifnot_redis_enterprise() -> _TestDecorator:
-    check = REDIS_INFO["enterprise"] is False
+    check = REDIS_INFO.get("enterprise", False) is False
     return pytest.mark.skipif(check, reason="Not running in redis enterprise")
 
 

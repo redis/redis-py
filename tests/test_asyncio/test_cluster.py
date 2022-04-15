@@ -13,6 +13,10 @@ if sys.version_info[0:2] == (3, 6):
 else:
     import pytest_asyncio
 
+from typing import Callable, Dict, List, Optional, Type, Union
+
+from _pytest.fixtures import FixtureRequest, SubRequest
+
 from redis.asyncio import Connection, Redis, RedisCluster
 from redis.asyncio.cluster import (
     PRIMARY,
@@ -53,7 +57,7 @@ default_cluster_slots = [
 
 
 @pytest_asyncio.fixture()
-async def slowlog(request, r):
+async def slowlog(request: SubRequest, r: RedisCluster) -> None:
     """
     Set the slowlog threshold to 0, and the
     max length to 128. This will force every
@@ -75,7 +79,7 @@ async def slowlog(request, r):
     await r.config_set("slowlog-max-len", old_max_length_value)
 
 
-async def get_mocked_redis_client(*args, **kwargs):
+async def get_mocked_redis_client(*args, **kwargs) -> RedisCluster:
     """
     Return a stable RedisCluster object that have deterministic
     nodes and slots setup to remove the problem of different IP addresses
@@ -122,20 +126,32 @@ async def get_mocked_redis_client(*args, **kwargs):
             return await RedisCluster(*args, **kwargs)
 
 
-def mock_node_resp(node, response):
+def mock_node_resp(
+    node: ClusterNode,
+    response: Union[
+        List[List[Union[int, List[Union[str, int]]]]], List[bytes], str, int
+    ],
+) -> ClusterNode:
     connection = mock.AsyncMock()
     connection.read_response.return_value = response
     node.redis_connection.connection = connection
     return node
 
 
-def mock_all_nodes_resp(rc, response):
+def mock_all_nodes_resp(
+    rc: RedisCluster,
+    response: Union[
+        List[List[Union[int, List[Union[str, int]]]]], List[bytes], int, str
+    ],
+) -> RedisCluster:
     for node in rc.get_nodes():
         mock_node_resp(node, response)
     return rc
 
 
-async def moved_redirection_helper(request, create_redis, failover=False):
+async def moved_redirection_helper(
+    request: FixtureRequest, create_redis: Callable, failover: bool = False
+) -> None:
     """
     Test that the client handles MOVED response after a failover.
     Redirection after a failover means that the redirection address is of a
@@ -194,7 +210,7 @@ class TestRedisClusterObj:
     Tests for the RedisCluster class
     """
 
-    async def test_host_port_startup_node(self):
+    async def test_host_port_startup_node(self) -> None:
         """
         Test that it is possible to use host & port arguments as startup node
         args
@@ -204,7 +220,7 @@ class TestRedisClusterObj:
 
         await cluster.close()
 
-    async def test_startup_nodes(self):
+    async def test_startup_nodes(self) -> None:
         """
         Test that it is possible to use startup_nodes
         argument to init the cluster
@@ -223,7 +239,7 @@ class TestRedisClusterObj:
 
         await cluster.close()
 
-    async def test_empty_startup_nodes(self):
+    async def test_empty_startup_nodes(self) -> None:
         """
         Test that exception is raised when empty providing empty startup_nodes
         """
@@ -234,7 +250,7 @@ class TestRedisClusterObj:
             "RedisCluster requires at least one node to discover the " "cluster"
         ), str_if_bytes(ex.value)
 
-    async def test_from_url(self, r):
+    async def test_from_url(self, r: RedisCluster) -> None:
         redis_url = f"redis://{default_host}:{default_port}/0"
         with mock.patch.object(RedisCluster, "from_url") as from_url:
 
@@ -247,7 +263,7 @@ class TestRedisClusterObj:
 
         await cluster.close()
 
-    async def test_execute_command_errors(self, r):
+    async def test_execute_command_errors(self, r: RedisCluster) -> None:
         """
         Test that if no key is provided then exception should be raised.
         """
@@ -257,7 +273,7 @@ class TestRedisClusterObj:
             "No way to dispatch this command to " "Redis Cluster. Missing key."
         )
 
-    async def test_execute_command_node_flag_primaries(self, r):
+    async def test_execute_command_node_flag_primaries(self, r: RedisCluster) -> None:
         """
         Test command execution with nodes flag PRIMARIES
         """
@@ -272,7 +288,7 @@ class TestRedisClusterObj:
             conn = replica.redis_connection.connection
             assert conn.read_response.called is not True
 
-    async def test_execute_command_node_flag_replicas(self, r):
+    async def test_execute_command_node_flag_replicas(self, r: RedisCluster) -> None:
         """
         Test command execution with nodes flag REPLICAS
         """
@@ -291,7 +307,7 @@ class TestRedisClusterObj:
 
         await r.close()
 
-    async def test_execute_command_node_flag_all_nodes(self, r):
+    async def test_execute_command_node_flag_all_nodes(self, r: RedisCluster) -> None:
         """
         Test command execution with nodes flag ALL_NODES
         """
@@ -301,7 +317,7 @@ class TestRedisClusterObj:
             conn = node.redis_connection.connection
             assert conn.read_response.called is True
 
-    async def test_execute_command_node_flag_random(self, r):
+    async def test_execute_command_node_flag_random(self, r: RedisCluster) -> None:
         """
         Test command execution with nodes flag RANDOM
         """
@@ -314,7 +330,7 @@ class TestRedisClusterObj:
                 called_count += 1
         assert called_count == 1
 
-    async def test_execute_command_default_node(self, r):
+    async def test_execute_command_default_node(self, r: RedisCluster) -> None:
         """
         Test command execution without node flag is being executed on the
         default node
@@ -325,7 +341,7 @@ class TestRedisClusterObj:
         conn = def_node.redis_connection.connection
         assert conn.read_response.called
 
-    async def test_ask_redirection(self, r):
+    async def test_ask_redirection(self, r: RedisCluster) -> None:
         """
         Test that the server handles ASK response.
 
@@ -351,19 +367,25 @@ class TestRedisClusterObj:
 
             assert await r.execute_command("SET", "foo", "bar") == "MOCK_OK"
 
-    async def test_moved_redirection(self, request, create_redis):
+    async def test_moved_redirection(
+        self, request: FixtureRequest, create_redis: Callable
+    ) -> None:
         """
         Test that the client handles MOVED response.
         """
         await moved_redirection_helper(request, create_redis, failover=False)
 
-    async def test_moved_redirection_after_failover(self, request, create_redis):
+    async def test_moved_redirection_after_failover(
+        self, request: FixtureRequest, create_redis: Callable
+    ) -> None:
         """
         Test that the client handles MOVED response after a failover.
         """
         await moved_redirection_helper(request, create_redis, failover=True)
 
-    async def test_refresh_using_specific_nodes(self, request, create_redis):
+    async def test_refresh_using_specific_nodes(
+        self, request: FixtureRequest, create_redis: Callable
+    ) -> None:
         """
         Test making calls on specific nodes when the cluster has failed over to
         another node
@@ -453,7 +475,7 @@ class TestRedisClusterObj:
                         assert parse_response.failed_calls == 1
                         assert parse_response.successful_calls == 1
 
-    async def test_reading_from_replicas_in_round_robin(self):
+    async def test_reading_from_replicas_in_round_robin(self) -> None:
         with mock.patch.multiple(
             Connection,
             send_command=mock.DEFAULT,
@@ -507,7 +529,7 @@ class TestRedisClusterObj:
 
                 await read_cluster.close()
 
-    async def test_keyslot(self, r):
+    async def test_keyslot(self, r: RedisCluster) -> None:
         """
         Test that method will compute correct key in all supported cases
         """
@@ -524,13 +546,13 @@ class TestRedisClusterObj:
         assert r.keyslot(1337) == r.keyslot("1337")
         assert r.keyslot(b"abc") == r.keyslot("abc")
 
-    async def test_get_node_name(self):
+    async def test_get_node_name(self) -> None:
         assert (
             get_node_name(default_host, default_port)
             == f"{default_host}:{default_port}"
         )
 
-    async def test_all_nodes(self, r):
+    async def test_all_nodes(self, r: RedisCluster) -> None:
         """
         Set a list of nodes and it should be possible to iterate over all
         """
@@ -539,7 +561,7 @@ class TestRedisClusterObj:
         for i, node in enumerate(r.get_nodes()):
             assert node in nodes
 
-    async def test_all_nodes_masters(self, r):
+    async def test_all_nodes_masters(self, r: RedisCluster) -> None:
         """
         Set a list of nodes with random primaries/replicas config and it shold
         be possible to iterate over all of them.
@@ -554,7 +576,10 @@ class TestRedisClusterObj:
             assert node in nodes
 
     @pytest.mark.parametrize("error", RedisCluster.ERRORS_ALLOW_RETRY)
-    async def test_cluster_down_overreaches_retry_attempts(self, error):
+    async def test_cluster_down_overreaches_retry_attempts(
+        self,
+        error: Union[Type[TimeoutError], Type[ClusterDownError], Type[ConnectionError]],
+    ) -> None:
         """
         When error that allows retry is thrown, test that we retry executing
         the command as many times as configured in cluster_error_retry_attempts
@@ -576,7 +601,7 @@ class TestRedisClusterObj:
 
             await rc.close()
 
-    async def test_set_default_node_success(self, r):
+    async def test_set_default_node_success(self, r: RedisCluster) -> None:
         """
         test successful replacement of the default cluster node
         """
@@ -590,7 +615,7 @@ class TestRedisClusterObj:
         assert r.set_default_node(new_def_node) is True
         assert r.get_default_node() == new_def_node
 
-    async def test_set_default_node_failure(self, r):
+    async def test_set_default_node_failure(self, r: RedisCluster) -> None:
         """
         test failed replacement of the default cluster node
         """
@@ -600,7 +625,7 @@ class TestRedisClusterObj:
         assert r.set_default_node(new_def_node) is False
         assert r.get_default_node() == default_node
 
-    async def test_get_node_from_key(self, r):
+    async def test_get_node_from_key(self, r: RedisCluster) -> None:
         """
         Test that get_node_from_key function returns the correct node
         """
@@ -615,7 +640,9 @@ class TestRedisClusterObj:
             assert replica in slot_nodes
 
     @skip_if_redis_enterprise()
-    async def test_not_require_full_coverage_cluster_down_error(self, r):
+    async def test_not_require_full_coverage_cluster_down_error(
+        self, r: RedisCluster
+    ) -> None:
         """
         When require_full_coverage is set to False (default client config) and not
         all slots are covered, if one of the nodes has 'cluster-require_full_coverage'
@@ -648,13 +675,13 @@ class TestClusterRedisCommands:
     Tests for RedisCluster unique commands
     """
 
-    async def test_case_insensitive_command_names(self, r):
+    async def test_case_insensitive_command_names(self, r: RedisCluster) -> None:
         assert (
             r.cluster_response_callbacks["cluster addslots"]
             == r.cluster_response_callbacks["CLUSTER ADDSLOTS"]
         )
 
-    async def test_get_and_set(self, r):
+    async def test_get_and_set(self, r: RedisCluster) -> None:
         # get and set can't be tested independently of each other
         assert await r.get("a") is None
         byte_string = b"value"
@@ -667,7 +694,7 @@ class TestClusterRedisCommands:
         assert await r.get("integer") == str(integer).encode()
         assert (await r.get("unicode_string")).decode("utf-8") == unicode_string
 
-    async def test_mget_nonatomic(self, r):
+    async def test_mget_nonatomic(self, r: RedisCluster) -> None:
         assert await r.mget_nonatomic([]) == []
         assert await r.mget_nonatomic(["a", "b"]) == [None, None]
         await r.set("a", "1")
@@ -681,16 +708,16 @@ class TestClusterRedisCommands:
             b"3",
         ]
 
-    async def test_mset_nonatomic(self, r):
+    async def test_mset_nonatomic(self, r: RedisCluster) -> None:
         d = {"a": b"1", "b": b"2", "c": b"3", "d": b"4"}
         assert await r.mset_nonatomic(d)
         for k, v in d.items():
             assert await r.get(k) == v
 
-    async def test_config_set(self, r):
+    async def test_config_set(self, r: RedisCluster) -> None:
         assert await r.config_set("slowlog-log-slower-than", 0)
 
-    async def test_cluster_config_resetstat(self, r):
+    async def test_cluster_config_resetstat(self, r: RedisCluster) -> None:
         await r.ping(target_nodes="all")
         all_info = await r.info(target_nodes="all")
         prior_commands_processed = -1
@@ -703,29 +730,29 @@ class TestClusterRedisCommands:
             reset_commands_processed = node_info["total_commands_processed"]
             assert reset_commands_processed < prior_commands_processed
 
-    async def test_client_setname(self, r):
+    async def test_client_setname(self, r: RedisCluster) -> None:
         node = r.get_random_node()
         await r.client_setname("redis_py_test", target_nodes=node)
         client_name = await r.client_getname(target_nodes=node)
         assert client_name == "redis_py_test"
 
-    async def test_exists(self, r):
+    async def test_exists(self, r: RedisCluster) -> None:
         d = {"a": b"1", "b": b"2", "c": b"3", "d": b"4"}
         await r.mset_nonatomic(d)
         assert await r.exists(*d.keys()) == len(d)
 
-    async def test_delete(self, r):
+    async def test_delete(self, r: RedisCluster) -> None:
         d = {"a": b"1", "b": b"2", "c": b"3", "d": b"4"}
         await r.mset_nonatomic(d)
         assert await r.delete(*d.keys()) == len(d)
         assert await r.delete(*d.keys()) == 0
 
-    async def test_touch(self, r):
+    async def test_touch(self, r: RedisCluster) -> None:
         d = {"a": b"1", "b": b"2", "c": b"3", "d": b"4"}
         await r.mset_nonatomic(d)
         assert await r.touch(*d.keys()) == len(d)
 
-    async def test_unlink(self, r):
+    async def test_unlink(self, r: RedisCluster) -> None:
         d = {"a": b"1", "b": b"2", "c": b"3", "d": b"4"}
         await r.mset_nonatomic(d)
         assert await r.unlink(*d.keys()) == len(d)
@@ -735,13 +762,13 @@ class TestClusterRedisCommands:
         assert await r.unlink(*d.keys()) == 0
 
     @skip_if_redis_enterprise()
-    async def test_cluster_myid(self, r):
+    async def test_cluster_myid(self, r: RedisCluster) -> None:
         node = r.get_random_node()
         myid = await r.cluster_myid(node)
         assert len(myid) == 40
 
     @skip_if_redis_enterprise()
-    async def test_cluster_slots(self, r):
+    async def test_cluster_slots(self, r: RedisCluster) -> None:
         mock_all_nodes_resp(r, default_cluster_slots)
         cluster_slots = await r.cluster_slots()
         assert isinstance(cluster_slots, dict)
@@ -750,7 +777,7 @@ class TestClusterRedisCommands:
         assert cluster_slots.get((0, 8191)).get("primary") == ("127.0.0.1", 7000)
 
     @skip_if_redis_enterprise()
-    async def test_cluster_addslots(self, r):
+    async def test_cluster_addslots(self, r: RedisCluster) -> None:
         node = r.get_random_node()
         mock_node_resp(node, "OK")
         assert await r.cluster_addslots(node, 1, 2, 3) is True
@@ -763,17 +790,17 @@ class TestClusterRedisCommands:
         assert await r.cluster_addslotsrange(node, 1, 5)
 
     @skip_if_redis_enterprise()
-    async def test_cluster_countkeysinslot(self, r):
+    async def test_cluster_countkeysinslot(self, r: RedisCluster) -> None:
         node = await r.nodes_manager.get_node_from_slot(1)
         mock_node_resp(node, 2)
         assert await r.cluster_countkeysinslot(1) == 2
 
-    async def test_cluster_count_failure_report(self, r):
+    async def test_cluster_count_failure_report(self, r: RedisCluster) -> None:
         mock_all_nodes_resp(r, 0)
         assert await r.cluster_count_failure_report("node_0") == 0
 
     @skip_if_redis_enterprise()
-    async def test_cluster_delslots(self):
+    async def test_cluster_delslots(self) -> None:
         cluster_slots = [
             [0, 8191, ["127.0.0.1", 7000, "node_0"]],
             [8192, 16383, ["127.0.0.1", 7001, "node_1"]],
@@ -799,7 +826,7 @@ class TestClusterRedisCommands:
         assert await r.cluster_delslotsrange(1, 5)
 
     @skip_if_redis_enterprise()
-    async def test_cluster_failover(self, r):
+    async def test_cluster_failover(self, r: RedisCluster) -> None:
         node = r.get_random_node()
         mock_node_resp(node, "OK")
         assert await r.cluster_failover(node) is True
@@ -809,24 +836,24 @@ class TestClusterRedisCommands:
             await r.cluster_failover(node, "FORCT")
 
     @skip_if_redis_enterprise()
-    async def test_cluster_info(self, r):
+    async def test_cluster_info(self, r: RedisCluster) -> None:
         info = await r.cluster_info()
         assert isinstance(info, dict)
         assert info["cluster_state"] == "ok"
 
     @skip_if_redis_enterprise()
-    async def test_cluster_keyslot(self, r):
+    async def test_cluster_keyslot(self, r: RedisCluster) -> None:
         mock_all_nodes_resp(r, 12182)
         assert await r.cluster_keyslot("foo") == 12182
 
     @skip_if_redis_enterprise()
-    async def test_cluster_meet(self, r):
+    async def test_cluster_meet(self, r: RedisCluster) -> None:
         node = r.get_default_node()
         mock_node_resp(node, "OK")
         assert await r.cluster_meet("127.0.0.1", 6379) is True
 
     @skip_if_redis_enterprise()
-    async def test_cluster_nodes(self, r):
+    async def test_cluster_nodes(self, r: RedisCluster) -> None:
         response = (
             "c8253bae761cb1ecb2b61857d85dfe455a0fec8b 172.17.0.7:7006 "
             "slave aa90da731f673a99617dfe930306549a09f83a6b 0 "
@@ -855,7 +882,7 @@ class TestClusterRedisCommands:
         )
 
     @skip_if_redis_enterprise()
-    async def test_cluster_nodes_importing_migrating(self, r):
+    async def test_cluster_nodes_importing_migrating(self, r: RedisCluster) -> None:
         response = (
             "488ead2fcce24d8c0f158f9172cb1f4a9e040fe5 127.0.0.1:16381@26381 "
             "master - 0 1648975557664 3 connected 10923-16383\n"
@@ -892,7 +919,7 @@ class TestClusterRedisCommands:
         assert node_16381.get("migrations") == []
 
     @skip_if_redis_enterprise()
-    async def test_cluster_replicate(self, r):
+    async def test_cluster_replicate(self, r: RedisCluster) -> None:
         node = r.get_random_node()
         all_replicas = r.get_replicas()
         mock_all_nodes_resp(r, "OK")
@@ -905,7 +932,7 @@ class TestClusterRedisCommands:
             assert results is True
 
     @skip_if_redis_enterprise()
-    async def test_cluster_reset(self, r):
+    async def test_cluster_reset(self, r: RedisCluster) -> None:
         mock_all_nodes_resp(r, "OK")
         assert await r.cluster_reset() is True
         assert await r.cluster_reset(False) is True
@@ -914,7 +941,7 @@ class TestClusterRedisCommands:
             assert res is True
 
     @skip_if_redis_enterprise()
-    async def test_cluster_save_config(self, r):
+    async def test_cluster_save_config(self, r: RedisCluster) -> None:
         node = r.get_random_node()
         all_nodes = r.get_nodes()
         mock_all_nodes_resp(r, "OK")
@@ -924,7 +951,7 @@ class TestClusterRedisCommands:
             assert res is True
 
     @skip_if_redis_enterprise()
-    async def test_cluster_get_keys_in_slot(self, r):
+    async def test_cluster_get_keys_in_slot(self, r: RedisCluster) -> None:
         response = [b"{foo}1", b"{foo}2"]
         node = await r.nodes_manager.get_node_from_slot(12182)
         mock_node_resp(node, response)
@@ -932,7 +959,7 @@ class TestClusterRedisCommands:
         assert keys == response
 
     @skip_if_redis_enterprise()
-    async def test_cluster_set_config_epoch(self, r):
+    async def test_cluster_set_config_epoch(self, r: RedisCluster) -> None:
         mock_all_nodes_resp(r, "OK")
         assert await r.cluster_set_config_epoch(3) is True
         all_results = await r.cluster_set_config_epoch(3, target_nodes="all")
@@ -940,7 +967,7 @@ class TestClusterRedisCommands:
             assert res is True
 
     @skip_if_redis_enterprise()
-    async def test_cluster_setslot(self, r):
+    async def test_cluster_setslot(self, r: RedisCluster) -> None:
         node = r.get_random_node()
         mock_node_resp(node, "OK")
         assert await r.cluster_setslot(node, "node_0", 1218, "IMPORTING") is True
@@ -951,14 +978,14 @@ class TestClusterRedisCommands:
         with pytest.raises(RedisError):
             await r.cluster_failover(node, "STATE")
 
-    async def test_cluster_setslot_stable(self, r):
+    async def test_cluster_setslot_stable(self, r: RedisCluster) -> None:
         node = await r.nodes_manager.get_node_from_slot(12182)
         mock_node_resp(node, "OK")
         assert await r.cluster_setslot_stable(12182) is True
         assert node.redis_connection.connection.read_response.called
 
     @skip_if_redis_enterprise()
-    async def test_cluster_replicas(self, r):
+    async def test_cluster_replicas(self, r: RedisCluster) -> None:
         response = [
             b"01eca22229cf3c652b6fca0d09ff6941e0d2e3 "
             b"127.0.0.1:6377@16377 slave "
@@ -989,7 +1016,7 @@ class TestClusterRedisCommands:
             assert res[i][3] == res[i + 1][3]
 
     @skip_if_redis_enterprise()
-    async def test_readonly(self):
+    async def test_readonly(self) -> None:
         r = await get_mocked_redis_client(host=default_host, port=default_port)
         mock_all_nodes_resp(r, "OK")
         assert await r.readonly() is True
@@ -1002,7 +1029,7 @@ class TestClusterRedisCommands:
         await r.close()
 
     @skip_if_redis_enterprise()
-    async def test_readwrite(self):
+    async def test_readwrite(self) -> None:
         r = await get_mocked_redis_client(host=default_host, port=default_port)
         mock_all_nodes_resp(r, "OK")
         assert await r.readwrite() is True
@@ -1015,12 +1042,12 @@ class TestClusterRedisCommands:
         await r.close()
 
     @skip_if_redis_enterprise()
-    async def test_bgsave(self, r):
+    async def test_bgsave(self, r: RedisCluster) -> None:
         assert await r.bgsave()
         await asyncio.sleep(0.3)
         assert await r.bgsave(True)
 
-    async def test_info(self, r):
+    async def test_info(self, r: RedisCluster) -> None:
         # Map keys to same slot
         await r.set("x{1}", 1)
         await r.set("y{1}", 2)
@@ -1033,20 +1060,24 @@ class TestClusterRedisCommands:
         assert isinstance(info, dict)
         assert info["db0"]["keys"] == 3
 
-    async def _init_slowlog_test(self, r, node):
+    async def _init_slowlog_test(self, r: RedisCluster, node: ClusterNode) -> str:
         slowlog_lim = await r.config_get("slowlog-log-slower-than", target_nodes=node)
         assert (
             await r.config_set("slowlog-log-slower-than", 0, target_nodes=node) is True
         )
         return slowlog_lim["slowlog-log-slower-than"]
 
-    async def _teardown_slowlog_test(self, r, node, prev_limit):
+    async def _teardown_slowlog_test(
+        self, r: RedisCluster, node: ClusterNode, prev_limit: str
+    ) -> None:
         assert (
             await r.config_set("slowlog-log-slower-than", prev_limit, target_nodes=node)
             is True
         )
 
-    async def test_slowlog_get(self, r, slowlog):
+    async def test_slowlog_get(
+        self, r: RedisCluster, slowlog: Optional[List[Dict[str, Union[int, bytes]]]]
+    ) -> None:
         unicode_string = chr(3456) + "abcd" + chr(3421)
         node = r.get_node_from_key(unicode_string)
         slowlog_limit = await self._init_slowlog_test(r, node)
@@ -1072,7 +1103,9 @@ class TestClusterRedisCommands:
         # rollback the slowlog limit to its original value
         await self._teardown_slowlog_test(r, node, slowlog_limit)
 
-    async def test_slowlog_get_limit(self, r, slowlog):
+    async def test_slowlog_get_limit(
+        self, r: RedisCluster, slowlog: Optional[List[Dict[str, Union[int, bytes]]]]
+    ) -> None:
         assert await r.slowlog_reset()
         node = r.get_node_from_key("foo")
         slowlog_limit = await self._init_slowlog_test(r, node)
@@ -1083,31 +1116,31 @@ class TestClusterRedisCommands:
         assert len(slowlog) == 1
         await self._teardown_slowlog_test(r, node, slowlog_limit)
 
-    async def test_slowlog_length(self, r, slowlog):
+    async def test_slowlog_length(self, r: RedisCluster, slowlog: None) -> None:
         await r.get("foo")
         node = await r.nodes_manager.get_node_from_slot(key_slot(b"foo"))
         slowlog_len = await r.slowlog_len(target_nodes=node)
         assert isinstance(slowlog_len, int)
 
-    async def test_time(self, r):
+    async def test_time(self, r: RedisCluster) -> None:
         t = await r.time(target_nodes=r.get_primaries()[0])
         assert len(t) == 2
         assert isinstance(t[0], int)
         assert isinstance(t[1], int)
 
     @skip_if_server_version_lt("4.0.0")
-    async def test_memory_usage(self, r):
+    async def test_memory_usage(self, r: RedisCluster) -> None:
         await r.set("foo", "bar")
         assert isinstance(await r.memory_usage("foo"), int)
 
     @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
-    async def test_memory_malloc_stats(self, r):
+    async def test_memory_malloc_stats(self, r: RedisCluster) -> None:
         assert await r.memory_malloc_stats()
 
     @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
-    async def test_memory_stats(self, r):
+    async def test_memory_stats(self, r: RedisCluster) -> None:
         # put a key into the current db to make sure that "db.<current-db>"
         # has data
         await r.set("foo", "bar")
@@ -1119,30 +1152,30 @@ class TestClusterRedisCommands:
                 assert isinstance(value, dict)
 
     @skip_if_server_version_lt("4.0.0")
-    async def test_memory_help(self, r):
+    async def test_memory_help(self, r: RedisCluster) -> None:
         with pytest.raises(NotImplementedError):
             await r.memory_help()
 
     @skip_if_server_version_lt("4.0.0")
-    async def test_memory_doctor(self, r):
+    async def test_memory_doctor(self, r: RedisCluster) -> None:
         with pytest.raises(NotImplementedError):
             await r.memory_doctor()
 
     @skip_if_redis_enterprise()
-    async def test_lastsave(self, r):
+    async def test_lastsave(self, r: RedisCluster) -> None:
         node = r.get_primaries()[0]
         assert isinstance(await r.lastsave(target_nodes=node), datetime.datetime)
 
-    async def test_cluster_echo(self, r):
+    async def test_cluster_echo(self, r: RedisCluster) -> None:
         node = r.get_primaries()[0]
         assert await r.echo("foo bar", target_nodes=node) == b"foo bar"
 
     @skip_if_server_version_lt("1.0.0")
-    async def test_debug_segfault(self, r):
+    async def test_debug_segfault(self, r: RedisCluster) -> None:
         with pytest.raises(NotImplementedError):
             await r.debug_segfault()
 
-    async def test_config_resetstat(self, r):
+    async def test_config_resetstat(self, r: RedisCluster) -> None:
         node = r.get_primaries()[0]
         await r.ping(target_nodes=node)
         prior_commands_processed = int(
@@ -1156,14 +1189,14 @@ class TestClusterRedisCommands:
         assert reset_commands_processed < prior_commands_processed
 
     @skip_if_server_version_lt("6.2.0")
-    async def test_client_trackinginfo(self, r):
+    async def test_client_trackinginfo(self, r: RedisCluster) -> None:
         node = r.get_primaries()[0]
         res = await r.client_trackinginfo(target_nodes=node)
         assert len(res) > 2
         assert "prefixes" in res
 
     @skip_if_server_version_lt("2.9.50")
-    async def test_client_pause(self, r):
+    async def test_client_pause(self, r: RedisCluster) -> None:
         node = r.get_primaries()[0]
         assert await r.client_pause(1, target_nodes=node)
         assert await r.client_pause(timeout=1, target_nodes=node)
@@ -1172,16 +1205,16 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("6.2.0")
     @skip_if_redis_enterprise()
-    async def test_client_unpause(self, r):
+    async def test_client_unpause(self, r: RedisCluster) -> None:
         assert await r.client_unpause()
 
     @skip_if_server_version_lt("5.0.0")
-    async def test_client_id(self, r):
+    async def test_client_id(self, r: RedisCluster) -> None:
         node = r.get_primaries()[0]
         assert await r.client_id(target_nodes=node) > 0
 
     @skip_if_server_version_lt("5.0.0")
-    async def test_client_unblock(self, r):
+    async def test_client_unblock(self, r: RedisCluster) -> None:
         node = r.get_primaries()[0]
         myid = await r.client_id(target_nodes=node)
         assert not await r.client_unblock(myid, target_nodes=node)
@@ -1189,20 +1222,20 @@ class TestClusterRedisCommands:
         assert not await r.client_unblock(myid, error=False, target_nodes=node)
 
     @skip_if_server_version_lt("6.0.0")
-    async def test_client_getredir(self, r):
+    async def test_client_getredir(self, r: RedisCluster) -> None:
         node = r.get_primaries()[0]
         assert isinstance(await r.client_getredir(target_nodes=node), int)
         assert await r.client_getredir(target_nodes=node) == -1
 
     @skip_if_server_version_lt("6.2.0")
-    async def test_client_info(self, r):
+    async def test_client_info(self, r: RedisCluster) -> None:
         node = r.get_primaries()[0]
         info = await r.client_info(target_nodes=node)
         assert isinstance(info, dict)
         assert "addr" in info
 
     @skip_if_server_version_lt("2.6.9")
-    async def test_client_kill(self, r, r2):
+    async def test_client_kill(self, r: RedisCluster, r2: RedisCluster) -> None:
         node = r.get_primaries()[0]
         await r.client_setname("redis-py-c1", target_nodes="all")
         await r2.client_setname("redis-py-c2", target_nodes="all")
@@ -1226,13 +1259,13 @@ class TestClusterRedisCommands:
         assert clients[0].get("name") == "redis-py-c1"
 
     @skip_if_server_version_lt("2.6.0")
-    async def test_cluster_bitop_not_empty_string(self, r):
+    async def test_cluster_bitop_not_empty_string(self, r: RedisCluster) -> None:
         await r.set("{foo}a", "")
         await r.bitop("not", "{foo}r", "{foo}a")
         assert await r.get("{foo}r") is None
 
     @skip_if_server_version_lt("2.6.0")
-    async def test_cluster_bitop_not(self, r):
+    async def test_cluster_bitop_not(self, r: RedisCluster) -> None:
         test_str = b"\xAA\x00\xFF\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         await r.set("{foo}a", test_str)
@@ -1240,7 +1273,7 @@ class TestClusterRedisCommands:
         assert int(binascii.hexlify(await r.get("{foo}r")), 16) == correct
 
     @skip_if_server_version_lt("2.6.0")
-    async def test_cluster_bitop_not_in_place(self, r):
+    async def test_cluster_bitop_not_in_place(self, r: RedisCluster) -> None:
         test_str = b"\xAA\x00\xFF\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         await r.set("{foo}a", test_str)
@@ -1248,7 +1281,7 @@ class TestClusterRedisCommands:
         assert int(binascii.hexlify(await r.get("{foo}a")), 16) == correct
 
     @skip_if_server_version_lt("2.6.0")
-    async def test_cluster_bitop_single_string(self, r):
+    async def test_cluster_bitop_single_string(self, r: RedisCluster) -> None:
         test_str = b"\x01\x02\xFF"
         await r.set("{foo}a", test_str)
         await r.bitop("and", "{foo}res1", "{foo}a")
@@ -1259,7 +1292,7 @@ class TestClusterRedisCommands:
         assert await r.get("{foo}res3") == test_str
 
     @skip_if_server_version_lt("2.6.0")
-    async def test_cluster_bitop_string_operands(self, r):
+    async def test_cluster_bitop_string_operands(self, r: RedisCluster) -> None:
         await r.set("{foo}a", b"\x01\x02\xFF\xFF")
         await r.set("{foo}b", b"\x01\x02\xFF")
         await r.bitop("and", "{foo}res1", "{foo}a", "{foo}b")
@@ -1270,7 +1303,7 @@ class TestClusterRedisCommands:
         assert int(binascii.hexlify(await r.get("{foo}res3")), 16) == 0x000000FF
 
     @skip_if_server_version_lt("6.2.0")
-    async def test_cluster_copy(self, r):
+    async def test_cluster_copy(self, r: RedisCluster) -> None:
         assert await r.copy("{foo}a", "{foo}b") == 0
         await r.set("{foo}a", "bar")
         assert await r.copy("{foo}a", "{foo}b") == 1
@@ -1278,25 +1311,25 @@ class TestClusterRedisCommands:
         assert await r.get("{foo}b") == b"bar"
 
     @skip_if_server_version_lt("6.2.0")
-    async def test_cluster_copy_and_replace(self, r):
+    async def test_cluster_copy_and_replace(self, r: RedisCluster) -> None:
         await r.set("{foo}a", "foo1")
         await r.set("{foo}b", "foo2")
         assert await r.copy("{foo}a", "{foo}b") == 0
         assert await r.copy("{foo}a", "{foo}b", replace=True) == 1
 
     @skip_if_server_version_lt("6.2.0")
-    async def test_cluster_lmove(self, r):
+    async def test_cluster_lmove(self, r: RedisCluster) -> None:
         await r.rpush("{foo}a", "one", "two", "three", "four")
         assert await r.lmove("{foo}a", "{foo}b")
         assert await r.lmove("{foo}a", "{foo}b", "right", "left")
 
     @skip_if_server_version_lt("6.2.0")
-    async def test_cluster_blmove(self, r):
+    async def test_cluster_blmove(self, r: RedisCluster) -> None:
         await r.rpush("{foo}a", "one", "two", "three", "four")
         assert await r.blmove("{foo}a", "{foo}b", 5)
         assert await r.blmove("{foo}a", "{foo}b", 1, "RIGHT", "LEFT")
 
-    async def test_cluster_msetnx(self, r):
+    async def test_cluster_msetnx(self, r: RedisCluster) -> None:
         d = {"{foo}a": b"1", "{foo}b": b"2", "{foo}c": b"3"}
         assert await r.msetnx(d)
         d2 = {"{foo}a": b"x", "{foo}d": b"4"}
@@ -1305,13 +1338,13 @@ class TestClusterRedisCommands:
             assert await r.get(k) == v
         assert await r.get("{foo}d") is None
 
-    async def test_cluster_rename(self, r):
+    async def test_cluster_rename(self, r: RedisCluster) -> None:
         await r.set("{foo}a", "1")
         assert await r.rename("{foo}a", "{foo}b")
         assert await r.get("{foo}a") is None
         assert await r.get("{foo}b") == b"1"
 
-    async def test_cluster_renamenx(self, r):
+    async def test_cluster_renamenx(self, r: RedisCluster) -> None:
         await r.set("{foo}a", "1")
         await r.set("{foo}b", "2")
         assert not await r.renamenx("{foo}a", "{foo}b")
@@ -1319,7 +1352,7 @@ class TestClusterRedisCommands:
         assert await r.get("{foo}b") == b"2"
 
     # LIST COMMANDS
-    async def test_cluster_blpop(self, r):
+    async def test_cluster_blpop(self, r: RedisCluster) -> None:
         await r.rpush("{foo}a", "1", "2")
         await r.rpush("{foo}b", "3", "4")
         assert await r.blpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}b", b"3")
@@ -1330,7 +1363,7 @@ class TestClusterRedisCommands:
         await r.rpush("{foo}c", "1")
         assert await r.blpop("{foo}c", timeout=1) == (b"{foo}c", b"1")
 
-    async def test_cluster_brpop(self, r):
+    async def test_cluster_brpop(self, r: RedisCluster) -> None:
         await r.rpush("{foo}a", "1", "2")
         await r.rpush("{foo}b", "3", "4")
         assert await r.brpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}b", b"4")
@@ -1341,7 +1374,7 @@ class TestClusterRedisCommands:
         await r.rpush("{foo}c", "1")
         assert await r.brpop("{foo}c", timeout=1) == (b"{foo}c", b"1")
 
-    async def test_cluster_brpoplpush(self, r):
+    async def test_cluster_brpoplpush(self, r: RedisCluster) -> None:
         await r.rpush("{foo}a", "1", "2")
         await r.rpush("{foo}b", "3", "4")
         assert await r.brpoplpush("{foo}a", "{foo}b") == b"2"
@@ -1350,24 +1383,24 @@ class TestClusterRedisCommands:
         assert await r.lrange("{foo}a", 0, -1) == []
         assert await r.lrange("{foo}b", 0, -1) == [b"1", b"2", b"3", b"4"]
 
-    async def test_cluster_brpoplpush_empty_string(self, r):
+    async def test_cluster_brpoplpush_empty_string(self, r: RedisCluster) -> None:
         await r.rpush("{foo}a", "")
         assert await r.brpoplpush("{foo}a", "{foo}b") == b""
 
-    async def test_cluster_rpoplpush(self, r):
+    async def test_cluster_rpoplpush(self, r: RedisCluster) -> None:
         await r.rpush("{foo}a", "a1", "a2", "a3")
         await r.rpush("{foo}b", "b1", "b2", "b3")
         assert await r.rpoplpush("{foo}a", "{foo}b") == b"a3"
         assert await r.lrange("{foo}a", 0, -1) == [b"a1", b"a2"]
         assert await r.lrange("{foo}b", 0, -1) == [b"a3", b"b1", b"b2", b"b3"]
 
-    async def test_cluster_sdiff(self, r):
+    async def test_cluster_sdiff(self, r: RedisCluster) -> None:
         await r.sadd("{foo}a", "1", "2", "3")
         assert await r.sdiff("{foo}a", "{foo}b") == {b"1", b"2", b"3"}
         await r.sadd("{foo}b", "2", "3")
         assert await r.sdiff("{foo}a", "{foo}b") == {b"1"}
 
-    async def test_cluster_sdiffstore(self, r):
+    async def test_cluster_sdiffstore(self, r: RedisCluster) -> None:
         await r.sadd("{foo}a", "1", "2", "3")
         assert await r.sdiffstore("{foo}c", "{foo}a", "{foo}b") == 3
         assert await r.smembers("{foo}c") == {b"1", b"2", b"3"}
@@ -1375,13 +1408,13 @@ class TestClusterRedisCommands:
         assert await r.sdiffstore("{foo}c", "{foo}a", "{foo}b") == 1
         assert await r.smembers("{foo}c") == {b"1"}
 
-    async def test_cluster_sinter(self, r):
+    async def test_cluster_sinter(self, r: RedisCluster) -> None:
         await r.sadd("{foo}a", "1", "2", "3")
         assert await r.sinter("{foo}a", "{foo}b") == set()
         await r.sadd("{foo}b", "2", "3")
         assert await r.sinter("{foo}a", "{foo}b") == {b"2", b"3"}
 
-    async def test_cluster_sinterstore(self, r):
+    async def test_cluster_sinterstore(self, r: RedisCluster) -> None:
         await r.sadd("{foo}a", "1", "2", "3")
         assert await r.sinterstore("{foo}c", "{foo}a", "{foo}b") == 0
         assert await r.smembers("{foo}c") == set()
@@ -1389,33 +1422,33 @@ class TestClusterRedisCommands:
         assert await r.sinterstore("{foo}c", "{foo}a", "{foo}b") == 2
         assert await r.smembers("{foo}c") == {b"2", b"3"}
 
-    async def test_cluster_smove(self, r):
+    async def test_cluster_smove(self, r: RedisCluster) -> None:
         await r.sadd("{foo}a", "a1", "a2")
         await r.sadd("{foo}b", "b1", "b2")
         assert await r.smove("{foo}a", "{foo}b", "a1")
         assert await r.smembers("{foo}a") == {b"a2"}
         assert await r.smembers("{foo}b") == {b"b1", b"b2", b"a1"}
 
-    async def test_cluster_sunion(self, r):
+    async def test_cluster_sunion(self, r: RedisCluster) -> None:
         await r.sadd("{foo}a", "1", "2")
         await r.sadd("{foo}b", "2", "3")
         assert await r.sunion("{foo}a", "{foo}b") == {b"1", b"2", b"3"}
 
-    async def test_cluster_sunionstore(self, r):
+    async def test_cluster_sunionstore(self, r: RedisCluster) -> None:
         await r.sadd("{foo}a", "1", "2")
         await r.sadd("{foo}b", "2", "3")
         assert await r.sunionstore("{foo}c", "{foo}a", "{foo}b") == 3
         assert await r.smembers("{foo}c") == {b"1", b"2", b"3"}
 
     @skip_if_server_version_lt("6.2.0")
-    async def test_cluster_zdiff(self, r):
+    async def test_cluster_zdiff(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 2, "a3": 3})
         await r.zadd("{foo}b", {"a1": 1, "a2": 2})
         assert await r.zdiff(["{foo}a", "{foo}b"]) == [b"a3"]
         assert await r.zdiff(["{foo}a", "{foo}b"], withscores=True) == [b"a3", b"3"]
 
     @skip_if_server_version_lt("6.2.0")
-    async def test_cluster_zdiffstore(self, r):
+    async def test_cluster_zdiffstore(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 2, "a3": 3})
         await r.zadd("{foo}b", {"a1": 1, "a2": 2})
         assert await r.zdiffstore("{foo}out", ["{foo}a", "{foo}b"])
@@ -1423,7 +1456,7 @@ class TestClusterRedisCommands:
         assert await r.zrange("{foo}out", 0, -1, withscores=True) == [(b"a3", 3.0)]
 
     @skip_if_server_version_lt("6.2.0")
-    async def test_cluster_zinter(self, r):
+    async def test_cluster_zinter(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 2, "a3": 1})
         await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
         await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
@@ -1451,7 +1484,7 @@ class TestClusterRedisCommands:
             {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True
         ) == [(b"a3", 20), (b"a1", 23)]
 
-    async def test_cluster_zinterstore_sum(self, r):
+    async def test_cluster_zinterstore_sum(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
         await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
         await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
@@ -1461,7 +1494,7 @@ class TestClusterRedisCommands:
             (b"a1", 9),
         ]
 
-    async def test_cluster_zinterstore_max(self, r):
+    async def test_cluster_zinterstore_max(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
         await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
         await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
@@ -1476,7 +1509,7 @@ class TestClusterRedisCommands:
             (b"a1", 6),
         ]
 
-    async def test_cluster_zinterstore_min(self, r):
+    async def test_cluster_zinterstore_min(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 2, "a3": 3})
         await r.zadd("{foo}b", {"a1": 2, "a2": 3, "a3": 5})
         await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
@@ -1491,7 +1524,7 @@ class TestClusterRedisCommands:
             (b"a3", 3),
         ]
 
-    async def test_cluster_zinterstore_with_weight(self, r):
+    async def test_cluster_zinterstore_with_weight(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
         await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
         await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
@@ -1504,7 +1537,7 @@ class TestClusterRedisCommands:
         ]
 
     @skip_if_server_version_lt("4.9.0")
-    async def test_cluster_bzpopmax(self, r):
+    async def test_cluster_bzpopmax(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 2})
         await r.zadd("{foo}b", {"b1": 10, "b2": 20})
         assert await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) == (
@@ -1532,7 +1565,7 @@ class TestClusterRedisCommands:
         assert await r.bzpopmax("{foo}c", timeout=1) == (b"{foo}c", b"c1", 100)
 
     @skip_if_server_version_lt("4.9.0")
-    async def test_cluster_bzpopmin(self, r):
+    async def test_cluster_bzpopmin(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 2})
         await r.zadd("{foo}b", {"b1": 10, "b2": 20})
         assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) == (
@@ -1560,7 +1593,7 @@ class TestClusterRedisCommands:
         assert await r.bzpopmin("{foo}c", timeout=1) == (b"{foo}c", b"c1", 100)
 
     @skip_if_server_version_lt("6.2.0")
-    async def test_cluster_zrangestore(self, r):
+    async def test_cluster_zrangestore(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 2, "a3": 3})
         assert await r.zrangestore("{foo}b", "{foo}a", 0, 1)
         assert await r.zrange("{foo}b", 0, -1) == [b"a1", b"a2"]
@@ -1585,7 +1618,7 @@ class TestClusterRedisCommands:
         assert await r.zrange("{foo}b", 0, -1) == [b"a2"]
 
     @skip_if_server_version_lt("6.2.0")
-    async def test_cluster_zunion(self, r):
+    async def test_cluster_zunion(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
         await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
         await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
@@ -1615,7 +1648,7 @@ class TestClusterRedisCommands:
             {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True
         ) == [(b"a2", 5), (b"a4", 12), (b"a3", 20), (b"a1", 23)]
 
-    async def test_cluster_zunionstore_sum(self, r):
+    async def test_cluster_zunionstore_sum(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
         await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
         await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
@@ -1627,7 +1660,7 @@ class TestClusterRedisCommands:
             (b"a1", 9),
         ]
 
-    async def test_cluster_zunionstore_max(self, r):
+    async def test_cluster_zunionstore_max(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
         await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
         await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
@@ -1644,7 +1677,7 @@ class TestClusterRedisCommands:
             (b"a1", 6),
         ]
 
-    async def test_cluster_zunionstore_min(self, r):
+    async def test_cluster_zunionstore_min(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 2, "a3": 3})
         await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 4})
         await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
@@ -1661,7 +1694,7 @@ class TestClusterRedisCommands:
             (b"a4", 4),
         ]
 
-    async def test_cluster_zunionstore_with_weight(self, r):
+    async def test_cluster_zunionstore_with_weight(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
         await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
         await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
@@ -1676,7 +1709,7 @@ class TestClusterRedisCommands:
         ]
 
     @skip_if_server_version_lt("2.8.9")
-    async def test_cluster_pfcount(self, r):
+    async def test_cluster_pfcount(self, r: RedisCluster) -> None:
         members = {b"1", b"2", b"3"}
         await r.pfadd("{foo}a", *members)
         assert await r.pfcount("{foo}a") == len(members)
@@ -1686,7 +1719,7 @@ class TestClusterRedisCommands:
         assert await r.pfcount("{foo}a", "{foo}b") == len(members_b.union(members))
 
     @skip_if_server_version_lt("2.8.9")
-    async def test_cluster_pfmerge(self, r):
+    async def test_cluster_pfmerge(self, r: RedisCluster) -> None:
         mema = {b"1", b"2", b"3"}
         memb = {b"2", b"3", b"4"}
         memc = {b"5", b"6", b"7"}
@@ -1698,14 +1731,14 @@ class TestClusterRedisCommands:
         await r.pfmerge("{foo}d", "{foo}b")
         assert await r.pfcount("{foo}d") == 7
 
-    async def test_cluster_sort_store(self, r):
+    async def test_cluster_sort_store(self, r: RedisCluster) -> None:
         await r.rpush("{foo}a", "2", "3", "1")
         assert await r.sort("{foo}a", store="{foo}sorted_values") == 3
         assert await r.lrange("{foo}sorted_values", 0, -1) == [b"1", b"2", b"3"]
 
     # GEO COMMANDS
     @skip_if_server_version_lt("6.2.0")
-    async def test_cluster_geosearchstore(self, r):
+    async def test_cluster_geosearchstore(self, r: RedisCluster) -> None:
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
             41.406342043777,
@@ -1724,7 +1757,7 @@ class TestClusterRedisCommands:
 
     @skip_unless_arch_bits(64)
     @skip_if_server_version_lt("6.2.0")
-    async def test_geosearchstore_dist(self, r):
+    async def test_geosearchstore_dist(self, r: RedisCluster) -> None:
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
             41.406342043777,
@@ -1744,7 +1777,7 @@ class TestClusterRedisCommands:
         assert await r.zscore("{foo}places_barcelona", "place1") == 88.05060698409301
 
     @skip_if_server_version_lt("3.2.0")
-    async def test_cluster_georadius_store(self, r):
+    async def test_cluster_georadius_store(self, r: RedisCluster) -> None:
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
             41.406342043777,
@@ -1759,7 +1792,7 @@ class TestClusterRedisCommands:
 
     @skip_unless_arch_bits(64)
     @skip_if_server_version_lt("3.2.0")
-    async def test_cluster_georadius_store_dist(self, r):
+    async def test_cluster_georadius_store_dist(self, r: RedisCluster) -> None:
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
             41.406342043777,
@@ -1773,12 +1806,12 @@ class TestClusterRedisCommands:
         # instead of save the geo score, the distance is saved.
         assert await r.zscore("{foo}places_barcelona", "place1") == 88.05060698409301
 
-    async def test_cluster_dbsize(self, r):
+    async def test_cluster_dbsize(self, r: RedisCluster) -> None:
         d = {"a": b"1", "b": b"2", "c": b"3", "d": b"4"}
         assert await r.mset_nonatomic(d)
         assert await r.dbsize(target_nodes="primaries") == len(d)
 
-    async def test_cluster_keys(self, r):
+    async def test_cluster_keys(self, r: RedisCluster) -> None:
         assert await r.keys() == []
         keys_with_underscores = {b"test_a", b"test_b"}
         keys = keys_with_underscores.union({b"testc"})
@@ -1792,7 +1825,7 @@ class TestClusterRedisCommands:
 
     # SCAN COMMANDS
     @skip_if_server_version_lt("2.8.0")
-    async def test_cluster_scan(self, r):
+    async def test_cluster_scan(self, r: RedisCluster) -> None:
         await r.set("a", 1)
         await r.set("b", 2)
         await r.set("c", 3)
@@ -1811,7 +1844,7 @@ class TestClusterRedisCommands:
             assert all(cursor == 0 for cursor in cursors.values())
 
     @skip_if_server_version_lt("6.0.0")
-    async def test_cluster_scan_type(self, r):
+    async def test_cluster_scan_type(self, r: RedisCluster) -> None:
         await r.sadd("a-set", 1)
         await r.sadd("b-set", 1)
         await r.sadd("c-set", 1)
@@ -1834,7 +1867,7 @@ class TestClusterRedisCommands:
             assert all(cursor == 0 for cursor in cursors.values())
 
     @skip_if_server_version_lt("2.8.0")
-    async def test_cluster_scan_iter(self, r):
+    async def test_cluster_scan_iter(self, r: RedisCluster) -> None:
         keys_all = []
         keys_1 = []
         for i in range(100):
@@ -1855,7 +1888,7 @@ class TestClusterRedisCommands:
             ]
             assert sorted(keys) == keys_1
 
-    async def test_cluster_randomkey(self, r):
+    async def test_cluster_randomkey(self, r: RedisCluster) -> None:
         node = r.get_node_from_key("{foo}")
         assert await r.randomkey(target_nodes=node) is None
         for key in ("{foo}a", "{foo}b", "{foo}c"):
@@ -1864,7 +1897,9 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
-    async def test_acl_log(self, r, request, create_redis):
+    async def test_acl_log(
+        self, r: RedisCluster, request: FixtureRequest, create_redis: Callable
+    ) -> None:
         key = "{cache}:"
         node = r.get_node_from_key(key)
         username = "redis-py-user"
@@ -1914,7 +1949,7 @@ class TestNodesManager:
     Tests for the NodesManager class
     """
 
-    async def test_load_balancer(self, r):
+    async def test_load_balancer(self, r: RedisCluster) -> None:
         n_manager = r.nodes_manager
         lb = n_manager.read_load_balancer
         slot_1 = 1257
@@ -1946,7 +1981,7 @@ class TestNodesManager:
         assert lb.get_server_index(primary1_name, list1_size) == 0
         assert lb.get_server_index(primary2_name, list2_size) == 0
 
-    async def test_init_slots_cache_not_all_slots_covered(self):
+    async def test_init_slots_cache_not_all_slots_covered(self) -> None:
         """
         Test that if not all slots are covered it should raise an exception
         """
@@ -1968,7 +2003,7 @@ class TestNodesManager:
             "All slots are not covered after query all startup_nodes."
         )
 
-    async def test_init_slots_cache_not_require_full_coverage_success(self):
+    async def test_init_slots_cache_not_require_full_coverage_success(self) -> None:
         """
         When require_full_coverage is set to False and not all slots are
         covered the cluster client initialization should succeed
@@ -1991,7 +2026,7 @@ class TestNodesManager:
 
         await rc.close()
 
-    async def test_init_slots_cache(self):
+    async def test_init_slots_cache(self) -> None:
         """
         Test that slots cache can in initialized and all slots are covered
         """
@@ -2022,7 +2057,7 @@ class TestNodesManager:
 
         await rc.close()
 
-    async def test_init_slots_cache_cluster_mode_disabled(self):
+    async def test_init_slots_cache_cluster_mode_disabled(self) -> None:
         """
         Test that creating a RedisCluster failes if one of the startup nodes
         has cluster mode disabled
@@ -2034,7 +2069,7 @@ class TestNodesManager:
             await rc.close()
         assert "Cluster mode is not enabled on this node" in str(e.value)
 
-    async def test_empty_startup_nodes(self):
+    async def test_empty_startup_nodes(self) -> None:
         """
         It should not be possible to create a node manager with no nodes
         specified
@@ -2042,7 +2077,7 @@ class TestNodesManager:
         with pytest.raises(RedisClusterException):
             await NodesManager([]).initialize()
 
-    async def test_wrong_startup_nodes_type(self):
+    async def test_wrong_startup_nodes_type(self) -> None:
         """
         If something other then a list type itteratable is provided it should
         fail
@@ -2050,7 +2085,9 @@ class TestNodesManager:
         with pytest.raises(RedisClusterException):
             await NodesManager({}).initialize()
 
-    async def test_init_slots_cache_slots_collision(self, request):
+    async def test_init_slots_cache_slots_collision(
+        self, request: FixtureRequest
+    ) -> None:
         """
         Test that if 2 nodes do not agree on the same slots setup it should
         raise an error. In this test both nodes will say that the first
@@ -2105,7 +2142,7 @@ class TestNodesManager:
                 "startup_nodes could not agree on a valid slots cache"
             ), str(ex.value)
 
-    async def test_cluster_one_instance(self):
+    async def test_cluster_one_instance(self) -> None:
         """
         If the cluster exists of only 1 node then there is some hacks that must
         be validated they work.
@@ -2128,7 +2165,7 @@ class TestNodesManager:
 
         await rc.close()
 
-    async def test_init_with_down_node(self):
+    async def test_init_with_down_node(self) -> None:
         """
         If I can't connect to one of the nodes, everything should still work.
         But if I can't connect to any of the nodes, exception should be thrown.

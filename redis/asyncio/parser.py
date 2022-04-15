@@ -1,4 +1,12 @@
+from typing import TYPE_CHECKING, List, Optional, TypeVar, Union
+
+from redis.asyncio.client import Redis
 from redis.exceptions import RedisError, ResponseError
+
+if TYPE_CHECKING:
+    from redis.asyncio.cluster import RedisCluster
+
+_RedisClusterT = TypeVar("_RedisClusterT", bound="RedisCluster")
 
 
 class CommandsParser:
@@ -10,10 +18,12 @@ class CommandsParser:
     'COMMAND GETKEYS'.
     """
 
-    def __init__(self):
+    __slots__ = ("commands",)
+
+    def __init__(self) -> None:
         self.commands = {}
 
-    async def initialize(self, r):
+    async def initialize(self, r: _RedisClusterT) -> None:
         commands = await r.execute_command("COMMAND")
         uppercase_commands = []
         for cmd in commands:
@@ -26,7 +36,9 @@ class CommandsParser:
     # As soon as this PR is merged into Redis, we should reimplement
     # our logic to use COMMAND INFO changes to determine the key positions
     # https://github.com/redis/redis/pull/8324
-    async def get_keys(self, redis_conn, *args):
+    async def get_keys(
+        self, redis_conn: Redis, *args
+    ) -> Optional[Union[List[str], List[bytes]]]:
         """
         Get the keys from the passed command.
 
@@ -80,7 +92,7 @@ class CommandsParser:
 
         return keys
 
-    async def _get_moveable_keys(self, redis_conn, *args):
+    async def _get_moveable_keys(self, redis_conn: Redis, *args) -> Optional[List[str]]:
         """
         NOTE: Due to a bug in redis<7.0, this function does not work properly
         for EVAL or EVALSHA when the `numkeys` arg is 0.
