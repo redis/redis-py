@@ -1374,9 +1374,9 @@ class ConnectionPool:
         if not isinstance(max_connections, int) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
 
-        self.connection_class: Type[Connection] = connection_class
-        self.connection_kwargs: Dict[str, Any] = connection_kwargs
-        self.max_connections: int = max_connections
+        self.connection_class = connection_class
+        self.connection_kwargs = connection_kwargs
+        self.max_connections = max_connections
 
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as
@@ -1386,7 +1386,7 @@ class ConnectionPool:
         # object of this pool. subsequent threads acquiring this lock
         # will notice the first thread already did the work and simply
         # release the lock.
-        self._fork_lock: threading.Lock = threading.Lock()
+        self._fork_lock = threading.Lock()
         self.reset()
 
     def __repr__(self) -> str:
@@ -1396,8 +1396,8 @@ class ConnectionPool:
         )
 
     def reset(self) -> None:
-        self._lock: threading.Lock = threading.Lock()
-        self._created_connections: int = 0
+        self._lock = threading.Lock()
+        self._created_connections = 0
         self._available_connections: List[Connection] = []
         self._in_use_connections: Set[Connection] = set()
 
@@ -1410,7 +1410,7 @@ class ConnectionPool:
         # release _fork_lock. when each of these threads eventually acquire
         # _fork_lock, they will notice that another thread already called
         # reset() and they will immediately release _fork_lock and continue on.
-        self.pid: int = os.getpid()
+        self.pid = os.getpid()
 
     def _checkpid(self) -> None:
         # _checkpid() attempts to keep ConnectionPool fork-safe on modern
