@@ -1903,9 +1903,9 @@ class TestClusterRedisCommands:
         assert "client-info" in (await r.acl_log(count=1, target_nodes=node))[0]
         assert await r.acl_log_reset(target_nodes=node)
 
-        yield
-
         await r.acl_deluser(username, target_nodes="primaries")
+
+        await user_client.close()
 
 
 @pytest.mark.onlycluster
@@ -2056,20 +2056,20 @@ class TestNodesManager:
         raise an error. In this test both nodes will say that the first
         slots block should be bound to different servers.
         """
-        with mock.patch.object(NodesManager, "create_redis_node") as create_redis_node:
+        with mock.patch.object(ClusterNode, "initialize", autospec=True) as initialize:
 
-            async def create_mocked_redis_node(host, port, **kwargs):
+            async def mocked_initialize(self, **kwargs):
                 """
                 Helper function to return custom slots cache data from
                 different redis nodes
                 """
-                if port == 7000:
+                if self.port == 7000:
                     result = [
                         [0, 5460, ["127.0.0.1", 7000], ["127.0.0.1", 7003]],
                         [5461, 10922, ["127.0.0.1", 7001], ["127.0.0.1", 7004]],
                     ]
 
-                elif port == 7001:
+                elif self.port == 7001:
                     result = [
                         [0, 5460, ["127.0.0.1", 7001], ["127.0.0.1", 7003]],
                         [5461, 10922, ["127.0.0.1", 7000], ["127.0.0.1", 7004]],
@@ -2077,7 +2077,7 @@ class TestNodesManager:
                 else:
                     result = []
 
-                r_node = Redis(host=host, port=port)
+                r_node = Redis(host=self.host, port=self.port)
 
                 orig_execute_command = r_node.execute_command
 
@@ -2094,14 +2094,13 @@ class TestNodesManager:
                 r_node.execute_command = execute_command
                 return r_node
 
-            create_redis_node.side_effect = create_mocked_redis_node
+            initialize.side_effect = mocked_initialize
 
             with pytest.raises(RedisClusterException) as ex:
                 node_1 = ClusterNode("127.0.0.1", 7000)
                 node_2 = ClusterNode("127.0.0.1", 7001)
-                rc = RedisCluster(startup_nodes=[node_1, node_2])
-                await rc.initialize()
-                await rc.close()
+                async with RedisCluster(startup_nodes=[node_1, node_2]):
+                    ...
             assert str(ex.value).startswith(
                 "startup_nodes could not agree on a valid slots cache"
             ), str(ex.value)
@@ -2134,13 +2133,13 @@ class TestNodesManager:
         If I can't connect to one of the nodes, everything should still work.
         But if I can't connect to any of the nodes, exception should be thrown.
         """
-        with mock.patch.object(NodesManager, "create_redis_node") as create_redis_node:
+        with mock.patch.object(ClusterNode, "initialize", autospec=True) as initialize:
 
-            async def create_mocked_redis_node(host, port, **kwargs):
-                if port == 7000:
+            async def mocked_initialize(self, **kwargs):
+                if self.port == 7000:
                     raise ConnectionError("mock connection error for 7000")
 
-                r_node = Redis(host=host, port=port, decode_responses=True)
+                r_node = Redis(host=self.host, port=self.port, decode_responses=True)
 
                 async def execute_command(*args, **kwargs):
                     if args[0] == "CLUSTER SLOTS":
@@ -2157,7 +2156,7 @@ class TestNodesManager:
 
                 return r_node
 
-            create_redis_node.side_effect = create_mocked_redis_node
+            initialize.side_effect = mocked_initialize
 
             node_1 = ClusterNode("127.0.0.1", 7000)
             node_2 = ClusterNode("127.0.0.1", 7001)
@@ -2165,9 +2164,8 @@ class TestNodesManager:
             # If all startup nodes fail to connect, connection error should be
             # thrown
             with pytest.raises(RedisClusterException) as e:
-                rc = RedisCluster(startup_nodes=[node_1])
-                await rc.initialize()
-                await rc.close()
+                async with RedisCluster(startup_nodes=[node_1]):
+                    ...
             assert "Redis Cluster cannot be connected" in str(e.value)
 
             with mock.patch.object(
@@ -2189,8 +2187,6 @@ class TestNodesManager:
                 cmd_parser_initialize.side_effect = cmd_init_mock
                 # When at least one startup node is reachable, the cluster
                 # initialization should succeeds
-                rc = RedisCluster(startup_nodes=[node_1, node_2])
-                await rc.initialize()
-                assert rc.get_node(host=default_host, port=7001) is not None
-                assert rc.get_node(host=default_host, port=7002) is not None
-                await rc.close()
+                async with RedisCluster(startup_nodes=[node_1, node_2]) as rc:
+                    assert rc.get_node(host=default_host, port=7001) is not None
+                    assert rc.get_node(host=default_host, port=7002) is not None
