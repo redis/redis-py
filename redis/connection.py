@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copy
 import errno
 import io
@@ -98,7 +100,7 @@ MODULE_EXPORTS_DATA_TYPES_ERROR = (
 
 
 class ConnectCallbackProtocol(Protocol):
-    def __call__(self, connection: "Connection") -> None:
+    def __call__(self, connection: Connection) -> None:
         ...
 
 
