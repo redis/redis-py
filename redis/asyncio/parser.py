@@ -1,12 +1,10 @@
-from typing import TYPE_CHECKING, List, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, List, Optional, Union
 
 from redis.asyncio.client import Redis
 from redis.exceptions import RedisError, ResponseError
 
 if TYPE_CHECKING:
     from redis.asyncio.cluster import RedisCluster
-
-_RedisClusterT = TypeVar("_RedisClusterT", bound="RedisCluster")
 
 
 class CommandsParser:
@@ -23,7 +21,7 @@ class CommandsParser:
     def __init__(self) -> None:
         self.commands = {}
 
-    async def initialize(self, r: _RedisClusterT) -> None:
+    async def initialize(self, r: "RedisCluster") -> None:
         commands = await r.execute_command("COMMAND")
         uppercase_commands = []
         for cmd in commands:

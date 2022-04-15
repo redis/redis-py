@@ -3,7 +3,7 @@ import logging
 import random
 import socket
 import warnings
-from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from redis.asyncio.client import Redis
 from redis.asyncio.connection import (
@@ -47,9 +47,6 @@ from redis.utils import dict_merge, str_if_bytes
 
 log = logging.getLogger(__name__)
 
-_RedisClusterT = TypeVar("_RedisClusterT", bound="RedisCluster")
-_ClusterNodeT = TypeVar("_ClusterNodeT", bound="ClusterNode")
-
 
 class ClusterParser(DefaultParser):
     EXCEPTION_CLASSES = dict_merge(
@@ -66,10 +63,78 @@ class ClusterParser(DefaultParser):
 
 
 class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
+    """
+    Create a new RedisCluster client.
+
+    Pass one of parameters:
+
+      - `url`
+      - `host`
+      - `startup_nodes`
+
+    | Use :meth:`initialize` to find cluster nodes & create connections.
+    | Use :meth:`close` to disconnect connections & close client.
+
+    Many commands support the target_nodes kwarg. It can be one of the
+    :attr:`NODE_FLAGS`:
+
+      - :attr:`PRIMARIES`
+      - :attr:`REPLICAS`
+      - :attr:`ALL_NODES`
+      - :attr:`RANDOM`
+      - :attr:`DEFAULT_NODE`
+
+    :param host:
+        | Can be used to point to a startup node
+    :param port:
+        | Port used if **host** or **url** is provided
+    :param startup_nodes:
+        | :class:`~.ClusterNode` to used as a startup node
+    :param cluster_error_retry_attempts:
+        | Retry command execution attempts when encountering :class:`~.ClusterDownError`
+          or :class:`~.ConnectionError`
+    :param require_full_coverage:
+        | When set to ``False``: the client will not require a full coverage of the
+          slots. However, if not all slots are covered, and at least one node has
+          ``cluster-require-full-coverage`` set to ``yes``, the server will throw a
+          :class:`~.ClusterDownError` for some key-based commands.
+        | When set to ``True``: all slots must be covered to construct the cluster
+          client. If not all slots are covered, :class:`~.RedisClusterException` will be
+          thrown.
+        | See:
+          https://redis.io/docs/manual/scaling/#redis-cluster-configuration-parameters
+    :param reinitialize_steps:
+        | Specifies the number of MOVED errors that need to occur before reinitializing
+          the whole cluster topology. If a MOVED error occurs and the cluster does not
+          need to be reinitialized on this current error handling, only the MOVED slot
+          will be patched with the redirected node.
+          To reinitialize the cluster on every MOVED error, set reinitialize_steps to 1.
+          To avoid reinitializing the cluster on moved errors, set reinitialize_steps to
+          0.
+    :param read_from_replicas:
+        | Enable read from replicas in READONLY mode. You can read possibly stale data.
+          When set to true, read commands will be assigned between the primary and
+          its replications in a Round-Robin manner.
+    :param url:
+        | See :meth:`.from_url`
+    :param kwargs:
+        | Extra arguments that will be passed to the
+          :class:`~redis.asyncio.client.Redis` instance when created
+
+    :raises RedisClusterException:
+        if any arguments are invalid. Eg:
+
+        - db kwarg
+        - db != 0 in url
+        - unix socket connection
+        - none of host & url & startup_nodes were provided
+
+    """
+
     @classmethod
-    def from_url(cls, url: str, **kwargs) -> _RedisClusterT:
+    def from_url(cls, url: str, **kwargs) -> "RedisCluster":
         """
-        Return a Redis client object configured from the given URL
+        Return a Redis client object configured from the given URL.
 
         For example::
 
@@ -130,7 +195,7 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         self,
         host: Optional[str] = None,
         port: int = 6379,
-        startup_nodes: Optional[List[_ClusterNodeT]] = None,
+        startup_nodes: Optional[List["ClusterNode"]] = None,
         cluster_error_retry_attempts: int = 3,
         require_full_coverage: bool = False,
         reinitialize_steps: int = 10,
@@ -138,52 +203,6 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         url: Optional[str] = None,
         **kwargs,
     ) -> None:
-        """
-         Initialize a new RedisCluster client.
-
-         :startup_nodes: 'list[ClusterNode]'
-             List of nodes from which initial bootstrapping can be done
-         :host: 'str'
-             Can be used to point to a startup node
-         :port: 'int'
-             Can be used to point to a startup node
-         :require_full_coverage: 'bool'
-            When set to False (default value): the client will not require a
-            full coverage of the slots. However, if not all slots are covered,
-            and at least one node has 'cluster-require-full-coverage' set to
-            'yes,' the server will throw a ClusterDownError for some key-based
-            commands. See -
-            https://redis.io/topics/cluster-tutorial#redis-cluster-configuration-parameters
-            When set to True: all slots must be covered to construct the
-            cluster client. If not all slots are covered, RedisClusterException
-            will be thrown.
-        :read_from_replicas: 'bool'
-             Enable read from replicas in READONLY mode. You can read possibly
-             stale data.
-             When set to true, read commands will be assigned between the
-             primary and its replications in a Round-Robin manner.
-        :cluster_error_retry_attempts: 'int'
-             Retry command execution attempts when encountering ClusterDownError
-             or ConnectionError
-        :reinitialize_steps: 'int'
-            Specifies the number of MOVED errors that need to occur before
-            reinitializing the whole cluster topology. If a MOVED error occurs
-            and the cluster does not need to be reinitialized on this current
-            error handling, only the MOVED slot will be patched with the
-            redirected node.
-            To reinitialize the cluster on every MOVED error, set
-            reinitialize_steps to 1.
-            To avoid reinitializing the cluster on moved errors, set
-            reinitialize_steps to 0.
-
-         :**kwargs:
-             Extra arguments that will be sent into Redis instance when created
-             (See Official redis-py doc for supported kwargs
-         [https://github.com/andymccurdy/redis-py/blob/master/redis/client.py])
-             Some kwargs are not supported and will raise a
-             RedisClusterException:
-                 - db (Redis do not support database SELECT in cluster mode)
-        """
         if startup_nodes is None:
             startup_nodes = []
 
@@ -258,7 +277,8 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         self._initialize = True
         self._lock = asyncio.Lock()
 
-    async def initialize(self) -> _RedisClusterT:
+    async def initialize(self) -> "RedisCluster":
+        """Get all nodes from startup nodes & creates connections if not initialized."""
         if self._initialize:
             async with self._lock:
                 if self._initialize:
@@ -274,13 +294,14 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         return self
 
     async def close(self) -> None:
+        """Close all connections & client if initialized."""
         if not self._initialize:
             async with self._lock:
                 if not self._initialize:
                     self._initialize = True
                     await self.nodes_manager.close()
 
-    async def __aenter__(self) -> _RedisClusterT:
+    async def __aenter__(self) -> "RedisCluster":
         return await self.initialize()
 
     async def __aexit__(self, exc_type: None, exc_value: None, traceback: None) -> None:
@@ -304,10 +325,6 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
                 ...
 
     async def on_connect(self, connection: Connection) -> None:
-        """
-        Initialize the connection, authenticate and select a database and send
-         READONLY if it is set during object initialization.
-        """
         connection.set_parser(ClusterParser)
         await connection.on_connect()
 
@@ -326,26 +343,38 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         host: Optional[str] = None,
         port: Optional[int] = None,
         node_name: Optional[str] = None,
-    ) -> Optional[_ClusterNodeT]:
+    ) -> Optional["ClusterNode"]:
+        """Get node by (host, port) or node_name."""
         return self.nodes_manager.get_node(host, port, node_name)
 
-    def get_primaries(self) -> List[_ClusterNodeT]:
+    def get_primaries(self) -> List["ClusterNode"]:
+        """Get the primary nodes of the cluster."""
         return self.nodes_manager.get_nodes_by_server_type(PRIMARY)
 
-    def get_replicas(self) -> List[_ClusterNodeT]:
+    def get_replicas(self) -> List["ClusterNode"]:
+        """Get the replica nodes of the cluster."""
         return self.nodes_manager.get_nodes_by_server_type(REPLICA)
 
-    def get_random_node(self) -> _ClusterNodeT:
+    def get_random_node(self) -> "ClusterNode":
+        """Get a random node of the cluster."""
         return random.choice(list(self.nodes_manager.nodes_cache.values()))
 
-    def get_nodes(self) -> List[_ClusterNodeT]:
+    def get_nodes(self) -> List["ClusterNode"]:
+        """Get all nodes of the cluster."""
         return list(self.nodes_manager.nodes_cache.values())
 
-    def get_node_from_key(self, key: str, replica: bool = False) -> _ClusterNodeT:
+    def get_node_from_key(
+        self, key: str, replica: bool = False
+    ) -> Optional["ClusterNode"]:
         """
-        Get the node that holds the key's slot.
-        If replica set to True but the slot doesn't have any replicas, None is
-        returned.
+        Get the cluster node corresponding to the provided key.
+
+        :param key:
+        :param replica:
+            | Indicates if a replica should be returned
+              None will returned if no replica holds this key
+
+        :raises SlotNotCoveredError: if the key is not covered by any slot.
         """
         slot = self.keyslot(key)
         slot_cache = self.nodes_manager.slots_cache.get(slot)
@@ -361,18 +390,12 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
 
         return slot_cache[node_idx]
 
-    def get_default_node(self) -> _ClusterNodeT:
-        """
-        Get the cluster's default node
-        """
+    def get_default_node(self) -> "ClusterNode":
+        """Get the default node of the client."""
         return self.nodes_manager.default_node
 
-    def set_default_node(self, node: Optional[_ClusterNodeT]) -> bool:
-        """
-        Set the default node of the cluster.
-        :param node: 'ClusterNode'
-        :return True if the default node was set, else False
-        """
+    def set_default_node(self, node: "ClusterNode") -> bool:
+        """Set the default node of the client."""
         if node is None or self.get_node(node_name=node.name) is None:
             log.info(
                 "The requested node does not exist in the cluster, so "
@@ -384,10 +407,10 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         return True
 
     def set_response_callback(self, command: KeyT, callback: Callable) -> None:
-        """Set a custom Response Callback"""
+        """Set a custom response callback."""
         self.cluster_response_callbacks[command] = callback
 
-    async def _determine_nodes(self, *args, **kwargs) -> List[_ClusterNodeT]:
+    async def _determine_nodes(self, *args, **kwargs) -> List["ClusterNode"]:
         command = args[0]
         nodes_flag = kwargs.pop("nodes_flag", None)
         if nodes_flag is not None:
@@ -424,22 +447,16 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
             log.debug(f"Target for {args}: slot {slot}")
             return [node]
 
-    def keyslot(self, key: Union[str, int, float, bytes]) -> int:
+    def keyslot(self, key: EncodableT) -> int:
         """
-        Calculate keyslot for a given key.
-        See Keys distribution model in https://redis.io/topics/cluster-spec
+        Find the keyslot for a given key.
+
+        See: https://redis.io/docs/manual/scaling/#redis-cluster-data-sharding
         """
         k = self.encoder.encode(key)
         return key_slot(k)
 
     async def determine_slot(self, *args) -> int:
-        """
-        Figure out what slot to use based on args.
-
-        Raises a RedisClusterException if there's a missing key and we can't
-            determine what slots to map the command to; or, if the keys don't
-            all map to the same key slot.
-        """
         command = args[0]
         if self.command_flags.get(command) == SLOT_ID:
             # The command contains the slot ID
@@ -495,25 +512,23 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         return slots.pop()
 
     def get_encoder(self) -> Encoder:
-        """
-        Get the connections' encoder
-        """
         return self.encoder
 
     def get_connection_kwargs(self) -> Dict[str, Optional[Any]]:
         """
-        Get the connections' key-word arguments
+        Get the kwargs passed to the :class:`~redis.asyncio.client.Redis` object of
+        each node.
         """
         return self.nodes_manager.connection_kwargs
 
     def _is_nodes_flag(
-        self, target_nodes: Union[List[_ClusterNodeT], _ClusterNodeT, str]
+        self, target_nodes: Union[List["ClusterNode"], "ClusterNode", str]
     ) -> bool:
         return isinstance(target_nodes, str) and target_nodes in self.node_flags
 
     def _parse_target_nodes(
-        self, target_nodes: Union[List[_ClusterNodeT], _ClusterNodeT]
-    ) -> List[_ClusterNodeT]:
+        self, target_nodes: Union[List["ClusterNode"], "ClusterNode"]
+    ) -> List["ClusterNode"]:
         if isinstance(target_nodes, list):
             nodes = target_nodes
         elif isinstance(target_nodes, ClusterNode):
@@ -535,19 +550,21 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
 
     async def execute_command(self, *args: Union[KeyT, EncodableT], **kwargs) -> Any:
         """
-        Wrapper for ERRORS_ALLOW_RETRY error handling.
+        Execute a raw command on the appropriate cluster node or target_nodes.
 
-        It will try the number of times specified by the config option
-        "self.cluster_error_retry_attempts" which defaults to 3 unless manually
-        configured.
+        It will retry the command as specified by :attr:`cluster_error_retry_attempts` &
+        then raise an exception.
 
-        If it reaches the number of times, the command will raise the exception
+        :param args:
+            | Raw command args
+        :param kwargs:
 
-        Key argument :target_nodes: can be passed with the following types:
-            nodes_flag: PRIMARIES, REPLICAS, ALL_NODES, RANDOM
-            ClusterNode
-            list<ClusterNode>
-            dict<Any, ClusterNode>
+            - target_nodes: :attr:`NODE_FLAGS` or :class:`~.ClusterNode`
+              or List[:class:`~.ClusterNode`] or Dict[Any, :class:`~.ClusterNode`]
+            - Rest of the kwargs are passed to the Redis connection
+
+        :raises RedisClusterException: if target_nodes is not provided & the command
+            can't be mapped to a slot
         """
         target_nodes_specified = False
         target_nodes = None
@@ -603,11 +620,8 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         raise exception
 
     async def _execute_command(
-        self, target_node: _ClusterNodeT, *args: Union[KeyT, EncodableT], **kwargs
+        self, target_node: "ClusterNode", *args: Union[KeyT, EncodableT], **kwargs
     ) -> Any:
-        """
-        Send a command to a node in the cluster
-        """
         command = args[0]
         redis_connection = None
         connection = None
@@ -740,16 +754,6 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         raise ClusterError("TTL exhausted.")
 
     def _process_result(self, command: KeyT, res: Dict[str, Any], **kwargs) -> Any:
-        """
-        Process the result of the executed command.
-        The function would return a dict or a single value.
-
-        :type command: str
-        :type res: dict
-
-        `res` should be in the following format:
-            Dict<node_name, command_result>
-        """
         if command in self.result_callbacks:
             return self.result_callbacks[command](command, res, **kwargs)
         elif len(res) == 1:
@@ -761,15 +765,16 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
 
 
 class ClusterNode:
+    """
+    Create a ClusterNode.
+
+    Each ClusterNode manages a :class:`~redis.asyncio.client.Redis` object corresponding
+    to the (host, port).
+    """
+
     __slots__ = ("_lock", "host", "name", "port", "redis_connection", "server_type")
 
-    def __init__(
-        self,
-        host: str,
-        port: int,
-        server_type: Optional[str] = None,
-        redis_connection: None = None,
-    ) -> None:
+    def __init__(self, host: str, port: int, server_type: Optional[str] = None) -> None:
         if host == "localhost":
             host = socket.gethostbyname(host)
 
@@ -777,7 +782,7 @@ class ClusterNode:
         self.port = port
         self.name = get_node_name(host, port)
         self.server_type = server_type
-        self.redis_connection = redis_connection
+        self.redis_connection = None
         self._lock = asyncio.Lock()
 
     def __repr__(self) -> str:
@@ -789,7 +794,7 @@ class ClusterNode:
             f"redis_connection={self.redis_connection}]"
         )
 
-    def __eq__(self, obj: _ClusterNodeT) -> bool:
+    def __eq__(self, obj: "ClusterNode") -> bool:
         return isinstance(obj, ClusterNode) and obj.name == self.name
 
     _DEL_MESSAGE = "Unclosed ClusterNode object"
@@ -807,6 +812,7 @@ class ClusterNode:
                 ...
 
     async def initialize(self, from_url: bool = False, **kwargs) -> Redis:
+        """Create a redis object & make connections."""
         if not self.redis_connection:
             async with self._lock:
                 if not self.redis_connection:
@@ -822,6 +828,7 @@ class ClusterNode:
         return self.redis_connection
 
     async def close(self) -> None:
+        """Close all redis client connections & object."""
         if self.redis_connection:
             async with self._lock:
                 if self.redis_connection:
@@ -846,7 +853,7 @@ class NodesManager:
 
     def __init__(
         self,
-        startup_nodes: List[_ClusterNodeT],
+        startup_nodes: List["ClusterNode"],
         from_url: bool = False,
         require_full_coverage: bool = False,
         **kwargs,
@@ -867,12 +874,7 @@ class NodesManager:
         host: Optional[str] = None,
         port: Optional[int] = None,
         node_name: Optional[str] = None,
-    ) -> Optional[_ClusterNodeT]:
-        """
-        Get the requested node from the cluster's nodes.
-        nodes.
-        :return: ClusterNode if the node exists, else None
-        """
+    ) -> Optional["ClusterNode"]:
         if host and port:
             # the user passed host and port
             if host == "localhost":
@@ -889,7 +891,7 @@ class NodesManager:
             return None
 
     async def set_nodes(
-        self, old: Dict[str, _ClusterNodeT], new: Dict[str, _ClusterNodeT]
+        self, old: Dict[str, "ClusterNode"], new: Dict[str, "ClusterNode"]
     ) -> None:
         tasks = [node.close() for name, node in old.items() if name not in new]
         for name, node in new.items():
@@ -901,9 +903,6 @@ class NodesManager:
         await asyncio.gather(*tasks)
 
     async def _update_moved_slots(self) -> None:
-        """
-        Update the slot's node with the redirected one
-        """
         e = self._moved_exception
         redirected_node = self.get_node(host=e.host, port=e.port)
         if redirected_node is not None:
@@ -943,10 +942,7 @@ class NodesManager:
 
     async def get_node_from_slot(
         self, slot: int, read_from_replicas: bool = False, server_type: None = None
-    ) -> _ClusterNodeT:
-        """
-        Gets a node that servers this hash slot
-        """
+    ) -> "ClusterNode":
         if self._moved_exception:
             async with self._lock:
                 if self._moved_exception:
@@ -978,19 +974,14 @@ class NodesManager:
 
         return self.slots_cache[slot][node_idx]
 
-    def get_nodes_by_server_type(self, server_type: str) -> List[_ClusterNodeT]:
-        """
-        Get all nodes with the specified server type
-        :param server_type: 'primary' or 'replica'
-        :return: list of ClusterNode
-        """
+    def get_nodes_by_server_type(self, server_type: str) -> List["ClusterNode"]:
         return [
             node
             for node in self.nodes_cache.values()
             if node.server_type == server_type
         ]
 
-    def check_slots_coverage(self, slots_cache: Dict[int, List[_ClusterNodeT]]) -> bool:
+    def check_slots_coverage(self, slots_cache: Dict[int, List["ClusterNode"]]) -> bool:
         # Validate if all slots are covered or if we should try next
         # startup node
         for i in range(0, REDIS_CLUSTER_HASH_SLOTS):
@@ -999,11 +990,6 @@ class NodesManager:
         return True
 
     async def initialize(self) -> None:
-        """
-        Initializes the nodes cache, slots cache and redis connections.
-        :startup_nodes:
-            Responsible for discovering other nodes in the cluster
-        """
         log.debug("Initializing the nodes' topology of the cluster")
         self.reset()
         tmp_nodes_cache = {}
