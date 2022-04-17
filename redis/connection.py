@@ -45,8 +45,14 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
+from redis.typing import EncodableT, EncodedT, DecodedT
 from redis.retry import Retry
 from redis.utils import CRYPTOGRAPHY_AVAILABLE, HIREDIS_AVAILABLE, str_if_bytes
+
+if sys.version_info >= (3, 8):
+    from typing import TypedDict, Protocol, Literal
+else:
+    from typing_extensions import TypedDict, Protocol, Literal
 
 try:
     import ssl
@@ -104,15 +110,29 @@ class ConnectCallbackProtocol(Protocol):
         ...
 
 
+EncodingErrorsT = Literal[
+    "strict",
+    "ignore",
+    "replace",
+    "xmlcharrefreplace",
+    "backslashreplace",
+]
+
+
 class Encoder:
     "Encode strings to bytes-like and decode bytes-like to strings"
 
-    def __init__(self, encoding, encoding_errors, decode_responses):
+    def __init__(
+        self,
+        encoding: str,
+        encoding_errors: EncodingErrorsT,
+        decode_responses: bool
+    ) -> None:
         self.encoding = encoding
         self.encoding_errors = encoding_errors
         self.decode_responses = decode_responses
 
-    def encode(self, value):
+    def encode(self, value: EncodableT) -> EncodedT:
         "Return a bytestring or bytes-like representation of the value"
         if isinstance(value, (bytes, memoryview)):
             return value
@@ -135,7 +155,7 @@ class Encoder:
             value = value.encode(self.encoding, self.encoding_errors)
         return value
 
-    def decode(self, value, force=False):
+    def decode(self, value: EncodedT, force: bool = False) -> DecodedT:
         "Return a unicode string from the bytes-like representation"
         if self.decode_responses or force:
             if isinstance(value, memoryview):
@@ -185,7 +205,12 @@ class BaseParser:
 
 
 class SocketBuffer:
-    def __init__(self, socket, socket_read_size, socket_timeout):
+    def __init__(
+        self,
+        socket: socket.socket,
+        socket_read_size: int,
+        socket_timeout: float
+    ) -> None:
         self._sock = socket
         self.socket_read_size = socket_read_size
         self.socket_timeout = socket_timeout
@@ -305,7 +330,7 @@ class SocketBuffer:
 class PythonParser(BaseParser):
     "Plain Python parsing class"
 
-    def __init__(self, socket_read_size):
+    def __init__(self, socket_read_size: int) -> None:
         self.socket_read_size = socket_read_size
         self.encoder = None
         self._sock = None
@@ -317,7 +342,7 @@ class PythonParser(BaseParser):
         except Exception:
             pass
 
-    def on_connect(self, connection):
+    def on_connect(self, connection: Connection) -> None:
         "Called when the socket connects"
         self._sock = connection._sock
         self._buffer = SocketBuffer(
@@ -803,7 +828,7 @@ class Connection:
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
-    def disconnect(self, *args) -> None:
+    def disconnect(self, *args: Any) -> None:
         "Disconnects from the Redis server"
         self._parser.on_disconnect()
         if self._sock is None:
@@ -1129,23 +1154,23 @@ class SSLConnection(Connection):
 class UnixDomainSocketConnection(Connection):
     def __init__(
         self,
-        path="",
-        db=0,
-        username=None,
-        password=None,
-        socket_timeout=None,
-        encoding="utf-8",
-        encoding_errors="strict",
-        decode_responses=False,
-        retry_on_timeout=False,
-        retry_on_error=[],
-        parser_class=DefaultParser,
-        socket_read_size=65536,
-        health_check_interval=0,
-        client_name=None,
-        retry=None,
+        path: str = "",
+        db: int = 0,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        socket_timeout: Optional[float] = None,
+        encoding: str = "utf-8",
+        encoding_errors: EncodingErrorsT = "strict",
+        decode_responses: bool = False,
+        retry_on_timeout: bool = False,
+        retry_on_error: List[Type[Exception]] = [],
+        parser_class: Type[BaseParser] = DefaultParser,
+        socket_read_size: int = 65536,
+        health_check_interval: int = 0,
+        client_name: Optional[str] = None,
+        retry: Optional[Retry] = None,
         redis_connect_func=None,
-    ):
+    ) -> None:
         """
         Initialize a new UnixDomainSocketConnection.
         To specify a retry policy for specific errors, first set
@@ -1185,7 +1210,7 @@ class UnixDomainSocketConnection(Connection):
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
 
-    def repr_pieces(self):
+    def repr_pieces(self) -> List[Tuple[str, Union[str, int], ]]:
         pieces = [
             ("path", self.path),
             ("db", self.db),
@@ -1216,15 +1241,20 @@ class UnixDomainSocketConnection(Connection):
 FALSE_STRINGS = ("0", "F", "FALSE", "N", "NO")
 
 
-def to_bool(value):
+def to_bool(value: Optional[str]) -> Optional[bool]:
     if value is None or value == "":
         return None
-    if isinstance(value, str) and value.upper() in FALSE_STRINGS:
+    if value.upper() in FALSE_STRINGS:
         return False
     return bool(value)
 
 
-URL_QUERY_ARGUMENT_PARSERS = {
+class ArgumentParserProtocol(Protocol):
+    def __call__(self, value: Optional[str]) -> Optional[bool]:
+        ...
+
+
+URL_QUERY_ARGUMENT_PARSERS: Dict[str, Union[type, ArgumentParserProtocol]] = {
     "db": int,
     "socket_timeout": float,
     "socket_connect_timeout": float,
@@ -1237,11 +1267,21 @@ URL_QUERY_ARGUMENT_PARSERS = {
 }
 
 
-def parse_url(url):
-    url = urlparse(url)
-    kwargs = {}
+class ConnectionPoolDict(TypedDict, total=False):
+    username: str
+    password: str
+    path: str
+    connection_class: Type[Connection]
+    host: str
+    port: int
+    db: int
 
-    for name, value in parse_qs(url.query).items():
+
+def parse_url(url: str) -> ConnectionPoolDict:
+    parsed_url = urlparse(url)
+    kwargs: ConnectionPoolDict = {}
+
+    for name, value in parse_qs(parsed_url.query).items():
         if value and len(value) > 0:
             value = unquote(value[0])
             parser = URL_QUERY_ARGUMENT_PARSERS.get(name)
@@ -1253,32 +1293,32 @@ def parse_url(url):
             else:
                 kwargs[name] = value
 
-    if url.username:
-        kwargs["username"] = unquote(url.username)
-    if url.password:
-        kwargs["password"] = unquote(url.password)
+    if parsed_url.username:
+        kwargs["username"] = unquote(parsed_url.username)
+    if parsed_url.password:
+        kwargs["password"] = unquote(parsed_url.password)
 
     # We only support redis://, rediss:// and unix:// schemes.
-    if url.scheme == "unix":
-        if url.path:
-            kwargs["path"] = unquote(url.path)
+    if parsed_url.scheme == "unix":
+        if parsed_url.path:
+            kwargs["path"] = unquote(parsed_url.path)
         kwargs["connection_class"] = UnixDomainSocketConnection
 
-    elif url.scheme in ("redis", "rediss"):
-        if url.hostname:
-            kwargs["host"] = unquote(url.hostname)
-        if url.port:
-            kwargs["port"] = int(url.port)
+    elif parsed_url.scheme in ("redis", "rediss"):
+        if parsed_url.hostname:
+            kwargs["host"] = unquote(parsed_url.hostname)
+        if parsed_url.port:
+            kwargs["port"] = int(parsed_url.port)
 
         # If there's a path argument, use it as the db argument if a
         # querystring value wasn't specified
-        if url.path and "db" not in kwargs:
+        if parsed_url.path and "db" not in kwargs:
             try:
-                kwargs["db"] = int(unquote(url.path).replace("/", ""))
+                kwargs["db"] = int(unquote(parsed_url.path).replace("/", ""))
             except (AttributeError, ValueError):
                 pass
 
-        if url.scheme == "rediss":
+        if parsed_url.scheme == "rediss":
             kwargs["connection_class"] = SSLConnection
     else:
         raise ValueError(
@@ -1316,7 +1356,7 @@ class ConnectionPool:
     )
 
     @classmethod
-    def from_url(cls, url: str, **kwargs: Any) -> "ConnectionPool":
+    def from_url(cls, url: str, **kwargs) -> ConnectionPool:
         """
         Return a connection pool configured from the given URL.
 
@@ -1484,7 +1524,7 @@ class ConnectionPool:
             # closed. either way, reconnect and verify everything is good.
             try:
                 if connection.can_read():
-                    raise ConnectionError("Connection has data")
+                    raise ConnectionEr`ror("Connection has data")
             except (ConnectionError, OSError):
                 connection.disconnect()
                 connection.connect()
