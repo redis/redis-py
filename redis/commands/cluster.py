@@ -11,7 +11,6 @@ from typing import (
     Mapping,
     NoReturn,
     Optional,
-    TypeVar,
     Union,
 )
 
@@ -44,11 +43,7 @@ from .helpers import list_or_args
 from .redismodules import RedisModuleCommands
 
 if TYPE_CHECKING:
-    from redis.asyncio.cluster import ClusterNode
-
-_TargetNodesT = TypeVar(
-    "_TargetNodesT", "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
-)
+    from redis.asyncio.cluster import TargetNodesT
 
 
 class ClusterMultiKeyCommands(ClusterCommandsProtocol):
@@ -941,7 +936,7 @@ class AsyncRedisClusterCommands(
         r.cluster_info(target_nodes=RedisCluster.ALL_NODES)
     """
 
-    def cluster_myid(self, target_node: _TargetNodesT) -> Awaitable:
+    def cluster_myid(self, target_node: "TargetNodesT") -> Awaitable:
         """
         Returns the node’s id.
 
@@ -953,7 +948,7 @@ class AsyncRedisClusterCommands(
         return self.execute_command("CLUSTER MYID", target_nodes=target_node)
 
     def cluster_addslots(
-        self, target_node: _TargetNodesT, *slots: EncodableT
+        self, target_node: "TargetNodesT", *slots: EncodableT
     ) -> Awaitable:
         """
         Assign new hash slots to receiving node. Sends to specified node.
@@ -968,7 +963,7 @@ class AsyncRedisClusterCommands(
         )
 
     def cluster_addslotsrange(
-        self, target_node: _TargetNodesT, *slots: EncodableT
+        self, target_node: "TargetNodesT", *slots: EncodableT
     ) -> Awaitable:
         """
         Similar to the CLUSTER ADDSLOTS command.
@@ -1028,7 +1023,7 @@ class AsyncRedisClusterCommands(
         return self.execute_command("CLUSTER DELSLOTSRANGE", *slots)
 
     def cluster_failover(
-        self, target_node: _TargetNodesT, option: Optional[str] = None
+        self, target_node: "TargetNodesT", option: Optional[str] = None
     ) -> Awaitable:
         """
         Forces a slave to perform a manual failover of its master
@@ -1051,7 +1046,7 @@ class AsyncRedisClusterCommands(
         else:
             return self.execute_command("CLUSTER FAILOVER", target_nodes=target_node)
 
-    def cluster_info(self, target_nodes: Optional[_TargetNodesT] = None) -> Awaitable:
+    def cluster_info(self, target_nodes: Optional["TargetNodesT"] = None) -> Awaitable:
         """
         Provides info about Redis Cluster node state.
         The command will be sent to a random node in the cluster if no target
@@ -1071,7 +1066,7 @@ class AsyncRedisClusterCommands(
         return self.execute_command("CLUSTER KEYSLOT", key)
 
     def cluster_meet(
-        self, host: str, port: int, target_nodes: Optional[_TargetNodesT] = None
+        self, host: str, port: int, target_nodes: Optional["TargetNodesT"] = None
     ) -> Awaitable:
         """
         Force a node cluster to handshake with another node.
@@ -1092,7 +1087,9 @@ class AsyncRedisClusterCommands(
         """
         return self.execute_command("CLUSTER NODES")
 
-    def cluster_replicate(self, target_nodes: _TargetNodesT, node_id: str) -> Awaitable:
+    def cluster_replicate(
+        self, target_nodes: "TargetNodesT", node_id: str
+    ) -> Awaitable:
         """
         Reconfigure a node as a slave of the specified master node
 
@@ -1103,7 +1100,7 @@ class AsyncRedisClusterCommands(
         )
 
     def cluster_reset(
-        self, soft: bool = True, target_nodes: Optional[_TargetNodesT] = None
+        self, soft: bool = True, target_nodes: Optional["TargetNodesT"] = None
     ) -> Awaitable:
         """
         Reset a Redis Cluster node
@@ -1118,7 +1115,7 @@ class AsyncRedisClusterCommands(
         )
 
     def cluster_save_config(
-        self, target_nodes: Optional[_TargetNodesT] = None
+        self, target_nodes: Optional["TargetNodesT"] = None
     ) -> Awaitable:
         """
         Forces the node to save cluster state on disk
@@ -1136,7 +1133,7 @@ class AsyncRedisClusterCommands(
         return self.execute_command("CLUSTER GETKEYSINSLOT", slot, num_keys)
 
     def cluster_set_config_epoch(
-        self, epoch: int, target_nodes: Optional[_TargetNodesT] = None
+        self, epoch: int, target_nodes: Optional["TargetNodesT"] = None
     ) -> Awaitable:
         """
         Set the configuration epoch in a new node
@@ -1148,7 +1145,7 @@ class AsyncRedisClusterCommands(
         )
 
     def cluster_setslot(
-        self, target_node: _TargetNodesT, node_id: str, slot_id: int, state: str
+        self, target_node: "TargetNodesT", node_id: str, slot_id: int, state: str
     ) -> Awaitable:
         """
         Bind an hash slot to a specific node
@@ -1177,7 +1174,7 @@ class AsyncRedisClusterCommands(
         return self.execute_command("CLUSTER SETSLOT", slot_id, "STABLE")
 
     def cluster_replicas(
-        self, node_id: str, target_nodes: Optional[_TargetNodesT] = None
+        self, node_id: str, target_nodes: Optional["TargetNodesT"] = None
     ) -> Awaitable:
         """
         Provides a list of replica nodes replicating from the specified primary
@@ -1189,7 +1186,7 @@ class AsyncRedisClusterCommands(
             "CLUSTER REPLICAS", node_id, target_nodes=target_nodes
         )
 
-    def cluster_slots(self, target_nodes: Optional[_TargetNodesT] = None) -> Awaitable:
+    def cluster_slots(self, target_nodes: Optional["TargetNodesT"] = None) -> Awaitable:
         """
         Get array of Cluster slot to node mappings
 
@@ -1197,7 +1194,7 @@ class AsyncRedisClusterCommands(
         """
         return self.execute_command("CLUSTER SLOTS", target_nodes=target_nodes)
 
-    def cluster_links(self, target_node: _TargetNodesT) -> Awaitable:
+    def cluster_links(self, target_node: "TargetNodesT") -> Awaitable:
         """
         Each node in a Redis Cluster maintains a pair of long-lived TCP link with each
         peer in the cluster: One for sending outbound messages towards the peer and one
@@ -1209,7 +1206,7 @@ class AsyncRedisClusterCommands(
         """
         return self.execute_command("CLUSTER LINKS", target_nodes=target_node)
 
-    def readonly(self, target_nodes: Optional[_TargetNodesT] = None) -> Awaitable:
+    def readonly(self, target_nodes: Optional["TargetNodesT"] = None) -> Awaitable:
         """
         Enables read queries.
         The command will be sent to the default cluster node if target_nodes is
@@ -1223,7 +1220,7 @@ class AsyncRedisClusterCommands(
             self.read_from_replicas = True
         return self.execute_command("READONLY", target_nodes=target_nodes)
 
-    def readwrite(self, target_nodes: Optional[_TargetNodesT] = None) -> Awaitable:
+    def readwrite(self, target_nodes: Optional["TargetNodesT"] = None) -> Awaitable:
         """
         Disables read queries.
         The command will be sent to the default cluster node if target_nodes is

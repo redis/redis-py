@@ -3,7 +3,7 @@ import logging
 import random
 import socket
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 
 from redis.asyncio.client import Redis
 from redis.asyncio.connection import (
@@ -46,6 +46,10 @@ from redis.typing import EncodableT, KeyT
 from redis.utils import dict_merge, str_if_bytes
 
 log = logging.getLogger(__name__)
+
+TargetNodesT = TypeVar(
+    "TargetNodesT", "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
+)
 
 
 class ClusterParser(DefaultParser):
