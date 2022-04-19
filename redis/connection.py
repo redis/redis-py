@@ -545,7 +545,7 @@ class Connection:
         self.db = db
         self.username = username
         self.client_name = client_name
-        self.password = password
+        self.password = unquote(password)
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout
         self.socket_keepalive = socket_keepalive
