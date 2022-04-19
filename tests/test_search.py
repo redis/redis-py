@@ -1305,6 +1305,35 @@ def test_fields_as_name(client):
 
 
 @pytest.mark.redismod
+def test_casesensitive(client):
+    # create index
+    SCHEMA = (
+        TagField("t", case_sensitive=False),
+    )
+    client.ft().create_index(SCHEMA)
+    client.ft().client.hset("1", "t", "HELLO")
+    client.ft().client.hset("2", "t", "hello")
+
+    res = client.ft().search("@t:{HELLO}").docs
+
+    assert 2 == len(res)
+    assert "1" == res[0].id
+    assert "2" == res[1].id
+
+    # create casesensitive index
+    client.ft().dropindex()
+    SCHEMA = (
+        TagField("t", case_sensitive=True),
+    )
+    client.ft().create_index(SCHEMA)
+
+    res = client.ft().search("@t:{HELLO}").docs
+
+    assert 1 == len(res)
+    assert "1" == res[0].id
+
+
+@pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
 def test_search_return_fields(client):
     res = client.json().set(
