@@ -118,7 +118,7 @@ class TagField(Field):
         if case_sensitive:
             args.append(self.CASESENSITIVE)
 
-        Field.__init__(self, name, args=args, *kwargs)
+        Field.__init__(self, name, args=args, **kwargs)
 
 
 class VectorField(Field):
