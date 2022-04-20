@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import random
 import socket
 import warnings
@@ -34,6 +33,7 @@ from redis.exceptions import (
     ClusterDownError,
     ClusterError,
     ConnectionError,
+    DataError,
     MasterDownError,
     MovedError,
     RedisClusterException,
@@ -44,8 +44,6 @@ from redis.exceptions import (
 )
 from redis.typing import EncodableT, KeyT
 from redis.utils import dict_merge, str_if_bytes
-
-log = logging.getLogger(__name__)
 
 TargetNodesT = TypeVar(
     "TargetNodesT", "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
@@ -248,7 +246,6 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
                 " RedisCluster(startup_nodes=[ClusterNode('localhost', 6379),"
                 " ClusterNode('localhost', 6378)])"
             )
-        log.debug(f"startup_nodes : {startup_nodes}")
         # Update the connection arguments
         # Whenever a new connection is established, RedisCluster's on_connect
         # method should be run
@@ -398,17 +395,16 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         """Get the default node of the client."""
         return self.nodes_manager.default_node
 
-    def set_default_node(self, node: "ClusterNode") -> bool:
-        """Set the default node of the client."""
+    def set_default_node(self, node: "ClusterNode") -> None:
+        """
+        Set the default node of the client.
+
+        :raises DataError: if None is passed or node does not exist in cluster.
+        """
         if node is None or self.get_node(node_name=node.name) is None:
-            log.info(
-                "The requested node does not exist in the cluster, so "
-                "the default node was not changed."
-            )
-            return False
+            raise DataError("The requested node does not exist in the cluster.")
+
         self.nodes_manager.default_node = node
-        log.info(f"Changed the default cluster node to {node}")
-        return True
 
     def set_response_callback(self, command: KeyT, callback: Callable) -> None:
         """Set a custom response callback."""
@@ -423,8 +419,6 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         else:
             # get the nodes group for this command if it was predefined
             command_flag = self.command_flags.get(command)
-        if command_flag:
-            log.debug(f"Target node/s for {command}: {command_flag}")
         if command_flag == self.__class__.RANDOM:
             # return a random node
             return [self.get_random_node()]
@@ -448,7 +442,6 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
             node = await self.nodes_manager.get_node_from_slot(
                 slot, self.read_from_replicas and command in READ_COMMANDS
             )
-            log.debug(f"Target for {args}: slot {slot}")
             return [node]
 
     def keyslot(self, key: EncodableT) -> int:
@@ -649,10 +642,6 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
                     )
                     moved = False
 
-                log.debug(
-                    f"Executing command {command} on target node: "
-                    f"{target_node.server_type} {target_node.name}"
-                )
                 redis_connection = await target_node.initialize(
                     **self.get_connection_kwargs()
                 )
@@ -679,12 +668,9 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
                         response, **kwargs
                     )
                 return response
-
-            except (RedisClusterException, BusyLoadingError) as e:
-                log.exception(type(e))
+            except (RedisClusterException, BusyLoadingError):
                 raise
-            except (ConnectionError, TimeoutError) as e:
-                log.exception(type(e))
+            except (ConnectionError, TimeoutError):
                 # ConnectionError can also be raised if we couldn't get a
                 # connection from the pool before timing out, so check that
                 # this is an actual connection before attempting to disconnect.
@@ -712,7 +698,6 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
                 # the same client object is shared between multiple threads. To
                 # reduce the frequency you can set this variable in the
                 # RedisCluster constructor.
-                log.exception("MovedError")
                 self.reinitialize_counter += 1
                 if (
                     self.reinitialize_steps
@@ -725,32 +710,24 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
                     self.nodes_manager._moved_exception = e
                 moved = True
             except TryAgainError:
-                log.exception("TryAgainError")
-
                 if ttl < self.RedisClusterRequestTTL / 2:
                     await asyncio.sleep(0.05)
             except AskError as e:
-                log.exception("AskError")
-
                 redirect_addr = get_node_name(host=e.host, port=e.port)
                 asking = True
-            except ClusterDownError as e:
-                log.exception("ClusterDownError")
+            except ClusterDownError:
                 # ClusterDownError can occur during a failover and to get
                 # self-healed, we will try to reinitialize the cluster layout
                 # and retry executing the command
                 await asyncio.sleep(0.25)
                 await self.close()
-                raise e
-            except ResponseError as e:
-                message = e.__str__()
-                log.exception(f"ResponseError: {message}")
-                raise e
-            except BaseException as e:
-                log.exception("BaseException")
+                raise
+            except ResponseError:
+                raise
+            except BaseException:
                 if connection:
                     await connection.disconnect()
-                raise e
+                raise
             finally:
                 if connection is not None:
                     await redis_connection.connection_pool.release(connection)
@@ -878,7 +855,7 @@ class NodesManager:
         host: Optional[str] = None,
         port: Optional[int] = None,
         node_name: Optional[str] = None,
-    ) -> Optional["ClusterNode"]:
+    ) -> "ClusterNode":
         if host and port:
             # the user passed host and port
             if host == "localhost":
@@ -887,12 +864,11 @@ class NodesManager:
         elif node_name:
             return self.nodes_cache.get(node_name)
         else:
-            log.error(
+            raise DataError(
                 "get_node requires one of the following: "
                 "1. node name "
                 "2. host and port"
             )
-            return None
 
     async def set_nodes(
         self, old: Dict[str, "ClusterNode"], new: Dict[str, "ClusterNode"]
@@ -994,7 +970,6 @@ class NodesManager:
         return True
 
     async def initialize(self) -> None:
-        log.debug("Initializing the nodes' topology of the cluster")
         self.reset()
         tmp_nodes_cache = {}
         tmp_slots = {}
@@ -1016,17 +991,9 @@ class NodesManager:
                     await redis_connection.execute_command("CLUSTER SLOTS")
                 )
                 startup_nodes_reachable = True
-            except (ConnectionError, TimeoutError) as e:
-                msg = e.__str__
-                log.exception(
-                    "An exception occurred while trying to"
-                    " initialize the cluster using the seed node"
-                    f" {startup_node.name}:\n{msg}"
-                )
+            except (ConnectionError, TimeoutError):
                 continue
             except ResponseError as e:
-                log.exception('ReseponseError sending "cluster slots" to redis server')
-
                 # Isn't a cluster connection, so it won't parse these
                 # exceptions automatically
                 message = e.__str__()

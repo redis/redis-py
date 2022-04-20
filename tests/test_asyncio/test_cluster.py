@@ -612,7 +612,7 @@ class TestRedisClusterObj:
             if node != default_node:
                 new_def_node = node
                 break
-        assert r.set_default_node(new_def_node) is True
+        r.set_default_node(new_def_node)
         assert r.get_default_node() == new_def_node
 
     async def test_set_default_node_failure(self, r: RedisCluster) -> None:
@@ -621,8 +621,10 @@ class TestRedisClusterObj:
         """
         default_node = r.get_default_node()
         new_def_node = ClusterNode("1.1.1.1", 1111)
-        assert r.set_default_node(None) is False
-        assert r.set_default_node(new_def_node) is False
+        with pytest.raises(DataError):
+            r.set_default_node(None)
+        with pytest.raises(DataError):
+            r.set_default_node(new_def_node)
         assert r.get_default_node() == default_node
 
     async def test_get_node_from_key(self, r: RedisCluster) -> None:
