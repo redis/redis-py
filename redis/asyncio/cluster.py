@@ -1,6 +1,7 @@
 import asyncio
 import random
 import socket
+import threading
 import warnings
 from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 
@@ -443,7 +444,7 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         else:
             # get the node that holds the key's slot
             slot = await self.determine_slot(*args)
-            node = await self.nodes_manager.get_node_from_slot(
+            node = self.nodes_manager.get_node_from_slot(
                 slot, self.read_from_replicas and command in READ_COMMANDS
             )
             return [node]
@@ -658,7 +659,7 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
                     # MOVED occurred and the slots cache was updated,
                     # refresh the target node
                     slot = await self.determine_slot(*args)
-                    target_node = await self.nodes_manager.get_node_from_slot(
+                    target_node = self.nodes_manager.get_node_from_slot(
                         slot, self.read_from_replicas and command in READ_COMMANDS
                     )
                     moved = False
@@ -858,7 +859,7 @@ class NodesManager:
         self._moved_exception = None
         self.connection_kwargs = kwargs
         self.read_load_balancer = LoadBalancer()
-        self._lock = asyncio.Lock()
+        self._lock = threading.Lock()
 
     def get_node(
         self,
@@ -880,23 +881,27 @@ class NodesManager:
                 "2. host and port"
             )
 
-    async def set_nodes(
-        self, old: Dict[str, "ClusterNode"], new: Dict[str, "ClusterNode"]
+    def set_nodes(
+        self,
+        old: Dict[str, "ClusterNode"],
+        new: Dict[str, "ClusterNode"],
+        remove_old=False,
     ) -> None:
-        tasks = [
-            asyncio.ensure_future(node.close())
-            for name, node in old.items()
-            if name not in new
-        ]
+        tasks = []
+        if remove_old:
+            tasks = [
+                asyncio.ensure_future(node.close())
+                for name, node in old.items()
+                if name not in new
+            ]
         for name, node in new.items():
             if name in old:
                 if old[name] is node:
                     continue
                 tasks.append(asyncio.ensure_future(old[name].close()))
             old[name] = node
-        await asyncio.gather(*tasks)
 
-    async def _update_moved_slots(self) -> None:
+    def _update_moved_slots(self) -> None:
         e = self._moved_exception
         redirected_node = self.get_node(host=e.host, port=e.port)
         if redirected_node:
@@ -907,9 +912,7 @@ class NodesManager:
         else:
             # This is a new node, we will add it to the nodes cache
             redirected_node = ClusterNode(e.host, e.port, PRIMARY)
-            await self.set_nodes(
-                self.nodes_cache, {redirected_node.name: redirected_node}
-            )
+            self.set_nodes(self.nodes_cache, {redirected_node.name: redirected_node})
         if redirected_node in self.slots_cache[e.slot_id]:
             # The MOVED error resulted from a failover, and the new slot owner
             # had previously been a replica.
@@ -934,39 +937,28 @@ class NodesManager:
         # Reset moved_exception
         self._moved_exception = None
 
-    async def get_node_from_slot(
-        self, slot: int, read_from_replicas: bool = False, server_type: None = None
+    def get_node_from_slot(
+        self, slot: int, read_from_replicas: bool = False
     ) -> "ClusterNode":
         if self._moved_exception:
-            async with self._lock:
+            with self._lock:
                 if self._moved_exception:
-                    await self._update_moved_slots()
+                    self._update_moved_slots()
 
-        if not self.slots_cache.get(slot):
+        try:
+            if read_from_replicas:
+                # get the server index in a Round-Robin manner
+                primary_name = self.slots_cache[slot][0].name
+                node_idx = self.read_load_balancer.get_server_index(
+                    primary_name, len(self.slots_cache[slot])
+                )
+                return self.slots_cache[slot][node_idx]
+            return self.slots_cache[slot][0]
+        except (IndexError, TypeError):
             raise SlotNotCoveredError(
                 f'Slot "{slot}" not covered by the cluster. '
                 f'"require_full_coverage={self._require_full_coverage}"'
             )
-
-        if read_from_replicas:
-            # get the server index in a Round-Robin manner
-            primary_name = self.slots_cache[slot][0].name
-            node_idx = self.read_load_balancer.get_server_index(
-                primary_name, len(self.slots_cache[slot])
-            )
-        elif (
-            not server_type
-            or server_type == PRIMARY
-            or len(self.slots_cache[slot]) == 1
-        ):
-            # return a primary
-            node_idx = 0
-        else:
-            # return a replica
-            # randomly choose one of the replicas
-            node_idx = random.randint(1, len(self.slots_cache[slot]) - 1)
-
-        return self.slots_cache[slot][node_idx]
 
     def get_nodes_by_server_type(self, server_type: str) -> List["ClusterNode"]:
         return [
@@ -1113,9 +1105,9 @@ class NodesManager:
 
         # Set the tmp variables to the real variables
         self.slots_cache = tmp_slots
-        await self.set_nodes(self.nodes_cache, tmp_nodes_cache)
+        self.set_nodes(self.nodes_cache, tmp_nodes_cache, remove_old=True)
         # Populate the startup nodes with all discovered nodes
-        await self.set_nodes(self.startup_nodes, self.nodes_cache)
+        self.set_nodes(self.startup_nodes, self.nodes_cache, remove_old=True)
 
         # Create Redis connections to all nodes
         await asyncio.gather(
