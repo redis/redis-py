@@ -1,7 +1,9 @@
-from typing import List, Optional, Union
+from typing import TYPE_CHECKING, List, Optional, Union
 
-from redis.asyncio.client import Redis
 from redis.exceptions import RedisError, ResponseError
+
+if TYPE_CHECKING:
+    from redis.asyncio.cluster import ClusterNode
 
 
 class CommandsParser:
@@ -25,15 +27,8 @@ class CommandsParser:
     def __init__(self) -> None:
         self.commands = {}
 
-    async def initialize(self, r: Redis) -> None:
+    async def initialize(self, r: "ClusterNode") -> None:
         commands = await r.execute_command("COMMAND")
-        uppercase_commands = []
-        for cmd in commands:
-            if any(x.isupper() for x in cmd):
-                uppercase_commands.append(cmd)
-        for cmd in uppercase_commands:
-            commands[cmd.lower()] = commands.pop(cmd)
-
         for cmd, command in commands.items():
             if "movablekeys" in command["flags"]:
                 commands[cmd] = -1
@@ -41,24 +36,24 @@ class CommandsParser:
                 commands[cmd] = 0
             elif command["first_key_pos"] == 1 and command["last_key_pos"] == 1:
                 commands[cmd] = 1
-        self.commands = commands
+        self.commands = {cmd.upper(): command for cmd, command in commands.items()}
 
     # As soon as this PR is merged into Redis, we should reimplement
     # our logic to use COMMAND INFO changes to determine the key positions
     # https://github.com/redis/redis/pull/8324
     async def get_keys(
-        self, redis_conn: Redis, *args
+        self, redis_conn: "ClusterNode", *args
     ) -> Optional[Union[List[str], List[bytes]]]:
         if len(args) < 2:
             # The command has no keys in it
             return None
 
         try:
-            command = self.commands[args[0].lower()]
+            command = self.commands[args[0]]
         except KeyError:
             # try to split the command name and to take only the main command
             # e.g. 'memory' for 'memory usage'
-            cmd_name_split = args[0].lower().split()
+            cmd_name_split = args[0].split()
             cmd_name = cmd_name_split[0]
             if cmd_name in self.commands:
                 # save the splitted command to args
@@ -86,7 +81,9 @@ class CommandsParser:
             last_key_pos = len(args) + last_key_pos
         return args[command["first_key_pos"] : last_key_pos + 1 : command["step_count"]]
 
-    async def _get_moveable_keys(self, redis_conn: Redis, *args) -> Optional[List[str]]:
+    async def _get_moveable_keys(
+        self, redis_conn: "ClusterNode", *args
+    ) -> Optional[List[str]]:
         pieces = []
         cmd_name = args[0]
         # The command name should be splitted into separate arguments,

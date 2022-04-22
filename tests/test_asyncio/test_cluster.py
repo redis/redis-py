@@ -17,7 +17,7 @@ from typing import Callable, Dict, List, Optional, Type, Union
 
 from _pytest.fixtures import FixtureRequest, SubRequest
 
-from redis.asyncio import Connection, Redis, RedisCluster
+from redis.asyncio import Connection, RedisCluster
 from redis.asyncio.cluster import (
     PRIMARY,
     REDIS_CLUSTER_HASH_SLOTS,
@@ -88,7 +88,7 @@ async def get_mocked_redis_client(*args, **kwargs) -> RedisCluster:
     cluster_slots = kwargs.pop("cluster_slots", default_cluster_slots)
     coverage_res = kwargs.pop("coverage_result", "yes")
     cluster_enabled = kwargs.pop("cluster_enabled", True)
-    with mock.patch.object(Redis, "execute_command") as execute_command_mock:
+    with mock.patch.object(ClusterNode, "execute_command") as execute_command_mock:
 
         async def execute_command(*_args, **_kwargs):
             if _args[0] == "CLUSTER SLOTS":
@@ -111,7 +111,7 @@ async def get_mocked_redis_client(*args, **kwargs) -> RedisCluster:
 
             def cmd_init_mock(self, r):
                 self.commands = {
-                    "get": {
+                    "GET": {
                         "name": "get",
                         "arity": 2,
                         "flags": ["readonly", "fast"],
@@ -133,8 +133,11 @@ def mock_node_resp(
     ],
 ) -> ClusterNode:
     connection = mock.AsyncMock()
+    connection.is_connected = True
     connection.read_response.return_value = response
-    node.redis_connection.connection = connection
+    while node._free:
+        node._free.pop()
+    node._free.append(connection)
     return node
 
 
@@ -183,19 +186,21 @@ async def moved_redirection_helper(
         redirect_node = rc.get_primaries()[0]
     r_host = redirect_node.host
     r_port = redirect_node.port
-    with mock.patch.object(Redis, "parse_response") as parse_response:
+    with mock.patch.object(
+        ClusterNode, "execute_command", autospec=True
+    ) as execute_command:
 
-        def moved_redirect_effect(connection, *args, **options):
-            def ok_response(connection, *args, **options):
-                assert connection.host == r_host
-                assert connection.port == r_port
+        def moved_redirect_effect(self, *args, **options):
+            def ok_response(self, *args, **options):
+                assert self.host == r_host
+                assert self.port == r_port
 
                 return "MOCK_OK"
 
-            parse_response.side_effect = ok_response
+            execute_command.side_effect = ok_response
             raise MovedError(f"{slot} {r_host}:{r_port}")
 
-        parse_response.side_effect = moved_redirect_effect
+        execute_command.side_effect = moved_redirect_effect
         assert await rc.execute_command("SET", "foo", "bar") == "MOCK_OK"
         slot_primary = rc.nodes_manager.slots_cache[slot][0]
         assert slot_primary == redirect_node
@@ -282,10 +287,10 @@ class TestRedisClusterObj:
         mock_all_nodes_resp(r, "PONG")
         assert await r.ping(target_nodes=RedisCluster.PRIMARIES) is True
         for primary in primaries:
-            conn = primary.redis_connection.connection
+            conn = primary._free.pop()
             assert conn.read_response.called is True
         for replica in replicas:
-            conn = replica.redis_connection.connection
+            conn = replica._free.pop()
             assert conn.read_response.called is not True
 
     async def test_execute_command_node_flag_replicas(self, r: RedisCluster) -> None:
@@ -299,10 +304,10 @@ class TestRedisClusterObj:
         mock_all_nodes_resp(r, "PONG")
         assert await r.ping(target_nodes=RedisCluster.REPLICAS) is True
         for replica in replicas:
-            conn = replica.redis_connection.connection
+            conn = replica._free.pop()
             assert conn.read_response.called is True
         for primary in primaries:
-            conn = primary.redis_connection.connection
+            conn = primary._free.pop()
             assert conn.read_response.called is not True
 
         await r.close()
@@ -314,7 +319,7 @@ class TestRedisClusterObj:
         mock_all_nodes_resp(r, "PONG")
         assert await r.ping(target_nodes=RedisCluster.ALL_NODES) is True
         for node in r.get_nodes():
-            conn = node.redis_connection.connection
+            conn = node._free.pop()
             assert conn.read_response.called is True
 
     async def test_execute_command_node_flag_random(self, r: RedisCluster) -> None:
@@ -325,7 +330,7 @@ class TestRedisClusterObj:
         assert await r.ping(target_nodes=RedisCluster.RANDOM) is True
         called_count = 0
         for node in r.get_nodes():
-            conn = node.redis_connection.connection
+            conn = node._free.pop()
             if conn.read_response.called is True:
                 called_count += 1
         assert called_count == 1
@@ -338,7 +343,7 @@ class TestRedisClusterObj:
         def_node = r.get_default_node()
         mock_node_resp(def_node, "PONG")
         assert await r.ping() is True
-        conn = def_node.redis_connection.connection
+        conn = def_node._free.pop()
         assert conn.read_response.called
 
     async def test_ask_redirection(self, r: RedisCluster) -> None:
@@ -351,19 +356,21 @@ class TestRedisClusterObj:
         Important thing to verify is that it tries to talk to the second node.
         """
         redirect_node = r.get_nodes()[0]
-        with mock.patch.object(Redis, "parse_response") as parse_response:
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True
+        ) as execute_command:
 
-            def ask_redirect_effect(connection, *args, **options):
-                def ok_response(connection, *args, **options):
-                    assert connection.host == redirect_node.host
-                    assert connection.port == redirect_node.port
+            def ask_redirect_effect(self, *args, **options):
+                def ok_response(self, *args, **options):
+                    assert self.host == redirect_node.host
+                    assert self.port == redirect_node.port
 
                     return "MOCK_OK"
 
-                parse_response.side_effect = ok_response
+                execute_command.side_effect = ok_response
                 raise AskError(f"12182 {redirect_node.host}:{redirect_node.port}")
 
-            parse_response.side_effect = ask_redirect_effect
+            execute_command.side_effect = ask_redirect_effect
 
             assert await r.execute_command("SET", "foo", "bar") == "MOCK_OK"
 
@@ -392,27 +399,29 @@ class TestRedisClusterObj:
         """
         node_7006 = ClusterNode(host=default_host, port=7006, server_type=PRIMARY)
         node_7007 = ClusterNode(host=default_host, port=7007, server_type=PRIMARY)
-        with mock.patch.object(Redis, "parse_response") as parse_response:
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True
+        ) as execute_command:
             with mock.patch.object(
                 NodesManager, "initialize", autospec=True
             ) as initialize:
                 with mock.patch.multiple(
                     Connection,
-                    send_command=mock.DEFAULT,
+                    send_packed_command=mock.DEFAULT,
                     connect=mock.DEFAULT,
                     can_read=mock.DEFAULT,
                 ) as mocks:
                     # simulate 7006 as a failed node
-                    def parse_response_mock(connection, command_name, **options):
-                        if connection.port == 7006:
-                            parse_response.failed_calls += 1
+                    def execute_command_mock(self, *args, **options):
+                        if self.port == 7006:
+                            execute_command.failed_calls += 1
                             raise ClusterDownError(
                                 "CLUSTERDOWN The cluster is "
                                 "down. Use CLUSTER INFO for "
                                 "more information"
                             )
-                        elif connection.port == 7007:
-                            parse_response.successful_calls += 1
+                        elif self.port == 7007:
+                            execute_command.successful_calls += 1
 
                     def initialize_mock(self):
                         # start with all slots mapped to 7006
@@ -436,12 +445,12 @@ class TestRedisClusterObj:
                         # Change initialize side effect for the second call
                         initialize.side_effect = map_7007
 
-                    parse_response.side_effect = parse_response_mock
-                    parse_response.successful_calls = 0
-                    parse_response.failed_calls = 0
+                    execute_command.side_effect = execute_command_mock
+                    execute_command.successful_calls = 0
+                    execute_command.failed_calls = 0
                     initialize.side_effect = initialize_mock
                     mocks["can_read"].return_value = False
-                    mocks["send_command"].return_value = "MOCK_OK"
+                    mocks["send_packed_command"].return_value = "MOCK_OK"
                     mocks["connect"].return_value = None
                     with mock.patch.object(
                         CommandsParser, "initialize", autospec=True
@@ -449,7 +458,7 @@ class TestRedisClusterObj:
 
                         def cmd_init_mock(self, r):
                             self.commands = {
-                                "get": {
+                                "GET": {
                                     "name": "get",
                                     "arity": 2,
                                     "flags": ["readonly", "fast"],
@@ -472,8 +481,8 @@ class TestRedisClusterObj:
                         assert len(rc.get_nodes()) == 1
                         assert rc.get_node(node_name=node_7007.name) is not None
                         assert rc.get_node(node_name=node_7006.name) is None
-                        assert parse_response.failed_calls == 1
-                        assert parse_response.successful_calls == 1
+                        assert execute_command.failed_calls == 1
+                        assert execute_command.successful_calls == 1
 
     async def test_reading_from_replicas_in_round_robin(self) -> None:
         with mock.patch.multiple(
@@ -484,29 +493,32 @@ class TestRedisClusterObj:
             can_read=mock.DEFAULT,
             on_connect=mock.DEFAULT,
         ) as mocks:
-            with mock.patch.object(Redis, "parse_response") as parse_response:
+            with mock.patch.object(
+                ClusterNode, "execute_command", autospec=True
+            ) as execute_command:
 
-                def parse_response_mock_first(connection, *args, **options):
+                async def execute_command_mock_first(self, *args, **options):
+                    await self.connection_class(**self.connection_kwargs).connect()
                     # Primary
-                    assert connection.port == 7001
-                    parse_response.side_effect = parse_response_mock_second
+                    assert self.port == 7001
+                    execute_command.side_effect = execute_command_mock_second
                     return "MOCK_OK"
 
-                def parse_response_mock_second(connection, *args, **options):
+                def execute_command_mock_second(self, *args, **options):
                     # Replica
-                    assert connection.port == 7002
-                    parse_response.side_effect = parse_response_mock_third
+                    assert self.port == 7002
+                    execute_command.side_effect = execute_command_mock_third
                     return "MOCK_OK"
 
-                def parse_response_mock_third(connection, *args, **options):
+                def execute_command_mock_third(self, *args, **options):
                     # Primary
-                    assert connection.port == 7001
+                    assert self.port == 7001
                     return "MOCK_OK"
 
                 # We don't need to create a real cluster connection but we
                 # do want RedisCluster.on_connect function to get called,
                 # so we'll mock some of the Connection's functions to allow it
-                parse_response.side_effect = parse_response_mock_first
+                execute_command.side_effect = execute_command_mock_first
                 mocks["send_command"].return_value = True
                 mocks["read_response"].return_value = "OK"
                 mocks["_connect"].return_value = True
@@ -677,12 +689,6 @@ class TestClusterRedisCommands:
     Tests for RedisCluster unique commands
     """
 
-    async def test_case_insensitive_command_names(self, r: RedisCluster) -> None:
-        assert (
-            r.cluster_response_callbacks["cluster addslots"]
-            == r.cluster_response_callbacks["CLUSTER ADDSLOTS"]
-        )
-
     async def test_get_and_set(self, r: RedisCluster) -> None:
         # get and set can't be tested independently of each other
         assert await r.get("a") is None
@@ -814,8 +820,8 @@ class TestClusterRedisCommands:
         node0 = r.get_node(default_host, 7000)
         node1 = r.get_node(default_host, 7001)
         assert await r.cluster_delslots(0, 8192) == [True, True]
-        assert node0.redis_connection.connection.read_response.called
-        assert node1.redis_connection.connection.read_response.called
+        assert node0._free.pop().read_response.called
+        assert node1._free.pop().read_response.called
 
         await r.close()
 
@@ -954,7 +960,7 @@ class TestClusterRedisCommands:
 
     @skip_if_redis_enterprise()
     async def test_cluster_get_keys_in_slot(self, r: RedisCluster) -> None:
-        response = [b"{foo}1", b"{foo}2"]
+        response = ["{foo}1", "{foo}2"]
         node = r.nodes_manager.get_node_from_slot(12182)
         mock_node_resp(node, response)
         keys = await r.cluster_get_keys_in_slot(12182, 4)
@@ -984,7 +990,7 @@ class TestClusterRedisCommands:
         node = r.nodes_manager.get_node_from_slot(12182)
         mock_node_resp(node, "OK")
         assert await r.cluster_setslot_stable(12182) is True
-        assert node.redis_connection.connection.read_response.called
+        assert node._free.pop().read_response.called
 
     @skip_if_redis_enterprise()
     async def test_cluster_replicas(self, r: RedisCluster) -> None:
@@ -1026,7 +1032,7 @@ class TestClusterRedisCommands:
         for res in all_replicas_results.values():
             assert res is True
         for replica in r.get_replicas():
-            assert replica.redis_connection.connection.read_response.called
+            assert replica._free.pop().read_response.called
 
         await r.close()
 
@@ -1039,7 +1045,7 @@ class TestClusterRedisCommands:
         for res in all_replicas_results.values():
             assert res is True
         for replica in r.get_replicas():
-            assert replica.redis_connection.connection.read_response.called
+            assert replica._free.pop().read_response.called
 
         await r.close()
 
@@ -2095,9 +2101,11 @@ class TestNodesManager:
         raise an error. In this test both nodes will say that the first
         slots block should be bound to different servers.
         """
-        with mock.patch.object(ClusterNode, "initialize", autospec=True) as initialize:
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True
+        ) as execute_command:
 
-            async def mocked_initialize(self, **kwargs):
+            async def mocked_execute_command(self, *args, **kwargs):
                 """
                 Helper function to return custom slots cache data from
                 different redis nodes
@@ -2116,24 +2124,14 @@ class TestNodesManager:
                 else:
                     result = []
 
-                r_node = Redis(host=self.host, port=self.port)
+                if args[0] == "CLUSTER SLOTS":
+                    return result
+                elif args[0] == "INFO":
+                    return {"cluster_enabled": True}
+                elif args[1] == "cluster-require-full-coverage":
+                    return {"cluster-require-full-coverage": "yes"}
 
-                orig_execute_command = r_node.execute_command
-
-                async def execute_command(*args, **kwargs):
-                    if args[0] == "CLUSTER SLOTS":
-                        return result
-                    elif args[0] == "INFO":
-                        return {"cluster_enabled": True}
-                    elif args[1] == "cluster-require-full-coverage":
-                        return {"cluster-require-full-coverage": "yes"}
-                    else:
-                        return orig_execute_command(*args, **kwargs)
-
-                r_node.execute_command = execute_command
-                return r_node
-
-            initialize.side_effect = mocked_initialize
+            execute_command.side_effect = mocked_execute_command
 
             with pytest.raises(RedisClusterException) as ex:
                 node_1 = ClusterNode("127.0.0.1", 7000)
@@ -2172,30 +2170,25 @@ class TestNodesManager:
         If I can't connect to one of the nodes, everything should still work.
         But if I can't connect to any of the nodes, exception should be thrown.
         """
-        with mock.patch.object(ClusterNode, "initialize", autospec=True) as initialize:
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True
+        ) as execute_command:
 
-            async def mocked_initialize(self, **kwargs):
+            async def mocked_execute_command(self, *args, **kwargs):
                 if self.port == 7000:
                     raise ConnectionError("mock connection error for 7000")
 
-                r_node = Redis(host=self.host, port=self.port, decode_responses=True)
+                if args[0] == "CLUSTER SLOTS":
+                    return [
+                        [0, 8191, ["127.0.0.1", 7001, "node_1"]],
+                        [8192, 16383, ["127.0.0.1", 7002, "node_2"]],
+                    ]
+                elif args[0] == "INFO":
+                    return {"cluster_enabled": True}
+                elif args[1] == "cluster-require-full-coverage":
+                    return {"cluster-require-full-coverage": "yes"}
 
-                async def execute_command(*args, **kwargs):
-                    if args[0] == "CLUSTER SLOTS":
-                        return [
-                            [0, 8191, ["127.0.0.1", 7001, "node_1"]],
-                            [8192, 16383, ["127.0.0.1", 7002, "node_2"]],
-                        ]
-                    elif args[0] == "INFO":
-                        return {"cluster_enabled": True}
-                    elif args[1] == "cluster-require-full-coverage":
-                        return {"cluster-require-full-coverage": "yes"}
-
-                r_node.execute_command = execute_command
-
-                return r_node
-
-            initialize.side_effect = mocked_initialize
+            execute_command.side_effect = mocked_execute_command
 
             node_1 = ClusterNode("127.0.0.1", 7000)
             node_2 = ClusterNode("127.0.0.1", 7001)
@@ -2213,7 +2206,7 @@ class TestNodesManager:
 
                 def cmd_init_mock(self, r):
                     self.commands = {
-                        "get": {
+                        "GET": {
                             "name": "get",
                             "arity": 2,
                             "flags": ["readonly", "fast"],

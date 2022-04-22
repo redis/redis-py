@@ -354,28 +354,7 @@ class AbstractRedisCluster:
         ],
     )
 
-    CLUSTER_COMMANDS_RESPONSE_CALLBACKS = {
-        "CLUSTER ADDSLOTS": bool,
-        "CLUSTER ADDSLOTSRANGE": bool,
-        "CLUSTER COUNT-FAILURE-REPORTS": int,
-        "CLUSTER COUNTKEYSINSLOT": int,
-        "CLUSTER DELSLOTS": bool,
-        "CLUSTER DELSLOTSRANGE": bool,
-        "CLUSTER FAILOVER": bool,
-        "CLUSTER FORGET": bool,
-        "CLUSTER GETKEYSINSLOT": list,
-        "CLUSTER KEYSLOT": int,
-        "CLUSTER MEET": bool,
-        "CLUSTER REPLICATE": bool,
-        "CLUSTER RESET": bool,
-        "CLUSTER SAVECONFIG": bool,
-        "CLUSTER SET-CONFIG-EPOCH": bool,
-        "CLUSTER SETSLOT": bool,
-        "CLUSTER SLOTS": parse_cluster_slots,
-        "ASKING": bool,
-        "READONLY": bool,
-        "READWRITE": bool,
-    }
+    CLUSTER_COMMANDS_RESPONSE_CALLBACKS = {"CLUSTER SLOTS": parse_cluster_slots}
 
     RESULT_CALLBACKS = dict_merge(
         list_keys_to_dict(["PUBSUB NUMSUB"], parse_pubsub_numsub),
