@@ -228,10 +228,12 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
         # the results
         # We must make sure that the keys are returned in order
         all_values = await asyncio.gather(
-            *[
-                self.execute_command("MGET", *slot_keys, **options)
+            *(
+                asyncio.ensure_future(
+                    self.execute_command("MGET", *slot_keys, **options)
+                )
                 for slot_keys in slots_to_keys.values()
-            ]
+            )
         )
 
         all_results = {}
@@ -266,7 +268,10 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
         # Call MSET for every slot and concatenate
         # the results (one result per slot)
         return await asyncio.gather(
-            *[self.execute_command("MSET", *pairs) for pairs in slots_to_pairs.values()]
+            *(
+                asyncio.ensure_future(self.execute_command("MSET", *pairs))
+                for pairs in slots_to_pairs.values()
+            )
         )
 
     async def _split_command_across_slots(self, command: str, *keys: KeyT) -> int:
@@ -280,10 +285,10 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
         # Sum up the reply from each command
         return sum(
             await asyncio.gather(
-                *[
-                    self.execute_command(command, *slot_keys)
+                *(
+                    asyncio.ensure_future(self.execute_command(command, *slot_keys))
                     for slot_keys in slots_to_keys.values()
-                ]
+                )
             )
         )
 
@@ -635,7 +640,10 @@ class AsyncClusterManagementCommands(
         For more information see https://redis.io/commands/cluster-delslots
         """
         return await asyncio.gather(
-            *[self.execute_command("CLUSTER DELSLOTS", slot) for slot in slots]
+            *(
+                asyncio.ensure_future(self.execute_command("CLUSTER DELSLOTS", slot))
+                for slot in slots
+            )
         )
 
 

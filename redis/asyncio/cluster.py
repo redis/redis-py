@@ -596,15 +596,31 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
                             f"No targets were found to execute {args} command on"
                         )
 
-                keys = [node.name for node in target_nodes]
-                values = await asyncio.gather(
-                    *[
-                        self._execute_command(node, *args, **kwargs)
-                        for node in target_nodes
-                    ]
-                )
-                # Return the processed result
-                return self._process_result(args[0], dict(zip(keys, values)), **kwargs)
+                if len(target_nodes) == 1:
+                    # Return the processed result
+                    return self._process_result(
+                        args[0],
+                        {
+                            target_nodes[0].name: await self._execute_command(
+                                target_nodes[0], *args, **kwargs
+                            )
+                        },
+                        **kwargs,
+                    )
+                else:
+                    keys = [node.name for node in target_nodes]
+                    values = await asyncio.gather(
+                        *(
+                            asyncio.ensure_future(
+                                self._execute_command(node, *args, **kwargs)
+                            )
+                            for node in target_nodes
+                        )
+                    )
+                    # Return the processed result
+                    return self._process_result(
+                        args[0], dict(zip(keys, values)), **kwargs
+                    )
             except BaseException as e:
                 if type(e) in self.__class__.ERRORS_ALLOW_RETRY:
                     # The nodes and slots cache were reinitialized.
@@ -875,12 +891,16 @@ class NodesManager:
     async def set_nodes(
         self, old: Dict[str, "ClusterNode"], new: Dict[str, "ClusterNode"]
     ) -> None:
-        tasks = [node.close() for name, node in old.items() if name not in new]
+        tasks = [
+            asyncio.ensure_future(node.close())
+            for name, node in old.items()
+            if name not in new
+        ]
         for name, node in new.items():
             if name in old:
                 if old[name] is node:
                     continue
-                tasks.append(old[name].close())
+                tasks.append(asyncio.ensure_future(old[name].close()))
             old[name] = node
         await asyncio.gather(*tasks)
 
@@ -1107,10 +1127,10 @@ class NodesManager:
 
         # Create Redis connections to all nodes
         await asyncio.gather(
-            *[
-                node.initialize(**self.connection_kwargs)
+            *(
+                asyncio.ensure_future(node.initialize(**self.connection_kwargs))
                 for node in self.nodes_cache.values()
-            ]
+            )
         )
 
         # Set the default node
@@ -1120,7 +1140,12 @@ class NodesManager:
 
     async def close(self, attr: str = "nodes_cache") -> None:
         self.default_node = None
-        await asyncio.gather(*[node.close() for node in getattr(self, attr).values()])
+        await asyncio.gather(
+            *(
+                asyncio.ensure_future(node.close())
+                for node in getattr(self, attr).values()
+            )
+        )
 
     def reset(self) -> None:
         try:

@@ -24,10 +24,12 @@ def timer(func):
 async def set_str(client, gather, data):
     if gather:
         for _ in range(count // 100):
-            tasks = []
-            for i in range(100):
-                tasks.append(client.set(f"bench:str_{i}", data))
-            await asyncio.gather(*tasks)
+            await asyncio.gather(
+                *(
+                    asyncio.create_task(client.set(f"bench:str_{i}", data))
+                    for i in range(100)
+                )
+            )
     else:
         for i in range(count):
             await client.set(f"bench:str_{i}", data)
@@ -37,10 +39,12 @@ async def set_str(client, gather, data):
 async def set_int(client, gather, data):
     if gather:
         for _ in range(count // 100):
-            tasks = []
-            for i in range(100):
-                tasks.append(client.set(f"bench:int_{i}", data))
-            await asyncio.gather(*tasks)
+            await asyncio.gather(
+                *(
+                    asyncio.create_task(client.set(f"bench:int_{i}", data))
+                    for i in range(100)
+                )
+            )
     else:
         for i in range(count):
             await client.set(f"bench:int_{i}", data)
@@ -50,10 +54,9 @@ async def set_int(client, gather, data):
 async def get_str(client, gather):
     if gather:
         for _ in range(count // 100):
-            tasks = []
-            for i in range(100):
-                tasks.append(client.get(f"bench:str_{i}"))
-            await asyncio.gather(*tasks)
+            await asyncio.gather(
+                *(asyncio.create_task(client.get(f"bench:str_{i}")) for i in range(100))
+            )
     else:
         for i in range(count):
             await client.get(f"bench:str_{i}")
@@ -63,10 +66,9 @@ async def get_str(client, gather):
 async def get_int(client, gather):
     if gather:
         for _ in range(count // 100):
-            tasks = []
-            for i in range(100):
-                tasks.append(client.get(f"bench:int_{i}"))
-            await asyncio.gather(*tasks)
+            await asyncio.gather(
+                *(asyncio.create_task(client.get(f"bench:int_{i}")) for i in range(100))
+            )
     else:
         for i in range(count):
             await client.get(f"bench:int_{i}")
@@ -76,10 +78,12 @@ async def get_int(client, gather):
 async def hset(client, gather, data):
     if gather:
         for _ in range(count // 100):
-            tasks = []
-            for i in range(100):
-                tasks.append(client.hset("bench:hset", str(i), data))
-            await asyncio.gather(*tasks)
+            await asyncio.gather(
+                *(
+                    asyncio.create_task(client.hset("bench:hset", str(i), data))
+                    for i in range(100)
+                )
+            )
     else:
         for i in range(count):
             await client.hset("bench:hset", str(i), data)
@@ -89,10 +93,12 @@ async def hset(client, gather, data):
 async def hget(client, gather):
     if gather:
         for _ in range(count // 100):
-            tasks = []
-            for i in range(100):
-                tasks.append(client.hget("bench:hset", str(i)))
-            await asyncio.gather(*tasks)
+            await asyncio.gather(
+                *(
+                    asyncio.create_task(client.hget("bench:hset", str(i)))
+                    for i in range(100)
+                )
+            )
     else:
         for i in range(count):
             await client.hget("bench:hset", str(i))
@@ -102,10 +108,9 @@ async def hget(client, gather):
 async def incr(client, gather):
     if gather:
         for _ in range(count // 100):
-            tasks = []
-            for i in range(100):
-                tasks.append(client.incr("bench:incr"))
-            await asyncio.gather(*tasks)
+            await asyncio.gather(
+                *(asyncio.create_task(client.incr("bench:incr")) for i in range(100))
+            )
     else:
         for i in range(count):
             await client.incr("bench:incr")
@@ -115,10 +120,12 @@ async def incr(client, gather):
 async def lpush(client, gather, data):
     if gather:
         for _ in range(count // 100):
-            tasks = []
-            for i in range(100):
-                tasks.append(client.lpush("bench:lpush", data))
-            await asyncio.gather(*tasks)
+            await asyncio.gather(
+                *(
+                    asyncio.create_task(client.lpush("bench:lpush", data))
+                    for i in range(100)
+                )
+            )
     else:
         for i in range(count):
             await client.lpush("bench:lpush", data)
@@ -128,10 +135,12 @@ async def lpush(client, gather, data):
 async def lrange_300(client, gather):
     if gather:
         for _ in range(count // 100):
-            tasks = []
-            for i in range(100):
-                tasks.append(client.lrange("bench:lpush", i, i + 300))
-            await asyncio.gather(*tasks)
+            await asyncio.gather(
+                *(
+                    asyncio.create_task(client.lrange("bench:lpush", i, i + 300))
+                    for i in range(100)
+                )
+            )
     else:
         for i in range(count):
             await client.lrange("bench:lpush", i, i + 300)
@@ -141,10 +150,9 @@ async def lrange_300(client, gather):
 async def lpop(client, gather):
     if gather:
         for _ in range(count // 100):
-            tasks = []
-            for i in range(100):
-                tasks.append(client.lpop("bench:lpush"))
-            await asyncio.gather(*tasks)
+            await asyncio.gather(
+                *(asyncio.create_task(client.lpop("bench:lpush")) for i in range(100))
+            )
     else:
         for i in range(count):
             await client.lpop("bench:lpush")
@@ -152,10 +160,9 @@ async def lpop(client, gather):
 
 @timer
 async def warmup(client):
-    tasks = []
-    for i in range(1000):
-        tasks.append(client.exists(f"bench:warmup_{i}"))
-    await asyncio.gather(*tasks)
+    await asyncio.gather(
+        *(asyncio.create_task(client.exists(f"bench:warmup_{i}")) for i in range(100))
+    )
 
 
 @timer
@@ -165,19 +172,19 @@ async def run(client, gather):
 
     if gather is False:
         for ret in await asyncio.gather(
-            set_str(client, gather, data_str),
-            set_int(client, gather, data_int),
-            hset(client, gather, data_str),
-            incr(client, gather),
-            lpush(client, gather, data_int),
+            asyncio.create_task(set_str(client, gather, data_str)),
+            asyncio.create_task(set_int(client, gather, data_int)),
+            asyncio.create_task(hset(client, gather, data_str)),
+            asyncio.create_task(incr(client, gather)),
+            asyncio.create_task(lpush(client, gather, data_int)),
         ):
             print(ret)
         for ret in await asyncio.gather(
-            get_str(client, gather),
-            get_int(client, gather),
-            hget(client, gather),
-            lrange_300(client, gather),
-            lpop(client, gather),
+            asyncio.create_task(get_str(client, gather)),
+            asyncio.create_task(get_int(client, gather)),
+            asyncio.create_task(hget(client, gather)),
+            asyncio.create_task(lrange_300(client, gather)),
+            asyncio.create_task(lpop(client, gather)),
         ):
             print(ret)
     else:
