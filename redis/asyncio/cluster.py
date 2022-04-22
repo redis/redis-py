@@ -415,39 +415,13 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         """Set a custom response callback."""
         self.cluster_response_callbacks[command] = callback
 
-    async def _determine_nodes(self, *args, **kwargs) -> List["ClusterNode"]:
-        command = args[0]
-        nodes_flag = kwargs.pop("nodes_flag", None)
-        if nodes_flag is not None:
-            # nodes flag passed by the user
-            command_flag = nodes_flag
-        else:
-            # get the nodes group for this command if it was predefined
-            command_flag = self.command_flags.get(command)
-        if command_flag == self.__class__.RANDOM:
-            # return a random node
-            return [self.get_random_node()]
-        elif command_flag == self.__class__.PRIMARIES:
-            # return all primaries
-            return self.get_primaries()
-        elif command_flag == self.__class__.REPLICAS:
-            # return all replicas
-            return self.get_replicas()
-        elif command_flag == self.__class__.ALL_NODES:
-            # return all nodes
-            return self.get_nodes()
-        elif command_flag == self.__class__.DEFAULT_NODE:
-            # return the cluster's default node
-            return [self.nodes_manager.default_node]
-        elif command in self.__class__.SEARCH_COMMANDS[0]:
-            return [self.nodes_manager.default_node]
-        else:
-            # get the node that holds the key's slot
-            slot = await self.determine_slot(*args)
-            node = self.nodes_manager.get_node_from_slot(
-                slot, self.read_from_replicas and command in READ_COMMANDS
-            )
-            return [node]
+    def get_encoder(self) -> Encoder:
+        """Get the encoder object of the client."""
+        return self.encoder
+
+    def get_connection_kwargs(self) -> Dict[str, Optional[Any]]:
+        """Get the connection kwargs passed to :class:`~redis.asyncio.client.Redis`."""
+        return self.connection_kwargs
 
     def keyslot(self, key: EncodableT) -> int:
         """
@@ -458,7 +432,39 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         k = self.encoder.encode(key)
         return key_slot(k)
 
-    async def determine_slot(self, *args) -> int:
+    async def _determine_nodes(
+        self, *args, node_flag: Optional[str] = None
+    ) -> List["ClusterNode"]:
+        command = args[0]
+        if not node_flag:
+            # get the nodes group for this command if it was predefined
+            node_flag = self.command_flags.get(command)
+
+        if node_flag in self.node_flags:
+            if node_flag == self.__class__.DEFAULT_NODE:
+                # return the cluster's default node
+                return [self.nodes_manager.default_node]
+            if node_flag == self.__class__.PRIMARIES:
+                # return all primaries
+                return self.nodes_manager.get_nodes_by_server_type(PRIMARY)
+            if node_flag == self.__class__.REPLICAS:
+                # return all replicas
+                return self.nodes_manager.get_nodes_by_server_type(REPLICA)
+            if node_flag == self.__class__.ALL_NODES:
+                # return all nodes
+                return list(self.nodes_manager.nodes_cache.values())
+            if node_flag == self.__class__.RANDOM:
+                # return a random node
+                return [random.choice(list(self.nodes_manager.nodes_cache.values()))]
+
+        # get the node that holds the key's slot
+        slot = await self._determine_slot(*args)
+        node = self.nodes_manager.get_node_from_slot(
+            slot, self.read_from_replicas and command in READ_COMMANDS
+        )
+        return [node]
+
+    async def _determine_slot(self, *args) -> int:
         command = args[0]
         if self.command_flags.get(command) == SLOT_ID:
             # The command contains the slot ID
@@ -514,17 +520,7 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
 
         return slots.pop()
 
-    def get_encoder(self) -> Encoder:
-        return self.encoder
-
-    def get_connection_kwargs(self) -> Dict[str, Optional[Any]]:
-        """
-        Get the kwargs passed to the :class:`~redis.asyncio.client.Redis` object of
-        each node.
-        """
-        return self.connection_kwargs
-
-    def _is_nodes_flag(
+    def _is_node_flag(
         self, target_nodes: Union[List["ClusterNode"], "ClusterNode", str]
     ) -> bool:
         return isinstance(target_nodes, str) and target_nodes in self.node_flags
@@ -570,24 +566,15 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
             can't be mapped to a slot
         """
         command = args[0]
-        target_nodes_specified = False
-        target_nodes = None
+        target_nodes_specified = target_nodes = exception = None
+        retry_attempts = self.cluster_error_retry_attempts
+
         passed_targets = kwargs.pop("target_nodes", None)
-        if passed_targets and not self._is_nodes_flag(passed_targets):
+        if passed_targets and not self._is_node_flag(passed_targets):
             target_nodes = self._parse_target_nodes(passed_targets)
             target_nodes_specified = True
-        # If an error that allows retrying was thrown, the nodes and slots
-        # cache were reinitialized. We will retry executing the command with
-        # the updated cluster setup only when the target nodes can be
-        # determined again with the new cache tables. Therefore, when target
-        # nodes were passed to this function, we cannot retry the command
-        # execution since the nodes may not be valid anymore after the tables
-        # were reinitialized. So in case of passed target nodes,
-        # retry_attempts will be set to 1.
-        retry_attempts = (
-            1 if target_nodes_specified else self.cluster_error_retry_attempts
-        )
-        exception = None
+            retry_attempts = 1
+
         for _ in range(0, retry_attempts):
             if self._initialize:
                 await self.initialize()
@@ -595,7 +582,7 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
                 if not target_nodes_specified:
                     # Determine the nodes to execute the command on
                     target_nodes = await self._determine_nodes(
-                        *args, **kwargs, nodes_flag=passed_targets
+                        *args, node_flag=passed_targets
                     )
                     if not target_nodes:
                         raise RedisClusterException(
@@ -642,12 +629,8 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         self, target_node: "ClusterNode", *args: Union[KeyT, EncodableT], **kwargs
     ) -> Any:
         command = args[0]
-        redis_connection = None
-        connection = None
-        redirect_addr = None
-        asking = False
-        moved = False
-        ttl = int(self.RedisClusterRequestTTL)
+        redis_connection = connection = redirect_addr = asking = moved = None
+        ttl = self.RedisClusterRequestTTL
         connection_error_retry_counter = 0
 
         while ttl > 0:
@@ -658,7 +641,7 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
                 elif moved:
                     # MOVED occurred and the slots cache was updated,
                     # refresh the target node
-                    slot = await self.determine_slot(*args)
+                    slot = await self._determine_slot(*args)
                     target_node = self.nodes_manager.get_node_from_slot(
                         slot, self.read_from_replicas and command in READ_COMMANDS
                     )
