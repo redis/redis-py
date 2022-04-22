@@ -286,7 +286,9 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
                     self._initialize = False
                     try:
                         await self.nodes_manager.initialize()
-                        await self.commands_parser.initialize(self)
+                        await self.commands_parser.initialize(
+                            self.nodes_manager.default_node.redis_connection
+                        )
                     except BaseException:
                         self._initialize = True
                         await self.nodes_manager.close()
