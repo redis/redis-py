@@ -184,6 +184,7 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         "cluster_response_callbacks",
         "command_flags",
         "commands_parser",
+        "connection_kwargs",
         "encoder",
         "node_flags",
         "nodes_manager",
@@ -205,7 +206,7 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         url: Optional[str] = None,
         **kwargs,
     ) -> None:
-        if startup_nodes is None:
+        if not startup_nodes:
             startup_nodes = []
 
         if "db" in kwargs:
@@ -216,7 +217,7 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
 
         # Get the startup node/s
         from_url = False
-        if url is not None:
+        if url:
             from_url = True
             url_options = parse_url(url)
             if "path" in url_options:
@@ -235,7 +236,7 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
             startup_nodes.append(ClusterNode(host, port))
         elif host is not None and port is not None:
             startup_nodes.append(ClusterNode(host, port))
-        elif len(startup_nodes) == 0:
+        elif not startup_nodes:
             # No startup node was provided
             raise RedisClusterException(
                 "RedisCluster requires at least one node to discover the "
@@ -246,11 +247,12 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
                 " RedisCluster(startup_nodes=[ClusterNode('localhost', 6379),"
                 " ClusterNode('localhost', 6378)])"
             )
+
         # Update the connection arguments
         # Whenever a new connection is established, RedisCluster's on_connect
         # method should be run
-        kwargs.update({"redis_connect_func": self.on_connect})
-        kwargs = cleanup_kwargs(**kwargs)
+        kwargs["redis_connect_func"] = self.on_connect
+        self.connection_kwargs = kwargs = cleanup_kwargs(**kwargs)
 
         self.encoder = Encoder(
             kwargs.get("encoding", "utf-8"),
@@ -267,7 +269,7 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
             startup_nodes=startup_nodes,
             from_url=from_url,
             require_full_coverage=require_full_coverage,
-            **kwargs,
+            **self.connection_kwargs,
         )
 
         self.cluster_response_callbacks = CaseInsensitiveDict(
@@ -381,7 +383,7 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         """
         slot = self.keyslot(key)
         slot_cache = self.nodes_manager.slots_cache.get(slot)
-        if slot_cache is None or len(slot_cache) == 0:
+        if not slot_cache:
             raise SlotNotCoveredError(f'Slot "{slot}" is not covered by the cluster.')
         if replica and len(self.nodes_manager.slots_cache[slot]) < 2:
             return None
@@ -403,7 +405,7 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
 
         :raises DataError: if None is passed or node does not exist in cluster.
         """
-        if node is None or self.get_node(node_name=node.name) is None:
+        if not node or not self.get_node(node_name=node.name):
             raise DataError("The requested node does not exist in the cluster.")
 
         self.nodes_manager.default_node = node
@@ -477,15 +479,16 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
             eval_keys = args[3 : 3 + num_actual_keys]
             # if there are 0 keys, that means the script can be run on any node
             # so we can just return a random slot
-            if len(eval_keys) == 0:
+            if not eval_keys:
                 return random.randrange(0, REDIS_CLUSTER_HASH_SLOTS)
             keys = eval_keys
         else:
-            redis_connection = await self.get_default_node().initialize(
-                **self.get_connection_kwargs()
+            node = self.nodes_manager.default_node
+            redis_connection = node.redis_connection or await node.initialize(
+                **self.connection_kwargs
             )
             keys = await self.commands_parser.get_keys(redis_connection, *args)
-            if keys is None or len(keys) == 0:
+            if not keys:
                 # FCALL can call a function with 0 keys, that means the function
                 #  can be run on any node so we can just return a random slot
                 if command in ("FCALL", "FCALL_RO"):
@@ -518,7 +521,7 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         Get the kwargs passed to the :class:`~redis.asyncio.client.Redis` object of
         each node.
         """
-        return self.nodes_manager.connection_kwargs
+        return self.connection_kwargs
 
     def _is_nodes_flag(
         self, target_nodes: Union[List["ClusterNode"], "ClusterNode", str]
@@ -565,10 +568,11 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         :raises RedisClusterException: if target_nodes is not provided & the command
             can't be mapped to a slot
         """
+        command = args[0]
         target_nodes_specified = False
         target_nodes = None
         passed_targets = kwargs.pop("target_nodes", None)
-        if passed_targets is not None and not self._is_nodes_flag(passed_targets):
+        if passed_targets and not self._is_nodes_flag(passed_targets):
             target_nodes = self._parse_target_nodes(passed_targets)
             target_nodes_specified = True
         # If an error that allows retrying was thrown, the nodes and slots
@@ -584,7 +588,8 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
         )
         exception = None
         for _ in range(0, retry_attempts):
-            await self.initialize()
+            if self._initialize:
+                await self.initialize()
             try:
                 if not target_nodes_specified:
                     # Determine the nodes to execute the command on
@@ -598,15 +603,12 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
 
                 if len(target_nodes) == 1:
                     # Return the processed result
-                    return self._process_result(
-                        args[0],
-                        {
-                            target_nodes[0].name: await self._execute_command(
-                                target_nodes[0], *args, **kwargs
-                            )
-                        },
-                        **kwargs,
-                    )
+                    ret = await self._execute_command(target_nodes[0], *args, **kwargs)
+                    if command in self.result_callbacks:
+                        return self.result_callbacks[command](
+                            command, {target_nodes[0].name: ret}, **kwargs
+                        )
+                    return ret
                 else:
                     keys = [node.name for node in target_nodes]
                     values = await asyncio.gather(
@@ -617,10 +619,11 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
                             for node in target_nodes
                         )
                     )
-                    # Return the processed result
-                    return self._process_result(
-                        args[0], dict(zip(keys, values)), **kwargs
-                    )
+                    if command in self.result_callbacks:
+                        return self.result_callbacks[command](
+                            command, dict(zip(keys, values)), **kwargs
+                        )
+                    return dict(zip(keys, values))
             except BaseException as e:
                 if type(e) in self.__class__.ERRORS_ALLOW_RETRY:
                     # The nodes and slots cache were reinitialized.
@@ -660,8 +663,9 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
                     )
                     moved = False
 
-                redis_connection = await target_node.initialize(
-                    **self.get_connection_kwargs()
+                redis_connection = (
+                    target_node.redis_connection
+                    or await target_node.initialize(**self.connection_kwargs)
                 )
                 connection = (
                     redis_connection.connection
@@ -686,7 +690,7 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
                         response, **kwargs
                     )
                 return response
-            except (RedisClusterException, BusyLoadingError):
+            except BusyLoadingError:
                 raise
             except (ConnectionError, TimeoutError):
                 # ConnectionError can also be raised if we couldn't get a
@@ -740,8 +744,6 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
                 await asyncio.sleep(0.25)
                 await self.close()
                 raise
-            except ResponseError:
-                raise
             except BaseException:
                 if connection:
                     await connection.disconnect()
@@ -751,16 +753,6 @@ class RedisCluster(AbstractRedisCluster, AsyncRedisClusterCommands):
                     await redis_connection.connection_pool.release(connection)
 
         raise ClusterError("TTL exhausted.")
-
-    def _process_result(self, command: KeyT, res: Dict[str, Any], **kwargs) -> Any:
-        if command in self.result_callbacks:
-            return self.result_callbacks[command](command, res, **kwargs)
-        elif len(res) == 1:
-            # When we execute the command on a single node, we can
-            # remove the dictionary and return a single response
-            return list(res.values())[0]
-        else:
-            return res
 
 
 class ClusterNode:
@@ -817,8 +809,11 @@ class ClusterNode:
                 if not self.redis_connection:
                     if from_url:
                         # Create a redis node with a costumed connection pool
-                        kwargs.update(host=self.host, port=self.port)
-                        conn = Redis(connection_pool=ConnectionPool(**kwargs))
+                        conn = Redis(
+                            connection_pool=ConnectionPool(
+                                host=self.host, port=self.port, **kwargs
+                            )
+                        )
                     else:
                         conn = Redis(host=self.host, port=self.port, **kwargs)
 
@@ -843,7 +838,6 @@ class NodesManager:
         "_require_full_coverage",
         "connection_kwargs",
         "default_node",
-        "from_url",
         "nodes_cache",
         "read_load_balancer",
         "slots_cache",
@@ -853,7 +847,6 @@ class NodesManager:
     def __init__(
         self,
         startup_nodes: List["ClusterNode"],
-        from_url: bool = False,
         require_full_coverage: bool = False,
         **kwargs,
     ) -> None:
@@ -861,7 +854,6 @@ class NodesManager:
         self.slots_cache = {}
         self.startup_nodes = {node.name: node for node in startup_nodes}
         self.default_node = None
-        self.from_url = from_url
         self._require_full_coverage = require_full_coverage
         self._moved_exception = None
         self.connection_kwargs = kwargs
@@ -907,9 +899,9 @@ class NodesManager:
     async def _update_moved_slots(self) -> None:
         e = self._moved_exception
         redirected_node = self.get_node(host=e.host, port=e.port)
-        if redirected_node is not None:
+        if redirected_node:
             # The node already exists
-            if redirected_node.server_type is not PRIMARY:
+            if redirected_node.server_type != PRIMARY:
                 # Update the node's server type
                 redirected_node.server_type = PRIMARY
         else:
@@ -950,20 +942,20 @@ class NodesManager:
                 if self._moved_exception:
                     await self._update_moved_slots()
 
-        if self.slots_cache.get(slot) is None or len(self.slots_cache[slot]) == 0:
+        if not self.slots_cache.get(slot):
             raise SlotNotCoveredError(
                 f'Slot "{slot}" not covered by the cluster. '
                 f'"require_full_coverage={self._require_full_coverage}"'
             )
 
-        if read_from_replicas is True:
+        if read_from_replicas:
             # get the server index in a Round-Robin manner
             primary_name = self.slots_cache[slot][0].name
             node_idx = self.read_load_balancer.get_server_index(
                 primary_name, len(self.slots_cache[slot])
             )
         elif (
-            server_type is None
+            not server_type
             or server_type == PRIMARY
             or len(self.slots_cache[slot]) == 1
         ):
@@ -992,7 +984,7 @@ class NodesManager:
         return True
 
     async def initialize(self) -> None:
-        self.reset()
+        self.read_load_balancer.reset()
         tmp_nodes_cache = {}
         tmp_slots = {}
         disagreements = []
@@ -1042,7 +1034,7 @@ class NodesManager:
             # Fix it to the host in startup_nodes
             if (
                 len(cluster_slots) == 1
-                and len(cluster_slots[0][2][0]) == 0
+                and not cluster_slots[0][2][0]
                 and len(self.startup_nodes) == 1
             ):
                 cluster_slots[0][2][0] = startup_node.host
@@ -1057,7 +1049,7 @@ class NodesManager:
                 port = int(primary_node[1])
 
                 target_node = tmp_nodes_cache.get(get_node_name(host, port))
-                if target_node is None:
+                if not target_node:
                     target_node = ClusterNode(host, port, PRIMARY)
                 # add this node to the nodes cache
                 tmp_nodes_cache[target_node.name] = target_node
@@ -1075,7 +1067,7 @@ class NodesManager:
                             target_replica_node = tmp_nodes_cache.get(
                                 get_node_name(host, port)
                             )
-                            if target_replica_node is None:
+                            if not target_replica_node:
                                 target_replica_node = ClusterNode(host, port, REPLICA)
                             tmp_slots[i].append(target_replica_node)
                             # add this node to the nodes cache
@@ -1146,10 +1138,3 @@ class NodesManager:
                 for node in getattr(self, attr).values()
             )
         )
-
-    def reset(self) -> None:
-        try:
-            self.read_load_balancer.reset()
-        except TypeError:
-            # The read_load_balancer is None, do nothing
-            pass
