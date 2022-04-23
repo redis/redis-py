@@ -664,7 +664,7 @@ class TestHealthCheck:
 
     def assert_interval_advanced(self, connection):
         diff = connection.next_health_check - asyncio.get_event_loop().time()
-        assert self.interval > diff > (self.interval - 1)
+        assert self.interval >= diff > (self.interval - 1)
 
     async def test_health_check_runs(self, r):
         if r.connection:
