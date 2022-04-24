@@ -255,6 +255,14 @@ class Redis(
         """Set a custom Response Callback"""
         self.response_callbacks[command] = callback
 
+    def get_encoder(self):
+        """Get the connection pool's encoder"""
+        return self.connection_pool.get_encoder()
+
+    def get_connection_kwargs(self):
+        """Get the connection's key-word arguments"""
+        return self.connection_pool.connection_kwargs
+
     def load_external_module(
         self,
         funcname,
