@@ -1111,7 +1111,6 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         Note this value can be overridden by passing a ``blocking``
         argument to ``acquire``.
 
-
         ``blocking_timeout`` indicates the maximum amount of time in seconds to
         spend trying to acquire the lock. A value of ``None`` indicates
         continue trying forever. ``blocking_timeout`` can be specified as a
