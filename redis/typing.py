@@ -38,6 +38,7 @@ AnyKeyT = TypeVar("AnyKeyT", bytes, str, memoryview)
 AnyFieldT = TypeVar("AnyFieldT", bytes, str, memoryview)
 AnyChannelT = TypeVar("AnyChannelT", bytes, str, memoryview)
 
+
 class CommandsProtocol(Protocol):
     connection_pool: Union["AsyncConnectionPool", "ConnectionPool"]
 

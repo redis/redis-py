@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import threading
 import time as mod_time
 import uuid
@@ -77,7 +75,7 @@ class Lock:
 
     def __init__(
         self,
-        redis: "Redis",
+        redis,
         name: str,
         *,
         timeout: Optional[Number] = None,
@@ -166,7 +164,7 @@ class Lock:
         self,
         exc_type: Optional[Type[BaseException]],
         exc_value: Optional[BaseException],
-        traceback: Optional[TracebackType]
+        traceback: Optional[TracebackType],
     ) -> None:
         self.release()
 
@@ -176,7 +174,7 @@ class Lock:
         sleep: Optional[Number] = None,
         blocking: Optional[bool] = None,
         blocking_timeout: Optional[Number] = None,
-        token: Optional[str] = None
+        token: Optional[str] = None,
     ):
         """
         Use Redis to hold a shared, distributed lock named ``name``.

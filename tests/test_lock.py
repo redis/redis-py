@@ -117,7 +117,7 @@ class TestLock:
         assert r.get("foo") is None
 
     def test_context_manager_blocking_timeout(self, r):
-        with self.get_lock(r, "foo", blocking=False) as lock1:
+        with self.get_lock(r, "foo", blocking=False):
             bt = 0.4
             sleep = 0.05
             lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
