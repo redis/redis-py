@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from redis.connection import ConnectionPool
 
 
+Number = Union[int, float]
 EncodedT = Union[bytes, memoryview]
 DecodedT = Union[str, int, float]
 EncodableT = Union[EncodedT, DecodedT]
@@ -36,7 +37,6 @@ TimeoutSecT = Union[int, float, _StringLikeT]
 AnyKeyT = TypeVar("AnyKeyT", bytes, str, memoryview)
 AnyFieldT = TypeVar("AnyFieldT", bytes, str, memoryview)
 AnyChannelT = TypeVar("AnyChannelT", bytes, str, memoryview)
-
 
 class CommandsProtocol(Protocol):
     connection_pool: Union["AsyncConnectionPool", "ConnectionPool"]
