@@ -808,7 +808,11 @@ class Connection:
         sock = self._sock
         if not sock:
             self.connect()
-        return self._parser.can_read(timeout)
+        try:
+            return self._parser.can_read(timeout)
+        except OSError as e:
+            self.disconnect()
+            raise ConnectionError(f"Error while reading from {self.host}:{self.port} : {e.args}")
 
     def read_response(self, disable_decoding=False):
         """Read the response from a previously sent command"""
@@ -1282,7 +1286,7 @@ class ConnectionPool:
     def __init__(
         self, connection_class=Connection, max_connections=None, **connection_kwargs
     ):
-        max_connections = max_connections or 2 ** 31
+        max_connections = max_connections or 2**31
         if not isinstance(max_connections, int) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
 
