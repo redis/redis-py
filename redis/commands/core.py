@@ -5703,28 +5703,20 @@ class FunctionCommands:
 
     def function_load(
         self,
-        engine: str,
-        library: str,
         code: str,
         replace: Optional[bool] = False,
-        description: Optional[str] = None,
     ) -> Union[Awaitable[str], str]:
         """
         Load a library to Redis.
-        :param engine: the name of the execution engine for the library
-        :param library: the unique name of the library
-        :param code: the source code
-        :param replace: changes the behavior to replace the library if a library called
-         ``library`` already exists
-        :param description: description to the library
+        :param code: the source code (must start with
+        Shebang statement that provides a metadata about the library)
+        :param replace: changes the behavior to overwrite the existing library
+        with the new contents.
+        Return the library name that was loaded.
 
         For more information see https://redis.io/commands/function-load
         """
-        pieces = [engine, library]
-        if replace:
-            pieces.append("REPLACE")
-        if description is not None:
-            pieces.append(description)
+        pieces = ["REPLACE"] if replace else []
         pieces.append(code)
         return self.execute_command("FUNCTION LOAD", *pieces)
 
