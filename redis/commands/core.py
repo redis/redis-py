@@ -752,13 +752,15 @@ class ManagementCommands(CommandsProtocol):
             "COMMAND DOCS is intentionally not implemented in the client."
         )
 
-    def config_get(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
+    def config_get(
+        self, pattern: PatternT = "*", *args: List[PatternT], **kwargs
+    ) -> ResponseT:
         """
         Return a dictionary of configuration based on the ``pattern``
 
         For more information see https://redis.io/commands/config-get
         """
-        return self.execute_command("CONFIG GET", pattern, **kwargs)
+        return self.execute_command("CONFIG GET", pattern, *args, **kwargs)
 
     def config_set(self, name: KeyT, value: EncodableT, **kwargs) -> ResponseT:
         """Set config item ``name`` with ``value``
