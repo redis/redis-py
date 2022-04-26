@@ -743,6 +743,14 @@ class ManagementCommands(CommandsProtocol):
     def command_count(self, **kwargs) -> ResponseT:
         return self.execute_command("COMMAND COUNT", **kwargs)
 
+    def command_getkeysandflags(self, *args: List[str]) -> List[Union[str, List[str]]]:
+        """
+        Returns array of keys from a full Redis command and their usage flags.
+
+        For more information see https://redis.io/commands/command-getkeysandflags
+        """
+        return self.execute_command("COMMAND GETKEYSANDFLAGS", *args)
+
     def command_docs(self, *args):
         """
         This function throws a NotImplementedError since it is intentionally
