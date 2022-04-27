@@ -67,11 +67,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
     Pass one of parameters:
 
       - `url`
-      - `host`
+      - `host` & `port`
       - `startup_nodes`
 
-    | Use :meth:`initialize` to find cluster nodes & create connections.
-    | Use :meth:`close` to disconnect connections & close client.
+    | Use ``await`` :meth:`initialize` to find cluster nodes & create connections.
+    | Use ``await`` :meth:`close` to disconnect connections & close client.
 
     Many commands support the target_nodes kwarg. It can be one of the
     :attr:`NODE_FLAGS`:
@@ -82,10 +82,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
       - :attr:`RANDOM`
       - :attr:`DEFAULT_NODE`
 
+    Note: This client is not thread/process/fork safe.
+
     :param host:
         | Can be used to point to a startup node
     :param port:
-        | Port used if **host** or **url** is provided
+        | Port used if **host** is provided
     :param startup_nodes:
         | :class:`~.ClusterNode` to used as a startup node
     :param cluster_error_retry_attempts:
@@ -117,7 +119,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         | See :meth:`.from_url`
     :param kwargs:
         | Extra arguments that will be passed to the
-          :class:`~redis.asyncio.connection.Connection` instance when created
+          :class:`~redis.asyncio.connection.Connection` instances when created
 
     :raises RedisClusterException:
         if any arguments are invalid. Eg:
@@ -165,9 +167,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         All querystring options are cast to their appropriate Python types.
         Boolean arguments can be specified with string values "True"/"False"
         or "Yes"/"No". Values that cannot be properly cast cause a
-        ``ValueError`` to be raised. Once parsed, the querystring arguments
-        and keyword arguments are passed to the ``ConnectionPool``'s
-        class initializer. In the case of conflicting arguments, querystring
+        ``ValueError`` to be raised. Once parsed, the querystring arguments and
+        keyword arguments are passed to :class:`~redis.asyncio.connection.Connection`
+        when created. In the case of conflicting arguments, querystring
         arguments always win.
 
         """
