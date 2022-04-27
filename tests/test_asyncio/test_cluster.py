@@ -134,7 +134,7 @@ def mock_node_resp(
 ) -> ClusterNode:
     connection = mock.AsyncMock()
     connection.is_connected = True
-    connection.read_response.return_value = response
+    connection.read_response_without_lock.return_value = response
     while node._free:
         node._free.pop()
     node._free.append(connection)
@@ -288,10 +288,10 @@ class TestRedisClusterObj:
         assert await r.ping(target_nodes=RedisCluster.PRIMARIES) is True
         for primary in primaries:
             conn = primary._free.pop()
-            assert conn.read_response.called is True
+            assert conn.read_response_without_lock.called is True
         for replica in replicas:
             conn = replica._free.pop()
-            assert conn.read_response.called is not True
+            assert conn.read_response_without_lock.called is not True
 
     async def test_execute_command_node_flag_replicas(self, r: RedisCluster) -> None:
         """
@@ -305,10 +305,10 @@ class TestRedisClusterObj:
         assert await r.ping(target_nodes=RedisCluster.REPLICAS) is True
         for replica in replicas:
             conn = replica._free.pop()
-            assert conn.read_response.called is True
+            assert conn.read_response_without_lock.called is True
         for primary in primaries:
             conn = primary._free.pop()
-            assert conn.read_response.called is not True
+            assert conn.read_response_without_lock.called is not True
 
         await r.close()
 
@@ -320,7 +320,7 @@ class TestRedisClusterObj:
         assert await r.ping(target_nodes=RedisCluster.ALL_NODES) is True
         for node in r.get_nodes():
             conn = node._free.pop()
-            assert conn.read_response.called is True
+            assert conn.read_response_without_lock.called is True
 
     async def test_execute_command_node_flag_random(self, r: RedisCluster) -> None:
         """
@@ -331,7 +331,7 @@ class TestRedisClusterObj:
         called_count = 0
         for node in r.get_nodes():
             conn = node._free.pop()
-            if conn.read_response.called is True:
+            if conn.read_response_without_lock.called is True:
                 called_count += 1
         assert called_count == 1
 
@@ -344,7 +344,7 @@ class TestRedisClusterObj:
         mock_node_resp(def_node, "PONG")
         assert await r.ping() is True
         conn = def_node._free.pop()
-        assert conn.read_response.called
+        assert conn.read_response_without_lock.called
 
     async def test_ask_redirection(self, r: RedisCluster) -> None:
         """
@@ -488,7 +488,7 @@ class TestRedisClusterObj:
         with mock.patch.multiple(
             Connection,
             send_command=mock.DEFAULT,
-            read_response=mock.DEFAULT,
+            read_response_without_lock=mock.DEFAULT,
             _connect=mock.DEFAULT,
             can_read=mock.DEFAULT,
             on_connect=mock.DEFAULT,
@@ -520,7 +520,7 @@ class TestRedisClusterObj:
                 # so we'll mock some of the Connection's functions to allow it
                 execute_command.side_effect = execute_command_mock_first
                 mocks["send_command"].return_value = True
-                mocks["read_response"].return_value = "OK"
+                mocks["read_response_without_lock"].return_value = "OK"
                 mocks["_connect"].return_value = True
                 mocks["can_read"].return_value = False
                 mocks["on_connect"].return_value = True
@@ -682,6 +682,14 @@ class TestRedisClusterObj:
                 else:
                     raise e
 
+    async def test_can_run_concurrent_commands(self, r: RedisCluster) -> None:
+        assert await r.ping(target_nodes=RedisCluster.ALL_NODES) is True
+        assert all(
+            await asyncio.gather(
+                *(r.ping(target_nodes=RedisCluster.ALL_NODES) for _ in range(100))
+            )
+        )
+
 
 @pytest.mark.onlycluster
 class TestClusterRedisCommands:
@@ -792,7 +800,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
-    async def test_cluster_addslotsrange(self, r):
+    async def test_cluster_addslotsrange(self, r: RedisCluster):
         node = r.get_random_node()
         mock_node_resp(node, "OK")
         assert await r.cluster_addslotsrange(node, 1, 5)
@@ -820,14 +828,14 @@ class TestClusterRedisCommands:
         node0 = r.get_node(default_host, 7000)
         node1 = r.get_node(default_host, 7001)
         assert await r.cluster_delslots(0, 8192) == [True, True]
-        assert node0._free.pop().read_response.called
-        assert node1._free.pop().read_response.called
+        assert node0._free.pop().read_response_without_lock.called
+        assert node1._free.pop().read_response_without_lock.called
 
         await r.close()
 
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
-    async def test_cluster_delslotsrange(self, r):
+    async def test_cluster_delslotsrange(self, r: RedisCluster):
         node = r.get_random_node()
         mock_node_resp(node, "OK")
         await r.cluster_addslots(node, 1, 2, 3, 4, 5)
@@ -990,7 +998,7 @@ class TestClusterRedisCommands:
         node = r.nodes_manager.get_node_from_slot(12182)
         mock_node_resp(node, "OK")
         assert await r.cluster_setslot_stable(12182) is True
-        assert node._free.pop().read_response.called
+        assert node._free.pop().read_response_without_lock.called
 
     @skip_if_redis_enterprise()
     async def test_cluster_replicas(self, r: RedisCluster) -> None:
@@ -1014,7 +1022,7 @@ class TestClusterRedisCommands:
         )
 
     @skip_if_server_version_lt("7.0.0")
-    async def test_cluster_links(self, r):
+    async def test_cluster_links(self, r: RedisCluster):
         node = r.get_random_node()
         res = await r.cluster_links(node)
         links_to = sum(x.count("to") for x in res)
@@ -1032,7 +1040,7 @@ class TestClusterRedisCommands:
         for res in all_replicas_results.values():
             assert res is True
         for replica in r.get_replicas():
-            assert replica._free.pop().read_response.called
+            assert replica._free.pop().read_response_without_lock.called
 
         await r.close()
 
@@ -1045,7 +1053,7 @@ class TestClusterRedisCommands:
         for res in all_replicas_results.values():
             assert res is True
         for replica in r.get_replicas():
-            assert replica._free.pop().read_response.called
+            assert replica._free.pop().read_response_without_lock.called
 
         await r.close()
 

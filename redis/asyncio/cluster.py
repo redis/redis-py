@@ -2,7 +2,6 @@ import asyncio
 import collections
 import random
 import socket
-import threading
 import warnings
 from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 
@@ -339,7 +338,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             # regardless of the server type. If this is a primary connection,
             # READONLY would not affect executing write commands.
             await connection.send_command("READONLY")
-            if str_if_bytes(await connection.read_response()) != "OK":
+            if str_if_bytes(await connection.read_response_without_lock()) != "OK":
                 raise ConnectionError("READONLY command failed")
 
     def get_node(
@@ -789,10 +788,10 @@ class ClusterNode:
         connection = None
         if self._free:
             for _ in range(len(self._free)):
-                if self._free[0].is_connected:
-                    connection = self._free.popleft()
+                connection = self._free.popleft()
+                if connection.is_connected:
                     break
-                self._free.rotate(-1)
+                self._free.append(connection)
             else:
                 connection = self._free.popleft()
         else:
@@ -807,9 +806,11 @@ class ClusterNode:
         await connection.send_packed_command(command, False)
         try:
             if NEVER_DECODE in kwargs:
-                response = await connection.read_response(disable_decoding=True)
+                response = await connection.read_response_without_lock(
+                    disable_decoding=True
+                )
             else:
-                response = await connection.read_response()
+                response = await connection.read_response_without_lock()
         except ResponseError:
             if EMPTY_RESPONSE in kwargs:
                 return kwargs[EMPTY_RESPONSE]
@@ -827,7 +828,6 @@ class ClusterNode:
 
 class NodesManager:
     __slots__ = (
-        "_lock",
         "_moved_exception",
         "_require_full_coverage",
         "connection_kwargs",
@@ -852,7 +852,6 @@ class NodesManager:
         self._moved_exception = None
         self.connection_kwargs = kwargs
         self.read_load_balancer = LoadBalancer()
-        self._lock = threading.Lock()
 
     def get_node(
         self,
@@ -936,9 +935,7 @@ class NodesManager:
         self, slot: int, read_from_replicas: bool = False
     ) -> "ClusterNode":
         if self._moved_exception:
-            with self._lock:
-                if self._moved_exception:
-                    self._update_moved_slots()
+            self._update_moved_slots()
 
         try:
             if read_from_replicas:

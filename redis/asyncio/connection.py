@@ -939,6 +939,41 @@ class Connection:
             raise response from None
         return response
 
+    async def read_response_without_lock(self, disable_decoding: bool = False):
+        """Read the response from a previously sent command"""
+        try:
+            if self.socket_timeout:
+                async with async_timeout.timeout(self.socket_timeout):
+                    response = await self._parser.read_response(
+                        disable_decoding=disable_decoding
+                    )
+            else:
+                response = await self._parser.read_response(
+                    disable_decoding=disable_decoding
+                )
+        except asyncio.TimeoutError:
+            await self.disconnect()
+            raise TimeoutError(f"Timeout reading from {self.host}:{self.port}")
+        except OSError as e:
+            await self.disconnect()
+            raise ConnectionError(
+                f"Error while reading from {self.host}:{self.port} : {e.args}"
+            )
+        except BaseException:
+            await self.disconnect()
+            raise
+
+        if self.health_check_interval:
+            if sys.version_info[0:2] == (3, 6):
+                func = asyncio.get_event_loop
+            else:
+                func = asyncio.get_running_loop
+            self.next_health_check = func().time() + self.health_check_interval
+
+        if isinstance(response, ResponseError):
+            raise response from None
+        return response
+
     def pack_command(self, *args: EncodableT) -> List[bytes]:
         """Pack a series of arguments into the Redis protocol"""
         output = []
