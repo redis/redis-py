@@ -53,12 +53,9 @@ class CommandsParser:
         except KeyError:
             # try to split the command name and to take only the main command
             # e.g. 'memory' for 'memory usage'
-            cmd_name_split = args[0].split()
-            cmd_name = cmd_name_split[0]
-            if cmd_name in self.commands:
-                # save the splitted command to args
-                args = cmd_name_split + list(args[1:])
-            else:
+            args = args[0].split() + list(args[1:])
+            cmd_name = args[0]
+            if cmd_name not in self.commands:
                 # We'll try to reinitialize the commands cache, if the engine
                 # version has changed, the commands may not be current
                 await self.initialize(redis_conn)
@@ -84,14 +81,8 @@ class CommandsParser:
     async def _get_moveable_keys(
         self, redis_conn: "ClusterNode", *args
     ) -> Optional[List[str]]:
-        pieces = []
-        cmd_name = args[0]
-        # The command name should be splitted into separate arguments,
-        # e.g. 'MEMORY USAGE' will be splitted into ['MEMORY', 'USAGE']
-        pieces = pieces + cmd_name.split()
-        pieces = pieces + list(args[1:])
         try:
-            keys = await redis_conn.execute_command("COMMAND GETKEYS", *pieces)
+            keys = await redis_conn.execute_command("COMMAND GETKEYS", *args)
         except ResponseError as e:
             message = e.__str__()
             if (
