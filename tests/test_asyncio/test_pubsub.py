@@ -660,7 +660,6 @@ class TestPubSubRun:
                 pass
         assert str(e) == "error"
 
-    @pytest.mark.xfail
     async def test_late_subscribe(self, r: redis.Redis):
         def callback(message):
             messages.put_nowait(message)
