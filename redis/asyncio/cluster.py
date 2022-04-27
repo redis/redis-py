@@ -454,11 +454,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 return [random.choice(list(self.nodes_manager.nodes_cache.values()))]
 
         # get the node that holds the key's slot
-        slot = await self._determine_slot(*args)
-        node = self.nodes_manager.get_node_from_slot(
-            slot, self.read_from_replicas and command in READ_COMMANDS
-        )
-        return [node]
+        return [
+            self.nodes_manager.get_node_from_slot(
+                await self._determine_slot(*args),
+                self.read_from_replicas and command in READ_COMMANDS,
+            )
+        ]
 
     async def _determine_slot(self, *args) -> int:
         command = args[0]
@@ -646,12 +647,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             except BusyLoadingError:
                 raise
             except (ConnectionError, TimeoutError):
-                connection_error_retry_counter += 1
-
                 # Give the node 0.25 seconds to get back up and retry again
                 # with same node and configuration. After 5 attempts then try
                 # to reinitialize the cluster and see if the nodes
                 # configuration has changed or not
+                connection_error_retry_counter += 1
                 if connection_error_retry_counter < 5:
                     await asyncio.sleep(0.25)
                 else:
@@ -960,14 +960,6 @@ class NodesManager:
             if node.server_type == server_type
         ]
 
-    def check_slots_coverage(self, slots_cache: Dict[int, List["ClusterNode"]]) -> bool:
-        # Validate if all slots are covered or if we should try next
-        # startup node
-        for i in range(0, REDIS_CLUSTER_HASH_SLOTS):
-            if i not in slots_cache:
-                return False
-        return True
-
     async def initialize(self) -> None:
         self.read_load_balancer.reset()
         tmp_nodes_cache = {}
@@ -1076,10 +1068,13 @@ class NodesManager:
                                     f'slots cache: {", ".join(disagreements)}'
                                 )
 
-            fully_covered = self.check_slots_coverage(tmp_slots)
+            # Validate if all slots are covered or if we should try next startup node
+            fully_covered = True
+            for i in range(0, REDIS_CLUSTER_HASH_SLOTS):
+                if i not in tmp_slots:
+                    fully_covered = False
+                    break
             if fully_covered:
-                # Don't need to continue to the next startup node if all
-                # slots are covered
                 break
 
         if not startup_nodes_reachable:
