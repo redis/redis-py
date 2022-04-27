@@ -22,7 +22,7 @@ jobs:
      steps:
        - uses: actions/checkout@v2
        - name: install python
-         uses: actions/setup-python@v2
+         uses: actions/setup-python@v3
          with:
            python-version: 3.9
        - name: run code linters
@@ -32,6 +32,7 @@ jobs:
 
    run-tests:
      runs-on: ubuntu-latest
+     continue-on-error: ${{ matrix.experimental }}
      timeout-minutes: 30
      strategy:
        max-parallel: 15
@@ -39,13 +40,19 @@ jobs:
          python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
          test-type: ['standalone', 'cluster']
          connection-type: ['hiredis', 'plain']
+         experimental: [false]
+         include:
+           - python-version: 3.11.0-alpha.6
+             experimental: true
+             test-type: standalone
+             connection-type: plain
      env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
      name: Python ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}} tests
      steps:
        - uses: actions/checkout@v2
        - name: install python
-         uses: actions/setup-python@v2
+         uses: actions/setup-python@v3
          with:
            python-version: ${{ matrix.python-version }}
        - name: run tests
@@ -68,7 +75,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: install python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v3
         with:
           python-version: 3.9
       - name: Run installed unit tests
@@ -76,15 +83,20 @@ jobs:
           bash .github/workflows/install_and_test.sh ${{ matrix.extension }}
 
    install_package_from_commit:
+    continue-on-error: ${{ matrix.experimental }}
     name: Install package from commit hash
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
+        experimental: [false]
+        include:
+          - python-version: 3.11.0-alpha.5
+          - experimental: true
     steps:
       - uses: actions/checkout@v2
       - name: install python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v3
         with:
           python-version: ${{ matrix.python-version }}
       - name: install from pip
