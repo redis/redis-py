@@ -1080,12 +1080,25 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("SAVE", **kwargs)
 
-    def shutdown(self, save: bool = False, nosave: bool = False, **kwargs) -> None:
+    def shutdown(
+        self,
+        save: bool = False,
+        nosave: bool = False,
+        now: bool = False,
+        force: bool = False,
+        abort: bool = False,
+        **kwargs,
+    ) -> None:
         """Shutdown the Redis server.  If Redis has persistence configured,
-        data will be flushed before shutdown.  If the "save" option is set,
-        a data flush will be attempted even if there is no persistence
-        configured.  If the "nosave" option is set, no data flush will be
-        attempted.  The "save" and "nosave" options cannot both be set.
+        data will be flushed before shutdown. 
+        It is possible to specify modifiers to alter the behavior of the command:
+        ``save`` will force a DB saving operation even if no save points are configured.
+        ``nosave`` will prevent a DB saving operation even if one or more save points
+        are configured.
+        ``now`` skips waiting for lagging replicas, i.e. it bypasses the first step in
+        the shutdown sequence.
+        ``force`` ignores any errors that would normally prevent the server from exiting
+        ``abort`` cancels an ongoing shutdown and cannot be combined with other flags.
 
         For more information see https://redis.io/commands/shutdown
         """
@@ -1096,6 +1109,12 @@ class ManagementCommands(CommandsProtocol):
             args.append("SAVE")
         if nosave:
             args.append("NOSAVE")
+        if now:
+            args.append("NOW")
+        if force:
+            args.append("FORCE")
+        if abort:
+            args.append("ABORT")
         try:
             self.execute_command(*args, **kwargs)
         except ConnectionError:
@@ -1206,7 +1225,13 @@ class AsyncManagementCommands(ManagementCommands):
         return super().memory_help(**kwargs)
 
     async def shutdown(
-        self, save: bool = False, nosave: bool = False, **kwargs
+        self,
+        save: bool = False,
+        nosave: bool = False,
+        now: bool = False,
+        force: bool = False,
+        abort: bool = False,
+        **kwargs,
     ) -> None:
         """Shutdown the Redis server.  If Redis has persistence configured,
         data will be flushed before shutdown.  If the "save" option is set,
@@ -1223,6 +1248,12 @@ class AsyncManagementCommands(ManagementCommands):
             args.append("SAVE")
         if nosave:
             args.append("NOSAVE")
+        if now:
+            args.append("NOW")
+        if force:
+            args.append("FORCE")
+        if abort:
+            args.append("ABORT")
         try:
             await self.execute_command(*args, **kwargs)
         except ConnectionError:
