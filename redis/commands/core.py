@@ -770,12 +770,18 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CONFIG GET", pattern, *args, **kwargs)
 
-    def config_set(self, name: KeyT, value: EncodableT, **kwargs) -> ResponseT:
+    def config_set(
+        self,
+        name: KeyT,
+        value: EncodableT,
+        *args: List[Union[KeyT, EncodableT]],
+        **kwargs,
+    ) -> ResponseT:
         """Set config item ``name`` with ``value``
 
         For more information see https://redis.io/commands/config-set
         """
-        return self.execute_command("CONFIG SET", name, value, **kwargs)
+        return self.execute_command("CONFIG SET", name, value, *args, **kwargs)
 
     def config_resetstat(self, **kwargs) -> ResponseT:
         """

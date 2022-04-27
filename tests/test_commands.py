@@ -692,6 +692,16 @@ class TestRedisCommands:
         assert r.config_set("timeout", 0)
         assert r.config_get()["timeout"] == "0"
 
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    def test_config_set_multi_params(self, r: redis.Redis):
+        r.config_set("timeout", 70, "maxmemory", 100)
+        assert r.config_get()["timeout"] == "70"
+        assert r.config_get()["maxmemory"] == "100"
+        assert r.config_set("timeout", 0, "maxmemory", 0)
+        assert r.config_get()["timeout"] == "0"
+        assert r.config_get()["maxmemory"] == "0"
+
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
     def test_failover(self, r):
