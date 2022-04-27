@@ -669,6 +669,12 @@ class TestRedisCommands:
         # # assert 'maxmemory' in data
         # assert data['maxmemory'].isdigit()
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_config_get_multi_params(self, r: redis.Redis):
+        res = r.config_get("*max-*-entries*", "maxmemory")
+        assert "maxmemory" in res
+        assert "hash-max-listpack-entries" in res
+
     @pytest.mark.onlynoncluster
     @skip_if_redis_enterprise()
     def test_config_resetstat(self, r):
@@ -685,6 +691,16 @@ class TestRedisCommands:
         assert r.config_get()["timeout"] == "70"
         assert r.config_set("timeout", 0)
         assert r.config_get()["timeout"] == "0"
+
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    def test_config_set_multi_params(self, r: redis.Redis):
+        r.config_set("timeout", 70, "maxmemory", 100)
+        assert r.config_get()["timeout"] == "70"
+        assert r.config_get()["maxmemory"] == "100"
+        assert r.config_set("timeout", 0, "maxmemory", 0)
+        assert r.config_get()["timeout"] == "0"
+        assert r.config_get()["maxmemory"] == "0"
 
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
@@ -710,6 +726,14 @@ class TestRedisCommands:
         assert isinstance(info, dict)
         assert "arch_bits" in info.keys()
         assert "redis_version" in info.keys()
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_info_multi_sections(self, r):
+        res = r.info("clients", "server")
+        assert isinstance(res, dict)
+        assert "redis_version" in res
+        assert "connected_clients" in res
 
     @pytest.mark.onlynoncluster
     @skip_if_redis_enterprise()
@@ -4469,6 +4493,15 @@ class TestRedisCommands:
         assert "get" in cmds
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    def test_command_getkeysandflags(self, r: redis.Redis):
+        res = [["mylist1", ["RW", "access", "delete"]], ["mylist2", ["RW", "insert"]]]
+        assert res == r.command_getkeysandflags(
+            "LMOVE", "mylist1", "mylist2", "left", "left"
+        )
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
     def test_module(self, r):
@@ -4478,6 +4511,18 @@ class TestRedisCommands:
 
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
             r.module_load("/some/fake/path", "arg1", "arg2", "arg3", "arg4")
+            assert "Error loading the extension." in str(excinfo.value)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    def test_module_loadex(self, r: redis.Redis):
+        with pytest.raises(redis.exceptions.ModuleError) as excinfo:
+            r.module_loadex("/some/fake/path")
+            assert "Error loading the extension." in str(excinfo.value)
+
+        with pytest.raises(redis.exceptions.ModuleError) as excinfo:
+            r.module_loadex("/some/fake/path", ["name", "value"], ["arg1", "arg2"])
             assert "Error loading the extension." in str(excinfo.value)
 
     @skip_if_server_version_lt("2.6.0")

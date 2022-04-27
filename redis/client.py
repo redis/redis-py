@@ -757,7 +757,6 @@ class AbstractRedis:
         "DEBUG OBJECT": parse_debug_object,
         "FUNCTION DELETE": bool_ok,
         "FUNCTION FLUSH": bool_ok,
-        "FUNCTION LOAD": bool_ok,
         "FUNCTION RESTORE": bool_ok,
         "GEOHASH": lambda r: list(map(str_if_bytes, r)),
         "GEOPOS": lambda r: list(
