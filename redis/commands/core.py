@@ -743,6 +743,34 @@ class ManagementCommands(CommandsProtocol):
     def command_count(self, **kwargs) -> ResponseT:
         return self.execute_command("COMMAND COUNT", **kwargs)
 
+    def command_list(
+        self,
+        module: Optional[str] = None,
+        category: Optional[str] = None,
+        pattern: Optional[str] = None,
+    ) -> ResponseT:
+        """
+        Return an array of the server's command names.
+        You can use one of the following filters:
+        ``module``: get the commands that belong to the module
+        ``category``: get the commands in the ACL category
+        ``pattern``: get the commands that match the given pattern
+
+        For more information see https://redis.io/commands/command-list/
+        """
+        pieces = ["FILTERBY"]
+        if module is not None:
+            pieces.extend(["MODULE", module])
+        if category is not None:
+            pieces.extend(["ACLCAT", category])
+        if pattern is not None:
+            pieces.extend(["PATTERN", pattern])
+
+        if len(pieces) > 1:
+            return self.execute_command("COMMAND LIST", *pieces)
+
+        return self.execute_command("COMMAND LIST")
+
     def command_docs(self, *args):
         """
         This function throws a NotImplementedError since it is intentionally
