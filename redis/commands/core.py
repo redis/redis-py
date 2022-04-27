@@ -256,7 +256,7 @@ class ACLCommands(CommandsProtocol):
         For more information see https://redis.io/commands/acl-setuser
         """
         encoder = self.get_encoder()
-        pieces: list[str | bytes] = [username]
+        pieces: List[EncodableT] = [username]
 
         if reset:
             pieces.append(b"reset")
