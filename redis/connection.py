@@ -1288,7 +1288,7 @@ class ConnectionPool:
     def __init__(
         self, connection_class=Connection, max_connections=None, **connection_kwargs
     ):
-        max_connections = max_connections or 2**31
+        max_connections = max_connections or 2 ** 31
         if not isinstance(max_connections, int) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
 
