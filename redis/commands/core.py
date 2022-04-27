@@ -256,7 +256,7 @@ class ACLCommands(CommandsProtocol):
         For more information see https://redis.io/commands/acl-setuser
         """
         encoder = self.get_encoder()
-        pieces: list[str | bytes] = [username]
+        pieces: List[EncodableT] = [username]
 
         if reset:
             pieces.append(b"reset")
@@ -742,6 +742,14 @@ class ManagementCommands(CommandsProtocol):
 
     def command_count(self, **kwargs) -> ResponseT:
         return self.execute_command("COMMAND COUNT", **kwargs)
+
+    def command_getkeysandflags(self, *args: List[str]) -> List[Union[str, List[str]]]:
+        """
+        Returns array of keys from a full Redis command and their usage flags.
+
+        For more information see https://redis.io/commands/command-getkeysandflags
+        """
+        return self.execute_command("COMMAND GETKEYSANDFLAGS", *args)
 
     def command_docs(self, *args):
         """
@@ -5705,28 +5713,20 @@ class FunctionCommands:
 
     def function_load(
         self,
-        engine: str,
-        library: str,
         code: str,
         replace: Optional[bool] = False,
-        description: Optional[str] = None,
     ) -> Union[Awaitable[str], str]:
         """
         Load a library to Redis.
-        :param engine: the name of the execution engine for the library
-        :param library: the unique name of the library
-        :param code: the source code
-        :param replace: changes the behavior to replace the library if a library called
-         ``library`` already exists
-        :param description: description to the library
+        :param code: the source code (must start with
+        Shebang statement that provides a metadata about the library)
+        :param replace: changes the behavior to overwrite the existing library
+        with the new contents.
+        Return the library name that was loaded.
 
         For more information see https://redis.io/commands/function-load
         """
-        pieces = [engine, library]
-        if replace:
-            pieces.append("REPLACE")
-        if description is not None:
-            pieces.append(description)
+        pieces = ["REPLACE"] if replace else []
         pieces.append(code)
         return self.execute_command("FUNCTION LOAD", *pieces)
 

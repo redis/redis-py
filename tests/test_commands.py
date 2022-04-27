@@ -4475,6 +4475,15 @@ class TestRedisCommands:
         assert "get" in cmds
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    def test_command_getkeysandflags(self, r: redis.Redis):
+        res = [["mylist1", ["RW", "access", "delete"]], ["mylist2", ["RW", "insert"]]]
+        assert res == r.command_getkeysandflags(
+            "LMOVE", "mylist1", "mylist2", "left", "left"
+        )
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
     def test_module(self, r):
