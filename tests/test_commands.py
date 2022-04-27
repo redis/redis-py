@@ -4513,6 +4513,18 @@ class TestRedisCommands:
             r.module_load("/some/fake/path", "arg1", "arg2", "arg3", "arg4")
             assert "Error loading the extension." in str(excinfo.value)
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    def test_module_loadex(self, r: redis.Redis):
+        with pytest.raises(redis.exceptions.ModuleError) as excinfo:
+            r.module_loadex("/some/fake/path")
+            assert "Error loading the extension." in str(excinfo.value)
+
+        with pytest.raises(redis.exceptions.ModuleError) as excinfo:
+            r.module_loadex("/some/fake/path", ["name", "value"], ["arg1", "arg2"])
+            assert "Error loading the extension." in str(excinfo.value)
+
     @skip_if_server_version_lt("2.6.0")
     def test_restore(self, r):
 
