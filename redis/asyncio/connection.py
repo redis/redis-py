@@ -916,7 +916,7 @@ class Connection:
         except OSError as e:
             await self.disconnect()
             raise ConnectionError(
-                f"Error while reading from {self.host}:{self.port} : {e.args}"
+                f"Error while reading from {self.host}:{self.port}: {e.args}"
             )
 
     async def read_response(self, disable_decoding: bool = False):
