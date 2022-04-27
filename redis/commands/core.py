@@ -900,7 +900,9 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("SELECT", index, **kwargs)
 
-    def info(self, section: Union[str, None] = None, **kwargs) -> ResponseT:
+    def info(
+        self, section: Union[str, None] = None, *args: List[str], **kwargs
+    ) -> ResponseT:
         """
         Returns a dictionary containing information about the Redis server
 
@@ -915,7 +917,7 @@ class ManagementCommands(CommandsProtocol):
         if section is None:
             return self.execute_command("INFO", **kwargs)
         else:
-            return self.execute_command("INFO", section, **kwargs)
+            return self.execute_command("INFO", section, *args, **kwargs)
 
     def lastsave(self, **kwargs) -> ResponseT:
         """

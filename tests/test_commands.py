@@ -728,6 +728,14 @@ class TestRedisCommands:
         assert "redis_version" in info.keys()
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_info_multi_sections(self, r):
+        res = r.info("clients", "server")
+        assert isinstance(res, dict)
+        assert "redis_version" in res
+        assert "connected_clients" in res
+
+    @pytest.mark.onlynoncluster
     @skip_if_redis_enterprise()
     def test_lastsave(self, r):
         assert isinstance(r.lastsave(), datetime.datetime)
