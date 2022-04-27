@@ -681,7 +681,8 @@ class TestPubSubRun:
         except asyncio.TimeoutError:
             pass
         task.cancel()
-        # we expect a cancelled error, not the Runtime error ("did you forget to call subscribe()"")
+        # we expect a cancelled error, not the Runtime error
+        # ("did you forget to call subscribe()"")
         with pytest.raises(asyncio.CancelledError):
             await task
         assert message == {
