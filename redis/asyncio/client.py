@@ -41,8 +41,8 @@ from redis.client import (
 )
 from redis.commands import (
     AsyncCoreCommands,
+    AsyncRedisModuleCommands,
     AsyncSentinelCommands,
-    RedisModuleCommands,
     list_or_args,
 )
 from redis.compat import Protocol, TypedDict
@@ -81,7 +81,7 @@ ResponseCallbackT = Union[ResponseCallbackProtocol, AsyncResponseCallbackProtoco
 
 
 class Redis(
-    AbstractRedis, RedisModuleCommands, AsyncCoreCommands, AsyncSentinelCommands
+    AbstractRedis, AsyncRedisModuleCommands, AsyncCoreCommands, AsyncSentinelCommands
 ):
     """
     Implementation of the Redis protocol.
