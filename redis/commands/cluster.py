@@ -189,7 +189,7 @@ class ClusterManagementCommands(ManagementCommands):
 
         For more information see https://redis.io/commands/replicaof
         """
-        raise RedisClusterException("REPLICAOF is not supported in cluster" " mode")
+        raise RedisClusterException("REPLICAOF is not supported in cluster mode")
 
     def swapdb(self, *args, **kwargs):
         """
@@ -197,7 +197,7 @@ class ClusterManagementCommands(ManagementCommands):
 
         For more information see https://redis.io/commands/swapdb
         """
-        raise RedisClusterException("SWAPDB is not supported in cluster" " mode")
+        raise RedisClusterException("SWAPDB is not supported in cluster mode")
 
 
 class ClusterDataAccessCommands(DataAccessCommands):
@@ -310,7 +310,6 @@ class RedisClusterCommands(
     target specific nodes. By default, if target_nodes is not specified, the
     command will be executed on the default cluster node.
 
-
     :param :target_nodes: type can be one of the followings:
         - nodes flag: ALL_NODES, PRIMARIES, REPLICAS, RANDOM
         - 'ClusterNode'
@@ -323,7 +322,7 @@ class RedisClusterCommands(
 
     def cluster_myid(self, target_node):
         """
-        Returns the node’s id.
+        Returns the node's id.
 
         :target_node: 'ClusterNode'
             The node to execute the command on
