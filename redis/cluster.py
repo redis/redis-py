@@ -92,6 +92,23 @@ def parse_cluster_slots(resp, **options):
     return slots
 
 
+def parse_cluster_shards(resp, **options):
+    shards = []
+    for x in resp:
+        shard = {"slots": [], "nodes": []}
+        for i in range(0, len(x[1]), 2):
+            shard["slots"].append((x[1][i], (x[1][i + 1])))
+        nodes = x[3]
+        for node in nodes:
+            dict_node = {}
+            for i in range(0, len(node), 2):
+                dict_node[node[i]] = node[i + 1]
+            shard["nodes"].append(dict_node)
+        shards.append(shard)
+    
+    return shards
+
+
 PRIMARY = "primary"
 REPLICA = "replica"
 SLOT_ID = "slot-id"
@@ -277,6 +294,7 @@ class RedisCluster(RedisClusterCommands):
                 "CLUSTER RESET",
                 "CLUSTER SET-CONFIG-EPOCH",
                 "CLUSTER SLOTS",
+                "CLUSTER SHARDS",
                 "CLUSTER COUNT-FAILURE-REPORTS",
                 "CLUSTER KEYSLOT",
                 "COMMAND",
@@ -378,6 +396,7 @@ class RedisCluster(RedisClusterCommands):
         "CLUSTER SET-CONFIG-EPOCH": bool,
         "CLUSTER SETSLOT": bool,
         "CLUSTER SLOTS": parse_cluster_slots,
+        "CLUSTER SHARDS": parse_cluster_shards,
         "ASKING": bool,
         "READONLY": bool,
         "READWRITE": bool,
