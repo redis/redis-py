@@ -376,9 +376,11 @@ class ManagementCommands(CommandsProtocol):
         authenticate for the given user.
         For more information see https://redis.io/commands/auth
         """
-        if username:
-            return self.execute_command("AUTH", username, password, **kwargs)
-        return self.execute_command
+        pieces = []
+        if username is not None:
+            pieces.append(username)
+        pieces.append(password)
+        return self.execute_command("AUTH", *pieces, **kwargs)
 
     def bgrewriteaof(self, **kwargs):
         """Tell the Redis server to rewrite the AOF file from data in memory.
@@ -3817,7 +3819,7 @@ class StreamCommands(CommandsProtocol):
     def xtrim(
         self,
         name: KeyT,
-        maxlen: int,
+        maxlen: Union[int, None],
         approximate: bool = True,
         minid: Union[StreamIdT, None] = None,
         limit: Union[int, None] = None,
