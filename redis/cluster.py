@@ -105,7 +105,7 @@ def parse_cluster_shards(resp, **options):
                 dict_node[node[i]] = node[i + 1]
             shard["nodes"].append(dict_node)
         shards.append(shard)
-    
+
     return shards
 
 

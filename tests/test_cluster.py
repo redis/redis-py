@@ -871,7 +871,7 @@ class TestClusterRedisCommands:
             "tls-port",
             "role",
             "replication-offset",
-            "health"
+            "health",
         ]
         for x in cluster_shards:
             assert list(x.keys()) == ["slots", "nodes"]

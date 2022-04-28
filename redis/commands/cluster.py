@@ -556,7 +556,7 @@ class RedisClusterCommands(
         For more information see https://redis.io/commands/cluster-slots
         """
         return self.execute_command("CLUSTER SLOTS", target_nodes=target_nodes)
-    
+
     def cluster_shards(self, target_nodes=None):
         """
         Returns details about the shards of the cluster.
