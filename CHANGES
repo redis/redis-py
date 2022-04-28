@@ -1,4 +1,5 @@
 
+    * Allow negative `retries` for `Retry` class to retry forever
     * Add `items` parameter to `hset` signature
     * Create codeql-analysis.yml (#1988). Thanks @chayim
     * Add limited support for Lua scripting with RedisCluster
