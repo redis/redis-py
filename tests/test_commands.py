@@ -3827,7 +3827,7 @@ class TestRedisCommands:
             == [message_id]
         )
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     def test_xclaim_trimmed(self, r):
         # xclaim should not raise an exception if the item is not there
         stream = "stream"
