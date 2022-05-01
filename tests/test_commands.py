@@ -3739,7 +3739,7 @@ class TestRedisCommands:
     def test_xadd_explicit_ms(self, r: redis.Redis):
         stream = "stream"
         message_id = r.xadd(stream, {"foo": "bar"}, "9999999999999999999-*")
-        ms = message_id[:message_id.index(b"-")]
+        ms = message_id[: message_id.index(b"-")]
         assert ms == b"9999999999999999999"
 
     @skip_if_server_version_lt("6.2.0")
@@ -3914,7 +3914,7 @@ class TestRedisCommands:
             }
         ]
         assert r.xinfo_groups(stream) == expected
-    
+
     @skip_if_server_version_lt("7.0.0")
     def test_xgroup_create_entriesread(self, r: redis.Redis):
         stream = "stream"

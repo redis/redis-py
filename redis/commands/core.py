@@ -3496,7 +3496,7 @@ class StreamCommands(CommandsProtocol):
         groupname: GroupT,
         id: StreamIdT = "$",
         mkstream: bool = False,
-        entries_read: Optional[int] = None
+        entries_read: Optional[int] = None,
     ) -> ResponseT:
         """
         Create a new consumer group associated with a stream.
@@ -3511,7 +3511,7 @@ class StreamCommands(CommandsProtocol):
             pieces.append(b"MKSTREAM")
         if entries_read is not None:
             pieces.extend(["ENTRIESREAD", entries_read])
-        
+
         return self.execute_command(*pieces)
 
     def xgroup_delconsumer(
