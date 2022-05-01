@@ -4039,6 +4039,9 @@ class TestRedisCommands:
         assert info["length"] == 2
         assert info["first-entry"] == get_stream_message(r, stream, m1)
         assert info["last-entry"] == get_stream_message(r, stream, m2)
+        assert info["max-deleted-entry-id"] == b"0-0"
+        assert info["entries-added"] == 2
+        assert info["recorded-first-entry-id"] == m1
 
     @skip_if_server_version_lt("6.0.0")
     def test_xinfo_stream_full(self, r):
