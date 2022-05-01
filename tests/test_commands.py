@@ -3735,6 +3735,13 @@ class TestRedisCommands:
         r.xadd(stream, {"foo": "bar"})
         assert r.xadd(stream, {"foo": "bar"}, approximate=True, minid=m3)
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_xadd_explicit_ms(self, r: redis.Redis):
+        stream = "stream"
+        message_id = r.xadd(stream, {"foo": "bar"}, "9999999999999999999-*")
+        ms = message_id[:message_id.index("-")]
+        assert ms == "9999999999999999999"
+
     @skip_if_server_version_lt("6.2.0")
     def test_xautoclaim(self, r):
         stream = "stream"
