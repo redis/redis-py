@@ -4029,7 +4029,7 @@ class TestRedisCommands:
         assert isinstance(info[1].pop("idle"), int)
         assert info == expected
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     def test_xinfo_stream(self, r):
         stream = "stream"
         m1 = r.xadd(stream, {"foo": "bar"})
