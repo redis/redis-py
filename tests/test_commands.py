@@ -3739,8 +3739,8 @@ class TestRedisCommands:
     def test_xadd_explicit_ms(self, r: redis.Redis):
         stream = "stream"
         message_id = r.xadd(stream, {"foo": "bar"}, "9999999999999999999-*")
-        ms = message_id[:message_id.index("-")]
-        assert ms == "9999999999999999999"
+        ms = message_id[:message_id.index(b"-")]
+        assert ms == b"9999999999999999999"
 
     @skip_if_server_version_lt("6.2.0")
     def test_xautoclaim(self, r):
@@ -3848,9 +3848,8 @@ class TestRedisCommands:
         # xclaim them from consumer2
         # the item that is still in the stream should be returned
         item = r.xclaim(stream, group, "consumer2", 0, [sid1, sid2])
-        assert len(item) == 2
-        assert item[0] == (None, None)
-        assert item[1][0] == sid2
+        assert len(item) == 1
+        assert item[0][0] == sid2
 
     @skip_if_server_version_lt("5.0.0")
     def test_xdel(self, r):
@@ -3867,7 +3866,7 @@ class TestRedisCommands:
         assert r.xdel(stream, m1) == 1
         assert r.xdel(stream, m2, m3) == 2
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     def test_xgroup_create(self, r):
         # tests xgroup_create and xinfo_groups
         stream = "stream"
@@ -3884,11 +3883,13 @@ class TestRedisCommands:
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": b"0-0",
+                "entries-read": None,
+                "lag": 1,
             }
         ]
         assert r.xinfo_groups(stream) == expected
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     def test_xgroup_create_mkstream(self, r):
         # tests xgroup_create and xinfo_groups
         stream = "stream"
@@ -3908,6 +3909,30 @@ class TestRedisCommands:
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": b"0-0",
+                "entries-read": None,
+                "lag": 0,
+            }
+        ]
+        assert r.xinfo_groups(stream) == expected
+    
+    @skip_if_server_version_lt("7.0.0")
+    def test_xgroup_create_entriesread(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        r.xadd(stream, {"foo": "bar"})
+
+        # no group is setup yet, no info to obtain
+        assert r.xinfo_groups(stream) == []
+
+        assert r.xgroup_create(stream, group, 0, entries_read=7)
+        expected = [
+            {
+                "name": group.encode(),
+                "consumers": 0,
+                "pending": 0,
+                "last-delivered-id": b"0-0",
+                "entries-read": 7,
+                "lag": -6,
             }
         ]
         assert r.xinfo_groups(stream) == expected
@@ -3958,7 +3983,7 @@ class TestRedisCommands:
         r.xgroup_create(stream, group, 0)
         assert r.xgroup_destroy(stream, group)
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     def test_xgroup_setid(self, r):
         stream = "stream"
         group = "group"
@@ -3966,13 +3991,15 @@ class TestRedisCommands:
 
         r.xgroup_create(stream, group, 0)
         # advance the last_delivered_id to the message_id
-        r.xgroup_setid(stream, group, message_id)
+        r.xgroup_setid(stream, group, message_id, entries_read=2)
         expected = [
             {
                 "name": group.encode(),
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": message_id,
+                "entries-read": 2,
+                "lag": -1,
             }
         ]
         assert r.xinfo_groups(stream) == expected
