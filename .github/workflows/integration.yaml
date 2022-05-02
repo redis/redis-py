@@ -25,6 +25,7 @@ jobs:
          uses: actions/setup-python@v3
          with:
            python-version: 3.9
+           cache: 'pip'
        - name: run code linters
          run: |
            pip install -r dev_requirements.txt
@@ -32,7 +33,6 @@ jobs:
 
    run-tests:
      runs-on: ubuntu-latest
-     continue-on-error: ${{ matrix.experimental }}
      timeout-minutes: 30
      strategy:
        max-parallel: 15
@@ -40,12 +40,6 @@ jobs:
          python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
          test-type: ['standalone', 'cluster']
          connection-type: ['hiredis', 'plain']
-         experimental: [false]
-         include:
-           - python-version: 3.11.0-alpha.6
-             experimental: true
-             test-type: standalone
-             connection-type: plain
      env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
      name: Python ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}} tests
@@ -55,6 +49,7 @@ jobs:
          uses: actions/setup-python@v3
          with:
            python-version: ${{ matrix.python-version }}
+           cache: 'pip'
        - name: run tests
          run: |
            pip install -U setuptools wheel
@@ -83,22 +78,18 @@ jobs:
           bash .github/workflows/install_and_test.sh ${{ matrix.extension }}
 
    install_package_from_commit:
-    continue-on-error: ${{ matrix.experimental }}
     name: Install package from commit hash
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
-        experimental: [false]
-        include:
-          - python-version: 3.11.0-alpha.5
-          - experimental: true
     steps:
       - uses: actions/checkout@v2
       - name: install python ${{ matrix.python-version }}
         uses: actions/setup-python@v3
         with:
           python-version: ${{ matrix.python-version }}
+          cache: 'pip'
       - name: install from pip
         run: |
           pip install --quiet git+${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git@${GITHUB_SHA}
