@@ -3,7 +3,7 @@ import sys
 import threading
 import uuid
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Awaitable, NoReturn, Optional, Union
+from typing import TYPE_CHECKING, Awaitable, Optional, Union
 
 from redis.exceptions import LockError, LockNotOwnedError
 
@@ -243,7 +243,7 @@ class Lock:
             stored_token = encoder.encode(stored_token)
         return self.local.token is not None and stored_token == self.local.token
 
-    def release(self) -> Awaitable[NoReturn]:
+    def release(self) -> Awaitable[None]:
         """Releases the already acquired lock"""
         expected_token = self.local.token
         if expected_token is None:
@@ -251,7 +251,7 @@ class Lock:
         self.local.token = None
         return self.do_release(expected_token)
 
-    async def do_release(self, expected_token: bytes):
+    async def do_release(self, expected_token: bytes) -> None:
         if not bool(
             await self.lua_release(
                 keys=[self.name], args=[expected_token], client=self.redis
