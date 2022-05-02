@@ -693,6 +693,15 @@ class PubSub:
         # legitimate message off the stack if the connection is already
         # subscribed to one or more channels
 
+        await self.connect()
+        connection = self.connection
+        kwargs = {"check_health": not self.subscribed}
+        await self._execute(connection, connection.send_command, *args, **kwargs)
+
+    async def connect(self):
+        """
+        Ensure that the PubSub is connected
+        """
         if self.connection is None:
             self.connection = await self.connection_pool.get_connection(
                 "pubsub", self.shard_hint
@@ -700,9 +709,8 @@ class PubSub:
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
-        connection = self.connection
-        kwargs = {"check_health": not self.subscribed}
-        await self._execute(connection, connection.send_command, *args, **kwargs)
+        else:
+            await self.connection.connect()
 
     async def _disconnect_raise_connect(self, conn, error):
         """
@@ -962,6 +970,7 @@ class PubSub:
             if handler is None:
                 raise PubSubError(f"Pattern: '{pattern}' has no handler registered")
 
+        await self.connect()
         while True:
             try:
                 await self.get_message(
