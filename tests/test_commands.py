@@ -4495,6 +4495,11 @@ class TestRedisCommands:
         r.set("foo", "bar")
         assert isinstance(r.memory_usage("foo"), int)
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_latency_histogram_not_implemented(self, r: redis.Redis):
+        with pytest.raises(NotImplementedError):
+            r.latency_histogram()
+
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
