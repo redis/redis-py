@@ -24,7 +24,7 @@ class Retry:
         self._retries = retries
         self._supported_errors = supported_errors
 
-    def update_supported_erros(self, specified_errors: list):
+    def update_supported_errors(self, specified_errors: list):
         """
         Updates the supported errors with the specified error types
         """
