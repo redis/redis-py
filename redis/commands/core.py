@@ -1064,6 +1064,15 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("MEMORY PURGE", **kwargs)
 
+    def latency_histogram(self, *args):
+        """
+        This function throws a NotImplementedError since it is intentionally
+        not supported.
+        """
+        raise NotImplementedError(
+            "LATENCY HISTOGRAM is intentionally not implemented in the client."
+        )
+
     def ping(self, **kwargs) -> ResponseT:
         """
         Ping the Redis server
