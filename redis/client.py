@@ -580,6 +580,17 @@ def parse_acl_getuser(response, **options):
     data["flags"] = list(map(str_if_bytes, data["flags"]))
     data["passwords"] = list(map(str_if_bytes, data["passwords"]))
     data["commands"] = str_if_bytes(data["commands"])
+    if isinstance(data["keys"], str) or isinstance(data["keys"], bytes):
+        data["keys"] = list(str_if_bytes(data["keys"]).split(" "))
+    if data["keys"] == [""]:
+        data["keys"] = []
+    if isinstance(data["channels"], str) or isinstance(data["channels"], bytes):
+        data["channels"] = list(str_if_bytes(data["channels"]).split(" "))
+    if data["channels"] == [""]:
+        data["channels"] = []
+    data["selectors"] = [
+        list(map(str_if_bytes, selector)) for selector in data["selectors"]
+    ]
 
     # split 'commands' into separate 'categories' and 'commands' lists
     commands, categories = [], []

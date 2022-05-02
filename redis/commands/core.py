@@ -186,9 +186,11 @@ class ACLCommands(CommandsProtocol):
         nopass: bool = False,
         passwords: Union[str, Iterable[str], None] = None,
         hashed_passwords: Union[str, Iterable[str], None] = None,
-        categories: Union[Iterable[str], None] = None,
-        commands: Union[Iterable[str], None] = None,
-        keys: Union[Iterable[KeyT], None] = None,
+        categories: Optional[Iterable[str]] = None,
+        commands: Optional[Iterable[str]] = None,
+        keys: Optional[Iterable[KeyT]] = None,
+        channels: Optional[Iterable[ChannelT]] = None,
+        selectors: Optional[Iterable[Tuple[str, KeyT]]] = None,
         reset: bool = False,
         reset_keys: bool = False,
         reset_passwords: bool = False,
@@ -342,7 +344,29 @@ class ACLCommands(CommandsProtocol):
         if keys:
             for key in keys:
                 key = encoder.encode(key)
-                pieces.append(b"~%s" % key)
+                if not key.startswith(b"%") and not key.startswith(b"~"):
+                    key = b"~%s" % key
+                pieces.append(key)
+
+        if channels:
+            for channel in channels:
+                channel = encoder.encode(channel)
+                pieces.append(b"&%s" % channel)
+
+        if selectors:
+            for cmd, key in selectors:
+                cmd = encoder.encode(cmd)
+                if not cmd.startswith(b"+") and not cmd.startswith(b"-"):
+                    raise DataError(
+                        f'Command "{encoder.decode(cmd, force=True)}" '
+                        'must be prefixed with "+" or "-"'
+                    )
+
+                key = encoder.encode(key)
+                if not key.startswith(b"%") and not key.startswith(b"~"):
+                    key = b"~%s" % key
+
+                pieces.append(b"(%s %s)" % (cmd, key))
 
         return self.execute_command("ACL SETUSER", *pieces, **kwargs)
 
