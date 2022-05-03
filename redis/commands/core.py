@@ -758,7 +758,7 @@ class ManagementCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/command-list/
         """
-        pieces = ["FILTERBY"]
+        pieces = []
         if module is not None:
             pieces.extend(["MODULE", module])
         if category is not None:
@@ -766,10 +766,10 @@ class ManagementCommands(CommandsProtocol):
         if pattern is not None:
             pieces.extend(["PATTERN", pattern])
 
-        if len(pieces) > 1:
-            return self.execute_command("COMMAND LIST", *pieces)
+        if pieces:
+            pieces.insert(0, "FILTERBY")
 
-        return self.execute_command("COMMAND LIST")
+        return self.execute_command("COMMAND LIST", *pieces)
 
     def command_getkeysandflags(self, *args: List[str]) -> List[Union[str, List[str]]]:
         """
