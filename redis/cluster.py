@@ -93,6 +93,9 @@ def parse_cluster_slots(resp, **options):
 
 
 def parse_cluster_shards(resp, **options):
+    """
+    Parse CLUSTER SHARDS response.
+    """
     shards = []
     for x in resp:
         shard = {"slots": [], "nodes": []}
