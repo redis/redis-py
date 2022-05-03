@@ -67,9 +67,23 @@ class TestResponseCallbacks:
 class TestRedisCommands:
     @skip_if_redis_enterprise()
     def test_auth(self, r, request):
+        # first, test for default user (`username` is supposed to be optional)
+        default_username = "default"
+        temp_pass = "temp_pass"
+        r.config_set("requirepass", temp_pass)
+
+        assert r.auth(temp_pass, default_username) is True
+        assert r.auth(temp_pass) is True
+
+        # test for other users
         username = "redis-py-auth"
 
         def teardown():
+            try:
+                r.auth(temp_pass)
+            except exceptions.ResponseError:
+                r.auth("default", "")
+            r.config_set("requirepass", "")
             r.acl_deluser(username)
 
         request.addfinalizer(teardown)
@@ -669,6 +683,12 @@ class TestRedisCommands:
         # # assert 'maxmemory' in data
         # assert data['maxmemory'].isdigit()
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_config_get_multi_params(self, r: redis.Redis):
+        res = r.config_get("*max-*-entries*", "maxmemory")
+        assert "maxmemory" in res
+        assert "hash-max-listpack-entries" in res
+
     @pytest.mark.onlynoncluster
     @skip_if_redis_enterprise()
     def test_config_resetstat(self, r):
@@ -685,6 +705,16 @@ class TestRedisCommands:
         assert r.config_get()["timeout"] == "70"
         assert r.config_set("timeout", 0)
         assert r.config_get()["timeout"] == "0"
+
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    def test_config_set_multi_params(self, r: redis.Redis):
+        r.config_set("timeout", 70, "maxmemory", 100)
+        assert r.config_get()["timeout"] == "70"
+        assert r.config_get()["maxmemory"] == "100"
+        assert r.config_set("timeout", 0, "maxmemory", 0)
+        assert r.config_get()["timeout"] == "0"
+        assert r.config_get()["maxmemory"] == "0"
 
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
@@ -710,6 +740,14 @@ class TestRedisCommands:
         assert isinstance(info, dict)
         assert "arch_bits" in info.keys()
         assert "redis_version" in info.keys()
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_info_multi_sections(self, r):
+        res = r.info("clients", "server")
+        assert isinstance(res, dict)
+        assert "redis_version" in res
+        assert "connected_clients" in res
 
     @pytest.mark.onlynoncluster
     @skip_if_redis_enterprise()
@@ -3697,6 +3735,13 @@ class TestRedisCommands:
         r.xadd(stream, {"foo": "bar"})
         assert r.xadd(stream, {"foo": "bar"}, approximate=True, minid=m3)
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_xadd_explicit_ms(self, r: redis.Redis):
+        stream = "stream"
+        message_id = r.xadd(stream, {"foo": "bar"}, "9999999999999999999-*")
+        ms = message_id[: message_id.index(b"-")]
+        assert ms == b"9999999999999999999"
+
     @skip_if_server_version_lt("6.2.0")
     def test_xautoclaim(self, r):
         stream = "stream"
@@ -3782,7 +3827,7 @@ class TestRedisCommands:
             == [message_id]
         )
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     def test_xclaim_trimmed(self, r):
         # xclaim should not raise an exception if the item is not there
         stream = "stream"
@@ -3803,9 +3848,8 @@ class TestRedisCommands:
         # xclaim them from consumer2
         # the item that is still in the stream should be returned
         item = r.xclaim(stream, group, "consumer2", 0, [sid1, sid2])
-        assert len(item) == 2
-        assert item[0] == (None, None)
-        assert item[1][0] == sid2
+        assert len(item) == 1
+        assert item[0][0] == sid2
 
     @skip_if_server_version_lt("5.0.0")
     def test_xdel(self, r):
@@ -3822,7 +3866,7 @@ class TestRedisCommands:
         assert r.xdel(stream, m1) == 1
         assert r.xdel(stream, m2, m3) == 2
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     def test_xgroup_create(self, r):
         # tests xgroup_create and xinfo_groups
         stream = "stream"
@@ -3839,11 +3883,13 @@ class TestRedisCommands:
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": b"0-0",
+                "entries-read": None,
+                "lag": 1,
             }
         ]
         assert r.xinfo_groups(stream) == expected
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     def test_xgroup_create_mkstream(self, r):
         # tests xgroup_create and xinfo_groups
         stream = "stream"
@@ -3863,6 +3909,30 @@ class TestRedisCommands:
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": b"0-0",
+                "entries-read": None,
+                "lag": 0,
+            }
+        ]
+        assert r.xinfo_groups(stream) == expected
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_xgroup_create_entriesread(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        r.xadd(stream, {"foo": "bar"})
+
+        # no group is setup yet, no info to obtain
+        assert r.xinfo_groups(stream) == []
+
+        assert r.xgroup_create(stream, group, 0, entries_read=7)
+        expected = [
+            {
+                "name": group.encode(),
+                "consumers": 0,
+                "pending": 0,
+                "last-delivered-id": b"0-0",
+                "entries-read": 7,
+                "lag": -6,
             }
         ]
         assert r.xinfo_groups(stream) == expected
@@ -3913,7 +3983,7 @@ class TestRedisCommands:
         r.xgroup_create(stream, group, 0)
         assert r.xgroup_destroy(stream, group)
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     def test_xgroup_setid(self, r):
         stream = "stream"
         group = "group"
@@ -3921,13 +3991,15 @@ class TestRedisCommands:
 
         r.xgroup_create(stream, group, 0)
         # advance the last_delivered_id to the message_id
-        r.xgroup_setid(stream, group, message_id)
+        r.xgroup_setid(stream, group, message_id, entries_read=2)
         expected = [
             {
                 "name": group.encode(),
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": message_id,
+                "entries-read": 2,
+                "lag": -1,
             }
         ]
         assert r.xinfo_groups(stream) == expected
@@ -3957,7 +4029,7 @@ class TestRedisCommands:
         assert isinstance(info[1].pop("idle"), int)
         assert info == expected
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     def test_xinfo_stream(self, r):
         stream = "stream"
         m1 = r.xadd(stream, {"foo": "bar"})
@@ -3967,6 +4039,9 @@ class TestRedisCommands:
         assert info["length"] == 2
         assert info["first-entry"] == get_stream_message(r, stream, m1)
         assert info["last-entry"] == get_stream_message(r, stream, m2)
+        assert info["max-deleted-entry-id"] == b"0-0"
+        assert info["entries-added"] == 2
+        assert info["recorded-first-entry-id"] == m1
 
     @skip_if_server_version_lt("6.0.0")
     def test_xinfo_stream_full(self, r):
@@ -4420,6 +4495,11 @@ class TestRedisCommands:
         r.set("foo", "bar")
         assert isinstance(r.memory_usage("foo"), int)
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_latency_histogram_not_implemented(self, r: redis.Redis):
+        with pytest.raises(NotImplementedError):
+            r.latency_histogram()
+
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
@@ -4469,6 +4549,15 @@ class TestRedisCommands:
         assert "get" in cmds
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    def test_command_getkeysandflags(self, r: redis.Redis):
+        res = [["mylist1", ["RW", "access", "delete"]], ["mylist2", ["RW", "insert"]]]
+        assert res == r.command_getkeysandflags(
+            "LMOVE", "mylist1", "mylist2", "left", "left"
+        )
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
     def test_module(self, r):
@@ -4478,6 +4567,18 @@ class TestRedisCommands:
 
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
             r.module_load("/some/fake/path", "arg1", "arg2", "arg3", "arg4")
+            assert "Error loading the extension." in str(excinfo.value)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    def test_module_loadex(self, r: redis.Redis):
+        with pytest.raises(redis.exceptions.ModuleError) as excinfo:
+            r.module_loadex("/some/fake/path")
+            assert "Error loading the extension." in str(excinfo.value)
+
+        with pytest.raises(redis.exceptions.ModuleError) as excinfo:
+            r.module_loadex("/some/fake/path", ["name", "value"], ["arg1", "arg2"])
             assert "Error loading the extension." in str(excinfo.value)
 
     @skip_if_server_version_lt("2.6.0")

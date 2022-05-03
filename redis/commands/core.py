@@ -256,7 +256,7 @@ class ACLCommands(CommandsProtocol):
         For more information see https://redis.io/commands/acl-setuser
         """
         encoder = self.get_encoder()
-        pieces: list[str | bytes] = [username]
+        pieces: List[EncodableT] = [username]
 
         if reset:
             pieces.append(b"reset")
@@ -376,9 +376,11 @@ class ManagementCommands(CommandsProtocol):
         authenticate for the given user.
         For more information see https://redis.io/commands/auth
         """
-        if username:
-            return self.execute_command("AUTH", username, password, **kwargs)
-        return self.execute_command
+        pieces = []
+        if username is not None:
+            pieces.append(username)
+        pieces.append(password)
+        return self.execute_command("AUTH", *pieces, **kwargs)
 
     def bgrewriteaof(self, **kwargs):
         """Tell the Redis server to rewrite the AOF file from data in memory.
@@ -743,6 +745,14 @@ class ManagementCommands(CommandsProtocol):
     def command_count(self, **kwargs) -> ResponseT:
         return self.execute_command("COMMAND COUNT", **kwargs)
 
+    def command_getkeysandflags(self, *args: List[str]) -> List[Union[str, List[str]]]:
+        """
+        Returns array of keys from a full Redis command and their usage flags.
+
+        For more information see https://redis.io/commands/command-getkeysandflags
+        """
+        return self.execute_command("COMMAND GETKEYSANDFLAGS", *args)
+
     def command_docs(self, *args):
         """
         This function throws a NotImplementedError since it is intentionally
@@ -752,20 +762,28 @@ class ManagementCommands(CommandsProtocol):
             "COMMAND DOCS is intentionally not implemented in the client."
         )
 
-    def config_get(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
+    def config_get(
+        self, pattern: PatternT = "*", *args: List[PatternT], **kwargs
+    ) -> ResponseT:
         """
         Return a dictionary of configuration based on the ``pattern``
 
         For more information see https://redis.io/commands/config-get
         """
-        return self.execute_command("CONFIG GET", pattern, **kwargs)
+        return self.execute_command("CONFIG GET", pattern, *args, **kwargs)
 
-    def config_set(self, name: KeyT, value: EncodableT, **kwargs) -> ResponseT:
+    def config_set(
+        self,
+        name: KeyT,
+        value: EncodableT,
+        *args: List[Union[KeyT, EncodableT]],
+        **kwargs,
+    ) -> ResponseT:
         """Set config item ``name`` with ``value``
 
         For more information see https://redis.io/commands/config-set
         """
-        return self.execute_command("CONFIG SET", name, value, **kwargs)
+        return self.execute_command("CONFIG SET", name, value, *args, **kwargs)
 
     def config_resetstat(self, **kwargs) -> ResponseT:
         """
@@ -884,7 +902,9 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("SELECT", index, **kwargs)
 
-    def info(self, section: Union[str, None] = None, **kwargs) -> ResponseT:
+    def info(
+        self, section: Union[str, None] = None, *args: List[str], **kwargs
+    ) -> ResponseT:
         """
         Returns a dictionary containing information about the Redis server
 
@@ -899,7 +919,7 @@ class ManagementCommands(CommandsProtocol):
         if section is None:
             return self.execute_command("INFO", **kwargs)
         else:
-            return self.execute_command("INFO", section, **kwargs)
+            return self.execute_command("INFO", section, *args, **kwargs)
 
     def lastsave(self, **kwargs) -> ResponseT:
         """
@@ -1043,6 +1063,15 @@ class ManagementCommands(CommandsProtocol):
         For more information see https://redis.io/commands/memory-purge
         """
         return self.execute_command("MEMORY PURGE", **kwargs)
+
+    def latency_histogram(self, *args):
+        """
+        This function throws a NotImplementedError since it is intentionally
+        not supported.
+        """
+        raise NotImplementedError(
+            "LATENCY HISTOGRAM is intentionally not implemented in the client."
+        )
 
     def ping(self, **kwargs) -> ResponseT:
         """
@@ -3507,6 +3536,7 @@ class StreamCommands(CommandsProtocol):
         groupname: GroupT,
         id: StreamIdT = "$",
         mkstream: bool = False,
+        entries_read: Optional[int] = None,
     ) -> ResponseT:
         """
         Create a new consumer group associated with a stream.
@@ -3519,6 +3549,9 @@ class StreamCommands(CommandsProtocol):
         pieces: list[EncodableT] = ["XGROUP CREATE", name, groupname, id]
         if mkstream:
             pieces.append(b"MKSTREAM")
+        if entries_read is not None:
+            pieces.extend(["ENTRIESREAD", entries_read])
+
         return self.execute_command(*pieces)
 
     def xgroup_delconsumer(
@@ -3574,6 +3607,7 @@ class StreamCommands(CommandsProtocol):
         name: KeyT,
         groupname: GroupT,
         id: StreamIdT,
+        entries_read: Optional[int] = None,
     ) -> ResponseT:
         """
         Set the consumer group last delivered ID to something else.
@@ -3583,7 +3617,10 @@ class StreamCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/xgroup-setid
         """
-        return self.execute_command("XGROUP SETID", name, groupname, id)
+        pieces = [name, groupname, id]
+        if entries_read is not None:
+            pieces.extend(["ENTRIESREAD", entries_read])
+        return self.execute_command("XGROUP SETID", *pieces)
 
     def xinfo_consumers(self, name: KeyT, groupname: GroupT) -> ResponseT:
         """
@@ -3830,7 +3867,7 @@ class StreamCommands(CommandsProtocol):
     def xtrim(
         self,
         name: KeyT,
-        maxlen: int,
+        maxlen: Union[int, None],
         approximate: bool = True,
         minid: Union[StreamIdT, None] = None,
         limit: Union[int, None] = None,
@@ -5605,6 +5642,27 @@ class ModuleCommands(CommandsProtocol):
         """
         return self.execute_command("MODULE LOAD", path, *args)
 
+    def module_loadex(
+        self,
+        path: str,
+        options: Optional[List[str]] = None,
+        args: Optional[List[str]] = None,
+    ) -> ResponseT:
+        """
+        Loads a module from a dynamic library at runtime with configuration directives.
+
+        For more information see https://redis.io/commands/module-loadex
+        """
+        pieces = []
+        if options is not None:
+            pieces.append("CONFIG")
+            pieces.extend(options)
+        if args is not None:
+            pieces.append("ARGS")
+            pieces.extend(args)
+
+        return self.execute_command("MODULE LOADEX", path, *pieces)
+
     def module_unload(self, name) -> ResponseT:
         """
         Unloads the module ``name``.
@@ -5734,28 +5792,20 @@ class FunctionCommands:
 
     def function_load(
         self,
-        engine: str,
-        library: str,
         code: str,
         replace: Optional[bool] = False,
-        description: Optional[str] = None,
     ) -> Union[Awaitable[str], str]:
         """
         Load a library to Redis.
-        :param engine: the name of the execution engine for the library
-        :param library: the unique name of the library
-        :param code: the source code
-        :param replace: changes the behavior to replace the library if a library called
-         ``library`` already exists
-        :param description: description to the library
+        :param code: the source code (must start with
+        Shebang statement that provides a metadata about the library)
+        :param replace: changes the behavior to overwrite the existing library
+        with the new contents.
+        Return the library name that was loaded.
 
         For more information see https://redis.io/commands/function-load
         """
-        pieces = [engine, library]
-        if replace:
-            pieces.append("REPLACE")
-        if description is not None:
-            pieces.append(description)
+        pieces = ["REPLACE"] if replace else []
         pieces.append(code)
         return self.execute_command("FUNCTION LOAD", *pieces)
 

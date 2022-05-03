@@ -22,9 +22,10 @@ jobs:
      steps:
        - uses: actions/checkout@v2
        - name: install python
-         uses: actions/setup-python@v2
+         uses: actions/setup-python@v3
          with:
            python-version: 3.9
+           cache: 'pip'
        - name: run code linters
          run: |
            pip install -r dev_requirements.txt
@@ -45,9 +46,10 @@ jobs:
      steps:
        - uses: actions/checkout@v2
        - name: install python
-         uses: actions/setup-python@v2
+         uses: actions/setup-python@v3
          with:
            python-version: ${{ matrix.python-version }}
+           cache: 'pip'
        - name: run tests
          run: |
            pip install -U setuptools wheel
@@ -68,7 +70,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: install python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v3
         with:
           python-version: 3.9
       - name: Run installed unit tests
@@ -84,9 +86,10 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: install python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v3
         with:
           python-version: ${{ matrix.python-version }}
+          cache: 'pip'
       - name: install from pip
         run: |
           pip install --quiet git+${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git@${GITHUB_SHA}
