@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copy
 import errno
 import io
@@ -8,11 +10,13 @@ import weakref
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
+from typing import List, Mapping, Optional, Sequence, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
 from packaging.version import Version
 
 from redis.backoff import NoBackoff
+from redis.compat import Literal, Protocol
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -82,6 +86,14 @@ MODULE_EXPORTS_DATA_TYPES_ERROR = (
     "exports one or more module-side data "
     "types, can't unload"
 )
+
+
+EncodingErrors = Literal["strict", "ignore", "replace", "xmlcharrefreplace"]
+
+
+class ConnectCallback(Protocol):
+    def __call__(self, connection: Connection) -> None:
+        ...
 
 
 class Encoder:
@@ -510,27 +522,30 @@ class Connection:
 
     def __init__(
         self,
-        host="localhost",
-        port=6379,
-        db=0,
-        password=None,
-        socket_timeout=None,
-        socket_connect_timeout=None,
-        socket_keepalive=False,
-        socket_keepalive_options=None,
-        socket_type=0,
-        retry_on_timeout=False,
-        retry_on_error=[],
-        encoding="utf-8",
-        encoding_errors="strict",
-        decode_responses=False,
-        parser_class=DefaultParser,
-        socket_read_size=65536,
-        health_check_interval=0,
-        client_name=None,
-        username=None,
-        retry=None,
-        redis_connect_func=None,
+        *,
+        host: str = "localhost",
+        port: Union[str, int] = 6379,
+        db: Union[str, int] = 0,
+        password: Optional[str] = None,
+        socket_timeout: Optional[float] = None,
+        socket_connect_timeout: Optional[float] = None,
+        socket_keepalive: bool = False,
+        socket_keepalive_options: Optional[
+            Mapping[int, Union[int, bytes]],
+        ] = None,
+        socket_type: int = 0,
+        retry_on_timeout: bool = False,
+        retry_on_error: list[type[BaseException]] = [],
+        encoding: str = "utf-8",
+        encoding_errors: EncodingErrors = "strict",
+        decode_responses: bool = False,
+        parser_class: type[BaseParser] = DefaultParser,
+        socket_read_size: int = 65536,
+        health_check_interval: float = 0,
+        client_name: Optional[str] = None,
+        username: Optional[str] = None,
+        retry: Optional[Retry] = None,
+        redis_connect_func: Optional[ConnectCallback] = None,
     ):
         """
         Initialize a new Connection.
