@@ -3,6 +3,7 @@ import pytest
 from redis.commands.graph import Edge, Node, Path
 from redis.commands.graph.execution_plan import Operation
 from redis.exceptions import ResponseError
+from tests.conftest import skip_if_redis_enterprise
 
 
 @pytest.fixture
@@ -311,6 +312,7 @@ def test_profile(client):
 
 
 @pytest.mark.redismod
+@skip_if_redis_enterprise()
 def test_config(client):
     config_name = "RESULTSET_SIZE"
     config_value = 3

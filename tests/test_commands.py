@@ -3765,6 +3765,13 @@ class TestRedisCommands:
         r.xadd(stream, {"foo": "bar"})
         assert r.xadd(stream, {"foo": "bar"}, approximate=True, minid=m3)
 
+    @skip_if_server_version_lt("7.0.0")
+    def test_xadd_explicit_ms(self, r: redis.Redis):
+        stream = "stream"
+        message_id = r.xadd(stream, {"foo": "bar"}, "9999999999999999999-*")
+        ms = message_id[: message_id.index(b"-")]
+        assert ms == b"9999999999999999999"
+
     @skip_if_server_version_lt("6.2.0")
     def test_xautoclaim(self, r):
         stream = "stream"
@@ -3850,7 +3857,7 @@ class TestRedisCommands:
             == [message_id]
         )
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     def test_xclaim_trimmed(self, r):
         # xclaim should not raise an exception if the item is not there
         stream = "stream"
@@ -3871,9 +3878,8 @@ class TestRedisCommands:
         # xclaim them from consumer2
         # the item that is still in the stream should be returned
         item = r.xclaim(stream, group, "consumer2", 0, [sid1, sid2])
-        assert len(item) == 2
-        assert item[0] == (None, None)
-        assert item[1][0] == sid2
+        assert len(item) == 1
+        assert item[0][0] == sid2
 
     @skip_if_server_version_lt("5.0.0")
     def test_xdel(self, r):
@@ -3890,7 +3896,7 @@ class TestRedisCommands:
         assert r.xdel(stream, m1) == 1
         assert r.xdel(stream, m2, m3) == 2
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     def test_xgroup_create(self, r):
         # tests xgroup_create and xinfo_groups
         stream = "stream"
@@ -3907,11 +3913,13 @@ class TestRedisCommands:
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": b"0-0",
+                "entries-read": None,
+                "lag": 1,
             }
         ]
         assert r.xinfo_groups(stream) == expected
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     def test_xgroup_create_mkstream(self, r):
         # tests xgroup_create and xinfo_groups
         stream = "stream"
@@ -3931,6 +3939,30 @@ class TestRedisCommands:
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": b"0-0",
+                "entries-read": None,
+                "lag": 0,
+            }
+        ]
+        assert r.xinfo_groups(stream) == expected
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_xgroup_create_entriesread(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        r.xadd(stream, {"foo": "bar"})
+
+        # no group is setup yet, no info to obtain
+        assert r.xinfo_groups(stream) == []
+
+        assert r.xgroup_create(stream, group, 0, entries_read=7)
+        expected = [
+            {
+                "name": group.encode(),
+                "consumers": 0,
+                "pending": 0,
+                "last-delivered-id": b"0-0",
+                "entries-read": 7,
+                "lag": -6,
             }
         ]
         assert r.xinfo_groups(stream) == expected
@@ -3981,7 +4013,7 @@ class TestRedisCommands:
         r.xgroup_create(stream, group, 0)
         assert r.xgroup_destroy(stream, group)
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     def test_xgroup_setid(self, r):
         stream = "stream"
         group = "group"
@@ -3989,13 +4021,15 @@ class TestRedisCommands:
 
         r.xgroup_create(stream, group, 0)
         # advance the last_delivered_id to the message_id
-        r.xgroup_setid(stream, group, message_id)
+        r.xgroup_setid(stream, group, message_id, entries_read=2)
         expected = [
             {
                 "name": group.encode(),
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": message_id,
+                "entries-read": 2,
+                "lag": -1,
             }
         ]
         assert r.xinfo_groups(stream) == expected
@@ -4025,7 +4059,7 @@ class TestRedisCommands:
         assert isinstance(info[1].pop("idle"), int)
         assert info == expected
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     def test_xinfo_stream(self, r):
         stream = "stream"
         m1 = r.xadd(stream, {"foo": "bar"})
@@ -4035,6 +4069,9 @@ class TestRedisCommands:
         assert info["length"] == 2
         assert info["first-entry"] == get_stream_message(r, stream, m1)
         assert info["last-entry"] == get_stream_message(r, stream, m2)
+        assert info["max-deleted-entry-id"] == b"0-0"
+        assert info["entries-added"] == 2
+        assert info["recorded-first-entry-id"] == m1
 
     @skip_if_server_version_lt("6.0.0")
     def test_xinfo_stream_full(self, r):
@@ -4487,6 +4524,11 @@ class TestRedisCommands:
     def test_memory_usage(self, r):
         r.set("foo", "bar")
         assert isinstance(r.memory_usage("foo"), int)
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_latency_histogram_not_implemented(self, r: redis.Redis):
+        with pytest.raises(NotImplementedError):
+            r.latency_histogram()
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("4.0.0")
