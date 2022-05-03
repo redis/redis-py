@@ -1119,7 +1119,7 @@ class ManagementCommands(CommandsProtocol):
         **kwargs,
     ) -> None:
         """Shutdown the Redis server.  If Redis has persistence configured,
-        data will be flushed before shutdown. 
+        data will be flushed before shutdown.
         It is possible to specify modifiers to alter the behavior of the command:
         ``save`` will force a DB saving operation even if no save points are configured.
         ``nosave`` will prevent a DB saving operation even if one or more save points
