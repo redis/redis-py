@@ -3505,6 +3505,7 @@ class StreamCommands(CommandsProtocol):
         groupname: GroupT,
         id: StreamIdT = "$",
         mkstream: bool = False,
+        entries_read: Optional[int] = None,
     ) -> ResponseT:
         """
         Create a new consumer group associated with a stream.
@@ -3517,6 +3518,9 @@ class StreamCommands(CommandsProtocol):
         pieces: list[EncodableT] = ["XGROUP CREATE", name, groupname, id]
         if mkstream:
             pieces.append(b"MKSTREAM")
+        if entries_read is not None:
+            pieces.extend(["ENTRIESREAD", entries_read])
+
         return self.execute_command(*pieces)
 
     def xgroup_delconsumer(
@@ -3572,6 +3576,7 @@ class StreamCommands(CommandsProtocol):
         name: KeyT,
         groupname: GroupT,
         id: StreamIdT,
+        entries_read: Optional[int] = None,
     ) -> ResponseT:
         """
         Set the consumer group last delivered ID to something else.
@@ -3581,7 +3586,10 @@ class StreamCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/xgroup-setid
         """
-        return self.execute_command("XGROUP SETID", name, groupname, id)
+        pieces = [name, groupname, id]
+        if entries_read is not None:
+            pieces.extend(["ENTRIESREAD", entries_read])
+        return self.execute_command("XGROUP SETID", *pieces)
 
     def xinfo_consumers(self, name: KeyT, groupname: GroupT) -> ResponseT:
         """
