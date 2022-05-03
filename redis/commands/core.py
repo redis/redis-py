@@ -376,9 +376,11 @@ class ManagementCommands(CommandsProtocol):
         authenticate for the given user.
         For more information see https://redis.io/commands/auth
         """
-        if username:
-            return self.execute_command("AUTH", username, password, **kwargs)
-        return self.execute_command
+        pieces = []
+        if username is not None:
+            pieces.append(username)
+        pieces.append(password)
+        return self.execute_command("AUTH", *pieces, **kwargs)
 
     def bgrewriteaof(self, **kwargs):
         """Tell the Redis server to rewrite the AOF file from data in memory.
@@ -1089,6 +1091,15 @@ class ManagementCommands(CommandsProtocol):
         For more information see https://redis.io/commands/memory-purge
         """
         return self.execute_command("MEMORY PURGE", **kwargs)
+
+    def latency_histogram(self, *args):
+        """
+        This function throws a NotImplementedError since it is intentionally
+        not supported.
+        """
+        raise NotImplementedError(
+            "LATENCY HISTOGRAM is intentionally not implemented in the client."
+        )
 
     def ping(self, **kwargs) -> ResponseT:
         """
@@ -3522,6 +3533,7 @@ class StreamCommands(CommandsProtocol):
         groupname: GroupT,
         id: StreamIdT = "$",
         mkstream: bool = False,
+        entries_read: Optional[int] = None,
     ) -> ResponseT:
         """
         Create a new consumer group associated with a stream.
@@ -3534,6 +3546,9 @@ class StreamCommands(CommandsProtocol):
         pieces: list[EncodableT] = ["XGROUP CREATE", name, groupname, id]
         if mkstream:
             pieces.append(b"MKSTREAM")
+        if entries_read is not None:
+            pieces.extend(["ENTRIESREAD", entries_read])
+
         return self.execute_command(*pieces)
 
     def xgroup_delconsumer(
@@ -3589,6 +3604,7 @@ class StreamCommands(CommandsProtocol):
         name: KeyT,
         groupname: GroupT,
         id: StreamIdT,
+        entries_read: Optional[int] = None,
     ) -> ResponseT:
         """
         Set the consumer group last delivered ID to something else.
@@ -3598,7 +3614,10 @@ class StreamCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/xgroup-setid
         """
-        return self.execute_command("XGROUP SETID", name, groupname, id)
+        pieces = [name, groupname, id]
+        if entries_read is not None:
+            pieces.extend(["ENTRIESREAD", entries_read])
+        return self.execute_command("XGROUP SETID", *pieces)
 
     def xinfo_consumers(self, name: KeyT, groupname: GroupT) -> ResponseT:
         """
@@ -3845,7 +3864,7 @@ class StreamCommands(CommandsProtocol):
     def xtrim(
         self,
         name: KeyT,
-        maxlen: int,
+        maxlen: Union[int, None],
         approximate: bool = True,
         minid: Union[StreamIdT, None] = None,
         limit: Union[int, None] = None,

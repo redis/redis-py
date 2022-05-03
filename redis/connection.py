@@ -563,7 +563,7 @@ class Connection:
                 # deep-copy the Retry object as it is mutable
                 self.retry = copy.deepcopy(retry)
             # Update the retry's supported errors with the specified errors
-            self.retry.update_supported_erros(retry_on_error)
+            self.retry.update_supported_errors(retry_on_error)
         else:
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
@@ -1099,7 +1099,7 @@ class UnixDomainSocketConnection(Connection):
                 # deep-copy the Retry object as it is mutable
                 self.retry = copy.deepcopy(retry)
             # Update the retry's supported errors with the specified errors
-            self.retry.update_supported_erros(retry_on_error)
+            self.retry.update_supported_errors(retry_on_error)
         else:
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval

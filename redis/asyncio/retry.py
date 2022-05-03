@@ -27,6 +27,7 @@ class Retry:
         """
         Initialize a `Retry` object with a `Backoff` object
         that retries a maximum of `retries` times.
+        `retries` can be negative to retry forever.
         You can specify the types of supported errors which trigger
         a retry with the `supported_errors` parameter.
         """
@@ -51,7 +52,7 @@ class Retry:
             except self._supported_errors as error:
                 failures += 1
                 await fail(error)
-                if failures > self._retries:
+                if self._retries >= 0 and failures > self._retries:
                     raise error
                 backoff = self._backoff.compute(failures)
                 if backoff > 0:

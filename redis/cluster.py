@@ -867,7 +867,10 @@ class RedisCluster(RedisClusterCommands):
         self.cluster_response_callbacks[command] = callback
 
     def _determine_nodes(self, *args, **kwargs):
-        command = args[0]
+        command = args[0].upper()
+        if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
+            command = f"{args[0]} {args[1]}".upper()
+
         nodes_flag = kwargs.pop("nodes_flag", None)
         if nodes_flag is not None:
             # nodes flag passed by the user
