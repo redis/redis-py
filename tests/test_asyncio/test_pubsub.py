@@ -642,11 +642,10 @@ class TestPubSubReconnect:
                             await loop_step()
                             # print("succ")
                         except redis.ConnectionError:
-                            err = True
-                            # print("err")
                             await asyncio.sleep(0.1)
                     except asyncio.CancelledError:
-                        # we use a cancel to interrupt the "listen" when we perform a disconnect
+                        # we use a cancel to interrupt the "listen"
+                        # when we perform a disconnect
                         # print("cancel", interrupt)
                         if interrupt:
                             interrupt = False
