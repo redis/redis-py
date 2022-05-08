@@ -1098,7 +1098,6 @@ class TestClusterRedisCommands:
         links_to = sum(x.count("to") for x in res)
         links_for = sum(x.count("from") for x in res)
         assert links_to == links_for
-        print(res)
         for i in range(0, len(res) - 1, 2):
             assert res[i][3] == res[i + 1][3]
 

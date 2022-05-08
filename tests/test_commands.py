@@ -1164,7 +1164,7 @@ class TestRedisCommands:
         r.set("key", "val")
         assert r.expire("key", 100, xx=True) == 0
         assert r.expire("key", 100)
-        assert r.expire("key", 500, nx=True) == 1
+        assert r.expire("key", 500, xx=True) == 1
 
     @skip_if_server_version_lt("7.0.0")
     def test_expire_option_gt(self, r):
@@ -3012,6 +3012,7 @@ class TestRedisCommands:
         assert r.lrange("sorted", 0, 10) == [b"vodka", b"milk", b"gin", b"apple juice"]
 
     @skip_if_server_version_lt("7.0.0")
+    @pytest.mark.onlynoncluster
     def test_sort_ro(self, r):
         r["score:1"] = 8
         r["score:2"] = 3

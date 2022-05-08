@@ -223,6 +223,7 @@ class RedisCluster(RedisClusterCommands):
             [
                 "ACL CAT",
                 "ACL DELUSER",
+                "ACL DRYRUN",
                 "ACL GENPASS",
                 "ACL GETUSER",
                 "ACL HELP",
