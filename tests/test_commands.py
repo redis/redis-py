@@ -3,6 +3,7 @@ import datetime
 import re
 import time
 from string import ascii_letters
+from unittest import mock
 
 import pytest
 
@@ -4632,6 +4633,12 @@ class TestRedisCommands:
         with pytest.raises(redis.ResponseError):
             assert r.replicaof("NO ONE")
         assert r.replicaof("NO", "ONE")
+    
+    def test_shutdown(self, r: redis.Redis):
+        conn = redis.Redis(port=6380)
+        conn.shutdown = mock.MagicMock()
+        conn.shutdown()
+        conn.shutdown.assert_called_once_with()
 
     @pytest.mark.replica
     @skip_if_server_version_lt("2.8.0")
