@@ -92,6 +92,26 @@ def parse_cluster_slots(resp, **options):
     return slots
 
 
+def parse_cluster_shards(resp, **options):
+    """
+    Parse CLUSTER SHARDS response.
+    """
+    shards = []
+    for x in resp:
+        shard = {"slots": [], "nodes": []}
+        for i in range(0, len(x[1]), 2):
+            shard["slots"].append((x[1][i], (x[1][i + 1])))
+        nodes = x[3]
+        for node in nodes:
+            dict_node = {}
+            for i in range(0, len(node), 2):
+                dict_node[node[i]] = node[i + 1]
+            shard["nodes"].append(dict_node)
+        shards.append(shard)
+
+    return shards
+
+
 PRIMARY = "primary"
 REPLICA = "replica"
 SLOT_ID = "slot-id"
@@ -220,6 +240,7 @@ class AbstractRedisCluster:
             [
                 "ACL CAT",
                 "ACL DELUSER",
+                "ACL DRYRUN",
                 "ACL GENPASS",
                 "ACL GETUSER",
                 "ACL HELP",
@@ -274,6 +295,7 @@ class AbstractRedisCluster:
                 "CLUSTER RESET",
                 "CLUSTER SET-CONFIG-EPOCH",
                 "CLUSTER SLOTS",
+                "CLUSTER SHARDS",
                 "CLUSTER COUNT-FAILURE-REPORTS",
                 "CLUSTER KEYSLOT",
                 "COMMAND",
@@ -354,7 +376,10 @@ class AbstractRedisCluster:
         ],
     )
 
-    CLUSTER_COMMANDS_RESPONSE_CALLBACKS = {"CLUSTER SLOTS": parse_cluster_slots}
+    CLUSTER_COMMANDS_RESPONSE_CALLBACKS = {
+        "CLUSTER SLOTS": parse_cluster_slots,
+        "CLUSTER SHARDS": parse_cluster_shards,
+    }
 
     RESULT_CALLBACKS = dict_merge(
         list_keys_to_dict(["PUBSUB NUMSUB"], parse_pubsub_numsub),

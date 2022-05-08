@@ -581,6 +581,14 @@ class ClusterManagementCommands(ManagementCommands):
         """
         return self.execute_command("CLUSTER SLOTS", target_nodes=target_nodes)
 
+    def cluster_shards(self, target_nodes=None):
+        """
+        Returns details about the shards of the cluster.
+
+        For more information see https://redis.io/commands/cluster-shards
+        """
+        return self.execute_command("CLUSTER SHARDS", target_nodes=target_nodes)
+
     def cluster_links(self, target_node: "TargetNodesT") -> ResponseT:
         """
         Each node in a Redis Cluster maintains a pair of long-lived TCP link with each
