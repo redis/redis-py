@@ -376,8 +376,8 @@ class AbstractRedisCluster:
     )
 
     CLUSTER_COMMANDS_RESPONSE_CALLBACKS = {
-      "CLUSTER SLOTS": parse_cluster_slots,
-      "CLUSTER SHARDS": parse_cluster_shards,
+        "CLUSTER SLOTS": parse_cluster_slots,
+        "CLUSTER SHARDS": parse_cluster_shards,
     }
 
     RESULT_CALLBACKS = dict_merge(
