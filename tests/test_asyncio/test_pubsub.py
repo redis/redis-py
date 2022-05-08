@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import sys
 from typing import Optional
 
@@ -18,6 +19,18 @@ from tests.conftest import skip_if_server_version_lt
 from .compat import mock
 
 pytestmark = pytest.mark.asyncio(forbid_global_loop=True)
+
+
+def with_timeout(t):
+    def wrapper(corofunc):
+        @functools.wraps(corofunc)
+        async def run(*args, **kwargs):
+            async with async_timeout.timeout(t):
+                return await corofunc(*args, **kwargs)
+
+        return run
+
+    return wrapper
 
 
 async def wait_for_message(pubsub, timeout=0.1, ignore_subscribe_messages=False):
@@ -601,6 +614,75 @@ class TestPubSubTimeouts:
         await p.subscribe("foo")
         assert await wait_for_message(p) == make_message("subscribe", "foo", 1)
         assert await p.get_message(timeout=0.01) is None
+
+
+@pytest.mark.onlynoncluster
+class TestPubSubReconnect:
+    # @pytest.mark.xfail
+    @with_timeout(2)
+    async def test_reconnect_listen(self, r: redis.Redis):
+        """
+        Test that a loop processing PubSub messages can survive
+        a disconnect, by issuing a connect() call.
+        """
+        messages = asyncio.Queue()
+        pubsub = r.pubsub()
+        interrupt = False
+
+        async def loop():
+            # must make sure the task exits
+            async with async_timeout.timeout(2):
+                nonlocal interrupt
+                await pubsub.subscribe("foo")
+                while True:
+                    # print("loop")
+                    try:
+                        try:
+                            await pubsub.connect()
+                            await loop_step()
+                            # print("succ")
+                        except redis.ConnectionError:
+                            await asyncio.sleep(0.1)
+                    except asyncio.CancelledError:
+                        # we use a cancel to interrupt the "listen"
+                        # when we perform a disconnect
+                        # print("cancel", interrupt)
+                        if interrupt:
+                            interrupt = False
+                        else:
+                            raise
+
+        async def loop_step():
+            # get a single message via listen()
+            async for message in pubsub.listen():
+                await messages.put(message)
+                break
+
+        task = asyncio.get_event_loop().create_task(loop())
+        # get the initial connect message
+        async with async_timeout.timeout(1):
+            message = await messages.get()
+        assert message == {
+            "channel": b"foo",
+            "data": 1,
+            "pattern": None,
+            "type": "subscribe",
+        }
+        # now, disconnect the connection.
+        await pubsub.connection.disconnect()
+        interrupt = True
+        task.cancel()  # interrupt the listen call
+        # await another auto-connect message
+        message = await messages.get()
+        assert message == {
+            "channel": b"foo",
+            "data": 1,
+            "pattern": None,
+            "type": "subscribe",
+        }
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
 
 
 @pytest.mark.onlynoncluster
