@@ -12,7 +12,6 @@ class CommandsParser:
     """
 
     def __init__(self, redis_connection):
-        self.initialized = False
         self.commands = {}
         self.initialize(redis_connection)
 

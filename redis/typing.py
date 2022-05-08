@@ -1,13 +1,14 @@
 # from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Iterable, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Awaitable, Iterable, TypeVar, Union
 
 from redis.compat import Protocol
 
 if TYPE_CHECKING:
     from redis.asyncio.connection import ConnectionPool as AsyncConnectionPool
-    from redis.connection import ConnectionPool
+    from redis.asyncio.connection import Encoder as AsyncEncoder
+    from redis.connection import ConnectionPool, Encoder
 
 
 EncodedT = Union[bytes, memoryview]
@@ -42,4 +43,11 @@ class CommandsProtocol(Protocol):
     connection_pool: Union["AsyncConnectionPool", "ConnectionPool"]
 
     def execute_command(self, *args, **options):
+        ...
+
+
+class ClusterCommandsProtocol(CommandsProtocol):
+    encoder: Union["AsyncEncoder", "Encoder"]
+
+    def execute_command(self, *args, **options) -> Union[Any, Awaitable]:
         ...

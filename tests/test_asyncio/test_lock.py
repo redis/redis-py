@@ -114,7 +114,7 @@ class TestLock:
         start = event_loop.time()
         assert not await lock2.acquire()
         # The elapsed duration should be less than the total blocking_timeout
-        assert bt > (event_loop.time() - start) > bt - sleep
+        assert bt >= (event_loop.time() - start) > bt - sleep
         await lock1.release()
 
     async def test_context_manager(self, r):

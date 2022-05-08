@@ -665,8 +665,8 @@ class TestClusterRedisCommands:
 
     def test_case_insensitive_command_names(self, r):
         assert (
-            r.cluster_response_callbacks["cluster addslots"]
-            == r.cluster_response_callbacks["CLUSTER ADDSLOTS"]
+            r.cluster_response_callbacks["cluster slots"]
+            == r.cluster_response_callbacks["CLUSTER SLOTS"]
         )
 
     def test_get_and_set(self, r):
@@ -1038,7 +1038,7 @@ class TestClusterRedisCommands:
 
     @skip_if_redis_enterprise()
     def test_cluster_get_keys_in_slot(self, r):
-        response = [b"{foo}1", b"{foo}2"]
+        response = ["{foo}1", "{foo}2"]
         node = r.nodes_manager.get_node_from_slot(12182)
         mock_node_resp(node, response)
         keys = r.cluster_get_keys_in_slot(12182, 4)
