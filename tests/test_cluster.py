@@ -856,6 +856,29 @@ class TestClusterRedisCommands:
         assert cluster_slots.get((0, 8191)) is not None
         assert cluster_slots.get((0, 8191)).get("primary") == ("127.0.0.1", 7000)
 
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    def test_cluster_shards(self, r):
+        cluster_shards = r.cluster_shards()
+        assert isinstance(cluster_shards, list)
+        assert isinstance(cluster_shards[0], dict)
+        attributes = [
+            "id",
+            "endpoint",
+            "ip",
+            "hostname",
+            "port",
+            "tls-port",
+            "role",
+            "replication-offset",
+            "health",
+        ]
+        for x in cluster_shards:
+            assert list(x.keys()) == ["slots", "nodes"]
+            for node in x["nodes"]:
+                for attribute in node.keys():
+                    assert attribute in attributes
+
     @skip_if_redis_enterprise()
     def test_cluster_addslots(self, r):
         node = r.get_random_node()
