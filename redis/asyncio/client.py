@@ -172,6 +172,7 @@ class Redis(
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
         auto_close_connection_pool: bool = True,
+        redis_connect_func=None,
     ):
         """
         Initialize a new Redis client.
@@ -200,6 +201,7 @@ class Redis(
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
+                "redis_connect_func": redis_connect_func,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -263,11 +265,7 @@ class Redis(
         """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
 
-    def load_external_module(
-        self,
-        funcname,
-        func,
-    ):
+    def load_external_module(self, funcname, func):
         """
         This function can be used to add externally defined redis modules,
         and their namespaces to the redis client.
@@ -426,9 +424,7 @@ class Redis(
     def __del__(self, _warnings: Any = warnings) -> None:
         if self.connection is not None:
             _warnings.warn(
-                f"Unclosed client session {self!r}",
-                ResourceWarning,
-                source=self,
+                f"Unclosed client session {self!r}", ResourceWarning, source=self
             )
             context = {"client": self, "message": self._DEL_MESSAGE}
             asyncio.get_event_loop().call_exception_handler(context)

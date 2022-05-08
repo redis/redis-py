@@ -120,8 +120,14 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
-    def test_acl_dryrun(self, r):
+    def test_acl_dryrun(self, r, request):
         username = "redis-py-user"
+
+        def teardown():
+            r.acl_deluser(username)
+
+        request.addfinalizer(teardown)
+
         r.acl_setuser(
             username,
             keys=["*"],
@@ -171,7 +177,7 @@ class TestRedisCommands:
         r.acl_genpass(555)
         assert isinstance(password, str)
 
-    @skip_if_server_version_lt("6.0.0")
+    @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
     def test_acl_getuser_setuser(self, r, request):
         username = "redis-py-user"
@@ -217,7 +223,7 @@ class TestRedisCommands:
         assert set(acl["commands"]) == {"+get", "+mget", "-hset"}
         assert acl["enabled"] is True
         assert "on" in acl["flags"]
-        assert set(acl["keys"]) == {b"cache:*", b"objects:*"}
+        assert set(acl["keys"]) == {"~cache:*", "~objects:*"}
         assert len(acl["passwords"]) == 2
 
         # test reset=False keeps existing ACL and applies new ACL on top
@@ -243,7 +249,7 @@ class TestRedisCommands:
         assert set(acl["commands"]) == {"+get", "+mget"}
         assert acl["enabled"] is True
         assert "on" in acl["flags"]
-        assert set(acl["keys"]) == {b"cache:*", b"objects:*"}
+        assert set(acl["keys"]) == {"~cache:*", "~objects:*"}
         assert len(acl["passwords"]) == 2
 
         # test removal of passwords
@@ -277,6 +283,30 @@ class TestRedisCommands:
             username, enabled=True, hashed_passwords=["-" + hashed_password]
         )
         assert len(r.acl_getuser(username)["passwords"]) == 1
+
+        # test selectors
+        assert r.acl_setuser(
+            username,
+            enabled=True,
+            reset=True,
+            passwords=["+pass1", "+pass2"],
+            categories=["+set", "+@hash", "-geo"],
+            commands=["+get", "+mget", "-hset"],
+            keys=["cache:*", "objects:*"],
+            channels=["message:*"],
+            selectors=[("+set", "%W~app*")],
+        )
+        acl = r.acl_getuser(username)
+        assert set(acl["categories"]) == {"-@all", "+@set", "+@hash"}
+        assert set(acl["commands"]) == {"+get", "+mget", "-hset"}
+        assert acl["enabled"] is True
+        assert "on" in acl["flags"]
+        assert set(acl["keys"]) == {"~cache:*", "~objects:*"}
+        assert len(acl["passwords"]) == 2
+        assert set(acl["channels"]) == {"&message:*"}
+        assert acl["selectors"] == [
+            ["commands", "-@all +set", "keys", "%W~app*", "channels", ""]
+        ]
 
     @skip_if_server_version_lt("6.0.0")
     def test_acl_help(self, r):
@@ -4519,6 +4549,16 @@ class TestRedisCommands:
     def test_command_docs(self, r):
         with pytest.raises(NotImplementedError):
             r.command_docs("set")
+
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    def test_command_list(self, r: redis.Redis):
+        assert len(r.command_list()) > 300
+        assert len(r.command_list(module="fakemod")) == 0
+        assert len(r.command_list(category="list")) > 15
+        assert "lpop" in r.command_list(pattern="l*")
+        with pytest.raises(redis.ResponseError):
+            r.command_list(category="list", pattern="l*")
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.13")

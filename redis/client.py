@@ -410,11 +410,7 @@ def parse_slowlog_get(response, **options):
     space = " " if options.get("decode_responses", False) else b" "
 
     def parse_item(item):
-        result = {
-            "id": item[0],
-            "start_time": int(item[1]),
-            "duration": int(item[2]),
-        }
+        result = {"id": item[0], "start_time": int(item[1]), "duration": int(item[2])}
         # Redis Enterprise injects another entry at index [3], which has
         # the complexity info (i.e. the value N in case the command has
         # an O(N) complexity) instead of the command.
@@ -580,6 +576,19 @@ def parse_acl_getuser(response, **options):
     data["flags"] = list(map(str_if_bytes, data["flags"]))
     data["passwords"] = list(map(str_if_bytes, data["passwords"]))
     data["commands"] = str_if_bytes(data["commands"])
+    if isinstance(data["keys"], str) or isinstance(data["keys"], bytes):
+        data["keys"] = list(str_if_bytes(data["keys"]).split(" "))
+    if data["keys"] == [""]:
+        data["keys"] = []
+    if "channels" in data:
+        if isinstance(data["channels"], str) or isinstance(data["channels"], bytes):
+            data["channels"] = list(str_if_bytes(data["channels"]).split(" "))
+        if data["channels"] == [""]:
+            data["channels"] = []
+    if "selectors" in data:
+        data["selectors"] = [
+            list(map(str_if_bytes, selector)) for selector in data["selectors"]
+        ]
 
     # split 'commands' into separate 'categories' and 'commands' lists
     commands, categories = [], []
@@ -690,7 +699,7 @@ class AbstractRedis:
         **string_keys_to_dict("SORT", sort_return_tuples),
         **string_keys_to_dict("ZSCORE ZINCRBY GEODIST", float_or_none),
         **string_keys_to_dict(
-            "FLUSHALL FLUSHDB LSET LTRIM MSET PFMERGE READONLY READWRITE "
+            "FLUSHALL FLUSHDB LSET LTRIM MSET PFMERGE ASKING READONLY READWRITE "
             "RENAME SAVE SELECT SHUTDOWN SLAVEOF SWAPDB WATCH UNWATCH ",
             bool_ok,
         ),
@@ -740,17 +749,18 @@ class AbstractRedis:
         "CLUSTER DELSLOTSRANGE": bool_ok,
         "CLUSTER FAILOVER": bool_ok,
         "CLUSTER FORGET": bool_ok,
+        "CLUSTER GETKEYSINSLOT": lambda r: list(map(str_if_bytes, r)),
         "CLUSTER INFO": parse_cluster_info,
         "CLUSTER KEYSLOT": lambda x: int(x),
         "CLUSTER MEET": bool_ok,
         "CLUSTER NODES": parse_cluster_nodes,
+        "CLUSTER REPLICAS": parse_cluster_nodes,
         "CLUSTER REPLICATE": bool_ok,
         "CLUSTER RESET": bool_ok,
         "CLUSTER SAVECONFIG": bool_ok,
         "CLUSTER SET-CONFIG-EPOCH": bool_ok,
         "CLUSTER SETSLOT": bool_ok,
         "CLUSTER SLAVES": parse_cluster_nodes,
-        "CLUSTER REPLICAS": parse_cluster_nodes,
         "COMMAND": parse_command,
         "COMMAND COUNT": int,
         "COMMAND GETKEYS": lambda r: list(map(str_if_bytes, r)),
@@ -1022,11 +1032,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         """Set a custom Response Callback"""
         self.response_callbacks[command] = callback
 
-    def load_external_module(
-        self,
-        funcname,
-        func,
-    ):
+    def load_external_module(self, funcname, func):
         """
         This function can be used to add externally defined redis modules,
         and their namespaces to the redis client.
