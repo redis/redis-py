@@ -4550,6 +4550,16 @@ class TestRedisCommands:
         with pytest.raises(NotImplementedError):
             r.command_docs("set")
 
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    def test_command_list(self, r: redis.Redis):
+        assert len(r.command_list()) > 300
+        assert len(r.command_list(module="fakemod")) == 0
+        assert len(r.command_list(category="list")) > 15
+        assert "lpop" in r.command_list(pattern="l*")
+        with pytest.raises(redis.ResponseError):
+            r.command_list(category="list", pattern="l*")
+
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.13")
     @skip_if_redis_enterprise()
