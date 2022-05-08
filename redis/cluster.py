@@ -240,6 +240,7 @@ class AbstractRedisCluster:
             [
                 "ACL CAT",
                 "ACL DELUSER",
+                "ACL DRYRUN",
                 "ACL GENPASS",
                 "ACL GETUSER",
                 "ACL HELP",
