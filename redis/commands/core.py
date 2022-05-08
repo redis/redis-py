@@ -186,9 +186,11 @@ class ACLCommands(CommandsProtocol):
         nopass: bool = False,
         passwords: Union[str, Iterable[str], None] = None,
         hashed_passwords: Union[str, Iterable[str], None] = None,
-        categories: Union[Iterable[str], None] = None,
-        commands: Union[Iterable[str], None] = None,
-        keys: Union[Iterable[KeyT], None] = None,
+        categories: Optional[Iterable[str]] = None,
+        commands: Optional[Iterable[str]] = None,
+        keys: Optional[Iterable[KeyT]] = None,
+        channels: Optional[Iterable[ChannelT]] = None,
+        selectors: Optional[Iterable[Tuple[str, KeyT]]] = None,
         reset: bool = False,
         reset_keys: bool = False,
         reset_passwords: bool = False,
@@ -342,7 +344,29 @@ class ACLCommands(CommandsProtocol):
         if keys:
             for key in keys:
                 key = encoder.encode(key)
-                pieces.append(b"~%s" % key)
+                if not key.startswith(b"%") and not key.startswith(b"~"):
+                    key = b"~%s" % key
+                pieces.append(key)
+
+        if channels:
+            for channel in channels:
+                channel = encoder.encode(channel)
+                pieces.append(b"&%s" % channel)
+
+        if selectors:
+            for cmd, key in selectors:
+                cmd = encoder.encode(cmd)
+                if not cmd.startswith(b"+") and not cmd.startswith(b"-"):
+                    raise DataError(
+                        f'Command "{encoder.decode(cmd, force=True)}" '
+                        'must be prefixed with "+" or "-"'
+                    )
+
+                key = encoder.encode(key)
+                if not key.startswith(b"%") and not key.startswith(b"~"):
+                    key = b"~%s" % key
+
+                pieces.append(b"(%s %s)" % (cmd, key))
 
         return self.execute_command("ACL SETUSER", *pieces, **kwargs)
 
@@ -1063,6 +1087,15 @@ class ManagementCommands(CommandsProtocol):
         For more information see https://redis.io/commands/memory-purge
         """
         return self.execute_command("MEMORY PURGE", **kwargs)
+
+    def latency_histogram(self, *args):
+        """
+        This function throws a NotImplementedError since it is intentionally
+        not supported.
+        """
+        raise NotImplementedError(
+            "LATENCY HISTOGRAM is intentionally not implemented in the client."
+        )
 
     def ping(self, **kwargs) -> ResponseT:
         """
@@ -3496,6 +3529,7 @@ class StreamCommands(CommandsProtocol):
         groupname: GroupT,
         id: StreamIdT = "$",
         mkstream: bool = False,
+        entries_read: Optional[int] = None,
     ) -> ResponseT:
         """
         Create a new consumer group associated with a stream.
@@ -3508,6 +3542,9 @@ class StreamCommands(CommandsProtocol):
         pieces: list[EncodableT] = ["XGROUP CREATE", name, groupname, id]
         if mkstream:
             pieces.append(b"MKSTREAM")
+        if entries_read is not None:
+            pieces.extend(["ENTRIESREAD", entries_read])
+
         return self.execute_command(*pieces)
 
     def xgroup_delconsumer(
@@ -3563,6 +3600,7 @@ class StreamCommands(CommandsProtocol):
         name: KeyT,
         groupname: GroupT,
         id: StreamIdT,
+        entries_read: Optional[int] = None,
     ) -> ResponseT:
         """
         Set the consumer group last delivered ID to something else.
@@ -3572,7 +3610,10 @@ class StreamCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/xgroup-setid
         """
-        return self.execute_command("XGROUP SETID", name, groupname, id)
+        pieces = [name, groupname, id]
+        if entries_read is not None:
+            pieces.extend(["ENTRIESREAD", entries_read])
+        return self.execute_command("XGROUP SETID", *pieces)
 
     def xinfo_consumers(self, name: KeyT, groupname: GroupT) -> ResponseT:
         """
