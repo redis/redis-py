@@ -1,5 +1,6 @@
 import redis
 
+from ...asyncio.client import Pipeline as AsyncioPipeline
 from .commands import AsyncSearchCommands, SearchCommands
 
 
@@ -174,5 +175,5 @@ class Pipeline(SearchCommands, redis.client.Pipeline):
     """Pipeline for the module."""
 
 
-class AsyncPipeline(AsyncSearchCommands, redis.asyncio.client.Pipeline):
+class AsyncPipeline(AsyncSearchCommands, AsyncioPipeline):
     """AsyncPipeline for the module."""
