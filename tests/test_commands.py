@@ -4634,11 +4634,17 @@ class TestRedisCommands:
             assert r.replicaof("NO ONE")
         assert r.replicaof("NO", "ONE")
 
-    def test_shutdown(self, r: redis.Redis):
-        conn = redis.Redis(port=6380)
-        conn.shutdown = mock.MagicMock()
-        conn.shutdown()
-        conn.shutdown.assert_called_once_with()
+    def test_shutdown(self):
+        r = redis.Redis(port=6380)
+        r.shutdown = mock.MagicMock()
+        r.shutdown()
+        r.shutdown.assert_called_once()
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_shutdown_with_params(self):
+        r = redis.Redis(port=6380)
+        r.shutdown(save=True, now=True, force=True, abort=False)
+        r.shutdown.assert_called_with(save=True, now=True, force=True, abort=False)
 
     @pytest.mark.replica
     @skip_if_server_version_lt("2.8.0")
