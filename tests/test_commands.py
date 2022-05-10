@@ -2215,7 +2215,6 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("6.2.0")
     def test_zadd_gt_lt(self, r):
-
         r.zadd("a", {"a": 2})
         assert r.zadd("a", {"a": 5}, gt=True, ch=True) == 1
         assert r.zadd("a", {"a": 1}, gt=True, ch=True) == 0
