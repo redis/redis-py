@@ -2224,8 +2224,11 @@ class TestRedisCommands:
         # cannot combine both nx and xx options and gt and lt options
         with pytest.raises(exceptions.DataError):
             r.zadd("a", {"a15": 15}, nx=True, lt=True)
+        with pytest.raises(exceptions.DataError):
             r.zadd("a", {"a15": 15}, nx=True, gt=True)
+        with pytest.raises(exceptions.DataError):
             r.zadd("a", {"a15": 15}, lt=True, gt=True)
+        with pytest.raises(exceptions.DataError):
             r.zadd("a", {"a15": 15}, nx=True, xx=True)
 
     def test_zcard(self, r):

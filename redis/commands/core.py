@@ -3943,8 +3943,8 @@ class SortedSetCommands(CommandsProtocol):
         xx: bool = False,
         ch: bool = False,
         incr: bool = False,
-        gt: bool = None,
-        lt: bool = None,
+        gt: bool = False,
+        lt: bool = False,
     ) -> ResponseT:
         """
         Set any number of element-name, score pairs to the key ``name``. Pairs
@@ -3983,12 +3983,14 @@ class SortedSetCommands(CommandsProtocol):
             raise DataError("ZADD requires at least one element/score pair")
         if nx and xx:
             raise DataError("ZADD allows either 'nx' or 'xx', not both")
+        if gt and lt:
+            raise DataError("ZADD allows either 'gt' or 'lt', not both")
         if incr and len(mapping) != 1:
             raise DataError(
                 "ZADD option 'incr' only works when passing a "
                 "single element/score pair"
             )
-        if nx is True and (gt is not None or lt is not None):
+        if nx and (gt or lt):
             raise DataError("Only one of 'nx', 'lt', or 'gr' may be defined.")
 
         pieces: list[EncodableT] = []
