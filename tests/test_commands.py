@@ -2216,19 +2216,18 @@ class TestRedisCommands:
     @skip_if_server_version_lt("6.2.0")
     def test_zadd_gt_lt(self, r):
 
-        for i in range(1, 20):
-            r.zadd("a", {f"a{i}": i})
-        assert r.zadd("a", {"a20": 5}, gt=3) == 1
-
-        for i in range(1, 20):
-            r.zadd("a", {f"a{i}": i})
-        assert r.zadd("a", {"a2": 5}, lt=1) == 0
+        r.zadd("a", {"a": 2})
+        assert r.zadd("a", {"a": 5}, gt=True, ch=True) == 1
+        assert r.zadd("a", {"a": 1}, gt=True, ch=True) == 0
+        assert r.zadd("a", {"a": 5}, lt=True, ch=True) == 0
+        assert r.zadd("a", {"a": 1}, lt=True, ch=True) == 1
 
         # cannot use both nx and xx options
         with pytest.raises(exceptions.DataError):
-            r.zadd("a", {"a15": 155}, nx=True, lt=True)
-            r.zadd("a", {"a15": 155}, nx=True, gt=True)
-            r.zadd("a", {"a15": 155}, lt=True, gt=True)
+            r.zadd("a", {"a15": 15}, nx=True, lt=True)
+            r.zadd("a", {"a15": 15}, nx=True, gt=True)
+            r.zadd("a", {"a15": 15}, lt=True, gt=True)
+            r.zadd("a", {"a15": 15}, nx=True, xx=True)
 
     def test_zcard(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
