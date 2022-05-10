@@ -2222,7 +2222,7 @@ class TestRedisCommands:
         assert r.zadd("a", {"a": 5}, lt=True, ch=True) == 0
         assert r.zadd("a", {"a": 1}, lt=True, ch=True) == 1
 
-        # cannot use both nx and xx options
+        # cannot combine both nx and xx options and gt and lt options
         with pytest.raises(exceptions.DataError):
             r.zadd("a", {"a15": 15}, nx=True, lt=True)
             r.zadd("a", {"a15": 15}, nx=True, gt=True)
