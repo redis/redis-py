@@ -94,7 +94,7 @@ class TestMemoryviewsAreNotPacked:
 class TestCommandsAreNotEncoded:
     @pytest.fixture()
     def r(self, request):
-        return _get_client(redis.Redis, request=request, encoding="utf-16")
+        return _get_client(redis.Redis, request=request, encoding="utf-8")
 
     def test_basic_command(self, r):
         r.set("hello", "world")

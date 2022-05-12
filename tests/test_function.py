@@ -22,10 +22,10 @@ class TestFunction:
     def reset_functions(self, r):
         r.function_flush()
 
+    @pytest.mark.onlynoncluster
     def test_function_load(self, r):
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        assert lib == r.function_load(f"#!{engine} name={lib} \n {function}")
-        assert lib == r.function_load(
+        assert b"mylib" == r.function_load(f"#!{engine} name={lib} \n {function}")
+        assert b"mylib" == r.function_load(
             f"#!{engine} name={lib} \n {function}", replace=True
         )
         with pytest.raises(ResponseError):
@@ -37,15 +37,14 @@ class TestFunction:
         r.function_load(f"#!{engine} name={lib} \n {set_function}")
         with pytest.raises(ResponseError):
             r.function_load(f"#!{engine} name={lib} \n {set_function}")
-        assert r.fcall("set", 1, "foo", "bar") == "OK"
+        assert r.fcall("set", 1, "foo", "bar") == b"OK"
         assert r.function_delete("mylib")
         with pytest.raises(ResponseError):
             r.fcall("set", 1, "foo", "bar")
-        assert lib == r.function_load(f"#!{engine} name={lib} \n {set_function}")
 
     def test_function_flush(self, r):
         r.function_load(f"#!{engine} name={lib} \n {function}")
-        assert r.fcall("myfunc", 0, "hello") == "hello"
+        assert r.fcall("myfunc", 0, "hello") == b"hello"
         assert r.function_flush()
         with pytest.raises(ResponseError):
             r.fcall("myfunc", 0, "hello")
@@ -57,19 +56,19 @@ class TestFunction:
         r.function_load(f"#!{engine} name={lib} \n {function}")
         res = [
             [
-                "library_name",
-                "mylib",
-                "engine",
-                "LUA",
-                "functions",
-                [["name", "myfunc", "description", None, "flags", ["no-writes"]]],
+                b"library_name",
+                b"mylib",
+                b"engine",
+                b"LUA",
+                b"functions",
+                [[b"name", b"myfunc", b"description", None, b"flags", [b"no-writes"]]],
             ],
         ]
         assert r.function_list() == res
         assert r.function_list(library="*lib") == res
         assert (
             r.function_list(withcode=True)[0][7]
-            == f"#!{engine} name={lib} \n {function}"
+            == f"#!{engine} name={lib} \n {function}".encode()
         )
 
     @pytest.mark.onlycluster
@@ -77,12 +76,12 @@ class TestFunction:
         r.function_load(f"#!{engine} name={lib} \n {function}")
         function_list = [
             [
-                "library_name",
-                "mylib",
-                "engine",
-                "LUA",
-                "functions",
-                [["name", "myfunc", "description", None, "flags", ["no-writes"]]],
+                b"library_name",
+                b"mylib",
+                b"engine",
+                b"LUA",
+                b"functions",
+                [[b"name", b"myfunc", b"description", None, b"flags", [b"no-writes"]]],
             ],
         ]
         primaries = r.get_primaries()
@@ -94,20 +93,20 @@ class TestFunction:
         node = primaries[0].name
         assert (
             r.function_list(withcode=True)[node][0][7]
-            == f"#!{engine} name={lib} \n {function}"
+            == f"#!{engine} name={lib} \n {function}".encode()
         )
 
     def test_fcall(self, r):
         r.function_load(f"#!{engine} name={lib} \n {set_function}")
         r.function_load(f"#!{engine} name={lib2} \n {get_function}")
-        assert r.fcall("set", 1, "foo", "bar") == "OK"
-        assert r.fcall("get", 1, "foo") == "bar"
+        assert r.fcall("set", 1, "foo", "bar") == b"OK"
+        assert r.fcall("get", 1, "foo") == b"bar"
         with pytest.raises(ResponseError):
             r.fcall("myfunc", 0, "hello")
 
     def test_fcall_ro(self, r):
         r.function_load(f"#!{engine} name={lib} \n {function}")
-        assert r.fcall_ro("myfunc", 0, "hello") == "hello"
+        assert r.fcall_ro("myfunc", 0, "hello") == b"hello"
         r.function_load(f"#!{engine} name={lib2} \n {set_function}")
         with pytest.raises(ResponseError):
             r.fcall_ro("set", 1, "foo", "bar")
@@ -115,14 +114,14 @@ class TestFunction:
     def test_function_dump_restore(self, r):
         r.function_load(f"#!{engine} name={lib} \n {set_function}")
         payload = r.function_dump()
-        assert r.fcall("set", 1, "foo", "bar") == "OK"
+        assert r.fcall("set", 1, "foo", "bar") == b"OK"
         r.function_delete("mylib")
         with pytest.raises(ResponseError):
             r.fcall("set", 1, "foo", "bar")
         assert r.function_restore(payload)
-        assert r.fcall("set", 1, "foo", "bar") == "OK"
+        assert r.fcall("set", 1, "foo", "bar") == b"OK"
         r.function_load(f"#!{engine} name={lib2} \n {get_function}")
-        assert r.fcall("get", 1, "foo") == "bar"
+        assert r.fcall("get", 1, "foo") == b"bar"
         r.function_delete("mylib")
         assert r.function_restore(payload, "FLUSH")
         with pytest.raises(ResponseError):

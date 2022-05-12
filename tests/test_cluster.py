@@ -863,15 +863,15 @@ class TestClusterRedisCommands:
         assert isinstance(cluster_shards, list)
         assert isinstance(cluster_shards[0], dict)
         attributes = [
-            "id",
-            "endpoint",
-            "ip",
-            "hostname",
-            "port",
-            "tls-port",
-            "role",
-            "replication-offset",
-            "health",
+            b"id",
+            b"endpoint",
+            b"ip",
+            b"hostname",
+            b"port",
+            b"tls-port",
+            b"role",
+            b"replication-offset",
+            b"health",
         ]
         for x in cluster_shards:
             assert list(x.keys()) == ["slots", "nodes"]
@@ -928,9 +928,24 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
-    def test_cluster_delslotsrange(self, r):
+    def test_cluster_delslotsrange(self):
+        cluster_slots = [
+            [
+                0,
+                8191,
+                ["127.0.0.1", 7000, "node_0"],
+            ],
+            [
+                8192,
+                16383,
+                ["127.0.0.1", 7001, "node_1"],
+            ],
+        ]
+        r = get_mocked_redis_client(
+            host=default_host, port=default_port, cluster_slots=cluster_slots
+        )
+        mock_all_nodes_resp(r, "OK")
         node = r.get_random_node()
-        mock_node_resp(node, "OK")
         r.cluster_addslots(node, 1, 2, 3, 4, 5)
         assert r.cluster_delslotsrange(1, 5)
 
