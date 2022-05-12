@@ -517,13 +517,10 @@ class TestRedisCommands:
         assert reset_commands_processed < prior_commands_processed
 
     async def test_config_set(self, r: redis.Redis):
-        data = await r.config_get()
-        rdbname = data["dbfilename"]
-        try:
-            assert await r.config_set("dbfilename", "redis_py_test.rdb")
-            assert (await r.config_get())["dbfilename"] == "redis_py_test.rdb"
-        finally:
-            assert await r.config_set("dbfilename", rdbname)
+        await r.config_set("timeout", 70)
+        assert (await r.config_get())["timeout"] == "70"
+        assert await r.config_set("timeout", 0)
+        assert (await r.config_get())["timeout"] == "0"
 
     @pytest.mark.onlynoncluster
     async def test_dbsize(self, r: redis.Redis):
@@ -541,7 +538,8 @@ class TestRedisCommands:
         await r.set("b", "bar")
         info = await r.info()
         assert isinstance(info, dict)
-        assert info["db9"]["keys"] == 2
+        assert "arch_bits" in info.keys()
+        assert "redis_version" in info.keys()
 
     @pytest.mark.onlynoncluster
     async def test_lastsave(self, r: redis.Redis):
@@ -2180,6 +2178,7 @@ class TestRedisCommands:
         )
 
     @skip_if_server_version_lt("3.0.0")
+    @skip_if_server_version_gte("7.0.0")
     @pytest.mark.onlynoncluster
     async def test_readwrite(self, r: redis.Redis):
         assert await r.readwrite()
@@ -2546,7 +2545,7 @@ class TestRedisCommands:
             == [message_id]
         )
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     async def test_xclaim_trimmed(self, r: redis.Redis):
         # xclaim should not raise an exception if the item is not there
         stream = "stream"
@@ -2567,9 +2566,8 @@ class TestRedisCommands:
         # xclaim them from consumer2
         # the item that is still in the stream should be returned
         item = await r.xclaim(stream, group, "consumer2", 0, [sid1, sid2])
-        assert len(item) == 2
-        assert item[0] == (None, None)
-        assert item[1][0] == sid2
+        assert len(item) == 1
+        assert item[0][0] == sid2
 
     @skip_if_server_version_lt("5.0.0")
     async def test_xdel(self, r: redis.Redis):
@@ -2586,7 +2584,7 @@ class TestRedisCommands:
         assert await r.xdel(stream, m1) == 1
         assert await r.xdel(stream, m2, m3) == 2
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     async def test_xgroup_create(self, r: redis.Redis):
         # tests xgroup_create and xinfo_groups
         stream = "stream"
@@ -2603,11 +2601,13 @@ class TestRedisCommands:
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": b"0-0",
+                "entries-read": None,
+                "lag": 1,
             }
         ]
         assert await r.xinfo_groups(stream) == expected
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     async def test_xgroup_create_mkstream(self, r: redis.Redis):
         # tests xgroup_create and xinfo_groups
         stream = "stream"
@@ -2627,6 +2627,8 @@ class TestRedisCommands:
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": b"0-0",
+                "entries-read": None,
+                "lag": 0,
             }
         ]
         assert await r.xinfo_groups(stream) == expected
@@ -2661,7 +2663,7 @@ class TestRedisCommands:
         await r.xgroup_create(stream, group, 0)
         assert await r.xgroup_destroy(stream, group)
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     async def test_xgroup_setid(self, r: redis.Redis):
         stream = "stream"
         group = "group"
@@ -2669,13 +2671,15 @@ class TestRedisCommands:
 
         await r.xgroup_create(stream, group, 0)
         # advance the last_delivered_id to the message_id
-        await r.xgroup_setid(stream, group, message_id)
+        await r.xgroup_setid(stream, group, message_id, entries_read=2)
         expected = [
             {
                 "name": group.encode(),
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": message_id,
+                "entries-read": 2,
+                "lag": -1,
             }
         ]
         assert await r.xinfo_groups(stream) == expected
