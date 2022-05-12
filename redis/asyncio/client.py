@@ -469,7 +469,10 @@ class Redis(
         is not a TimeoutError
         """
         await conn.disconnect()
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
             raise error
 
     # COMMAND EXECUTION AND PROTOCOL PARSING
