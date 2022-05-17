@@ -12,7 +12,6 @@ class GraphCommands:
     def commit(self):
         """
         Create entire graph.
-        For more information see `CREATE <https://oss.redis.com/redisgraph/master/commands/#create>`_. # noqa
         """
         if len(self.nodes) == 0 and len(self.edges) == 0:
             return None
@@ -32,7 +31,7 @@ class GraphCommands:
     def query(self, q, params=None, timeout=None, read_only=False, profile=False):
         """
         Executes a query against the graph.
-        For more information see `GRAPH.QUERY <https://oss.redis.com/redisgraph/master/commands/#graphquery>`_. # noqa
+        For more information see `GRAPH.QUERY <https://redis.io/commands/graph.query>`_. # noqa
 
         Args:
 
@@ -95,7 +94,6 @@ class GraphCommands:
     def merge(self, pattern):
         """
         Merge pattern.
-        For more information see `MERGE <https://oss.redis.com/redisgraph/master/commands/#merge>`_. # noqa
         """
         query = "MERGE "
         query += str(pattern)
@@ -105,7 +103,7 @@ class GraphCommands:
     def delete(self):
         """
         Deletes graph.
-        For more information see `DELETE <https://oss.redis.com/redisgraph/master/commands/#delete>`_. # noqa
+        For more information see `DELETE <https://redis.io/commands/graph.delete>`_. # noqa
         """
         self._clear_schema()
         return self.execute_command("GRAPH.DELETE", self.name)
@@ -132,7 +130,7 @@ class GraphCommands:
         for each operation's execution. Return a string representation of a
         query execution plan, with details on results produced by and time
         spent in each operation.
-        For more information see `GRAPH.PROFILE <https://oss.redis.com/redisgraph/master/commands/#graphprofile>`_. # noqa
+        For more information see `GRAPH.PROFILE <https://redis.io/commands/graph.profile>`_. # noqa
         """
         return self.query(query, profile=True)
 
@@ -140,7 +138,7 @@ class GraphCommands:
         """
         Get a list containing up to 10 of the slowest queries issued
         against the given graph ID.
-        For more information see `GRAPH.SLOWLOG <https://oss.redis.com/redisgraph/master/commands/#graphslowlog>`_. # noqa
+        For more information see `GRAPH.SLOWLOG <https://redis.io/commands/graph.slowlog>`_. # noqa
 
         Each item in the list has the following structure:
         1. A unix timestamp at which the log entry was processed.
@@ -153,7 +151,7 @@ class GraphCommands:
     def config(self, name, value=None, set=False):
         """
         Retrieve or update a RedisGraph configuration.
-        For more information see `GRAPH.CONFIG <https://oss.redis.com/redisgraph/master/commands/#graphconfig>`_. # noqa
+        For more information see `https://redis.io/commands/graph.config-get/>`_. # noqa
 
         Args:
 
@@ -177,7 +175,7 @@ class GraphCommands:
     def list_keys(self):
         """
         Lists all graph keys in the keyspace.
-        For more information see `GRAPH.LIST <https://oss.redis.com/redisgraph/master/commands/#graphlist>`_. # noqa
+        For more information see `GRAPH.LIST <https://redis.io/commands/graph.list>`_. # noqa
         """
         return self.execute_command("GRAPH.LIST")
 
@@ -202,6 +200,7 @@ class GraphCommands:
         """
         Get the execution plan for given query,
         GRAPH.EXPLAIN returns ExecutionPlan object.
+        For more information see `GRAPH.EXPLAIN <https://redis.io/commands/graph.explain>`_. # noqa
 
         Args:
             query: the query that will be executed
