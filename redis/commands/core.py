@@ -3888,7 +3888,7 @@ class StreamCommands(CommandsProtocol):
     def xtrim(
         self,
         name: KeyT,
-        maxlen: Union[int, None],
+        maxlen: Union[int, None] = None,
         approximate: bool = True,
         minid: Union[StreamIdT, None] = None,
         limit: Union[int, None] = None,
@@ -3908,6 +3908,9 @@ class StreamCommands(CommandsProtocol):
         pieces: list[EncodableT] = []
         if maxlen is not None and minid is not None:
             raise DataError("Only one of ``maxlen`` or ``minid`` " "may be specified")
+
+        if maxlen is None and minid is None:
+            raise DataError("One of ``maxlen`` or ``minid`` must be specified")
 
         if maxlen is not None:
             pieces.append(b"MAXLEN")
