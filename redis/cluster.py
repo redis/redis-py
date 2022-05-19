@@ -754,6 +754,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             cluster_error_retry_attempts=self.cluster_error_retry_attempts,
             read_from_replicas=self.read_from_replicas,
             reinitialize_steps=self.reinitialize_steps,
+            lock=self._lock,
         )
 
     def lock(
@@ -1754,6 +1755,7 @@ class ClusterPipeline(RedisCluster):
         read_from_replicas=False,
         cluster_error_retry_attempts=5,
         reinitialize_steps=10,
+        lock=None,
         **kwargs,
     ):
         """ """
@@ -1776,6 +1778,9 @@ class ClusterPipeline(RedisCluster):
             kwargs.get("encoding_errors", "strict"),
             kwargs.get("decode_responses", False),
         )
+        if lock is None:
+            lock = threading.Lock()
+        self._lock = lock
 
     def __repr__(self):
         """ """
