@@ -167,7 +167,7 @@ class SearchCommands:
         ### Parameters:
 
         - **delete_documents**: If `True`, all documents will be deleted.
-        
+
         For more information see `FT.DROPINDEX <https://redis.io/commands/ft.dropindex>`_.
         """  # noqa
         keep_str = "" if delete_documents else "KEEPDOCS"
