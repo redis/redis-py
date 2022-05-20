@@ -893,7 +893,6 @@ def test_type_dollar(client):
 
 @pytest.mark.redismod
 def test_clear_dollar(client):
-
     client.json().set(
         "doc1",
         "$",
@@ -905,10 +904,10 @@ def test_clear_dollar(client):
         },
     )
     # Test multi
-    assert client.json().clear("doc1", "$..a") == 4
+    assert client.json().clear("doc1", "$..a") == 3
 
     assert client.json().get("doc1", "$") == [
-        {"nested1": {"a": {}}, "a": [], "nested2": {"a": ""}, "nested3": {"a": {}}}
+        {"nested1": {"a": {}}, "a": [], "nested2": {"a": "claro"}, "nested3": {"a": {}}}
     ]
 
     # Test single
