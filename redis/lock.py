@@ -1,11 +1,12 @@
 import threading
 import time as mod_time
 import uuid
+from types import SimpleNamespace
+
 from redis.exceptions import LockError, LockNotOwnedError
-from redis.utils import dummy
 
 
-class Lock(object):
+class Lock:
     """
     A shared, distributed Lock. Using Redis for locking allows the Lock
     to be shared across processes and/or machines.
@@ -70,20 +71,28 @@ class Lock(object):
         return 1
     """
 
-    def __init__(self, redis, name, timeout=None, sleep=0.1,
-                 blocking=True, blocking_timeout=None, thread_local=True):
+    def __init__(
+        self,
+        redis,
+        name,
+        timeout=None,
+        sleep=0.1,
+        blocking=True,
+        blocking_timeout=None,
+        thread_local=True,
+    ):
         """
         Create a new Lock instance named ``name`` using the Redis client
         supplied by ``redis``.
 
-        ``timeout`` indicates a maximum life for the lock.
+        ``timeout`` indicates a maximum life for the lock in seconds.
         By default, it will remain locked until release() is called.
         ``timeout`` can be specified as a float or integer, both representing
         the number of seconds to wait.
 
-        ``sleep`` indicates the amount of time to sleep per loop iteration
-        when the lock is in blocking mode and another client is currently
-        holding the lock.
+        ``sleep`` indicates the amount of time to sleep in seconds per loop
+        iteration when the lock is in blocking mode and another client is
+        currently holding the lock.
 
         ``blocking`` indicates whether calling ``acquire`` should block until
         the lock has been acquired or to fail immediately, causing ``acquire``
@@ -129,7 +138,7 @@ class Lock(object):
         self.blocking = blocking
         self.blocking_timeout = blocking_timeout
         self.thread_local = bool(thread_local)
-        self.local = threading.local() if self.thread_local else dummy()
+        self.local = threading.local() if self.thread_local else SimpleNamespace()
         self.local.token = None
         self.register_scripts()
 
@@ -141,13 +150,10 @@ class Lock(object):
         if cls.lua_extend is None:
             cls.lua_extend = client.register_script(cls.LUA_EXTEND_SCRIPT)
         if cls.lua_reacquire is None:
-            cls.lua_reacquire = \
-                client.register_script(cls.LUA_REACQUIRE_SCRIPT)
+            cls.lua_reacquire = client.register_script(cls.LUA_REACQUIRE_SCRIPT)
 
     def __enter__(self):
-        # force blocking, as otherwise the user would have to check whether
-        # the lock was actually acquired or not.
-        if self.acquire(blocking=True):
+        if self.acquire():
             return self
         raise LockError("Unable to acquire lock within the time specified")
 
@@ -174,7 +180,7 @@ class Lock(object):
         if token is None:
             token = uuid.uuid1().hex.encode()
         else:
-            encoder = self.redis.connection_pool.get_encoder()
+            encoder = self.redis.get_encoder()
             token = encoder.encode(token)
         if blocking is None:
             blocking = self.blocking
@@ -182,14 +188,14 @@ class Lock(object):
             blocking_timeout = self.blocking_timeout
         stop_trying_at = None
         if blocking_timeout is not None:
-            stop_trying_at = mod_time.time() + blocking_timeout
+            stop_trying_at = mod_time.monotonic() + blocking_timeout
         while True:
             if self.do_acquire(token):
                 self.local.token = token
                 return True
             if not blocking:
                 return False
-            next_try_at = mod_time.time() + sleep
+            next_try_at = mod_time.monotonic() + sleep
             if stop_trying_at is not None and next_try_at > stop_trying_at:
                 return False
             mod_time.sleep(sleep)
@@ -218,10 +224,9 @@ class Lock(object):
         # need to always compare bytes to bytes
         # TODO: this can be simplified when the context manager is finished
         if stored_token and not isinstance(stored_token, bytes):
-            encoder = self.redis.connection_pool.get_encoder()
+            encoder = self.redis.get_encoder()
             stored_token = encoder.encode(stored_token)
-        return self.local.token is not None and \
-            stored_token == self.local.token
+        return self.local.token is not None and stored_token == self.local.token
 
     def release(self):
         "Releases the already acquired lock"
@@ -232,11 +237,10 @@ class Lock(object):
         self.do_release(expected_token)
 
     def do_release(self, expected_token):
-        if not bool(self.lua_release(keys=[self.name],
-                                     args=[expected_token],
-                                     client=self.redis)):
-            raise LockNotOwnedError("Cannot release a lock"
-                                    " that's no longer owned")
+        if not bool(
+            self.lua_release(keys=[self.name], args=[expected_token], client=self.redis)
+        ):
+            raise LockNotOwnedError("Cannot release a lock" " that's no longer owned")
 
     def extend(self, additional_time, replace_ttl=False):
         """
@@ -260,17 +264,11 @@ class Lock(object):
         if not bool(
             self.lua_extend(
                 keys=[self.name],
-                args=[
-                    self.local.token,
-                    additional_time,
-                    replace_ttl and "1" or "0"
-                ],
+                args=[self.local.token, additional_time, replace_ttl and "1" or "0"],
                 client=self.redis,
             )
         ):
-            raise LockNotOwnedError(
-                "Cannot extend a lock that's" " no longer owned"
-            )
+            raise LockNotOwnedError("Cannot extend a lock that's" " no longer owned")
         return True
 
     def reacquire(self):
@@ -285,9 +283,10 @@ class Lock(object):
 
     def do_reacquire(self):
         timeout = int(self.timeout * 1000)
-        if not bool(self.lua_reacquire(keys=[self.name],
-                                       args=[self.local.token, timeout],
-                                       client=self.redis)):
-            raise LockNotOwnedError("Cannot reacquire a lock that's"
-                                    " no longer owned")
+        if not bool(
+            self.lua_reacquire(
+                keys=[self.name], args=[self.local.token, timeout], client=self.redis
+            )
+        ):
+            raise LockNotOwnedError("Cannot reacquire a lock that's" " no longer owned")
         return True
