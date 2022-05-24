@@ -1559,6 +1559,30 @@ def test_profile_limited(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+def test_profile_query_params(modclient: redis.Redis):
+    modclient.flushdb()
+    modclient.ft().create_index(
+        (
+            VectorField(
+                "v", "HNSW", {"TYPE": "FLOAT32", "DIM": 2, "DISTANCE_METRIC": "L2"}
+            ),
+        )
+    )
+    modclient.hset("a", "v", "aaaaaaaa")
+    modclient.hset("b", "v", "aaaabaaa")
+    modclient.hset("c", "v", "aaaaabaa")
+    query = "*=>[KNN 2 @v $vec]"
+    q = Query(query).return_field("__v_score").sort_by("__v_score", True).dialect(2)
+    res, det = modclient.ft().profile(q, query_params={"vec": "aaaaaaaa"})
+    assert det["Iterators profile"]["Counter"] == 2.0
+    assert det["Iterators profile"]["Type"] == "VECTOR"
+    assert res.total == 2
+    assert "a" == res.docs[0].id
+    assert "0" == res.docs[0].__getattribute__("__v_score")
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.4.3", "search")
 def test_vector_field(modclient):
     modclient.flushdb()
     modclient.ft().create_index(

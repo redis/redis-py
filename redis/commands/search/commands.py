@@ -506,7 +506,7 @@ class SearchCommands:
 
         return AggregateResult(rows, cursor, schema)
 
-    def profile(self, query, limited=False):
+    def profile(self, query, query_params=None, limited=False):
         """
         Performs a search or aggregate command and collects performance
         information.
@@ -530,6 +530,8 @@ class SearchCommands:
         elif isinstance(query, Query):
             cmd[2] = "SEARCH"
             cmd += query.get_args()
+            if query_params is not None:
+                cmd += self.get_params_args(query_params)
         else:
             raise ValueError("Must provide AggregateRequest object or " "Query object.")
 
