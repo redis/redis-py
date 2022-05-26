@@ -16,7 +16,6 @@ from redis.cluster import (
     SLOT_ID,
     AbstractRedisCluster,
     LoadBalancer,
-    cleanup_kwargs,
     get_node_name,
     parse_cluster_slots,
 )
@@ -44,6 +43,33 @@ from redis.utils import dict_merge, str_if_bytes
 TargetNodesT = TypeVar(
     "TargetNodesT", str, "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
 )
+
+CONNECTION_ALLOWED_KEYS = (
+    "client_name",
+    "db",
+    "decode_responses",
+    "encoder_class",
+    "encoding",
+    "encoding_errors",
+    "health_check_interval",
+    "parser_class",
+    "password",
+    "redis_connect_func",
+    "retry",
+    "retry_on_timeout",
+    "socket_connect_timeout",
+    "socket_keepalive",
+    "socket_keepalive_options",
+    "socket_read_size",
+    "socket_timeout",
+    "socket_type",
+    "username",
+)
+
+
+def cleanup_kwargs(**kwargs: Any) -> Dict[str, Any]:
+    """Remove unsupported or disabled keys from kwargs."""
+    return {k: v for k, v in kwargs.items() if k in CONNECTION_ALLOWED_KEYS}
 
 
 class ClusterParser(DefaultParser):
