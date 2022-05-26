@@ -3,6 +3,7 @@ import binascii
 import datetime
 import sys
 import warnings
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 import pytest
 
@@ -13,21 +14,13 @@ if sys.version_info[0:2] == (3, 6):
 else:
     import pytest_asyncio
 
-from typing import Callable, Dict, List, Optional, Type, Union
-
 from _pytest.fixtures import FixtureRequest, SubRequest
 
 from redis.asyncio import Connection, RedisCluster
-from redis.asyncio.cluster import (
-    PRIMARY,
-    REDIS_CLUSTER_HASH_SLOTS,
-    REPLICA,
-    ClusterNode,
-    NodesManager,
-    get_node_name,
-)
+from redis.asyncio.cluster import ClusterNode, NodesManager
 from redis.asyncio.parser import CommandsParser
-from redis.crc import key_slot
+from redis.cluster import PRIMARY, REPLICA, get_node_name
+from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
     AskError,
     ClusterDownError,
@@ -109,7 +102,7 @@ async def get_mocked_redis_client(*args, **kwargs) -> RedisCluster:
             CommandsParser, "initialize", autospec=True
         ) as cmd_parser_initialize:
 
-            def cmd_init_mock(self, r):
+            def cmd_init_mock(self, r: ClusterNode) -> None:
                 self.commands = {
                     "GET": {
                         "name": "get",
@@ -126,12 +119,7 @@ async def get_mocked_redis_client(*args, **kwargs) -> RedisCluster:
             return await RedisCluster(*args, **kwargs)
 
 
-def mock_node_resp(
-    node: ClusterNode,
-    response: Union[
-        List[List[Union[int, List[Union[str, int]]]]], List[bytes], str, int
-    ],
-) -> ClusterNode:
+def mock_node_resp(node: ClusterNode, response: Any) -> ClusterNode:
     connection = mock.AsyncMock()
     connection.is_connected = True
     connection.read_response_without_lock.return_value = response
@@ -141,12 +129,7 @@ def mock_node_resp(
     return node
 
 
-def mock_all_nodes_resp(
-    rc: RedisCluster,
-    response: Union[
-        List[List[Union[int, List[Union[str, int]]]]], List[bytes], int, str
-    ],
-) -> RedisCluster:
+def mock_all_nodes_resp(rc: RedisCluster, response: Any) -> RedisCluster:
     for node in rc.get_nodes():
         mock_node_resp(node, response)
     return rc
@@ -461,7 +444,7 @@ class TestRedisClusterObj:
                         CommandsParser, "initialize", autospec=True
                     ) as cmd_parser_initialize:
 
-                        def cmd_init_mock(self, r):
+                        def cmd_init_mock(self, r: ClusterNode) -> None:
                             self.commands = {
                                 "GET": {
                                     "name": "get",
@@ -2217,7 +2200,7 @@ class TestNodesManager:
                 CommandsParser, "initialize", autospec=True
             ) as cmd_parser_initialize:
 
-                def cmd_init_mock(self, r):
+                def cmd_init_mock(self, r: ClusterNode) -> None:
                     self.commands = {
                         "GET": {
                             "name": "get",

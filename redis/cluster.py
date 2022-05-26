@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 from collections import OrderedDict
+from typing import Any, Dict, Tuple
 
 from redis.client import CaseInsensitiveDict, PubSub, Redis, parse_scan
 from redis.commands import CommandsParser, RedisClusterCommands
@@ -40,7 +41,7 @@ from redis.utils import (
 log = logging.getLogger(__name__)
 
 
-def get_node_name(host, port):
+def get_node_name(host: str, port: int) -> str:
     return f"{host}:{port}"
 
 
@@ -74,10 +75,12 @@ def parse_pubsub_numsub(command, res, **options):
     return ret_numsub
 
 
-def parse_cluster_slots(resp, **options):
+def parse_cluster_slots(
+    resp: Any, **options: Any
+) -> Dict[Tuple[int, int], Dict[str, Any]]:
     current_host = options.get("current_host", "")
 
-    def fix_server(*args):
+    def fix_server(*args: Any) -> Tuple[str, Any]:
         return str_if_bytes(args[0]) or current_host, args[1]
 
     slots = {}
@@ -1248,17 +1251,17 @@ class LoadBalancer:
     Round-Robin Load Balancing
     """
 
-    def __init__(self, start_index=0):
+    def __init__(self, start_index: int = 0) -> None:
         self.primary_to_idx = {}
         self.start_index = start_index
 
-    def get_server_index(self, primary, list_size):
+    def get_server_index(self, primary: str, list_size: int) -> int:
         server_index = self.primary_to_idx.setdefault(primary, self.start_index)
         # Update the index
         self.primary_to_idx[primary] = (server_index + 1) % list_size
         return server_index
 
-    def reset(self):
+    def reset(self) -> None:
         self.primary_to_idx.clear()
 
 
