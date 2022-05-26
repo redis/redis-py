@@ -903,18 +903,16 @@ class NodesManager:
         new: Dict[str, "ClusterNode"],
         remove_old: bool = False,
     ) -> None:
-        tasks = []
         if remove_old:
-            tasks = [
-                asyncio.ensure_future(node.disconnect())
-                for name, node in old.items()
-                if name not in new
-            ]
+            for name in list(old.keys()):
+                if name not in new:
+                    asyncio.ensure_future(old.pop(name).disconnect())
+
         for name, node in new.items():
             if name in old:
                 if old[name] is node:
                     continue
-                tasks.append(asyncio.ensure_future(old[name].disconnect()))
+                asyncio.ensure_future(old[name].disconnect())
             old[name] = node
 
     def _update_moved_slots(self) -> None:
