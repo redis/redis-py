@@ -2230,3 +2230,20 @@ class TestNodesManager:
                 async with RedisCluster(startup_nodes=[node_1, node_2]) as rc:
                     assert rc.get_node(host=default_host, port=7001) is not None
                     assert rc.get_node(host=default_host, port=7002) is not None
+
+
+@pytest.mark.onlycluster
+class TestClusterNode:
+    """
+    Tests for the ClusterNode class
+    """
+
+    async def test_valid_response_callbacks(self) -> None:
+        """
+        ClusterNode must have valid default response_callbacks.
+        """
+
+        startup_nodes = [ClusterNode("127.0.0.1", 16379)]
+        async with RedisCluster(startup_nodes=startup_nodes) as rc:
+            assert await rc.set("A", 1)
+            assert await rc.get("A") == b'1'
