@@ -2246,4 +2246,4 @@ class TestClusterNode:
         startup_nodes = [ClusterNode("127.0.0.1", 16379)]
         async with RedisCluster(startup_nodes=startup_nodes) as rc:
             assert await rc.set("A", 1)
-            assert await rc.get("A") == b'1'
+            assert await rc.get("A") == b"1"
