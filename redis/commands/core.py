@@ -2593,7 +2593,7 @@ class ListCommands(CommandsProtocol):
         else:
             return self.execute_command("LPOP", name)
 
-    def lpush(self, name: str, *values: List) -> Union[Awaitable[int], int]:
+    def lpush(self, name: str, *values: FieldT) -> Union[Awaitable[int], int]:
         """
         Push ``values`` onto the head of the list ``name``
 
@@ -2601,7 +2601,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LPUSH", name, *values)
 
-    def lpushx(self, name: str, *values: List) -> Union[Awaitable[int], int]:
+    def lpushx(self, name: str, *values: FieldT) -> Union[Awaitable[int], int]:
         """
         Push ``value`` onto the head of the list ``name`` if ``name`` exists
 
@@ -2679,7 +2679,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("RPOPLPUSH", src, dst)
 
-    def rpush(self, name: str, *values: List) -> Union[Awaitable[int], int]:
+    def rpush(self, name: str, *values: FieldT) -> Union[Awaitable[int], int]:
         """
         Push ``values`` onto the tail of the list ``name``
 
@@ -3169,7 +3169,7 @@ class SetCommands(CommandsProtocol):
     see: https://redis.io/topics/data-types#sets
     """
 
-    def sadd(self, name: str, *values: List) -> Union[Awaitable[int], int]:
+    def sadd(self, name: str, *values: FieldT) -> Union[Awaitable[int], int]:
         """
         Add ``value(s)`` to set ``name``
 
@@ -3307,7 +3307,7 @@ class SetCommands(CommandsProtocol):
         args = (number is not None) and [number] or []
         return self.execute_command("SRANDMEMBER", name, *args)
 
-    def srem(self, name: str, *values: List) -> Union[Awaitable[int], int]:
+    def srem(self, name: str, *values: FieldT) -> Union[Awaitable[int], int]:
         """
         Remove ``values`` from set ``name``
 
@@ -4586,7 +4586,7 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZRANK", name, value)
 
-    def zrem(self, name: KeyT, *values: EncodableT) -> ResponseT:
+    def zrem(self, name: KeyT, *values: FieldT) -> ResponseT:
         """
         Remove member ``values`` from sorted set ``name``
 
@@ -4735,7 +4735,7 @@ class HyperlogCommands(CommandsProtocol):
     see: https://redis.io/topics/data-types-intro#hyperloglogs
     """
 
-    def pfadd(self, name: KeyT, *values: EncodableT) -> ResponseT:
+    def pfadd(self, name: KeyT, *values: FieldT) -> ResponseT:
         """
         Adds the specified elements to the specified HyperLogLog.
 
