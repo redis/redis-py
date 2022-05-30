@@ -3,7 +3,7 @@ from json import JSONDecoder, JSONEncoder
 
 class RedisModuleCommands:
     """This class contains the wrapper functions to bring supported redis
-    modules into the command namepsace.
+    modules into the command namespace.
     """
 
     def json(self, encoder=JSONEncoder(), decoder=JSONDecoder()):

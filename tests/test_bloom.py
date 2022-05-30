@@ -173,6 +173,7 @@ def test_cf_exists_and_del(client):
     assert client.cf().add("cuckoo", "filter")
     assert client.cf().exists("cuckoo", "filter")
     assert not client.cf().exists("cuckoo", "notexist")
+    assert [1, 0] == client.cf().mexists("cuckoo", "filter", "notexist")
     assert 1 == client.cf().count("cuckoo", "filter")
     assert 0 == client.cf().count("cuckoo", "notexist")
     assert client.cf().delete("cuckoo", "filter")

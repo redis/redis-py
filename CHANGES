@@ -9,6 +9,7 @@
     * Remove verbose logging when initializing ClusterPubSub, ClusterPipeline or RedisCluster
     * Fix broken connection writer lock-up for asyncio (#2065)
     * Fix auth bug when provided with no username (#2086)
+    * Fix missing ClusterPipeline._lock (#2189)
 
 * 4.1.3 (Feb 8, 2022)
     * Fix flushdb and flushall (#1926)
