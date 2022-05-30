@@ -725,7 +725,7 @@ class ClusterNode:
         server_type: Optional[str] = None,
         max_connections: int = 2 ** 31,
         connection_class: Type[Connection] = Connection,
-        response_callbacks: Dict = None,
+        response_callbacks: Dict = RedisCluster.RESPONSE_CALLBACKS,
         **connection_kwargs,
     ) -> None:
         if host == "localhost":

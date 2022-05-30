@@ -244,6 +244,11 @@ class TestRedisClusterObj:
 
         await cluster.close()
 
+        startup_nodes = [ClusterNode("127.0.0.1", 16379)]
+        async with RedisCluster(startup_nodes=startup_nodes) as rc:
+            assert await rc.set("A", 1)
+            assert await rc.get("A") == b"1"
+
     async def test_empty_startup_nodes(self) -> None:
         """
         Test that exception is raised when empty providing empty startup_nodes
