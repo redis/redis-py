@@ -17,7 +17,7 @@ from typing import (
 )
 
 from redis.asyncio.client import ResponseCallbackT
-from redis.asyncio.connection import Connection, DefaultParser, Encoder, parse_url
+from redis.asyncio.connection import Connection, DefaultParser, parse_url
 from redis.asyncio.parser import CommandsParser
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis
 from redis.cluster import (
@@ -33,7 +33,7 @@ from redis.cluster import (
     parse_cluster_slots,
 )
 from redis.commands import AsyncRedisClusterCommands
-from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
+from redis.encoder import Encoder
 from redis.exceptions import (
     AskError,
     BusyLoadingError,
@@ -50,6 +50,7 @@ from redis.exceptions import (
     TimeoutError,
     TryAgainError,
 )
+from redis.slotter import REDIS_CLUSTER_HASH_SLOTS, KeySlotter
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import dict_merge, safe_str, str_if_bytes
 
@@ -222,6 +223,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         "commands_parser",
         "connection_kwargs",
         "encoder",
+        "key_slotter",
         "node_flags",
         "nodes_manager",
         "read_from_replicas",
@@ -301,6 +303,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             kwargs.get("encoding_errors", "strict"),
             kwargs.get("decode_responses", False),
         )
+        self.key_slotter = KeySlotter(self.encoder)
         self.cluster_error_retry_attempts = cluster_error_retry_attempts
         self.read_from_replicas = read_from_replicas
         self.reinitialize_steps = reinitialize_steps
@@ -417,7 +420,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
         :raises SlotNotCoveredError: if the key is not covered by any slot.
         """
-        slot = self.keyslot(key)
+        slot = self.key_slotter.key_slot(key)
         slot_cache = self.nodes_manager.slots_cache.get(slot)
         if not slot_cache:
             raise SlotNotCoveredError(f'Slot "{slot}" is not covered by the cluster.')
@@ -464,8 +467,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
         See: https://redis.io/docs/manual/scaling/#redis-cluster-data-sharding
         """
-        k = self.encoder.encode(key)
-        return key_slot(k)
+        return self.key_slotter.key_slot(key)
 
     async def _determine_nodes(
         self, command: str, *args: Any, node_flag: Optional[str] = None
@@ -538,11 +540,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
         # single key command
         if len(keys) == 1:
-            return self.keyslot(keys[0])
+            return self.key_slotter.key_slot(keys[0])
 
         # multi-key command; we need to make sure all keys are mapped to
         # the same slot
-        slots = {self.keyslot(key) for key in keys}
+        slots = {self.key_slotter.key_slot(key) for key in keys}
         if len(slots) != 1:
             raise RedisClusterException(
                 f"{command} - all keys must map to the same key slot"
@@ -878,7 +880,9 @@ class ClusterNode:
         connection = self.acquire_connection()
 
         # Execute command
-        await connection.send_packed_command(connection.pack_command(*args), False)
+        await connection.send_packed_command(
+            connection.command_packer.pack_command(*args), False
+        )
 
         # Read response
         try:
@@ -893,7 +897,10 @@ class ClusterNode:
 
         # Execute command
         await connection.send_packed_command(
-            connection.pack_commands(cmd.args for cmd in self._command_stack), False
+            connection.command_packer.pack_commands(
+                cmd.args for cmd in self._command_stack
+            ),
+            False,
         )
 
         # Read responses
@@ -1408,7 +1415,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
 
         slots_pairs = {}
         for pair in mapping.items():
-            slot = key_slot(encoder.encode(pair[0]))
+            slot = self._client.key_slotter.key_slot(encoder.encode(pair[0]))
             slots_pairs.setdefault(slot, []).extend(pair)
 
         for pairs in slots_pairs.values():

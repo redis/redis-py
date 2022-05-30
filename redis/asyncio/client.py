@@ -1245,7 +1245,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         self, connection: Connection, commands: CommandStackT, raise_on_error: bool
     ):
         # build up all commands into a single request to increase network perf
-        all_cmds = connection.pack_commands([args for args, _ in commands])
+        all_cmds = connection.pack_commands(args for args, _ in commands)
         await connection.send_packed_command(all_cmds)
 
         response = []

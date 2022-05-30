@@ -1,5 +1,7 @@
 #!/usr/bin/env python
+
 from setuptools import find_packages, setup
+from setuptools.extension import Extension
 
 setup(
     name="redis",
@@ -60,4 +62,5 @@ setup(
         "hiredis": ["hiredis>=1.0.0"],
         "ocsp": ["cryptography>=36.0.1", "pyopenssl==20.0.1", "requests>=2.26.0"],
     },
+    ext_modules=[Extension(name="redis.speedups", sources=["redis/speedups.c"])],
 )

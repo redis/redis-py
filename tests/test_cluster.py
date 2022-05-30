@@ -18,7 +18,6 @@ from redis.cluster import (
 )
 from redis.commands import CommandsParser
 from redis.connection import Connection
-from redis.crc import key_slot
 from redis.exceptions import (
     AskError,
     ClusterDownError,
@@ -1217,7 +1216,7 @@ class TestClusterRedisCommands:
 
     def test_slowlog_length(self, r, slowlog):
         r.get("foo")
-        node = r.nodes_manager.get_node_from_slot(key_slot(b"foo"))
+        node = r.nodes_manager.get_node_from_slot(r.keyslot(b"foo"))
         slowlog_len = r.slowlog_len(target_nodes=node)
         assert isinstance(slowlog_len, int)
 
@@ -1243,7 +1242,7 @@ class TestClusterRedisCommands:
         # put a key into the current db to make sure that "db.<current-db>"
         # has data
         r.set("foo", "bar")
-        node = r.nodes_manager.get_node_from_slot(key_slot(b"foo"))
+        node = r.nodes_manager.get_node_from_slot(r.keyslot(b"foo"))
         stats = r.memory_stats(target_nodes=node)
         assert isinstance(stats, dict)
         for key, value in stats.items():

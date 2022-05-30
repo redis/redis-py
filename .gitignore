@@ -18,3 +18,4 @@ coverage.xml
 *.xml
 .coverage*
 docker/stunnel/keys
+*.so

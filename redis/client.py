@@ -1917,7 +1917,7 @@ class Pipeline(Redis):
     def _execute_transaction(self, connection, commands, raise_on_error):
         cmds = chain([(("MULTI",), {})], commands, [(("EXEC",), {})])
         all_cmds = connection.pack_commands(
-            [args for args, options in cmds if EMPTY_RESPONSE not in options]
+            args for args, options in cmds if EMPTY_RESPONSE not in options
         )
         connection.send_packed_command(all_cmds)
         errors = []
@@ -1983,7 +1983,7 @@ class Pipeline(Redis):
 
     def _execute_pipeline(self, connection, commands, raise_on_error):
         # build up all commands into a single request to increase network perf
-        all_cmds = connection.pack_commands([args for args, _ in commands])
+        all_cmds = connection.pack_commands(args for args, _ in commands)
         connection.send_packed_command(all_cmds)
 
         response = []

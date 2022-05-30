@@ -31,14 +31,15 @@ import async_timeout
 
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
+from redis.commands.packer import SYM_CRLF, CommandPacker
 from redis.compat import Protocol, TypedDict
+from redis.encoder import Encoder
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
     BusyLoadingError,
     ChildDeadlockedError,
     ConnectionError,
-    DataError,
     ExecAbortError,
     InvalidResponse,
     ModuleError,
@@ -49,7 +50,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
-from redis.typing import EncodableT, EncodedT
+from redis.typing import EncodableT
 from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 
 hiredis = None
@@ -65,12 +66,6 @@ NONBLOCKING_EXCEPTION_ERROR_NUMBERS = {
 
 NONBLOCKING_EXCEPTIONS = tuple(NONBLOCKING_EXCEPTION_ERROR_NUMBERS.keys())
 
-
-SYM_STAR = b"*"
-SYM_DOLLAR = b"$"
-SYM_CRLF = b"\r\n"
-SYM_LF = b"\n"
-SYM_EMPTY = b""
 
 SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
 
@@ -95,47 +90,6 @@ class _HiredisReaderArgs(TypedDict, total=False):
     replyError: Callable[[str], Exception]
     encoding: Optional[str]
     errors: Optional[str]
-
-
-class Encoder:
-    """Encode strings to bytes-like and decode bytes-like to strings"""
-
-    __slots__ = "encoding", "encoding_errors", "decode_responses"
-
-    def __init__(self, encoding: str, encoding_errors: str, decode_responses: bool):
-        self.encoding = encoding
-        self.encoding_errors = encoding_errors
-        self.decode_responses = decode_responses
-
-    def encode(self, value: EncodableT) -> EncodedT:
-        """Return a bytestring or bytes-like representation of the value"""
-        if isinstance(value, str):
-            return value.encode(self.encoding, self.encoding_errors)
-        if isinstance(value, (bytes, memoryview)):
-            return value
-        if isinstance(value, (int, float)):
-            if isinstance(value, bool):
-                # special case bool since it is a subclass of int
-                raise DataError(
-                    "Invalid input of type: 'bool'. "
-                    "Convert to a bytes, string, int or float first."
-                )
-            return repr(value).encode()
-        # a value we don't know how to deal with. throw an error
-        typename = value.__class__.__name__
-        raise DataError(
-            f"Invalid input of type: {typename!r}. "
-            "Convert to a bytes, string, int or float first."
-        )
-
-    def decode(self, value: EncodableT, force=False) -> EncodableT:
-        """Return a unicode string from the bytes-like representation"""
-        if self.decode_responses or force:
-            if isinstance(value, bytes):
-                return value.decode(self.encoding, self.encoding_errors)
-            if isinstance(value, memoryview):
-                return value.tobytes().decode(self.encoding, self.encoding_errors)
-        return value
 
 
 ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Exception]]]]
@@ -582,12 +536,12 @@ class Connection:
         "next_health_check",
         "last_active_at",
         "encoder",
+        "command_packer",
         "ssl_context",
         "_reader",
         "_writer",
         "_parser",
         "_connect_callbacks",
-        "_buffer_cutoff",
         "_lock",
         "_socket_read_size",
         "__dict__",
@@ -643,13 +597,13 @@ class Connection:
         self.next_health_check: float = -1
         self.ssl_context: Optional[RedisSSLContext] = None
         self.encoder = encoder_class(encoding, encoding_errors, decode_responses)
+        self.command_packer = CommandPacker(self.encoder)
         self.redis_connect_func = redis_connect_func
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
         self._socket_read_size = socket_read_size
         self.set_parser(parser_class)
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
-        self._buffer_cutoff = 6000
         self._lock = asyncio.Lock()
 
     def __repr__(self):
@@ -894,7 +848,8 @@ class Connection:
     async def send_command(self, *args: Any, **kwargs: Any) -> None:
         """Pack and send a command to the Redis server"""
         await self.send_packed_command(
-            self.pack_command(*args), check_health=kwargs.get("check_health", True)
+            self.command_packer.pack_command(*args),
+            check_health=kwargs.get("check_health", True),
         )
 
     async def can_read(self, timeout: float = 0):
@@ -982,78 +937,11 @@ class Connection:
 
     def pack_command(self, *args: EncodableT) -> List[bytes]:
         """Pack a series of arguments into the Redis protocol"""
-        output = []
-        # the client might have included 1 or more literal arguments in
-        # the command name, e.g., 'CONFIG GET'. The Redis server expects these
-        # arguments to be sent separately, so split the first argument
-        # manually. These arguments should be bytestrings so that they are
-        # not encoded.
-        assert not isinstance(args[0], float)
-        if isinstance(args[0], str):
-            args = tuple(args[0].encode().split()) + args[1:]
-        elif b" " in args[0]:
-            args = tuple(args[0].split()) + args[1:]
-
-        buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
-
-        buffer_cutoff = self._buffer_cutoff
-        for arg in map(self.encoder.encode, args):
-            # to avoid large string mallocs, chunk the command into the
-            # output list if we're sending large values or memoryviews
-            arg_length = len(arg)
-            if (
-                len(buff) > buffer_cutoff
-                or arg_length > buffer_cutoff
-                or isinstance(arg, memoryview)
-            ):
-                buff = SYM_EMPTY.join(
-                    (buff, SYM_DOLLAR, str(arg_length).encode(), SYM_CRLF)
-                )
-                output.append(buff)
-                output.append(arg)
-                buff = SYM_CRLF
-            else:
-                buff = SYM_EMPTY.join(
-                    (
-                        buff,
-                        SYM_DOLLAR,
-                        str(arg_length).encode(),
-                        SYM_CRLF,
-                        arg,
-                        SYM_CRLF,
-                    )
-                )
-        output.append(buff)
-        return output
+        return self.command_packer.pack_command(*args)
 
     def pack_commands(self, commands: Iterable[Iterable[EncodableT]]) -> List[bytes]:
         """Pack multiple commands into the Redis protocol"""
-        output: List[bytes] = []
-        pieces: List[bytes] = []
-        buffer_length = 0
-        buffer_cutoff = self._buffer_cutoff
-
-        for cmd in commands:
-            for chunk in self.pack_command(*cmd):
-                chunklen = len(chunk)
-                if (
-                    buffer_length > buffer_cutoff
-                    or chunklen > buffer_cutoff
-                    or isinstance(chunk, memoryview)
-                ):
-                    output.append(SYM_EMPTY.join(pieces))
-                    buffer_length = 0
-                    pieces = []
-
-                if chunklen > buffer_cutoff or isinstance(chunk, memoryview):
-                    output.append(chunk)
-                else:
-                    pieces.append(chunk)
-                    buffer_length += chunklen
-
-        if pieces:
-            output.append(SYM_EMPTY.join(pieces))
-        return output
+        return self.command_packer.pack_commands(commands)
 
 
 class SSLConnection(Connection):
@@ -1208,7 +1096,6 @@ class UnixDomainSocketConnection(Connection):  # lgtm [py/missing-call-to-init]
         self._socket_read_size = socket_read_size
         self.set_parser(parser_class)
         self._connect_callbacks = []
-        self._buffer_cutoff = 6000
         self._lock = asyncio.Lock()
 
     def repr_pieces(self) -> Iterable[Tuple[str, Union[str, int]]]:

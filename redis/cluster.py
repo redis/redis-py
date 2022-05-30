@@ -11,7 +11,6 @@ from typing import Any, Callable, Dict, Tuple
 from redis.client import CaseInsensitiveDict, PubSub, Redis, parse_scan
 from redis.commands import CommandsParser, RedisClusterCommands
 from redis.connection import ConnectionPool, DefaultParser, Encoder, parse_url
-from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
     AskError,
     BusyLoadingError,
@@ -30,6 +29,7 @@ from redis.exceptions import (
     TryAgainError,
 )
 from redis.lock import Lock
+from redis.slotter import REDIS_CLUSTER_HASH_SLOTS, KeySlotter
 from redis.utils import (
     dict_merge,
     list_keys_to_dict,
@@ -586,6 +586,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             kwargs.get("encoding_errors", "strict"),
             kwargs.get("decode_responses", False),
         )
+        self.key_slotter = KeySlotter(self.encoder)
         self.cluster_error_retry_attempts = cluster_error_retry_attempts
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
@@ -674,7 +675,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         If replica set to True but the slot doesn't have any replicas, None is
         returned.
         """
-        slot = self.keyslot(key)
+        slot = self.key_slotter.key_slot(key)
         slot_cache = self.nodes_manager.slots_cache.get(slot)
         if slot_cache is None or len(slot_cache) == 0:
             raise SlotNotCoveredError(f'Slot "{slot}" is not covered by the cluster.')
@@ -891,11 +892,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
 
     def keyslot(self, key):
         """
-        Calculate keyslot for a given key.
-        See Keys distribution model in https://redis.io/topics/cluster-spec
+        Find the keyslot for a given key.
+
+        See: https://redis.io/docs/manual/scaling/#redis-cluster-data-sharding
         """
-        k = self.encoder.encode(key)
-        return key_slot(k)
+        return self.key_slotter.key_slot(key)
 
     def _get_command_keys(self, *args):
         """
@@ -957,11 +958,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
 
         # single key command
         if len(keys) == 1:
-            return self.keyslot(keys[0])
+            return self.key_slotter.key_slot(keys[0])
 
         # multi-key command; we need to make sure all keys are mapped to
         # the same slot
-        slots = {self.keyslot(key) for key in keys}
+        slots = {self.key_slotter.key_slot(key) for key in keys}
         if len(slots) != 1:
             raise RedisClusterException(
                 f"{command} - all keys must map to the same key slot"
@@ -1790,6 +1791,7 @@ class ClusterPipeline(RedisCluster):
             kwargs.get("encoding_errors", "strict"),
             kwargs.get("decode_responses", False),
         )
+        self.key_slotter = KeySlotter(self.encoder)
         if lock is None:
             lock = threading.Lock()
         self._lock = lock
@@ -2276,7 +2278,7 @@ class NodeCommands:
         # send all the commands and catch connection and timeout errors.
         try:
             connection.send_packed_command(
-                connection.pack_commands([c.args for c in commands])
+                connection.command_packer.pack_commands(c.args for c in commands)
             )
         except (ConnectionError, TimeoutError) as e:
             for c in commands:

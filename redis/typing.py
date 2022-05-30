@@ -7,8 +7,8 @@ from redis.compat import Protocol
 
 if TYPE_CHECKING:
     from redis.asyncio.connection import ConnectionPool as AsyncConnectionPool
-    from redis.asyncio.connection import Encoder as AsyncEncoder
-    from redis.connection import ConnectionPool, Encoder
+    from redis.connection import ConnectionPool
+    from redis.slotter import KeySlotter
 
 
 Number = Union[int, float]
@@ -48,7 +48,7 @@ class CommandsProtocol(Protocol):
 
 
 class ClusterCommandsProtocol(CommandsProtocol):
-    encoder: Union["AsyncEncoder", "Encoder"]
+    key_slotter: "KeySlotter"
 
     def execute_command(self, *args, **options) -> Union[Any, Awaitable]:
         ...

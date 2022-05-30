@@ -20,7 +20,6 @@ from redis.asyncio import Connection, RedisCluster
 from redis.asyncio.cluster import ClusterNode, NodesManager
 from redis.asyncio.parser import CommandsParser
 from redis.cluster import PIPELINE_BLOCKED_COMMANDS, PRIMARY, REPLICA, get_node_name
-from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
     AskError,
     ClusterDownError,
@@ -32,6 +31,7 @@ from redis.exceptions import (
     RedisError,
     ResponseError,
 )
+from redis.slotter import REDIS_CLUSTER_HASH_SLOTS
 from redis.utils import str_if_bytes
 from tests.conftest import (
     skip_if_redis_enterprise,
@@ -1132,7 +1132,7 @@ class TestClusterRedisCommands:
 
     async def test_slowlog_length(self, r: RedisCluster, slowlog: None) -> None:
         await r.get("foo")
-        node = r.nodes_manager.get_node_from_slot(key_slot(b"foo"))
+        node = r.nodes_manager.get_node_from_slot(r.keyslot("foo"))
         slowlog_len = await r.slowlog_len(target_nodes=node)
         assert isinstance(slowlog_len, int)
 
@@ -1158,7 +1158,7 @@ class TestClusterRedisCommands:
         # put a key into the current db to make sure that "db.<current-db>"
         # has data
         await r.set("foo", "bar")
-        node = r.nodes_manager.get_node_from_slot(key_slot(b"foo"))
+        node = r.nodes_manager.get_node_from_slot(r.keyslot("foo"))
         stats = await r.memory_stats(target_nodes=node)
         assert isinstance(stats, dict)
         for key, value in stats.items():

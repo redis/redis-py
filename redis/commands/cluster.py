@@ -14,7 +14,6 @@ from typing import (
 )
 
 from redis.compat import Literal
-from redis.crc import key_slot
 from redis.exceptions import RedisClusterException, RedisError
 from redis.typing import (
     AnyKeyT,
@@ -58,8 +57,7 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
         """
         slots_to_keys = {}
         for key in keys:
-            k = self.encoder.encode(key)
-            slot = key_slot(k)
+            slot = self.key_slotter.key_slot(key)
             slots_to_keys.setdefault(slot, []).append(key)
 
         return slots_to_keys
@@ -116,9 +114,7 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
         # Partition the keys by slot
         slots_to_pairs = {}
         for pair in mapping.items():
-            # encode the key
-            k = self.encoder.encode(pair[0])
-            slot = key_slot(k)
+            slot = self.key_slotter.key_slot(pair[0])
             slots_to_pairs.setdefault(slot, []).extend(pair)
 
         # Call MSET for every slot and concatenate
@@ -260,9 +256,7 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
         # Partition the keys by slot
         slots_to_pairs = {}
         for pair in mapping.items():
-            # encode the key
-            k = self.encoder.encode(pair[0])
-            slot = key_slot(k)
+            slot = self.key_slotter.key_slot(pair[0])
             slots_to_pairs.setdefault(slot, []).extend(pair)
 
         # Call MSET for every slot and concatenate
