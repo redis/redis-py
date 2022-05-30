@@ -44,12 +44,7 @@ from .conftest import (
 default_host = "127.0.0.1"
 default_port = 7000
 default_cluster_slots = [
-    [
-        0,
-        8191,
-        ["127.0.0.1", 7000, "node_0"],
-        ["127.0.0.1", 7003, "node_3"],
-    ],
+    [0, 8191, ["127.0.0.1", 7000, "node_0"], ["127.0.0.1", 7003, "node_3"]],
     [8192, 16383, ["127.0.0.1", 7001, "node_1"], ["127.0.0.1", 7002, "node_2"]],
 ]
 
@@ -905,16 +900,8 @@ class TestClusterRedisCommands:
     @skip_if_redis_enterprise()
     def test_cluster_delslots(self):
         cluster_slots = [
-            [
-                0,
-                8191,
-                ["127.0.0.1", 7000, "node_0"],
-            ],
-            [
-                8192,
-                16383,
-                ["127.0.0.1", 7001, "node_1"],
-            ],
+            [0, 8191, ["127.0.0.1", 7000, "node_0"]],
+            [8192, 16383, ["127.0.0.1", 7001, "node_1"]],
         ]
         r = get_mocked_redis_client(
             host=default_host, port=default_port, cluster_slots=cluster_slots
@@ -2138,34 +2125,14 @@ class TestNodesManager:
                 """
                 if port == 7000:
                     result = [
-                        [
-                            0,
-                            5460,
-                            ["127.0.0.1", 7000],
-                            ["127.0.0.1", 7003],
-                        ],
-                        [
-                            5461,
-                            10922,
-                            ["127.0.0.1", 7001],
-                            ["127.0.0.1", 7004],
-                        ],
+                        [0, 5460, ["127.0.0.1", 7000], ["127.0.0.1", 7003]],
+                        [5461, 10922, ["127.0.0.1", 7001], ["127.0.0.1", 7004]],
                     ]
 
                 elif port == 7001:
                     result = [
-                        [
-                            0,
-                            5460,
-                            ["127.0.0.1", 7001],
-                            ["127.0.0.1", 7003],
-                        ],
-                        [
-                            5461,
-                            10922,
-                            ["127.0.0.1", 7000],
-                            ["127.0.0.1", 7004],
-                        ],
+                        [0, 5460, ["127.0.0.1", 7001], ["127.0.0.1", 7003]],
+                        [5461, 10922, ["127.0.0.1", 7000], ["127.0.0.1", 7004]],
                     ]
                 else:
                     result = []
@@ -2232,16 +2199,8 @@ class TestNodesManager:
                 def execute_command(*args, **kwargs):
                     if args[0] == "CLUSTER SLOTS":
                         return [
-                            [
-                                0,
-                                8191,
-                                ["127.0.0.1", 7001, "node_1"],
-                            ],
-                            [
-                                8192,
-                                16383,
-                                ["127.0.0.1", 7002, "node_2"],
-                            ],
+                            [0, 8191, ["127.0.0.1", 7001, "node_1"]],
+                            [8192, 16383, ["127.0.0.1", 7002, "node_2"]],
                         ]
                     elif args[0] == "INFO":
                         return {"cluster_enabled": True}
@@ -2688,10 +2647,7 @@ class TestReadOnlyPipeline:
 
         with r.pipeline() as readonly_pipe:
             readonly_pipe.get("foo71").zrange("foo88", 0, 5, withscores=True)
-            assert readonly_pipe.execute() == [
-                b"a1",
-                [(b"z1", 1.0), (b"z2", 4)],
-            ]
+            assert readonly_pipe.execute() == [b"a1", [(b"z1", 1.0), (b"z2", 4)]]
 
     def test_moved_redirection_on_slave_with_default(self, r):
         """

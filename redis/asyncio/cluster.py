@@ -746,7 +746,7 @@ class ClusterNode:
         host: str,
         port: int,
         server_type: Optional[str] = None,
-        max_connections: int = 2 ** 31,
+        max_connections: int = 2**31,
         connection_class: Type[Connection] = Connection,
         response_callbacks: Dict[str, Any] = RedisCluster.RESPONSE_CALLBACKS,
         **connection_kwargs: Any,

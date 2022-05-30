@@ -13,11 +13,7 @@ class TestEncoding:
 
     @pytest.fixture()
     def r_no_decode(self, request):
-        return _get_client(
-            redis.Redis,
-            request=request,
-            decode_responses=False,
-        )
+        return _get_client(redis.Redis, request=request, decode_responses=False)
 
     def test_simple_encoding(self, r_no_decode):
         unicode_string = chr(3456) + "abcd" + chr(3421)

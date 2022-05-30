@@ -89,10 +89,7 @@ class TestRedisCommands:
         request.addfinalizer(teardown)
 
         assert r.acl_setuser(
-            username,
-            enabled=True,
-            passwords=["+strong_password"],
-            commands=["+acl"],
+            username, enabled=True, passwords=["+strong_password"], commands=["+acl"]
         )
 
         assert r.auth(username=username, password="strong_password") is True
@@ -128,11 +125,7 @@ class TestRedisCommands:
 
         request.addfinalizer(teardown)
 
-        r.acl_setuser(
-            username,
-            keys=["*"],
-            commands=["+set"],
-        )
+        r.acl_setuser(username, keys=["*"], commands=["+set"])
         assert r.acl_dryrun(username, "set", "key", "value") == b"OK"
         assert r.acl_dryrun(username, "get", "key").startswith(
             b"This user has no permissions to run the"
@@ -3361,18 +3354,15 @@ class TestRedisCommands:
                 (2.19093829393386841, 41.43379028184083523),
             ]
         ]
-        assert (
-            r.geosearch(
-                "barcelona",
-                longitude=2.191,
-                latitude=41.433,
-                radius=1,
-                unit="km",
-                withdist=True,
-                withcoord=True,
-            )
-            == [[b"place1", 0.0881, (2.19093829393386841, 41.43379028184083523)]]
-        )
+        assert r.geosearch(
+            "barcelona",
+            longitude=2.191,
+            latitude=41.433,
+            radius=1,
+            unit="km",
+            withdist=True,
+            withcoord=True,
+        ) == [[b"place1", 0.0881, (2.19093829393386841, 41.43379028184083523)]]
         assert r.geosearch(
             "barcelona",
             longitude=2.191,
@@ -3702,7 +3692,7 @@ class TestRedisCommands:
     def test_xadd(self, r):
         stream = "stream"
         message_id = r.xadd(stream, {"foo": "bar"})
-        assert re.match(br"[0-9]+\-[0-9]+", message_id)
+        assert re.match(rb"[0-9]+\-[0-9]+", message_id)
 
         # explicit message id
         message_id = b"9999999999999999999-0"
@@ -3848,17 +3838,14 @@ class TestRedisCommands:
 
         # reclaim the message as consumer1, but use the justid argument
         # which only returns message ids
-        assert (
-            r.xclaim(
-                stream,
-                group,
-                consumer1,
-                min_idle_time=0,
-                message_ids=(message_id,),
-                justid=True,
-            )
-            == [message_id]
-        )
+        assert r.xclaim(
+            stream,
+            group,
+            consumer1,
+            min_idle_time=0,
+            message_ids=(message_id,),
+            justid=True,
+        ) == [message_id]
 
     @skip_if_server_version_lt("7.0.0")
     def test_xclaim_trimmed(self, r):
@@ -4229,34 +4216,17 @@ class TestRedisCommands:
         expected = [
             [
                 stream.encode(),
-                [
-                    get_stream_message(r, stream, m1),
-                    get_stream_message(r, stream, m2),
-                ],
+                [get_stream_message(r, stream, m1), get_stream_message(r, stream, m2)],
             ]
         ]
         # xread starting at 0 returns both messages
         assert r.xread(streams={stream: 0}) == expected
 
-        expected = [
-            [
-                stream.encode(),
-                [
-                    get_stream_message(r, stream, m1),
-                ],
-            ]
-        ]
+        expected = [[stream.encode(), [get_stream_message(r, stream, m1)]]]
         # xread starting at 0 and count=1 returns only the first message
         assert r.xread(streams={stream: 0}, count=1) == expected
 
-        expected = [
-            [
-                stream.encode(),
-                [
-                    get_stream_message(r, stream, m2),
-                ],
-            ]
-        ]
+        expected = [[stream.encode(), [get_stream_message(r, stream, m2)]]]
         # xread starting at m1 returns only the second message
         assert r.xread(streams={stream: m1}) == expected
 
@@ -4275,10 +4245,7 @@ class TestRedisCommands:
         expected = [
             [
                 stream.encode(),
-                [
-                    get_stream_message(r, stream, m1),
-                    get_stream_message(r, stream, m2),
-                ],
+                [get_stream_message(r, stream, m1), get_stream_message(r, stream, m2)],
             ]
         ]
         # xread starting at 0 returns both messages
@@ -4287,14 +4254,7 @@ class TestRedisCommands:
         r.xgroup_destroy(stream, group)
         r.xgroup_create(stream, group, 0)
 
-        expected = [
-            [
-                stream.encode(),
-                [
-                    get_stream_message(r, stream, m1),
-                ],
-            ]
-        ]
+        expected = [[stream.encode(), [get_stream_message(r, stream, m1)]]]
         # xread with count=1 returns only the first message
         assert r.xreadgroup(group, consumer, streams={stream: ">"}, count=1) == expected
 
@@ -4321,15 +4281,7 @@ class TestRedisCommands:
         r.xgroup_destroy(stream, group)
         r.xgroup_create(stream, group, "0")
         # delete all the messages in the stream
-        expected = [
-            [
-                stream.encode(),
-                [
-                    (m1, {}),
-                    (m2, {}),
-                ],
-            ]
-        ]
+        expected = [[stream.encode(), [(m1, {}), (m2, {})]]]
         r.xreadgroup(group, consumer, streams={stream: ">"})
         r.xtrim(stream, 0)
         assert r.xreadgroup(group, consumer, streams={stream: "0"}) == expected

@@ -171,16 +171,7 @@ def test_arrindex(client):
 @pytest.mark.redismod
 def test_arrinsert(client):
     client.json().set("arr", Path.root_path(), [0, 4])
-    assert 5 - -client.json().arrinsert(
-        "arr",
-        Path.root_path(),
-        1,
-        *[
-            1,
-            2,
-            3,
-        ],
-    )
+    assert 5 - -client.json().arrinsert("arr", Path.root_path(), 1, *[1, 2, 3])
     assert [0, 1, 2, 3, 4] == client.json().get("arr")
 
     # test prepends
@@ -1011,10 +1002,8 @@ def test_resp_dollar(client):
                     ],
                     "A1_B3_C3": [1],
                 },
-                "A1_B4": {
-                    "A1_B4_C1": "foo",
-                },
-            },
+                "A1_B4": {"A1_B4_C1": "foo"},
+            }
         },
         "L2": {
             "a": {
@@ -1032,10 +1021,8 @@ def test_resp_dollar(client):
                     ],
                     "A2_B3_C3": [2],
                 },
-                "A2_B4": {
-                    "A2_B4_C1": "bar",
-                },
-            },
+                "A2_B4": {"A2_B4_C1": "bar"},
+            }
         },
     }
     client.json().set("doc1", "$", data)

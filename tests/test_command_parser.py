@@ -71,13 +71,7 @@ class TestCommandsParser:
     @skip_if_server_version_lt("7.0.0")
     def test_get_eval_keys_with_0_keys(self, r):
         commands_parser = CommandsParser(r)
-        args = [
-            "EVAL",
-            "return {ARGV[1],ARGV[2]}",
-            0,
-            "key1",
-            "key2",
-        ]
+        args = ["EVAL", "return {ARGV[1],ARGV[2]}", 0, "key1", "key2"]
         assert commands_parser.get_keys(r, *args) == []
 
     def test_get_pubsub_keys(self, r):
