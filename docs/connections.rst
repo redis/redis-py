@@ -76,6 +76,11 @@ ClusterNode (Async)
 .. autoclass:: redis.asyncio.cluster.ClusterNode
     :members:
 
+ClusterPipeline (Async)
+===================
+.. autoclass:: redis.asyncio.cluster.ClusterPipeline
+    :members:
+
 
 Connection
 **********
