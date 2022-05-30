@@ -37,10 +37,7 @@ class TestPipeline:
     async def test_pipeline_memoryview(self, r):
         async with r.pipeline() as pipe:
             (pipe.set("a", memoryview(b"a1")).get("a"))
-            assert await pipe.execute() == [
-                True,
-                b"a1",
-            ]
+            assert await pipe.execute() == [True, b"a1"]
 
     async def test_pipeline_length(self, r):
         async with r.pipeline() as pipe:

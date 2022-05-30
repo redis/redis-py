@@ -19,11 +19,7 @@ class JSON(JSONCommands):
     """
 
     def __init__(
-        self,
-        client,
-        version=None,
-        decoder=JSONDecoder(),
-        encoder=JSONEncoder(),
+        self, client, version=None, decoder=JSONDecoder(), encoder=JSONEncoder()
     ):
         """
         Create a client for talking to json.

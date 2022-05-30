@@ -919,9 +919,14 @@ async def test_aggregations_groupby(modclient: redis.Redis):
         random_num=8,
     )
 
+    req = aggregations.AggregateRequest("redis").group_by("@parent", reducers.count())
+
+    res = (await modclient.ft().aggregate(req)).rows[0]
+    assert res[1] == "redis"
+    assert res[3] == "3"
+
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.count(),
+        "@parent", reducers.count_distinct("@title")
     )
 
     res = (await modclient.ft().aggregate(req)).rows[0]
@@ -929,8 +934,7 @@ async def test_aggregations_groupby(modclient: redis.Redis):
     assert res[3] == "3"
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.count_distinct("@title"),
+        "@parent", reducers.count_distinctish("@title")
     )
 
     res = (await modclient.ft().aggregate(req)).rows[0]
@@ -938,17 +942,7 @@ async def test_aggregations_groupby(modclient: redis.Redis):
     assert res[3] == "3"
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.count_distinctish("@title"),
-    )
-
-    res = (await modclient.ft().aggregate(req)).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "3"
-
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.sum("@random_num"),
+        "@parent", reducers.sum("@random_num")
     )
 
     res = (await modclient.ft().aggregate(req)).rows[0]
@@ -956,8 +950,7 @@ async def test_aggregations_groupby(modclient: redis.Redis):
     assert res[3] == "21"  # 10+8+3
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.min("@random_num"),
+        "@parent", reducers.min("@random_num")
     )
 
     res = (await modclient.ft().aggregate(req)).rows[0]
@@ -965,8 +958,7 @@ async def test_aggregations_groupby(modclient: redis.Redis):
     assert res[3] == "3"  # min(10,8,3)
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.max("@random_num"),
+        "@parent", reducers.max("@random_num")
     )
 
     res = (await modclient.ft().aggregate(req)).rows[0]
@@ -974,8 +966,7 @@ async def test_aggregations_groupby(modclient: redis.Redis):
     assert res[3] == "10"  # max(10,8,3)
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.avg("@random_num"),
+        "@parent", reducers.avg("@random_num")
     )
 
     res = (await modclient.ft().aggregate(req)).rows[0]
@@ -983,8 +974,7 @@ async def test_aggregations_groupby(modclient: redis.Redis):
     assert res[3] == "7"  # (10+3+8)/3
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.stddev("random_num"),
+        "@parent", reducers.stddev("random_num")
     )
 
     res = (await modclient.ft().aggregate(req)).rows[0]
@@ -992,8 +982,7 @@ async def test_aggregations_groupby(modclient: redis.Redis):
     assert res[3] == "3.60555127546"
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.quantile("@random_num", 0.5),
+        "@parent", reducers.quantile("@random_num", 0.5)
     )
 
     res = (await modclient.ft().aggregate(req)).rows[0]
@@ -1001,8 +990,7 @@ async def test_aggregations_groupby(modclient: redis.Redis):
     assert res[3] == "8"  # median of 3,8,10
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.tolist("@title"),
+        "@parent", reducers.tolist("@title")
     )
 
     res = (await modclient.ft().aggregate(req)).rows[0]
@@ -1010,16 +998,14 @@ async def test_aggregations_groupby(modclient: redis.Redis):
     assert res[3] == ["RediSearch", "RedisAI", "RedisJson"]
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.first_value("@title").alias("first"),
+        "@parent", reducers.first_value("@title").alias("first")
     )
 
     res = (await modclient.ft().aggregate(req)).rows[0]
     assert res == ["parent", "redis", "first", "RediSearch"]
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.random_sample("@title", 2).alias("random"),
+        "@parent", reducers.random_sample("@title", 2).alias("random")
     )
 
     res = (await modclient.ft().aggregate(req)).rows[0]
@@ -1031,12 +1017,7 @@ async def test_aggregations_groupby(modclient: redis.Redis):
 
 @pytest.mark.redismod
 async def test_aggregations_sort_by_and_limit(modclient: redis.Redis):
-    await modclient.ft().create_index(
-        (
-            TextField("t1"),
-            TextField("t2"),
-        )
-    )
+    await modclient.ft().create_index((TextField("t1"), TextField("t2")))
 
     await modclient.ft().client.hset("doc1", mapping={"t1": "a", "t2": "b"})
     await modclient.ft().client.hset("doc2", mapping={"t1": "b", "t2": "a"})
