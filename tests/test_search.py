@@ -888,9 +888,14 @@ def test_aggregations_groupby(client):
         random_num=8,
     )
 
+    req = aggregations.AggregateRequest("redis").group_by("@parent", reducers.count())
+
+    res = client.ft().aggregate(req).rows[0]
+    assert res[1] == "redis"
+    assert res[3] == "3"
+
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.count(),
+        "@parent", reducers.count_distinct("@title")
     )
 
     res = client.ft().aggregate(req).rows[0]
@@ -898,8 +903,7 @@ def test_aggregations_groupby(client):
     assert res[3] == "3"
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.count_distinct("@title"),
+        "@parent", reducers.count_distinctish("@title")
     )
 
     res = client.ft().aggregate(req).rows[0]
@@ -907,17 +911,7 @@ def test_aggregations_groupby(client):
     assert res[3] == "3"
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.count_distinctish("@title"),
-    )
-
-    res = client.ft().aggregate(req).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "3"
-
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.sum("@random_num"),
+        "@parent", reducers.sum("@random_num")
     )
 
     res = client.ft().aggregate(req).rows[0]
@@ -925,8 +919,7 @@ def test_aggregations_groupby(client):
     assert res[3] == "21"  # 10+8+3
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.min("@random_num"),
+        "@parent", reducers.min("@random_num")
     )
 
     res = client.ft().aggregate(req).rows[0]
@@ -934,8 +927,7 @@ def test_aggregations_groupby(client):
     assert res[3] == "3"  # min(10,8,3)
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.max("@random_num"),
+        "@parent", reducers.max("@random_num")
     )
 
     res = client.ft().aggregate(req).rows[0]
@@ -943,8 +935,7 @@ def test_aggregations_groupby(client):
     assert res[3] == "10"  # max(10,8,3)
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.avg("@random_num"),
+        "@parent", reducers.avg("@random_num")
     )
 
     res = client.ft().aggregate(req).rows[0]
@@ -953,8 +944,7 @@ def test_aggregations_groupby(client):
     assert res[index + 1] == "7"  # (10+3+8)/3
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.stddev("random_num"),
+        "@parent", reducers.stddev("random_num")
     )
 
     res = client.ft().aggregate(req).rows[0]
@@ -962,8 +952,7 @@ def test_aggregations_groupby(client):
     assert res[3] == "3.60555127546"
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.quantile("@random_num", 0.5),
+        "@parent", reducers.quantile("@random_num", 0.5)
     )
 
     res = client.ft().aggregate(req).rows[0]
@@ -971,8 +960,7 @@ def test_aggregations_groupby(client):
     assert res[3] == "8"  # median of 3,8,10
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.tolist("@title"),
+        "@parent", reducers.tolist("@title")
     )
 
     res = client.ft().aggregate(req).rows[0]
@@ -980,16 +968,14 @@ def test_aggregations_groupby(client):
     assert res[3] == ["RediSearch", "RedisAI", "RedisJson"]
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.first_value("@title").alias("first"),
+        "@parent", reducers.first_value("@title").alias("first")
     )
 
     res = client.ft().aggregate(req).rows[0]
     assert res == ["parent", "redis", "first", "RediSearch"]
 
     req = aggregations.AggregateRequest("redis").group_by(
-        "@parent",
-        reducers.random_sample("@title", 2).alias("random"),
+        "@parent", reducers.random_sample("@title", 2).alias("random")
     )
 
     res = client.ft().aggregate(req).rows[0]
@@ -1001,12 +987,7 @@ def test_aggregations_groupby(client):
 
 @pytest.mark.redismod
 def test_aggregations_sort_by_and_limit(client):
-    client.ft().create_index(
-        (
-            TextField("t1"),
-            TextField("t2"),
-        )
-    )
+    client.ft().create_index((TextField("t1"), TextField("t2")))
 
     client.ft().client.hset("doc1", mapping={"t1": "a", "t2": "b"})
     client.ft().client.hset("doc2", mapping={"t1": "b", "t2": "a"})
@@ -1039,12 +1020,7 @@ def test_aggregations_sort_by_and_limit(client):
 
 @pytest.mark.redismod
 def test_aggregations_load(client):
-    client.ft().create_index(
-        (
-            TextField("t1"),
-            TextField("t2"),
-        )
-    )
+    client.ft().create_index((TextField("t1"), TextField("t2")))
 
     client.ft().client.hset("doc1", mapping={"t1": "hello", "t2": "world"})
 
@@ -1093,10 +1069,7 @@ def test_aggregations_apply(client):
 @pytest.mark.redismod
 def test_aggregations_filter(client):
     client.ft().create_index(
-        (
-            TextField("name", sortable=True),
-            NumericField("age", sortable=True),
-        )
+        (TextField("name", sortable=True), NumericField("age", sortable=True))
     )
 
     client.ft().client.hset("doc1", mapping={"name": "bar", "age": "25"})
@@ -1341,10 +1314,7 @@ def test_search_return_fields(client):
 
     # create index on
     definition = IndexDefinition(index_type=IndexType.JSON)
-    SCHEMA = (
-        TextField("$.t"),
-        NumericField("$.flt"),
-    )
+    SCHEMA = (TextField("$.t"), NumericField("$.flt"))
     client.ft().create_index(SCHEMA, definition=definition)
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
 
@@ -1363,11 +1333,7 @@ def test_search_return_fields(client):
 def test_synupdate(client):
     definition = IndexDefinition(index_type=IndexType.HASH)
     client.ft().create_index(
-        (
-            TextField("title"),
-            TextField("body"),
-        ),
-        definition=definition,
+        (TextField("title"), TextField("body")), definition=definition
     )
 
     client.ft().synupdate("id1", True, "boy", "child", "offspring")
@@ -1386,11 +1352,7 @@ def test_synupdate(client):
 def test_syndump(client):
     definition = IndexDefinition(index_type=IndexType.HASH)
     client.ft().create_index(
-        (
-            TextField("title"),
-            TextField("body"),
-        ),
-        definition=definition,
+        (TextField("title"), TextField("body")), definition=definition
     )
 
     client.ft().synupdate("id1", False, "boy", "child", "offspring")

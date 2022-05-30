@@ -155,16 +155,7 @@ async def test_arrindex(modclient: redis.Redis):
 @pytest.mark.redismod
 async def test_arrinsert(modclient: redis.Redis):
     await modclient.json().set("arr", Path.root_path(), [0, 4])
-    assert 5 - -await modclient.json().arrinsert(
-        "arr",
-        Path.root_path(),
-        1,
-        *[
-            1,
-            2,
-            3,
-        ],
-    )
+    assert 5 - -await modclient.json().arrinsert("arr", Path.root_path(), 1, *[1, 2, 3])
     assert [0, 1, 2, 3, 4] == await modclient.json().get("arr")
 
     # test prepends

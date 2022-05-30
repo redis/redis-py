@@ -203,7 +203,7 @@ async def test_master_for(cluster, sentinel, master_ip):
 @pytest.mark.onlynoncluster
 async def test_slave_for(cluster, sentinel):
     cluster.slaves = [
-        {"ip": "127.0.0.1", "port": 6379, "is_odown": False, "is_sdown": False},
+        {"ip": "127.0.0.1", "port": 6379, "is_odown": False, "is_sdown": False}
     ]
     slave = sentinel.slave_for("mymaster", db=9)
     assert await slave.ping()

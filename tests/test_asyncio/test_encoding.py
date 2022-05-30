@@ -68,18 +68,12 @@ class TestEncoding:
 @pytest.mark.onlynoncluster
 class TestEncodingErrors:
     async def test_ignore(self, create_redis):
-        r = await create_redis(
-            decode_responses=True,
-            encoding_errors="ignore",
-        )
+        r = await create_redis(decode_responses=True, encoding_errors="ignore")
         await r.set("a", b"foo\xff")
         assert await r.get("a") == "foo"
 
     async def test_replace(self, create_redis):
-        r = await create_redis(
-            decode_responses=True,
-            encoding_errors="replace",
-        )
+        r = await create_redis(decode_responses=True, encoding_errors="replace")
         await r.set("a", b"foo\xff")
         assert await r.get("a") == "foo\ufffd"
 

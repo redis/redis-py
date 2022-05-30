@@ -502,10 +502,7 @@ class ManagementCommands(CommandsProtocol):
         return self.execute_command("CLIENT INFO", **kwargs)
 
     def client_list(
-        self,
-        _type: Union[str, None] = None,
-        client_id: List[EncodableT] = [],
-        **kwargs,
+        self, _type: Union[str, None] = None, client_id: List[EncodableT] = [], **kwargs
     ) -> ResponseT:
         """
         Returns a list of currently connected clients.
@@ -548,9 +545,7 @@ class ManagementCommands(CommandsProtocol):
         return self.execute_command("CLIENT GETREDIR", **kwargs)
 
     def client_reply(
-        self,
-        reply: Union[Literal["ON"], Literal["OFF"], Literal["SKIP"]],
-        **kwargs,
+        self, reply: Union[Literal["ON"], Literal["OFF"], Literal["SKIP"]], **kwargs
     ) -> ResponseT:
         """
         Enable and disable redis server replies.
@@ -696,10 +691,7 @@ class ManagementCommands(CommandsProtocol):
         return self.execute_command("CLIENT SETNAME", name, **kwargs)
 
     def client_unblock(
-        self,
-        client_id: int,
-        error: bool = False,
-        **kwargs,
+        self, client_id: int, error: bool = False, **kwargs
     ) -> ResponseT:
         """
         Unblocks a connection by its client id.
@@ -1475,12 +1467,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return BitFieldOperation(self, key, default_overflow=default_overflow)
 
-    def bitop(
-        self,
-        operation: str,
-        dest: KeyT,
-        *keys: KeyT,
-    ) -> ResponseT:
+    def bitop(self, operation: str, dest: KeyT, *keys: KeyT) -> ResponseT:
         """
         Perform a bitwise operation using ``operation`` between ``keys`` and
         store the result in ``dest``.
@@ -1826,11 +1813,7 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("KEYS", pattern, **kwargs)
 
     def lmove(
-        self,
-        first_list: str,
-        second_list: str,
-        src: str = "LEFT",
-        dest: str = "RIGHT",
+        self, first_list: str, second_list: str, src: str = "LEFT", dest: str = "RIGHT"
     ) -> ResponseT:
         """
         Atomically returns and removes the first/last element of a list,
@@ -1996,12 +1979,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("PEXPIRETIME", key)
 
-    def psetex(
-        self,
-        name: KeyT,
-        time_ms: ExpiryT,
-        value: EncodableT,
-    ):
+    def psetex(self, name: KeyT, time_ms: ExpiryT, value: EncodableT):
         """
         Set the value of key ``name`` to ``value`` that expires in ``time_ms``
         milliseconds. ``time_ms`` can be represented by an integer or a Python
@@ -2022,10 +2000,7 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("PTTL", name)
 
     def hrandfield(
-        self,
-        key: str,
-        count: int = None,
-        withvalues: bool = False,
+        self, key: str, count: int = None, withvalues: bool = False
     ) -> ResponseT:
         """
         Return a random field from the hash value stored at key.
@@ -2240,12 +2215,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("SETNX", name, value)
 
-    def setrange(
-        self,
-        name: KeyT,
-        offset: int,
-        value: EncodableT,
-    ) -> ResponseT:
+    def setrange(self, name: KeyT, offset: int, value: EncodableT) -> ResponseT:
         """
         Overwrite bytes in the value of ``name`` starting at ``offset`` with
         ``value``. If ``offset`` plus the length of ``value`` exceeds the
@@ -3259,10 +3229,7 @@ class SetCommands(CommandsProtocol):
         return self.execute_command("SMEMBERS", name)
 
     def smismember(
-        self,
-        name: str,
-        values: List,
-        *args: List,
+        self, name: str, values: List, *args: List
     ) -> Union[Awaitable[List[bool]], List[bool]]:
         """
         Return whether each value in ``values`` is a member of the set ``name``
@@ -3291,9 +3258,7 @@ class SetCommands(CommandsProtocol):
         return self.execute_command("SPOP", name, *args)
 
     def srandmember(
-        self,
-        name: str,
-        number: Optional[int] = None,
+        self, name: str, number: Optional[int] = None
     ) -> Union[str, List, None]:
         """
         If ``number`` is None, returns a random member of set ``name``.
@@ -3346,12 +3311,7 @@ class StreamCommands(CommandsProtocol):
     see: https://redis.io/topics/streams-intro
     """
 
-    def xack(
-        self,
-        name: KeyT,
-        groupname: GroupT,
-        *ids: StreamIdT,
-    ) -> ResponseT:
+    def xack(self, name: KeyT, groupname: GroupT, *ids: StreamIdT) -> ResponseT:
         """
         Acknowledges the successful processing of one or more messages.
         name: name of the stream.
@@ -3576,10 +3536,7 @@ class StreamCommands(CommandsProtocol):
         return self.execute_command(*pieces)
 
     def xgroup_delconsumer(
-        self,
-        name: KeyT,
-        groupname: GroupT,
-        consumername: ConsumerT,
+        self, name: KeyT, groupname: GroupT, consumername: ConsumerT
     ) -> ResponseT:
         """
         Remove a specific consumer from a consumer group.
@@ -3604,10 +3561,7 @@ class StreamCommands(CommandsProtocol):
         return self.execute_command("XGROUP DESTROY", name, groupname)
 
     def xgroup_createconsumer(
-        self,
-        name: KeyT,
-        groupname: GroupT,
-        consumername: ConsumerT,
+        self, name: KeyT, groupname: GroupT, consumername: ConsumerT
     ) -> ResponseT:
         """
         Consumers in a consumer group are auto-created every time a new
@@ -4052,12 +4006,7 @@ class SortedSetCommands(CommandsProtocol):
         pieces = [len(keys), *keys]
         return self.execute_command("ZDIFFSTORE", dest, *pieces)
 
-    def zincrby(
-        self,
-        name: KeyT,
-        amount: float,
-        value: EncodableT,
-    ) -> ResponseT:
+    def zincrby(self, name: KeyT, amount: float, value: EncodableT) -> ResponseT:
         """
         Increment the score of ``value`` in sorted set ``name`` by ``amount``
 
@@ -4066,10 +4015,7 @@ class SortedSetCommands(CommandsProtocol):
         return self.execute_command("ZINCRBY", name, amount, value)
 
     def zinter(
-        self,
-        keys: KeysT,
-        aggregate: Union[str, None] = None,
-        withscores: bool = False,
+        self, keys: KeysT, aggregate: Union[str, None] = None, withscores: bool = False
     ) -> ResponseT:
         """
         Return the intersect of multiple sorted sets specified by ``keys``.
@@ -4127,11 +4073,7 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZLEXCOUNT", name, min, max)
 
-    def zpopmax(
-        self,
-        name: KeyT,
-        count: Union[int, None] = None,
-    ) -> ResponseT:
+    def zpopmax(self, name: KeyT, count: Union[int, None] = None) -> ResponseT:
         """
         Remove and return up to ``count`` members with the highest scores
         from the sorted set ``name``.
@@ -4142,11 +4084,7 @@ class SortedSetCommands(CommandsProtocol):
         options = {"withscores": True}
         return self.execute_command("ZPOPMAX", name, *args, **options)
 
-    def zpopmin(
-        self,
-        name: KeyT,
-        count: Union[int, None] = None,
-    ) -> ResponseT:
+    def zpopmin(self, name: KeyT, count: Union[int, None] = None) -> ResponseT:
         """
         Remove and return up to ``count`` members with the lowest scores
         from the sorted set ``name``.
@@ -4158,10 +4096,7 @@ class SortedSetCommands(CommandsProtocol):
         return self.execute_command("ZPOPMIN", name, *args, **options)
 
     def zrandmember(
-        self,
-        key: KeyT,
-        count: int = None,
-        withscores: bool = False,
+        self, key: KeyT, count: int = None, withscores: bool = False
     ) -> ResponseT:
         """
         Return a random element from the sorted set value stored at key.
@@ -4675,11 +4610,7 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self._zaggregate("ZUNIONSTORE", dest, keys, aggregate)
 
-    def zmscore(
-        self,
-        key: KeyT,
-        members: List[str],
-    ) -> ResponseT:
+    def zmscore(self, key: KeyT, members: List[str]) -> ResponseT:
         """
         Returns the scores associated with the specified members
         in the sorted set stored at key.
@@ -5264,11 +5195,7 @@ class GeoCommands(CommandsProtocol):
         return self.execute_command("GEOADD", *pieces)
 
     def geodist(
-        self,
-        name: KeyT,
-        place1: FieldT,
-        place2: FieldT,
-        unit: Union[str, None] = None,
+        self, name: KeyT, place1: FieldT, place2: FieldT, unit: Union[str, None] = None
     ) -> ResponseT:
         """
         Return the distance between ``place1`` and ``place2`` members of the
@@ -5407,10 +5334,7 @@ class GeoCommands(CommandsProtocol):
         )
 
     def _georadiusgeneric(
-        self,
-        command: str,
-        *args: EncodableT,
-        **kwargs: Union[EncodableT, None],
+        self, command: str, *args: EncodableT, **kwargs: Union[EncodableT, None]
     ) -> ResponseT:
         pieces = list(args)
         if kwargs["unit"] and kwargs["unit"] not in ("m", "km", "mi", "ft"):
@@ -5418,9 +5342,7 @@ class GeoCommands(CommandsProtocol):
         elif kwargs["unit"]:
             pieces.append(kwargs["unit"])
         else:
-            pieces.append(
-                "m",
-            )
+            pieces.append("m")
 
         if kwargs["any"] and kwargs["count"] is None:
             raise DataError("``any`` can't be provided without ``count``")
@@ -5577,10 +5499,7 @@ class GeoCommands(CommandsProtocol):
         )
 
     def _geosearchgeneric(
-        self,
-        command: str,
-        *args: EncodableT,
-        **kwargs: Union[EncodableT, None],
+        self, command: str, *args: EncodableT, **kwargs: Union[EncodableT, None]
     ) -> ResponseT:
         pieces = list(args)
 
@@ -5814,9 +5733,7 @@ class FunctionCommands:
     """
 
     def function_load(
-        self,
-        code: str,
-        replace: Optional[bool] = False,
+        self, code: str, replace: Optional[bool] = False
     ) -> Union[Awaitable[str], str]:
         """
         Load a library to Redis.

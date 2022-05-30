@@ -425,9 +425,7 @@ class TestPubSubAutoDecoding:
 
     @pytest_asyncio.fixture()
     async def r(self, create_redis):
-        return await create_redis(
-            decode_responses=True,
-        )
+        return await create_redis(decode_responses=True)
 
     async def test_channel_subscribe_unsubscribe(self, r: redis.Redis):
         p = r.pubsub()
