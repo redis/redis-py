@@ -79,7 +79,7 @@ class CommandsParser:
         command = self.commands.get(cmd_name)
         if "movablekeys" in command["flags"]:
             keys = self._get_moveable_keys(redis_conn, *args)
-        elif "pubsub" in command["flags"]:
+        elif "pubsub" in command["flags"] or command["name"] == "pubsub":
             keys = self._get_pubsub_keys(*args)
         else:
             if (

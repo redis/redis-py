@@ -670,7 +670,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
     def test_client_no_evict(self, r):
-        assert r.client_no_evict("ON") == "OK"
+        assert r.client_no_evict("ON")
         with pytest.raises(TypeError):
             r.client_no_evict()
 
@@ -1089,9 +1089,9 @@ class TestRedisCommands:
     @skip_if_server_version_lt("7.0.0")
     def test_lcs(self, r):
         r.mset({"foo": "ohmytext", "bar": "mynewtext"})
-        assert r.lcs("foo", "bar") == "mytext"
+        assert r.lcs("foo", "bar") == b"mytext"
         assert r.lcs("foo", "bar", len=True) == 6
-        result = ["matches", [[[4, 7], [5, 8]]], "len", 6]
+        result = [b"matches", [[[4, 7], [5, 8]]], b"len", 6]
         assert r.lcs("foo", "bar", idx=True, minmatchlen=3) == result
         with pytest.raises(redis.ResponseError):
             assert r.lcs("foo", "bar", len=True, idx=True)
@@ -1764,24 +1764,24 @@ class TestRedisCommands:
     @skip_if_server_version_lt("7.0.0")
     def test_blmpop(self, r):
         r.rpush("a", "1", "2", "3", "4", "5")
-        res = ["a", ["1", "2"]]
+        res = [b"a", [b"1", b"2"]]
         assert r.blmpop(1, "2", "b", "a", direction="LEFT", count=2) == res
         with pytest.raises(TypeError):
             r.blmpop(1, "2", "b", "a", count=2)
         r.rpush("b", "6", "7", "8", "9")
-        assert r.blmpop(0, "2", "b", "a", direction="LEFT") == ["b", ["6"]]
+        assert r.blmpop(0, "2", "b", "a", direction="LEFT") == [b"b", [b"6"]]
         assert r.blmpop(1, "2", "foo", "bar", direction="RIGHT") is None
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
     def test_lmpop(self, r):
         r.rpush("foo", "1", "2", "3", "4", "5")
-        result = ["foo", ["1", "2"]]
+        result = [b"foo", [b"1", b"2"]]
         assert r.lmpop("2", "bar", "foo", direction="LEFT", count=2) == result
         with pytest.raises(redis.ResponseError):
             r.lmpop("2", "bar", "foo", direction="up", count=2)
         r.rpush("bar", "a", "b", "c", "d")
-        assert r.lmpop("2", "bar", "foo", direction="LEFT") == ["bar", ["a"]]
+        assert r.lmpop("2", "bar", "foo", direction="LEFT") == [b"bar", [b"a"]]
 
     def test_lindex(self, r):
         r.rpush("a", "1", "2", "3")
@@ -2393,23 +2393,23 @@ class TestRedisCommands:
     @skip_if_server_version_lt("7.0.0")
     def test_zmpop(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        res = ["a", [["a1", "1"], ["a2", "2"]]]
+        res = [b"a", [[b"a1", b"1"], [b"a2", b"2"]]]
         assert r.zmpop("2", ["b", "a"], min=True, count=2) == res
         with pytest.raises(redis.DataError):
             r.zmpop("2", ["b", "a"], count=2)
         r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
-        assert r.zmpop("2", ["b", "a"], max=True) == ["b", [["b1", "10"]]]
+        assert r.zmpop("2", ["b", "a"], max=True) == [b"b", [[b"b1", b"10"]]]
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
     def test_bzmpop(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        res = ["a", [["a1", "1"], ["a2", "2"]]]
+        res = [b"a", [[b"a1", b"1"], [b"a2", b"2"]]]
         assert r.bzmpop(1, "2", ["b", "a"], min=True, count=2) == res
         with pytest.raises(redis.DataError):
             r.bzmpop(1, "2", ["b", "a"], count=2)
         r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
-        res = ["b", [["b1", "10"]]]
+        res = [b"b", [[b"b1", b"10"]]]
         assert r.bzmpop(0, "2", ["b", "a"], max=True) == res
         assert r.bzmpop(1, "2", ["foo", "bar"], max=True) is None
 
@@ -3100,6 +3100,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("3.0.0")
+    @skip_if_server_version_gte("7.0.0")
     @skip_if_redis_enterprise()
     def test_readwrite(self, r):
         assert r.readwrite()
@@ -4510,7 +4511,7 @@ class TestRedisCommands:
         assert len(r.command_list()) > 300
         assert len(r.command_list(module="fakemod")) == 0
         assert len(r.command_list(category="list")) > 15
-        assert "lpop" in r.command_list(pattern="l*")
+        assert b"lpop" in r.command_list(pattern="l*")
         with pytest.raises(redis.ResponseError):
             r.command_list(category="list", pattern="l*")
 
@@ -4546,7 +4547,10 @@ class TestRedisCommands:
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
     def test_command_getkeysandflags(self, r: redis.Redis):
-        res = [["mylist1", ["RW", "access", "delete"]], ["mylist2", ["RW", "insert"]]]
+        res = [
+            [b"mylist1", [b"RW", b"access", b"delete"]],
+            [b"mylist2", [b"RW", b"insert"]],
+        ]
         assert res == r.command_getkeysandflags(
             "LMOVE", "mylist1", "mylist2", "left", "left"
         )

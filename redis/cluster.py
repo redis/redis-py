@@ -303,6 +303,7 @@ class AbstractRedisCluster:
                 "CLUSTER KEYSLOT",
                 "COMMAND",
                 "COMMAND COUNT",
+                "COMMAND LIST",
                 "COMMAND GETKEYS",
                 "CONFIG GET",
                 "DEBUG",

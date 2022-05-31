@@ -50,8 +50,6 @@ class TestCommandsParser:
             "key3",
         ]
         args7 = ["MIGRATE", "192.168.1.34", 6379, "key1", 0, 5000]
-        args8 = ["STRALGO", "LCS", "STRINGS", "string_a", "string_b"]
-        args9 = ["STRALGO", "LCS", "KEYS", "key1", "key2"]
 
         assert commands_parser.get_keys(r, *args1).sort() == ["key1", "key2"].sort()
         assert (
@@ -68,8 +66,6 @@ class TestCommandsParser:
             == ["key1", "key2", "key3"].sort()
         )
         assert commands_parser.get_keys(r, *args7).sort() == ["key1"].sort()
-        assert commands_parser.get_keys(r, *args8) is None
-        assert commands_parser.get_keys(r, *args9).sort() == ["key1", "key2"].sort()
 
     # A bug in redis<7.0 causes this to fail: https://github.com/redis/redis/issues/9493
     @skip_if_server_version_lt("7.0.0")
