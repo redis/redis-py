@@ -249,8 +249,8 @@ if __name__ == "__main__":
     port = 16379
     password = None
 
-    count = 1000
-    size = 16
+    count = 10000
+    size = 256
 
     asyncio.run(main("asyncio"))
     asyncio.run(main("asyncio", gather=False))
