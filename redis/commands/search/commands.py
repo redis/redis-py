@@ -216,12 +216,7 @@ class SearchCommands:
         return self.execute_command(*args)
 
     def _add_document_hash(
-        self,
-        doc_id,
-        conn=None,
-        score=1.0,
-        language=None,
-        replace=False,
+        self, doc_id, conn=None, score=1.0, language=None, replace=False
     ):
         """
         Internal add_document_hash used for both batch and single doc indexing
@@ -293,13 +288,7 @@ class SearchCommands:
             **fields,
         )
 
-    def add_document_hash(
-        self,
-        doc_id,
-        score=1.0,
-        language=None,
-        replace=False,
-    ):
+    def add_document_hash(self, doc_id, score=1.0, language=None, replace=False):
         """
         Add a hash document to the index.
 
@@ -313,11 +302,7 @@ class SearchCommands:
         - **language**: Specify the language used for document tokenization.
         """  # noqa
         return self._add_document_hash(
-            doc_id,
-            conn=None,
-            score=score,
-            language=language,
-            replace=replace,
+            doc_id, conn=None, score=score, language=language, replace=replace
         )
 
     def delete_document(self, doc_id, conn=None, delete_actual_document=False):

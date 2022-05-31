@@ -63,7 +63,7 @@ class TestFunction:
                 "LUA",
                 "functions",
                 [["name", "myfunc", "description", None, "flags", ["no-writes"]]],
-            ],
+            ]
         ]
         assert r.function_list() == res
         assert r.function_list(library="*lib") == res
@@ -83,7 +83,7 @@ class TestFunction:
                 "LUA",
                 "functions",
                 [["name", "myfunc", "description", None, "flags", ["no-writes"]]],
-            ],
+            ]
         ]
         primaries = r.get_primaries()
         res = {}

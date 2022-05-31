@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 from collections import OrderedDict
+from typing import Any, Callable, Dict, Tuple
 
 from redis.client import CaseInsensitiveDict, PubSub, Redis, parse_scan
 from redis.commands import CommandsParser, RedisClusterCommands
@@ -40,7 +41,7 @@ from redis.utils import (
 log = logging.getLogger(__name__)
 
 
-def get_node_name(host, port):
+def get_node_name(host: str, port: int) -> str:
     return f"{host}:{port}"
 
 
@@ -74,10 +75,12 @@ def parse_pubsub_numsub(command, res, **options):
     return ret_numsub
 
 
-def parse_cluster_slots(resp, **options):
+def parse_cluster_slots(
+    resp: Any, **options: Any
+) -> Dict[Tuple[int, int], Dict[str, Any]]:
     current_host = options.get("current_host", "")
 
-    def fix_server(*args):
+    def fix_server(*args: Any) -> Tuple[str, Any]:
         return str_if_bytes(args[0]) or current_host, args[1]
 
     slots = {}
@@ -754,6 +757,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             cluster_error_retry_attempts=self.cluster_error_retry_attempts,
             read_from_replicas=self.read_from_replicas,
             reinitialize_steps=self.reinitialize_steps,
+            lock=self._lock,
         )
 
     def lock(
@@ -1247,17 +1251,17 @@ class LoadBalancer:
     Round-Robin Load Balancing
     """
 
-    def __init__(self, start_index=0):
+    def __init__(self, start_index: int = 0) -> None:
         self.primary_to_idx = {}
         self.start_index = start_index
 
-    def get_server_index(self, primary, list_size):
+    def get_server_index(self, primary: str, list_size: int) -> int:
         server_index = self.primary_to_idx.setdefault(primary, self.start_index)
         # Update the index
         self.primary_to_idx[primary] = (server_index + 1) % list_size
         return server_index
 
-    def reset(self):
+    def reset(self) -> None:
         self.primary_to_idx.clear()
 
 
@@ -1754,6 +1758,7 @@ class ClusterPipeline(RedisCluster):
         read_from_replicas=False,
         cluster_error_retry_attempts=5,
         reinitialize_steps=10,
+        lock=None,
         **kwargs,
     ):
         """ """
@@ -1776,6 +1781,9 @@ class ClusterPipeline(RedisCluster):
             kwargs.get("encoding_errors", "strict"),
             kwargs.get("decode_responses", False),
         )
+        if lock is None:
+            lock = threading.Lock()
+        self._lock = lock
 
     def __repr__(self):
         """ """
@@ -2122,7 +2130,7 @@ class ClusterPipeline(RedisCluster):
         return self.execute_command("DEL", names[0])
 
 
-def block_pipeline_command(func):
+def block_pipeline_command(name: str) -> Callable[..., Any]:
     """
     Prints error because some pipelined commands should
     be blocked when running in cluster-mode
@@ -2130,7 +2138,7 @@ def block_pipeline_command(func):
 
     def inner(*args, **kwargs):
         raise RedisClusterException(
-            f"ERROR: Calling pipelined function {func.__name__} is blocked "
+            f"ERROR: Calling pipelined function {name} is blocked "
             f"when running redis in cluster mode..."
         )
 
@@ -2138,39 +2146,81 @@ def block_pipeline_command(func):
 
 
 # Blocked pipeline commands
-ClusterPipeline.bitop = block_pipeline_command(RedisCluster.bitop)
-ClusterPipeline.brpoplpush = block_pipeline_command(RedisCluster.brpoplpush)
-ClusterPipeline.client_getname = block_pipeline_command(RedisCluster.client_getname)
-ClusterPipeline.client_list = block_pipeline_command(RedisCluster.client_list)
-ClusterPipeline.client_setname = block_pipeline_command(RedisCluster.client_setname)
-ClusterPipeline.config_set = block_pipeline_command(RedisCluster.config_set)
-ClusterPipeline.dbsize = block_pipeline_command(RedisCluster.dbsize)
-ClusterPipeline.flushall = block_pipeline_command(RedisCluster.flushall)
-ClusterPipeline.flushdb = block_pipeline_command(RedisCluster.flushdb)
-ClusterPipeline.keys = block_pipeline_command(RedisCluster.keys)
-ClusterPipeline.mget = block_pipeline_command(RedisCluster.mget)
-ClusterPipeline.move = block_pipeline_command(RedisCluster.move)
-ClusterPipeline.mset = block_pipeline_command(RedisCluster.mset)
-ClusterPipeline.msetnx = block_pipeline_command(RedisCluster.msetnx)
-ClusterPipeline.pfmerge = block_pipeline_command(RedisCluster.pfmerge)
-ClusterPipeline.pfcount = block_pipeline_command(RedisCluster.pfcount)
-ClusterPipeline.ping = block_pipeline_command(RedisCluster.ping)
-ClusterPipeline.publish = block_pipeline_command(RedisCluster.publish)
-ClusterPipeline.randomkey = block_pipeline_command(RedisCluster.randomkey)
-ClusterPipeline.rename = block_pipeline_command(RedisCluster.rename)
-ClusterPipeline.renamenx = block_pipeline_command(RedisCluster.renamenx)
-ClusterPipeline.rpoplpush = block_pipeline_command(RedisCluster.rpoplpush)
-ClusterPipeline.scan = block_pipeline_command(RedisCluster.scan)
-ClusterPipeline.sdiff = block_pipeline_command(RedisCluster.sdiff)
-ClusterPipeline.sdiffstore = block_pipeline_command(RedisCluster.sdiffstore)
-ClusterPipeline.sinter = block_pipeline_command(RedisCluster.sinter)
-ClusterPipeline.sinterstore = block_pipeline_command(RedisCluster.sinterstore)
-ClusterPipeline.smove = block_pipeline_command(RedisCluster.smove)
-ClusterPipeline.sort = block_pipeline_command(RedisCluster.sort)
-ClusterPipeline.sunion = block_pipeline_command(RedisCluster.sunion)
-ClusterPipeline.sunionstore = block_pipeline_command(RedisCluster.sunionstore)
-ClusterPipeline.readwrite = block_pipeline_command(RedisCluster.readwrite)
-ClusterPipeline.readonly = block_pipeline_command(RedisCluster.readonly)
+PIPELINE_BLOCKED_COMMANDS = (
+    "BGREWRITEAOF",
+    "BGSAVE",
+    "BITOP",
+    "BRPOPLPUSH",
+    "CLIENT GETNAME",
+    "CLIENT KILL",
+    "CLIENT LIST",
+    "CLIENT SETNAME",
+    "CLIENT",
+    "CONFIG GET",
+    "CONFIG RESETSTAT",
+    "CONFIG REWRITE",
+    "CONFIG SET",
+    "CONFIG",
+    "DBSIZE",
+    "ECHO",
+    "EVALSHA",
+    "FLUSHALL",
+    "FLUSHDB",
+    "INFO",
+    "KEYS",
+    "LASTSAVE",
+    "MGET",
+    "MGET NONATOMIC",
+    "MOVE",
+    "MSET",
+    "MSET NONATOMIC",
+    "MSETNX",
+    "PFCOUNT",
+    "PFMERGE",
+    "PING",
+    "PUBLISH",
+    "RANDOMKEY",
+    "READONLY",
+    "READWRITE",
+    "RENAME",
+    "RENAMENX",
+    "RPOPLPUSH",
+    "SAVE",
+    "SCAN",
+    "SCRIPT EXISTS",
+    "SCRIPT FLUSH",
+    "SCRIPT KILL",
+    "SCRIPT LOAD",
+    "SCRIPT",
+    "SDIFF",
+    "SDIFFSTORE",
+    "SENTINEL GET MASTER ADDR BY NAME",
+    "SENTINEL MASTER",
+    "SENTINEL MASTERS",
+    "SENTINEL MONITOR",
+    "SENTINEL REMOVE",
+    "SENTINEL SENTINELS",
+    "SENTINEL SET",
+    "SENTINEL SLAVES",
+    "SENTINEL",
+    "SHUTDOWN",
+    "SINTER",
+    "SINTERSTORE",
+    "SLAVEOF",
+    "SLOWLOG GET",
+    "SLOWLOG LEN",
+    "SLOWLOG RESET",
+    "SLOWLOG",
+    "SMOVE",
+    "SORT",
+    "SUNION",
+    "SUNIONSTORE",
+    "TIME",
+)
+for command in PIPELINE_BLOCKED_COMMANDS:
+    command = command.replace(" ", "_").lower()
+
+    setattr(ClusterPipeline, command, block_pipeline_command(command))
 
 
 class PipelineCommand:

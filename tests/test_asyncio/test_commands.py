@@ -2534,17 +2534,14 @@ class TestRedisCommands:
 
         # reclaim the message as consumer1, but use the justid argument
         # which only returns message ids
-        assert (
-            await r.xclaim(
-                stream,
-                group,
-                consumer1,
-                min_idle_time=0,
-                message_ids=(message_id,),
-                justid=True,
-            )
-            == [message_id]
-        )
+        assert await r.xclaim(
+            stream,
+            group,
+            consumer1,
+            min_idle_time=0,
+            message_ids=(message_id,),
+            justid=True,
+        ) == [message_id]
 
     @skip_if_server_version_lt("5.0.0")
     async def test_xclaim_trimmed(self, r: redis.Redis):

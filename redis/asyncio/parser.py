@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
 from redis.exceptions import RedisError, ResponseError
 
@@ -25,7 +25,7 @@ class CommandsParser:
     __slots__ = ("commands",)
 
     def __init__(self) -> None:
-        self.commands = {}
+        self.commands: Dict[str, Union[int, Dict[str, Any]]] = {}
 
     async def initialize(self, r: "ClusterNode") -> None:
         commands = await r.execute_command("COMMAND")
@@ -42,8 +42,8 @@ class CommandsParser:
     # our logic to use COMMAND INFO changes to determine the key positions
     # https://github.com/redis/redis/pull/8324
     async def get_keys(
-        self, redis_conn: "ClusterNode", *args
-    ) -> Optional[Union[List[str], List[bytes]]]:
+        self, redis_conn: "ClusterNode", *args: Any
+    ) -> Optional[Tuple[str, ...]]:
         if len(args) < 2:
             # The command has no keys in it
             return None
@@ -67,7 +67,7 @@ class CommandsParser:
             command = self.commands[cmd_name]
 
         if command == 1:
-            return [args[1]]
+            return (args[1],)
         if command == 0:
             return None
         if command == -1:
@@ -79,8 +79,8 @@ class CommandsParser:
         return args[command["first_key_pos"] : last_key_pos + 1 : command["step_count"]]
 
     async def _get_moveable_keys(
-        self, redis_conn: "ClusterNode", *args
-    ) -> Optional[List[str]]:
+        self, redis_conn: "ClusterNode", *args: Any
+    ) -> Optional[Tuple[str, ...]]:
         try:
             keys = await redis_conn.execute_command("COMMAND GETKEYS", *args)
         except ResponseError as e:

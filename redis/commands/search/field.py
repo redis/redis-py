@@ -108,11 +108,7 @@ class TagField(Field):
     CASESENSITIVE = "CASESENSITIVE"
 
     def __init__(
-        self,
-        name: str,
-        separator: str = ",",
-        case_sensitive: bool = False,
-        **kwargs,
+        self, name: str, separator: str = ",", case_sensitive: bool = False, **kwargs
     ):
         args = [Field.TAG, self.SEPARATOR, separator]
         if case_sensitive:
@@ -159,8 +155,5 @@ class VectorField(Field):
             attr_li.extend([key, value])
 
         Field.__init__(
-            self,
-            name,
-            args=[Field.VECTOR, algorithm, len(attr_li), *attr_li],
-            **kwargs,
+            self, name, args=[Field.VECTOR, algorithm, len(attr_li), *attr_li], **kwargs
         )

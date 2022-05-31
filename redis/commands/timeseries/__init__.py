@@ -77,6 +77,7 @@ class TimeSeries(TimeSeriesCommands):
                 cluster_error_retry_attempts=self.client.cluster_error_retry_attempts,
                 read_from_replicas=self.client.read_from_replicas,
                 reinitialize_steps=self.client.reinitialize_steps,
+                lock=self.client._lock,
             )
 
         else:

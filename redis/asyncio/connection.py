@@ -684,7 +684,7 @@ class Connection:
     def clear_connect_callbacks(self):
         self._connect_callbacks = []
 
-    def set_parser(self, parser_class):
+    def set_parser(self, parser_class: Type[BaseParser]) -> None:
         """
         Creates a new instance of parser_class with socket size:
         _socket_read_size and assigns it to the parser for the connection
@@ -766,7 +766,7 @@ class Connection:
                 f"{exception.args[0]}."
             )
 
-    async def on_connect(self):
+    async def on_connect(self) -> None:
         """Initialize the connection, authenticate and select a database"""
         self._parser.on_connect(self)
 
@@ -807,7 +807,7 @@ class Connection:
             if str_if_bytes(await self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
-    async def disconnect(self):
+    async def disconnect(self) -> None:
         """Disconnects from the Redis server"""
         try:
             async with async_timeout.timeout(self.socket_connect_timeout):
@@ -891,7 +891,7 @@ class Connection:
             await self.disconnect()
             raise
 
-    async def send_command(self, *args, **kwargs):
+    async def send_command(self, *args: Any, **kwargs: Any) -> None:
         """Pack and send a command to the Redis server"""
         await self.send_packed_command(
             self.pack_command(*args), check_health=kwargs.get("check_health", True)
@@ -1390,7 +1390,7 @@ class ConnectionPool:
         max_connections: Optional[int] = None,
         **connection_kwargs,
     ):
-        max_connections = max_connections or 2 ** 31
+        max_connections = max_connections or 2**31
         if not isinstance(max_connections, int) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
 
