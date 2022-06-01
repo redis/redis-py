@@ -1,6 +1,6 @@
 import itertools
 import time
-from typing import Dict, Union
+from typing import Dict, Optional, Union
 
 from redis.client import Pipeline
 
@@ -363,7 +363,11 @@ class SearchCommands:
         it = map(to_string, res)
         return dict(zip(it, it))
 
-    def get_params_args(self, query_params: Dict[str, Union[str, int, float]]):
+    def get_params_args(
+        self, query_params: Union[Dict[str, Union[str, int, float]], None]
+    ):
+        if query_params is None:
+            return []
         args = []
         if len(query_params) > 0:
             args.append("params")
@@ -383,8 +387,7 @@ class SearchCommands:
             raise ValueError(f"Bad query type {type(query)}")
 
         args += query.get_args()
-        if query_params is not None:
-            args += self.get_params_args(query_params)
+        args += self.get_params_args(query_params)
 
         return args, query
 
@@ -459,8 +462,7 @@ class SearchCommands:
             cmd = [CURSOR_CMD, "READ", self.index_name] + query.build_args()
         else:
             raise ValueError("Bad query", query)
-        if query_params is not None:
-            cmd += self.get_params_args(query_params)
+        cmd += self.get_params_args(query_params)
 
         raw = self.execute_command(*cmd)
         return self._get_aggregate_result(raw, query, has_cursor)
@@ -485,16 +487,22 @@ class SearchCommands:
 
         return AggregateResult(rows, cursor, schema)
 
-    def profile(self, query, limited=False):
+    def profile(
+        self,
+        query: Union[str, Query, AggregateRequest],
+        limited: bool = False,
+        query_params: Optional[Dict[str, Union[str, int, float]]] = None,
+    ):
         """
         Performs a search or aggregate command and collects performance
         information.
 
         ### Parameters
 
-        **query**: This can be either an `AggregateRequest`, `Query` or
-        string.
+        **query**: This can be either an `AggregateRequest`, `Query` or string.
         **limited**: If set to True, removes details of reader iterator.
+        **query_params**: Define one or more value parameters.
+        Each parameter has a name and a value.
 
         """
         st = time.time()
@@ -509,6 +517,7 @@ class SearchCommands:
         elif isinstance(query, Query):
             cmd[2] = "SEARCH"
             cmd += query.get_args()
+            cmd += self.get_params_args(query_params)
         else:
             raise ValueError("Must provide AggregateRequest object or " "Query object.")
 
@@ -907,8 +916,7 @@ class AsyncSearchCommands(SearchCommands):
             cmd = [CURSOR_CMD, "READ", self.index_name] + query.build_args()
         else:
             raise ValueError("Bad query", query)
-        if query_params is not None:
-            cmd += self.get_params_args(query_params)
+        cmd += self.get_params_args(query_params)
 
         raw = await self.execute_command(*cmd)
         return self._get_aggregate_result(raw, query, has_cursor)
