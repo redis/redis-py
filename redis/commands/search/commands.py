@@ -1,6 +1,6 @@
 import itertools
 import time
-from typing import Dict, Union
+from typing import Dict, Optional, Union
 
 from redis.client import Pipeline
 
@@ -508,7 +508,12 @@ class SearchCommands:
 
         return AggregateResult(rows, cursor, schema)
 
-    def profile(self, query, limited=False, query_params=None):
+    def profile(
+        self,
+        query: Union[str, Query, AggregateRequest],
+        limited: bool = False,
+        query_params: Optional[Dict[str, Union[str, int, float]]] = None,
+    ):
         """
         Performs a search or aggregate command and collects performance
         information.
