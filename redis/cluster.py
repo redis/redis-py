@@ -766,6 +766,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         name,
         timeout=None,
         sleep=0.1,
+        blocking=True,
         blocking_timeout=None,
         lock_class=None,
         thread_local=True,
@@ -780,6 +781,12 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         ``sleep`` indicates the amount of time to sleep per loop iteration
         when the lock is in blocking mode and another client is currently
         holding the lock.
+
+        ``blocking`` indicates whether calling ``acquire`` should block until
+        the lock has been acquired or to fail immediately, causing ``acquire``
+        to return False and the lock not being acquired. Defaults to True.
+        Note this value can be overridden by passing a ``blocking``
+        argument to ``acquire``.
 
         ``blocking_timeout`` indicates the maximum amount of time in seconds to
         spend trying to acquire the lock. A value of ``None`` indicates
@@ -823,6 +830,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             name,
             timeout=timeout,
             sleep=sleep,
+            blocking=blocking,
             blocking_timeout=blocking_timeout,
             thread_local=thread_local,
         )

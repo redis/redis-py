@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from redis.connection import ConnectionPool, Encoder
 
 
+Number = Union[int, float]
 EncodedT = Union[bytes, memoryview]
 DecodedT = Union[str, int, float]
 EncodableT = Union[EncodedT, DecodedT]
