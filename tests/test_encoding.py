@@ -13,11 +13,7 @@ class TestEncoding:
 
     @pytest.fixture()
     def r_no_decode(self, request):
-        return _get_client(
-            redis.Redis,
-            request=request,
-            decode_responses=False,
-        )
+        return _get_client(redis.Redis, request=request, decode_responses=False)
 
     def test_simple_encoding(self, r_no_decode):
         unicode_string = chr(3456) + "abcd" + chr(3421)
@@ -94,7 +90,7 @@ class TestMemoryviewsAreNotPacked:
 class TestCommandsAreNotEncoded:
     @pytest.fixture()
     def r(self, request):
-        return _get_client(redis.Redis, request=request, encoding="utf-16")
+        return _get_client(redis.Redis, request=request, encoding="utf-8")
 
     def test_basic_command(self, r):
         r.set("hello", "world")

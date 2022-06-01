@@ -1,6 +1,6 @@
 import itertools
 import time
-from typing import Dict, Union
+from typing import Dict, Optional, Union
 
 from redis.client import Pipeline
 
@@ -104,7 +104,7 @@ class SearchCommands:
         in the index.
         - **skip_initial_scan**: If true, we do not scan and index.
 
-        For more information: https://oss.redis.com/redisearch/Commands/#ftcreate
+        For more information see `FT.CREATE <https://redis.io/commands/ft.create>`_.
         """  # noqa
 
         args = [CREATE_CMD, self.index_name]
@@ -147,7 +147,7 @@ class SearchCommands:
 
         - **fields**: a list of Field objects to add for the index
 
-        For more information: https://oss.redis.com/redisearch/Commands/#ftalter_schema_add
+        For more information see `FT.ALTER <https://redis.io/commands/ft.alter>`_.
         """  # noqa
 
         args = [ALTER_CMD, self.index_name, "SCHEMA", "ADD"]
@@ -167,7 +167,8 @@ class SearchCommands:
         ### Parameters:
 
         - **delete_documents**: If `True`, all documents will be deleted.
-        For more information: https://oss.redis.com/redisearch/Commands/#ftdropindex
+
+        For more information see `FT.DROPINDEX <https://redis.io/commands/ft.dropindex>`_.
         """  # noqa
         keep_str = "" if delete_documents else "KEEPDOCS"
         return self.execute_command(DROP_CMD, self.index_name, keep_str)
@@ -215,12 +216,7 @@ class SearchCommands:
         return self.execute_command(*args)
 
     def _add_document_hash(
-        self,
-        doc_id,
-        conn=None,
-        score=1.0,
-        language=None,
-        replace=False,
+        self, doc_id, conn=None, score=1.0, language=None, replace=False
     ):
         """
         Internal add_document_hash used for both batch and single doc indexing
@@ -278,8 +274,6 @@ class SearchCommands:
         - **fields** kwargs dictionary of the document fields to be saved
                          and/or indexed.
                      NOTE: Geo points shoule be encoded as strings of "lon,lat"
-
-        For more information: https://oss.redis.com/redisearch/Commands/#ftadd
         """  # noqa
         return self._add_document(
             doc_id,
@@ -294,13 +288,7 @@ class SearchCommands:
             **fields,
         )
 
-    def add_document_hash(
-        self,
-        doc_id,
-        score=1.0,
-        language=None,
-        replace=False,
-    ):
+    def add_document_hash(self, doc_id, score=1.0, language=None, replace=False):
         """
         Add a hash document to the index.
 
@@ -312,15 +300,9 @@ class SearchCommands:
         - **replace**: if True, and the document already is in the index, we
                       perform an update and reindex the document
         - **language**: Specify the language used for document tokenization.
-
-        For more information: https://oss.redis.com/redisearch/Commands/#ftaddhash
         """  # noqa
         return self._add_document_hash(
-            doc_id,
-            conn=None,
-            score=score,
-            language=language,
-            replace=replace,
+            doc_id, conn=None, score=score, language=language, replace=replace
         )
 
     def delete_document(self, doc_id, conn=None, delete_actual_document=False):
@@ -332,8 +314,6 @@ class SearchCommands:
 
         - **delete_actual_document**: if set to True, RediSearch also delete
                                       the actual document if it is in the index
-
-        For more information: https://oss.redis.com/redisearch/Commands/#ftdel
         """  # noqa
         args = [DEL_CMD, self.index_name, doc_id]
         if delete_actual_document:
@@ -367,7 +347,6 @@ class SearchCommands:
 
         - **ids**: the ids of the saved documents.
 
-        For more information https://oss.redis.com/redisearch/Commands/#ftget
         """
 
         return self.execute_command(MGET_CMD, self.index_name, *ids)
@@ -377,14 +356,18 @@ class SearchCommands:
         Get info an stats about the the current index, including the number of
         documents, memory consumption, etc
 
-        For more information https://oss.redis.com/redisearch/Commands/#ftinfo
+        For more information see `FT.INFO <https://redis.io/commands/ft.info>`_.
         """
 
         res = self.execute_command(INFO_CMD, self.index_name)
         it = map(to_string, res)
         return dict(zip(it, it))
 
-    def get_params_args(self, query_params: Dict[str, Union[str, int, float]]):
+    def get_params_args(
+        self, query_params: Union[Dict[str, Union[str, int, float]], None]
+    ):
+        if query_params is None:
+            return []
         args = []
         if len(query_params) > 0:
             args.append("params")
@@ -404,8 +387,7 @@ class SearchCommands:
             raise ValueError(f"Bad query type {type(query)}")
 
         args += query.get_args()
-        if query_params is not None:
-            args += self.get_params_args(query_params)
+        args += self.get_params_args(query_params)
 
         return args, query
 
@@ -423,7 +405,7 @@ class SearchCommands:
                      default parameters, or a Query object for complex queries.
                      See RediSearch's documentation on query format
 
-        For more information: https://oss.redis.com/redisearch/Commands/#ftsearch
+        For more information see `FT.SEARCH <https://redis.io/commands/ft.search>`_.
         """  # noqa
         args, query = self._mk_query_args(query, query_params=query_params)
         st = time.time()
@@ -447,7 +429,7 @@ class SearchCommands:
     ):
         """Returns the execution plan for a complex query.
 
-        For more information: https://oss.redis.com/redisearch/Commands/#ftexplain
+        For more information see `FT.EXPLAIN <https://redis.io/commands/ft.explain>`_.
         """  # noqa
         args, query_text = self._mk_query_args(query, query_params=query_params)
         return self.execute_command(EXPLAIN_CMD, *args)
@@ -470,7 +452,7 @@ class SearchCommands:
         An `AggregateResult` object is returned. You can access the rows from
         its `rows` property, which will always yield the rows of the result.
 
-        For more information: https://oss.redis.com/redisearch/Commands/#ftaggregate
+        For more information see `FT.AGGREGATE <https://redis.io/commands/ft.aggregate>`_.
         """  # noqa
         if isinstance(query, AggregateRequest):
             has_cursor = bool(query._cursor)
@@ -480,8 +462,7 @@ class SearchCommands:
             cmd = [CURSOR_CMD, "READ", self.index_name] + query.build_args()
         else:
             raise ValueError("Bad query", query)
-        if query_params is not None:
-            cmd += self.get_params_args(query_params)
+        cmd += self.get_params_args(query_params)
 
         raw = self.execute_command(*cmd)
         return self._get_aggregate_result(raw, query, has_cursor)
@@ -506,16 +487,22 @@ class SearchCommands:
 
         return AggregateResult(rows, cursor, schema)
 
-    def profile(self, query, limited=False):
+    def profile(
+        self,
+        query: Union[str, Query, AggregateRequest],
+        limited: bool = False,
+        query_params: Optional[Dict[str, Union[str, int, float]]] = None,
+    ):
         """
         Performs a search or aggregate command and collects performance
         information.
 
         ### Parameters
 
-        **query**: This can be either an `AggregateRequest`, `Query` or
-        string.
+        **query**: This can be either an `AggregateRequest`, `Query` or string.
         **limited**: If set to True, removes details of reader iterator.
+        **query_params**: Define one or more value parameters.
+        Each parameter has a name and a value.
 
         """
         st = time.time()
@@ -530,6 +517,7 @@ class SearchCommands:
         elif isinstance(query, Query):
             cmd[2] = "SEARCH"
             cmd += query.get_args()
+            cmd += self.get_params_args(query_params)
         else:
             raise ValueError("Must provide AggregateRequest object or " "Query object.")
 
@@ -560,7 +548,7 @@ class SearchCommands:
         **include**: specifies an inclusion custom dictionary.
         **exclude**: specifies an exclusion custom dictionary.
 
-        For more information: https://oss.redis.com/redisearch/Commands/#ftspellcheck
+        For more information see `FT.SPELLCHECK <https://redis.io/commands/ft.spellcheck>`_.
         """  # noqa
         cmd = [SPELLCHECK_CMD, self.index_name, query]
         if distance:
@@ -618,7 +606,7 @@ class SearchCommands:
         - **name**: Dictionary name.
         - **terms**: List of items for adding to the dictionary.
 
-        For more information: https://oss.redis.com/redisearch/Commands/#ftdictadd
+        For more information see `FT.DICTADD <https://redis.io/commands/ft.dictadd>`_.
         """  # noqa
         cmd = [DICT_ADD_CMD, name]
         cmd.extend(terms)
@@ -632,7 +620,7 @@ class SearchCommands:
         - **name**: Dictionary name.
         - **terms**: List of items for removing from the dictionary.
 
-        For more information: https://oss.redis.com/redisearch/Commands/#ftdictdel
+        For more information see `FT.DICTDEL <https://redis.io/commands/ft.dictdel>`_.
         """  # noqa
         cmd = [DICT_DEL_CMD, name]
         cmd.extend(terms)
@@ -645,7 +633,7 @@ class SearchCommands:
 
         - **name**: Dictionary name.
 
-        For more information: https://oss.redis.com/redisearch/Commands/#ftdictdump
+        For more information see `FT.DICTDUMP <https://redis.io/commands/ft.dictdump>`_.
         """  # noqa
         cmd = [DICT_DUMP_CMD, name]
         return self.execute_command(*cmd)
@@ -658,7 +646,7 @@ class SearchCommands:
         - **option**: the name of the configuration option.
         - **value**: a value for the configuration option.
 
-        For more information: https://oss.redis.com/redisearch/Commands/#ftconfig
+        For more information see `FT.CONFIG SET <https://redis.io/commands/ft.config-set>`_.
         """  # noqa
         cmd = [CONFIG_CMD, "SET", option, value]
         raw = self.execute_command(*cmd)
@@ -671,7 +659,7 @@ class SearchCommands:
 
         - **option**: the name of the configuration option.
 
-        For more information: https://oss.redis.com/redisearch/Commands/#ftconfig
+        For more information see `FT.CONFIG GET <https://redis.io/commands/ft.config-get>`_.
         """  # noqa
         cmd = [CONFIG_CMD, "GET", option]
         res = {}
@@ -689,7 +677,7 @@ class SearchCommands:
 
         - **tagfield**: Tag field name
 
-        For more information: https://oss.redis.com/redisearch/Commands/#fttagvals
+        For more information see `FT.TAGVALS <https://redis.io/commands/ft.tagvals>`_.
         """  # noqa
 
         return self.execute_command(TAGVALS_CMD, self.index_name, tagfield)
@@ -702,7 +690,7 @@ class SearchCommands:
 
         - **alias**: Name of the alias to create
 
-        For more information: https://oss.redis.com/redisearch/Commands/#ftaliasadd
+        For more information see `FT.ALIASADD <https://redis.io/commands/ft.aliasadd>`_.
         """  # noqa
 
         return self.execute_command(ALIAS_ADD_CMD, alias, self.index_name)
@@ -715,7 +703,7 @@ class SearchCommands:
 
         - **alias**: Name of the alias to create
 
-        For more information: https://oss.redis.com/redisearch/Commands/#ftaliasupdate
+        For more information see `FT.ALIASUPDATE <https://redis.io/commands/ft.aliasupdate>`_.
         """  # noqa
 
         return self.execute_command(ALIAS_UPDATE_CMD, alias, self.index_name)
@@ -728,7 +716,7 @@ class SearchCommands:
 
         - **alias**: Name of the alias to delete
 
-        For more information: https://oss.redis.com/redisearch/Commands/#ftaliasdel
+        For more information see `FT.ALIASDEL <https://redis.io/commands/ft.aliasdel>`_.
         """  # noqa
         return self.execute_command(ALIAS_DEL_CMD, alias)
 
@@ -739,7 +727,7 @@ class SearchCommands:
         If kwargs["increment"] is true and the terms are already in the
         server's dictionary, we increment their scores.
 
-        For more information: https://oss.redis.com/redisearch/master/Commands/#ftsugadd
+        For more information see `FT.SUGADD <https://redis.io/commands/ft.sugadd/>`_.
         """  # noqa
         # If Transaction is not False it will MULTI/EXEC which will error
         pipe = self.pipeline(transaction=False)
@@ -759,7 +747,7 @@ class SearchCommands:
         """
         Return the number of entries in the AutoCompleter index.
 
-        For more information https://oss.redis.com/redisearch/master/Commands/#ftsuglen
+        For more information see `FT.SUGLEN <https://redis.io/commands/ft.suglen>`_.
         """  # noqa
         return self.execute_command(SUGLEN_COMMAND, key)
 
@@ -768,7 +756,7 @@ class SearchCommands:
         Delete a string from the AutoCompleter index.
         Returns 1 if the string was found and deleted, 0 otherwise.
 
-        For more information: https://oss.redis.com/redisearch/master/Commands/#ftsugdel
+        For more information see `FT.SUGDEL <https://redis.io/commands/ft.sugdel>`_.
         """  # noqa
         return self.execute_command(SUGDEL_COMMAND, key, string)
 
@@ -804,7 +792,7 @@ class SearchCommands:
              A list of Suggestion objects. If with_scores was False, the
              score of all suggestions is 1.
 
-        For more information: https://oss.redis.com/redisearch/master/Commands/#ftsugget
+        For more information see `FT.SUGGET <https://redis.io/commands/ft.sugget>`_.
         """  # noqa
         args = [SUGGET_COMMAND, key, prefix, "MAX", num]
         if fuzzy:
@@ -838,7 +826,7 @@ class SearchCommands:
         terms :
             The terms.
 
-        For more information: https://oss.redis.com/redisearch/Commands/#ftsynupdate
+        For more information see `FT.SYNUPDATE <https://redis.io/commands/ft.synupdate>`_.
         """  # noqa
         cmd = [SYNUPDATE_CMD, self.index_name, groupid]
         if skipinitial:
@@ -853,7 +841,248 @@ class SearchCommands:
         The command is used to dump the synonyms data structure.
         Returns a list of synonym terms and their synonym group ids.
 
-        For more information: https://oss.redis.com/redisearch/Commands/#ftsyndump
+        For more information see `FT.SYNDUMP <https://redis.io/commands/ft.syndump>`_.
         """  # noqa
         raw = self.execute_command(SYNDUMP_CMD, self.index_name)
         return {raw[i]: raw[i + 1] for i in range(0, len(raw), 2)}
+
+
+class AsyncSearchCommands(SearchCommands):
+    async def info(self):
+        """
+        Get info an stats about the the current index, including the number of
+        documents, memory consumption, etc
+
+        For more information see `FT.INFO <https://redis.io/commands/ft.info>`_.
+        """
+
+        res = await self.execute_command(INFO_CMD, self.index_name)
+        it = map(to_string, res)
+        return dict(zip(it, it))
+
+    async def search(
+        self,
+        query: Union[str, Query],
+        query_params: Dict[str, Union[str, int, float]] = None,
+    ):
+        """
+        Search the index for a given query, and return a result of documents
+
+        ### Parameters
+
+        - **query**: the search query. Either a text for simple queries with
+                     default parameters, or a Query object for complex queries.
+                     See RediSearch's documentation on query format
+
+        For more information see `FT.SEARCH <https://redis.io/commands/ft.search>`_.
+        """  # noqa
+        args, query = self._mk_query_args(query, query_params=query_params)
+        st = time.time()
+        res = await self.execute_command(SEARCH_CMD, *args)
+
+        if isinstance(res, Pipeline):
+            return res
+
+        return Result(
+            res,
+            not query._no_content,
+            duration=(time.time() - st) * 1000.0,
+            has_payload=query._with_payloads,
+            with_scores=query._with_scores,
+        )
+
+    async def aggregate(
+        self,
+        query: Union[str, Query],
+        query_params: Dict[str, Union[str, int, float]] = None,
+    ):
+        """
+        Issue an aggregation query.
+
+        ### Parameters
+
+        **query**: This can be either an `AggregateRequest`, or a `Cursor`
+
+        An `AggregateResult` object is returned. You can access the rows from
+        its `rows` property, which will always yield the rows of the result.
+
+        For more information see `FT.AGGREGATE <https://redis.io/commands/ft.aggregate>`_.
+        """  # noqa
+        if isinstance(query, AggregateRequest):
+            has_cursor = bool(query._cursor)
+            cmd = [AGGREGATE_CMD, self.index_name] + query.build_args()
+        elif isinstance(query, Cursor):
+            has_cursor = True
+            cmd = [CURSOR_CMD, "READ", self.index_name] + query.build_args()
+        else:
+            raise ValueError("Bad query", query)
+        cmd += self.get_params_args(query_params)
+
+        raw = await self.execute_command(*cmd)
+        return self._get_aggregate_result(raw, query, has_cursor)
+
+    async def spellcheck(self, query, distance=None, include=None, exclude=None):
+        """
+        Issue a spellcheck query
+
+        ### Parameters
+
+        **query**: search query.
+        **distance***: the maximal Levenshtein distance for spelling
+                       suggestions (default: 1, max: 4).
+        **include**: specifies an inclusion custom dictionary.
+        **exclude**: specifies an exclusion custom dictionary.
+
+        For more information see `FT.SPELLCHECK <https://redis.io/commands/ft.spellcheck>`_.
+        """  # noqa
+        cmd = [SPELLCHECK_CMD, self.index_name, query]
+        if distance:
+            cmd.extend(["DISTANCE", distance])
+
+        if include:
+            cmd.extend(["TERMS", "INCLUDE", include])
+
+        if exclude:
+            cmd.extend(["TERMS", "EXCLUDE", exclude])
+
+        raw = await self.execute_command(*cmd)
+
+        corrections = {}
+        if raw == 0:
+            return corrections
+
+        for _correction in raw:
+            if isinstance(_correction, int) and _correction == 0:
+                continue
+
+            if len(_correction) != 3:
+                continue
+            if not _correction[2]:
+                continue
+            if not _correction[2][0]:
+                continue
+
+            corrections[_correction[1]] = [
+                {"score": _item[0], "suggestion": _item[1]} for _item in _correction[2]
+            ]
+
+        return corrections
+
+    async def config_set(self, option, value):
+        """Set runtime configuration option.
+
+        ### Parameters
+
+        - **option**: the name of the configuration option.
+        - **value**: a value for the configuration option.
+
+        For more information see `FT.CONFIG SET <https://redis.io/commands/ft.config-set>`_.
+        """  # noqa
+        cmd = [CONFIG_CMD, "SET", option, value]
+        raw = await self.execute_command(*cmd)
+        return raw == "OK"
+
+    async def config_get(self, option):
+        """Get runtime configuration option value.
+
+        ### Parameters
+
+        - **option**: the name of the configuration option.
+
+        For more information see `FT.CONFIG GET <https://redis.io/commands/ft.config-get>`_.
+        """  # noqa
+        cmd = [CONFIG_CMD, "GET", option]
+        res = {}
+        raw = await self.execute_command(*cmd)
+        if raw:
+            for kvs in raw:
+                res[kvs[0]] = kvs[1]
+        return res
+
+    async def load_document(self, id):
+        """
+        Load a single document by id
+        """
+        fields = await self.client.hgetall(id)
+        f2 = {to_string(k): to_string(v) for k, v in fields.items()}
+        fields = f2
+
+        try:
+            del fields["id"]
+        except KeyError:
+            pass
+
+        return Document(id=id, **fields)
+
+    async def sugadd(self, key, *suggestions, **kwargs):
+        """
+        Add suggestion terms to the AutoCompleter engine. Each suggestion has
+        a score and string.
+        If kwargs["increment"] is true and the terms are already in the
+        server's dictionary, we increment their scores.
+
+        For more information see `FT.SUGADD <https://redis.io/commands/ft.sugadd>`_.
+        """  # noqa
+        # If Transaction is not False it will MULTI/EXEC which will error
+        pipe = self.pipeline(transaction=False)
+        for sug in suggestions:
+            args = [SUGADD_COMMAND, key, sug.string, sug.score]
+            if kwargs.get("increment"):
+                args.append("INCR")
+            if sug.payload:
+                args.append("PAYLOAD")
+                args.append(sug.payload)
+
+            pipe.execute_command(*args)
+
+        return (await pipe.execute())[-1]
+
+    async def sugget(
+        self, key, prefix, fuzzy=False, num=10, with_scores=False, with_payloads=False
+    ):
+        """
+        Get a list of suggestions from the AutoCompleter, for a given prefix.
+
+        Parameters:
+
+        prefix : str
+            The prefix we are searching. **Must be valid ascii or utf-8**
+        fuzzy : bool
+            If set to true, the prefix search is done in fuzzy mode.
+            **NOTE**: Running fuzzy searches on short (<3 letters) prefixes
+            can be very
+            slow, and even scan the entire index.
+        with_scores : bool
+            If set to true, we also return the (refactored) score of
+            each suggestion.
+            This is normally not needed, and is NOT the original score
+            inserted into the index.
+        with_payloads : bool
+            Return suggestion payloads
+        num : int
+            The maximum number of results we return. Note that we might
+            return less. The algorithm trims irrelevant suggestions.
+
+        Returns:
+
+        list:
+             A list of Suggestion objects. If with_scores was False, the
+             score of all suggestions is 1.
+
+        For more information see `FT.SUGGET <https://redis.io/commands/ft.sugget>`_.
+        """  # noqa
+        args = [SUGGET_COMMAND, key, prefix, "MAX", num]
+        if fuzzy:
+            args.append(FUZZY)
+        if with_scores:
+            args.append(WITHSCORES)
+        if with_payloads:
+            args.append(WITHPAYLOADS)
+
+        ret = await self.execute_command(*args)
+        results = []
+        if not ret:
+            return results
+
+        parser = SuggestionParser(with_scores, with_payloads, ret)
+        return [s for s in parser]

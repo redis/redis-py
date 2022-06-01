@@ -49,7 +49,7 @@ class ExponentialBackoff(AbstractBackoff):
         self._base = base
 
     def compute(self, failures):
-        return min(self._cap, self._base * 2 ** failures)
+        return min(self._cap, self._base * 2**failures)
 
 
 class FullJitterBackoff(AbstractBackoff):
@@ -64,7 +64,7 @@ class FullJitterBackoff(AbstractBackoff):
         self._base = base
 
     def compute(self, failures):
-        return random.uniform(0, min(self._cap, self._base * 2 ** failures))
+        return random.uniform(0, min(self._cap, self._base * 2**failures))
 
 
 class EqualJitterBackoff(AbstractBackoff):
@@ -79,7 +79,7 @@ class EqualJitterBackoff(AbstractBackoff):
         self._base = base
 
     def compute(self, failures):
-        temp = min(self._cap, self._base * 2 ** failures) / 2
+        temp = min(self._cap, self._base * 2**failures) / 2
         return temp + random.uniform(0, temp)
 
 

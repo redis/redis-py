@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from typing import Any, Dict, Mapping, Union
 
 try:
     import hiredis  # noqa
@@ -34,7 +35,7 @@ def pipeline(redis_obj):
     p.execute()
 
 
-def str_if_bytes(value):
+def str_if_bytes(value: Union[str, bytes]) -> str:
     return (
         value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
     )
@@ -44,7 +45,7 @@ def safe_str(value):
     return str(str_if_bytes(value))
 
 
-def dict_merge(*dicts):
+def dict_merge(*dicts: Mapping[str, Any]) -> Dict[str, Any]:
     """
     Merge all provided dicts into 1 dict.
     *dicts : `dict`

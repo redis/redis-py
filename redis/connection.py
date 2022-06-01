@@ -40,9 +40,7 @@ try:
 except ImportError:
     ssl_available = False
 
-NONBLOCKING_EXCEPTION_ERROR_NUMBERS = {
-    BlockingIOError: errno.EWOULDBLOCK,
-}
+NONBLOCKING_EXCEPTION_ERROR_NUMBERS = {BlockingIOError: errno.EWOULDBLOCK}
 
 if ssl_available:
     if hasattr(ssl, "SSLWantReadError"):
@@ -385,10 +383,7 @@ class HiredisParser(BaseParser):
     def on_connect(self, connection, **kwargs):
         self._sock = connection._sock
         self._socket_timeout = connection.socket_timeout
-        kwargs = {
-            "protocolError": InvalidResponse,
-            "replyError": self.parse_error,
-        }
+        kwargs = {"protocolError": InvalidResponse, "replyError": self.parse_error}
 
         # hiredis < 0.1.3 doesn't support functions that create exceptions
         if not HIREDIS_SUPPORTS_CALLABLE_ERRORS:
@@ -563,7 +558,7 @@ class Connection:
                 # deep-copy the Retry object as it is mutable
                 self.retry = copy.deepcopy(retry)
             # Update the retry's supported errors with the specified errors
-            self.retry.update_supported_erros(retry_on_error)
+            self.retry.update_supported_errors(retry_on_error)
         else:
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
@@ -808,7 +803,13 @@ class Connection:
         sock = self._sock
         if not sock:
             self.connect()
-        return self._parser.can_read(timeout)
+        try:
+            return self._parser.can_read(timeout)
+        except OSError as e:
+            self.disconnect()
+            raise ConnectionError(
+                f"Error while reading from {self.host}:{self.port}: {e.args}"
+            )
 
     def read_response(self, disable_decoding=False):
         """Read the response from a previously sent command"""
@@ -1029,8 +1030,7 @@ class SSLConnection(Connection):
                 staple_ctx = self.ssl_ocsp_context
 
             staple_ctx.set_ocsp_client_callback(
-                ocsp_staple_verifier,
-                self.ssl_ocsp_expected_cert,
+                ocsp_staple_verifier, self.ssl_ocsp_expected_cert
             )
 
             #  need another socket
@@ -1099,7 +1099,7 @@ class UnixDomainSocketConnection(Connection):
                 # deep-copy the Retry object as it is mutable
                 self.retry = copy.deepcopy(retry)
             # Update the retry's supported errors with the specified errors
-            self.retry.update_supported_erros(retry_on_error)
+            self.retry.update_supported_errors(retry_on_error)
         else:
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
@@ -1113,10 +1113,7 @@ class UnixDomainSocketConnection(Connection):
         self._buffer_cutoff = 6000
 
     def repr_pieces(self):
-        pieces = [
-            ("path", self.path),
-            ("db", self.db),
-        ]
+        pieces = [("path", self.path), ("db", self.db)]
         if self.client_name:
             pieces.append(("client_name", self.client_name))
         return pieces
@@ -1282,7 +1279,7 @@ class ConnectionPool:
     def __init__(
         self, connection_class=Connection, max_connections=None, **connection_kwargs
     ):
-        max_connections = max_connections or 2 ** 31
+        max_connections = max_connections or 2**31
         if not isinstance(max_connections, int) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
 

@@ -4,10 +4,16 @@ Tests async overrides of commands from their mixins
 import binascii
 import datetime
 import re
+import sys
 import time
 from string import ascii_letters
 
 import pytest
+
+if sys.version_info[0:2] == (3, 6):
+    import pytest as pytest_asyncio
+else:
+    import pytest_asyncio
 
 import redis
 from redis import exceptions
@@ -21,10 +27,10 @@ from tests.conftest import (
 REDIS_6_VERSION = "5.9.0"
 
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.onlynoncluster]
+pytestmark = pytest.mark.asyncio
 
 
-@pytest.fixture()
+@pytest_asyncio.fixture()
 async def slowlog(r: redis.Redis, event_loop):
     current_config = await r.config_get()
     old_slower_than_value = current_config["slowlog-log-slower-than"]
@@ -53,6 +59,7 @@ async def get_stream_message(client: redis.Redis, stream: str, message_id: str):
 
 
 # RESPONSE CALLBACKS
+@pytest.mark.onlynoncluster
 class TestResponseCallbacks:
     """Tests for the response callback system"""
 
@@ -109,6 +116,7 @@ class TestRedisCommands:
         assert isinstance(password, str)
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_gte("7.0.0")
     async def test_acl_getuser_setuser(self, r: redis.Redis, request, event_loop):
         username = "redis-py-user"
 
@@ -224,6 +232,7 @@ class TestRedisCommands:
         assert len((await r.acl_getuser(username))["passwords"]) == 1
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_gte("7.0.0")
     async def test_acl_list(self, r: redis.Redis, request, event_loop):
         username = "redis-py-user"
 
@@ -241,6 +250,7 @@ class TestRedisCommands:
         assert f"user {username} off sanitize-payload &* -@all" in users
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
+    @pytest.mark.onlynoncluster
     async def test_acl_log(self, r: redis.Redis, request, event_loop, create_redis):
         username = "redis-py-user"
 
@@ -348,6 +358,7 @@ class TestRedisCommands:
         username = await r.acl_whoami()
         assert isinstance(username, str)
 
+    @pytest.mark.onlynoncluster
     async def test_client_list(self, r: redis.Redis):
         clients = await r.client_list()
         assert isinstance(clients[0], dict)
@@ -362,10 +373,12 @@ class TestRedisCommands:
             assert isinstance(clients, list)
 
     @skip_if_server_version_lt("5.0.0")
+    @pytest.mark.onlynoncluster
     async def test_client_id(self, r: redis.Redis):
         assert await r.client_id() > 0
 
     @skip_if_server_version_lt("5.0.0")
+    @pytest.mark.onlynoncluster
     async def test_client_unblock(self, r: redis.Redis):
         myid = await r.client_id()
         assert not await r.client_unblock(myid)
@@ -373,15 +386,18 @@ class TestRedisCommands:
         assert not await r.client_unblock(myid, error=False)
 
     @skip_if_server_version_lt("2.6.9")
+    @pytest.mark.onlynoncluster
     async def test_client_getname(self, r: redis.Redis):
         assert await r.client_getname() is None
 
     @skip_if_server_version_lt("2.6.9")
+    @pytest.mark.onlynoncluster
     async def test_client_setname(self, r: redis.Redis):
         assert await r.client_setname("redis_py_test")
         assert await r.client_getname() == "redis_py_test"
 
     @skip_if_server_version_lt("2.6.9")
+    @pytest.mark.onlynoncluster
     async def test_client_kill(self, r: redis.Redis, r2):
         await r.client_setname("redis-py-c1")
         await r2.client_setname("redis-py-c2")
@@ -420,6 +436,7 @@ class TestRedisCommands:
             await r.client_kill_filter(_type="caster")  # type: ignore
 
     @skip_if_server_version_lt("2.8.12")
+    @pytest.mark.onlynoncluster
     async def test_client_kill_filter_by_id(self, r: redis.Redis, r2):
         await r.client_setname("redis-py-c1")
         await r2.client_setname("redis-py-c2")
@@ -445,6 +462,7 @@ class TestRedisCommands:
         assert clients[0].get("name") == "redis-py-c1"
 
     @skip_if_server_version_lt("2.8.12")
+    @pytest.mark.onlynoncluster
     async def test_client_kill_filter_by_addr(self, r: redis.Redis, r2):
         await r.client_setname("redis-py-c1")
         await r2.client_setname("redis-py-c2")
@@ -477,6 +495,7 @@ class TestRedisCommands:
         assert "redis_py_test" in [c["name"] for c in clients]
 
     @skip_if_server_version_lt("2.9.50")
+    @pytest.mark.onlynoncluster
     async def test_client_pause(self, r: redis.Redis):
         assert await r.client_pause(1)
         assert await r.client_pause(timeout=1)
@@ -488,6 +507,7 @@ class TestRedisCommands:
         assert "maxmemory" in data
         assert data["maxmemory"].isdigit()
 
+    @pytest.mark.onlynoncluster
     async def test_config_resetstat(self, r: redis.Redis):
         await r.ping()
         prior_commands_processed = int((await r.info())["total_commands_processed"])
@@ -497,29 +517,31 @@ class TestRedisCommands:
         assert reset_commands_processed < prior_commands_processed
 
     async def test_config_set(self, r: redis.Redis):
-        data = await r.config_get()
-        rdbname = data["dbfilename"]
-        try:
-            assert await r.config_set("dbfilename", "redis_py_test.rdb")
-            assert (await r.config_get())["dbfilename"] == "redis_py_test.rdb"
-        finally:
-            assert await r.config_set("dbfilename", rdbname)
+        await r.config_set("timeout", 70)
+        assert (await r.config_get())["timeout"] == "70"
+        assert await r.config_set("timeout", 0)
+        assert (await r.config_get())["timeout"] == "0"
 
+    @pytest.mark.onlynoncluster
     async def test_dbsize(self, r: redis.Redis):
         await r.set("a", "foo")
         await r.set("b", "bar")
         assert await r.dbsize() == 2
 
+    @pytest.mark.onlynoncluster
     async def test_echo(self, r: redis.Redis):
         assert await r.echo("foo bar") == b"foo bar"
 
+    @pytest.mark.onlynoncluster
     async def test_info(self, r: redis.Redis):
         await r.set("a", "foo")
         await r.set("b", "bar")
         info = await r.info()
         assert isinstance(info, dict)
-        assert info["db9"]["keys"] == 2
+        assert "arch_bits" in info.keys()
+        assert "redis_version" in info.keys()
 
+    @pytest.mark.onlynoncluster
     async def test_lastsave(self, r: redis.Redis):
         assert isinstance(await r.lastsave(), datetime.datetime)
 
@@ -533,6 +555,7 @@ class TestRedisCommands:
     async def test_ping(self, r: redis.Redis):
         assert await r.ping()
 
+    @pytest.mark.onlynoncluster
     async def test_slowlog_get(self, r: redis.Redis, slowlog):
         assert await r.slowlog_reset()
         unicode_string = chr(3456) + "abcd" + chr(3421)
@@ -554,6 +577,7 @@ class TestRedisCommands:
         assert isinstance(slowlog[0]["start_time"], int)
         assert isinstance(slowlog[0]["duration"], int)
 
+    @pytest.mark.onlynoncluster
     async def test_slowlog_get_limit(self, r: redis.Redis, slowlog):
         assert await r.slowlog_reset()
         await r.get("foo")
@@ -562,6 +586,7 @@ class TestRedisCommands:
         # only one command, based on the number we passed to slowlog_get()
         assert len(slowlog) == 1
 
+    @pytest.mark.onlynoncluster
     async def test_slowlog_length(self, r: redis.Redis, slowlog):
         await r.get("foo")
         assert isinstance(await r.slowlog_len(), int)
@@ -600,12 +625,14 @@ class TestRedisCommands:
         assert await r.bitcount("a", 1, 1) == 1
 
     @skip_if_server_version_lt("2.6.0")
+    @pytest.mark.onlynoncluster
     async def test_bitop_not_empty_string(self, r: redis.Redis):
         await r.set("a", "")
         await r.bitop("not", "r", "a")
         assert await r.get("r") is None
 
     @skip_if_server_version_lt("2.6.0")
+    @pytest.mark.onlynoncluster
     async def test_bitop_not(self, r: redis.Redis):
         test_str = b"\xAA\x00\xFF\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
@@ -614,6 +641,7 @@ class TestRedisCommands:
         assert int(binascii.hexlify(await r.get("r")), 16) == correct
 
     @skip_if_server_version_lt("2.6.0")
+    @pytest.mark.onlynoncluster
     async def test_bitop_not_in_place(self, r: redis.Redis):
         test_str = b"\xAA\x00\xFF\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
@@ -622,6 +650,7 @@ class TestRedisCommands:
         assert int(binascii.hexlify(await r.get("a")), 16) == correct
 
     @skip_if_server_version_lt("2.6.0")
+    @pytest.mark.onlynoncluster
     async def test_bitop_single_string(self, r: redis.Redis):
         test_str = b"\x01\x02\xFF"
         await r.set("a", test_str)
@@ -633,6 +662,7 @@ class TestRedisCommands:
         assert await r.get("res3") == test_str
 
     @skip_if_server_version_lt("2.6.0")
+    @pytest.mark.onlynoncluster
     async def test_bitop_string_operands(self, r: redis.Redis):
         await r.set("a", b"\x01\x02\xFF\xFF")
         await r.set("b", b"\x01\x02\xFF")
@@ -643,6 +673,7 @@ class TestRedisCommands:
         assert int(binascii.hexlify(await r.get("res2")), 16) == 0x0102FFFF
         assert int(binascii.hexlify(await r.get("res3")), 16) == 0x000000FF
 
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.7")
     async def test_bitpos(self, r: redis.Redis):
         key = "key:bitpos"
@@ -838,6 +869,7 @@ class TestRedisCommands:
         assert await r.incrbyfloat("a", 1.1) == 2.1
         assert float(await r.get("a")) == float(2.1)
 
+    @pytest.mark.onlynoncluster
     async def test_keys(self, r: redis.Redis):
         assert await r.keys() == []
         keys_with_underscores = {b"test_a", b"test_b"}
@@ -847,6 +879,7 @@ class TestRedisCommands:
         assert set(await r.keys(pattern="test_*")) == keys_with_underscores
         assert set(await r.keys(pattern="test*")) == keys
 
+    @pytest.mark.onlynoncluster
     async def test_mget(self, r: redis.Redis):
         assert await r.mget([]) == []
         assert await r.mget(["a", "b"]) == [None, None]
@@ -855,12 +888,14 @@ class TestRedisCommands:
         await r.set("c", "3")
         assert await r.mget("a", "other", "b", "c") == [b"1", None, b"2", b"3"]
 
+    @pytest.mark.onlynoncluster
     async def test_mset(self, r: redis.Redis):
         d = {"a": b"1", "b": b"2", "c": b"3"}
         assert await r.mset(d)
         for k, v in d.items():
             assert await r.get(k) == v
 
+    @pytest.mark.onlynoncluster
     async def test_msetnx(self, r: redis.Redis):
         d = {"a": b"1", "b": b"2", "c": b"3"}
         assert await r.msetnx(d)
@@ -926,18 +961,21 @@ class TestRedisCommands:
         """PTTL on servers 2.8 and after return -2 when the key doesn't exist"""
         assert await r.pttl("a") == -2
 
+    @pytest.mark.onlynoncluster
     async def test_randomkey(self, r: redis.Redis):
         assert await r.randomkey() is None
         for key in ("a", "b", "c"):
             await r.set(key, 1)
         assert await r.randomkey() in (b"a", b"b", b"c")
 
+    @pytest.mark.onlynoncluster
     async def test_rename(self, r: redis.Redis):
         await r.set("a", "1")
         assert await r.rename("a", "b")
         assert await r.get("a") is None
         assert await r.get("b") == b"1"
 
+    @pytest.mark.onlynoncluster
     async def test_renamenx(self, r: redis.Redis):
         await r.set("a", "1")
         await r.set("b", "2")
@@ -1055,6 +1093,7 @@ class TestRedisCommands:
         assert await r.type("a") == b"zset"
 
     # LIST COMMANDS
+    @pytest.mark.onlynoncluster
     async def test_blpop(self, r: redis.Redis):
         await r.rpush("a", "1", "2")
         await r.rpush("b", "3", "4")
@@ -1066,6 +1105,7 @@ class TestRedisCommands:
         await r.rpush("c", "1")
         assert await r.blpop("c", timeout=1) == (b"c", b"1")
 
+    @pytest.mark.onlynoncluster
     async def test_brpop(self, r: redis.Redis):
         await r.rpush("a", "1", "2")
         await r.rpush("b", "3", "4")
@@ -1077,6 +1117,7 @@ class TestRedisCommands:
         await r.rpush("c", "1")
         assert await r.brpop("c", timeout=1) == (b"c", b"1")
 
+    @pytest.mark.onlynoncluster
     async def test_brpoplpush(self, r: redis.Redis):
         await r.rpush("a", "1", "2")
         await r.rpush("b", "3", "4")
@@ -1086,6 +1127,7 @@ class TestRedisCommands:
         assert await r.lrange("a", 0, -1) == []
         assert await r.lrange("b", 0, -1) == [b"1", b"2", b"3", b"4"]
 
+    @pytest.mark.onlynoncluster
     async def test_brpoplpush_empty_string(self, r: redis.Redis):
         await r.rpush("a", "")
         assert await r.brpoplpush("a", "b") == b""
@@ -1163,6 +1205,7 @@ class TestRedisCommands:
         assert await r.rpop("a") == b"1"
         assert await r.rpop("a") is None
 
+    @pytest.mark.onlynoncluster
     async def test_rpoplpush(self, r: redis.Redis):
         await r.rpush("a", "a1", "a2", "a3")
         await r.rpush("b", "b1", "b2", "b3")
@@ -1217,6 +1260,7 @@ class TestRedisCommands:
 
     # SCAN COMMANDS
     @skip_if_server_version_lt("2.8.0")
+    @pytest.mark.onlynoncluster
     async def test_scan(self, r: redis.Redis):
         await r.set("a", 1)
         await r.set("b", 2)
@@ -1228,6 +1272,7 @@ class TestRedisCommands:
         assert set(keys) == {b"a"}
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
+    @pytest.mark.onlynoncluster
     async def test_scan_type(self, r: redis.Redis):
         await r.sadd("a-set", 1)
         await r.hset("a-hash", "foo", 2)
@@ -1236,6 +1281,7 @@ class TestRedisCommands:
         assert set(keys) == {b"a-set"}
 
     @skip_if_server_version_lt("2.8.0")
+    @pytest.mark.onlynoncluster
     async def test_scan_iter(self, r: redis.Redis):
         await r.set("a", 1)
         await r.set("b", 2)
@@ -1306,12 +1352,14 @@ class TestRedisCommands:
         await r.sadd("a", "1", "2", "3")
         assert await r.scard("a") == 3
 
+    @pytest.mark.onlynoncluster
     async def test_sdiff(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
         assert await r.sdiff("a", "b") == {b"1", b"2", b"3"}
         await r.sadd("b", "2", "3")
         assert await r.sdiff("a", "b") == {b"1"}
 
+    @pytest.mark.onlynoncluster
     async def test_sdiffstore(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
         assert await r.sdiffstore("c", "a", "b") == 3
@@ -1320,12 +1368,14 @@ class TestRedisCommands:
         assert await r.sdiffstore("c", "a", "b") == 1
         assert await r.smembers("c") == {b"1"}
 
+    @pytest.mark.onlynoncluster
     async def test_sinter(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
         assert await r.sinter("a", "b") == set()
         await r.sadd("b", "2", "3")
         assert await r.sinter("a", "b") == {b"2", b"3"}
 
+    @pytest.mark.onlynoncluster
     async def test_sinterstore(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
         assert await r.sinterstore("c", "a", "b") == 0
@@ -1345,6 +1395,7 @@ class TestRedisCommands:
         await r.sadd("a", "1", "2", "3")
         assert await r.smembers("a") == {b"1", b"2", b"3"}
 
+    @pytest.mark.onlynoncluster
     async def test_smove(self, r: redis.Redis):
         await r.sadd("a", "a1", "a2")
         await r.sadd("b", "b1", "b2")
@@ -1390,11 +1441,13 @@ class TestRedisCommands:
         assert await r.srem("a", "2", "4") == 2
         assert await r.smembers("a") == {b"1", b"3"}
 
+    @pytest.mark.onlynoncluster
     async def test_sunion(self, r: redis.Redis):
         await r.sadd("a", "1", "2")
         await r.sadd("b", "2", "3")
         assert await r.sunion("a", "b") == {b"1", b"2", b"3"}
 
+    @pytest.mark.onlynoncluster
     async def test_sunionstore(self, r: redis.Redis):
         await r.sadd("a", "1", "2")
         await r.sadd("b", "2", "3")
@@ -1479,6 +1532,7 @@ class TestRedisCommands:
         assert await r.zlexcount("a", "-", "+") == 7
         assert await r.zlexcount("a", "[b", "[f") == 5
 
+    @pytest.mark.onlynoncluster
     async def test_zinterstore_sum(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
         await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -1486,6 +1540,7 @@ class TestRedisCommands:
         assert await r.zinterstore("d", ["a", "b", "c"]) == 2
         assert await r.zrange("d", 0, -1, withscores=True) == [(b"a3", 8), (b"a1", 9)]
 
+    @pytest.mark.onlynoncluster
     async def test_zinterstore_max(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
         await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -1493,6 +1548,7 @@ class TestRedisCommands:
         assert await r.zinterstore("d", ["a", "b", "c"], aggregate="MAX") == 2
         assert await r.zrange("d", 0, -1, withscores=True) == [(b"a3", 5), (b"a1", 6)]
 
+    @pytest.mark.onlynoncluster
     async def test_zinterstore_min(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         await r.zadd("b", {"a1": 2, "a2": 3, "a3": 5})
@@ -1500,6 +1556,7 @@ class TestRedisCommands:
         assert await r.zinterstore("d", ["a", "b", "c"], aggregate="MIN") == 2
         assert await r.zrange("d", 0, -1, withscores=True) == [(b"a1", 1), (b"a3", 3)]
 
+    @pytest.mark.onlynoncluster
     async def test_zinterstore_with_weight(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
         await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -1524,6 +1581,7 @@ class TestRedisCommands:
         assert await r.zpopmin("a", count=2) == [(b"a2", 2), (b"a3", 3)]
 
     @skip_if_server_version_lt("4.9.0")
+    @pytest.mark.onlynoncluster
     async def test_bzpopmax(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2})
         await r.zadd("b", {"b1": 10, "b2": 20})
@@ -1536,6 +1594,7 @@ class TestRedisCommands:
         assert await r.bzpopmax("c", timeout=1) == (b"c", b"c1", 100)
 
     @skip_if_server_version_lt("4.9.0")
+    @pytest.mark.onlynoncluster
     async def test_bzpopmin(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2})
         await r.zadd("b", {"b1": 10, "b2": 20})
@@ -1703,6 +1762,7 @@ class TestRedisCommands:
         assert await r.zscore("a", "a2") == 2.0
         assert await r.zscore("a", "a4") is None
 
+    @pytest.mark.onlynoncluster
     async def test_zunionstore_sum(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
         await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -1715,6 +1775,7 @@ class TestRedisCommands:
             (b"a1", 9),
         ]
 
+    @pytest.mark.onlynoncluster
     async def test_zunionstore_max(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
         await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -1727,6 +1788,7 @@ class TestRedisCommands:
             (b"a1", 6),
         ]
 
+    @pytest.mark.onlynoncluster
     async def test_zunionstore_min(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         await r.zadd("b", {"a1": 2, "a2": 2, "a3": 4})
@@ -1739,6 +1801,7 @@ class TestRedisCommands:
             (b"a4", 4),
         ]
 
+    @pytest.mark.onlynoncluster
     async def test_zunionstore_with_weight(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
         await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -1760,6 +1823,7 @@ class TestRedisCommands:
         assert await r.pfcount("a") == len(members)
 
     @skip_if_server_version_lt("2.8.9")
+    @pytest.mark.onlynoncluster
     async def test_pfcount(self, r: redis.Redis):
         members = {b"1", b"2", b"3"}
         await r.pfadd("a", *members)
@@ -1770,6 +1834,7 @@ class TestRedisCommands:
         assert await r.pfcount("a", "b") == len(members_b.union(members))
 
     @skip_if_server_version_lt("2.8.9")
+    @pytest.mark.onlynoncluster
     async def test_pfmerge(self, r: redis.Redis):
         mema = {b"1", b"2", b"3"}
         memb = {b"2", b"3", b"4"}
@@ -1864,7 +1929,8 @@ class TestRedisCommands:
 
     async def test_hmset(self, r: redis.Redis):
         warning_message = (
-            r"^Redis\.hmset\(\) is deprecated\. " r"Use Redis\.hset\(\) instead\.$"
+            r"^Redis(?:Cluster)*\.hmset\(\) is deprecated\. "
+            r"Use Redis(?:Cluster)*\.hset\(\) instead\.$"
         )
         h = {b"a": b"1", b"b": b"2", b"c": b"3"}
         with pytest.warns(DeprecationWarning, match=warning_message):
@@ -1900,6 +1966,7 @@ class TestRedisCommands:
         await r.rpush("a", "3", "2", "1", "4")
         assert await r.sort("a", start=1, num=2) == [b"2", b"3"]
 
+    @pytest.mark.onlynoncluster
     async def test_sort_by(self, r: redis.Redis):
         await r.set("score:1", 8)
         await r.set("score:2", 3)
@@ -1907,6 +1974,7 @@ class TestRedisCommands:
         await r.rpush("a", "3", "2", "1")
         assert await r.sort("a", by="score:*") == [b"2", b"3", b"1"]
 
+    @pytest.mark.onlynoncluster
     async def test_sort_get(self, r: redis.Redis):
         await r.set("user:1", "u1")
         await r.set("user:2", "u2")
@@ -1914,6 +1982,7 @@ class TestRedisCommands:
         await r.rpush("a", "2", "3", "1")
         assert await r.sort("a", get="user:*") == [b"u1", b"u2", b"u3"]
 
+    @pytest.mark.onlynoncluster
     async def test_sort_get_multi(self, r: redis.Redis):
         await r.set("user:1", "u1")
         await r.set("user:2", "u2")
@@ -1928,6 +1997,7 @@ class TestRedisCommands:
             b"3",
         ]
 
+    @pytest.mark.onlynoncluster
     async def test_sort_get_groups_two(self, r: redis.Redis):
         await r.set("user:1", "u1")
         await r.set("user:2", "u2")
@@ -1939,6 +2009,7 @@ class TestRedisCommands:
             (b"u3", b"3"),
         ]
 
+    @pytest.mark.onlynoncluster
     async def test_sort_groups_string_get(self, r: redis.Redis):
         await r.set("user:1", "u1")
         await r.set("user:2", "u2")
@@ -1947,6 +2018,7 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             await r.sort("a", get="user:*", groups=True)
 
+    @pytest.mark.onlynoncluster
     async def test_sort_groups_just_one_get(self, r: redis.Redis):
         await r.set("user:1", "u1")
         await r.set("user:2", "u2")
@@ -1963,6 +2035,7 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             await r.sort("a", groups=True)
 
+    @pytest.mark.onlynoncluster
     async def test_sort_groups_three_gets(self, r: redis.Redis):
         await r.set("user:1", "u1")
         await r.set("user:2", "u2")
@@ -1985,11 +2058,13 @@ class TestRedisCommands:
         await r.rpush("a", "e", "c", "b", "d", "a")
         assert await r.sort("a", alpha=True) == [b"a", b"b", b"c", b"d", b"e"]
 
+    @pytest.mark.onlynoncluster
     async def test_sort_store(self, r: redis.Redis):
         await r.rpush("a", "2", "3", "1")
         assert await r.sort("a", store="sorted_values") == 3
         assert await r.lrange("sorted_values", 0, -1) == [b"1", b"2", b"3"]
 
+    @pytest.mark.onlynoncluster
     async def test_sort_all_options(self, r: redis.Redis):
         await r.set("user:1:username", "zeus")
         await r.set("user:2:username", "titan")
@@ -2033,70 +2108,89 @@ class TestRedisCommands:
         await r.execute_command("SADD", "issue#924", 1)
         await r.execute_command("SORT", "issue#924")
 
+    @pytest.mark.onlynoncluster
     async def test_cluster_addslots(self, mock_cluster_resp_ok):
         assert await mock_cluster_resp_ok.cluster("ADDSLOTS", 1) is True
 
+    @pytest.mark.onlynoncluster
     async def test_cluster_count_failure_reports(self, mock_cluster_resp_int):
         assert isinstance(
             await mock_cluster_resp_int.cluster("COUNT-FAILURE-REPORTS", "node"), int
         )
 
+    @pytest.mark.onlynoncluster
     async def test_cluster_countkeysinslot(self, mock_cluster_resp_int):
         assert isinstance(
             await mock_cluster_resp_int.cluster("COUNTKEYSINSLOT", 2), int
         )
 
+    @pytest.mark.onlynoncluster
     async def test_cluster_delslots(self, mock_cluster_resp_ok):
         assert await mock_cluster_resp_ok.cluster("DELSLOTS", 1) is True
 
+    @pytest.mark.onlynoncluster
     async def test_cluster_failover(self, mock_cluster_resp_ok):
         assert await mock_cluster_resp_ok.cluster("FAILOVER", 1) is True
 
+    @pytest.mark.onlynoncluster
     async def test_cluster_forget(self, mock_cluster_resp_ok):
         assert await mock_cluster_resp_ok.cluster("FORGET", 1) is True
 
+    @pytest.mark.onlynoncluster
     async def test_cluster_info(self, mock_cluster_resp_info):
         assert isinstance(await mock_cluster_resp_info.cluster("info"), dict)
 
+    @pytest.mark.onlynoncluster
     async def test_cluster_keyslot(self, mock_cluster_resp_int):
         assert isinstance(await mock_cluster_resp_int.cluster("keyslot", "asdf"), int)
 
+    @pytest.mark.onlynoncluster
     async def test_cluster_meet(self, mock_cluster_resp_ok):
         assert await mock_cluster_resp_ok.cluster("meet", "ip", "port", 1) is True
 
+    @pytest.mark.onlynoncluster
     async def test_cluster_nodes(self, mock_cluster_resp_nodes):
         assert isinstance(await mock_cluster_resp_nodes.cluster("nodes"), dict)
 
+    @pytest.mark.onlynoncluster
     async def test_cluster_replicate(self, mock_cluster_resp_ok):
         assert await mock_cluster_resp_ok.cluster("replicate", "nodeid") is True
 
+    @pytest.mark.onlynoncluster
     async def test_cluster_reset(self, mock_cluster_resp_ok):
         assert await mock_cluster_resp_ok.cluster("reset", "hard") is True
 
+    @pytest.mark.onlynoncluster
     async def test_cluster_saveconfig(self, mock_cluster_resp_ok):
         assert await mock_cluster_resp_ok.cluster("saveconfig") is True
 
+    @pytest.mark.onlynoncluster
     async def test_cluster_setslot(self, mock_cluster_resp_ok):
         assert (
             await mock_cluster_resp_ok.cluster("setslot", 1, "IMPORTING", "nodeid")
             is True
         )
 
+    @pytest.mark.onlynoncluster
     async def test_cluster_slaves(self, mock_cluster_resp_slaves):
         assert isinstance(
             await mock_cluster_resp_slaves.cluster("slaves", "nodeid"), dict
         )
 
     @skip_if_server_version_lt("3.0.0")
+    @skip_if_server_version_gte("7.0.0")
+    @pytest.mark.onlynoncluster
     async def test_readwrite(self, r: redis.Redis):
         assert await r.readwrite()
 
     @skip_if_server_version_lt("3.0.0")
+    @pytest.mark.onlynoncluster
     async def test_readonly_invalid_cluster_state(self, r: redis.Redis):
         with pytest.raises(exceptions.RedisError):
             await r.readonly()
 
     @skip_if_server_version_lt("3.0.0")
+    @pytest.mark.onlynoncluster
     async def test_readonly(self, mock_cluster_resp_ok):
         assert await mock_cluster_resp_ok.readonly() is True
 
@@ -2313,6 +2407,7 @@ class TestRedisCommands:
         ]
 
     @skip_if_server_version_lt("3.2.0")
+    @pytest.mark.onlynoncluster
     async def test_georadius_store(self, r: redis.Redis):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
@@ -2326,6 +2421,7 @@ class TestRedisCommands:
 
     @skip_unless_arch_bits(64)
     @skip_if_server_version_lt("3.2.0")
+    @pytest.mark.onlynoncluster
     async def test_georadius_store_dist(self, r: redis.Redis):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
@@ -2437,19 +2533,16 @@ class TestRedisCommands:
 
         # reclaim the message as consumer1, but use the justid argument
         # which only returns message ids
-        assert (
-            await r.xclaim(
-                stream,
-                group,
-                consumer1,
-                min_idle_time=0,
-                message_ids=(message_id,),
-                justid=True,
-            )
-            == [message_id]
-        )
+        assert await r.xclaim(
+            stream,
+            group,
+            consumer1,
+            min_idle_time=0,
+            message_ids=(message_id,),
+            justid=True,
+        ) == [message_id]
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     async def test_xclaim_trimmed(self, r: redis.Redis):
         # xclaim should not raise an exception if the item is not there
         stream = "stream"
@@ -2470,9 +2563,8 @@ class TestRedisCommands:
         # xclaim them from consumer2
         # the item that is still in the stream should be returned
         item = await r.xclaim(stream, group, "consumer2", 0, [sid1, sid2])
-        assert len(item) == 2
-        assert item[0] == (None, None)
-        assert item[1][0] == sid2
+        assert len(item) == 1
+        assert item[0][0] == sid2
 
     @skip_if_server_version_lt("5.0.0")
     async def test_xdel(self, r: redis.Redis):
@@ -2489,7 +2581,7 @@ class TestRedisCommands:
         assert await r.xdel(stream, m1) == 1
         assert await r.xdel(stream, m2, m3) == 2
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     async def test_xgroup_create(self, r: redis.Redis):
         # tests xgroup_create and xinfo_groups
         stream = "stream"
@@ -2506,11 +2598,13 @@ class TestRedisCommands:
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": b"0-0",
+                "entries-read": None,
+                "lag": 1,
             }
         ]
         assert await r.xinfo_groups(stream) == expected
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     async def test_xgroup_create_mkstream(self, r: redis.Redis):
         # tests xgroup_create and xinfo_groups
         stream = "stream"
@@ -2530,6 +2624,8 @@ class TestRedisCommands:
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": b"0-0",
+                "entries-read": None,
+                "lag": 0,
             }
         ]
         assert await r.xinfo_groups(stream) == expected
@@ -2564,7 +2660,7 @@ class TestRedisCommands:
         await r.xgroup_create(stream, group, 0)
         assert await r.xgroup_destroy(stream, group)
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     async def test_xgroup_setid(self, r: redis.Redis):
         stream = "stream"
         group = "group"
@@ -2572,13 +2668,15 @@ class TestRedisCommands:
 
         await r.xgroup_create(stream, group, 0)
         # advance the last_delivered_id to the message_id
-        await r.xgroup_setid(stream, group, message_id)
+        await r.xgroup_setid(stream, group, message_id, entries_read=2)
         expected = [
             {
                 "name": group.encode(),
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": message_id,
+                "entries-read": 2,
+                "lag": -1,
             }
         ]
         assert await r.xinfo_groups(stream) == expected
@@ -2721,25 +2819,11 @@ class TestRedisCommands:
         # xread starting at 0 returns both messages
         assert await r.xread(streams={stream: 0}) == expected
 
-        expected = [
-            [
-                stream.encode(),
-                [
-                    await get_stream_message(r, stream, m1),
-                ],
-            ]
-        ]
+        expected = [[stream.encode(), [await get_stream_message(r, stream, m1)]]]
         # xread starting at 0 and count=1 returns only the first message
         assert await r.xread(streams={stream: 0}, count=1) == expected
 
-        expected = [
-            [
-                stream.encode(),
-                [
-                    await get_stream_message(r, stream, m2),
-                ],
-            ]
-        ]
+        expected = [[stream.encode(), [await get_stream_message(r, stream, m2)]]]
         # xread starting at m1 returns only the second message
         assert await r.xread(streams={stream: m1}) == expected
 
@@ -2770,14 +2854,7 @@ class TestRedisCommands:
         await r.xgroup_destroy(stream, group)
         await r.xgroup_create(stream, group, 0)
 
-        expected = [
-            [
-                stream.encode(),
-                [
-                    await get_stream_message(r, stream, m1),
-                ],
-            ]
-        ]
+        expected = [[stream.encode(), [await get_stream_message(r, stream, m1)]]]
         # xread with count=1 returns only the first message
         assert (
             await r.xreadgroup(group, consumer, streams={stream: ">"}, count=1)
@@ -2815,15 +2892,7 @@ class TestRedisCommands:
         await r.xgroup_destroy(stream, group)
         await r.xgroup_create(stream, group, "0")
         # delete all the messages in the stream
-        expected = [
-            [
-                stream.encode(),
-                [
-                    (m1, {}),
-                    (m2, {}),
-                ],
-            ]
-        ]
+        expected = [[stream.encode(), [(m1, {}), (m2, {})]]]
         await r.xreadgroup(group, consumer, streams={stream: ">"})
         await r.xtrim(stream, 0)
         assert await r.xreadgroup(group, consumer, streams={stream: "0"}) == expected
@@ -2870,6 +2939,7 @@ class TestRedisCommands:
         # 1 message is trimmed
         assert await r.xtrim(stream, 3, approximate=False) == 1
 
+    @pytest.mark.onlynoncluster
     async def test_bitfield_operations(self, r: redis.Redis):
         # comments show affected bits
         await r.execute_command("SELECT", 10)
@@ -2956,11 +3026,13 @@ class TestRedisCommands:
         assert isinstance(await r.memory_usage("foo"), int)
 
     @skip_if_server_version_lt("4.0.0")
+    @pytest.mark.onlynoncluster
     async def test_module_list(self, r: redis.Redis):
         assert isinstance(await r.module_list(), list)
         assert not await r.module_list()
 
 
+@pytest.mark.onlynoncluster
 class TestBinarySave:
     async def test_binary_get_set(self, r: redis.Redis):
         assert await r.set(" foo bar ", "123")

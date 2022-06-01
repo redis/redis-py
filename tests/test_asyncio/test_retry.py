@@ -19,7 +19,6 @@ class BackoffMock(AbstractBackoff):
         return 0
 
 
-@pytest.mark.onlynoncluster
 class TestConnectionConstructorWithRetry:
     "Test that the Connection constructors properly handles Retry objects"
 
@@ -41,7 +40,6 @@ class TestConnectionConstructorWithRetry:
         assert c.retry._retries == retries
 
 
-@pytest.mark.onlynoncluster
 class TestRetry:
     "Test that Retry calls backoff and retries the expected number of times"
 
@@ -56,6 +54,11 @@ class TestRetry:
     async def _fail(self, error):
         self.actual_failures += 1
 
+    async def _fail_inf(self, error):
+        self.actual_failures += 1
+        if self.actual_failures == 5:
+            raise ConnectionError()
+
     @pytest.mark.parametrize("retries", range(10))
     @pytest.mark.asyncio
     async def test_retry(self, retries: int):
@@ -68,3 +71,14 @@ class TestRetry:
         assert self.actual_failures == 1 + retries
         assert backoff.reset_calls == 1
         assert backoff.calls == retries
+
+    @pytest.mark.asyncio
+    async def test_infinite_retry(self):
+        backoff = BackoffMock()
+        # specify infinite retries, but give up after 5
+        retry = Retry(backoff, -1)
+        with pytest.raises(ConnectionError):
+            await retry.call_with_retry(self._do, self._fail_inf)
+
+        assert self.actual_attempts == 5
+        assert self.actual_failures == 5

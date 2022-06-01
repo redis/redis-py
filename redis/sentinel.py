@@ -51,10 +51,7 @@ class SentinelManagedConnection(Connection):
             raise SlaveNotFoundError  # Never be here
 
     def connect(self):
-        return self.retry.call_with_retry(
-            self._connect_retry,
-            lambda error: None,
-        )
+        return self.retry.call_with_retry(self._connect_retry, lambda error: None)
 
     def read_response(self, disable_decoding=False):
         try:
@@ -213,9 +210,7 @@ class Sentinel(SentinelCommands):
         sentinel_addresses = []
         for sentinel in self.sentinels:
             sentinel_addresses.append(
-                "{host}:{port}".format_map(
-                    sentinel.connection_pool.connection_kwargs,
-                )
+                "{host}:{port}".format_map(sentinel.connection_pool.connection_kwargs)
             )
         return f'{type(self).__name__}<sentinels=[{",".join(sentinel_addresses)}]>'
 

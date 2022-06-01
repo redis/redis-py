@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 from collections import OrderedDict
+from typing import Any, Callable, Dict, Tuple
 
 from redis.client import CaseInsensitiveDict, PubSub, Redis, parse_scan
 from redis.commands import CommandsParser, RedisClusterCommands
@@ -40,7 +41,7 @@ from redis.utils import (
 log = logging.getLogger(__name__)
 
 
-def get_node_name(host, port):
+def get_node_name(host: str, port: int) -> str:
     return f"{host}:{port}"
 
 
@@ -74,10 +75,12 @@ def parse_pubsub_numsub(command, res, **options):
     return ret_numsub
 
 
-def parse_cluster_slots(resp, **options):
+def parse_cluster_slots(
+    resp: Any, **options: Any
+) -> Dict[Tuple[int, int], Dict[str, Any]]:
     current_host = options.get("current_host", "")
 
-    def fix_server(*args):
+    def fix_server(*args: Any) -> Tuple[str, Any]:
         return str_if_bytes(args[0]) or current_host, args[1]
 
     slots = {}
@@ -90,6 +93,26 @@ def parse_cluster_slots(resp, **options):
         }
 
     return slots
+
+
+def parse_cluster_shards(resp, **options):
+    """
+    Parse CLUSTER SHARDS response.
+    """
+    shards = []
+    for x in resp:
+        shard = {"slots": [], "nodes": []}
+        for i in range(0, len(x[1]), 2):
+            shard["slots"].append((x[1][i], (x[1][i + 1])))
+        nodes = x[3]
+        for node in nodes:
+            dict_node = {}
+            for i in range(0, len(node), 2):
+                dict_node[node[i]] = node[i + 1]
+            shard["nodes"].append(dict_node)
+        shards.append(shard)
+
+    return shards
 
 
 PRIMARY = "primary"
@@ -128,10 +151,7 @@ REDIS_ALLOWED_KEYS = (
     "unix_socket_path",
     "username",
 )
-KWARGS_DISABLED_KEYS = (
-    "host",
-    "port",
-)
+KWARGS_DISABLED_KEYS = ("host", "port")
 
 # Not complete, but covers the major ones
 # https://redis.io/commands
@@ -207,7 +227,7 @@ class ClusterParser(DefaultParser):
     )
 
 
-class RedisCluster(RedisClusterCommands):
+class AbstractRedisCluster:
     RedisClusterRequestTTL = 16
 
     PRIMARIES = "primaries"
@@ -223,6 +243,7 @@ class RedisCluster(RedisClusterCommands):
             [
                 "ACL CAT",
                 "ACL DELUSER",
+                "ACL DRYRUN",
                 "ACL GENPASS",
                 "ACL GETUSER",
                 "ACL HELP",
@@ -277,10 +298,12 @@ class RedisCluster(RedisClusterCommands):
                 "CLUSTER RESET",
                 "CLUSTER SET-CONFIG-EPOCH",
                 "CLUSTER SLOTS",
+                "CLUSTER SHARDS",
                 "CLUSTER COUNT-FAILURE-REPORTS",
                 "CLUSTER KEYSLOT",
                 "COMMAND",
                 "COMMAND COUNT",
+                "COMMAND LIST",
                 "COMMAND GETKEYS",
                 "CONFIG GET",
                 "DEBUG",
@@ -308,10 +331,7 @@ class RedisCluster(RedisClusterCommands):
             ],
             PRIMARIES,
         ),
-        list_keys_to_dict(
-            ["FUNCTION DUMP"],
-            RANDOM,
-        ),
+        list_keys_to_dict(["FUNCTION DUMP"], RANDOM),
         list_keys_to_dict(
             [
                 "CLUSTER COUNTKEYSINSLOT",
@@ -361,48 +381,16 @@ class RedisCluster(RedisClusterCommands):
     )
 
     CLUSTER_COMMANDS_RESPONSE_CALLBACKS = {
-        "CLUSTER ADDSLOTS": bool,
-        "CLUSTER ADDSLOTSRANGE": bool,
-        "CLUSTER COUNT-FAILURE-REPORTS": int,
-        "CLUSTER COUNTKEYSINSLOT": int,
-        "CLUSTER DELSLOTS": bool,
-        "CLUSTER DELSLOTSRANGE": bool,
-        "CLUSTER FAILOVER": bool,
-        "CLUSTER FORGET": bool,
-        "CLUSTER GETKEYSINSLOT": list,
-        "CLUSTER KEYSLOT": int,
-        "CLUSTER MEET": bool,
-        "CLUSTER REPLICATE": bool,
-        "CLUSTER RESET": bool,
-        "CLUSTER SAVECONFIG": bool,
-        "CLUSTER SET-CONFIG-EPOCH": bool,
-        "CLUSTER SETSLOT": bool,
         "CLUSTER SLOTS": parse_cluster_slots,
-        "ASKING": bool,
-        "READONLY": bool,
-        "READWRITE": bool,
+        "CLUSTER SHARDS": parse_cluster_shards,
     }
 
     RESULT_CALLBACKS = dict_merge(
+        list_keys_to_dict(["PUBSUB NUMSUB"], parse_pubsub_numsub),
         list_keys_to_dict(
-            [
-                "PUBSUB NUMSUB",
-            ],
-            parse_pubsub_numsub,
+            ["PUBSUB NUMPAT"], lambda command, res: sum(list(res.values()))
         ),
-        list_keys_to_dict(
-            [
-                "PUBSUB NUMPAT",
-            ],
-            lambda command, res: sum(list(res.values())),
-        ),
-        list_keys_to_dict(
-            [
-                "KEYS",
-                "PUBSUB CHANNELS",
-            ],
-            merge_result,
-        ),
+        list_keys_to_dict(["KEYS", "PUBSUB CHANNELS"], merge_result),
         list_keys_to_dict(
             [
                 "PING",
@@ -420,49 +408,69 @@ class RedisCluster(RedisClusterCommands):
             lambda command, res: all(res.values()) if isinstance(res, dict) else res,
         ),
         list_keys_to_dict(
-            [
-                "DBSIZE",
-                "WAIT",
-            ],
+            ["DBSIZE", "WAIT"],
             lambda command, res: sum(res.values()) if isinstance(res, dict) else res,
         ),
         list_keys_to_dict(
-            [
-                "CLIENT UNBLOCK",
-            ],
-            lambda command, res: 1 if sum(res.values()) > 0 else 0,
+            ["CLIENT UNBLOCK"], lambda command, res: 1 if sum(res.values()) > 0 else 0
+        ),
+        list_keys_to_dict(["SCAN"], parse_scan_result),
+        list_keys_to_dict(
+            ["SCRIPT LOAD"], lambda command, res: list(res.values()).pop()
         ),
         list_keys_to_dict(
-            [
-                "SCAN",
-            ],
-            parse_scan_result,
+            ["SCRIPT EXISTS"], lambda command, res: [all(k) for k in zip(*res.values())]
         ),
-        list_keys_to_dict(
-            [
-                "SCRIPT LOAD",
-            ],
-            lambda command, res: list(res.values()).pop(),
-        ),
-        list_keys_to_dict(
-            [
-                "SCRIPT EXISTS",
-            ],
-            lambda command, res: [all(k) for k in zip(*res.values())],
-        ),
-        list_keys_to_dict(
-            [
-                "SCRIPT FLUSH",
-            ],
-            lambda command, res: all(res.values()),
-        ),
+        list_keys_to_dict(["SCRIPT FLUSH"], lambda command, res: all(res.values())),
     )
 
-    ERRORS_ALLOW_RETRY = (
-        ConnectionError,
-        TimeoutError,
-        ClusterDownError,
-    )
+    ERRORS_ALLOW_RETRY = (ConnectionError, TimeoutError, ClusterDownError)
+
+
+class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
+    @classmethod
+    def from_url(cls, url, **kwargs):
+        """
+        Return a Redis client object configured from the given URL
+
+        For example::
+
+            redis://[[username]:[password]]@localhost:6379/0
+            rediss://[[username]:[password]]@localhost:6379/0
+            unix://[[username]:[password]]@/path/to/socket.sock?db=0
+
+        Three URL schemes are supported:
+
+        - `redis://` creates a TCP socket connection. See more at:
+          <https://www.iana.org/assignments/uri-schemes/prov/redis>
+        - `rediss://` creates a SSL wrapped TCP socket connection. See more at:
+          <https://www.iana.org/assignments/uri-schemes/prov/rediss>
+        - ``unix://``: creates a Unix Domain Socket connection.
+
+        The username, password, hostname, path and all querystring values
+        are passed through urllib.parse.unquote in order to replace any
+        percent-encoded values with their corresponding characters.
+
+        There are several ways to specify a database number. The first value
+        found will be used:
+
+            1. A ``db`` querystring option, e.g. redis://localhost?db=0
+            2. If using the redis:// or rediss:// schemes, the path argument
+               of the url, e.g. redis://localhost/0
+            3. A ``db`` keyword argument to this function.
+
+        If none of these options are specified, the default db=0 is used.
+
+        All querystring options are cast to their appropriate Python types.
+        Boolean arguments can be specified with string values "True"/"False"
+        or "Yes"/"No". Values that cannot be properly cast cause a
+        ``ValueError`` to be raised. Once parsed, the querystring arguments
+        and keyword arguments are passed to the ``ConnectionPool``'s
+        class initializer. In the case of conflicting arguments, querystring
+        arguments always win.
+
+        """
+        return cls(url=url, **kwargs)
 
     def __init__(
         self,
@@ -617,50 +625,6 @@ class RedisCluster(RedisClusterCommands):
                     # Client was already disconnected. do nothing
                     pass
 
-    @classmethod
-    def from_url(cls, url, **kwargs):
-        """
-        Return a Redis client object configured from the given URL
-
-        For example::
-
-            redis://[[username]:[password]]@localhost:6379/0
-            rediss://[[username]:[password]]@localhost:6379/0
-            unix://[[username]:[password]]@/path/to/socket.sock?db=0
-
-        Three URL schemes are supported:
-
-        - `redis://` creates a TCP socket connection. See more at:
-          <https://www.iana.org/assignments/uri-schemes/prov/redis>
-        - `rediss://` creates a SSL wrapped TCP socket connection. See more at:
-          <https://www.iana.org/assignments/uri-schemes/prov/rediss>
-        - ``unix://``: creates a Unix Domain Socket connection.
-
-        The username, password, hostname, path and all querystring values
-        are passed through urllib.parse.unquote in order to replace any
-        percent-encoded values with their corresponding characters.
-
-        There are several ways to specify a database number. The first value
-        found will be used:
-
-            1. A ``db`` querystring option, e.g. redis://localhost?db=0
-            2. If using the redis:// or rediss:// schemes, the path argument
-               of the url, e.g. redis://localhost/0
-            3. A ``db`` keyword argument to this function.
-
-        If none of these options are specified, the default db=0 is used.
-
-        All querystring options are cast to their appropriate Python types.
-        Boolean arguments can be specified with string values "True"/"False"
-        or "Yes"/"No". Values that cannot be properly cast cause a
-        ``ValueError`` to be raised. Once parsed, the querystring arguments
-        and keyword arguments are passed to the ``ConnectionPool``'s
-        class initializer. In the case of conflicting arguments, querystring
-        arguments always win.
-
-        """
-        return cls(url=url, **kwargs)
-
     def on_connect(self, connection):
         """
         Initialize the connection, authenticate and select a database and send
@@ -794,6 +758,7 @@ class RedisCluster(RedisClusterCommands):
             cluster_error_retry_attempts=self.cluster_error_retry_attempts,
             read_from_replicas=self.read_from_replicas,
             reinitialize_steps=self.reinitialize_steps,
+            lock=self._lock,
         )
 
     def lock(
@@ -875,7 +840,10 @@ class RedisCluster(RedisClusterCommands):
         self.cluster_response_callbacks[command] = callback
 
     def _determine_nodes(self, *args, **kwargs):
-        command = args[0]
+        command = args[0].upper()
+        if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
+            command = f"{args[0]} {args[1]}".upper()
+
         nodes_flag = kwargs.pop("nodes_flag", None)
         if nodes_flag is not None:
             # nodes flag passed by the user
@@ -1001,9 +969,6 @@ class RedisCluster(RedisClusterCommands):
 
         return slots.pop()
 
-    def reinitialize_caches(self):
-        self.nodes_manager.initialize()
-
     def get_encoder(self):
         """
         Get the connections' encoder
@@ -1090,7 +1055,7 @@ class RedisCluster(RedisClusterCommands):
                 # Return the processed result
                 return self._process_result(args[0], res, **kwargs)
             except BaseException as e:
-                if type(e) in RedisCluster.ERRORS_ALLOW_RETRY:
+                if type(e) in self.__class__.ERRORS_ALLOW_RETRY:
                     # The nodes and slots cache were reinitialized.
                     # Try again with the new cluster setup.
                     exception = e
@@ -1251,11 +1216,7 @@ class RedisCluster(RedisClusterCommands):
         else:
             return res
 
-    def load_external_module(
-        self,
-        funcname,
-        func,
-    ):
+    def load_external_module(self, funcname, func):
         """
         This function can be used to add externally defined redis modules,
         and their namespaces to the redis client.
@@ -1299,17 +1260,17 @@ class LoadBalancer:
     Round-Robin Load Balancing
     """
 
-    def __init__(self, start_index=0):
+    def __init__(self, start_index: int = 0) -> None:
         self.primary_to_idx = {}
         self.start_index = start_index
 
-    def get_server_index(self, primary, list_size):
+    def get_server_index(self, primary: str, list_size: int) -> int:
         server_index = self.primary_to_idx.setdefault(primary, self.start_index)
         # Update the index
         self.primary_to_idx[primary] = (server_index + 1) % list_size
         return server_index
 
-    def reset(self):
+    def reset(self) -> None:
         self.primary_to_idx.clear()
 
 
@@ -1469,9 +1430,7 @@ class NodesManager:
         for node in nodes:
             if node.redis_connection is None:
                 node.redis_connection = self.create_redis_node(
-                    host=node.host,
-                    port=node.port,
-                    **self.connection_kwargs,
+                    host=node.host, port=node.port, **self.connection_kwargs
                 )
 
     def create_redis_node(self, host, port, **kwargs):
@@ -1808,6 +1767,7 @@ class ClusterPipeline(RedisCluster):
         read_from_replicas=False,
         cluster_error_retry_attempts=5,
         reinitialize_steps=10,
+        lock=None,
         **kwargs,
     ):
         """ """
@@ -1830,6 +1790,9 @@ class ClusterPipeline(RedisCluster):
             kwargs.get("encoding_errors", "strict"),
             kwargs.get("decode_responses", False),
         )
+        if lock is None:
+            lock = threading.Lock()
+        self._lock = lock
 
     def __repr__(self):
         """ """
@@ -2176,7 +2139,7 @@ class ClusterPipeline(RedisCluster):
         return self.execute_command("DEL", names[0])
 
 
-def block_pipeline_command(func):
+def block_pipeline_command(name: str) -> Callable[..., Any]:
     """
     Prints error because some pipelined commands should
     be blocked when running in cluster-mode
@@ -2184,7 +2147,7 @@ def block_pipeline_command(func):
 
     def inner(*args, **kwargs):
         raise RedisClusterException(
-            f"ERROR: Calling pipelined function {func.__name__} is blocked "
+            f"ERROR: Calling pipelined function {name} is blocked "
             f"when running redis in cluster mode..."
         )
 
@@ -2192,39 +2155,81 @@ def block_pipeline_command(func):
 
 
 # Blocked pipeline commands
-ClusterPipeline.bitop = block_pipeline_command(RedisCluster.bitop)
-ClusterPipeline.brpoplpush = block_pipeline_command(RedisCluster.brpoplpush)
-ClusterPipeline.client_getname = block_pipeline_command(RedisCluster.client_getname)
-ClusterPipeline.client_list = block_pipeline_command(RedisCluster.client_list)
-ClusterPipeline.client_setname = block_pipeline_command(RedisCluster.client_setname)
-ClusterPipeline.config_set = block_pipeline_command(RedisCluster.config_set)
-ClusterPipeline.dbsize = block_pipeline_command(RedisCluster.dbsize)
-ClusterPipeline.flushall = block_pipeline_command(RedisCluster.flushall)
-ClusterPipeline.flushdb = block_pipeline_command(RedisCluster.flushdb)
-ClusterPipeline.keys = block_pipeline_command(RedisCluster.keys)
-ClusterPipeline.mget = block_pipeline_command(RedisCluster.mget)
-ClusterPipeline.move = block_pipeline_command(RedisCluster.move)
-ClusterPipeline.mset = block_pipeline_command(RedisCluster.mset)
-ClusterPipeline.msetnx = block_pipeline_command(RedisCluster.msetnx)
-ClusterPipeline.pfmerge = block_pipeline_command(RedisCluster.pfmerge)
-ClusterPipeline.pfcount = block_pipeline_command(RedisCluster.pfcount)
-ClusterPipeline.ping = block_pipeline_command(RedisCluster.ping)
-ClusterPipeline.publish = block_pipeline_command(RedisCluster.publish)
-ClusterPipeline.randomkey = block_pipeline_command(RedisCluster.randomkey)
-ClusterPipeline.rename = block_pipeline_command(RedisCluster.rename)
-ClusterPipeline.renamenx = block_pipeline_command(RedisCluster.renamenx)
-ClusterPipeline.rpoplpush = block_pipeline_command(RedisCluster.rpoplpush)
-ClusterPipeline.scan = block_pipeline_command(RedisCluster.scan)
-ClusterPipeline.sdiff = block_pipeline_command(RedisCluster.sdiff)
-ClusterPipeline.sdiffstore = block_pipeline_command(RedisCluster.sdiffstore)
-ClusterPipeline.sinter = block_pipeline_command(RedisCluster.sinter)
-ClusterPipeline.sinterstore = block_pipeline_command(RedisCluster.sinterstore)
-ClusterPipeline.smove = block_pipeline_command(RedisCluster.smove)
-ClusterPipeline.sort = block_pipeline_command(RedisCluster.sort)
-ClusterPipeline.sunion = block_pipeline_command(RedisCluster.sunion)
-ClusterPipeline.sunionstore = block_pipeline_command(RedisCluster.sunionstore)
-ClusterPipeline.readwrite = block_pipeline_command(RedisCluster.readwrite)
-ClusterPipeline.readonly = block_pipeline_command(RedisCluster.readonly)
+PIPELINE_BLOCKED_COMMANDS = (
+    "BGREWRITEAOF",
+    "BGSAVE",
+    "BITOP",
+    "BRPOPLPUSH",
+    "CLIENT GETNAME",
+    "CLIENT KILL",
+    "CLIENT LIST",
+    "CLIENT SETNAME",
+    "CLIENT",
+    "CONFIG GET",
+    "CONFIG RESETSTAT",
+    "CONFIG REWRITE",
+    "CONFIG SET",
+    "CONFIG",
+    "DBSIZE",
+    "ECHO",
+    "EVALSHA",
+    "FLUSHALL",
+    "FLUSHDB",
+    "INFO",
+    "KEYS",
+    "LASTSAVE",
+    "MGET",
+    "MGET NONATOMIC",
+    "MOVE",
+    "MSET",
+    "MSET NONATOMIC",
+    "MSETNX",
+    "PFCOUNT",
+    "PFMERGE",
+    "PING",
+    "PUBLISH",
+    "RANDOMKEY",
+    "READONLY",
+    "READWRITE",
+    "RENAME",
+    "RENAMENX",
+    "RPOPLPUSH",
+    "SAVE",
+    "SCAN",
+    "SCRIPT EXISTS",
+    "SCRIPT FLUSH",
+    "SCRIPT KILL",
+    "SCRIPT LOAD",
+    "SCRIPT",
+    "SDIFF",
+    "SDIFFSTORE",
+    "SENTINEL GET MASTER ADDR BY NAME",
+    "SENTINEL MASTER",
+    "SENTINEL MASTERS",
+    "SENTINEL MONITOR",
+    "SENTINEL REMOVE",
+    "SENTINEL SENTINELS",
+    "SENTINEL SET",
+    "SENTINEL SLAVES",
+    "SENTINEL",
+    "SHUTDOWN",
+    "SINTER",
+    "SINTERSTORE",
+    "SLAVEOF",
+    "SLOWLOG GET",
+    "SLOWLOG LEN",
+    "SLOWLOG RESET",
+    "SLOWLOG",
+    "SMOVE",
+    "SORT",
+    "SUNION",
+    "SUNIONSTORE",
+    "TIME",
+)
+for command in PIPELINE_BLOCKED_COMMANDS:
+    command = command.replace(" ", "_").lower()
+
+    setattr(ClusterPipeline, command, block_pipeline_command(command))
 
 
 class PipelineCommand:

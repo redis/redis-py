@@ -12,7 +12,6 @@ class CommandsParser:
     """
 
     def __init__(self, redis_connection):
-        self.initialized = False
         self.commands = {}
         self.initialize(redis_connection)
 
@@ -25,6 +24,21 @@ class CommandsParser:
         for cmd in uppercase_commands:
             commands[cmd.lower()] = commands.pop(cmd)
         self.commands = commands
+
+    def parse_subcommand(self, command, **options):
+        cmd_dict = {}
+        cmd_name = str_if_bytes(command[0])
+        cmd_dict["name"] = cmd_name
+        cmd_dict["arity"] = int(command[1])
+        cmd_dict["flags"] = [str_if_bytes(flag) for flag in command[2]]
+        cmd_dict["first_key_pos"] = command[3]
+        cmd_dict["last_key_pos"] = command[4]
+        cmd_dict["step_count"] = command[5]
+        if len(command) > 7:
+            cmd_dict["tips"] = command[7]
+            cmd_dict["key_specifications"] = command[8]
+            cmd_dict["subcommands"] = command[9]
+        return cmd_dict
 
     # As soon as this PR is merged into Redis, we should reimplement
     # our logic to use COMMAND INFO changes to determine the key positions
@@ -65,7 +79,7 @@ class CommandsParser:
         command = self.commands.get(cmd_name)
         if "movablekeys" in command["flags"]:
             keys = self._get_moveable_keys(redis_conn, *args)
-        elif "pubsub" in command["flags"]:
+        elif "pubsub" in command["flags"] or command["name"] == "pubsub":
             keys = self._get_pubsub_keys(*args)
         else:
             if (
@@ -73,8 +87,17 @@ class CommandsParser:
                 and command["first_key_pos"] == 0
                 and command["last_key_pos"] == 0
             ):
+                is_subcmd = False
+                if "subcommands" in command:
+                    subcmd_name = f"{cmd_name}|{args[1].lower()}"
+                    for subcmd in command["subcommands"]:
+                        if str_if_bytes(subcmd[0]) == subcmd_name:
+                            command = self.parse_subcommand(subcmd)
+                            is_subcmd = True
+
                 # The command doesn't have keys in it
-                return None
+                if not is_subcmd:
+                    return None
             last_key_pos = command["last_key_pos"]
             if last_key_pos < 0:
                 last_key_pos = len(args) - abs(last_key_pos)
