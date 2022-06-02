@@ -379,14 +379,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             if str_if_bytes(await connection.read_response_without_lock()) != "OK":
                 raise ConnectionError("READONLY command failed")
 
-    def get_node(
-        self,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        node_name: Optional[str] = None,
-    ) -> Optional["ClusterNode"]:
-        """Get node by (host, port) or node_name."""
-        return self.nodes_manager.get_node(host, port, node_name)
+    def get_nodes(self) -> List["ClusterNode"]:
+        """Get all nodes of the cluster."""
+        return list(self.nodes_manager.nodes_cache.values())
 
     def get_primaries(self) -> List["ClusterNode"]:
         """Get the primary nodes of the cluster."""
@@ -400,9 +395,29 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         """Get a random node of the cluster."""
         return random.choice(list(self.nodes_manager.nodes_cache.values()))
 
-    def get_nodes(self) -> List["ClusterNode"]:
-        """Get all nodes of the cluster."""
-        return list(self.nodes_manager.nodes_cache.values())
+    def get_default_node(self) -> "ClusterNode":
+        """Get the default node of the client."""
+        return self.nodes_manager.default_node
+
+    def set_default_node(self, node: "ClusterNode") -> None:
+        """
+        Set the default node of the client.
+
+        :raises DataError: if None is passed or node does not exist in cluster.
+        """
+        if not node or not self.get_node(node_name=node.name):
+            raise DataError("The requested node does not exist in the cluster.")
+
+        self.nodes_manager.default_node = node
+
+    def get_node(
+        self,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        node_name: Optional[str] = None,
+    ) -> Optional["ClusterNode"]:
+        """Get node by (host, port) or node_name."""
+        return self.nodes_manager.get_node(host, port, node_name)
 
     def get_node_from_key(
         self, key: str, replica: bool = False
@@ -413,6 +428,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         :param key:
         :param replica:
             | Indicates if a replica should be returned
+            |
               None will returned if no replica holds this key
 
         :raises SlotNotCoveredError: if the key is not covered by any slot.
@@ -431,24 +447,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
         return slot_cache[node_idx]
 
-    def get_default_node(self) -> "ClusterNode":
-        """Get the default node of the client."""
-        return self.nodes_manager.default_node
-
-    def set_default_node(self, node: "ClusterNode") -> None:
+    def keyslot(self, key: EncodableT) -> int:
         """
-        Set the default node of the client.
+        Find the keyslot for a given key.
 
-        :raises DataError: if None is passed or node does not exist in cluster.
+        See: https://redis.io/docs/manual/scaling/#redis-cluster-data-sharding
         """
-        if not node or not self.get_node(node_name=node.name):
-            raise DataError("The requested node does not exist in the cluster.")
-
-        self.nodes_manager.default_node = node
-
-    def set_response_callback(self, command: str, callback: ResponseCallbackT) -> None:
-        """Set a custom response callback."""
-        self.response_callbacks[command] = callback
+        return key_slot(self.encoder.encode(key))
 
     def get_encoder(self) -> Encoder:
         """Get the encoder object of the client."""
@@ -458,14 +463,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         """Get the kwargs passed to :class:`~redis.asyncio.connection.Connection`."""
         return self.connection_kwargs
 
-    def keyslot(self, key: EncodableT) -> int:
-        """
-        Find the keyslot for a given key.
-
-        See: https://redis.io/docs/manual/scaling/#redis-cluster-data-sharding
-        """
-        k = self.encoder.encode(key)
-        return key_slot(k)
+    def set_response_callback(self, command: str, callback: ResponseCallbackT) -> None:
+        """Set a custom response callback."""
+        self.response_callbacks[command] = callback
 
     async def _determine_nodes(
         self, command: str, *args: Any, node_flag: Optional[str] = None
@@ -776,7 +776,6 @@ class ClusterNode:
         server_type: Optional[str] = None,
         max_connections: int = 2**31,
         connection_class: Type[Connection] = Connection,
-        response_callbacks: Dict[str, Any] = RedisCluster.RESPONSE_CALLBACKS,
         **connection_kwargs: Any,
     ) -> None:
         if host == "localhost":
@@ -792,7 +791,9 @@ class ClusterNode:
         self.max_connections = max_connections
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
-        self.response_callbacks = response_callbacks
+        self.response_callbacks = connection_kwargs.pop(
+            "response_callbacks", RedisCluster.RESPONSE_CALLBACKS
+        )
 
         self._connections: List[Connection] = []
         self._free: Deque[Connection] = collections.deque(maxlen=self.max_connections)
