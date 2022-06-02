@@ -77,7 +77,6 @@ class Lock:
         self,
         redis,
         name: str,
-        *,
         timeout: Optional[Number] = None,
         sleep: Number = 0.1,
         blocking: bool = True,
