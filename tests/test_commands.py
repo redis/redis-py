@@ -1185,7 +1185,7 @@ class TestRedisCommands:
     def test_expireat_unixtime(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         r["a"] = "foo"
-        expire_at_seconds = int(time.mktime(expire_at.timetuple()))
+        expire_at_seconds = int(expire_at.timestamp())
         assert r.expireat("a", expire_at_seconds) is True
         assert 0 < r.ttl("a") <= 61
 
@@ -1428,8 +1428,8 @@ class TestRedisCommands:
     def test_pexpireat_unixtime(self, r):
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         r["a"] = "foo"
-        expire_at_seconds = int(time.mktime(expire_at.timetuple())) * 1000
-        assert r.pexpireat("a", expire_at_seconds) is True
+        expire_at_milliseconds = int(expire_at.timestamp() * 1000)
+        assert r.pexpireat("a", expire_at_milliseconds) is True
         assert 0 < r.pttl("a") <= 61000
 
     @skip_if_server_version_lt("7.0.0")
