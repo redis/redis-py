@@ -1990,7 +1990,7 @@ class ClusterPipeline(RedisCluster):
                     nodes[node_name] = NodeCommands(
                         redis_node.parse_response,
                         redis_node.connection_pool,
-                        connection
+                        connection,
                     )
                 break
 
