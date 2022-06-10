@@ -10,6 +10,8 @@
     * Fix broken connection writer lock-up for asyncio (#2065)
     * Fix auth bug when provided with no username (#2086)
     * Fix missing ClusterPipeline._lock (#2189)
+    * ClusterPipeline Doesn't Handle ConnectionError for Dead Hosts (#2225)
+
 
 * 4.1.3 (Feb 8, 2022)
     * Fix flushdb and flushall (#1926)
