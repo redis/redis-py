@@ -1992,9 +1992,8 @@ class ClusterPipeline(RedisCluster):
                         redis_node.connection_pool,
                         connection,
                     )
+                nodes[node_name].append(c)
                 break
-
-            nodes[node_name].append(c)
 
         # send the commands in sequence.
         # we  write to all the open sockets for each node first,
