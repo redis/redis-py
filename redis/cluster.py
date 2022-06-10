@@ -1962,21 +1962,35 @@ class ClusterPipeline(RedisCluster):
         # we figure out the slot number that command maps to, then from
         # the slot determine the node.
         for c in attempt:
-            # refer to our internal node -> slot table that
-            # tells us where a given
-            # command should route to.
-            node = self._determine_nodes(*c.args)
 
-            # now that we know the name of the node
-            # ( it's just a string in the form of host:port )
-            # we can build a list of commands for each node.
-            node_name = node[0].name
-            if node_name not in nodes:
-                redis_node = self.get_redis_connection(node[0])
-                connection = get_connection(redis_node, c.args)
-                nodes[node_name] = NodeCommands(
-                    redis_node.parse_response, redis_node.connection_pool, connection
-                )
+            connection_error_retry_counter = 0
+            while True:
+                # refer to our internal node -> slot table that
+                # tells us where a given command should route to.
+                # (it might be possible we have a cached node that no longer
+                # exists in the cluster, which is why we do this in a loop)
+                node = self._determine_nodes(*c.args)
+
+                # now that we know the name of the node
+                # ( it's just a string in the form of host:port )
+                # we can build a list of commands for each node.
+                node_name = node[0].name
+                if node_name not in nodes:
+                    redis_node = self.get_redis_connection(node[0])
+                    try:
+                        connection = get_connection(redis_node, c.args)
+                    except ConnectionError:
+                        connection_error_retry_counter += 1
+                        if connection_error_retry_counter < 5:
+                            # reinitialize the node -> slot table
+                            self.nodes_manager.initialize()
+                            continue
+                        else:
+                            raise
+                    nodes[node_name] = NodeCommands(
+                        redis_node.parse_response, redis_node.connection_pool, connection
+                    )
+                break
 
             nodes[node_name].append(c)
 
