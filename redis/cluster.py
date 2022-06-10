@@ -1988,7 +1988,9 @@ class ClusterPipeline(RedisCluster):
                         else:
                             raise
                     nodes[node_name] = NodeCommands(
-                        redis_node.parse_response, redis_node.connection_pool, connection
+                        redis_node.parse_response,
+                        redis_node.connection_pool,
+                        connection
                     )
                 break
 
