@@ -23,7 +23,6 @@ from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis
 from redis.cluster import (
     PIPELINE_BLOCKED_COMMANDS,
     PRIMARY,
-    READ_COMMANDS,
     REPLICA,
     SLOT_ID,
     AbstractRedisCluster,
@@ -32,7 +31,7 @@ from redis.cluster import (
     get_node_name,
     parse_cluster_slots,
 )
-from redis.commands import AsyncRedisClusterCommands
+from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
     AskError,
@@ -1350,11 +1349,17 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
 
         nodes = {}
         for cmd in todo:
-            target_nodes = await client._determine_nodes(*cmd.args)
-            if not target_nodes:
-                raise RedisClusterException(
-                    f"No targets were found to execute {cmd.args} command on"
+            passed_targets = cmd.kwargs.pop("target_nodes", None)
+            if passed_targets and not client._is_node_flag(passed_targets):
+                target_nodes = client._parse_target_nodes(passed_targets)
+            else:
+                target_nodes = await client._determine_nodes(
+                    *cmd.args, node_flag=passed_targets
                 )
+                if not target_nodes:
+                    raise RedisClusterException(
+                        f"No targets were found to execute {cmd.args} command on"
+                    )
             if len(target_nodes) > 1:
                 raise RedisClusterException(f"Too many targets for command {cmd.args}")
 
