@@ -1065,7 +1065,6 @@ class TestClusterRedisCommands:
             if "Background save already in progress" not in e.__str__():
                 raise
 
-
     async def test_info(self, r: RedisCluster) -> None:
         # Map keys to same slot
         await r.set("x{1}", 1)
