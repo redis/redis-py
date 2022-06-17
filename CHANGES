@@ -1,4 +1,4 @@
-
+    * Remove verbose logging from cluster.py
     * Allow negative `retries` for `Retry` class to retry forever
     * Add `items` parameter to `hset` signature
     * Create codeql-analysis.yml (#1988). Thanks @chayim
