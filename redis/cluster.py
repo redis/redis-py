@@ -13,7 +13,6 @@ from redis.connection import ConnectionPool, DefaultParser, Encoder, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
     AskError,
-    BusyLoadingError,
     ClusterCrossSlotError,
     ClusterDownError,
     ClusterError,
