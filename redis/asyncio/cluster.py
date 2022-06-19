@@ -323,14 +323,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         if self._initialize:
             async with self._lock:
                 if self._initialize:
-                    self._initialize = False
                     try:
                         await self.nodes_manager.initialize()
                         await self.commands_parser.initialize(
                             self.nodes_manager.default_node
                         )
+                        self._initialize = False
                     except BaseException:
-                        self._initialize = True
                         await self.nodes_manager.close()
                         await self.nodes_manager.close("startup_nodes")
                         raise
@@ -343,6 +342,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 if not self._initialize:
                     self._initialize = True
                     await self.nodes_manager.close()
+                    await self.nodes_manager.close("startup_nodes")
 
     async def __aenter__(self) -> "RedisCluster":
         return await self.initialize()

@@ -578,6 +578,7 @@ class Connection:
         "socket_type",
         "redis_connect_func",
         "retry_on_timeout",
+        "retry_on_error",
         "health_check_interval",
         "next_health_check",
         "last_active_at",
@@ -606,6 +607,7 @@ class Connection:
         socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
         socket_type: int = 0,
         retry_on_timeout: bool = False,
+        retry_on_error: Union[list, _Sentinel] = SENTINEL,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
@@ -631,12 +633,19 @@ class Connection:
         self.socket_keepalive_options = socket_keepalive_options or {}
         self.socket_type = socket_type
         self.retry_on_timeout = retry_on_timeout
+        if retry_on_error is SENTINEL:
+            retry_on_error = []
         if retry_on_timeout:
+            retry_on_error.append(TimeoutError)
+        self.retry_on_error = retry_on_error
+        if retry_on_error:
             if not retry:
                 self.retry = Retry(NoBackoff(), 1)
             else:
                 # deep-copy the Retry object as it is mutable
                 self.retry = copy.deepcopy(retry)
+            # Update the retry's supported errors with the specified errors
+            self.retry.update_supported_errors(retry_on_error)
         else:
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
@@ -1169,6 +1178,7 @@ class UnixDomainSocketConnection(Connection):  # lgtm [py/missing-call-to-init]
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         retry_on_timeout: bool = False,
+        retry_on_error: Union[list, _Sentinel] = SENTINEL,
         parser_class: Type[BaseParser] = DefaultParser,
         socket_read_size: int = 65536,
         health_check_interval: float = 0.0,
@@ -1190,12 +1200,19 @@ class UnixDomainSocketConnection(Connection):  # lgtm [py/missing-call-to-init]
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout or None
         self.retry_on_timeout = retry_on_timeout
+        if retry_on_error is SENTINEL:
+            retry_on_error = []
         if retry_on_timeout:
+            retry_on_error.append(TimeoutError)
+        self.retry_on_error = retry_on_error
+        if retry_on_error:
             if retry is None:
                 self.retry = Retry(NoBackoff(), 1)
             else:
                 # deep-copy the Retry object as it is mutable
                 self.retry = copy.deepcopy(retry)
+            # Update the retry's supported errors with the specified errors
+            self.retry.update_supported_errors(retry_on_error)
         else:
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
