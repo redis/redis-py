@@ -1097,8 +1097,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     )
                 return response
 
-            except (RedisClusterException, BusyLoadingError) as e:
-                raise e
             except (ConnectionError, TimeoutError) as e:
                 # ConnectionError can also be raised if we couldn't get a
                 # connection from the pool before timing out, so check that
