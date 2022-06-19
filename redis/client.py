@@ -914,7 +914,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         errors=None,
         decode_responses=False,
         retry_on_timeout=False,
-        retry_on_error=[],
+        retry_on_error=None,
         ssl=False,
         ssl_keyfile=None,
         ssl_certfile=None,
@@ -958,6 +958,8 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
                     )
                 )
                 encoding_errors = errors
+            if not retry_on_error:
+                retry_on_error = []
             if retry_on_timeout is True:
                 retry_on_error.append(TimeoutError)
             kwargs = {

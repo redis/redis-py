@@ -158,6 +158,7 @@ class Redis(
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         retry_on_timeout: bool = False,
+        retry_on_error: Optional[list] = None,
         ssl: bool = False,
         ssl_keyfile: Optional[str] = None,
         ssl_certfile: Optional[str] = None,
@@ -176,8 +177,10 @@ class Redis(
     ):
         """
         Initialize a new Redis client.
-        To specify a retry policy, first set `retry_on_timeout` to `True`
-        then set `retry` to a valid `Retry` object
+        To specify a retry policy for specific errors, first set
+        `retry_on_error` to a list of the error/s to retry on, then set
+        `retry` to a valid `Retry` object.
+        To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
         """
         kwargs: Dict[str, Any]
         # auto_close_connection_pool only has an effect if connection_pool is
@@ -188,6 +191,10 @@ class Redis(
             auto_close_connection_pool if connection_pool is None else False
         )
         if not connection_pool:
+            if not retry_on_error:
+                retry_on_error = []
+            if retry_on_timeout is True:
+                retry_on_error.append(TimeoutError)
             kwargs = {
                 "db": db,
                 "username": username,
@@ -197,6 +204,7 @@ class Redis(
                 "encoding_errors": encoding_errors,
                 "decode_responses": decode_responses,
                 "retry_on_timeout": retry_on_timeout,
+                "retry_on_error": retry_on_error,
                 "retry": copy.deepcopy(retry),
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
@@ -461,7 +469,10 @@ class Redis(
         is not a TimeoutError
         """
         await conn.disconnect()
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
             raise error
 
     # COMMAND EXECUTION AND PROTOCOL PARSING
