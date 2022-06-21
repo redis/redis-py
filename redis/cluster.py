@@ -1041,7 +1041,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     res[node.name] = self._execute_command(node, *args, **kwargs)
                 # Return the processed result
                 return self._process_result(args[0], res, **kwargs)
-            except BaseException as e:
+            except Exception as e:
                 if type(e) in self.__class__.ERRORS_ALLOW_RETRY:
                     # The nodes and slots cache were reinitialized.
                     # Try again with the new cluster setup.
@@ -1147,7 +1147,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 raise e
             except ResponseError as e:
                 raise e
-            except BaseException as e:
+            except Exception as e:
                 if connection:
                     connection.disconnect()
                 raise e
