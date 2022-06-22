@@ -515,7 +515,7 @@ class Connection:
         socket_keepalive_options=None,
         socket_type=0,
         retry_on_timeout=False,
-        retry_on_error=[],
+        retry_on_error=SENTINEL,
         encoding="utf-8",
         encoding_errors="strict",
         decode_responses=False,
@@ -547,6 +547,8 @@ class Connection:
         self.socket_keepalive_options = socket_keepalive_options or {}
         self.socket_type = socket_type
         self.retry_on_timeout = retry_on_timeout
+        if retry_on_error is SENTINEL:
+            retry_on_error = []
         if retry_on_timeout:
             # Add TimeoutError to the errors list to retry on
             retry_on_error.append(TimeoutError)
@@ -1065,7 +1067,7 @@ class UnixDomainSocketConnection(Connection):
         encoding_errors="strict",
         decode_responses=False,
         retry_on_timeout=False,
-        retry_on_error=[],
+        retry_on_error=SENTINEL,
         parser_class=DefaultParser,
         socket_read_size=65536,
         health_check_interval=0,
@@ -1088,6 +1090,8 @@ class UnixDomainSocketConnection(Connection):
         self.password = password
         self.socket_timeout = socket_timeout
         self.retry_on_timeout = retry_on_timeout
+        if retry_on_error is SENTINEL:
+            retry_on_error = []
         if retry_on_timeout:
             # Add TimeoutError to the errors list to retry on
             retry_on_error.append(TimeoutError)

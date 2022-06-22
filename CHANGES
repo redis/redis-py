@@ -1,4 +1,5 @@
 
+    * Compare commands case-insensitively in the asyncio command parser
     * Allow negative `retries` for `Retry` class to retry forever
     * Add `items` parameter to `hset` signature
     * Create codeql-analysis.yml (#1988). Thanks @chayim

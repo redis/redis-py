@@ -680,13 +680,15 @@ class TestRedisClusterObj:
                 else:
                     raise e
 
-    async def test_can_run_concurrent_commands(self, r: RedisCluster) -> None:
-        assert await r.ping(target_nodes=RedisCluster.ALL_NODES) is True
+    async def test_can_run_concurrent_commands(self, request: FixtureRequest) -> None:
+        url = request.config.getoption("--redis-url")
+        rc = RedisCluster.from_url(url)
         assert all(
             await asyncio.gather(
-                *(r.ping(target_nodes=RedisCluster.ALL_NODES) for _ in range(100))
+                *(rc.echo("i", target_nodes=RedisCluster.ALL_NODES) for i in range(100))
             )
         )
+        await rc.close()
 
 
 @pytest.mark.onlycluster
