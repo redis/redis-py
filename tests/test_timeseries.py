@@ -70,7 +70,8 @@ def test_add(client):
     assert 4 == client.ts().add(
         4, 4, 2, retention_msecs=10, labels={"Redis": "Labs", "Time": "Series"}
     )
-    assert round(time.time()) == round(float(client.ts().add(5, "*", 1)) / 1000)
+
+    assert abs(time.time() - float(client.ts().add(5, "*", 1)) / 1000) < 1.0
 
     info = client.ts().info(4)
     assert 10 == info.retention_msecs
