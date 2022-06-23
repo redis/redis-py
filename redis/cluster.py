@@ -13,6 +13,7 @@ from redis.connection import ConnectionPool, DefaultParser, Encoder, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
     AskError,
+    AuthenticationError,
     ClusterCrossSlotError,
     ClusterDownError,
     ClusterError,
@@ -477,6 +478,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         require_full_coverage=False,
         reinitialize_steps=10,
         read_from_replicas=False,
+        dynamic_startup_nodes=False,
         url=None,
         **kwargs,
     ):
@@ -504,6 +506,14 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
              stale data.
              When set to true, read commands will be assigned between the
              primary and its replications in a Round-Robin manner.
+         :dynamic_startup_nodes: 'bool'
+             Set the RedisCluster's startup nodes to all of the discovered nodes.
+             If true, the cluster's discovered nodes will be used to determine the
+             cluster nodes-slots mapping in the next topology refresh.
+             It will remove the initial passed startup nodes if their endpoints aren't
+             listed in the CLUSTER SLOTS output.
+             If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
+             specific IP addresses, keep it at false.
         :cluster_error_retry_attempts: 'int'
              Retry command execution attempts when encountering ClusterDownError
              or ConnectionError
@@ -592,6 +602,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             startup_nodes=startup_nodes,
             from_url=from_url,
             require_full_coverage=require_full_coverage,
+            dynamic_startup_nodes=dynamic_startup_nodes,
             **kwargs,
         )
 
@@ -1096,6 +1107,8 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     )
                 return response
 
+            except AuthenticationError as e:
+                raise e
             except (ConnectionError, TimeoutError) as e:
                 # ConnectionError can also be raised if we couldn't get a
                 # connection from the pool before timing out, so check that
@@ -1113,6 +1126,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 else:
                     # Hard force of reinitialize of the node/slots setup
                     # and try again with the new setup
+                    target_node.redis_connection = None
                     self.nodes_manager.initialize()
                     raise e
             except MovedError as e:
@@ -1251,6 +1265,7 @@ class NodesManager:
         from_url=False,
         require_full_coverage=False,
         lock=None,
+        dynamic_startup_nodes=False,
         **kwargs,
     ):
         self.nodes_cache = {}
@@ -1260,6 +1275,7 @@ class NodesManager:
         self.populate_startup_nodes(startup_nodes)
         self.from_url = from_url
         self._require_full_coverage = require_full_coverage
+        self._dynamic_startup_nodes = dynamic_startup_nodes
         self._moved_exception = None
         self.connection_kwargs = kwargs
         self.read_load_balancer = LoadBalancer()
@@ -1408,6 +1424,21 @@ class NodesManager:
             r = Redis(host=host, port=port, **kwargs)
         return r
 
+    def _get_or_create_cluster_node(self, host, port, role, tmp_nodes_cache):
+        node_name = get_node_name(host, port)
+        # check if we already have this node in the tmp_nodes_cache
+        target_node = tmp_nodes_cache.get(node_name)
+        if target_node is None:
+            # before creating a new cluster node, check if the cluster node already
+            # exists in the current nodes cache and has a valid connection so we can
+            # reuse it
+            target_node = self.nodes_cache.get(node_name)
+            if target_node is None or target_node.redis_connection is None:
+                # create new cluster node for this cluster
+                target_node = ClusterNode(host, port, role)
+
+        return target_node
+
     def initialize(self):
         """
         Initializes the nodes cache, slots cache and redis connections.
@@ -1477,14 +1508,14 @@ class NodesManager:
 
             for slot in cluster_slots:
                 primary_node = slot[2]
-                host = primary_node[0]
+                host = str_if_bytes(primary_node[0])
                 if host == "":
                     host = startup_node.host
                 port = int(primary_node[1])
 
-                target_node = tmp_nodes_cache.get(get_node_name(host, port))
-                if target_node is None:
-                    target_node = ClusterNode(host, port, PRIMARY)
+                target_node = self._get_or_create_cluster_node(
+                    host, port, PRIMARY, tmp_nodes_cache
+                )
                 # add this node to the nodes cache
                 tmp_nodes_cache[target_node.name] = target_node
 
@@ -1495,14 +1526,12 @@ class NodesManager:
                         replica_nodes = [slot[j] for j in range(3, len(slot))]
 
                         for replica_node in replica_nodes:
-                            host = replica_node[0]
+                            host = str_if_bytes(replica_node[0])
                             port = replica_node[1]
 
-                            target_replica_node = tmp_nodes_cache.get(
-                                get_node_name(host, port)
+                            target_replica_node = self._get_or_create_cluster_node(
+                                host, port, REPLICA, tmp_nodes_cache
                             )
-                            if target_replica_node is None:
-                                target_replica_node = ClusterNode(host, port, REPLICA)
                             tmp_slots[i].append(target_replica_node)
                             # add this node to the nodes cache
                             tmp_nodes_cache[
@@ -1553,8 +1582,9 @@ class NodesManager:
         self.slots_cache = tmp_slots
         # Set the default node
         self.default_node = self.get_nodes_by_server_type(PRIMARY)[0]
-        # Populate the startup nodes with all discovered nodes
-        self.populate_startup_nodes(self.nodes_cache.values())
+        if self._dynamic_startup_nodes:
+            # Populate the startup nodes with all discovered nodes
+            self.startup_nodes = tmp_nodes_cache
         # If initialize was called after a MovedError, clear it
         self._moved_exception = None
 

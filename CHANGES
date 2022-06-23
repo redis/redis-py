@@ -11,7 +11,9 @@
     * Fix broken connection writer lock-up for asyncio (#2065)
     * Fix auth bug when provided with no username (#2086)
     * Fix missing ClusterPipeline._lock (#2189)
-
+    * Added dynaminc_startup_nodes configuration to RedisCluster
+    * Fix reusing the old nodes' connections when cluster topology refresh is being done
+    * Fix RedisCluster to immediately raise AuthenticationError without a retry
 * 4.1.3 (Feb 8, 2022)
     * Fix flushdb and flushall (#1926)
     * Add redis5 and redis4 dockers (#1871)
