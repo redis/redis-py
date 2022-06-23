@@ -673,7 +673,7 @@ class TestRedisClusterObj:
 
             def moved_redirect_effect(connection, *args, **options):
                 # raise a timeout for 5 times so we'll need to reinitilize the topology
-                if count.val >= 5:
+                if count.val == 4:
                     parse_response.side_effect = real_func
                 count.val += 1
                 raise TimeoutError()
