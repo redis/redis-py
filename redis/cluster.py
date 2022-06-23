@@ -482,6 +482,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         require_full_coverage=False,
         reinitialize_steps=10,
         read_from_replicas=False,
+        dynamic_startup_nodes=False,
         url=None,
         **kwargs,
     ):
@@ -509,6 +510,14 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
              stale data.
              When set to true, read commands will be assigned between the
              primary and its replications in a Round-Robin manner.
+         :dynamic_startup_nodes: 'bool'
+             Set the RedisCluster's startup nodes to all of the discovered nodes.
+             If true, the cluster's discovered nodes will be used to determine the
+             cluster nodes-slots mapping in the next topology refresh.
+             It will remove the initial passed startup nodes if their endpoints aren't
+             listed in the CLUSTER SLOTS output.
+             If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
+             specific IP addresses, keep it at false.
         :cluster_error_retry_attempts: 'int'
              Retry command execution attempts when encountering ClusterDownError
              or ConnectionError
@@ -598,6 +607,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             startup_nodes=startup_nodes,
             from_url=from_url,
             require_full_coverage=require_full_coverage,
+            dynamic_startup_nodes=dynamic_startup_nodes,
             **kwargs,
         )
 
@@ -1283,6 +1293,7 @@ class NodesManager:
         from_url=False,
         require_full_coverage=False,
         lock=None,
+        dynamic_startup_nodes=False,
         **kwargs,
     ):
         self.nodes_cache = {}
@@ -1292,6 +1303,7 @@ class NodesManager:
         self.populate_startup_nodes(startup_nodes)
         self.from_url = from_url
         self._require_full_coverage = require_full_coverage
+        self._dynamic_startup_nodes = dynamic_startup_nodes
         self._moved_exception = None
         self.connection_kwargs = kwargs
         self.read_load_balancer = LoadBalancer()
@@ -1612,8 +1624,9 @@ class NodesManager:
         self.slots_cache = tmp_slots
         # Set the default node
         self.default_node = self.get_nodes_by_server_type(PRIMARY)[0]
-        # Populate the startup nodes with all discovered nodes
-        self.startup_nodes = tmp_nodes_cache
+        if self._dynamic_startup_nodes:
+            # Populate the startup nodes with all discovered nodes
+            self.startup_nodes = tmp_nodes_cache
         # If initialize was called after a MovedError, clear it
         self._moved_exception = None
 

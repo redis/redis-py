@@ -673,7 +673,7 @@ class TestRedisClusterObj:
 
             def moved_redirect_effect(connection, *args, **options):
                 # raise a timeout for 5 times so we'll need to reinitilize the topology
-                if count.val >= 5:
+                if count.val == 4:
                     parse_response.side_effect = real_func
                 count.val += 1
                 raise TimeoutError()
@@ -2284,6 +2284,27 @@ class TestNodesManager:
                 rc = RedisCluster(startup_nodes=[node_1, node_2])
                 assert rc.get_node(host=default_host, port=7001) is not None
                 assert rc.get_node(host=default_host, port=7002) is not None
+
+    @pytest.mark.parametrize("dynamic_startup_nodes", [True, False])
+    def test_init_slots_dynamic_startup_nodes(self, dynamic_startup_nodes):
+        rc = get_mocked_redis_client(
+            host="my@DNS.com",
+            port=7000,
+            cluster_slots=default_cluster_slots,
+            dynamic_startup_nodes=dynamic_startup_nodes,
+        )
+        # Nodes are taken from default_cluster_slots
+        discovered_nodes = [
+            "127.0.0.1:7000",
+            "127.0.0.1:7001",
+            "127.0.0.1:7002",
+            "127.0.0.1:7003",
+        ]
+        startup_nodes = list(rc.nodes_manager.startup_nodes.keys())
+        if dynamic_startup_nodes is True:
+            assert startup_nodes.sort() == discovered_nodes.sort()
+        else:
+            assert startup_nodes == ["my@DNS.com:7000"]
 
 
 @pytest.mark.onlycluster
