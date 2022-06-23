@@ -1059,9 +1059,13 @@ class TestClusterRedisCommands:
 
     @skip_if_redis_enterprise()
     async def test_bgsave(self, r: RedisCluster) -> None:
-        assert await r.bgsave()
-        await asyncio.sleep(0.3)
-        assert await r.bgsave(True)
+        try:
+            assert await r.bgsave()
+            await asyncio.sleep(0.3)
+            assert await r.bgsave(True)
+        except ResponseError as e:
+            if "Background save already in progress" not in e.__str__():
+                raise
 
     async def test_info(self, r: RedisCluster) -> None:
         # Map keys to same slot

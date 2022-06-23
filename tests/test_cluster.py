@@ -29,6 +29,7 @@ from redis.exceptions import (
     RedisClusterException,
     RedisError,
     ResponseError,
+    TimeoutError,
 )
 from redis.utils import str_if_bytes
 from tests.test_pubsub import wait_for_message
@@ -650,6 +651,45 @@ class TestRedisClusterObj:
                     pass
                 else:
                     raise e
+
+    def test_timeout_error_topology_refresh_reuse_connections(self, r):
+        """
+        By mucking TIMEOUT errors, we'll force the cluster topology to be reinitialized,
+        and then ensure that only the impacted connection is replaced
+        """
+        node = r.get_node_from_key("key")
+        r.set("key", "value")
+        node_conn_origin = {}
+        for n in r.get_nodes():
+            node_conn_origin[n.name] = n.redis_connection
+        real_func = r.get_redis_connection(node).parse_response
+
+        class counter:
+            def __init__(self, val=0):
+                self.val = int(val)
+
+        count = counter(0)
+        with patch.object(Redis, "parse_response") as parse_response:
+
+            def moved_redirect_effect(connection, *args, **options):
+                # raise a timeout for 5 times so we'll need to reinitilize the topology
+                if count.val >= 5:
+                    parse_response.side_effect = real_func
+                count.val += 1
+                raise TimeoutError()
+
+            parse_response.side_effect = moved_redirect_effect
+            assert r.get("key") == b"value"
+            for node_name, conn in node_conn_origin.items():
+                if node_name == node.name:
+                    # The old redis connection of the timed out node should have been
+                    # deleted and replaced
+                    assert conn != r.get_redis_connection(node)
+                else:
+                    # other nodes' redis connection should have been reused during the
+                    # topology refresh
+                    cur_node = r.get_node(node_name=node_name)
+                    assert conn == r.get_redis_connection(cur_node)
 
 
 @pytest.mark.onlycluster
