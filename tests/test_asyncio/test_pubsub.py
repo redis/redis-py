@@ -917,7 +917,7 @@ class TestPubSubAutoReconnect:
         except asyncio.TimeoutError:
             return False
 
-            
+
 @pytest.mark.onlynoncluster
 class TestBaseException:
     @pytest.mark.skipif(
