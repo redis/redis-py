@@ -687,6 +687,12 @@ class ManagementCommands(CommandsProtocol):
         Sets the current connection name
 
         For more information see https://redis.io/commands/client-setname
+
+        .. note::
+           This method sets client name only for **current** connection.
+
+           If you want to set a common name for all connections managed
+           by this client, use ``client_name`` constructor argument.
         """
         return self.execute_command("CLIENT SETNAME", name, **kwargs)
 
