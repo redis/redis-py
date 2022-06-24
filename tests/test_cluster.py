@@ -29,6 +29,7 @@ from redis.exceptions import (
     RedisClusterException,
     RedisError,
     ResponseError,
+    TimeoutError,
 )
 from redis.utils import str_if_bytes
 from tests.test_pubsub import wait_for_message
@@ -650,6 +651,45 @@ class TestRedisClusterObj:
                     pass
                 else:
                     raise e
+
+    def test_timeout_error_topology_refresh_reuse_connections(self, r):
+        """
+        By mucking TIMEOUT errors, we'll force the cluster topology to be reinitialized,
+        and then ensure that only the impacted connection is replaced
+        """
+        node = r.get_node_from_key("key")
+        r.set("key", "value")
+        node_conn_origin = {}
+        for n in r.get_nodes():
+            node_conn_origin[n.name] = n.redis_connection
+        real_func = r.get_redis_connection(node).parse_response
+
+        class counter:
+            def __init__(self, val=0):
+                self.val = int(val)
+
+        count = counter(0)
+        with patch.object(Redis, "parse_response") as parse_response:
+
+            def moved_redirect_effect(connection, *args, **options):
+                # raise a timeout for 5 times so we'll need to reinitilize the topology
+                if count.val == 4:
+                    parse_response.side_effect = real_func
+                count.val += 1
+                raise TimeoutError()
+
+            parse_response.side_effect = moved_redirect_effect
+            assert r.get("key") == b"value"
+            for node_name, conn in node_conn_origin.items():
+                if node_name == node.name:
+                    # The old redis connection of the timed out node should have been
+                    # deleted and replaced
+                    assert conn != r.get_redis_connection(node)
+                else:
+                    # other nodes' redis connection should have been reused during the
+                    # topology refresh
+                    cur_node = r.get_node(node_name=node_name)
+                    assert conn == r.get_redis_connection(cur_node)
 
 
 @pytest.mark.onlycluster
@@ -2244,6 +2284,27 @@ class TestNodesManager:
                 rc = RedisCluster(startup_nodes=[node_1, node_2])
                 assert rc.get_node(host=default_host, port=7001) is not None
                 assert rc.get_node(host=default_host, port=7002) is not None
+
+    @pytest.mark.parametrize("dynamic_startup_nodes", [True, False])
+    def test_init_slots_dynamic_startup_nodes(self, dynamic_startup_nodes):
+        rc = get_mocked_redis_client(
+            host="my@DNS.com",
+            port=7000,
+            cluster_slots=default_cluster_slots,
+            dynamic_startup_nodes=dynamic_startup_nodes,
+        )
+        # Nodes are taken from default_cluster_slots
+        discovered_nodes = [
+            "127.0.0.1:7000",
+            "127.0.0.1:7001",
+            "127.0.0.1:7002",
+            "127.0.0.1:7003",
+        ]
+        startup_nodes = list(rc.nodes_manager.startup_nodes.keys())
+        if dynamic_startup_nodes is True:
+            assert startup_nodes.sort() == discovered_nodes.sort()
+        else:
+            assert startup_nodes == ["my@DNS.com:7000"]
 
 
 @pytest.mark.onlycluster

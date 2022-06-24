@@ -680,13 +680,15 @@ class TestRedisClusterObj:
                 else:
                     raise e
 
-    async def test_can_run_concurrent_commands(self, r: RedisCluster) -> None:
-        assert await r.ping(target_nodes=RedisCluster.ALL_NODES) is True
+    async def test_can_run_concurrent_commands(self, request: FixtureRequest) -> None:
+        url = request.config.getoption("--redis-url")
+        rc = RedisCluster.from_url(url)
         assert all(
             await asyncio.gather(
-                *(r.ping(target_nodes=RedisCluster.ALL_NODES) for _ in range(100))
+                *(rc.echo("i", target_nodes=RedisCluster.ALL_NODES) for i in range(100))
             )
         )
+        await rc.close()
 
 
 @pytest.mark.onlycluster
@@ -1057,9 +1059,13 @@ class TestClusterRedisCommands:
 
     @skip_if_redis_enterprise()
     async def test_bgsave(self, r: RedisCluster) -> None:
-        assert await r.bgsave()
-        await asyncio.sleep(0.3)
-        assert await r.bgsave(True)
+        try:
+            assert await r.bgsave()
+            await asyncio.sleep(0.3)
+            assert await r.bgsave(True)
+        except ResponseError as e:
+            if "Background save already in progress" not in e.__str__():
+                raise
 
     async def test_info(self, r: RedisCluster) -> None:
         # Map keys to same slot

@@ -1006,6 +1006,7 @@ a slots cache which maps each of the 16384 slots to the node/s handling them,
 a nodes cache that contains ClusterNode objects (name, host, port, redis connection)
 for all of the cluster's nodes, and a commands cache contains all the server
 supported commands that were retrieved using the Redis 'COMMAND' output.
+See *RedisCluster specific options* below for more.
 
 RedisCluster instance can be directly used to execute Redis commands. When a
 command is being executed through the cluster instance, the target node(s) will
@@ -1244,6 +1245,55 @@ The following commands are not supported:
 - `EVALSHA_RO`
 
 Using scripting within pipelines in cluster mode is **not supported**.
+
+
+**RedisCluster specific options**
+
+ require_full_coverage: (default=False)
+ 
+    When set to False (default value): the client will not require a
+    full coverage of the slots. However, if not all slots are covered,
+    and at least one node has 'cluster-require-full-coverage' set to
+    'yes,' the server will throw a ClusterDownError for some key-based
+    commands. See -
+    https://redis.io/topics/cluster-tutorial#redis-cluster-configuration-parameters
+    When set to True: all slots must be covered to construct the
+    cluster client. If not all slots are covered, RedisClusterException
+    will be thrown.
+    
+ read_from_replicas: (default=False)
+
+     Enable read from replicas in READONLY mode. You can read possibly
+     stale data.
+     When set to true, read commands will be assigned between the
+     primary and its replications in a Round-Robin manner.
+     
+ dynamic_startup_nodes: (default=False)
+
+     Set the RedisCluster's startup nodes to all of the discovered nodes.
+     If true, the cluster's discovered nodes will be used to determine the
+     cluster nodes-slots mapping in the next topology refresh.
+     It will remove the initial passed startup nodes if their endpoints aren't
+     listed in the CLUSTER SLOTS output.
+     If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
+     specific IP addresses, keep it at false.
+     
+ cluster_error_retry_attempts: (default=3)
+
+     Retry command execution attempts when encountering ClusterDownError
+     or ConnectionError
+     
+ reinitialize_steps: (default=10)
+
+    Specifies the number of MOVED errors that need to occur before
+    reinitializing the whole cluster topology. If a MOVED error occurs
+    and the cluster does not need to be reinitialized on this current
+    error handling, only the MOVED slot will be patched with the
+    redirected node.
+    To reinitialize the cluster on every MOVED error, set
+    reinitialize_steps to 1.
+    To avoid reinitializing the cluster on moved errors, set
+    reinitialize_steps to 0.
 
 ### Author
 
