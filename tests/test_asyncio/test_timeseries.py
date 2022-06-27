@@ -73,7 +73,7 @@ async def test_add(modclient: redis.Redis):
         4, 4, 2, retention_msecs=10, labels={"Redis": "Labs", "Time": "Series"}
     )
     res = await modclient.ts().add(5, "*", 1)
-    assert round(time.time()) == round(float(res) / 1000)
+    assert abs(time.time() - round(float(res) / 1000)) < 1.0
 
     info = await modclient.ts().info(4)
     assert 10 == info.retention_msecs

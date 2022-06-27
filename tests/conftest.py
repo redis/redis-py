@@ -139,6 +139,8 @@ def pytest_sessionstart(session):
     REDIS_INFO["arch_bits"] = arch_bits
     REDIS_INFO["cluster_enabled"] = cluster_enabled
     REDIS_INFO["enterprise"] = info["enterprise"]
+    # store REDIS_INFO in config so that it is available from "condition strings"
+    session.config.REDIS_INFO = REDIS_INFO
 
     # module info, if the second redis is running
     try:
