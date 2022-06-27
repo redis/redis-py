@@ -169,7 +169,6 @@ class Lock:
 
     def acquire(
         self,
-        *,
         sleep: Optional[Number] = None,
         blocking: Optional[bool] = None,
         blocking_timeout: Optional[Number] = None,
