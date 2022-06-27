@@ -1268,7 +1268,7 @@ Using scripting within pipelines in cluster mode is **not supported**.
      When set to true, read commands will be assigned between the
      primary and its replications in a Round-Robin manner.
      
- dynamic_startup_nodes: (default=False)
+ dynamic_startup_nodes: (default=True)
 
      Set the RedisCluster's startup nodes to all of the discovered nodes.
      If true, the cluster's discovered nodes will be used to determine the
@@ -1276,7 +1276,7 @@ Using scripting within pipelines in cluster mode is **not supported**.
      It will remove the initial passed startup nodes if their endpoints aren't
      listed in the CLUSTER SLOTS output.
      If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
-     specific IP addresses, keep it at false.
+     specific IP addresses, it is best to set it to false.
      
  cluster_error_retry_attempts: (default=3)
 
