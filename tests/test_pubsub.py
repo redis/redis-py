@@ -1,4 +1,6 @@
 import platform
+import queue
+import socket
 import threading
 import time
 from unittest import mock
@@ -608,3 +610,121 @@ class TestPubSubDeadlock:
             p = r.pubsub()
             p.subscribe("my-channel-1", "my-channel-2")
             pool.reset()
+
+
+@pytest.mark.timeout(5, method="thread")
+@pytest.mark.onlynoncluster
+class TestPubSubAutoReconnect:
+    def test_reconnect_socket_error(self, r: redis.Redis):
+        """
+        Test that a socket error will cause reconnect
+        """
+        self.messages = queue.Queue()
+        self.pubsub = r.pubsub()
+        self.state = 0
+        self.cond = threading.Condition()
+
+        thread = threading.Thread(target=self.loop)
+        thread.start()
+        # get the initial connect message
+        message = self.messages.get(timeout=1)
+        assert message == {
+            "channel": b"foo",
+            "data": 1,
+            "pattern": None,
+            "type": "subscribe",
+        }
+        # now, disconnect the connection, and wait for it to be re-established
+        with self.cond:
+            self.state = 1
+            with patch("socket.socket.recv") as mock:
+                mock.side_effect = socket.error
+                # wait until thread noticies the disconnect until we undo the patch
+                self.cond.wait_for(lambda: self.state >= 2)
+                assert (
+                    self.pubsub.connection._sock is None
+                )  # it is in a disconnecte state
+            # wait for reconnect
+            self.cond.wait_for(lambda: self.pubsub.connection._sock is not None)
+            assert self.state == 3
+
+        message = self.messages.get(timeout=1)
+        assert message == {
+            "channel": b"foo",
+            "data": 1,
+            "pattern": None,
+            "type": "subscribe",
+        }
+        # kill thread
+        with self.cond:
+            self.state = 4  # quit
+        thread.join()
+
+    def test_reconnect_disconnect(self, r: redis.Redis):
+        """
+        Test that a socket error will cause reconnect
+        """
+        self.messages = queue.Queue()
+        self.pubsub = r.pubsub()
+        self.state = 0
+        self.cond = threading.Condition()
+
+        thread = threading.Thread(target=self.loop)
+        thread.start()
+        # get the initial connect message
+        message = self.messages.get(timeout=1)
+        assert message == {
+            "channel": b"foo",
+            "data": 1,
+            "pattern": None,
+            "type": "subscribe",
+        }
+        # now, disconnect the connection, and wait for it to be re-established
+        with self.cond:
+            self.state = 1
+            self.pubsub.connection.disconnect()
+            assert self.pubsub.connection._sock is None  # it is in a disconnecte state
+            # wait for reconnect
+            self.cond.wait_for(lambda: self.pubsub.connection._sock is not None)
+            assert self.state == 3
+
+        message = self.messages.get(timeout=1)
+        assert message == {
+            "channel": b"foo",
+            "data": 1,
+            "pattern": None,
+            "type": "subscribe",
+        }
+        # kill thread
+        with self.cond:
+            self.state = 4  # quit
+        thread.join()
+
+    def loop(self):
+        # must make sure the task exits
+        self.pubsub.subscribe("foo")
+        while True:
+            time.sleep(0.01)  # give main thread chance to get lock
+            with self.cond:
+                try:
+                    if self.state == 1:
+                        self.state = 2
+                    elif self.state == 4:
+                        break
+                    # print ('state, %s, sock %s' % (state, pubsub.connection._sock))
+                    self.loop_step(0.1)
+                    if self.state == 2:
+                        self.state = 3  # successful reconnect
+                except redis.ConnectionError:
+                    pass  # we will reconnect
+
+                finally:
+                    self.cond.notify()
+
+    def loop_step(self, timeout):
+        # get a single message via listen()
+        message = self.pubsub.get_message(timeout=timeout)
+        if message is not None:
+            self.messages.put(message)
+            return True
+        return False
