@@ -41,7 +41,7 @@ async def r_teardown(r: redis.Redis):
     yield factory
     for username in usernames:
         await r.acl_deluser(username)
-        
+
 
 @pytest_asyncio.fixture()
 async def slowlog(r: redis.Redis):
