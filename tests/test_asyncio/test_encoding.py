@@ -10,8 +10,6 @@ else:
 import redis.asyncio as redis
 from redis.exceptions import DataError
 
-pytestmark = pytest.mark.asyncio
-
 
 @pytest.mark.onlynoncluster
 class TestEncoding:

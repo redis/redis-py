@@ -18,8 +18,6 @@ from tests.conftest import skip_if_server_version_lt
 
 from .compat import mock
 
-pytestmark = pytest.mark.asyncio(forbid_global_loop=True)
-
 
 def with_timeout(t):
     def wrapper(corofunc):

@@ -27,9 +27,6 @@ from tests.conftest import (
 REDIS_6_VERSION = "5.9.0"
 
 
-pytestmark = pytest.mark.asyncio
-
-
 @pytest_asyncio.fixture()
 async def slowlog(r: redis.Redis, event_loop):
     current_config = await r.config_get()

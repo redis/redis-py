@@ -11,8 +11,6 @@ else:
 from redis.asyncio.lock import Lock
 from redis.exceptions import LockError, LockNotOwnedError
 
-pytestmark = pytest.mark.asyncio
-
 
 @pytest.mark.onlynoncluster
 class TestLock:

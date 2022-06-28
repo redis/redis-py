@@ -17,8 +17,6 @@ from redis.asyncio.sentinel import (
     SlaveNotFoundError,
 )
 
-pytestmark = pytest.mark.asyncio
-
 
 @pytest_asyncio.fixture(scope="module")
 def master_ip(master_host):

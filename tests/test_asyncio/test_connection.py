@@ -18,8 +18,6 @@ from tests.conftest import skip_if_server_version_lt
 
 from .compat import mock
 
-pytestmark = pytest.mark.asyncio
-
 
 @pytest.mark.onlynoncluster
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")

@@ -39,8 +39,6 @@ from tests.conftest import (
     skip_unless_arch_bits,
 )
 
-pytestmark = pytest.mark.asyncio
-
 default_host = "127.0.0.1"
 default_port = 7000
 default_cluster_slots = [

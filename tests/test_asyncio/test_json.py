@@ -5,8 +5,6 @@ from redis import exceptions
 from redis.commands.json.path import Path
 from tests.conftest import skip_ifmodversion_lt
 
-pytestmark = pytest.mark.asyncio
-
 
 @pytest.mark.redismod
 async def test_json_setbinarykey(modclient: redis.Redis):

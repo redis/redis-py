@@ -4,8 +4,6 @@ import redis.asyncio as redis
 from redis.exceptions import ModuleError, RedisError
 from redis.utils import HIREDIS_AVAILABLE
 
-pytestmark = pytest.mark.asyncio
-
 
 def intlist(obj):
     return [int(v) for v in obj]

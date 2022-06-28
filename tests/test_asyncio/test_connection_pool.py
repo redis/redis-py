@@ -17,8 +17,6 @@ from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 from .compat import mock
 from .test_pubsub import wait_for_message
 
-pytestmark = pytest.mark.asyncio
-
 
 @pytest.mark.onlynoncluster
 class TestRedisAutoReleaseConnectionPool:
