@@ -687,6 +687,8 @@ class TestHealthCheck:
         if r.connection:
             await r.get("foo")
             next_health_check = r.connection.next_health_check
+            # ensure that the event loop's `time()` advances a bit
+            await asyncio.sleep(0.001)
             await r.get("foo")
             assert next_health_check < r.connection.next_health_check
 
