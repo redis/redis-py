@@ -99,9 +99,7 @@ async def create_redis(request):
 
         async def teardown():
             if not cluster_mode:
-                if "username" in kwargs:
-                    return
-                if flushdb:
+                if flushdb and "username" not in kwargs:
                     try:
                         await client.flushdb()
                     except redis.ConnectionError:
