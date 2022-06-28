@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 import os
 import re
 import sys
@@ -18,6 +17,7 @@ from redis.asyncio.connection import Connection, to_bool
 from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
 from .compat import mock
+from .conftest import asynccontextmanager
 from .test_pubsub import wait_for_message
 
 
@@ -115,7 +115,7 @@ class DummyConnection(Connection):
 
 
 class TestConnectionPool:
-    @contextlib.asynccontextmanager
+    @asynccontextmanager
     async def get_pool(
         self,
         connection_kwargs=None,
@@ -197,7 +197,7 @@ class TestConnectionPool:
 
 
 class TestBlockingConnectionPool:
-    @contextlib.asynccontextmanager
+    @asynccontextmanager
     async def get_pool(self, connection_kwargs=None, max_connections=10, timeout=20):
         connection_kwargs = connection_kwargs or {}
         pool = redis.BlockingConnectionPool(

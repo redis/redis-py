@@ -1,3 +1,4 @@
+import functools
 import random
 import sys
 from typing import Union
@@ -243,3 +244,41 @@ async def wait_for_command(
             return monitor_response
         if key in monitor_response["command"]:
             return None
+
+
+# python 3.6 doesn't have the asynccontextmanager decorator.  Provide it here.
+class AsyncContextManager:
+    def __init__(self, async_generator):
+        self.gen = async_generator
+
+    async def __aenter__(self):
+        try:
+            return await self.gen.__anext__()
+        except StopAsyncIteration as err:
+            raise RuntimeError("Pickles") from err
+
+    async def __aexit__(self, exc_type, exc_inst, tb):
+        if exc_type:
+            await self.gen.athrow(exc_type, exc_inst, tb)
+            return True
+        try:
+            await self.gen.__anext__()
+        except StopAsyncIteration:
+            return
+        raise RuntimeError("More pickles")
+
+
+if sys.version_info[0:2] == (3, 6):
+
+    def asynccontextmanager(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            return AsyncContextManager(func(*args, **kwargs))
+
+        return wrapper
+
+else:
+    from contextlib import asynccontextmanager as _asynccontextmanager
+
+    def asynccontextmanager(func):
+        return _asynccontextmanager(func)
