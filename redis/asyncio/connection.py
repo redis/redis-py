@@ -767,7 +767,16 @@ class Connection:
     def _error_message(self, exception):
         # args for socket.error can either be (errno, "message")
         # or just "message"
-        if len(exception.args) == 1:
+        if not exception.args:
+            # asyncio has a bug where on Connection reset by peer, the
+            # exception is not instanciated, so args is empty. This is the
+            # workaround.
+            # See: https://github.com/redis/redis-py/issues/2237
+            # See: https://github.com/python/cpython/issues/94061
+            return (
+                f"Error connecting to {self.host}:{self.port}. Connection reset by peer"
+            )
+        elif len(exception.args) == 1:
             return f"Error connecting to {self.host}:{self.port}. {exception.args[0]}."
         else:
             return (
