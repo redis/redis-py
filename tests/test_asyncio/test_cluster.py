@@ -11,6 +11,8 @@ from .compat import mock
 
 if sys.version_info[0:2] == (3, 6):
     import pytest as pytest_asyncio
+
+    pytestmark = pytest.mark.asyncio
 else:
     import pytest_asyncio
 

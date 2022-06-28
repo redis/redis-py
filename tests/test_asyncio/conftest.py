@@ -3,11 +3,6 @@ import sys
 from typing import Union
 from urllib.parse import urlparse
 
-if sys.version_info[0:2] == (3, 6):
-    import pytest as pytest_asyncio
-else:
-    import pytest_asyncio
-
 import pytest
 from packaging.version import Version
 
@@ -24,6 +19,13 @@ from redis.backoff import NoBackoff
 from tests.conftest import REDIS_INFO
 
 from .compat import mock
+
+if sys.version_info[0:2] == (3, 6):
+    import pytest as pytest_asyncio
+
+    pytestmark = pytest.mark.asyncio
+else:
+    import pytest_asyncio
 
 
 async def _get_info(redis_url):

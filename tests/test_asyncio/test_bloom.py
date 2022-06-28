@@ -1,8 +1,13 @@
+import sys
+
 import pytest
 
 import redis.asyncio as redis
 from redis.exceptions import ModuleError, RedisError
 from redis.utils import HIREDIS_AVAILABLE
+
+if sys.version_info[0:2] == (3, 6):
+    pytestmark = pytest.mark.asyncio
 
 
 def intlist(obj):
