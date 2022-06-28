@@ -3420,7 +3420,7 @@ class StreamCommands(CommandsProtocol):
         groupname: GroupT,
         consumername: ConsumerT,
         min_idle_time: int,
-        start_id: int = 0,
+        start_id: StreamIdT = "0-0",
         count: Union[int, None] = None,
         justid: bool = False,
     ) -> ResponseT:
