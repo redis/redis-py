@@ -775,14 +775,13 @@ class TestPubSubRun:
         await p.subscribe(foo=callback)
         # wait tof the subscribe to finish.  Cannot use _subscribe() because
         # p.run() is already accepting messages
-        await asyncio.sleep(0.1)
-        await r.publish("foo", "bar")
-        message = None
-        try:
-            async with async_timeout.timeout(0.1):
-                message = await messages.get()
-        except asyncio.TimeoutError:
-            pass
+        while True:
+            n = await r.publish("foo", "bar")
+            if n == 1:
+                break
+            await asyncio.sleep(0.1)
+        async with async_timeout.timeout(0.1):
+            message = await messages.get()
         task.cancel()
         # we expect a cancelled error, not the Runtime error
         # ("did you forget to call subscribe()"")
