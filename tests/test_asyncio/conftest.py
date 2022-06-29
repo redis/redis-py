@@ -39,16 +39,21 @@ async def _get_info(redis_url):
         pytest.param(
             (True, PythonParser),
             marks=pytest.mark.skipif(
-                REDIS_INFO["cluster_enabled"], reason="cluster mode enabled"
+                'config.REDIS_INFO["cluster_enabled"]', reason="cluster mode enabled"
             ),
         ),
         (False, PythonParser),
         pytest.param(
             (True, HiredisParser),
-            marks=pytest.mark.skipif(
-                not HIREDIS_AVAILABLE or REDIS_INFO["cluster_enabled"],
-                reason="hiredis is not installed or cluster mode enabled",
-            ),
+            marks=[
+                pytest.mark.skipif(
+                    'config.REDIS_INFO["cluster_enabled"]',
+                    reason="cluster mode enabled",
+                ),
+                pytest.mark.skipif(
+                    not HIREDIS_AVAILABLE, reason="hiredis is not installed"
+                ),
+            ],
         ),
         pytest.param(
             (False, HiredisParser),

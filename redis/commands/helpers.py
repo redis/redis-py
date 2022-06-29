@@ -1,9 +1,12 @@
 import copy
 import random
 import string
+from typing import List, Tuple
+
+from redis.typing import KeysT, KeyT
 
 
-def list_or_args(keys, args):
+def list_or_args(keys: KeysT, args: Tuple[KeyT, ...]) -> List[KeyT]:
     # returns a single new list combining keys and args
     try:
         iter(keys)

@@ -8,7 +8,7 @@ from collections import OrderedDict
 from typing import Any, Callable, Dict, Tuple
 
 from redis.client import CaseInsensitiveDict, PubSub, Redis, parse_scan
-from redis.commands import CommandsParser, RedisClusterCommands
+from redis.commands import READ_COMMANDS, CommandsParser, RedisClusterCommands
 from redis.connection import ConnectionPool, DefaultParser, Encoder, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
@@ -149,52 +149,6 @@ REDIS_ALLOWED_KEYS = (
     "username",
 )
 KWARGS_DISABLED_KEYS = ("host", "port")
-
-# Not complete, but covers the major ones
-# https://redis.io/commands
-READ_COMMANDS = frozenset(
-    [
-        "BITCOUNT",
-        "BITPOS",
-        "EXISTS",
-        "GEODIST",
-        "GEOHASH",
-        "GEOPOS",
-        "GEORADIUS",
-        "GEORADIUSBYMEMBER",
-        "GET",
-        "GETBIT",
-        "GETRANGE",
-        "HEXISTS",
-        "HGET",
-        "HGETALL",
-        "HKEYS",
-        "HLEN",
-        "HMGET",
-        "HSTRLEN",
-        "HVALS",
-        "KEYS",
-        "LINDEX",
-        "LLEN",
-        "LRANGE",
-        "MGET",
-        "PTTL",
-        "RANDOMKEY",
-        "SCARD",
-        "SDIFF",
-        "SINTER",
-        "SISMEMBER",
-        "SMEMBERS",
-        "SRANDMEMBER",
-        "STRLEN",
-        "SUNION",
-        "TTL",
-        "ZCARD",
-        "ZCOUNT",
-        "ZRANGE",
-        "ZSCORE",
-    ]
-)
 
 
 def cleanup_kwargs(**kwargs):
@@ -478,7 +432,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         require_full_coverage=False,
         reinitialize_steps=10,
         read_from_replicas=False,
-        dynamic_startup_nodes=False,
+        dynamic_startup_nodes=True,
         url=None,
         **kwargs,
     ):
@@ -508,12 +462,12 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
              primary and its replications in a Round-Robin manner.
          :dynamic_startup_nodes: 'bool'
              Set the RedisCluster's startup nodes to all of the discovered nodes.
-             If true, the cluster's discovered nodes will be used to determine the
-             cluster nodes-slots mapping in the next topology refresh.
+             If true (default value), the cluster's discovered nodes will be used to
+             determine the cluster nodes-slots mapping in the next topology refresh.
              It will remove the initial passed startup nodes if their endpoints aren't
              listed in the CLUSTER SLOTS output.
              If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
-             specific IP addresses, keep it at false.
+             specific IP addresses, it is best to set it to false.
         :cluster_error_retry_attempts: 'int'
              Retry command execution attempts when encountering ClusterDownError
              or ConnectionError
@@ -1265,7 +1219,7 @@ class NodesManager:
         from_url=False,
         require_full_coverage=False,
         lock=None,
-        dynamic_startup_nodes=False,
+        dynamic_startup_nodes=True,
         **kwargs,
     ):
         self.nodes_cache = {}
@@ -1951,14 +1905,25 @@ class ClusterPipeline(RedisCluster):
             # refer to our internal node -> slot table that
             # tells us where a given
             # command should route to.
-            node = self._determine_nodes(*c.args)
+            passed_targets = c.options.pop("target_nodes", None)
+            if passed_targets and not self._is_nodes_flag(passed_targets):
+                target_nodes = self._parse_target_nodes(passed_targets)
+            else:
+                target_nodes = self._determine_nodes(*c.args, node_flag=passed_targets)
+                if not target_nodes:
+                    raise RedisClusterException(
+                        f"No targets were found to execute {c.args} command on"
+                    )
+            if len(target_nodes) > 1:
+                raise RedisClusterException(f"Too many targets for command {c.args}")
 
+            node = target_nodes[0]
             # now that we know the name of the node
             # ( it's just a string in the form of host:port )
             # we can build a list of commands for each node.
-            node_name = node[0].name
+            node_name = node.name
             if node_name not in nodes:
-                redis_node = self.get_redis_connection(node[0])
+                redis_node = self.get_redis_connection(node)
                 connection = get_connection(redis_node, c.args)
                 nodes[node_name] = NodeCommands(
                     redis_node.parse_response, redis_node.connection_pool, connection
