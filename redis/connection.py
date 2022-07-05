@@ -476,6 +476,42 @@ else:
     DefaultParser = PythonParser
 
 
+class CredentialsProvider:
+    def __init__(self, username="", password="", supplier=None, *args, **kwargs):
+        """
+        Initialize a new Credentials Provider.
+        :param supplier: a supplier function that returns the username and password.
+                         def supplier(arg1, arg2, ...) -> (username, password)
+                         For examples see examples/connection_examples.ipynb
+        :param args: arguments to pass to the supplier function
+        :param kwargs: keyword arguments to pass to the supplier function
+        """
+        self.username = username
+        self.password = password
+        self.supplier = supplier
+        self.args = args
+        self.kwargs = kwargs
+
+    def get_credentials(self):
+        if self.supplier:
+            self.username, self.password = self.supplier(*self.args, **self.kwargs)
+        if self.username:
+            auth_args = (self.username, self.password or "")
+        else:
+            auth_args = (self.password,)
+        return auth_args
+
+    def get_password(self, call_supplier=True):
+        if call_supplier and self.supplier:
+            self.username, self.password = self.supplier(*self.args, **self.kwargs)
+        return self.password
+
+    def get_username(self, call_supplier=True):
+        if call_supplier and self.supplier:
+            self.username, self.password = self.supplier(*self.args, **self.kwargs)
+        return self.username
+
+
 class Connection:
     "Manages TCP communication to and from a Redis server"
 
@@ -502,6 +538,7 @@ class Connection:
         username=None,
         retry=None,
         redis_connect_func=None,
+        credentials_provider=None,
     ):
         """
         Initialize a new Connection.
@@ -514,9 +551,10 @@ class Connection:
         self.host = host
         self.port = int(port)
         self.db = db
-        self.username = username
         self.client_name = client_name
-        self.password = password
+        self.credentials_provider = credentials_provider
+        if not self.credentials_provider and (username or password):
+            self.credentials_provider = CredentialsProvider(username, password)
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout
         self.socket_keepalive = socket_keepalive
@@ -675,12 +713,9 @@ class Connection:
         "Initialize the connection, authenticate and select a database"
         self._parser.on_connect(self)
 
-        # if username and/or password are set, authenticate
-        if self.username or self.password:
-            if self.username:
-                auth_args = (self.username, self.password or "")
-            else:
-                auth_args = (self.password,)
+        # if credentials provider is set, authenticate
+        if self.credentials_provider:
+            auth_args = self.credentials_provider.get_credentials()
             # avoid checking health here -- PING will fail if we try
             # to check the health prior to the AUTH
             self.send_command("AUTH", *auth_args, check_health=False)
@@ -692,7 +727,11 @@ class Connection:
                 # server seems to be < 6.0.0 which expects a single password
                 # arg. retry auth with just the password.
                 # https://github.com/andymccurdy/redis-py/issues/1274
-                self.send_command("AUTH", self.password, check_health=False)
+                self.send_command(
+                    "AUTH",
+                    self.credentials_provider.get_password(),
+                    check_health=False,
+                )
                 auth_response = self.read_response()
 
             if str_if_bytes(auth_response) != "OK":
@@ -1050,6 +1089,7 @@ class UnixDomainSocketConnection(Connection):
         client_name=None,
         retry=None,
         redis_connect_func=None,
+        credentials_provider=None,
     ):
         """
         Initialize a new UnixDomainSocketConnection.
@@ -1061,9 +1101,10 @@ class UnixDomainSocketConnection(Connection):
         self.pid = os.getpid()
         self.path = path
         self.db = db
-        self.username = username
         self.client_name = client_name
-        self.password = password
+        self.credentials_provider = credentials_provider
+        if not self.credentials_provider and (username or password):
+            self.credentials_provider = CredentialsProvider(username, password)
         self.socket_timeout = socket_timeout
         self.retry_on_timeout = retry_on_timeout
         if retry_on_error is SENTINEL:

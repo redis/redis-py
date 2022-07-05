@@ -121,6 +121,7 @@ REDIS_ALLOWED_KEYS = (
     "connection_class",
     "connection_pool",
     "client_name",
+    "credentials_provider",
     "db",
     "decode_responses",
     "encoding",

@@ -6,6 +6,7 @@ from redis.connection import (
     BlockingConnectionPool,
     Connection,
     ConnectionPool,
+    CredentialsProvider,
     SSLConnection,
     UnixDomainSocketConnection,
 )
@@ -62,6 +63,7 @@ __all__ = [
     "Connection",
     "ConnectionError",
     "ConnectionPool",
+    "CredentialsProvider",
     "DataError",
     "from_url",
     "InvalidResponse",

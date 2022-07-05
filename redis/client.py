@@ -938,6 +938,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         username=None,
         retry=None,
         redis_connect_func=None,
+        credentials_provider=None,
     ):
         """
         Initialize a new Redis client.
@@ -985,6 +986,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
                 "redis_connect_func": redis_connect_func,
+                "credentials_provider": credentials_provider,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
