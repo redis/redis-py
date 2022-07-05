@@ -27,7 +27,7 @@ To install redis-py, simply:
 $ pip install redis
 ```
 
-Looking for a high-level library to handle object mapping? See [redis-om-python](https://github.com/redis/redis-om-python) !
+Looking for a high-level library to handle object mapping? See [redis-om-python](https://github.com/redis/redis-om-python)!
 
 redis-py requires a running Redis server.  Assuming you have docker
 ```bash
@@ -1145,7 +1145,7 @@ Using scripting within pipelines in cluster mode is **not supported**.
 **RedisCluster specific options**
 
  require_full_coverage: (default=False)
- 
+
     When set to False (default value): the client will not require a
     full coverage of the slots. However, if not all slots are covered,
     and at least one node has 'cluster-require-full-coverage' set to
@@ -1155,14 +1155,14 @@ Using scripting within pipelines in cluster mode is **not supported**.
     When set to True: all slots must be covered to construct the
     cluster client. If not all slots are covered, RedisClusterException
     will be thrown.
-    
+
  read_from_replicas: (default=False)
 
      Enable read from replicas in READONLY mode. You can read possibly
      stale data.
      When set to true, read commands will be assigned between the
      primary and its replications in a Round-Robin manner.
-     
+
  dynamic_startup_nodes: (default=True)
 
      Set the RedisCluster's startup nodes to all of the discovered nodes.
@@ -1172,12 +1172,12 @@ Using scripting within pipelines in cluster mode is **not supported**.
      listed in the CLUSTER SLOTS output.
      If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
      specific IP addresses, it is best to set it to false.
-     
+
  cluster_error_retry_attempts: (default=3)
 
      Retry command execution attempts when encountering ClusterDownError
      or ConnectionError
-     
+
  reinitialize_steps: (default=10)
 
     Specifies the number of MOVED errors that need to occur before
