@@ -9,30 +9,17 @@ The Python interface to the Redis key-value store.
 [![codecov](https://codecov.io/gh/redis/redis-py/branch/master/graph/badge.svg?token=yenl5fzxxr)](https://codecov.io/gh/redis/redis-py)
 [![Total alerts](https://img.shields.io/lgtm/alerts/g/redis/redis-py.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/redis/redis-py/alerts/)
 
-[Installation](#installation) | [Contributing](#contributing) |  [Getting Started](#getting-started) | [Connecting To Redis](#connecting-to-redis)
+[Installation](#installation) | [Contributing](#contributing) |  [Getting Started](#getting-started) | [Connecting To Redis](#connecting-to-redis) | [Contributing](https://github.com/redis/redis-py/blob/master/CONTRIBUTING.md)
 
 ---------------------------------------------
 
 ## Python Notice
 
-redis-py 4.2.x will be the last generation of redis-py to support python 3.6 as it has been [End of Life'd](https://www.python.org/dev/peps/pep-0494/#schedule-last-security-only-release).  Async support was introduced in redis-py 4.2.x thanks to [aioredis](https://github.com/aio-libs/aioredis-py), which necessitates this change. We will continue to maintain 3.6 support as long as possible - but the plan is for redis-py version 5+ to officially remove 3.6.
+redis-py 4.3.x will be the last generation of redis-py to support python 3.6 as it has been [End of Life'd](https://www.python.org/dev/peps/pep-0494/#schedule-last-security-only-release).  Async support was introduced in redis-py 4.2.x thanks to [aioredis](https://github.com/aio-libs/aioredis-py), which necessitates this change. We will continue to maintain 3.6 support as long as possible - but the plan is for redis-py version 4.4+ to officially remove 3.6.
 
 ---------------------------
 
 ## Installation
-
-redis-py requires a running Redis server. See [Redis's
-quickstart](https://redis.io/topics/quickstart) for installation
-instructions.
-
-redis-py can be installed using pip similar to other
-Python packages. Do not use sudo with pip.
-It is usually good to work in a
-[virtualenv](https://virtualenv.pypa.io/en/latest/) or
-[venv](https://docs.python.org/3/library/venv.html) to avoid conflicts
-with other package managers and Python projects. For a quick
-introduction see [Python Virtual Environments in Five
-Minutes](https://bit.ly/py-env).
 
 To install redis-py, simply:
 
@@ -40,19 +27,12 @@ To install redis-py, simply:
 $ pip install redis
 ```
 
-or from source:
+Looking for a high-level library to handle object mapping? See [redis-om-python](https://github.com/redis/redis-om-python) !
 
-``` bash
-$ python setup.py install
+redis-py requires a running Redis server.  Assuming you have docker
+```bash
+docker run -p 6379:6379 -it redis/redis-stack-server:latest
 ```
-
-View the current documentation [here](https://readthedocs.org/projects/redis/).
-
-## Contributing
-
-Want to contribute a feature, bug fix, or report an issue? Check out
-our [guide to
-contributing](https://github.com/redis/redis-py/blob/master/CONTRIBUTING.md).
 
 ## Getting Started
 
@@ -80,91 +60,6 @@ The default encoding is utf-8, but this can be customized by specifying the
 encoding argument for the redis.Redis class.
 The encoding will be used to automatically encode any
 strings passed to commands, such as key names and values.
-
-
---------------------
-
-### MSET, MSETNX and ZADD
-
-These commands all accept a mapping of key/value pairs. In redis-py 2.X
-this mapping could be specified as **args* or as `**kwargs`. Both of
-these styles caused issues when Redis introduced optional flags to ZADD.
-Relying on `*args` caused issues with the optional argument order,
-especially in Python 2.7. Relying on `**kwargs` caused potential
-collision issues of user keys with the argument names in the method
-signature.
-
-To resolve this, redis-py 3.0 has changed these three commands to all
-accept a single positional argument named mapping that is expected to be
-a dict. For MSET and MSETNX, the dict is a mapping of key-names -\>
-values. For ZADD, the dict is a mapping of element-names -\> score.
-
-MSET, MSETNX and ZADD now look like:
-
-``` pycon
-def mset(self, mapping):
-def msetnx(self, mapping):
-def zadd(self, name, mapping, nx=False, xx=False, ch=False, incr=False):
-```
-
-All 2.X users that use these commands must modify their code to supply
-keys and values as a dict to these commands.
-
-### ZINCRBY
-
-redis-py 2.X accidentally modified the argument order of ZINCRBY,
-swapping the order of value and amount. ZINCRBY now looks like:
-
-``` python
-def zincrby(self, name, amount, value):
-```
-
-All 2.X users that rely on ZINCRBY must swap the order of amount and
-value for the command to continue to work as intended.
-
-### Encoding of User Input
-
-redis-py 3.0 only accepts user data as bytes, strings or numbers (ints,
-longs and floats). Attempting to specify a key or a value as any other
-type will raise a DataError exception.
-
-redis-py 2.X attempted to coerce any type of input into a string. While
-occasionally convenient, this caused all sorts of hidden errors when
-users passed boolean values (which were coerced to \'True\' or
-\'False\'), a None value (which was coerced to \'None\') or other
-values, such as user defined types.
-
-All 2.X users should make sure that the keys and values they pass into
-redis-py are either bytes, strings or numbers.
-
-### Locks
-
-redis-py 3.0 drops support for the pipeline-based Lock and now only
-supports the Lua-based lock. In doing so, LuaLock has been renamed to
-Lock. This also means that redis-py Lock objects require Redis server
-2.6 or greater.
-
-2.X users that were explicitly referring to *LuaLock* will have to now
-refer to *Lock* instead.
-
-### Locks as Context Managers
-
-redis-py 3.0 now raises a LockError when using a lock as a context
-manager and the lock cannot be acquired within the specified timeout.
-This is more of a bug fix than a backwards incompatible change. However,
-given an error is now raised where none was before, this might alarm
-some users.
-
-2.X users should make sure they're wrapping their lock code in a
-try/catch like this:
-
-``` python
-try:
-    with r.lock('my-lock-key', blocking_timeout=5) as lock:
-        # code you want executed only after the lock has been acquired
-except LockError:
-    # the lock wasn't acquired
-```
 
 ## API Reference
 
