@@ -24,7 +24,7 @@ jobs:
      steps:
        - uses: actions/checkout@v2
        - name: install python
-         uses: actions/setup-python@v3
+         uses: actions/setup-python@v4
          with:
            python-version: 3.9
            cache: 'pip'
@@ -39,7 +39,7 @@ jobs:
      strategy:
        max-parallel: 15
        matrix:
-         python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
+         python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7', 'pypy-3.8']
          test-type: ['standalone', 'cluster']
          connection-type: ['hiredis', 'plain']
      env:
@@ -48,7 +48,7 @@ jobs:
      steps:
        - uses: actions/checkout@v2
        - name: install python
-         uses: actions/setup-python@v3
+         uses: actions/setup-python@v4
          with:
            python-version: ${{ matrix.python-version }}
            cache: 'pip'
