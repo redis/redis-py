@@ -1,7 +1,9 @@
 import asyncio
 import functools
 import socket
+import sys
 from typing import Optional
+from unittest.mock import patch
 
 import async_timeout
 import pytest
@@ -914,3 +916,76 @@ class TestPubSubAutoReconnect:
                     return True
         except asyncio.TimeoutError:
             return False
+
+            
+@pytest.mark.xfail
+@pytest.mark.onlynoncluster
+class TestBaseException:
+    @pytest.mark.skipif(
+        sys.version_info < (3, 8), reason="requires python 3.8 or higher"
+    )
+    async def test_outer_timeout(self, r: redis.Redis):
+        """
+        Using asyncio_timeout manually outside the inner method timeouts works.
+        This works on Python versions 3.8 and greater, at which time asyncio.
+        CancelledError became a BaseException instead of an Exception before.
+        """
+        pubsub = r.pubsub()
+        await pubsub.subscribe("foo")
+        assert pubsub.connection.is_connected
+
+        async def get_msg_or_timeout(timeout=0.1):
+            async with async_timeout.timeout(timeout):
+                # blocking method to return messages
+                while True:
+                    response = await pubsub.parse_response(block=True)
+                    message = await pubsub.handle_message(
+                        response, ignore_subscribe_messages=False
+                    )
+                    if message is not None:
+                        return message
+
+        # get subscribe message
+        msg = await get_msg_or_timeout(10)
+        assert msg is not None
+        # timeout waiting for another message which never arrives
+        assert pubsub.connection.is_connected
+        with pytest.raises(asyncio.TimeoutError):
+            await get_msg_or_timeout()
+        # the timeout on the read should not cause disconnect
+        assert pubsub.connection.is_connected
+
+    async def test_base_exception(self, r: redis.Redis):
+        """
+        Manually trigger a BaseException inside the parser's .read_response method
+        and verify that it isn't caught
+        """
+        pubsub = r.pubsub()
+        await pubsub.subscribe("foo")
+        assert pubsub.connection.is_connected
+
+        async def get_msg():
+            # blocking method to return messages
+            while True:
+                response = await pubsub.parse_response(block=True)
+                message = await pubsub.handle_message(
+                    response, ignore_subscribe_messages=False
+                )
+                if message is not None:
+                    return message
+
+        # get subscribe message
+        msg = await get_msg()
+        assert msg is not None
+        # timeout waiting for another message which never arrives
+        assert pubsub.connection.is_connected
+        with patch("redis.asyncio.connection.PythonParser.read_response") as mock1:
+            mock1.side_effect = BaseException("boom")
+            with patch("redis.asyncio.connection.HiredisParser.read_response") as mock2:
+                mock2.side_effect = BaseException("boom")
+
+                with pytest.raises(BaseException):
+                    await get_msg()
+
+        # the timeout on the read should not cause disconnect
+        assert pubsub.connection.is_connected
