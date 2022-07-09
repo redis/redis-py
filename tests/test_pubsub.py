@@ -737,7 +737,6 @@ class TestPubSubAutoReconnect:
             return True
 
 
-@pytest.mark.xfail
 @pytest.mark.onlynoncluster
 class TestBaseException:
     def test_base_exception(self, r: redis.Redis):

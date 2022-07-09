@@ -916,7 +916,7 @@ class Connection:
             raise ConnectionError(
                 f"Error {err_no} while writing to socket. {errmsg}."
             ) from e
-        except BaseException:
+        except Exception:
             await self.disconnect()
             raise
 
@@ -958,7 +958,7 @@ class Connection:
             raise ConnectionError(
                 f"Error while reading from {self.host}:{self.port} : {e.args}"
             )
-        except BaseException:
+        except Exception:
             await self.disconnect()
             raise
 

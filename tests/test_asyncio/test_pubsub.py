@@ -918,7 +918,6 @@ class TestPubSubAutoReconnect:
             return False
 
             
-@pytest.mark.xfail
 @pytest.mark.onlynoncluster
 class TestBaseException:
     @pytest.mark.skipif(
