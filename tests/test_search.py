@@ -1710,4 +1710,5 @@ def test_expire_while_search(modclient: redis.Redis):
     modclient.pexpire("hset:2", 300)
     for _ in range(500):
         modclient.ft().search(Query("*")).docs[1]
+    time.sleep(1)
     assert 2 == modclient.ft().search(Query("*")).total
