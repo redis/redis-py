@@ -130,15 +130,25 @@ def _get_info(redis_url):
 
 
 def pytest_sessionstart(session):
+    # during test discovery, e.g. with VS Code, we may not
+    # have a server running.
     redis_url = session.config.getoption("--redis-url")
-    info = _get_info(redis_url)
-    version = info["redis_version"]
-    arch_bits = info["arch_bits"]
-    cluster_enabled = info["cluster_enabled"]
+    try:
+        info = _get_info(redis_url)
+        version = info["redis_version"]
+        arch_bits = info["arch_bits"]
+        cluster_enabled = info["cluster_enabled"]
+        enterprise = info["enterprise"]
+    except redis.ConnectionError:
+        # provide optimistic defaults
+        version = "10.0.0"
+        arch_bits = 64
+        cluster_enabled = False
+        enterprise = False
     REDIS_INFO["version"] = version
     REDIS_INFO["arch_bits"] = arch_bits
     REDIS_INFO["cluster_enabled"] = cluster_enabled
-    REDIS_INFO["enterprise"] = info["enterprise"]
+    REDIS_INFO["enterprise"] = enterprise
     # store REDIS_INFO in config so that it is available from "condition strings"
     session.config.REDIS_INFO = REDIS_INFO
 
