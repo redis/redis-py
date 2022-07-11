@@ -637,6 +637,8 @@ class Connection:
             retry_on_error = []
         if retry_on_timeout:
             retry_on_error.append(TimeoutError)
+            retry_on_error.append(socket.timeout)
+            retry_on_error.append(asyncio.TimeoutError)
         self.retry_on_error = retry_on_error
         if retry_on_error:
             if not retry:
@@ -706,7 +708,9 @@ class Connection:
         if self.is_connected:
             return
         try:
-            await self._connect()
+            await self.retry.call_with_retry(
+                lambda: self._connect(), lambda error: self.disconnect()
+            )
         except asyncio.CancelledError:
             raise
         except (socket.timeout, asyncio.TimeoutError):
