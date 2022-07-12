@@ -6,7 +6,6 @@ from redis.commands.graph.execution_plan import Operation
 from redis.exceptions import ResponseError
 from tests.conftest import skip_if_redis_enterprise
 
-
 pytestmark = pytest.mark.asyncio
 
 
