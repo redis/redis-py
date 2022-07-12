@@ -672,7 +672,7 @@ class TestRedisClusterObj:
         with patch.object(Redis, "parse_response") as parse_response:
 
             def moved_redirect_effect(connection, *args, **options):
-                # raise a timeout for 5 times so we'll need to reinitilize the topology
+                # raise a timeout for 5 times so we'll need to reinitialize the topology
                 if count.val == 4:
                     parse_response.side_effect = real_func
                 count.val += 1
