@@ -1,5 +1,5 @@
 from ..helpers import quote_string, random_string, stringify_param_value
-from .commands import GraphCommands
+from .commands import AsyncGraphCommands, GraphCommands
 from .edge import Edge  # noqa
 from .node import Node  # noqa
 from .path import Path  # noqa
@@ -160,3 +160,102 @@ class Graph(GraphCommands):
 
     def property_keys(self):
         return self.call_procedure("db.propertyKeys", read_only=True).result_set
+
+
+class AsyncGraph(Graph, AsyncGraphCommands):
+    """Async version for Graph"""
+
+    async def _refresh_labels(self):
+        lbls = await self.labels()
+
+        # Unpack data.
+        self._labels = [None] * len(lbls)
+        for i, l in enumerate(lbls):
+            self._labels[i] = l[0]
+
+    async def _refresh_attributes(self):
+        props = await self.property_keys()
+
+        # Unpack data.
+        self._properties = [None] * len(props)
+        for i, p in enumerate(props):
+            self._properties[i] = p[0]
+
+    async def _refresh_relations(self):
+        rels = await self.relationship_types()
+
+        # Unpack data.
+        self._relationship_types = [None] * len(rels)
+        for i, r in enumerate(rels):
+            self._relationship_types[i] = r[0]
+
+    async def get_label(self, idx):
+        """
+        Returns a label by it's index
+
+        Args:
+
+        idx:
+            The index of the label
+        """
+        try:
+            label = self._labels[idx]
+        except IndexError:
+            # Refresh labels.
+            await self._refresh_labels()
+            label = self._labels[idx]
+        return label
+
+    async def get_property(self, idx):
+        """
+        Returns a property by it's index
+
+        Args:
+
+        idx:
+            The index of the property
+        """
+        try:
+            propertie = self._properties[idx]
+        except IndexError:
+            # Refresh properties.
+            await self._refresh_attributes()
+            propertie = self._properties[idx]
+        return propertie
+
+    async def get_relation(self, idx):
+        """
+        Returns a relationship type by it's index
+
+        Args:
+
+        idx:
+            The index of the relation
+        """
+        try:
+            relationship_type = self._relationship_types[idx]
+        except IndexError:
+            # Refresh relationship types.
+            await self._refresh_relations()
+            relationship_type = self._relationship_types[idx]
+        return relationship_type
+
+    async def call_procedure(self, procedure, *args, read_only=False, **kwagrs):
+        args = [quote_string(arg) for arg in args]
+        q = f"CALL {procedure}({','.join(args)})"
+
+        y = kwagrs.get("y", None)
+        if y:
+            q += f" YIELD {','.join(y)}"
+        return await self.query(q, read_only=read_only)
+
+    async def labels(self):
+        return ((await self.call_procedure("db.labels", read_only=True))).result_set
+
+    async def property_keys(self):
+        return (await self.call_procedure("db.propertyKeys", read_only=True)).result_set
+
+    async def relationship_types(self):
+        return (
+            await self.call_procedure("db.relationshipTypes", read_only=True)
+        ).result_set

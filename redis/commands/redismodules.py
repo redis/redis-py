@@ -91,3 +91,13 @@ class AsyncRedisModuleCommands(RedisModuleCommands):
 
         s = AsyncSearch(client=self, index_name=index_name)
         return s
+
+    def graph(self, index_name="idx"):
+        """Access the timeseries namespace, providing support for
+        redis timeseries data.
+        """
+
+        from .graph import AsyncGraph
+
+        g = AsyncGraph(client=self, name=index_name)
+        return g

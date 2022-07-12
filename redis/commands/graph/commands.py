@@ -3,7 +3,7 @@ from redis.exceptions import ResponseError
 
 from .exceptions import VersionMismatchException
 from .execution_plan import ExecutionPlan
-from .query_result import QueryResult
+from .query_result import AsyncQueryResult, QueryResult
 
 
 class GraphCommands:
@@ -211,3 +211,108 @@ class GraphCommands:
 
         plan = self.execute_command("GRAPH.EXPLAIN", self.name, query)
         return ExecutionPlan(plan)
+
+
+class AsyncGraphCommands(GraphCommands):
+    async def query(self, q, params=None, timeout=None, read_only=False, profile=False):
+        """
+        Executes a query against the graph.
+        For more information see `GRAPH.QUERY <https://oss.redis.com/redisgraph/master/commands/#graphquery>`_. # noqa
+
+        Args:
+
+        q : str
+            The query.
+        params : dict
+            Query parameters.
+        timeout : int
+            Maximum runtime for read queries in milliseconds.
+        read_only : bool
+            Executes a readonly query if set to True.
+        profile : bool
+            Return details on results produced by and time
+            spent in each operation.
+        """
+
+        # maintain original 'q'
+        query = q
+
+        # handle query parameters
+        if params is not None:
+            query = self._build_params_header(params) + query
+
+        # construct query command
+        # ask for compact result-set format
+        # specify known graph version
+        if profile:
+            cmd = "GRAPH.PROFILE"
+        else:
+            cmd = "GRAPH.RO_QUERY" if read_only else "GRAPH.QUERY"
+        command = [cmd, self.name, query, "--compact"]
+
+        # include timeout is specified
+        if timeout:
+            if not isinstance(timeout, int):
+                raise Exception("Timeout argument must be a positive integer")
+            command += ["timeout", timeout]
+
+        # issue query
+        try:
+            response = await self.execute_command(*command)
+            return await AsyncQueryResult().initialize(self, response, profile)
+        except ResponseError as e:
+            if "wrong number of arguments" in str(e):
+                print(
+                    "Note: RedisGraph Python requires server version 2.2.8 or above"
+                )  # noqa
+            if "unknown command" in str(e) and read_only:
+                # `GRAPH.RO_QUERY` is unavailable in older versions.
+                return await self.query(q, params, timeout, read_only=False)
+            raise e
+        except VersionMismatchException as e:
+            # client view over the graph schema is out of sync
+            # set client version and refresh local schema
+            self.version = e.version
+            self._refresh_schema()
+            # re-issue query
+            return await self.query(q, params, timeout, read_only)
+
+    async def execution_plan(self, query, params=None):
+        """
+        Get the execution plan for given query,
+        GRAPH.EXPLAIN returns an array of operations.
+
+        Args:
+            query: the query that will be executed
+            params: query parameters
+        """
+        if params is not None:
+            query = self._build_params_header(params) + query
+
+        plan = await self.execute_command("GRAPH.EXPLAIN", self.name, query)
+        if isinstance(plan[0], bytes):
+            plan = [b.decode() for b in plan]
+        return "\n".join(plan)
+
+    async def explain(self, query, params=None):
+        """
+        Get the execution plan for given query,
+        GRAPH.EXPLAIN returns ExecutionPlan object.
+
+        Args:
+            query: the query that will be executed
+            params: query parameters
+        """
+        if params is not None:
+            query = self._build_params_header(params) + query
+
+        plan = await self.execute_command("GRAPH.EXPLAIN", self.name, query)
+        return ExecutionPlan(plan)
+
+    async def flush(self):
+        """
+        Commit the graph and reset the edges and the nodes to zero length.
+        """
+        await self.commit()
+        self.nodes = {}
+        self.edges = []

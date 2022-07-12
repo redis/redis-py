@@ -360,3 +360,166 @@ class QueryResult:
     @property
     def run_time_ms(self):
         return self._get_stat(INTERNAL_EXECUTION_TIME)
+
+
+class AsyncQueryResult(QueryResult):
+    def __init__(self):
+        pass
+
+    async def initialize(self, graph, response, profile=False):
+        self.graph = graph
+        self.header = []
+        self.result_set = []
+
+        # in case of an error an exception will be raised
+        self._check_for_errors(response)
+
+        if len(response) == 1:
+            self.parse_statistics(response[0])
+        elif profile:
+            self.parse_profile(response)
+        else:
+            # start by parsing statistics, matches the one we have
+            self.parse_statistics(response[-1])  # Last element.
+            await self.parse_results(response)
+
+        return self
+
+    async def parse_node(self, cell):
+        # Node ID (integer),
+        # [label string offset (integer)],
+        # [[name, value type, value] X N]
+
+        node_id = int(cell[0])
+        labels = None
+        if len(cell[1]) > 0:
+            labels = []
+            for inner_label in cell[1]:
+                labels.append(await self.graph.get_label(inner_label))
+        properties = await self.parse_entity_properties(cell[2])
+        return Node(node_id=node_id, label=labels, properties=properties)
+
+    async def parse_scalar(self, cell):
+        scalar_type = int(cell[0])
+        value = cell[1]
+        scalar = None
+
+        if scalar_type == ResultSetScalarTypes.VALUE_NULL:
+            scalar = None
+
+        elif scalar_type == ResultSetScalarTypes.VALUE_STRING:
+            scalar = self.parse_string(value)
+
+        elif scalar_type == ResultSetScalarTypes.VALUE_INTEGER:
+            scalar = int(value)
+
+        elif scalar_type == ResultSetScalarTypes.VALUE_BOOLEAN:
+            value = value.decode() if isinstance(value, bytes) else value
+            if value == "true":
+                scalar = True
+            elif value == "false":
+                scalar = False
+            else:
+                print("Unknown boolean type\n")
+
+        elif scalar_type == ResultSetScalarTypes.VALUE_DOUBLE:
+            scalar = float(value)
+
+        elif scalar_type == ResultSetScalarTypes.VALUE_ARRAY:
+            # array variable is introduced only for readability
+            scalar = array = value
+            for i in range(len(array)):
+                scalar[i] = await self.parse_scalar(array[i])
+
+        elif scalar_type == ResultSetScalarTypes.VALUE_NODE:
+            scalar = await self.parse_node(value)
+
+        elif scalar_type == ResultSetScalarTypes.VALUE_EDGE:
+            scalar = await self.parse_edge(value)
+
+        elif scalar_type == ResultSetScalarTypes.VALUE_PATH:
+            scalar = await self.parse_path(value)
+
+        elif scalar_type == ResultSetScalarTypes.VALUE_MAP:
+            scalar = await self.parse_map(value)
+
+        elif scalar_type == ResultSetScalarTypes.VALUE_POINT:
+            scalar = self.parse_point(value)
+
+        elif scalar_type == ResultSetScalarTypes.VALUE_UNKNOWN:
+            print("Unknown scalar type\n")
+
+        return scalar
+
+    async def parse_records(self, raw_result_set):
+        records = []
+        result_set = raw_result_set[1]
+        for row in result_set:
+            record = []
+            for idx, cell in enumerate(row):
+                if self.header[idx][0] == ResultSetColumnTypes.COLUMN_SCALAR:  # noqa
+                    record.append(await self.parse_scalar(cell))
+                elif self.header[idx][0] == ResultSetColumnTypes.COLUMN_NODE:  # noqa
+                    record.append(await self.parse_node(cell))
+                elif (
+                    self.header[idx][0] == ResultSetColumnTypes.COLUMN_RELATION
+                ):  # noqa
+                    record.append(await self.parse_edge(cell))
+                else:
+                    print("Unknown column type.\n")
+            records.append(record)
+
+        return records
+
+    async def parse_results(self, raw_result_set):
+        self.header = self.parse_header(raw_result_set)
+
+        # Empty header.
+        if len(self.header) == 0:
+            return
+
+        self.result_set = await self.parse_records(raw_result_set)
+
+    async def parse_entity_properties(self, props):
+        # [[name, value type, value] X N]
+        properties = {}
+        for prop in props:
+            prop_name = await self.graph.get_property(prop[0])
+            prop_value = await self.parse_scalar(prop[1:])
+            properties[prop_name] = prop_value
+
+        return properties
+
+    async def parse_edge(self, cell):
+        # Edge ID (integer),
+        # reltype string offset (integer),
+        # src node ID offset (integer),
+        # dest node ID offset (integer),
+        # [[name, value, value type] X N]
+
+        edge_id = int(cell[0])
+        relation = await self.graph.get_relation(cell[1])
+        src_node_id = int(cell[2])
+        dest_node_id = int(cell[3])
+        properties = await self.parse_entity_properties(cell[4])
+        return Edge(
+            src_node_id, relation, dest_node_id, edge_id=edge_id, properties=properties
+        )
+
+    async def parse_path(self, cell):
+        nodes = await self.parse_scalar(cell[0])
+        edges = await self.parse_scalar(cell[1])
+        return Path(nodes, edges)
+
+    async def parse_map(self, cell):
+        m = OrderedDict()
+        n_entries = len(cell)
+
+        # A map is an array of key value pairs.
+        # 1. key (string)
+        # 2. array: (value type, value)
+        for i in range(0, n_entries, 2):
+            key = self.parse_string(cell[i])
+            m[key] = await self.parse_scalar(cell[i + 1])
+
+        return m
