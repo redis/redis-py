@@ -13,6 +13,7 @@ from redis.connection import ConnectionPool, DefaultParser, Encoder, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
     AskError,
+    AuthenticationError,
     ClusterCrossSlotError,
     ClusterDownError,
     ClusterError,
@@ -1060,6 +1061,8 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     )
                 return response
 
+            except AuthenticationError as e:
+                raise e
             except (ConnectionError, TimeoutError) as e:
                 # ConnectionError can also be raised if we couldn't get a
                 # connection from the pool before timing out, so check that
@@ -1109,6 +1112,8 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 # and retry executing the command
                 time.sleep(0.25)
                 self.nodes_manager.initialize()
+                raise e
+            except ResponseError as e:
                 raise e
             except Exception as e:
                 if connection:
