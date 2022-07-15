@@ -1060,9 +1060,8 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                         response, **kwargs
                     )
                 return response
-
-            except AuthenticationError as e:
-                raise e
+            except AuthenticationError:
+                raise
             except (ConnectionError, TimeoutError) as e:
                 # ConnectionError can also be raised if we couldn't get a
                 # connection from the pool before timing out, so check that
@@ -1113,8 +1112,8 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 time.sleep(0.25)
                 self.nodes_manager.initialize()
                 raise e
-            except ResponseError as e:
-                raise e
+            except ResponseError:
+                raise
             except Exception as e:
                 if connection:
                     connection.disconnect()
