@@ -613,7 +613,7 @@ class TestPubSubDeadlock:
 
 
 @pytest.mark.timeout(5, method="thread")
-@pytest.mark.parametrize("method", ["get_message", pytest.param("listen", marks=pytest.mark.xfail)])
+@pytest.mark.parametrize("method", ["get_message", "listen"])
 @pytest.mark.onlynoncluster
 class TestPubSubAutoReconnect:
     def mysetup(self, r, method):
