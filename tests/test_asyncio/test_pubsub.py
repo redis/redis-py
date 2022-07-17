@@ -807,7 +807,7 @@ class TestPubSubAutoReconnect:
         else:
             self.get_message = self.loop_step_listen
 
-        self. task = create_task(self.loop())
+        self.task = create_task(self.loop())
         # get the initial connect message
         message = await self.messages.get()
         assert message == {
@@ -863,7 +863,7 @@ class TestPubSubAutoReconnect:
             async with self.cond:
                 self.state = 1
                 await self.pubsub.connection.disconnect()
-                assert not self.pubsub.connection.is_connected  # it is in a disconnecte state
+                assert not self.pubsub.connection.is_connected
                 # wait for reconnect
                 await self.cond.wait_for(lambda: self.pubsub.connection.is_connected)
                 assert self.state == 3

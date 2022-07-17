@@ -639,8 +639,7 @@ class TestPubSubAutoReconnect:
         }
 
     def wait_for_reconnect(self):
-        self.cond.wait_for(
-            lambda: self.pubsub.connection._sock is not None, timeout=2)
+        self.cond.wait_for(lambda: self.pubsub.connection._sock is not None, timeout=2)
         assert self.pubsub.connection._sock is not None  # we didn't time out
         assert self.state == 3
 
@@ -691,7 +690,7 @@ class TestPubSubAutoReconnect:
             with self.cond:
                 self.state = 1
                 self.pubsub.connection.disconnect()
-                assert self.pubsub.connection._sock is None  # it is in a disconnected state
+                assert self.pubsub.connection._sock is None
                 # wait for reconnect
                 self.wait_for_reconnect()
         finally:
