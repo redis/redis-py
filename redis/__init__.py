@@ -6,10 +6,10 @@ from redis.connection import (
     BlockingConnectionPool,
     Connection,
     ConnectionPool,
-    CredentialsProvider,
     SSLConnection,
     UnixDomainSocketConnection,
 )
+from redis.credentials import CredentialsProvider
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
