@@ -70,6 +70,9 @@ Module Documentation
    lock
    retry
    examples
+   advanced_features
+   clustering
+   lua_scripting
 
 Contributing
 *************
