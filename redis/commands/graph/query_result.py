@@ -9,10 +9,12 @@ from .node import Node
 from .path import Path
 
 LABELS_ADDED = "Labels added"
+LABELS_REMOVED = "Labels removed"
 NODES_CREATED = "Nodes created"
 NODES_DELETED = "Nodes deleted"
 RELATIONSHIPS_DELETED = "Relationships deleted"
 PROPERTIES_SET = "Properties set"
+PROPERTIES_REMOVED = "Properties removed"
 RELATIONSHIPS_CREATED = "Relationships created"
 INDICES_CREATED = "Indices created"
 INDICES_DELETED = "Indices deleted"
@@ -21,8 +23,10 @@ INTERNAL_EXECUTION_TIME = "internal execution time"
 
 STATS = [
     LABELS_ADDED,
+    LABELS_REMOVED,
     NODES_CREATED,
     PROPERTIES_SET,
+    PROPERTIES_REMOVED,
     RELATIONSHIPS_CREATED,
     NODES_DELETED,
     RELATIONSHIPS_DELETED,
@@ -326,6 +330,10 @@ class QueryResult:
         return self._get_stat(LABELS_ADDED)
 
     @property
+    def labels_removed(self):
+        return self._get_stat(LABELS_REMOVED)
+
+    @property
     def nodes_created(self):
         return self._get_stat(NODES_CREATED)
 
@@ -336,6 +344,10 @@ class QueryResult:
     @property
     def properties_set(self):
         return self._get_stat(PROPERTIES_SET)
+
+    @property
+    def properties_removed(self):
+        return self._get_stat(PROPERTIES_REMOVED)
 
     @property
     def relationships_created(self):
