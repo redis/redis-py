@@ -867,16 +867,16 @@ class PubSub:
                 yield response
 
     async def get_message(
-        self, ignore_subscribe_messages: bool = False, timeout: float = 0.0
+        self, ignore_subscribe_messages: bool = False, timeout: Optional[float] = 0.0
     ):
         """
         Get the next message if one is available, otherwise None.
 
         If timeout is specified, the system will wait for `timeout` seconds
         before returning. Timeout should be specified as a floating point
-        number.
+        number or None to wait indefinitely.
         """
-        response = await self.parse_response(block=False, timeout=timeout)
+        response = await self.parse_response(block=(timeout is None), timeout=timeout)
         if response:
             return await self.handle_message(response, ignore_subscribe_messages)
         return None
