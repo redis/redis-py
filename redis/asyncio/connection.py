@@ -220,11 +220,9 @@ class SocketBuffer:
         self,
         stream_reader: asyncio.StreamReader,
         socket_read_size: int,
-        socket_timeout: Optional[float],
     ):
         self._stream: Optional[asyncio.StreamReader] = stream_reader
         self.socket_read_size = socket_read_size
-        self.socket_timeout = socket_timeout
         self._buffer: Optional[io.BytesIO] = io.BytesIO()
         # number of bytes written to the buffer from the socket
         self.bytes_written = 0
@@ -235,52 +233,35 @@ class SocketBuffer:
     def length(self):
         return self.bytes_written - self.bytes_read
 
-    async def _read_from_socket(
-        self,
-        length: Optional[int] = None,
-        timeout: Union[float, None, _Sentinel] = SENTINEL,
-        raise_on_timeout: bool = True,
-    ) -> bool:
+    async def _read_from_socket(self, length: Optional[int] = None) -> bool:
         buf = self._buffer
         if buf is None or self._stream is None:
             raise RedisError("Buffer is closed.")
         buf.seek(self.bytes_written)
         marker = 0
-        timeout = timeout if timeout is not SENTINEL else self.socket_timeout
 
-        try:
-            while True:
-                async with async_timeout.timeout(timeout):
-                    data = await self._stream.read(self.socket_read_size)
-                # an empty string indicates the server shutdown the socket
-                if isinstance(data, bytes) and len(data) == 0:
-                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-                buf.write(data)
-                data_length = len(data)
-                self.bytes_written += data_length
-                marker += data_length
+        while True:
+            data = await self._stream.read(self.socket_read_size)
+            # an empty string indicates the server shutdown the socket
+            if isinstance(data, bytes) and len(data) == 0:
+                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+            buf.write(data)
+            data_length = len(data)
+            self.bytes_written += data_length
+            marker += data_length
 
-                if length is not None and length > marker:
-                    continue
-                return True
-        except (socket.timeout, asyncio.TimeoutError):
-            if raise_on_timeout:
-                raise TimeoutError("Timeout reading from socket")
-            return False
-        except NONBLOCKING_EXCEPTIONS as ex:
-            # if we're in nonblocking mode and the recv raises a
-            # blocking error, simply return False indicating that
-            # there's no data to be read. otherwise raise the
-            # original exception.
-            allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
-            if not raise_on_timeout and ex.errno == allowed:
-                return False
-            raise ConnectionError(f"Error while reading from socket: {ex.args}")
+            if length is not None and length > marker:
+                continue
+            return True
 
     async def can_read(self, timeout: float) -> bool:
-        return bool(self.length) or await self._read_from_socket(
-            timeout=timeout, raise_on_timeout=False
-        )
+        if self.length:
+            return True
+        try:
+            async with async_timeout.timeout(timeout):
+                return await self._read_from_socket()
+        except asyncio.TimeoutError:
+            return False
 
     async def read(self, length: int) -> bytes:
         length = length + 2  # make sure to read the \r\n terminator
@@ -363,9 +344,7 @@ class PythonParser(BaseParser):
         if self._stream is None:
             raise RedisError("Buffer is closed.")
 
-        self._buffer = SocketBuffer(
-            self._stream, self._read_size, connection.socket_timeout
-        )
+        self._buffer = SocketBuffer(self._stream, self._read_size)
         self.encoder = connection.encoder
 
     def on_disconnect(self):
@@ -435,7 +414,7 @@ class PythonParser(BaseParser):
 class HiredisParser(BaseParser):
     """Parser class for connections using Hiredis"""
 
-    __slots__ = BaseParser.__slots__ + ("_next_response", "_reader", "_socket_timeout")
+    __slots__ = BaseParser.__slots__ + ("_next_response", "_reader")
 
     _next_response: bool
 
@@ -444,7 +423,6 @@ class HiredisParser(BaseParser):
             raise RedisError("Hiredis is not available.")
         super().__init__(socket_read_size=socket_read_size)
         self._reader: Optional[hiredis.Reader] = None
-        self._socket_timeout: Optional[float] = None
 
     def on_connect(self, connection: "Connection"):
         self._stream = connection._reader
@@ -458,7 +436,6 @@ class HiredisParser(BaseParser):
 
         self._reader = hiredis.Reader(**kwargs)
         self._next_response = False
-        self._socket_timeout = connection.socket_timeout
 
     def on_disconnect(self):
         self._stream = None
@@ -472,42 +449,21 @@ class HiredisParser(BaseParser):
         if self._next_response is False:
             self._next_response = self._reader.gets()
         if self._next_response is False:
-            return await self.read_from_socket(timeout=timeout, raise_on_timeout=False)
+            try:
+                with async_timeout.timeout(timeout):
+                    return await self.read_from_socket()
+            except asyncio.TimeoutError:
+                return False
         return True
 
-    async def read_from_socket(
-        self,
-        timeout: Union[float, None, _Sentinel] = SENTINEL,
-        raise_on_timeout: bool = True,
-    ):
-        timeout = self._socket_timeout if timeout is SENTINEL else timeout
-        try:
-            if timeout is None:
-                buffer = await self._stream.read(self._read_size)
-            else:
-                async with async_timeout.timeout(timeout):
-                    buffer = await self._stream.read(self._read_size)
-            if not buffer or not isinstance(buffer, bytes):
-                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
-            self._reader.feed(buffer)
-            # data was read from the socket and added to the buffer.
-            # return True to indicate that data was read.
-            return True
-        except asyncio.CancelledError:
-            raise
-        except (socket.timeout, asyncio.TimeoutError):
-            if raise_on_timeout:
-                raise TimeoutError("Timeout reading from socket") from None
-            return False
-        except NONBLOCKING_EXCEPTIONS as ex:
-            # if we're in nonblocking mode and the recv raises a
-            # blocking error, simply return False indicating that
-            # there's no data to be read. otherwise raise the
-            # original exception.
-            allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
-            if not raise_on_timeout and ex.errno == allowed:
-                return False
-            raise ConnectionError(f"Error while reading from socket: {ex.args}")
+    async def read_from_socket(self):
+        buffer = await self._stream.read(self._read_size)
+        if not buffer or not isinstance(buffer, bytes):
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
+        self._reader.feed(buffer)
+        # data was read from the socket and added to the buffer.
+        # return True to indicate that data was read.
+        return True
 
     async def read_response(
         self, disable_decoding: bool = False
