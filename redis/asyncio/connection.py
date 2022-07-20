@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import copy
 import enum
 import errno
@@ -54,6 +55,19 @@ from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 hiredis = None
 if HIREDIS_AVAILABLE:
     import hiredis
+
+if sys.version_info[:2] >= (3, 10):
+    nullcontext = contextlib.nullcontext()
+else:
+
+    class NullContext:
+        async def __aenter__(self):
+            pass
+
+        async def __aexit__(self, *args):
+            pass
+
+    nullcontext = NullContext()
 
 NONBLOCKING_EXCEPTION_ERROR_NUMBERS = {
     BlockingIOError: errno.EWOULDBLOCK,
@@ -922,19 +936,23 @@ class Connection:
                 f"Error while reading from {self.host}:{self.port}: {e.args}"
             )
 
-    async def read_response(self, disable_decoding: bool = False):
+    async def read_response(
+        self,
+        disable_decoding: bool = False,
+        timeout: Optional[float] = None,
+    ):
         """Read the response from a previously sent command"""
+        read_timeout = timeout if timeout is not None else self.socket_timeout
         try:
-            if self.socket_timeout:
-                async with async_timeout.timeout(self.socket_timeout):
-                    response = await self._parser.read_response(
-                        disable_decoding=disable_decoding
-                    )
-            else:
+            async with async_timeout.timeout(read_timeout):
                 response = await self._parser.read_response(
                     disable_decoding=disable_decoding
                 )
         except asyncio.TimeoutError:
+            if timeout is not None:
+                # user requested timeout, return None
+                return None
+            # it was a self.socket_timeout error.
             await self.disconnect(nowait=True)
             raise TimeoutError(f"Timeout reading from {self.host}:{self.port}")
         except OSError as e:
