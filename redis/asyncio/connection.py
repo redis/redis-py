@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import copy
 import enum
 import errno
@@ -918,55 +919,27 @@ class Connection:
                 f"Error while reading from {self.host}:{self.port}: {e.args}"
             )
 
-    async def read_response(self, disable_decoding: bool = False):
+    async def read_response(
+        self,
+        disable_decoding: bool = False,
+        timeout: Optional[float] = None,
+        with_lock: bool = True,
+    ):
         """Read the response from a previously sent command"""
+        read_timeout = timeout if timeout is not None else self.socket_timeout
+        lock_ctxt = self._lock if with_lock else contextlib.nullcontext
+        if not self.is_connected:
+            await self.connect()
         try:
-            async with self._lock:
-                if self.socket_timeout:
-                    async with async_timeout.timeout(self.socket_timeout):
-                        response = await self._parser.read_response(
-                            disable_decoding=disable_decoding
-                        )
-                else:
-                    response = await self._parser.read_response(
-                        disable_decoding=disable_decoding
-                    )
-        except asyncio.TimeoutError:
-            await self.disconnect()
-            raise TimeoutError(f"Timeout reading from {self.host}:{self.port}")
-        except OSError as e:
-            await self.disconnect()
-            raise ConnectionError(
-                f"Error while reading from {self.host}:{self.port} : {e.args}"
-            )
-        except BaseException:
-            await self.disconnect()
-            raise
-
-        if self.health_check_interval:
-            if sys.version_info[0:2] == (3, 6):
-                func = asyncio.get_event_loop
-            else:
-                func = asyncio.get_running_loop
-            self.next_health_check = func().time() + self.health_check_interval
-
-        if isinstance(response, ResponseError):
-            raise response from None
-        return response
-
-    async def read_response_without_lock(self, disable_decoding: bool = False):
-        """Read the response from a previously sent command"""
-        try:
-            if self.socket_timeout:
-                async with async_timeout.timeout(self.socket_timeout):
-                    response = await self._parser.read_response(
-                        disable_decoding=disable_decoding
-                    )
-            else:
+            async with lock_ctxt, async_timeout.timeout(read_timeout):
                 response = await self._parser.read_response(
                     disable_decoding=disable_decoding
                 )
         except asyncio.TimeoutError:
+            if timeout is not None:
+                # user requested timeout, return None
+                return None
+            # it was a self.socket_timeout error.
             await self.disconnect()
             raise TimeoutError(f"Timeout reading from {self.host}:{self.port}")
         except OSError as e:
@@ -988,6 +961,14 @@ class Connection:
         if isinstance(response, ResponseError):
             raise response from None
         return response
+
+    async def read_response_without_lock(
+        self, disable_decoding: bool = False, timeout: Optional[float] = None
+    ):
+        """Read the response from a previously sent command"""
+        return await self.read_response(
+            disable_decoding=disable_decoding, timeout=timeout, with_lock=False
+        )
 
     def pack_command(self, *args: EncodableT) -> List[bytes]:
         """Pack a series of arguments into the Redis protocol"""

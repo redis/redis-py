@@ -754,9 +754,8 @@ class PubSub:
 
         await self.check_health()
 
-        if not block and not await self._execute(conn, conn.can_read, timeout=timeout):
-            return None
-        response = await self._execute(conn, conn.read_response)
+        read_timeout = None if block else timeout
+        response = await self._execute(conn, conn.read_response, timeout=read_timeout)
 
         if conn.health_check_interval and response == self.health_check_response:
             # ignore the health check message as user might not expect it
