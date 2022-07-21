@@ -685,7 +685,7 @@ class Connection:
 
     @property
     def is_connected(self):
-        return self._reader and self._writer
+        return self._reader is not None and self._writer is not None
 
     def register_connect_callback(self, callback):
         self._connect_callbacks.append(weakref.WeakMethod(callback))
