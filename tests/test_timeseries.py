@@ -279,7 +279,7 @@ def test_range_bucket_timestamp(client: redis.Redis):
         align=0,
         aggregation_type="max",
         bucket_size_msec=10,
-        bucket_timestamp="+"
+        bucket_timestamp="+",
     )
 
 
@@ -299,7 +299,7 @@ def test_range_empty(client: redis.Redis):
     res = timeseries.range(
         "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10, empty=True
     )
-    for (i) in range(len(res)):
+    for i in range(len(res)):
         if math.isnan(res[i][1]):
             res[i] = (res[i][0], None)
     assert [
@@ -387,7 +387,7 @@ def test_revrange_bucket_timestamp(client: redis.Redis):
         align=0,
         aggregation_type="max",
         bucket_size_msec=10,
-        bucket_timestamp="+"
+        bucket_timestamp="+",
     )
 
 
@@ -407,7 +407,7 @@ def test_revrange_empty(client: redis.Redis):
     res = timeseries.revrange(
         "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10, empty=True
     )
-    for (i) in range(len(res)):
+    for i in range(len(res)):
         if math.isnan(res[i][1]):
             res[i] = (res[i][0], None)
     assert [
@@ -528,7 +528,8 @@ def test_mrange_latest(client: redis.Redis):
     timeseries.add("t3", 11, 7)
     timeseries.add("t3", 13, 1)
     assert client.ts().mrange(0, 10, filters=["is_compaction=true"], latest=True) == [
-        {'t2': [{}, [(0, 4.0), (10, 8.0)]]}, {'t4': [{}, [(0, 4.0), (10, 8.0)]]}
+        {'t2': [{}, [(0, 4.0), (10, 8.0)]]},
+        {'t4': [{}, [(0, 4.0), (10, 8.0)]]},
     ]
 
 
@@ -634,10 +635,9 @@ def test_mrevrange_latest(client: redis.Redis):
     timeseries.add("t3", 2, 3)
     timeseries.add("t3", 11, 7)
     timeseries.add("t3", 13, 1)
-    assert (
-        client.ts().mrevrange(0, 10, filters=["is_compaction=true"], latest=True)
-        == [{'t2': [{}, [(10, 8.0), (0, 4.0)]]}, {'t4': [{}, [(10, 8.0), (0, 4.0)]]}]
-    )
+    assert client.ts().mrevrange(
+        0, 10, filters=["is_compaction=true"], latest=True
+    ) == [{'t2': [{}, [(10, 8.0), (0, 4.0)]]}, {'t4': [{}, [(10, 8.0), (0, 4.0)]]}]
 
 
 @pytest.mark.redismod
@@ -700,8 +700,8 @@ def test_mget_latest(client: redis.Redis):
     timeseries.add("t1", 2, 3)
     timeseries.add("t1", 11, 7)
     timeseries.add("t1", 13, 1)
-    assert timeseries.mget(filters=["is_compaction=true"]) == [{'t2': [{}, 0, 4.0]}]
-    assert [{'t2': [{}, 10, 8.0]}] == timeseries.mget(
+    assert timeseries.mget(filters=["is_compaction=true"]) == [{"t2": [{}, 0, 4.0]}]
+    assert [{"t2": [{}, 10, 8.0]}] == timeseries.mget(
         filters=["is_compaction=true"], latest=True
     )
 
