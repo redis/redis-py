@@ -1,4 +1,6 @@
+from typing import Dict, List, Optional, Tuple, Union
 from redis.exceptions import DataError
+from redis.typing import KeyT, Number
 
 ADD_CMD = "TS.ADD"
 ALTER_CMD = "TS.ALTER"
@@ -22,7 +24,15 @@ REVRANGE_CMD = "TS.REVRANGE"
 class TimeSeriesCommands:
     """RedisTimeSeries Commands."""
 
-    def create(self, key, **kwargs):
+    def create(
+        self,
+        key: KeyT,
+        retention_msecs: Optional[int] = None,
+        uncompressed: Optional[bool] = False,
+        labels: Optional[Dict[str, str]] = None,
+        chunk_size: Optional[int] = None,
+        duplicate_policy: Optional[str] = None,
+    ):
         """
         Create a new time-series.
 
@@ -51,11 +61,6 @@ class TimeSeriesCommands:
 
         For more information: https://redis.io/commands/ts.create/
         """  # noqa
-        retention_msecs = kwargs.get("retention_msecs", None)
-        uncompressed = kwargs.get("uncompressed", False)
-        labels = kwargs.get("labels", {})
-        chunk_size = kwargs.get("chunk_size", None)
-        duplicate_policy = kwargs.get("duplicate_policy", None)
         params = [key]
         self._append_retention(params, retention_msecs)
         self._append_uncompressed(params, uncompressed)
@@ -65,7 +70,14 @@ class TimeSeriesCommands:
 
         return self.execute_command(CREATE_CMD, *params)
 
-    def alter(self, key, **kwargs):
+    def alter(
+        self,
+        key: KeyT,
+        retention_msecs: Optional[int] = None,
+        labels: Optional[Dict[str, str]] = None,
+        chunk_size: Optional[int] = None,
+        duplicate_policy: Optional[str] = None,
+    ):
         """
         Update the retention, chunk size, duplicate policy, and labels of an existing
         time series.
@@ -93,17 +105,25 @@ class TimeSeriesCommands:
 
         For more information: https://redis.io/commands/ts.alter/
         """  # noqa
-        retention_msecs = kwargs.get("retention_msecs", None)
-        labels = kwargs.get("labels", {})
-        duplicate_policy = kwargs.get("duplicate_policy", None)
         params = [key]
         self._append_retention(params, retention_msecs)
+        self._append_chunk_size(params, chunk_size)
         self._append_duplicate_policy(params, ALTER_CMD, duplicate_policy)
         self._append_labels(params, labels)
 
         return self.execute_command(ALTER_CMD, *params)
 
-    def add(self, key, timestamp, value, **kwargs):
+    def add(
+        self,
+        key: KeyT,
+        timestamp: Union[int, str],
+        value: Number,
+        retention_msecs: Optional[int] = None,
+        uncompressed: Optional[bool] = False,
+        labels: Optional[Dict[str, str]] = None,
+        chunk_size: Optional[int] = None,
+        duplicate_policy: Optional[str] = None,
+    ):
         """
         Append (or create and append) a new sample to a time series.
 
@@ -136,11 +156,6 @@ class TimeSeriesCommands:
 
         For more information: https://redis.io/commands/ts.add/
         """  # noqa
-        retention_msecs = kwargs.get("retention_msecs", None)
-        uncompressed = kwargs.get("uncompressed", False)
-        labels = kwargs.get("labels", {})
-        chunk_size = kwargs.get("chunk_size", None)
-        duplicate_policy = kwargs.get("duplicate_policy", None)
         params = [key, timestamp, value]
         self._append_retention(params, retention_msecs)
         self._append_uncompressed(params, uncompressed)
@@ -150,7 +165,7 @@ class TimeSeriesCommands:
 
         return self.execute_command(ADD_CMD, *params)
 
-    def madd(self, ktv_tuples):
+    def madd(self, ktv_tuples: List[Tuple[KeyT, Union[int, str], Number]]):
         """
         Append (or create and append) a new `value` to series
         `key` with `timestamp`.
@@ -165,7 +180,16 @@ class TimeSeriesCommands:
 
         return self.execute_command(MADD_CMD, *params)
 
-    def incrby(self, key, value, **kwargs):
+    def incrby(
+        self,
+        key: KeyT,
+        value: Number,
+        timestamp: Optional[Union[int, str]] = None,
+        retention_msecs: Optional[int] = None,
+        uncompressed: Optional[bool] = False,
+        labels: Optional[Dict[str, str]] = None,
+        chunk_size: Optional[int] = None,
+    ):
         """
         Increment (or create an time-series and increment) the latest sample's of a series.
         This command can be used as a counter or gauge that automatically gets history as a time series.
@@ -190,11 +214,6 @@ class TimeSeriesCommands:
 
         For more information: https://redis.io/commands/ts.incrby/
         """  # noqa
-        timestamp = kwargs.get("timestamp", None)
-        retention_msecs = kwargs.get("retention_msecs", None)
-        uncompressed = kwargs.get("uncompressed", False)
-        labels = kwargs.get("labels", {})
-        chunk_size = kwargs.get("chunk_size", None)
         params = [key, value]
         self._append_timestamp(params, timestamp)
         self._append_retention(params, retention_msecs)
@@ -204,7 +223,16 @@ class TimeSeriesCommands:
 
         return self.execute_command(INCRBY_CMD, *params)
 
-    def decrby(self, key, value, **kwargs):
+    def decrby(
+        self,
+        key: KeyT,
+        value: Number,
+        timestamp: Optional[Union[int, str]] = None,
+        retention_msecs: Optional[int] = None,
+        uncompressed: Optional[bool] = False,
+        labels: Optional[Dict[str, str]] = None,
+        chunk_size: Optional[int] = None,
+    ):
         """
         Decrement (or create an time-series and decrement) the latest sample's of a series.
         This command can be used as a counter or gauge that automatically gets history as a time series.
@@ -229,11 +257,6 @@ class TimeSeriesCommands:
 
         For more information: https://redis.io/commands/ts.decrby/
         """  # noqa
-        timestamp = kwargs.get("timestamp", None)
-        retention_msecs = kwargs.get("retention_msecs", None)
-        uncompressed = kwargs.get("uncompressed", False)
-        labels = kwargs.get("labels", {})
-        chunk_size = kwargs.get("chunk_size", None)
         params = [key, value]
         self._append_timestamp(params, timestamp)
         self._append_retention(params, retention_msecs)
@@ -243,7 +266,7 @@ class TimeSeriesCommands:
 
         return self.execute_command(DECRBY_CMD, *params)
 
-    def delete(self, key, from_time, to_time):
+    def delete(self, key: KeyT, from_time: int, to_time: int):
         """
         Delete all samples between two timestamps for a given time series.
 
@@ -262,11 +285,11 @@ class TimeSeriesCommands:
 
     def createrule(
         self,
-        source_key,
-        dest_key,
-        aggregation_type,
-        bucket_size_msec,
-        align_timestamp=None,
+        source_key: KeyT,
+        dest_key: KeyT,
+        aggregation_type: str,
+        bucket_size_msec: int,
+        align_timestamp: Optional[int] = None,
     ):
         """
         Create a compaction rule from values added to `source_key` into `dest_key`.
@@ -296,7 +319,7 @@ class TimeSeriesCommands:
 
         return self.execute_command(CREATERULE_CMD, *params)
 
-    def deleterule(self, source_key, dest_key):
+    def deleterule(self, source_key: KeyT, dest_key: KeyT):
         """
         Delete a compaction rule from `source_key` to `dest_key`..
 
@@ -306,19 +329,19 @@ class TimeSeriesCommands:
 
     def __range_params(
         self,
-        key,
-        from_time,
-        to_time,
-        count,
-        aggregation_type,
-        bucket_size_msec,
-        filter_by_ts,
-        filter_by_min_value,
-        filter_by_max_value,
-        align,
-        latest,
-        bucket_timestamp,
-        empty,
+        key: KeyT,
+        from_time: Union[int, str],
+        to_time: Union[int, str],
+        count: Optional[int],
+        aggregation_type: Optional[str],
+        bucket_size_msec: Optional[int],
+        filter_by_ts: Optional[List[int]],
+        filter_by_min_value: Optional[int],
+        filter_by_max_value: Optional[int],
+        align: Optional[Union[int, str]],
+        latest: Optional[bool],
+        bucket_timestamp: Optional[str],
+        empty: Optional[bool],
     ):
         """Create TS.RANGE and TS.REVRANGE arguments."""
         params = [key, from_time, to_time]
@@ -335,19 +358,19 @@ class TimeSeriesCommands:
 
     def range(
         self,
-        key,
-        from_time,
-        to_time,
-        count=None,
-        aggregation_type=None,
-        bucket_size_msec=0,
-        filter_by_ts=None,
-        filter_by_min_value=None,
-        filter_by_max_value=None,
-        align=None,
-        latest=False,
-        bucket_timestamp=None,
-        empty=False,
+        key: KeyT,
+        from_time: Union[int, str],
+        to_time: Union[int, str],
+        count: Optional[int] = None,
+        aggregation_type: Optional[str] = None,
+        bucket_size_msec: Optional[int] = 0,
+        filter_by_ts: Optional[List[int]] = None,
+        filter_by_min_value: Optional[int] = None,
+        filter_by_max_value: Optional[int] = None,
+        align: Optional[Union[int, str]] = None,
+        latest: Optional[bool] = False,
+        bucket_timestamp: Optional[str] = None,
+        empty: Optional[bool] = False,
     ):
         """
         Query a range in forward direction for a specific time-serie.
@@ -405,19 +428,19 @@ class TimeSeriesCommands:
 
     def revrange(
         self,
-        key,
-        from_time,
-        to_time,
-        count=None,
-        aggregation_type=None,
-        bucket_size_msec=0,
-        filter_by_ts=None,
-        filter_by_min_value=None,
-        filter_by_max_value=None,
-        align=None,
-        latest=False,
-        bucket_timestamp=None,
-        empty=False,
+        key: KeyT,
+        from_time: Union[int, str],
+        to_time: Union[int, str],
+        count: Optional[int] = None,
+        aggregation_type: Optional[str] = None,
+        bucket_size_msec: Optional[int] = 0,
+        filter_by_ts: Optional[List[int]] = None,
+        filter_by_min_value: Optional[int] = None,
+        filter_by_max_value: Optional[int] = None,
+        align: Optional[Union[int, str]] = None,
+        latest: Optional[bool] = False,
+        bucket_timestamp: Optional[str] = None,
+        empty: Optional[bool] = False,
     ):
         """
         Query a range in reverse direction for a specific time-series.
@@ -477,23 +500,23 @@ class TimeSeriesCommands:
 
     def __mrange_params(
         self,
-        aggregation_type,
-        bucket_size_msec,
-        count,
-        filters,
-        from_time,
-        to_time,
-        with_labels,
-        filter_by_ts,
-        filter_by_min_value,
-        filter_by_max_value,
-        groupby,
-        reduce,
-        select_labels,
-        align,
-        latest,
-        bucket_timestamp,
-        empty,
+        aggregation_type: Optional[str],
+        bucket_size_msec: Optional[int],
+        count: Optional[int],
+        filters: List[str],
+        from_time: Union[int, str],
+        to_time: Union[int, str],
+        with_labels: Optional[bool],
+        filter_by_ts: Optional[List[int]],
+        filter_by_min_value: Optional[int],
+        filter_by_max_value: Optional[int],
+        groupby: Optional[str],
+        reduce: Optional[str],
+        select_labels: Optional[List[str]],
+        align: Optional[Union[int, str]],
+        latest: Optional[bool],
+        bucket_timestamp: Optional[str],
+        empty: Optional[bool],
     ):
         """Create TS.MRANGE and TS.MREVRANGE arguments."""
         params = [from_time, to_time]
@@ -513,23 +536,23 @@ class TimeSeriesCommands:
 
     def mrange(
         self,
-        from_time,
-        to_time,
-        filters,
-        count=None,
-        aggregation_type=None,
-        bucket_size_msec=0,
-        with_labels=False,
-        filter_by_ts=None,
-        filter_by_min_value=None,
-        filter_by_max_value=None,
-        groupby=None,
-        reduce=None,
-        select_labels=None,
-        align=None,
-        latest=False,
-        bucket_timestamp=None,
-        empty=False,
+        from_time: Union[int, str],
+        to_time: Union[int, str],
+        filters: List[str],
+        count: Optional[int] = None,
+        aggregation_type: Optional[str] = None,
+        bucket_size_msec: Optional[int] = 0,
+        with_labels: Optional[bool] = False,
+        filter_by_ts: Optional[List[int]] = None,
+        filter_by_min_value: Optional[int] = None,
+        filter_by_max_value: Optional[int] = None,
+        groupby: Optional[str] = None,
+        reduce: Optional[str] = None,
+        select_labels: Optional[List[str]] = None,
+        align: Optional[Union[int, str]] = None,
+        latest: Optional[bool] = False,
+        bucket_timestamp: Optional[str] = None,
+        empty: Optional[bool] = False,
     ):
         """
         Query a range across multiple time-series by filters in forward direction.
@@ -601,23 +624,23 @@ class TimeSeriesCommands:
 
     def mrevrange(
         self,
-        from_time,
-        to_time,
-        filters,
-        count=None,
-        aggregation_type=None,
-        bucket_size_msec=0,
-        with_labels=False,
-        filter_by_ts=None,
-        filter_by_min_value=None,
-        filter_by_max_value=None,
-        groupby=None,
-        reduce=None,
-        select_labels=None,
-        align=None,
-        latest=False,
-        bucket_timestamp=None,
-        empty=False,
+        from_time: Union[int, str],
+        to_time: Union[int, str],
+        filters: List[str],
+        count: Optional[int] = None,
+        aggregation_type: Optional[str] = None,
+        bucket_size_msec: Optional[int] = 0,
+        with_labels: Optional[bool] = False,
+        filter_by_ts: Optional[List[int]] = None,
+        filter_by_min_value: Optional[int] = None,
+        filter_by_max_value: Optional[int] = None,
+        groupby: Optional[str] = None,
+        reduce: Optional[str] = None,
+        select_labels: Optional[List[str]] = None,
+        align: Optional[Union[int, str]] = None,
+        latest: Optional[bool] = False,
+        bucket_timestamp: Optional[str] = None,
+        empty: Optional[bool] = False,
     ):
         """
         Query a range across multiple time-series by filters in reverse direction.
@@ -687,7 +710,7 @@ class TimeSeriesCommands:
 
         return self.execute_command(MREVRANGE_CMD, *params)
 
-    def get(self, key, latest=False):
+    def get(self, key: KeyT, latest: Optional[bool] = False):
         """# noqa
         Get the last sample of `key`.
         `latest` used when a time series is a compaction, reports the compacted
@@ -699,7 +722,13 @@ class TimeSeriesCommands:
         self._append_latest(params, latest)
         return self.execute_command(GET_CMD, *params)
 
-    def mget(self, filters, with_labels=False, select_labels=None, latest=False):
+    def mget(
+        self,
+        filters: List[str],
+        with_labels: Optional[bool] = False,
+        select_labels: Optional[List[str]] = None,
+        latest: Optional[bool] = False,
+    ):
         """# noqa
         Get the last samples matching the specific `filter`.
 
@@ -725,7 +754,7 @@ class TimeSeriesCommands:
         params += filters
         return self.execute_command(MGET_CMD, *params)
 
-    def info(self, key):
+    def info(self, key: KeyT):
         """# noqa
         Get information of `key`.
 
@@ -733,7 +762,7 @@ class TimeSeriesCommands:
         """  # noqa
         return self.execute_command(INFO_CMD, key)
 
-    def queryindex(self, filters):
+    def queryindex(self, filters: List[str]):
         """# noqa
         Get all time series keys matching the `filter` list.
 
@@ -742,13 +771,17 @@ class TimeSeriesCommands:
         return self.execute_command(QUERYINDEX_CMD, *filters)
 
     @staticmethod
-    def _append_uncompressed(params, uncompressed):
+    def _append_uncompressed(params: List[str], uncompressed: Optional[bool]):
         """Append UNCOMPRESSED tag to params."""
         if uncompressed:
             params.extend(["UNCOMPRESSED"])
 
     @staticmethod
-    def _append_with_labels(params, with_labels, select_labels=None):
+    def _append_with_labels(
+        params: List[str],
+        with_labels: Optional[bool],
+        select_labels: Optional[List[str]],
+    ):
         """Append labels behavior to params."""
         if with_labels and select_labels:
             raise DataError(
@@ -761,19 +794,21 @@ class TimeSeriesCommands:
             params.extend(["SELECTED_LABELS", *select_labels])
 
     @staticmethod
-    def _append_groupby_reduce(params, groupby, reduce):
+    def _append_groupby_reduce(
+        params: List[str], groupby: Optional[str], reduce: Optional[str]
+    ):
         """Append GROUPBY REDUCE property to params."""
         if groupby is not None and reduce is not None:
             params.extend(["GROUPBY", groupby, "REDUCE", reduce.upper()])
 
     @staticmethod
-    def _append_retention(params, retention):
+    def _append_retention(params: List[str], retention: Optional[int]):
         """Append RETENTION property to params."""
         if retention is not None:
             params.extend(["RETENTION", retention])
 
     @staticmethod
-    def _append_labels(params, labels):
+    def _append_labels(params: List[str], labels: Optional[List[str]]):
         """Append LABELS property to params."""
         if labels:
             params.append("LABELS")
@@ -781,37 +816,43 @@ class TimeSeriesCommands:
                 params.extend([k, v])
 
     @staticmethod
-    def _append_count(params, count):
+    def _append_count(params: List[str], count: Optional[int]):
         """Append COUNT property to params."""
         if count is not None:
             params.extend(["COUNT", count])
 
     @staticmethod
-    def _append_timestamp(params, timestamp):
+    def _append_timestamp(params: List[str], timestamp: Optional[int]):
         """Append TIMESTAMP property to params."""
         if timestamp is not None:
             params.extend(["TIMESTAMP", timestamp])
 
     @staticmethod
-    def _append_align(params, align):
+    def _append_align(params: List[str], align: Optional[Union[int, str]]):
         """Append ALIGN property to params."""
         if align is not None:
             params.extend(["ALIGN", align])
 
     @staticmethod
-    def _append_aggregation(params, aggregation_type, bucket_size_msec):
+    def _append_aggregation(
+        params: List[str],
+        aggregation_type: Optional[str],
+        bucket_size_msec: Optional[int],
+    ):
         """Append AGGREGATION property to params."""
         if aggregation_type is not None:
             params.extend(["AGGREGATION", aggregation_type, bucket_size_msec])
 
     @staticmethod
-    def _append_chunk_size(params, chunk_size):
+    def _append_chunk_size(params: List[str], chunk_size: Optional[int]):
         """Append CHUNK_SIZE property to params."""
         if chunk_size is not None:
             params.extend(["CHUNK_SIZE", chunk_size])
 
     @staticmethod
-    def _append_duplicate_policy(params, command, duplicate_policy):
+    def _append_duplicate_policy(
+        params: List[str], command: Optional[str], duplicate_policy: Optional[str]
+    ):
         """Append DUPLICATE_POLICY property to params on CREATE
         and ON_DUPLICATE on ADD.
         """
@@ -822,31 +863,33 @@ class TimeSeriesCommands:
                 params.extend(["DUPLICATE_POLICY", duplicate_policy])
 
     @staticmethod
-    def _append_filer_by_ts(params, ts_list):
+    def _append_filer_by_ts(params: List[str], ts_list: Optional[List[int]]):
         """Append FILTER_BY_TS property to params."""
         if ts_list is not None:
             params.extend(["FILTER_BY_TS", *ts_list])
 
     @staticmethod
-    def _append_filer_by_value(params, min_value, max_value):
+    def _append_filer_by_value(
+        params: List[str], min_value: Optional[int], max_value: Optional[int]
+    ):
         """Append FILTER_BY_VALUE property to params."""
         if min_value is not None and max_value is not None:
             params.extend(["FILTER_BY_VALUE", min_value, max_value])
 
     @staticmethod
-    def _append_latest(params, latest):
+    def _append_latest(params: List[str], latest: Optional[bool]):
         """Append LATEST property to params."""
         if latest:
             params.append("LATEST")
 
     @staticmethod
-    def _append_bucket_timestamp(params, bucket_timestamp):
+    def _append_bucket_timestamp(params: List[str], bucket_timestamp: Optional[str]):
         """Append BUCKET_TIMESTAMP property to params."""
         if bucket_timestamp is not None:
             params.extend(["BUCKETTIMESTAMP", bucket_timestamp])
 
     @staticmethod
-    def _append_empty(params, empty):
+    def _append_empty(params: List[str], empty: Optional[bool]):
         """Append EMPTY property to params."""
         if empty:
             params.append("EMPTY")
