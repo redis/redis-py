@@ -528,8 +528,8 @@ def test_mrange_latest(client: redis.Redis):
     timeseries.add("t3", 11, 7)
     timeseries.add("t3", 13, 1)
     assert client.ts().mrange(0, 10, filters=["is_compaction=true"], latest=True) == [
-        {'t2': [{}, [(0, 4.0), (10, 8.0)]]},
-        {'t4': [{}, [(0, 4.0), (10, 8.0)]]},
+        {"t2": [{}, [(0, 4.0), (10, 8.0)]]},
+        {"t4": [{}, [(0, 4.0), (10, 8.0)]]},
     ]
 
 
@@ -637,7 +637,7 @@ def test_mrevrange_latest(client: redis.Redis):
     timeseries.add("t3", 13, 1)
     assert client.ts().mrevrange(
         0, 10, filters=["is_compaction=true"], latest=True
-    ) == [{'t2': [{}, [(10, 8.0), (0, 4.0)]]}, {'t4': [{}, [(10, 8.0), (0, 4.0)]]}]
+    ) == [{"t2": [{}, [(10, 8.0), (0, 4.0)]]}, {"t4": [{}, [(10, 8.0), (0, 4.0)]]}]
 
 
 @pytest.mark.redismod
