@@ -67,8 +67,8 @@ class TSInfo:
         self.total_samples = response["totalSamples"]
         self.labels = list_to_dict(response["labels"])
         self.retention_msecs = response["retentionTime"]
-        self.lastTimeStamp = response["lastTimestamp"]
-        self.first_time_stamp = response["firstTimestamp"]
+        self.last_timestamp = response["lastTimestamp"]
+        self.first_timestamp = response["firstTimestamp"]
         if "maxSamplesPerChunk" in response:
             self.max_samples_per_chunk = response["maxSamplesPerChunk"]
             self.chunk_size = (
