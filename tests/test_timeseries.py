@@ -745,7 +745,7 @@ def test_pipeline(client):
     pipeline.execute()
 
     info = client.ts().info("with_pipeline")
-    assert info.lastTimeStamp == 99
+    assert info.last_timeStamp == 99
     assert info.total_samples == 100
     assert client.ts().get("with_pipeline")[1] == 99 * 1.1
 
