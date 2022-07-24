@@ -815,8 +815,6 @@ class Connection:
 
     def read_response(self, disable_decoding=False):
         """Read the response from a previously sent command"""
-        if not self._sock:
-            self.connect()
         try:
             hosterr = f"{self.host}:{self.port}"
         except AttributeError:

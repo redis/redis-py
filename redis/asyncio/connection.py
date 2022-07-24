@@ -930,8 +930,6 @@ class Connection:
 
     async def read_response(self, disable_decoding: bool = False):
         """Read the response from a previously sent command"""
-        if not self.is_connected:
-            await self.connect()
         try:
             async with self._lock:
                 if self.socket_timeout:
