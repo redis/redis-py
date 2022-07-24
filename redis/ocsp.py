@@ -292,7 +292,7 @@ class OCSPVerifier:
         This first retrieves for validate the certificate, issuer_url,
         and ocsp_server for certificate validate. Then retrieves the
         issuer certificate from the issuer_url, and finally checks
-        the valididy of OCSP revocation status.
+        the validity of OCSP revocation status.
         """
 
         # validate the certificate
