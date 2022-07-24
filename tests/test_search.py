@@ -1698,3 +1698,17 @@ def test_dialect(modclient: redis.Redis):
     with pytest.raises(redis.ResponseError) as err:
         modclient.ft().explain(Query("@title:(@num:[0 10])").dialect(2))
     assert "Syntax error" in str(err)
+
+
+@pytest.mark.redismod
+def test_expire_while_search(modclient: redis.Redis):
+    modclient.ft().create_index((TextField("txt"),))
+    modclient.hset("hset:1", "txt", "a")
+    modclient.hset("hset:2", "txt", "b")
+    modclient.hset("hset:3", "txt", "c")
+    assert 3 == modclient.ft().search(Query("*")).total
+    modclient.pexpire("hset:2", 300)
+    for _ in range(500):
+        modclient.ft().search(Query("*")).docs[1]
+    time.sleep(1)
+    assert 2 == modclient.ft().search(Query("*")).total
