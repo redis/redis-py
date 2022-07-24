@@ -4,6 +4,8 @@ import redis.commands.bf
 from redis.exceptions import ModuleError, RedisError
 from redis.utils import HIREDIS_AVAILABLE
 
+from .conftest import skip_ifmodversion_lt
+
 
 def intlist(obj):
     return [int(v) for v in obj]
@@ -380,6 +382,7 @@ def test_tdigest_cdf(client):
 
 @pytest.mark.redismod
 @pytest.mark.experimental
+@skip_ifmodversion_lt("2.4.0", "bf")
 def test_tdigest_trimmed_mean(client):
     assert client.tdigest().create("tDigest", 100)
     # insert data-points into sketch
