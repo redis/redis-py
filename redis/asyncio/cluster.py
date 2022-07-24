@@ -208,9 +208,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self,
         host: Optional[str] = None,
         port: Union[str, int] = 6379,
-        *,
-        db: Union[str, int] = 0,
-        path: Optional[str] = None,
         # Cluster related kwargs
         startup_nodes: Optional[List["ClusterNode"]] = None,
         require_full_coverage: bool = True,
@@ -220,6 +217,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         connection_error_retry_attempts: int = 5,
         max_connections: int = 2**31,
         # Client related kwargs
+        db: Union[str, int] = 0,
+        path: Optional[str] = None,
         username: Optional[str] = None,
         password: Optional[str] = None,
         client_name: Optional[str] = None,
