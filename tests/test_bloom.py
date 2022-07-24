@@ -378,6 +378,16 @@ def test_tdigest_cdf(client):
     assert 0.9 == round(client.tdigest().cdf("tDigest", 9.0), 1)
 
 
+@pytest.mark.redismod
+@pytest.mark.experimental
+def test_tdigest_trimmed_mean(client):
+    assert client.tdigest().create("tDigest", 100)
+    # insert data-points into sketch
+    assert client.tdigest().add("tDigest", list(range(1, 10)), [1.0] * 10)
+    assert 5 == client.tdigest().trimmed_mean("tDigest", 0.1, 0.9)
+    assert 4.5 == client.tdigest().trimmed_mean("tDigest", 0.4, 0.5)
+
+
 # @pytest.mark.redismod
 # def test_pipeline(client):
 #     pipeline = client.bf().pipeline()
