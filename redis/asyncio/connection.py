@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 import copy
 import enum
 import inspect
@@ -54,19 +53,6 @@ from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 hiredis = None
 if HIREDIS_AVAILABLE:
     import hiredis
-
-if sys.version_info[:2] >= (3, 10):
-    nullcontext = contextlib.nullcontext()
-else:
-
-    class NullContext:
-        async def __aenter__(self):
-            pass
-
-        async def __aexit__(self, *args):
-            pass
-
-    nullcontext = NullContext()
 
 SYM_STAR = b"*"
 SYM_DOLLAR = b"$"
@@ -891,7 +877,12 @@ class Connection:
         """Read the response from a previously sent command"""
         read_timeout = timeout if timeout is not None else self.socket_timeout
         try:
-            async with async_timeout.timeout(read_timeout):
+            if read_timeout is not None:
+                async with async_timeout.timeout(read_timeout):
+                    response = await self._parser.read_response(
+                        disable_decoding=disable_decoding
+                    )
+            else:
                 response = await self._parser.read_response(
                     disable_decoding=disable_decoding
                 )
