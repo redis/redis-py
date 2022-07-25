@@ -1,25 +1,26 @@
+from unittest.mock import patch
+
 import pytest
 
 from redis.commands.graph import Edge, Node, Path
 from redis.commands.graph.execution_plan import Operation
 from redis.commands.graph.query_result import (
-    QueryResult,
+    CACHED_EXECUTION,
+    INDICES_CREATED,
+    INDICES_DELETED,
+    INTERNAL_EXECUTION_TIME,
     LABELS_ADDED,
     LABELS_REMOVED,
     NODES_CREATED,
     NODES_DELETED,
+    PROPERTIES_REMOVED,
+    PROPERTIES_SET,
     RELATIONSHIPS_CREATED,
     RELATIONSHIPS_DELETED,
-    PROPERTIES_SET,
-    PROPERTIES_REMOVED,
-    CACHED_EXECUTION,
-    INTERNAL_EXECUTION_TIME,
-    INDICES_CREATED,
-    INDICES_DELETED,
+    QueryResult,
 )
 from redis.exceptions import ResponseError
 from tests.conftest import skip_if_redis_enterprise
-from unittest.mock import patch
 
 
 @pytest.fixture
