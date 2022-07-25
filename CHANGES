@@ -1,4 +1,6 @@
-
+    * Fix start_id type for XAUTOCLAIM
+    * Remove verbose logging from cluster.py
+    * Add retry mechanism to async version of Connection
     * Compare commands case-insensitively in the asyncio command parser
     * Allow negative `retries` for `Retry` class to retry forever
     * Add `items` parameter to `hset` signature
