@@ -325,50 +325,61 @@ class QueryResult:
     def _get_stat(self, stat):
         return self.statistics[stat] if stat in self.statistics else 0
 
+    '''Returns the number of labels added in the query'''
     @property
     def labels_added(self):
         return self._get_stat(LABELS_ADDED)
 
+    '''Returns the number of labels removed in the query'''
     @property
     def labels_removed(self):
         return self._get_stat(LABELS_REMOVED)
-
+    '''Returns the number of nodes created in the query'''
     @property
     def nodes_created(self):
         return self._get_stat(NODES_CREATED)
 
+    '''Returns the number of nodes deleted in the query'''
     @property
     def nodes_deleted(self):
         return self._get_stat(NODES_DELETED)
 
+    '''Returns the number of properties set in the query'''
     @property
     def properties_set(self):
         return self._get_stat(PROPERTIES_SET)
 
+    '''Returns the number of properties removed in the query'''
     @property
     def properties_removed(self):
         return self._get_stat(PROPERTIES_REMOVED)
 
+    '''Returns the number of relationships created in the query'''
     @property
     def relationships_created(self):
         return self._get_stat(RELATIONSHIPS_CREATED)
 
+    '''Returns the number of relationships deleted in the query'''
     @property
     def relationships_deleted(self):
         return self._get_stat(RELATIONSHIPS_DELETED)
 
+    '''Returns the number of indices created in the query'''
     @property
     def indices_created(self):
         return self._get_stat(INDICES_CREATED)
 
+    '''Returns the number of indices deleted in the query'''
     @property
     def indices_deleted(self):
         return self._get_stat(INDICES_DELETED)
 
+    '''Returns whether or not the query execution plan was cached'''
     @property
     def cached_execution(self):
         return self._get_stat(CACHED_EXECUTION) == 1
 
+    '''Returns the server execution time of the query'''
     @property
     def run_time_ms(self):
         return self._get_stat(INTERNAL_EXECUTION_TIME)
