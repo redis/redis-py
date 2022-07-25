@@ -637,6 +637,8 @@ class Connection:
             retry_on_error = []
         if retry_on_timeout:
             retry_on_error.append(TimeoutError)
+            retry_on_error.append(socket.timeout)
+            retry_on_error.append(asyncio.TimeoutError)
         self.retry_on_error = retry_on_error
         if retry_on_error:
             if not retry:
@@ -685,7 +687,7 @@ class Connection:
 
     @property
     def is_connected(self):
-        return self._reader and self._writer
+        return self._reader is not None and self._writer is not None
 
     def register_connect_callback(self, callback):
         self._connect_callbacks.append(weakref.WeakMethod(callback))
@@ -706,7 +708,9 @@ class Connection:
         if self.is_connected:
             return
         try:
-            await self._connect()
+            await self.retry.call_with_retry(
+                lambda: self._connect(), lambda error: self.disconnect()
+            )
         except asyncio.CancelledError:
             raise
         except (socket.timeout, asyncio.TimeoutError):
