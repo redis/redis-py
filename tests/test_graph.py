@@ -2,7 +2,21 @@ import pytest
 
 from redis.commands.graph import Edge, Node, Path
 from redis.commands.graph.execution_plan import Operation
-from redis.commands.graph.query_result import *
+from redis.commands.graph.query_result import (
+    QueryResult,
+    LABELS_ADDED,
+    LABELS_REMOVED,
+    NODES_CREATED,
+    NODES_DELETED,
+    RELATIONSHIPS_CREATED,
+    RELATIONSHIPS_DELETED,
+    PROPERTIES_SET,
+    PROPERTIES_REMOVED,
+    CACHED_EXECUTION,
+    INTERNAL_EXECUTION_TIME,
+    INDICES_CREATED,
+    INDICES_DELETED,
+)
 from redis.exceptions import ResponseError
 from tests.conftest import skip_if_redis_enterprise
 from unittest.mock import patch
@@ -578,9 +592,10 @@ Project
 
     redis_graph.delete()
 
+
 @pytest.mark.redismod
 def test_resultset_statistics(client):
-    with patch.object(target = QueryResult, attribute = "_get_stat") as mock_get_stats:
+    with patch.object(target=QueryResult, attribute="_get_stat") as mock_get_stats:
         result = client.graph().query("RETURN 1")
         result.labels_added
         mock_get_stats.assert_called_with(LABELS_ADDED)
