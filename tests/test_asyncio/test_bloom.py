@@ -1,10 +1,13 @@
+import sys
+
 import pytest
 
 import redis.asyncio as redis
 from redis.exceptions import ModuleError, RedisError
 from redis.utils import HIREDIS_AVAILABLE
 
-pytestmark = pytest.mark.asyncio
+if sys.version_info[0:2] == (3, 6):
+    pytestmark = pytest.mark.asyncio
 
 
 def intlist(obj):
@@ -91,7 +94,7 @@ async def test_bf_scandump_and_loadchunk(modclient: redis.Redis):
             res += rv == x
         assert res < 5
 
-    do_verify()
+    await do_verify()
     cmds = []
     if HIREDIS_AVAILABLE:
         with pytest.raises(ModuleError):
@@ -120,7 +123,7 @@ async def test_bf_scandump_and_loadchunk(modclient: redis.Redis):
 
     cur_info = await modclient.bf().execute_command("bf.debug", "myBloom")
     assert prev_info == cur_info
-    do_verify()
+    await do_verify()
 
     await modclient.bf().client.delete("myBloom")
     await modclient.bf().create("myBloom", "0.0001", "10000000")
