@@ -1411,7 +1411,8 @@ def test_set_path(client):
 
     with open(jsonfile, "w+") as fp:
         fp.write(json.dumps({"hello": "world"}))
-    open(nojsonfile, "a+").write("hello")
+    with open(nojsonfile, "a+") as fp:
+        fp.write("hello")
 
     result = {jsonfile: True, nojsonfile: False}
     assert client.json().set_path(Path.root_path(), root) == result
