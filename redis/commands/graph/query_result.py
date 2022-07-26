@@ -9,10 +9,12 @@ from .node import Node
 from .path import Path
 
 LABELS_ADDED = "Labels added"
+LABELS_REMOVED = "Labels removed"
 NODES_CREATED = "Nodes created"
 NODES_DELETED = "Nodes deleted"
 RELATIONSHIPS_DELETED = "Relationships deleted"
 PROPERTIES_SET = "Properties set"
+PROPERTIES_REMOVED = "Properties removed"
 RELATIONSHIPS_CREATED = "Relationships created"
 INDICES_CREATED = "Indices created"
 INDICES_DELETED = "Indices deleted"
@@ -21,8 +23,10 @@ INTERNAL_EXECUTION_TIME = "internal execution time"
 
 STATS = [
     LABELS_ADDED,
+    LABELS_REMOVED,
     NODES_CREATED,
     PROPERTIES_SET,
+    PROPERTIES_REMOVED,
     RELATIONSHIPS_CREATED,
     NODES_DELETED,
     RELATIONSHIPS_DELETED,
@@ -323,40 +327,60 @@ class QueryResult:
 
     @property
     def labels_added(self):
+        """Returns the number of labels added in the query"""
         return self._get_stat(LABELS_ADDED)
 
     @property
+    def labels_removed(self):
+        """Returns the number of labels removed in the query"""
+        return self._get_stat(LABELS_REMOVED)
+
+    @property
     def nodes_created(self):
+        """Returns the number of nodes created in the query"""
         return self._get_stat(NODES_CREATED)
 
     @property
     def nodes_deleted(self):
+        """Returns the number of nodes deleted in the query"""
         return self._get_stat(NODES_DELETED)
 
     @property
     def properties_set(self):
+        """Returns the number of properties set in the query"""
         return self._get_stat(PROPERTIES_SET)
 
     @property
+    def properties_removed(self):
+        """Returns the number of properties removed in the query"""
+        return self._get_stat(PROPERTIES_REMOVED)
+
+    @property
     def relationships_created(self):
+        """Returns the number of relationships created in the query"""
         return self._get_stat(RELATIONSHIPS_CREATED)
 
     @property
     def relationships_deleted(self):
+        """Returns the number of relationships deleted in the query"""
         return self._get_stat(RELATIONSHIPS_DELETED)
 
     @property
     def indices_created(self):
+        """Returns the number of indices created in the query"""
         return self._get_stat(INDICES_CREATED)
 
     @property
     def indices_deleted(self):
+        """Returns the number of indices deleted in the query"""
         return self._get_stat(INDICES_DELETED)
 
     @property
     def cached_execution(self):
+        """Returns whether or not the query execution plan was cached"""
         return self._get_stat(CACHED_EXECUTION) == 1
 
     @property
     def run_time_ms(self):
+        """Returns the server execution time of the query"""
         return self._get_stat(INTERNAL_EXECUTION_TIME)
