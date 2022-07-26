@@ -5,13 +5,13 @@ import pytest
 
 if sys.version_info[0:2] == (3, 6):
     import pytest as pytest_asyncio
+
+    pytestmark = pytest.mark.asyncio
 else:
     import pytest_asyncio
 
 from redis.asyncio.lock import Lock
 from redis.exceptions import LockError, LockNotOwnedError
-
-pytestmark = pytest.mark.asyncio
 
 
 @pytest.mark.onlynoncluster

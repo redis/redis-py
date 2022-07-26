@@ -1,5 +1,6 @@
 import asyncio
 import socket
+import sys
 import types
 from unittest.mock import patch
 
@@ -18,7 +19,8 @@ from tests.conftest import skip_if_server_version_lt
 
 from .compat import mock
 
-pytestmark = pytest.mark.asyncio
+if sys.version_info[0:2] == (3, 6):
+    pytestmark = pytest.mark.asyncio
 
 
 @pytest.mark.onlynoncluster

@@ -1,6 +1,7 @@
 import bz2
 import csv
 import os
+import sys
 import time
 from io import TextIOWrapper
 
@@ -18,7 +19,8 @@ from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
 from tests.conftest import skip_ifmodversion_lt
 
-pytestmark = pytest.mark.asyncio
+if sys.version_info[0:2] == (3, 6):
+    pytestmark = pytest.mark.asyncio
 
 
 WILL_PLAY_TEXT = os.path.abspath(
