@@ -13,6 +13,8 @@ from .compat import mock
 
 if sys.version_info[0:2] == (3, 6):
     import pytest as pytest_asyncio
+
+    pytestmark = pytest.mark.asyncio
 else:
     import pytest_asyncio
 
@@ -42,7 +44,8 @@ from tests.conftest import (
     skip_unless_arch_bits,
 )
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.onlycluster]
+pytestmark = pytest.mark.onlycluster
+
 
 default_host = "127.0.0.1"
 default_port = 7000

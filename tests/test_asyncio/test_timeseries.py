@@ -1,3 +1,4 @@
+import sys
 import time
 from time import sleep
 
@@ -6,7 +7,8 @@ import pytest
 import redis.asyncio as redis
 from tests.conftest import skip_ifmodversion_lt
 
-pytestmark = pytest.mark.asyncio
+if sys.version_info[0:2] == (3, 6):
+    pytestmark = pytest.mark.asyncio
 
 
 @pytest.mark.redismod
