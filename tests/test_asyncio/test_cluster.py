@@ -2,22 +2,12 @@ import asyncio
 import binascii
 import datetime
 import os
-import sys
 import warnings
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, Union
 from urllib.parse import urlparse
 
 import pytest
-
-from .compat import mock
-
-if sys.version_info[0:2] == (3, 6):
-    import pytest as pytest_asyncio
-
-    pytestmark = pytest.mark.asyncio
-else:
-    import pytest_asyncio
-
+import pytest_asyncio
 from _pytest.fixtures import FixtureRequest
 
 from redis.asyncio.cluster import ClusterNode, NodesManager, RedisCluster
@@ -43,6 +33,8 @@ from tests.conftest import (
     skip_if_server_version_lt,
     skip_unless_arch_bits,
 )
+
+from .compat import mock
 
 pytestmark = pytest.mark.onlycluster
 

@@ -4,18 +4,11 @@ Tests async overrides of commands from their mixins
 import binascii
 import datetime
 import re
-import sys
 import time
 from string import ascii_letters
 
 import pytest
-
-if sys.version_info[0:2] == (3, 6):
-    import pytest as pytest_asyncio
-
-    pytestmark = pytest.mark.asyncio
-else:
-    import pytest_asyncio
+import pytest_asyncio
 
 import redis
 from redis import exceptions

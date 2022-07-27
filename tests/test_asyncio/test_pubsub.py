@@ -1,17 +1,10 @@
 import asyncio
 import functools
-import sys
 from typing import Optional
 
 import async_timeout
 import pytest
-
-if sys.version_info[0:2] == (3, 6):
-    import pytest as pytest_asyncio
-
-    pytestmark = pytest.mark.asyncio(forbid_global_loop=True)
-else:
-    import pytest_asyncio
+import pytest_asyncio
 
 import redis.asyncio as redis
 from redis.exceptions import ConnectionError
