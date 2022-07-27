@@ -11,6 +11,8 @@ from .compat import mock
 
 if sys.version_info[0:2] == (3, 6):
     import pytest as pytest_asyncio
+
+    pytestmark = pytest.mark.asyncio
 else:
     import pytest_asyncio
 
@@ -38,8 +40,6 @@ from tests.conftest import (
     skip_if_server_version_lt,
     skip_unless_arch_bits,
 )
-
-pytestmark = pytest.mark.asyncio
 
 default_host = "127.0.0.1"
 default_port = 7000
@@ -2476,3 +2476,11 @@ class TestClusterPipeline:
                         executed_on_replica = True
                         break
             assert executed_on_replica
+
+    async def test_can_run_concurrent_pipelines(self, r: RedisCluster) -> None:
+        """Test that the pipeline can be used concurrently."""
+        await asyncio.gather(
+            *(self.test_redis_cluster_pipeline(r) for i in range(100)),
+            *(self.test_multi_key_operation_with_a_single_slot(r) for i in range(100)),
+            *(self.test_multi_key_operation_with_multi_slots(r) for i in range(100)),
+        )

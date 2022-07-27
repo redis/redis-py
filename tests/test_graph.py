@@ -1,7 +1,24 @@
+from unittest.mock import patch
+
 import pytest
 
 from redis.commands.graph import Edge, Node, Path
 from redis.commands.graph.execution_plan import Operation
+from redis.commands.graph.query_result import (
+    CACHED_EXECUTION,
+    INDICES_CREATED,
+    INDICES_DELETED,
+    INTERNAL_EXECUTION_TIME,
+    LABELS_ADDED,
+    LABELS_REMOVED,
+    NODES_CREATED,
+    NODES_DELETED,
+    PROPERTIES_REMOVED,
+    PROPERTIES_SET,
+    RELATIONSHIPS_CREATED,
+    RELATIONSHIPS_DELETED,
+    QueryResult,
+)
 from redis.exceptions import ResponseError
 from tests.conftest import skip_if_redis_enterprise
 
@@ -575,3 +592,33 @@ Project
     assert result.structured_plan == expected
 
     redis_graph.delete()
+
+
+@pytest.mark.redismod
+def test_resultset_statistics(client):
+    with patch.object(target=QueryResult, attribute="_get_stat") as mock_get_stats:
+        result = client.graph().query("RETURN 1")
+        result.labels_added
+        mock_get_stats.assert_called_with(LABELS_ADDED)
+        result.labels_removed
+        mock_get_stats.assert_called_with(LABELS_REMOVED)
+        result.nodes_created
+        mock_get_stats.assert_called_with(NODES_CREATED)
+        result.nodes_deleted
+        mock_get_stats.assert_called_with(NODES_DELETED)
+        result.properties_set
+        mock_get_stats.assert_called_with(PROPERTIES_SET)
+        result.properties_removed
+        mock_get_stats.assert_called_with(PROPERTIES_REMOVED)
+        result.relationships_created
+        mock_get_stats.assert_called_with(RELATIONSHIPS_CREATED)
+        result.relationships_deleted
+        mock_get_stats.assert_called_with(RELATIONSHIPS_DELETED)
+        result.indices_created
+        mock_get_stats.assert_called_with(INDICES_CREATED)
+        result.indices_deleted
+        mock_get_stats.assert_called_with(INDICES_DELETED)
+        result.cached_execution
+        mock_get_stats.assert_called_with(CACHED_EXECUTION)
+        result.run_time_ms
+        mock_get_stats.assert_called_with(INTERNAL_EXECUTION_TIME)

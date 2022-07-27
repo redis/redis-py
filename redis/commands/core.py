@@ -3420,7 +3420,7 @@ class StreamCommands(CommandsProtocol):
         groupname: GroupT,
         consumername: ConsumerT,
         min_idle_time: int,
-        start_id: int = 0,
+        start_id: StreamIdT = "0-0",
         count: Union[int, None] = None,
         justid: bool = False,
     ) -> ResponseT:
@@ -5459,7 +5459,7 @@ class GeoCommands(CommandsProtocol):
         `m` for meters (the default value), `km` for kilometers,
         `mi` for miles and `ft` for feet.
         ``sort`` indicates to return the places in a sorted way,
-        ASC for nearest to farest and DESC for farest to nearest.
+        ASC for nearest to furthest and DESC for furthest to nearest.
         ``count`` limit the results to the first count matching items.
         ``any`` is set to True, the command will return as soon as
         enough matches are found. Can't be provided without ``count``
