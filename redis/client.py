@@ -850,6 +850,8 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
     the commands are sent and received to the Redis server. Based on
     configuration, an instance will either use a ConnectionPool, or
     Connection object to talk to redis.
+
+    It is not safe to pass PubSub or Pipeline objects between threads.
     """
 
     @classmethod
