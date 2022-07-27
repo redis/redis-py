@@ -1,5 +1,3 @@
-import sys
-
 import pytest
 
 from tests.conftest import skip_if_redis_enterprise, skip_ifnot_redis_enterprise

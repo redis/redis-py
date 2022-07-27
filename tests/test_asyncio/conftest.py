@@ -21,13 +21,6 @@ from tests.conftest import REDIS_INFO
 
 from .compat import mock
 
-if sys.version_info[0:2] == (3, 6):
-    import pytest as pytest_asyncio
-
-    pytestmark = pytest.mark.asyncio
-else:
-    import pytest_asyncio
-
 
 async def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
