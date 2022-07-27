@@ -1,0 +1,4 @@
+async-timeout>=4.0.2
+deprecated>=1.2.3
+packaging>=20.4
+typing-extensions; python_version<"3.8"

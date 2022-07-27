@@ -1,0 +1,7 @@
+sphinx<5
+docutils<0.18
+sphinx-rtd-theme
+nbsphinx
+sphinx_gallery
+ipython
+sphinx-autodoc-typehints

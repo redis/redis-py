@@ -1,0 +1,17 @@
+click==8.0.4
+black==22.3.0
+flake8==4.0.1
+flynt~=0.69.0
+isort==5.10.1
+mock==4.0.3
+pytest==6.2.5
+pytest-timeout==2.0.1
+pytest-asyncio>=0.16.0
+tox==3.24.4
+tox-docker==3.1.0
+invoke==1.6.0
+pytest-cov>=3.0.0
+vulture>=2.3.0
+ujson>=4.2.0
+wheel>=0.30.0
+uvloop
