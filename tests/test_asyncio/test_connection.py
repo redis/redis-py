@@ -64,6 +64,10 @@ async def test_socket_param_regression(r):
 
 
 async def test_can_run_concurrent_commands(r):
+    if getattr(r, "connection", None) is not None:
+        # Concurrent commands are only supported on pooled or cluster connections
+        # since there is no synchronization on a single connection.
+        pytest.skip("pool only")
     assert await r.ping() is True
     assert all(await asyncio.gather(*(r.ping() for _ in range(10))))
 
