@@ -30,7 +30,7 @@ setup(
     },
     author="Redis Inc.",
     author_email="oss@redis.com",
-    python_requires=">=3.6",
+    python_requires=">=3.7",
     install_requires=[
         "deprecated>=1.2.3",
         "packaging>=20.4",
@@ -47,7 +47,6 @@ setup(
         "Programming Language :: Python",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3 :: Only",
-        "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",

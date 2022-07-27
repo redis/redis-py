@@ -7,9 +7,6 @@ from tests.conftest import skip_if_server_version_lt
 
 from .conftest import wait_for_command
 
-if sys.version_info[0:2] == (3, 6):
-    pytestmark = pytest.mark.asyncio
-
 
 class TestPipeline:
     @pytest.mark.onlynoncluster

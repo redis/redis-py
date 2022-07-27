@@ -1,10 +1,10 @@
-import functools
 import random
-import sys
+from contextlib import asynccontextmanager as _asynccontextmanager
 from typing import Union
 from urllib.parse import urlparse
 
 import pytest
+import pytest_asyncio
 from packaging.version import Version
 
 import redis.asyncio as redis
@@ -268,17 +268,5 @@ class AsyncContextManager:
         raise RuntimeError("More pickles")
 
 
-if sys.version_info[0:2] == (3, 6):
-
-    def asynccontextmanager(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            return AsyncContextManager(func(*args, **kwargs))
-
-        return wrapper
-
-else:
-    from contextlib import asynccontextmanager as _asynccontextmanager
-
-    def asynccontextmanager(func):
-        return _asynccontextmanager(func)
+def asynccontextmanager(func):
+    return _asynccontextmanager(func)
