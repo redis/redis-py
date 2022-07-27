@@ -199,3 +199,7 @@ class SlotNotCoveredError(RedisClusterException):
     """
 
     pass
+
+
+class MaxConnectionsError(ConnectionError):
+    ...
