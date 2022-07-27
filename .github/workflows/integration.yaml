@@ -39,7 +39,7 @@ jobs:
      strategy:
        max-parallel: 15
        matrix:
-         python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7', 'pypy-3.8']
+         python-version: ['3.7', '3.8', '3.9', '3.10', 'pypy-3.7', 'pypy-3.8']
          test-type: ['standalone', 'cluster']
          connection-type: ['hiredis', 'plain']
      env:
@@ -84,7 +84,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
+        python-version: ['3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
     steps:
       - uses: actions/checkout@v2
       - name: install python ${{ matrix.python-version }}

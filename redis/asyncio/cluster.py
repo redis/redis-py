@@ -377,8 +377,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             warnings.warn(f"{self._DEL_MESSAGE} {self!r}", ResourceWarning, source=self)
             try:
                 context = {"client": self, "message": self._DEL_MESSAGE}
-                # TODO: Change to get_running_loop() when dropping support for py3.6
-                asyncio.get_event_loop().call_exception_handler(context)
+                asyncio.get_running_loop().call_exception_handler(context)
             except RuntimeError:
                 ...
 
@@ -834,8 +833,7 @@ class ClusterNode:
                 )
                 try:
                     context = {"client": self, "message": self._DEL_MESSAGE}
-                    # TODO: Change to get_running_loop() when dropping support for py3.6
-                    asyncio.get_event_loop().call_exception_handler(context)
+                    asyncio.get_running_loop().call_exception_handler(context)
                 except RuntimeError:
                     ...
                 break
