@@ -1497,9 +1497,15 @@ class PubSub:
 
         self.check_health()
 
-        if not block and not self._execute(conn, conn.can_read, timeout=timeout):
-            return None
-        response = self._execute(conn, conn.read_response)
+        def try_read():
+            if not block:
+                if not conn.can_read(timeout=timeout):
+                    return None
+            else:
+                conn.connect()
+            return conn.read_response()
+
+        response = self._execute(conn, try_read)
 
         if self.is_health_check_response(response):
             # ignore the health check message as user might not expect it
