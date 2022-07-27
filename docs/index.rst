@@ -69,10 +69,10 @@ Module Documentation
    exceptions
    lock
    retry
-   examples
    advanced_features
    clustering
    lua_scripting
+   examples
 
 Contributing
 *************
