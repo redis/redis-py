@@ -44,25 +44,19 @@ class Graph(GraphCommands):
         lbls = self.labels()
 
         # Unpack data.
-        self._labels = [None] * len(lbls)
-        for i, l in enumerate(lbls):
-            self._labels[i] = l[0]
+        self._labels = [l[0] for _, l in enumerate(lbls)]
 
     def _refresh_relations(self):
         rels = self.relationship_types()
 
         # Unpack data.
-        self._relationship_types = [None] * len(rels)
-        for i, r in enumerate(rels):
-            self._relationship_types[i] = r[0]
+        self._relationship_types = [r[0] for _, r in enumerate(rels)]
 
     def _refresh_attributes(self):
         props = self.property_keys()
 
         # Unpack data.
-        self._properties = [None] * len(props)
-        for i, p in enumerate(props):
-            self._properties[i] = p[0]
+        self._properties = [p[0] for _, p in enumerate(props)]
 
     def get_label(self, idx):
         """
@@ -169,25 +163,19 @@ class AsyncGraph(Graph, AsyncGraphCommands):
         lbls = await self.labels()
 
         # Unpack data.
-        self._labels = [None] * len(lbls)
-        for i, l in enumerate(lbls):
-            self._labels[i] = l[0]
+        self._labels = [l[0] for _, l in enumerate(lbls)]
 
     async def _refresh_attributes(self):
         props = await self.property_keys()
 
         # Unpack data.
-        self._properties = [None] * len(props)
-        for i, p in enumerate(props):
-            self._properties[i] = p[0]
+        self._properties = [p[0] for _, p in enumerate(props)]
 
     async def _refresh_relations(self):
         rels = await self.relationship_types()
 
         # Unpack data.
-        self._relationship_types = [None] * len(rels)
-        for i, r in enumerate(rels):
-            self._relationship_types[i] = r[0]
+        self._relationship_types = [r[0] for _, r in enumerate(rels)]
 
     async def get_label(self, idx):
         """
@@ -250,12 +238,12 @@ class AsyncGraph(Graph, AsyncGraphCommands):
         return await self.query(q, read_only=read_only)
 
     async def labels(self):
-        return ((await self.call_procedure("db.labels", read_only=True))).result_set
+        return ((await self.call_procedure("DB.LABELS", read_only=True))).result_set
 
     async def property_keys(self):
-        return (await self.call_procedure("db.propertyKeys", read_only=True)).result_set
+        return (await self.call_procedure("DB.PROPERTYKEYS", read_only=True)).result_set
 
     async def relationship_types(self):
         return (
-            await self.call_procedure("db.relationshipTypes", read_only=True)
+            await self.call_procedure("DB.RELATIONSHIPTYPES", read_only=True)
         ).result_set
