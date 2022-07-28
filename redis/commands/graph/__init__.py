@@ -148,7 +148,7 @@ class Graph(GraphCommands):
 
         y = kwagrs.get("y", None)
         if y is not None:
-            q += f" YIELD {','.join(y)}"
+            q += f"YIELD {','.join(y)}"
 
         return self.query(q, read_only=read_only)
 
@@ -240,7 +240,7 @@ class AsyncGraph(Graph, AsyncGraphCommands):
 
         y = kwagrs.get("y", None)
         if y is not None:
-            f" YIELD {','.join(y)}"
+            f"YIELD {','.join(y)}"
         return await self.query(q, read_only=read_only)
 
     async def labels(self):

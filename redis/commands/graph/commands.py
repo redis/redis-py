@@ -5,6 +5,15 @@ from .exceptions import VersionMismatchException
 from .execution_plan import ExecutionPlan
 from .query_result import AsyncQueryResult, QueryResult
 
+PROFILE_CMD = "GRAPH.PROFILE"
+RO_QUERY_CMD = "GRAPH.RO_QUERY"
+QUERY_CMD = "GRAPH.QUERY"
+DELETE_CMD = "GRAPH.DELETE"
+SLOWLOG_CMD = "GRAPH.SLOWLOG"
+CONFIG_CMD = "GRAPH.CONFIG"
+LIST_CMD = "GRAPH.LIST"
+EXPLAIN_CMD = "GRAPH.EXPLAIN"
+
 
 class GraphCommands:
     """RedisGraph Commands"""
@@ -58,26 +67,22 @@ class GraphCommands:
         # ask for compact result-set format
         # specify known graph version
         if profile:
-            cmd = "GRAPH.PROFILE"
+            cmd = PROFILE_CMD
         else:
-            cmd = "GRAPH.RO_QUERY" if read_only else "GRAPH.QUERY"
+            cmd = RO_QUERY_CMD if read_only else QUERY_CMD
         command = [cmd, self.name, query, "--compact"]
 
         # include timeout is specified
-        if timeout:
-            if not isinstance(timeout, int):
-                raise Exception("Timeout argument must be a positive integer")
-            command += ["timeout", timeout]
+        if isinstance(timeout, int):
+            command.extend(["timeout", timeout])
+        elif timeout is not None:
+            raise Exception("Timeout argument must be a positive integer")
 
         # issue query
         try:
             response = self.execute_command(*command)
             return QueryResult(self, response, profile)
         except ResponseError as e:
-            if "wrong number of arguments" in str(e):
-                print(
-                    "Note: RedisGraph Python requires server version 2.2.8 or above"
-                )  # noqa
             if "unknown command" in str(e) and read_only:
                 # `GRAPH.RO_QUERY` is unavailable in older versions.
                 return self.query(q, params, timeout, read_only=False)
@@ -105,7 +110,7 @@ class GraphCommands:
         For more information see `DELETE <https://redis.io/commands/graph.delete>`_. # noqa
         """
         self._clear_schema()
-        return self.execute_command("GRAPH.DELETE", self.name)
+        return self.execute_command(DELETE_CMD, self.name)
 
     # declared here, to override the built in redis.db.flush()
     def flush(self):
@@ -145,7 +150,7 @@ class GraphCommands:
         3. The issued query.
         4. The amount of time needed for its execution, in milliseconds.
         """
-        return self.execute_command("GRAPH.SLOWLOG", self.name)
+        return self.execute_command(SLOWLOG_CMD, self.name)
 
     def config(self, name, value=None, set=False):
         """
@@ -169,14 +174,14 @@ class GraphCommands:
                 raise DataError(
                     "``value`` can be provided only when ``set`` is True"
                 )  # noqa
-        return self.execute_command("GRAPH.CONFIG", *params)
+        return self.execute_command(CONFIG_CMD, *params)
 
     def list_keys(self):
         """
         Lists all graph keys in the keyspace.
         For more information see `GRAPH.LIST <https://redis.io/commands/graph.list>`_. # noqa
         """
-        return self.execute_command("GRAPH.LIST")
+        return self.execute_command(LIST_CMD)
 
     def execution_plan(self, query, params=None):
         """
@@ -189,7 +194,7 @@ class GraphCommands:
         """
         query = self._build_params_header(params) + query
 
-        plan = self.execute_command("GRAPH.EXPLAIN", self.name, query)
+        plan = self.execute_command(EXPLAIN_CMD, self.name, query)
         if isinstance(plan[0], bytes):
             plan = [b.decode() for b in plan]
         return "\n".join(plan)
@@ -206,7 +211,7 @@ class GraphCommands:
         """
         query = self._build_params_header(params) + query
 
-        plan = self.execute_command("GRAPH.EXPLAIN", self.name, query)
+        plan = self.execute_command(EXPLAIN_CMD, self.name, query)
         return ExecutionPlan(plan)
 
 
@@ -241,26 +246,22 @@ class AsyncGraphCommands(GraphCommands):
         # ask for compact result-set format
         # specify known graph version
         if profile:
-            cmd = "GRAPH.PROFILE"
+            cmd = PROFILE_CMD
         else:
-            cmd = "GRAPH.RO_QUERY" if read_only else "GRAPH.QUERY"
+            cmd = RO_QUERY_CMD if read_only else QUERY_CMD
         command = [cmd, self.name, query, "--compact"]
 
         # include timeout is specified
-        if timeout:
-            if not isinstance(timeout, int):
-                raise Exception("Timeout argument must be a positive integer")
-            command += ["timeout", timeout]
+        if isinstance(timeout, int):
+            command.extend(["timeout", timeout])
+        elif timeout is not None:
+            raise Exception("Timeout argument must be a positive integer")
 
         # issue query
         try:
             response = await self.execute_command(*command)
             return await AsyncQueryResult().initialize(self, response, profile)
         except ResponseError as e:
-            if "wrong number of arguments" in str(e):
-                print(
-                    "Note: RedisGraph Python requires server version 2.2.8 or above"
-                )  # noqa
             if "unknown command" in str(e) and read_only:
                 # `GRAPH.RO_QUERY` is unavailable in older versions.
                 return await self.query(q, params, timeout, read_only=False)
@@ -284,7 +285,7 @@ class AsyncGraphCommands(GraphCommands):
         """
         query = self._build_params_header(params) + query
 
-        plan = await self.execute_command("GRAPH.EXPLAIN", self.name, query)
+        plan = await self.execute_command(EXPLAIN_CMD, self.name, query)
         if isinstance(plan[0], bytes):
             plan = [b.decode() for b in plan]
         return "\n".join(plan)
@@ -300,7 +301,7 @@ class AsyncGraphCommands(GraphCommands):
         """
         query = self._build_params_header(params) + query
 
-        plan = await self.execute_command("GRAPH.EXPLAIN", self.name, query)
+        plan = await self.execute_command(EXPLAIN_CMD, self.name, query)
         return ExecutionPlan(plan)
 
     async def flush(self):

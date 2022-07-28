@@ -1,9 +1,9 @@
-from collections import OrderedDict
 import sys
+from collections import OrderedDict
+from distutils.util import strtobool
 
 # from prettytable import PrettyTable
 from redis import ResponseError
-from distutils.util import strtobool
 
 from .edge import Edge
 from .exceptions import VersionMismatchException
@@ -293,7 +293,7 @@ class QueryResult:
         """
         Parse a cell of unknown type.
         """
-        print("Unknown type\n")
+        sys.stderr.write("Unknown type\n")
         return None
 
     def parse_scalar(self, cell):
