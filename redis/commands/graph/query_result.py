@@ -1,7 +1,9 @@
 from collections import OrderedDict
+import sys
 
 # from prettytable import PrettyTable
 from redis import ResponseError
+from distutils.util import strtobool
 
 from .edge import Edge
 from .exceptions import VersionMismatchException
@@ -145,13 +147,12 @@ class QueryResult:
         """
         Parses the result set and returns a list of records.
         """
-        result_set = raw_result_set[1]
         records = [
             [
                 self.parse_record_types[self.header[idx][0]](cell)
                 for idx, cell in enumerate(row)
             ]
-            for row in result_set
+            for row in raw_result_set[1]
         ]
 
         return records
@@ -268,12 +269,10 @@ class QueryResult:
         Parse the cell value as a boolean.
         """
         value = value.decode() if isinstance(value, bytes) else value
-        if value == "true":
-            scalar = True
-        elif value == "false":
-            scalar = False
-        else:
-            print("Unknown boolean type\n")
+        try:
+            scalar = strtobool(value)
+        except ValueError:
+            sys.stderr.write("unknown boolean type\n")
             scalar = None
         return scalar
 
@@ -489,8 +488,7 @@ class AsyncQueryResult(QueryResult):
         Parses the result set and returns a list of records.
         """
         records = []
-        result_set = raw_result_set[1]
-        for row in result_set:
+        for row in raw_result_set[1]:
             record = [
                 await self.parse_record_types[self.header[idx][0]](cell)
                 for idx, cell in enumerate(row)

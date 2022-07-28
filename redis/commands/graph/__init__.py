@@ -4,6 +4,10 @@ from .edge import Edge  # noqa
 from .node import Node  # noqa
 from .path import Path  # noqa
 
+DB_LABELS = "DB.LABELS"
+DB_RAELATIONSHIPTYPES = "DB.RELATIONSHIPTYPES"
+DB_PROPERTYKEYS = "DB.PROPERTYKEYS"
+
 
 class Graph(GraphCommands):
     """
@@ -102,12 +106,12 @@ class Graph(GraphCommands):
             The index of the property
         """
         try:
-            propertie = self._properties[idx]
+            p = self._properties[idx]
         except IndexError:
             # Refresh properties.
             self._refresh_attributes()
-            propertie = self._properties[idx]
-        return propertie
+            p = self._properties[idx]
+        return p
 
     def add_node(self, node):
         """
@@ -127,6 +131,8 @@ class Graph(GraphCommands):
         self.edges.append(edge)
 
     def _build_params_header(self, params):
+        if params is None:
+            return ""
         if not isinstance(params, dict):
             raise TypeError("'params' must be a dict")
         # Header starts with "CYPHER"
@@ -141,19 +147,19 @@ class Graph(GraphCommands):
         q = f"CALL {procedure}({','.join(args)})"
 
         y = kwagrs.get("y", None)
-        if y:
+        if y is not None:
             q += f" YIELD {','.join(y)}"
 
         return self.query(q, read_only=read_only)
 
     def labels(self):
-        return self.call_procedure("db.labels", read_only=True).result_set
+        return self.call_procedure(DB_LABELS, read_only=True).result_set
 
     def relationship_types(self):
-        return self.call_procedure("db.relationshipTypes", read_only=True).result_set
+        return self.call_procedure(DB_RAELATIONSHIPTYPES, read_only=True).result_set
 
     def property_keys(self):
-        return self.call_procedure("db.propertyKeys", read_only=True).result_set
+        return self.call_procedure(DB_PROPERTYKEYS, read_only=True).result_set
 
 
 class AsyncGraph(Graph, AsyncGraphCommands):
@@ -204,12 +210,12 @@ class AsyncGraph(Graph, AsyncGraphCommands):
             The index of the property
         """
         try:
-            propertie = self._properties[idx]
+            p = self._properties[idx]
         except IndexError:
             # Refresh properties.
             await self._refresh_attributes()
-            propertie = self._properties[idx]
-        return propertie
+            p = self._properties[idx]
+        return p
 
     async def get_relation(self, idx):
         """
@@ -233,17 +239,17 @@ class AsyncGraph(Graph, AsyncGraphCommands):
         q = f"CALL {procedure}({','.join(args)})"
 
         y = kwagrs.get("y", None)
-        if y:
-            q += f" YIELD {','.join(y)}"
+        if y is not None:
+            f" YIELD {','.join(y)}"
         return await self.query(q, read_only=read_only)
 
     async def labels(self):
-        return ((await self.call_procedure("DB.LABELS", read_only=True))).result_set
+        return ((await self.call_procedure(DB_LABELS, read_only=True))).result_set
 
     async def property_keys(self):
-        return (await self.call_procedure("DB.PROPERTYKEYS", read_only=True)).result_set
+        return (await self.call_procedure(DB_PROPERTYKEYS, read_only=True)).result_set
 
     async def relationship_types(self):
         return (
-            await self.call_procedure("DB.RELATIONSHIPTYPES", read_only=True)
+            await self.call_procedure(DB_RAELATIONSHIPTYPES, read_only=True)
         ).result_set

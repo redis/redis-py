@@ -52,8 +52,7 @@ class GraphCommands:
         query = q
 
         # handle query parameters
-        if params is not None:
-            query = self._build_params_header(params) + query
+        query = self._build_params_header(params) + query
 
         # construct query command
         # ask for compact result-set format
@@ -188,8 +187,7 @@ class GraphCommands:
             query: the query that will be executed
             params: query parameters
         """
-        if params is not None:
-            query = self._build_params_header(params) + query
+        query = self._build_params_header(params) + query
 
         plan = self.execute_command("GRAPH.EXPLAIN", self.name, query)
         if isinstance(plan[0], bytes):
@@ -206,8 +204,7 @@ class GraphCommands:
             query: the query that will be executed
             params: query parameters
         """
-        if params is not None:
-            query = self._build_params_header(params) + query
+        query = self._build_params_header(params) + query
 
         plan = self.execute_command("GRAPH.EXPLAIN", self.name, query)
         return ExecutionPlan(plan)
@@ -238,8 +235,7 @@ class AsyncGraphCommands(GraphCommands):
         query = q
 
         # handle query parameters
-        if params is not None:
-            query = self._build_params_header(params) + query
+        query = self._build_params_header(params) + query
 
         # construct query command
         # ask for compact result-set format
@@ -286,8 +282,7 @@ class AsyncGraphCommands(GraphCommands):
             query: the query that will be executed
             params: query parameters
         """
-        if params is not None:
-            query = self._build_params_header(params) + query
+        query = self._build_params_header(params) + query
 
         plan = await self.execute_command("GRAPH.EXPLAIN", self.name, query)
         if isinstance(plan[0], bytes):
@@ -303,8 +298,7 @@ class AsyncGraphCommands(GraphCommands):
             query: the query that will be executed
             params: query parameters
         """
-        if params is not None:
-            query = self._build_params_header(params) + query
+        query = self._build_params_header(params) + query
 
         plan = await self.execute_command("GRAPH.EXPLAIN", self.name, query)
         return ExecutionPlan(plan)
