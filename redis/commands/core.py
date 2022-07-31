@@ -17,6 +17,7 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Union,
 )
@@ -3257,7 +3258,7 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SISMEMBER", name, value)
 
-    def smembers(self, name: str) -> Union[Awaitable[list], list]:
+    def smembers(self, name: str) -> Union[Awaitable[Set], Set]:
         """
         Return all members of the set ``name``
 
