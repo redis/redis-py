@@ -5,8 +5,6 @@ from tests.conftest import skip_if_server_version_lt
 
 from .conftest import wait_for_command
 
-pytestmark = pytest.mark.asyncio
-
 
 class TestPipeline:
     @pytest.mark.onlynoncluster
