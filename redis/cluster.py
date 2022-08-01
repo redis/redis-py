@@ -888,7 +888,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             if len(args) <= 2:
                 raise RedisClusterException(f"Invalid args in command: {args}")
             num_actual_keys = args[2]
-            eval_keys = args[3: 3 + num_actual_keys]
+            eval_keys = args[3 : 3 + num_actual_keys]
             # if there are 0 keys, that means the script can be run on any node
             # so we can just return a random slot
             if len(eval_keys) == 0:
@@ -1908,14 +1908,16 @@ class ClusterPipeline(RedisCluster):
                     target_nodes = self._parse_target_nodes(passed_targets)
                 else:
                     target_nodes = self._determine_nodes(
-                        *c.args, node_flag=passed_targets)
+                        *c.args, node_flag=passed_targets
+                    )
                     if not target_nodes:
                         raise RedisClusterException(
                             f"No targets were found to execute {c.args} command on"
                         )
                 if len(target_nodes) > 1:
                     raise RedisClusterException(
-                        f"Too many targets for command {c.args}")
+                        f"Too many targets for command {c.args}"
+                    )
 
                 node = target_nodes[0]
 
@@ -1938,7 +1940,7 @@ class ClusterPipeline(RedisCluster):
                     nodes[node_name] = NodeCommands(
                         redis_node.parse_response,
                         redis_node.connection_pool,
-                        connection
+                        connection,
                     )
                 nodes[node_name].append(c)
                 break
