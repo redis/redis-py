@@ -6,6 +6,7 @@ from redis.utils import HIREDIS_AVAILABLE
 
 from .conftest import skip_ifmodversion_lt
 
+
 def intlist(obj):
     return [int(v) for v in obj]
 
