@@ -3,6 +3,7 @@ import pytest
 import redis.asyncio as redis
 from redis.exceptions import ModuleError, RedisError
 from redis.utils import HIREDIS_AVAILABLE
+from tests.conftest import skip_ifmodversion_lt
 
 
 def intlist(obj):
@@ -385,6 +386,7 @@ async def test_tdigest_cdf(modclient: redis.Redis):
 
 @pytest.mark.redismod
 @pytest.mark.experimental
+@skip_ifmodversion_lt("2.4.0", "bf")
 async def test_tdigest_mergestore(modclient: redis.Redis):
     assert await modclient.tdigest().create("sourcekey1", 100)
     assert await modclient.tdigest().create("sourcekey2", 100)
