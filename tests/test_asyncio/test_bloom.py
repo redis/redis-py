@@ -401,9 +401,9 @@ async def test_tdigest_mergestore(modclient: redis.Redis):
     assert await modclient.tdigest().create("sourcekey2", 100)
     assert await modclient.tdigest().add("sourcekey1", [10], [1.0])
     assert await modclient.tdigest().add("sourcekey2", [50], [1.0])
-    assert await modclient.tdigest().mergestore("destkey", 2, "sourcekey1", "sourcekey2")
-    assert await modclient.tdigest().max("destkey") == 50
-    assert await modclient.tdigest().min("destkey") == 10
+    assert await modclient.tdigest().mergestore("dest", 2, "sourcekey1", "sourcekey2")
+    assert await modclient.tdigest().max("dest") == 50
+    assert await modclient.tdigest().min("dest") == 10
 
 
 # @pytest.mark.redismod
