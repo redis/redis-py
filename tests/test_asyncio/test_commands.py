@@ -4,7 +4,6 @@ Tests async overrides of commands from their mixins
 import binascii
 import datetime
 import re
-import time
 from string import ascii_letters
 
 import pytest
@@ -750,7 +749,7 @@ class TestRedisCommands:
     async def test_expireat_unixtime(self, r: redis.Redis):
         expire_at = await redis_server_time(r) + datetime.timedelta(minutes=1)
         await r.set("a", "foo")
-        expire_at_seconds = int(time.mktime(expire_at.timetuple()))
+        expire_at_seconds = int(expire_at.timestamp())
         assert await r.expireat("a", expire_at_seconds)
         assert 0 < await r.ttl("a") <= 61
 
@@ -875,8 +874,8 @@ class TestRedisCommands:
     async def test_pexpireat_unixtime(self, r: redis.Redis):
         expire_at = await redis_server_time(r) + datetime.timedelta(minutes=1)
         await r.set("a", "foo")
-        expire_at_seconds = int(time.mktime(expire_at.timetuple())) * 1000
-        assert await r.pexpireat("a", expire_at_seconds)
+        expire_at_milliseconds = int(expire_at.timestamp() * 1000)
+        assert await r.pexpireat("a", expire_at_milliseconds)
         assert 0 < await r.pttl("a") <= 61000
 
     @skip_if_server_version_lt("2.6.0")
