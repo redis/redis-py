@@ -383,6 +383,18 @@ async def test_tdigest_cdf(modclient: redis.Redis):
     assert 0.9 == round(await modclient.tdigest().cdf("tDigest", 9.0), 1)
 
 
+@pytest.mark.redismod
+@pytest.mark.experimental
+async def test_tdigest_mergestore(modclient: redis.Redis):
+    assert await modclient.tdigest().create("sourcekey1", 100)
+    assert await modclient.tdigest().create("sourcekey2", 100)
+    assert await modclient.tdigest().add("sourcekey1", [10], [1.0])
+    assert await modclient.tdigest().add("sourcekey2", [50], [1.0])
+    assert await modclient.tdigest().mergestore("destkey", 2, "sourcekey1", "sourcekey2")
+    assert await modclient.tdigest().max("destkey") == 50
+    assert await modclient.tdigest().min("destkey") == 10
+
+
 # @pytest.mark.redismod
 # async def test_pipeline(modclient: redis.Redis):
 #     pipeline = await modclient.bf().pipeline()
