@@ -45,7 +45,7 @@ jobs:
          connection-type: ['hiredis', 'plain']
          experimental: [false]
          include:
-           - python-version: 3.11.0b5
+           - python-version: 3.11.0-beta.5
              experimental: true
              test-type: standalone
              connection-type: plain
@@ -95,7 +95,7 @@ jobs:
         python-version: ['3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
         experimental: [false]
         include:
-          - python-version: 3.11.0b5
+          - python-version: 3.11.0-beta.5
           - experimental: true
     steps:
       - uses: actions/checkout@v2
