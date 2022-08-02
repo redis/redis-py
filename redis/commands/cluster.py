@@ -673,7 +673,7 @@ class AsyncClusterManagementCommands(
         """
         return await asyncio.gather(
             *(
-                asyncio.ensure_future(self.execute_command("CLUSTER DELSLOTS", slot))
+                asyncio.create_task(self.execute_command("CLUSTER DELSLOTS", slot))
                 for slot in slots
             )
         )
