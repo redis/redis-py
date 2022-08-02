@@ -3,6 +3,7 @@ from redis.client import bool_ok
 from ..helpers import parse_to_list
 from .commands import *  # noqa
 from .info import BFInfo, CFInfo, CMSInfo, TDigestInfo, TopKInfo
+from .utils import parse_tdigest_quantile
 
 
 class AbstractBloom(object):
@@ -166,7 +167,7 @@ class TDigestBloom(TDigestCommands, AbstractBloom):
             # TDIGEST_ADD: spaceHolder,
             # TDIGEST_MERGE: spaceHolder,
             TDIGEST_CDF: float,
-            TDIGEST_QUANTILE: float,
+            TDIGEST_QUANTILE: parse_tdigest_quantile,
             TDIGEST_MIN: float,
             TDIGEST_MAX: float,
             TDIGEST_INFO: TDigestInfo,

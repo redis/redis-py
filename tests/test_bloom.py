@@ -4,6 +4,8 @@ import redis.commands.bf
 from redis.exceptions import ModuleError, RedisError
 from redis.utils import HIREDIS_AVAILABLE
 
+from .conftest import skip_ifmodversion_lt
+
 
 def intlist(obj):
     return [int(v) for v in obj]
@@ -354,6 +356,7 @@ def test_tdigest_min_and_max(client):
 
 @pytest.mark.redismod
 @pytest.mark.experimental
+@skip_ifmodversion_lt("2.4.0", "bf")
 def test_tdigest_quantile(client):
     assert client.tdigest().create("tDigest", 500)
     # insert data-points into sketch
@@ -361,11 +364,18 @@ def test_tdigest_quantile(client):
         "tDigest", list([x * 0.01 for x in range(1, 10000)]), [1.0] * 10000
     )
     # assert min min/max have same result as quantile 0 and 1
-    assert client.tdigest().max("tDigest") == client.tdigest().quantile("tDigest", 1.0)
-    assert client.tdigest().min("tDigest") == client.tdigest().quantile("tDigest", 0.0)
+    res = client.tdigest().quantile("tDigest", 1.0)
+    assert client.tdigest().max("tDigest") == res[1]
+    res = client.tdigest().quantile("tDigest", 0.0)
+    assert client.tdigest().min("tDigest") == res[1]
 
-    assert 1.0 == round(client.tdigest().quantile("tDigest", 0.01), 2)
-    assert 99.0 == round(client.tdigest().quantile("tDigest", 0.99), 2)
+    assert 1.0 == round(client.tdigest().quantile("tDigest", 0.01)[1], 2)
+    assert 99.0 == round(client.tdigest().quantile("tDigest", 0.99)[1], 2)
+
+    # test multiple quantiles
+    assert client.tdigest().create("t-digest", 100)
+    assert client.tdigest().add("t-digest", [1, 2, 3, 4, 5], [1.0] * 5)
+    assert [0.5, 3.0, 0.8, 5.0] == client.tdigest().quantile("t-digest", 0.5, 0.8)
 
 
 @pytest.mark.redismod

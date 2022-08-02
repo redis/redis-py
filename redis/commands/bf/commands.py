@@ -393,13 +393,14 @@ class TDigestCommands:
         """  # noqa
         return self.execute_command(TDIGEST_MAX, key)
 
-    def quantile(self, key, quantile):
+    def quantile(self, key, quantile, *quantiles):
         """
-        Return double value estimate of the cutoff such that a specified fraction of the data
-        added to this TDigest would be less than or equal to the cutoff.
+        Returns estimates of one or more cutoffs such that a specified fraction of the
+        observations added to this t-digest would be less than or equal to each of the
+        specified cutoffs. (Multiple quantiles can be returned with one call)
         For more information see `TDIGEST.QUANTILE <https://redis.io/commands/tdigest.quantile>`_.
         """  # noqa
-        return self.execute_command(TDIGEST_QUANTILE, key, quantile)
+        return self.execute_command(TDIGEST_QUANTILE, key, quantile, *quantiles)
 
     def cdf(self, key, value):
         """
