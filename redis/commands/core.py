@@ -2,7 +2,6 @@
 
 import datetime
 import hashlib
-import time
 import warnings
 from typing import (
     TYPE_CHECKING,
@@ -1674,7 +1673,7 @@ class BasicKeyCommands(CommandsProtocol):
         For more information see https://redis.io/commands/expireat
         """
         if isinstance(when, datetime.datetime):
-            when = int(time.mktime(when.timetuple()))
+            when = int(when.timestamp())
 
         exp_option = list()
         if nx:
@@ -1769,14 +1768,12 @@ class BasicKeyCommands(CommandsProtocol):
         if exat is not None:
             pieces.append("EXAT")
             if isinstance(exat, datetime.datetime):
-                s = int(exat.microsecond / 1000000)
-                exat = int(time.mktime(exat.timetuple())) + s
+                exat = int(exat.timestamp())
             pieces.append(exat)
         if pxat is not None:
             pieces.append("PXAT")
             if isinstance(pxat, datetime.datetime):
-                ms = int(pxat.microsecond / 1000)
-                pxat = int(time.mktime(pxat.timetuple())) * 1000 + ms
+                pxat = int(pxat.timestamp() * 1000)
             pieces.append(pxat)
         if persist:
             pieces.append("PERSIST")
@@ -1995,8 +1992,7 @@ class BasicKeyCommands(CommandsProtocol):
         For more information see https://redis.io/commands/pexpireat
         """
         if isinstance(when, datetime.datetime):
-            ms = int(when.microsecond / 1000)
-            when = int(time.mktime(when.timetuple())) * 1000 + ms
+            when = int(when.timestamp() * 1000)
         exp_option = list()
         if nx:
             exp_option.append("NX")
@@ -2197,14 +2193,12 @@ class BasicKeyCommands(CommandsProtocol):
         if exat is not None:
             pieces.append("EXAT")
             if isinstance(exat, datetime.datetime):
-                s = int(exat.microsecond / 1000000)
-                exat = int(time.mktime(exat.timetuple())) + s
+                exat = int(exat.timestamp())
             pieces.append(exat)
         if pxat is not None:
             pieces.append("PXAT")
             if isinstance(pxat, datetime.datetime):
-                ms = int(pxat.microsecond / 1000)
-                pxat = int(time.mktime(pxat.timetuple())) * 1000 + ms
+                pxat = int(pxat.timestamp() * 1000)
             pieces.append(pxat)
         if keepttl:
             pieces.append("KEEPTTL")

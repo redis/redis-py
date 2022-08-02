@@ -1,3 +1,4 @@
+    * Fix timezone handling for datetime to unixtime conversions
     * Fix start_id type for XAUTOCLAIM
     * Remove verbose logging from cluster.py
     * Add retry mechanism to async version of Connection
