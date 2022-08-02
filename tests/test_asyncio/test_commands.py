@@ -4,7 +4,6 @@ Tests async overrides of commands from their mixins
 import binascii
 import datetime
 import re
-import time
 from string import ascii_letters
 
 import pytest
