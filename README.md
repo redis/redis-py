@@ -52,7 +52,7 @@ The above code connects to localhost on port 6379, sets a value in Redis, and re
 
 ### Connection Pools
 
-By default, redis-py uses a connection pool to manage connections. Each instance of of a Redis class receives its own connection pool. You can however define your own [redis.ConnectionPool](https://redis.readthedocs.io/en/stable/connections.html#connection-pools)
+By default, redis-py uses a connection pool to manage connections. Each instance of a Redis class receives its own connection pool. You can however define your own [redis.ConnectionPool](https://redis.readthedocs.io/en/stable/connections.html#connection-pools)
 
 ``` python
 >>> pool = redis.ConnectionPool(host='localhost', port=6379, db=0)
