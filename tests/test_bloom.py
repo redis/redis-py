@@ -378,6 +378,18 @@ def test_tdigest_cdf(client):
     assert 0.9 == round(client.tdigest().cdf("tDigest", 9.0), 1)
 
 
+@pytest.mark.redismod
+@pytest.mark.experimental
+def test_tdigest_mergestore(client):
+    assert client.tdigest().create("sourcekey1", 100)
+    assert client.tdigest().create("sourcekey2", 100)
+    assert client.tdigest().add("sourcekey1", [10], [1.0])
+    assert client.tdigest().add("sourcekey2", [50], [1.0])
+    assert client.tdigest().mergestore("destkey", 2, "sourcekey1", "sourcekey2")
+    assert client.tdigest().max("destkey") == 50
+    assert client.tdigest().min("destkey") == 10
+
+
 # @pytest.mark.redismod
 # def test_pipeline(client):
 #     pipeline = client.bf().pipeline()
