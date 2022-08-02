@@ -398,7 +398,6 @@ class TDigestCommands:
         Returns estimates of one or more cutoffs such that a specified fraction of the
         observations added to this t-digest would be less than or equal to each of the
         specified cutoffs. (Multiple quantiles can be returned with one call)
-        
         For more information see `TDIGEST.QUANTILE <https://redis.io/commands/tdigest.quantile>`_.
         """  # noqa
         return self.execute_command(TDIGEST_QUANTILE, key, quantile, *quantiles)

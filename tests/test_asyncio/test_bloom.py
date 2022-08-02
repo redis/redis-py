@@ -362,12 +362,14 @@ async def test_tdigest_quantile(modclient: redis.Redis):
         "tDigest", list([x * 0.01 for x in range(1, 10000)]), [1.0] * 10000
     )
     # assert min min/max have same result as quantile 0 and 1
-    assert await modclient.tdigest().max(
-        "tDigest"
-    ) == (await modclient.tdigest().quantile("tDigest", 1.0))[1]
-    assert await modclient.tdigest().min(
-        "tDigest"
-    ) == (await modclient.tdigest().quantile("tDigest", 0.0))[1]
+    assert (
+        await modclient.tdigest().max("tDigest")
+        == (await modclient.tdigest().quantile("tDigest", 1.0))[1]
+    )
+    assert (
+        await modclient.tdigest().min("tDigest")
+        == (await modclient.tdigest().quantile("tDigest", 0.0))[1]
+    )
 
     assert 1.0 == round((await modclient.tdigest().quantile("tDigest", 0.01))[1], 2)
     assert 99.0 == round((await modclient.tdigest().quantile("tDigest", 0.99))[1], 2)
