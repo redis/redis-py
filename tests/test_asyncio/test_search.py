@@ -16,7 +16,7 @@ from redis.commands.search.indexDefinition import IndexDefinition
 from redis.commands.search.query import GeoFilter, NumericFilter, Query
 from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
-from tests.conftest import skip_ifmodversion_lt
+from tests.conftest import skip_if_redis_enterprise, skip_ifmodversion_lt
 
 pytestmark = pytest.mark.asyncio
 
@@ -1046,3 +1046,22 @@ async def test_aggregations_sort_by_and_limit(modclient: redis.Redis):
     res = await modclient.ft().aggregate(req)
     assert len(res.rows) == 1
     assert res.rows[0] == ["t1", "b"]
+
+
+@pytest.mark.redismod
+@skip_if_redis_enterprise()
+async def test_search_commands_in_pipeline(modclient: redis.Redis):
+    p = await modclient.ft().pipeline()
+    p.create_index((TextField("txt"),))
+    p.add_document("doc1", payload="foo baz", txt="foo bar")
+    p.add_document("doc2", txt="foo bar")
+    q = Query("foo bar").with_payloads()
+    await p.search(q)
+    res = await p.execute()
+    assert res[:3] == ["OK", "OK", "OK"]
+    assert 2 == res[3][0]
+    assert "doc1" == res[3][1]
+    assert "doc2" == res[3][4]
+    assert "foo baz" == res[3][2]
+    assert res[3][5] is None
+    assert res[3][3] == res[3][6] == ["txt", "foo bar"]
