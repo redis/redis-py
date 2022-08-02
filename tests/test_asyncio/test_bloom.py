@@ -3,8 +3,7 @@ import pytest
 import redis.asyncio as redis
 from redis.exceptions import ModuleError, RedisError
 from redis.utils import HIREDIS_AVAILABLE
-
-pytestmark = pytest.mark.asyncio
+from tests.conftest import skip_ifmodversion_lt
 
 
 def intlist(obj):
@@ -91,7 +90,7 @@ async def test_bf_scandump_and_loadchunk(modclient: redis.Redis):
             res += rv == x
         assert res < 5
 
-    do_verify()
+    await do_verify()
     cmds = []
     if HIREDIS_AVAILABLE:
         with pytest.raises(ModuleError):
@@ -120,7 +119,7 @@ async def test_bf_scandump_and_loadchunk(modclient: redis.Redis):
 
     cur_info = await modclient.bf().execute_command("bf.debug", "myBloom")
     assert prev_info == cur_info
-    do_verify()
+    await do_verify()
 
     await modclient.bf().client.delete("myBloom")
     await modclient.bf().create("myBloom", "0.0001", "10000000")
@@ -357,6 +356,7 @@ async def test_tdigest_min_and_max(modclient: redis.Redis):
 
 @pytest.mark.redismod
 @pytest.mark.experimental
+@skip_ifmodversion_lt("2.4.0", "bf")
 async def test_tdigest_quantile(modclient: redis.Redis):
     assert await modclient.tdigest().create("tDigest", 500)
     # insert data-points into sketch
@@ -364,15 +364,23 @@ async def test_tdigest_quantile(modclient: redis.Redis):
         "tDigest", list([x * 0.01 for x in range(1, 10000)]), [1.0] * 10000
     )
     # assert min min/max have same result as quantile 0 and 1
-    assert await modclient.tdigest().max(
-        "tDigest"
-    ) == await modclient.tdigest().quantile("tDigest", 1.0)
-    assert await modclient.tdigest().min(
-        "tDigest"
-    ) == await modclient.tdigest().quantile("tDigest", 0.0)
+    assert (
+        await modclient.tdigest().max("tDigest")
+        == (await modclient.tdigest().quantile("tDigest", 1.0))[1]
+    )
+    assert (
+        await modclient.tdigest().min("tDigest")
+        == (await modclient.tdigest().quantile("tDigest", 0.0))[1]
+    )
 
-    assert 1.0 == round(await modclient.tdigest().quantile("tDigest", 0.01), 2)
-    assert 99.0 == round(await modclient.tdigest().quantile("tDigest", 0.99), 2)
+    assert 1.0 == round((await modclient.tdigest().quantile("tDigest", 0.01))[1], 2)
+    assert 99.0 == round((await modclient.tdigest().quantile("tDigest", 0.99))[1], 2)
+
+    # test multiple quantiles
+    assert await modclient.tdigest().create("t-digest", 100)
+    assert await modclient.tdigest().add("t-digest", [1, 2, 3, 4, 5], [1.0] * 5)
+    res = await modclient.tdigest().quantile("t-digest", 0.5, 0.8)
+    assert [0.5, 3.0, 0.8, 5.0] == res
 
 
 @pytest.mark.redismod

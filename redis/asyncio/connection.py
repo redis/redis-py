@@ -7,7 +7,6 @@ import io
 import os
 import socket
 import ssl
-import sys
 import threading
 import weakref
 from itertools import chain
@@ -771,7 +770,16 @@ class Connection:
     def _error_message(self, exception):
         # args for socket.error can either be (errno, "message")
         # or just "message"
-        if len(exception.args) == 1:
+        if not exception.args:
+            # asyncio has a bug where on Connection reset by peer, the
+            # exception is not instanciated, so args is empty. This is the
+            # workaround.
+            # See: https://github.com/redis/redis-py/issues/2237
+            # See: https://github.com/python/cpython/issues/94061
+            return (
+                f"Error connecting to {self.host}:{self.port}. Connection reset by peer"
+            )
+        elif len(exception.args) == 1:
             return f"Error connecting to {self.host}:{self.port}. {exception.args[0]}."
         else:
             return (
@@ -855,12 +863,10 @@ class Connection:
 
     async def check_health(self):
         """Check the health of the connection with a PING/PONG"""
-        if sys.version_info[0:2] == (3, 6):
-            func = asyncio.get_event_loop
-        else:
-            func = asyncio.get_running_loop
-
-        if self.health_check_interval and func().time() > self.next_health_check:
+        if (
+            self.health_check_interval
+            and asyncio.get_running_loop().time() > self.next_health_check
+        ):
             await self.retry.call_with_retry(self._send_ping, self._ping_failed)
 
     async def _send_packed_command(self, command: Iterable[bytes]) -> None:
@@ -948,11 +954,8 @@ class Connection:
             raise
 
         if self.health_check_interval:
-            if sys.version_info[0:2] == (3, 6):
-                func = asyncio.get_event_loop
-            else:
-                func = asyncio.get_running_loop
-            self.next_health_check = func().time() + self.health_check_interval
+            next_time = asyncio.get_running_loop().time() + self.health_check_interval
+            self.next_health_check = next_time
 
         if isinstance(response, ResponseError):
             raise response from None
@@ -983,11 +986,8 @@ class Connection:
             raise
 
         if self.health_check_interval:
-            if sys.version_info[0:2] == (3, 6):
-                func = asyncio.get_event_loop
-            else:
-                func = asyncio.get_running_loop
-            self.next_health_check = func().time() + self.health_check_interval
+            next_time = asyncio.get_running_loop().time() + self.health_check_interval
+            self.next_health_check = next_time
 
         if isinstance(response, ResponseError):
             raise response from None

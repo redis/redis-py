@@ -6,8 +6,6 @@ import pytest
 import redis.asyncio as redis
 from tests.conftest import skip_ifmodversion_lt
 
-pytestmark = pytest.mark.asyncio
-
 
 @pytest.mark.redismod
 async def test_create(modclient: redis.Redis):

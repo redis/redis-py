@@ -850,6 +850,8 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
     the commands are sent and received to the Redis server. Based on
     configuration, an instance will either use a ConnectionPool, or
     Connection object to talk to redis.
+
+    It is not safe to pass PubSub or Pipeline objects between threads.
     """
 
     @classmethod
@@ -1495,9 +1497,15 @@ class PubSub:
 
         self.check_health()
 
-        if not block and not self._execute(conn, conn.can_read, timeout=timeout):
-            return None
-        response = self._execute(conn, conn.read_response)
+        def try_read():
+            if not block:
+                if not conn.can_read(timeout=timeout):
+                    return None
+            else:
+                conn.connect()
+            return conn.read_response()
+
+        response = self._execute(conn, try_read)
 
         if self.is_health_check_response(response):
             # ignore the health check message as user might not expect it

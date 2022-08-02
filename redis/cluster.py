@@ -1,12 +1,11 @@
 import copy
-import logging
 import random
 import socket
 import sys
 import threading
 import time
 from collections import OrderedDict
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable, Dict, Tuple, Union
 
 from redis.client import CaseInsensitiveDict, PubSub, Redis, parse_scan
 from redis.commands import READ_COMMANDS, CommandsParser, RedisClusterCommands
@@ -15,7 +14,6 @@ from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
     AskError,
     AuthenticationError,
-    BusyLoadingError,
     ClusterCrossSlotError,
     ClusterDownError,
     ClusterError,
@@ -39,10 +37,8 @@ from redis.utils import (
     str_if_bytes,
 )
 
-log = logging.getLogger(__name__)
 
-
-def get_node_name(host: str, port: int) -> str:
+def get_node_name(host: str, port: Union[str, int]) -> str:
     return f"{host}:{port}"
 
 
@@ -535,7 +531,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 " RedisCluster(startup_nodes=[ClusterNode('localhost', 6379),"
                 " ClusterNode('localhost', 6378)])"
             )
-        log.debug(f"startup_nodes : {startup_nodes}")
         # Update the connection arguments
         # Whenever a new connection is established, RedisCluster's on_connect
         # method should be run
@@ -666,13 +661,8 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         :return True if the default node was set, else False
         """
         if node is None or self.get_node(node_name=node.name) is None:
-            log.info(
-                "The requested node does not exist in the cluster, so "
-                "the default node was not changed."
-            )
             return False
         self.nodes_manager.default_node = node
-        log.info(f"Changed the default cluster node to {node}")
         return True
 
     def monitor(self, target_node=None):
@@ -816,8 +806,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         else:
             # get the nodes group for this command if it was predefined
             command_flag = self.command_flags.get(command)
-        if command_flag:
-            log.debug(f"Target node/s for {command}: {command_flag}")
         if command_flag == self.__class__.RANDOM:
             # return a random node
             return [self.get_random_node()]
@@ -841,7 +829,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             node = self.nodes_manager.get_node_from_slot(
                 slot, self.read_from_replicas and command in READ_COMMANDS
             )
-            log.debug(f"Target for {args}: slot {slot}")
             return [node]
 
     def _should_reinitialized(self):
@@ -1019,7 +1006,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     res[node.name] = self._execute_command(node, *args, **kwargs)
                 # Return the processed result
                 return self._process_result(args[0], res, **kwargs)
-            except BaseException as e:
+            except Exception as e:
                 if type(e) in self.__class__.ERRORS_ALLOW_RETRY:
                     # The nodes and slots cache were reinitialized.
                     # Try again with the new cluster setup.
@@ -1059,10 +1046,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     )
                     moved = False
 
-                log.debug(
-                    f"Executing command {command} on target node: "
-                    f"{target_node.server_type} {target_node.name}"
-                )
                 redis_node = self.get_redis_connection(target_node)
                 connection = get_connection(redis_node, *args, **kwargs)
                 if asking:
@@ -1077,12 +1060,9 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                         response, **kwargs
                     )
                 return response
-
-            except (RedisClusterException, BusyLoadingError, AuthenticationError) as e:
-                log.exception(type(e))
+            except AuthenticationError:
                 raise
             except (ConnectionError, TimeoutError) as e:
-                log.exception(type(e))
                 # ConnectionError can also be raised if we couldn't get a
                 # connection from the pool before timing out, so check that
                 # this is an actual connection before attempting to disconnect.
@@ -1101,7 +1081,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     # and try again with the new setup
                     target_node.redis_connection = None
                     self.nodes_manager.initialize()
-                    raise
+                    raise e
             except MovedError as e:
                 # First, we will try to patch the slots/nodes cache with the
                 # redirected node output and try again. If MovedError exceeds
@@ -1111,7 +1091,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 # the same client object is shared between multiple threads. To
                 # reduce the frequency you can set this variable in the
                 # RedisCluster constructor.
-                log.exception("MovedError")
                 self.reinitialize_counter += 1
                 if self._should_reinitialized():
                     self.nodes_manager.initialize()
@@ -1121,29 +1100,21 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     self.nodes_manager.update_moved_exception(e)
                 moved = True
             except TryAgainError:
-                log.exception("TryAgainError")
-
                 if ttl < self.RedisClusterRequestTTL / 2:
                     time.sleep(0.05)
             except AskError as e:
-                log.exception("AskError")
-
                 redirect_addr = get_node_name(host=e.host, port=e.port)
                 asking = True
             except ClusterDownError as e:
-                log.exception("ClusterDownError")
                 # ClusterDownError can occur during a failover and to get
                 # self-healed, we will try to reinitialize the cluster layout
                 # and retry executing the command
                 time.sleep(0.25)
                 self.nodes_manager.initialize()
                 raise e
-            except ResponseError as e:
-                message = e.__str__()
-                log.exception(f"ResponseError: {message}")
-                raise e
-            except BaseException as e:
-                log.exception("BaseException")
+            except ResponseError:
+                raise
+            except Exception as e:
                 if connection:
                     connection.disconnect()
                 raise e
@@ -1280,11 +1251,6 @@ class NodesManager:
         elif node_name:
             return self.nodes_cache.get(node_name)
         else:
-            log.error(
-                "get_node requires one of the following: "
-                "1. node name "
-                "2. host and port"
-            )
             return None
 
     def update_moved_exception(self, exception):
@@ -1432,7 +1398,6 @@ class NodesManager:
         :startup_nodes:
             Responsible for discovering other nodes in the cluster
         """
-        log.debug("Initializing the nodes' topology of the cluster")
         self.reset()
         tmp_nodes_cache = {}
         tmp_slots = {}
@@ -1460,17 +1425,9 @@ class NodesManager:
                     )
                 cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
                 startup_nodes_reachable = True
-            except (ConnectionError, TimeoutError) as e:
-                msg = e.__str__
-                log.exception(
-                    "An exception occurred while trying to"
-                    " initialize the cluster using the seed node"
-                    f" {startup_node.name}:\n{msg}"
-                )
+            except (ConnectionError, TimeoutError):
                 continue
             except ResponseError as e:
-                log.exception('ReseponseError sending "cluster slots" to redis server')
-
                 # Isn't a cluster connection, so it won't parse these
                 # exceptions automatically
                 message = e.__str__()
@@ -1798,10 +1755,6 @@ class ClusterPipeline(RedisCluster):
         """ """
         return len(self.command_stack)
 
-    def __nonzero__(self):
-        "Pipeline instances should  always evaluate to True on Python 2.7"
-        return True
-
     def __bool__(self):
         "Pipeline instances should  always evaluate to True on Python 3+"
         return True
@@ -1944,34 +1897,53 @@ class ClusterPipeline(RedisCluster):
         # we figure out the slot number that command maps to, then from
         # the slot determine the node.
         for c in attempt:
-            # refer to our internal node -> slot table that
-            # tells us where a given
-            # command should route to.
-            passed_targets = c.options.pop("target_nodes", None)
-            if passed_targets and not self._is_nodes_flag(passed_targets):
-                target_nodes = self._parse_target_nodes(passed_targets)
-            else:
-                target_nodes = self._determine_nodes(*c.args, node_flag=passed_targets)
-                if not target_nodes:
-                    raise RedisClusterException(
-                        f"No targets were found to execute {c.args} command on"
+            connection_error_retry_counter = 0
+            while True:
+                # refer to our internal node -> slot table that
+                # tells us where a given command should route to.
+                # (it might be possible we have a cached node that no longer
+                # exists in the cluster, which is why we do this in a loop)
+                passed_targets = c.options.pop("target_nodes", None)
+                if passed_targets and not self._is_nodes_flag(passed_targets):
+                    target_nodes = self._parse_target_nodes(passed_targets)
+                else:
+                    target_nodes = self._determine_nodes(
+                        *c.args, node_flag=passed_targets
                     )
-            if len(target_nodes) > 1:
-                raise RedisClusterException(f"Too many targets for command {c.args}")
+                    if not target_nodes:
+                        raise RedisClusterException(
+                            f"No targets were found to execute {c.args} command on"
+                        )
+                if len(target_nodes) > 1:
+                    raise RedisClusterException(
+                        f"Too many targets for command {c.args}"
+                    )
 
-            node = target_nodes[0]
-            # now that we know the name of the node
-            # ( it's just a string in the form of host:port )
-            # we can build a list of commands for each node.
-            node_name = node.name
-            if node_name not in nodes:
-                redis_node = self.get_redis_connection(node)
-                connection = get_connection(redis_node, c.args)
-                nodes[node_name] = NodeCommands(
-                    redis_node.parse_response, redis_node.connection_pool, connection
-                )
+                node = target_nodes[0]
 
-            nodes[node_name].append(c)
+                # now that we know the name of the node
+                # ( it's just a string in the form of host:port )
+                # we can build a list of commands for each node.
+                node_name = node.name
+                if node_name not in nodes:
+                    redis_node = self.get_redis_connection(node)
+                    try:
+                        connection = get_connection(redis_node, c.args)
+                    except ConnectionError:
+                        connection_error_retry_counter += 1
+                        if connection_error_retry_counter < 5:
+                            # reinitialize the node -> slot table
+                            self.nodes_manager.initialize()
+                            continue
+                        else:
+                            raise
+                    nodes[node_name] = NodeCommands(
+                        redis_node.parse_response,
+                        redis_node.connection_pool,
+                        connection,
+                    )
+                nodes[node_name].append(c)
+                break
 
         # send the commands in sequence.
         # we  write to all the open sockets for each node first,
@@ -2025,7 +1997,7 @@ class ClusterPipeline(RedisCluster):
         )
         if attempt and allow_redirections:
             # RETRY MAGIC HAPPENS HERE!
-            # send these remaing comamnds one at a time using `execute_command`
+            # send these remaing commands one at a time using `execute_command`
             # in the main client. This keeps our retry logic
             # in one place mostly,
             # and allows us to be more confident in correctness of behavior.
@@ -2042,12 +2014,6 @@ class ClusterPipeline(RedisCluster):
             # If a lot of commands have failed, we'll be setting the
             # flag to rebuild the slots table from scratch.
             # So MOVED errors should correct themselves fairly quickly.
-            log.exception(
-                f"An exception occurred during pipeline execution. "
-                f"args: {attempt[-1].args}, "
-                f"error: {type(attempt[-1].result).__name__} "
-                f"{str(attempt[-1].result)}"
-            )
             self.reinitialize_counter += 1
             if self._should_reinitialized():
                 self.nodes_manager.initialize()
