@@ -35,6 +35,7 @@ jobs:
 
    run-tests:
      runs-on: ubuntu-latest
+     continue-on-error: ${{ matrix.experimental }}
      timeout-minutes: 30
      strategy:
        max-parallel: 15
@@ -42,6 +43,12 @@ jobs:
          python-version: ['3.7', '3.8', '3.9', '3.10', 'pypy-3.7', 'pypy-3.8']
          test-type: ['standalone', 'cluster']
          connection-type: ['hiredis', 'plain']
+         experimental: [false]
+         include:
+           - python-version: 3.11.0b5
+             experimental: true
+             test-type: standalone
+             connection-type: plain
      env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
      name: Python ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}} tests
@@ -82,9 +89,14 @@ jobs:
    install_package_from_commit:
     name: Install package from commit hash
     runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
     strategy:
       matrix:
         python-version: ['3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
+        experimental: [false]
+        include:
+          - python-version: 3.11.0b5
+          - experimental: true
     steps:
       - uses: actions/checkout@v2
       - name: install python ${{ matrix.python-version }}
