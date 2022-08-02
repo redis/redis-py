@@ -3781,14 +3781,14 @@ class TestRedisCommands:
         # trying to claim a message that isn't already pending doesn't
         # do anything
         response = r.xautoclaim(stream, group, consumer2, min_idle_time=0)
-        assert response == []
+        assert response == [b"0-0", []]
 
         # read the group as consumer1 to initially claim the messages
         r.xreadgroup(group, consumer1, streams={stream: ">"})
 
         # claim one message as consumer2
         response = r.xautoclaim(stream, group, consumer2, min_idle_time=0, count=1)
-        assert response == [message]
+        assert response[1] == [message]
 
         # reclaim the messages as consumer1, but use the justid argument
         # which only returns message ids

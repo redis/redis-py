@@ -7,7 +7,6 @@ import io
 import os
 import socket
 import ssl
-import sys
 import threading
 import weakref
 from itertools import chain
@@ -578,6 +577,7 @@ class Connection:
         "socket_type",
         "redis_connect_func",
         "retry_on_timeout",
+        "retry_on_error",
         "health_check_interval",
         "next_health_check",
         "last_active_at",
@@ -606,6 +606,7 @@ class Connection:
         socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
         socket_type: int = 0,
         retry_on_timeout: bool = False,
+        retry_on_error: Union[list, _Sentinel] = SENTINEL,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
@@ -631,12 +632,21 @@ class Connection:
         self.socket_keepalive_options = socket_keepalive_options or {}
         self.socket_type = socket_type
         self.retry_on_timeout = retry_on_timeout
+        if retry_on_error is SENTINEL:
+            retry_on_error = []
         if retry_on_timeout:
+            retry_on_error.append(TimeoutError)
+            retry_on_error.append(socket.timeout)
+            retry_on_error.append(asyncio.TimeoutError)
+        self.retry_on_error = retry_on_error
+        if retry_on_error:
             if not retry:
                 self.retry = Retry(NoBackoff(), 1)
             else:
                 # deep-copy the Retry object as it is mutable
                 self.retry = copy.deepcopy(retry)
+            # Update the retry's supported errors with the specified errors
+            self.retry.update_supported_errors(retry_on_error)
         else:
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
@@ -676,7 +686,7 @@ class Connection:
 
     @property
     def is_connected(self):
-        return self._reader and self._writer
+        return self._reader is not None and self._writer is not None
 
     def register_connect_callback(self, callback):
         self._connect_callbacks.append(weakref.WeakMethod(callback))
@@ -697,7 +707,9 @@ class Connection:
         if self.is_connected:
             return
         try:
-            await self._connect()
+            await self.retry.call_with_retry(
+                lambda: self._connect(), lambda error: self.disconnect()
+            )
         except asyncio.CancelledError:
             raise
         except (socket.timeout, asyncio.TimeoutError):
@@ -758,7 +770,16 @@ class Connection:
     def _error_message(self, exception):
         # args for socket.error can either be (errno, "message")
         # or just "message"
-        if len(exception.args) == 1:
+        if not exception.args:
+            # asyncio has a bug where on Connection reset by peer, the
+            # exception is not instanciated, so args is empty. This is the
+            # workaround.
+            # See: https://github.com/redis/redis-py/issues/2237
+            # See: https://github.com/python/cpython/issues/94061
+            return (
+                f"Error connecting to {self.host}:{self.port}. Connection reset by peer"
+            )
+        elif len(exception.args) == 1:
             return f"Error connecting to {self.host}:{self.port}. {exception.args[0]}."
         else:
             return (
@@ -842,12 +863,10 @@ class Connection:
 
     async def check_health(self):
         """Check the health of the connection with a PING/PONG"""
-        if sys.version_info[0:2] == (3, 6):
-            func = asyncio.get_event_loop
-        else:
-            func = asyncio.get_running_loop
-
-        if self.health_check_interval and func().time() > self.next_health_check:
+        if (
+            self.health_check_interval
+            and asyncio.get_running_loop().time() > self.next_health_check
+        ):
             await self.retry.call_with_retry(self._send_ping, self._ping_failed)
 
     async def _send_packed_command(self, command: Iterable[bytes]) -> None:
@@ -935,11 +954,8 @@ class Connection:
             raise
 
         if self.health_check_interval:
-            if sys.version_info[0:2] == (3, 6):
-                func = asyncio.get_event_loop
-            else:
-                func = asyncio.get_running_loop
-            self.next_health_check = func().time() + self.health_check_interval
+            next_time = asyncio.get_running_loop().time() + self.health_check_interval
+            self.next_health_check = next_time
 
         if isinstance(response, ResponseError):
             raise response from None
@@ -970,11 +986,8 @@ class Connection:
             raise
 
         if self.health_check_interval:
-            if sys.version_info[0:2] == (3, 6):
-                func = asyncio.get_event_loop
-            else:
-                func = asyncio.get_running_loop
-            self.next_health_check = func().time() + self.health_check_interval
+            next_time = asyncio.get_running_loop().time() + self.health_check_interval
+            self.next_health_check = next_time
 
         if isinstance(response, ResponseError):
             raise response from None
@@ -1169,6 +1182,7 @@ class UnixDomainSocketConnection(Connection):  # lgtm [py/missing-call-to-init]
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         retry_on_timeout: bool = False,
+        retry_on_error: Union[list, _Sentinel] = SENTINEL,
         parser_class: Type[BaseParser] = DefaultParser,
         socket_read_size: int = 65536,
         health_check_interval: float = 0.0,
@@ -1190,12 +1204,19 @@ class UnixDomainSocketConnection(Connection):  # lgtm [py/missing-call-to-init]
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout or None
         self.retry_on_timeout = retry_on_timeout
+        if retry_on_error is SENTINEL:
+            retry_on_error = []
         if retry_on_timeout:
+            retry_on_error.append(TimeoutError)
+        self.retry_on_error = retry_on_error
+        if retry_on_error:
             if retry is None:
                 self.retry = Retry(NoBackoff(), 1)
             else:
                 # deep-copy the Retry object as it is mutable
                 self.retry = copy.deepcopy(retry)
+            # Update the retry's supported errors with the specified errors
+            self.retry.update_supported_errors(retry_on_error)
         else:
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval

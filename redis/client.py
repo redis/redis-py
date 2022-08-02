@@ -310,7 +310,8 @@ def parse_xclaim(response, **options):
 def parse_xautoclaim(response, **options):
     if options.get("parse_justid", False):
         return response[1]
-    return parse_stream_list(response[1])
+    response[1] = parse_stream_list(response[1])
+    return response
 
 
 def parse_xinfo_stream(response, **options):
@@ -849,6 +850,8 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
     the commands are sent and received to the Redis server. Based on
     configuration, an instance will either use a ConnectionPool, or
     Connection object to talk to redis.
+
+    It is not safe to pass PubSub or Pipeline objects between threads.
     """
 
     @classmethod
@@ -914,7 +917,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         errors=None,
         decode_responses=False,
         retry_on_timeout=False,
-        retry_on_error=[],
+        retry_on_error=None,
         ssl=False,
         ssl_keyfile=None,
         ssl_certfile=None,
@@ -958,6 +961,8 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
                     )
                 )
                 encoding_errors = errors
+            if not retry_on_error:
+                retry_on_error = []
             if retry_on_timeout is True:
                 retry_on_error.append(TimeoutError)
             kwargs = {
@@ -1492,9 +1497,15 @@ class PubSub:
 
         self.check_health()
 
-        if not block and not self._execute(conn, conn.can_read, timeout=timeout):
-            return None
-        response = self._execute(conn, conn.read_response)
+        def try_read():
+            if not block:
+                if not conn.can_read(timeout=timeout):
+                    return None
+            else:
+                conn.connect()
+            return conn.read_response()
+
+        response = self._execute(conn, try_read)
 
         if self.is_health_check_response(response):
             # ignore the health check message as user might not expect it

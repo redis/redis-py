@@ -1,16 +1,8 @@
-import sys
-
 import pytest
-
-if sys.version_info[0:2] == (3, 6):
-    import pytest as pytest_asyncio
-else:
-    import pytest_asyncio
+import pytest_asyncio
 
 import redis.asyncio as redis
 from redis.exceptions import DataError
-
-pytestmark = pytest.mark.asyncio
 
 
 @pytest.mark.onlynoncluster

@@ -55,14 +55,14 @@ class CommandsParser:
             # try to split the command name and to take only the main command
             # e.g. 'memory' for 'memory usage'
             args = args[0].split() + list(args[1:])
-            cmd_name = args[0]
+            cmd_name = args[0].upper()
             if cmd_name not in self.commands:
                 # We'll try to reinitialize the commands cache, if the engine
                 # version has changed, the commands may not be current
                 await self.initialize()
                 if cmd_name not in self.commands:
                     raise RedisError(
-                        f"{cmd_name.upper()} command doesn't exist in Redis commands"
+                        f"{cmd_name} command doesn't exist in Redis commands"
                     )
 
             command = self.commands[cmd_name]

@@ -44,7 +44,7 @@ class SentinelManagedConnection(Connection):
             if str_if_bytes(await self.read_response()) != "PONG":
                 raise ConnectionError("PING failed")
 
-    async def connect(self):
+    async def _connect_retry(self):
         if self._reader:
             return  # already connected
         if self.connection_pool.is_master:
@@ -56,6 +56,12 @@ class SentinelManagedConnection(Connection):
                 except ConnectionError:
                     continue
             raise SlaveNotFoundError  # Never be here
+
+    async def connect(self):
+        return await self.retry.call_with_retry(
+            self._connect_retry,
+            lambda error: asyncio.sleep(0),
+        )
 
     async def read_response(self, disable_decoding: bool = False):
         try:

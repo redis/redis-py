@@ -3,7 +3,7 @@ import pytest
 from redis.asyncio.connection import Connection, UnixDomainSocketConnection
 from redis.asyncio.retry import Retry
 from redis.backoff import AbstractBackoff, NoBackoff
-from redis.exceptions import ConnectionError
+from redis.exceptions import ConnectionError, TimeoutError
 
 
 class BackoffMock(AbstractBackoff):
@@ -22,9 +22,28 @@ class BackoffMock(AbstractBackoff):
 class TestConnectionConstructorWithRetry:
     "Test that the Connection constructors properly handles Retry objects"
 
+    @pytest.mark.parametrize("Class", [Connection, UnixDomainSocketConnection])
+    def test_retry_on_error_set(self, Class):
+        class CustomError(Exception):
+            pass
+
+        retry_on_error = [ConnectionError, TimeoutError, CustomError]
+        c = Class(retry_on_error=retry_on_error)
+        assert c.retry_on_error == retry_on_error
+        assert isinstance(c.retry, Retry)
+        assert c.retry._retries == 1
+        assert set(c.retry._supported_errors) == set(retry_on_error)
+
+    @pytest.mark.parametrize("Class", [Connection, UnixDomainSocketConnection])
+    def test_retry_on_error_not_set(self, Class):
+        c = Class()
+        assert c.retry_on_error == []
+        assert isinstance(c.retry, Retry)
+        assert c.retry._retries == 0
+
     @pytest.mark.parametrize("retry_on_timeout", [False, True])
     @pytest.mark.parametrize("Class", [Connection, UnixDomainSocketConnection])
-    def test_retry_on_timeout_boolean(self, Class, retry_on_timeout):
+    def test_retry_on_timeout(self, Class, retry_on_timeout):
         c = Class(retry_on_timeout=retry_on_timeout)
         assert c.retry_on_timeout == retry_on_timeout
         assert isinstance(c.retry, Retry)
@@ -32,12 +51,25 @@ class TestConnectionConstructorWithRetry:
 
     @pytest.mark.parametrize("retries", range(10))
     @pytest.mark.parametrize("Class", [Connection, UnixDomainSocketConnection])
-    def test_retry_on_timeout_retry(self, Class, retries: int):
+    def test_retry_with_retry_on_timeout(self, Class, retries: int):
         retry_on_timeout = retries > 0
         c = Class(retry_on_timeout=retry_on_timeout, retry=Retry(NoBackoff(), retries))
         assert c.retry_on_timeout == retry_on_timeout
         assert isinstance(c.retry, Retry)
         assert c.retry._retries == retries
+
+    @pytest.mark.parametrize("retries", range(10))
+    @pytest.mark.parametrize("Class", [Connection, UnixDomainSocketConnection])
+    def test_retry_with_retry_on_error(self, Class, retries: int):
+        class CustomError(Exception):
+            pass
+
+        retry_on_error = [ConnectionError, TimeoutError, CustomError]
+        c = Class(retry_on_error=retry_on_error, retry=Retry(NoBackoff(), retries))
+        assert c.retry_on_error == retry_on_error
+        assert isinstance(c.retry, Retry)
+        assert c.retry._retries == retries
+        assert set(c.retry._supported_errors) == set(retry_on_error)
 
 
 class TestRetry:
