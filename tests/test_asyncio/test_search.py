@@ -16,7 +16,7 @@ from redis.commands.search.indexDefinition import IndexDefinition
 from redis.commands.search.query import GeoFilter, NumericFilter, Query
 from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
-from tests.conftest import skip_ifmodversion_lt
+from tests.conftest import skip_if_redis_enterprise, skip_ifmodversion_lt
 
 WILL_PLAY_TEXT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "testdata", "will_play_text.csv.bz2")
@@ -992,7 +992,7 @@ async def test_aggregations_groupby(modclient: redis.Redis):
 
     res = (await modclient.ft().aggregate(req)).rows[0]
     assert res[1] == "redis"
-    assert res[3] == ["RediSearch", "RedisAI", "RedisJson"]
+    assert set(res[3]) == {"RediSearch", "RedisAI", "RedisJson"}
 
     req = aggregations.AggregateRequest("redis").group_by(
         "@parent", reducers.first_value("@title").alias("first")
@@ -1067,3 +1067,21 @@ async def test_withsuffixtrie(modclient: redis.Redis):
     await waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
     info = await modclient.ft().info()
     assert "WITHSUFFIXTRIE" in info["attributes"][0]
+
+
+@skip_if_redis_enterprise()
+async def test_search_commands_in_pipeline(modclient: redis.Redis):
+    p = await modclient.ft().pipeline()
+    p.create_index((TextField("txt"),))
+    p.add_document("doc1", payload="foo baz", txt="foo bar")
+    p.add_document("doc2", txt="foo bar")
+    q = Query("foo bar").with_payloads()
+    await p.search(q)
+    res = await p.execute()
+    assert res[:3] == ["OK", "OK", "OK"]
+    assert 2 == res[3][0]
+    assert "doc1" == res[3][1]
+    assert "doc2" == res[3][4]
+    assert "foo baz" == res[3][2]
+    assert res[3][5] is None
+    assert res[3][3] == res[3][6] == ["txt", "foo bar"]

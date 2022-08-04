@@ -20,6 +20,7 @@ SEARCH_CMD = "FT.SEARCH"
 ADD_CMD = "FT.ADD"
 ADDHASH_CMD = "FT.ADDHASH"
 DROP_CMD = "FT.DROP"
+DROPINDEX_CMD = "FT.DROPINDEX"
 EXPLAIN_CMD = "FT.EXPLAIN"
 EXPLAINCLI_CMD = "FT.EXPLAINCLI"
 DEL_CMD = "FT.DEL"
@@ -170,8 +171,8 @@ class SearchCommands:
 
         For more information see `FT.DROPINDEX <https://redis.io/commands/ft.dropindex>`_.
         """  # noqa
-        keep_str = "" if delete_documents else "KEEPDOCS"
-        return self.execute_command(DROP_CMD, self.index_name, keep_str)
+        delete_str = "DD" if delete_documents else ""
+        return self.execute_command(DROPINDEX_CMD, self.index_name, delete_str)
 
     def _add_document(
         self,
