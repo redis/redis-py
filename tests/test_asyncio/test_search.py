@@ -1043,3 +1043,27 @@ async def test_aggregations_sort_by_and_limit(modclient: redis.Redis):
     res = await modclient.ft().aggregate(req)
     assert len(res.rows) == 1
     assert res.rows[0] == ["t1", "b"]
+
+
+@pytest.mark.redismod
+@pytest.mark.experimental
+async def test_withsuffixtrie(modclient: redis.Redis):
+    # create index
+    assert await modclient.ft().create_index((TextField("txt"),))
+    await waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
+    info = await modclient.ft().info()
+    assert "WITHSUFFIXTRIE" not in info["attributes"][0]
+    assert await modclient.ft().dropindex("idx")
+
+    # create withsuffixtrie index (text field)
+    assert await modclient.ft().create_index((TextField("t", withsuffixtrie=True)))
+    await waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
+    info = await modclient.ft().info()
+    assert "WITHSUFFIXTRIE" in info["attributes"][0]
+    assert await modclient.ft().dropindex("idx")
+
+    # create withsuffixtrie index (tag field)
+    assert await modclient.ft().create_index((TagField("t", withsuffixtrie=True)))
+    await waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
+    info = await modclient.ft().info()
+    assert "WITHSUFFIXTRIE" in info["attributes"][0]
