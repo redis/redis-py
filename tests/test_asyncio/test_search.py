@@ -1069,6 +1069,7 @@ async def test_withsuffixtrie(modclient: redis.Redis):
     assert "WITHSUFFIXTRIE" in info["attributes"][0]
 
 
+@pytest.mark.redismod
 @skip_if_redis_enterprise()
 async def test_search_commands_in_pipeline(modclient: redis.Redis):
     p = await modclient.ft().pipeline()
