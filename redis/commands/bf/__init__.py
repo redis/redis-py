@@ -170,6 +170,7 @@ class TDigestBloom(TDigestCommands, AbstractBloom):
             TDIGEST_QUANTILE: parse_tdigest_quantile,
             TDIGEST_MIN: float,
             TDIGEST_MAX: float,
+            TDIGEST_TRIMMED_MEAN: float,
             TDIGEST_INFO: TDigestInfo,
         }
 

@@ -391,6 +391,17 @@ def test_tdigest_cdf(client):
 @pytest.mark.redismod
 @pytest.mark.experimental
 @skip_ifmodversion_lt("2.4.0", "bf")
+def test_tdigest_trimmed_mean(client):
+    assert client.tdigest().create("tDigest", 100)
+    # insert data-points into sketch
+    assert client.tdigest().add("tDigest", list(range(1, 10)), [1.0] * 10)
+    assert 5 == client.tdigest().trimmed_mean("tDigest", 0.1, 0.9)
+    assert 4.5 == client.tdigest().trimmed_mean("tDigest", 0.4, 0.5)
+
+
+@pytest.mark.redismod
+@pytest.mark.experimental
+@skip_ifmodversion_lt("2.4.0", "bf")
 def test_tdigest_mergestore(client):
     assert client.tdigest().create("sourcekey1", 100)
     assert client.tdigest().create("sourcekey2", 100)

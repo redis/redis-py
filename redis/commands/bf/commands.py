@@ -49,6 +49,7 @@ TDIGEST_QUANTILE = "TDIGEST.QUANTILE"
 TDIGEST_MIN = "TDIGEST.MIN"
 TDIGEST_MAX = "TDIGEST.MAX"
 TDIGEST_INFO = "TDIGEST.INFO"
+TDIGEST_TRIMMED_MEAN = "TDIGEST.TRIMMED_MEAN"
 TDIGEST_MERGESTORE = "TDIGEST.MERGESTORE"
 
 
@@ -417,6 +418,16 @@ class TDigestCommands:
         For more information see `TDIGEST.INFO <https://redis.io/commands/tdigest.info>`_.
         """  # noqa
         return self.execute_command(TDIGEST_INFO, key)
+
+    def trimmed_mean(self, key, low_cut_quantile, high_cut_quantile):
+        """
+        Return mean value from the sketch, excluding observation values outside
+        the low and high cutoff quantiles.
+        For more information see `TDIGEST.TRIMMED_MEAN <https://redis.io/commands/tdigest.trimmed_mean>`_.
+        """  # noqa
+        return self.execute_command(
+            TDIGEST_TRIMMED_MEAN, key, low_cut_quantile, high_cut_quantile
+        )
 
     def mergestore(self, dest_key, numkeys, *sourcekeys, compression=False):
         """
