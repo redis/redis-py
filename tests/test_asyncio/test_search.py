@@ -995,7 +995,7 @@ async def test_aggregations_groupby(modclient: redis.Redis):
 
     res = (await modclient.ft().aggregate(req)).rows[0]
     assert res[1] == "redis"
-    assert res[3] == ["RediSearch", "RedisAI", "RedisJson"]
+    assert set(res[3]) == {"RediSearch", "RedisAI", "RedisJson"}
 
     req = aggregations.AggregateRequest("redis").group_by(
         "@parent", reducers.first_value("@title").alias("first")
