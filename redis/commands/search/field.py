@@ -57,7 +57,6 @@ class TextField(Field):
 
     NOSTEM = "NOSTEM"
     PHONETIC = "PHONETIC"
-    WITHSUFFIXTRIE = "WITHSUFFIXTRIE"
 
     def __init__(
         self,
@@ -81,7 +80,7 @@ class TextField(Field):
             Field.append_arg(self, self.PHONETIC)
             Field.append_arg(self, phonetic_matcher)
         if withsuffixtrie:
-            Field.append_arg(self, self.WITHSUFFIXTRIE)
+            Field.append_arg(self, "WITHSUFFIXTRIE")
 
 
 class NumericField(Field):
@@ -110,7 +109,6 @@ class TagField(Field):
 
     SEPARATOR = "SEPARATOR"
     CASESENSITIVE = "CASESENSITIVE"
-    WITHSUFFIXTRIE = "WITHSUFFIXTRIE"
 
     def __init__(
         self,
@@ -124,7 +122,7 @@ class TagField(Field):
         if case_sensitive:
             args.append(self.CASESENSITIVE)
         if withsuffixtrie:
-            args.append(self.WITHSUFFIXTRIE)
+            args.append("WITHSUFFIXTRIE")
 
         Field.__init__(self, name, args=args, **kwargs)
 
