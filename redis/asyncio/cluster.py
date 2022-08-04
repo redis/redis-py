@@ -642,7 +642,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     keys = [node.name for node in target_nodes]
                     values = await asyncio.gather(
                         *(
-                            asyncio.ensure_future(
+                            asyncio.create_task(
                                 self._execute_command(node, *args, **kwargs)
                             )
                             for node in target_nodes
@@ -841,7 +841,7 @@ class ClusterNode:
     async def disconnect(self) -> None:
         ret = await asyncio.gather(
             *(
-                asyncio.ensure_future(connection.disconnect())
+                asyncio.create_task(connection.disconnect())
                 for connection in self._connections
             ),
             return_exceptions=True,
@@ -979,13 +979,13 @@ class NodesManager:
         if remove_old:
             for name in list(old.keys()):
                 if name not in new:
-                    asyncio.ensure_future(old.pop(name).disconnect())
+                    asyncio.create_task(old.pop(name).disconnect())
 
         for name, node in new.items():
             if name in old:
                 if old[name] is node:
                     continue
-                asyncio.ensure_future(old[name].disconnect())
+                asyncio.create_task(old[name].disconnect())
             old[name] = node
 
     def _update_moved_slots(self) -> None:
@@ -1202,7 +1202,7 @@ class NodesManager:
         self.default_node = None
         await asyncio.gather(
             *(
-                asyncio.ensure_future(node.disconnect())
+                asyncio.create_task(node.disconnect())
                 for node in getattr(self, attr).values()
             )
         )
@@ -1381,7 +1381,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
 
         errors = await asyncio.gather(
             *(
-                asyncio.ensure_future(node[0].execute_pipeline(node[1]))
+                asyncio.create_task(node[0].execute_pipeline(node[1]))
                 for node in nodes.values()
             )
         )
