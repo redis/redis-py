@@ -1049,6 +1049,30 @@ async def test_aggregations_sort_by_and_limit(modclient: redis.Redis):
 
 
 @pytest.mark.redismod
+@pytest.mark.experimental
+async def test_withsuffixtrie(modclient: redis.Redis):
+    # create index
+    assert await modclient.ft().create_index((TextField("txt"),))
+    await waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
+    info = await modclient.ft().info()
+    assert "WITHSUFFIXTRIE" not in info["attributes"][0]
+    assert await modclient.ft().dropindex("idx")
+
+    # create withsuffixtrie index (text field)
+    assert await modclient.ft().create_index((TextField("t", withsuffixtrie=True)))
+    await waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
+    info = await modclient.ft().info()
+    assert "WITHSUFFIXTRIE" in info["attributes"][0]
+    assert await modclient.ft().dropindex("idx")
+
+    # create withsuffixtrie index (tag field)
+    assert await modclient.ft().create_index((TagField("t", withsuffixtrie=True)))
+    await waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
+    info = await modclient.ft().info()
+    assert "WITHSUFFIXTRIE" in info["attributes"][0]
+
+
+@pytest.mark.redismod
 @skip_if_redis_enterprise()
 async def test_search_commands_in_pipeline(modclient: redis.Redis):
     p = await modclient.ft().pipeline()
