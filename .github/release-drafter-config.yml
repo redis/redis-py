@@ -1,5 +1,5 @@
-name-template: 'Version $NEXT_PATCH_VERSION'
-tag-template: 'v$NEXT_PATCH_VERSION'
+name-template: '$NEXT_MAJOR_VERSION'
+tag-template: 'v$NEXT_MAJOR_VERSION'
 autolabeler:
   - label: 'maintenance'
     files:
@@ -15,9 +15,13 @@ autolabeler:
     branch:
       - '/feature-.+'
 categories:
-  - title: '🔥 Breaking Changes'
+  - title: 'Breaking Changes'
     labels:
       - 'breakingchange'
+
+  - title: '🧪 Experimental Features'
+    labels:
+      - 'experimental'
   - title: '🚀 New Features'
     labels:
       - 'feature'
@@ -27,6 +31,7 @@ categories:
       - 'fix'
       - 'bugfix'
       - 'bug'
+      - 'BUG'
   - title: '🧰 Maintenance'
     label: 'maintenance'
 change-template: '- $TITLE (#$NUMBER)'
