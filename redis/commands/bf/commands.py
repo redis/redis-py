@@ -429,7 +429,7 @@ class TDigestCommands:
             TDIGEST_TRIMMED_MEAN, key, low_cut_quantile, high_cut_quantile
         )
 
-      def mergestore(self, dest_key, numkeys, *sourcekeys, compression=False):
+    def mergestore(self, dest_key, numkeys, *sourcekeys, compression=False):
         """
         Merges all of the values from `sourcekeys` keys to `dest_key` sketch.
         If destination already exists, it is overwritten.
