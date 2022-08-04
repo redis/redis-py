@@ -64,6 +64,7 @@ class TextField(Field):
         weight: float = 1.0,
         no_stem: bool = False,
         phonetic_matcher: str = None,
+        withsuffixtrie: bool = False,
         **kwargs,
     ):
         Field.__init__(self, name, args=[Field.TEXT, Field.WEIGHT, weight], **kwargs)
@@ -78,6 +79,8 @@ class TextField(Field):
         ]:
             Field.append_arg(self, self.PHONETIC)
             Field.append_arg(self, phonetic_matcher)
+        if withsuffixtrie:
+            Field.append_arg(self, "WITHSUFFIXTRIE")
 
 
 class NumericField(Field):
@@ -108,11 +111,18 @@ class TagField(Field):
     CASESENSITIVE = "CASESENSITIVE"
 
     def __init__(
-        self, name: str, separator: str = ",", case_sensitive: bool = False, **kwargs
+        self,
+        name: str,
+        separator: str = ",",
+        case_sensitive: bool = False,
+        withsuffixtrie: bool = False,
+        **kwargs,
     ):
         args = [Field.TAG, self.SEPARATOR, separator]
         if case_sensitive:
             args.append(self.CASESENSITIVE)
+        if withsuffixtrie:
+            args.append("WITHSUFFIXTRIE")
 
         Field.__init__(self, name, args=args, **kwargs)
 
