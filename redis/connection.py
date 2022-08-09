@@ -694,7 +694,7 @@ class Connection:
                 # https://github.com/andymccurdy/redis-py/issues/1274
                 self.send_command(
                     "AUTH",
-                    self.credentials_provider.get_password(),
+                    self.credentials_provider.password,
                     check_health=False,
                 )
                 auth_response = self.read_response()
@@ -1068,7 +1068,7 @@ class UnixDomainSocketConnection(Connection):
         self.db = db
         self.client_name = client_name
         self.credentials_provider = credentials_provider
-        if not self.credentials_provider and (username or password):
+        if (username or password) and self.credentials_provider is None:
             self.credentials_provider = CredentialsProvider(username, password)
         self.socket_timeout = socket_timeout
         self.retry_on_timeout = retry_on_timeout

@@ -1,9 +1,12 @@
+from typing import Callable, Optional
+
+
 class CredentialsProvider:
     def __init__(
         self,
         username: str = "",
         password: str = "",
-        supplier: callable = None,
+        supplier: Optional[Callable] = None,
         *args,
         **kwargs,
     ):
@@ -15,8 +18,8 @@ class CredentialsProvider:
         :param args: arguments to pass to the supplier function
         :param kwargs: keyword arguments to pass to the supplier function
         """
-        self.username = username
-        self.password = password
+        self._username = "" if username is None else username
+        self._password = "" if password is None else password
         self.supplier = supplier
         self.args = args
         self.kwargs = kwargs
@@ -24,18 +27,24 @@ class CredentialsProvider:
     def get_credentials(self):
         if self.supplier:
             self.username, self.password = self.supplier(*self.args, **self.kwargs)
-        if self.username:
-            auth_args = (self.username, self.password or "")
-        else:
-            auth_args = (self.password,)
-        return auth_args
+        return self._username, self._password
 
-    def get_password(self, call_supplier: bool = True):
-        if call_supplier and self.supplier:
+    @property
+    def password(self):
+        if self.supplier and not self._password:
             self.username, self.password = self.supplier(*self.args, **self.kwargs)
-        return self.password
+        return self._password
 
-    def get_username(self, call_supplier: bool = True):
-        if call_supplier and self.supplier:
+    @password.setter
+    def password(self, value):
+        self._password = value
+
+    @property
+    def username(self):
+        if self.supplier and not self._username:
             self.username, self.password = self.supplier(*self.args, **self.kwargs)
-        return self.username
+        return self._username
+
+    @username.setter
+    def username(self, value):
+        self._username = value
