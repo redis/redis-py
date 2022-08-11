@@ -69,6 +69,8 @@ class BFCommands:
         self.append_no_scale(params, noScale)
         return self.execute_command(BF_RESERVE, *params)
 
+    reserve = create
+
     def add(self, key, item):
         """
         Add to a Bloom Filter `key` an `item`.
