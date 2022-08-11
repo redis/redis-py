@@ -25,7 +25,7 @@ jobs:
        - uses: actions/checkout@v3
        - uses: trailofbits/gh-action-pip-audit@v1.0.0
          with:
-           inputs: requirements.txt dev)requirements.txt
+           inputs: requirements.txt dev_requirements.txt
 
    lint:
      name: Code linters
