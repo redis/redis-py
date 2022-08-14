@@ -366,11 +366,11 @@ def test_list_keys(client):
     result = client.graph().list_keys()
     assert result == []
 
-    client.execute_command("GRAPH.EXPLAIN", "G", "RETURN 1")
+    client.graph("G").query("CREATE (n)")
     result = client.graph().list_keys()
     assert result == ["G"]
 
-    client.execute_command("GRAPH.EXPLAIN", "X", "RETURN 1")
+    client.graph("X").query("CREATE (m)")
     result = client.graph().list_keys()
     assert result == ["G", "X"]
 
