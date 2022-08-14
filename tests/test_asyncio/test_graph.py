@@ -348,11 +348,11 @@ async def test_list_keys(modclient: redis.Redis):
     result = await modclient.graph().list_keys()
     assert result == []
 
-    await modclient.execute_command("GRAPH.EXPLAIN", "G", "RETURN 1")
+    await modclient.graph("G").query("CREATE (n)")
     result = await modclient.graph().list_keys()
     assert result == ["G"]
 
-    await modclient.execute_command("GRAPH.EXPLAIN", "X", "RETURN 1")
+    await modclient.graph("X").query("CREATE (m)")
     result = await modclient.graph().list_keys()
     assert result == ["G", "X"]
 

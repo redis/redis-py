@@ -365,17 +365,17 @@ def test_tdigest_quantile(client):
     )
     # assert min min/max have same result as quantile 0 and 1
     res = client.tdigest().quantile("tDigest", 1.0)
-    assert client.tdigest().max("tDigest") == res[1]
+    assert client.tdigest().max("tDigest") == res[0]
     res = client.tdigest().quantile("tDigest", 0.0)
-    assert client.tdigest().min("tDigest") == res[1]
+    assert client.tdigest().min("tDigest") == res[0]
 
-    assert 1.0 == round(client.tdigest().quantile("tDigest", 0.01)[1], 2)
-    assert 99.0 == round(client.tdigest().quantile("tDigest", 0.99)[1], 2)
+    assert 1.0 == round(client.tdigest().quantile("tDigest", 0.01)[0], 2)
+    assert 99.0 == round(client.tdigest().quantile("tDigest", 0.99)[0], 2)
 
     # test multiple quantiles
     assert client.tdigest().create("t-digest", 100)
     assert client.tdigest().add("t-digest", [1, 2, 3, 4, 5], [1.0] * 5)
-    assert [0.5, 3.0, 0.8, 5.0] == client.tdigest().quantile("t-digest", 0.5, 0.8)
+    assert [3.0, 5.0] == client.tdigest().quantile("t-digest", 0.5, 0.8)
 
 
 @pytest.mark.redismod
