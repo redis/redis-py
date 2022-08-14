@@ -380,7 +380,7 @@ async def test_tdigest_quantile(modclient: redis.Redis):
     assert await modclient.tdigest().create("t-digest", 100)
     assert await modclient.tdigest().add("t-digest", [1, 2, 3, 4, 5], [1.0] * 5)
     res = await modclient.tdigest().quantile("t-digest", 0.5, 0.8)
-    assert [0.5, 3.0, 0.8, 5.0] == res
+    assert [3.0, 5.0] == res
 
 
 @pytest.mark.redismod

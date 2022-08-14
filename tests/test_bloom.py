@@ -375,7 +375,7 @@ def test_tdigest_quantile(client):
     # test multiple quantiles
     assert client.tdigest().create("t-digest", 100)
     assert client.tdigest().add("t-digest", [1, 2, 3, 4, 5], [1.0] * 5)
-    assert [0.5, 3.0, 0.8, 5.0] == client.tdigest().quantile("t-digest", 0.5, 0.8)
+    assert [3.0, 5.0] == client.tdigest().quantile("t-digest", 0.5, 0.8)
 
 
 @pytest.mark.redismod
