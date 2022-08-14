@@ -18,6 +18,15 @@ on:
 
 jobs:
 
+   dependency-audit:
+     name: Dependency audit
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@v3
+       - uses: trailofbits/gh-action-pip-audit@v1.0.0
+         with:
+           inputs: requirements.txt dev_requirements.txt
+
    lint:
      name: Code linters
      runs-on: ubuntu-latest
