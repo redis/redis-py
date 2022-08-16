@@ -4438,6 +4438,19 @@ class TestRedisCommands:
         )
         assert resp == [0, None, 255]
 
+    @skip_if_server_version_lt("6.0.0")
+    def test_bitfield_ro(self, r: redis.Redis):
+        bf = r.bitfield("a")
+        resp = bf.set("u8", 8, 255).execute()
+        assert resp == [0]
+
+        resp = r.bitfield_ro("a", "u8", 0)
+        assert resp == [0]
+
+        items = [("u4", 8), ("u4", 12), ("u4", 13)]
+        resp = r.bitfield_ro("a", "u8", 0, items)
+        assert resp == [0, 15, 15, 14]
+
     @skip_if_server_version_lt("4.0.0")
     def test_memory_help(self, r):
         with pytest.raises(NotImplementedError):
