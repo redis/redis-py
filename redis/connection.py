@@ -1166,6 +1166,16 @@ URL_QUERY_ARGUMENT_PARSERS = {
 
 
 def parse_url(url):
+    if not (
+        url.startswith("redis://")
+        or url.startswith("rediss://")
+        or url.startswith("unix://")
+    ):
+        raise ValueError(
+            "Redis URL must specify one of the following "
+            "schemes (redis://, rediss://, unix://)"
+        )
+
     url = urlparse(url)
     kwargs = {}
 
@@ -1192,7 +1202,7 @@ def parse_url(url):
             kwargs["path"] = unquote(url.path)
         kwargs["connection_class"] = UnixDomainSocketConnection
 
-    elif url.scheme in ("redis", "rediss"):
+    else:  # implied:  url.scheme in ("redis", "rediss"):
         if url.hostname:
             kwargs["host"] = unquote(url.hostname)
         if url.port:
@@ -1208,11 +1218,6 @@ def parse_url(url):
 
         if url.scheme == "rediss":
             kwargs["connection_class"] = SSLConnection
-    else:
-        raise ValueError(
-            "Redis URL must specify one of the following "
-            "schemes (redis://, rediss://, unix://)"
-        )
 
     return kwargs
 
