@@ -1219,6 +1219,9 @@ def parse_url(url):
         if url.scheme == "rediss":
             kwargs["connection_class"] = SSLConnection
 
+    if url.scheme != "unix" and "host" not in kwargs:
+        raise ValueError("Redis URL must specify an explicit hostname")
+
     return kwargs
 
 

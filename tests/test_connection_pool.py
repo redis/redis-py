@@ -308,7 +308,7 @@ class TestConnectionPoolURLParsing:
             assert expected is to_bool(value)
 
     def test_client_name_in_querystring(self):
-        pool = redis.ConnectionPool.from_url("redis://location?client_name=test-client")
+        pool = redis.ConnectionPool.from_url("redis://host/loc?client_name=test-client")
         assert pool.connection_kwargs["client_name"] == "test-client"
 
     def test_invalid_extra_typed_querystring_options(self):
@@ -330,6 +330,11 @@ class TestConnectionPoolURLParsing:
         r = redis.Redis.from_url("redis://myhost")
         assert r.connection_pool.connection_class == redis.Connection
         assert r.connection_pool.connection_kwargs == {"host": "myhost"}
+
+    def test_missing_hostname_raises_error(self):
+        with pytest.raises(ValueError) as cm:
+            redis.ConnectionPool.from_url("redis://")
+        assert str(cm.value) == "Redis URL must specify an explicit hostname"
 
     def test_invalid_scheme_raises_error(self):
         with pytest.raises(ValueError) as cm:
@@ -448,19 +453,19 @@ class TestSSLConnectionURLParsing:
             def get_connection(self, *args, **kwargs):
                 return self.make_connection()
 
-        pool = DummyConnectionPool.from_url("rediss://?ssl_cert_reqs=none")
+        pool = DummyConnectionPool.from_url("rediss://host/?ssl_cert_reqs=none")
         assert pool.get_connection("_").cert_reqs == ssl.CERT_NONE
 
-        pool = DummyConnectionPool.from_url("rediss://?ssl_cert_reqs=optional")
+        pool = DummyConnectionPool.from_url("rediss://host/?ssl_cert_reqs=optional")
         assert pool.get_connection("_").cert_reqs == ssl.CERT_OPTIONAL
 
-        pool = DummyConnectionPool.from_url("rediss://?ssl_cert_reqs=required")
+        pool = DummyConnectionPool.from_url("rediss://host/?ssl_cert_reqs=required")
         assert pool.get_connection("_").cert_reqs == ssl.CERT_REQUIRED
 
-        pool = DummyConnectionPool.from_url("rediss://?ssl_check_hostname=False")
+        pool = DummyConnectionPool.from_url("rediss://host/?ssl_check_hostname=False")
         assert pool.get_connection("_").check_hostname is False
 
-        pool = DummyConnectionPool.from_url("rediss://?ssl_check_hostname=True")
+        pool = DummyConnectionPool.from_url("rediss://host/?ssl_check_hostname=True")
         assert pool.get_connection("_").check_hostname is True
 
 
