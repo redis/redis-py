@@ -351,7 +351,7 @@ class TDigestCommands:
         Allocate the memory and initialize the t-digest.
         For more information see `TDIGEST.CREATE <https://redis.io/commands/tdigest.create>`_.
         """  # noqa
-        return self.execute_command(TDIGEST_CREATE, key, compression)
+        return self.execute_command(TDIGEST_CREATE, key, "COMPRESSION", compression)
 
     def reset(self, key):
         """
