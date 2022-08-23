@@ -24,6 +24,8 @@ from typing import (
     cast,
 )
 
+import async_timeout
+
 from redis.asyncio.connection import (
     Connection,
     ConnectionPool,
@@ -755,12 +757,16 @@ class PubSub:
         await self.check_health()
 
         async def try_read():
+            if not conn.is_connected:
+                await conn.connect()
             if not block:
-                if not await conn.can_read(timeout=timeout):
+                try:
+                    async with async_timeout.timeout(timeout):
+                        return await conn.read_response()
+                except asyncio.TimeoutError:
                     return None
             else:
-                await conn.connect()
-            return await conn.read_response()
+                return await conn.read_response()
 
         response = await self._execute(conn, try_read)
 
