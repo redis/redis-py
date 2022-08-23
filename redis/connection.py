@@ -11,7 +11,7 @@ from time import time
 from urllib.parse import parse_qs, unquote, urlparse
 
 from redis.backoff import NoBackoff
-from redis.credentials import CredentialsProvider
+from redis.credentials import CredentialProvider, StaticCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -503,7 +503,7 @@ class Connection:
         username=None,
         retry=None,
         redis_connect_func=None,
-        credentials_provider=None,
+        credential_provider: CredentialProvider = None,
     ):
         """
         Initialize a new Connection.
@@ -517,9 +517,10 @@ class Connection:
         self.port = int(port)
         self.db = db
         self.client_name = client_name
-        self.credentials_provider = credentials_provider
-        if not self.credentials_provider and (username or password):
-            self.credentials_provider = CredentialsProvider(username, password)
+        self.credential_provider = credential_provider
+        if (username or password) and self.credential_provider is None:
+            # username and password backward compatibility
+            self.credential_provider = StaticCredentialProvider(username, password)
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout
         self.socket_keepalive = socket_keepalive
@@ -679,8 +680,8 @@ class Connection:
         self._parser.on_connect(self)
 
         # if credentials provider is set, authenticate
-        if self.credentials_provider:
-            auth_args = self.credentials_provider.get_credentials()
+        if self.credential_provider is not None:
+            auth_args = self.credential_provider.get_credentials()
             # avoid checking health here -- PING will fail if we try
             # to check the health prior to the AUTH
             self.send_command("AUTH", *auth_args, check_health=False)
@@ -694,7 +695,7 @@ class Connection:
                 # https://github.com/andymccurdy/redis-py/issues/1274
                 self.send_command(
                     "AUTH",
-                    self.credentials_provider.password,
+                    self.credential_provider.password,
                     check_health=False,
                 )
                 auth_response = self.read_response()
@@ -1054,7 +1055,7 @@ class UnixDomainSocketConnection(Connection):
         client_name=None,
         retry=None,
         redis_connect_func=None,
-        credentials_provider=None,
+        credential_provider: CredentialProvider = None,
     ):
         """
         Initialize a new UnixDomainSocketConnection.
@@ -1067,9 +1068,10 @@ class UnixDomainSocketConnection(Connection):
         self.path = path
         self.db = db
         self.client_name = client_name
-        self.credentials_provider = credentials_provider
-        if (username or password) and self.credentials_provider is None:
-            self.credentials_provider = CredentialsProvider(username, password)
+        self.credential_provider = credential_provider
+        if (username or password) and self.credential_provider is None:
+            # username and password backward compatibility
+            self.credential_provider = StaticCredentialProvider(username, password)
         self.socket_timeout = socket_timeout
         self.retry_on_timeout = retry_on_timeout
         if retry_on_error is SENTINEL:

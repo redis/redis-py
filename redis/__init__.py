@@ -9,7 +9,7 @@ from redis.connection import (
     SSLConnection,
     UnixDomainSocketConnection,
 )
-from redis.credentials import CredentialsProvider
+from redis.credentials import CredentialProvider, StaticCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -63,7 +63,7 @@ __all__ = [
     "Connection",
     "ConnectionError",
     "ConnectionPool",
-    "CredentialsProvider",
+    "CredentialProvider",
     "DataError",
     "from_url",
     "InvalidResponse",
@@ -78,6 +78,7 @@ __all__ = [
     "SentinelManagedConnection",
     "SentinelManagedSSLConnection",
     "SSLConnection",
+    "StaticCredentialProvider",
     "StrictRedis",
     "TimeoutError",
     "UnixDomainSocketConnection",
