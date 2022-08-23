@@ -103,7 +103,7 @@ class DummyConnection(Connection):
     async def disconnect(self):
         pass
 
-    async def can_read(self, timeout: float = 0):
+    async def can_read_destructive(self, timeout: float = 0):
         return False
 
 

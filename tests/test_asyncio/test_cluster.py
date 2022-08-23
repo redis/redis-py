@@ -433,7 +433,7 @@ class TestRedisClusterObj:
                     Connection,
                     send_packed_command=mock.DEFAULT,
                     connect=mock.DEFAULT,
-                    can_read=mock.DEFAULT,
+                    can_read_destructive=mock.DEFAULT,
                 ) as mocks:
                     # simulate 7006 as a failed node
                     def execute_command_mock(self, *args, **options):
@@ -473,7 +473,7 @@ class TestRedisClusterObj:
                     execute_command.successful_calls = 0
                     execute_command.failed_calls = 0
                     initialize.side_effect = initialize_mock
-                    mocks["can_read"].return_value = False
+                    mocks["can_read_destructive"].return_value = False
                     mocks["send_packed_command"].return_value = "MOCK_OK"
                     mocks["connect"].return_value = None
                     with mock.patch.object(
@@ -514,7 +514,7 @@ class TestRedisClusterObj:
             send_command=mock.DEFAULT,
             read_response=mock.DEFAULT,
             _connect=mock.DEFAULT,
-            can_read=mock.DEFAULT,
+            can_read_destructive=mock.DEFAULT,
             on_connect=mock.DEFAULT,
         ) as mocks:
             with mock.patch.object(
@@ -546,7 +546,7 @@ class TestRedisClusterObj:
                 mocks["send_command"].return_value = True
                 mocks["read_response"].return_value = "OK"
                 mocks["_connect"].return_value = True
-                mocks["can_read"].return_value = False
+                mocks["can_read_destructive"].return_value = False
                 mocks["on_connect"].return_value = True
 
                 # Create a cluster with reading from replications

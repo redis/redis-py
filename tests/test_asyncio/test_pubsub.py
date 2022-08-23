@@ -847,7 +847,7 @@ class TestPubSubAutoReconnect:
                     self.state = 1
                     with mock.patch.object(self.pubsub.connection, "_parser") as m:
                         m.read_response.side_effect = socket.error
-                        m.can_read.side_effect = socket.error
+                        m.can_read_destructive.side_effect = socket.error
                         # wait until task noticies the disconnect until we
                         # undo the patch
                         await self.cond.wait_for(lambda: self.state >= 2)
