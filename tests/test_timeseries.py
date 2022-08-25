@@ -233,9 +233,12 @@ def test_range_advanced(client):
     assert [(0, 5.0), (5, 6.0)] == client.ts().range(
         1, 0, 10, aggregation_type="count", bucket_size_msec=10, align=5
     )
-    assert [(0, 2.5500000000000003), (10, 3.95)] == client.ts().range(
-        1, 0, 10, aggregation_type="twa", bucket_size_msec=10
-    )
+
+    # the twa algorithm can produce slightly different results based on implementation.
+    # just check that the first bucket is approcimately correct.
+    result = client.ts().range(1, 0, 10, aggregation_type="twa", bucket_size_msec=10)
+    rounded = [(a, round(b, 2)) for (a, b) in result]
+    assert (0, 2.55) == rounded[0]
 
 
 @pytest.mark.redismod
