@@ -100,6 +100,12 @@ def parse_object(response, infotype):
     return response
 
 
+def parse_ping(response):
+    if str_if_bytes(response) == "PONG":
+        return True
+    return response
+
+
 def parse_info(response):
     """Parse the result of Redis's INFO command into a Python dict"""
     info = {}
@@ -794,7 +800,7 @@ class AbstractRedis:
         "MODULE UNLOAD": parse_module_result,
         "MODULE LIST": lambda r: [pairs_to_dict(m) for m in r],
         "OBJECT": parse_object,
-        "PING": lambda r: str_if_bytes(r) == "PONG",
+        "PING": parse_ping,
         "QUIT": bool_ok,
         "STRALGO": parse_stralgo,
         "PUBSUB NUMSUB": parse_pubsub_numsub,
