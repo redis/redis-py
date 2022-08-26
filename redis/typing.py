@@ -17,6 +17,7 @@ DecodedT = Union[str, int, float]
 EncodableT = Union[EncodedT, DecodedT]
 AbsExpiryT = Union[int, datetime]
 ExpiryT = Union[float, timedelta]
+IntExpiryT = Union[int, timedelta]
 ZScoreBoundT = Union[float, str]  # str allows for the [ or ( prefix
 BitfieldOffsetT = Union[int, str]  # str allows for #x syntax
 _StringLikeT = Union[bytes, str, memoryview]

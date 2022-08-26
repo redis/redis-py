@@ -33,6 +33,7 @@ from redis.typing import (
     EncodableT,
     ExpiryT,
     FieldT,
+    IntExpiryT,
     GroupT,
     KeysT,
     KeyT,
@@ -1639,7 +1640,7 @@ class BasicKeyCommands(CommandsProtocol):
     def expire(
         self,
         name: KeyT,
-        time: AbsExpiryT,
+        time: IntExpiryT,
         nx: bool = False,
         xx: bool = False,
         gt: bool = False,
@@ -1741,8 +1742,8 @@ class BasicKeyCommands(CommandsProtocol):
     def getex(
         self,
         name: KeyT,
-        ex: Union[AbsExpiryT, None] = None,
-        px: Union[AbsExpiryT, None] = None,
+        ex: Union[IntExpiryT, None] = None,
+        px: Union[IntExpiryT, None] = None,
         exat: Union[AbsExpiryT, None] = None,
         pxat: Union[AbsExpiryT, None] = None,
         persist: bool = False,
@@ -1959,7 +1960,7 @@ class BasicKeyCommands(CommandsProtocol):
     def pexpire(
         self,
         name: KeyT,
-        time: AbsExpiryT,
+        time: IntExpiryT,
         nx: bool = False,
         xx: bool = False,
         gt: bool = False,
@@ -2158,8 +2159,8 @@ class BasicKeyCommands(CommandsProtocol):
         self,
         name: KeyT,
         value: EncodableT,
-        ex: Union[AbsExpiryT, None] = None,
-        px: Union[AbsExpiryT, None] = None,
+        ex: Union[IntExpiryT, None] = None,
+        px: Union[IntExpiryT, None] = None,
         nx: bool = False,
         xx: bool = False,
         keepttl: bool = False,
@@ -2250,7 +2251,7 @@ class BasicKeyCommands(CommandsProtocol):
         value = value and 1 or 0
         return self.execute_command("SETBIT", name, offset, value)
 
-    def setex(self, name: KeyT, time: AbsExpiryT, value: EncodableT) -> ResponseT:
+    def setex(self, name: KeyT, time: IntExpiryT, value: EncodableT) -> ResponseT:
         """
         Set the value of key ``name`` to ``value`` that expires in ``time``
         seconds. ``time`` can be represented by an integer or a Python
