@@ -2036,7 +2036,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("PEXPIRETIME", key)
 
-    def psetex(self, name: KeyT, time_ms: AbsExpiryT, value: EncodableT):
+    def psetex(self, name: KeyT, time_ms: ExpiryT, value: EncodableT):
         """
         Set the value of key ``name`` to ``value`` that expires in ``time_ms``
         milliseconds. ``time_ms`` can be represented by an integer or a Python
