@@ -180,6 +180,8 @@ class CFCommands:
         self.append_max_iterations(params, max_iterations)
         return self.execute_command(CF_RESERVE, *params)
 
+    reserve = create
+
     def add(self, key, item):
         """
         Add an `item` to a Cuckoo Filter `key`.
