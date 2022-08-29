@@ -1,7 +1,8 @@
+from deprecated import deprecated
+
 from redis.client import NEVER_DECODE
 from redis.exceptions import ModuleError
 from redis.utils import HIREDIS_AVAILABLE
-from deprecated import deprecated
 
 BF_RESERVE = "BF.RESERVE"
 BF_ADD = "BF.ADD"
