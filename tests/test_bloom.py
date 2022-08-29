@@ -39,6 +39,21 @@ def test_create(client):
 
 
 @pytest.mark.redismod
+def test_bf_reserve(client):
+    """Testing BF.RESERVE"""
+    assert client.bf().reserve("bloom", 0.01, 1000)
+    assert client.bf().reserve("bloom_e", 0.01, 1000, expansion=1)
+    assert client.bf().reserve("bloom_ns", 0.01, 1000, noScale=True)
+    assert client.cf().reserve("cuckoo", 1000)
+    assert client.cf().reserve("cuckoo_e", 1000, expansion=1)
+    assert client.cf().reserve("cuckoo_bs", 1000, bucket_size=4)
+    assert client.cf().reserve("cuckoo_mi", 1000, max_iterations=10)
+    assert client.cms().initbydim("cmsDim", 100, 5)
+    assert client.cms().initbyprob("cmsProb", 0.01, 0.01)
+    assert client.topk().reserve("topk", 5, 100, 5, 0.9)
+
+
+@pytest.mark.redismod
 @pytest.mark.experimental
 def test_tdigest_create(client):
     assert client.tdigest().create("tDigest", 100)
