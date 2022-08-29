@@ -553,21 +553,39 @@ class TestConnection:
         )
 
     @skip_if_redis_enterprise()
-    def test_connect_no_auth_supplied_when_required(self, r):
+    def test_connect_no_auth_configured(self, r):
         """
-        AuthenticationError should be raised when the server requires a
-        password but one isn't supplied.
+        AuthenticationError should be raised when the server is not configured with auth
+        but credentials are supplied by the user.
         """
+        # Redis < 6
         with pytest.raises(redis.AuthenticationError):
             r.execute_command(
                 "DEBUG", "ERROR", "ERR Client sent AUTH, but no password is set"
             )
 
+        # Redis >= 6
+        with pytest.raises(redis.AuthenticationError):
+            r.execute_command(
+                "DEBUG",
+                "ERROR",
+                "ERR AUTH <password> called without any password "
+                "configured for the default user. Are you sure "
+                "your configuration is correct?",
+            )
+
     @skip_if_redis_enterprise()
-    def test_connect_invalid_password_supplied(self, r):
-        "AuthenticationError should be raised when sending the wrong password"
+    def test_connect_invalid_auth_credentials_supplied(self, r):
+        """
+        AuthenticationError should be raised when sending invalid username/password
+        """
+        # Redis < 6
         with pytest.raises(redis.AuthenticationError):
             r.execute_command("DEBUG", "ERROR", "ERR invalid password")
+
+        # Redis >= 6
+        with pytest.raises(redis.AuthenticationError):
+            r.execute_command("DEBUG", "ERROR", "WRONGPASS")
 
 
 @pytest.mark.onlynoncluster
