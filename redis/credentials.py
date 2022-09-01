@@ -30,7 +30,11 @@ class CredentialProvider:
                 self, *self.supplier_args, **self.supplier_kwargs
             )
 
-        return (self.__username, self.__password) if self.__username else (self.__password,)
+        return (
+            (self.__username, self.__password)
+            if self.__username
+            else (self.__password,)
+        )
 
     @property
     def password(self):
