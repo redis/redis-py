@@ -4,7 +4,7 @@ import string
 import pytest
 
 import redis
-from redis import ResponseError
+from redis import AuthenticationError, ResponseError
 from redis.credentials import CredentialProvider, StaticCredentialProvider
 from tests.conftest import _get_client, skip_if_redis_enterprise
 
@@ -63,7 +63,7 @@ def init_required_pass(r, request, password):
     def teardown():
         try:
             r.auth(password)
-        except ResponseError:
+        except (ResponseError, AuthenticationError):
             r.auth("default", "")
         r.config_set("requirepass", "")
 
@@ -151,11 +151,11 @@ class TestCredentialsProvider:
 
         init_acl_user(r, request, "username", "password")
         creds_provider = CredentialProvider(supplier=bad_creds_provider)
-        with pytest.raises(ResponseError) as e:
+        with pytest.raises(AuthenticationError) as e:
             _get_client(
                 redis.Redis, request, flushdb=False, credential_provider=creds_provider
             )
-        assert e.match("WRONGPASS")
+        assert e.match("invalid username-password")
 
 
 class TestStaticCredentialProvider:
