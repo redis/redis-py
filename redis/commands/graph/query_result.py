@@ -270,7 +270,7 @@ class QueryResult:
         """
         value = value.decode() if isinstance(value, bytes) else value
         try:
-            scalar = strtobool(value)
+            scalar = True if strtobool(value) else False
         except ValueError:
             sys.stderr.write("unknown boolean type\n")
             scalar = None
