@@ -10,6 +10,7 @@ import pytest
 import redis
 from redis import exceptions
 from redis.client import parse_info
+from redis.credentials import StaticCredentialProvider
 
 from .conftest import (
     _get_client,
@@ -95,7 +96,9 @@ class TestRedisCommands:
                 # error when switching to the db 9 because we're not authenticated yet
                 # setting the password on the connection itself triggers the
                 # authentication in the connection's `on_connect` method
-                r.connection.password = temp_pass
+                r.connection.credential_provider = StaticCredentialProvider(
+                    password=temp_pass
+                )
             except AttributeError:
                 # connection field is not set in Redis Cluster, but that's ok
                 # because the problem discussed above does not apply to Redis Cluster
