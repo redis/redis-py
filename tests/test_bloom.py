@@ -280,9 +280,10 @@ def test_topk(client):
     assert [1, 1, 0, 0, 1, 0, 0] == client.topk().query(
         "topk", "A", "B", "C", "D", "E", "F", "G"
     )
-    assert [4, 3, 2, 3, 3, 0, 1] == client.topk().count(
-        "topk", "A", "B", "C", "D", "E", "F", "G"
-    )
+    with pytest.deprecated_call():
+        assert [4, 3, 2, 3, 3, 0, 1] == client.topk().count(
+            "topk", "A", "B", "C", "D", "E", "F", "G"
+        )
 
     # test full list
     assert client.topk().reserve("topklist", 3, 50, 3, 0.9)
@@ -322,9 +323,10 @@ def test_topk_incrby(client):
         "topk", ["bar", "baz", "42"], [3, 6, 2]
     )
     assert [None, "bar"] == client.topk().incrby("topk", ["42", "xyzzy"], [8, 4])
-    assert [3, 6, 10, 4, 0] == client.topk().count(
-        "topk", "bar", "baz", "42", "xyzzy", 4
-    )
+    with pytest.deprecated_call():
+        assert [3, 6, 10, 4, 0] == client.topk().count(
+            "topk", "bar", "baz", "42", "xyzzy", 4
+        )
 
 
 # region Test T-Digest

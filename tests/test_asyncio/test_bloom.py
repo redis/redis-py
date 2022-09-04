@@ -263,9 +263,10 @@ async def test_topk(modclient: redis.Redis):
     assert [1, 1, 0, 0, 1, 0, 0] == await modclient.topk().query(
         "topk", "A", "B", "C", "D", "E", "F", "G"
     )
-    assert [4, 3, 2, 3, 3, 0, 1] == await modclient.topk().count(
-        "topk", "A", "B", "C", "D", "E", "F", "G"
-    )
+    with pytest.deprecated_call():
+        assert [4, 3, 2, 3, 3, 0, 1] == await modclient.topk().count(
+            "topk", "A", "B", "C", "D", "E", "F", "G"
+        )
 
     # test full list
     assert await modclient.topk().reserve("topklist", 3, 50, 3, 0.9)
@@ -307,9 +308,10 @@ async def test_topk_incrby(modclient: redis.Redis):
     )
     res = await modclient.topk().incrby("topk", ["42", "xyzzy"], [8, 4])
     assert [None, "bar"] == res
-    assert [3, 6, 10, 4, 0] == await modclient.topk().count(
-        "topk", "bar", "baz", "42", "xyzzy", 4
-    )
+    with pytest.deprecated_call():
+        assert [3, 6, 10, 4, 0] == await modclient.topk().count(
+            "topk", "bar", "baz", "42", "xyzzy", 4
+        )
 
 
 # region Test T-Digest
