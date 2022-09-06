@@ -750,11 +750,11 @@ class Connection:
         if self._sock is None:
             return
 
-        if os.getpid() == self.pid:
-            try:
+        try:
+            if os.getpid() == self.pid:
                 self._sock.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
+        except OSError:
+            pass
 
         try:
             self._sock.close()
