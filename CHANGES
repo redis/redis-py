@@ -1,3 +1,4 @@
+    * Update README.md links
     * Fix timezone handling for datetime to unixtime conversions
     * Fix start_id type for XAUTOCLAIM
     * Remove verbose logging from cluster.py
