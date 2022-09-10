@@ -7,6 +7,7 @@ from unittest.mock import DEFAULT, Mock, call, patch
 import pytest
 
 from redis import Redis
+from redis.backoff import ExponentialBackoff, NoBackoff, get_default_backoff
 from redis.cluster import (
     PRIMARY,
     REDIS_CLUSTER_HASH_SLOTS,
@@ -31,6 +32,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
+from redis.retry import Retry
 from redis.utils import str_if_bytes
 from tests.test_pubsub import wait_for_message
 
@@ -690,6 +692,48 @@ class TestRedisClusterObj:
                     # topology refresh
                     cur_node = r.get_node(node_name=node_name)
                     assert conn == r.get_redis_connection(cur_node)
+
+    def test_cluster_retry_object(self) -> None:
+        # Test default retry
+        rc_default = RedisCluster("127.0.0.1", 16379)
+        retry = rc_default.get_connection_kwargs().get("retry")
+        assert isinstance(retry, Retry)
+        assert retry._retries == 3
+        assert isinstance(retry._backoff, type(get_default_backoff()))
+        assert rc_default.get_node("127.0.0.1", 16379).get_connection_kwargs().get(
+            "retry"
+        ) == rc_default.get_node("127.0.0.1", 16380).get_connection_kwargs().get(
+            "retry"
+        )
+
+        # Test custom retry
+        retry = Retry(ExponentialBackoff(10, 5), 5)
+        rc_custom_retry = RedisCluster("127.0.0.1", 16379, retry=retry)
+        assert (
+            rc_custom_retry.get_node("127.0.0.1", 16379)
+            .get_connection_kwargs()
+            .get("retry")
+            == retry
+        )
+
+        # Test no connection retries
+        rc_no_retries = RedisCluster(
+            "127.0.0.1", 16379, connection_error_retry_attempts=0
+        )
+        assert (
+            rc_no_retries.get_node("127.0.0.1", 16379)
+            .get_connection_kwargs()
+            .get("retry")
+            is None
+        )
+        rc_no_retries = RedisCluster("127.0.0.1", 16379, retry=Retry(NoBackoff(), 0))
+        assert (
+            rc_no_retries.get_node("127.0.0.1", 16379)
+            .get_connection_kwargs()
+            .get("retry")
+            ._retries
+            == 0
+        )
 
 
 @pytest.mark.onlycluster

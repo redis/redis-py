@@ -13,6 +13,8 @@ from _pytest.fixtures import FixtureRequest
 from redis.asyncio.cluster import ClusterNode, NodesManager, RedisCluster
 from redis.asyncio.connection import Connection, SSLConnection
 from redis.asyncio.parser import CommandsParser
+from redis.asyncio.retry import Retry
+from redis.backoff import get_default_backoff, ExponentialBackoff, NoBackoff
 from redis.cluster import PIPELINE_BLOCKED_COMMANDS, PRIMARY, REPLICA, get_node_name
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
@@ -246,6 +248,43 @@ class TestRedisClusterObj:
                     ).values()
                 ]
             )
+
+    async def test_cluster_retry_object(self) -> None:
+        # Test default retry
+        rc_default = await RedisCluster("127.0.0.1", 16379)
+        retry = rc_default.connection_kwargs.get("retry")
+        assert isinstance(retry, Retry)
+        assert retry._retries == 3
+        assert isinstance(retry._backoff, type(get_default_backoff()))
+        assert rc_default.get_node("127.0.0.1", 16379).connection_kwargs.get(
+            "retry"
+        ) == rc_default.get_node("127.0.0.1", 16380).connection_kwargs.get("retry")
+
+        # Test custom retry
+        retry = Retry(ExponentialBackoff(10, 5), 5)
+        rc_custom_retry = await RedisCluster("127.0.0.1", 16379, retry=retry)
+        assert (
+            rc_custom_retry.get_node("127.0.0.1", 16379).connection_kwargs.get("retry")
+            == retry
+        )
+
+        # Test no connection retries
+        rc_no_retries = await RedisCluster(
+            "127.0.0.1", 16379, connection_error_retry_attempts=0
+        )
+        assert (
+            rc_no_retries.get_node("127.0.0.1", 16379).connection_kwargs.get("retry")
+            is None
+        )
+        rc_no_retries = await RedisCluster(
+            "127.0.0.1", 16379, retry=Retry(NoBackoff(), 0)
+        )
+        assert (
+            rc_no_retries.get_node("127.0.0.1", 16379)
+            .connection_kwargs.get("retry")
+            ._retries
+            == 0
+        )
 
     async def test_empty_startup_nodes(self) -> None:
         """

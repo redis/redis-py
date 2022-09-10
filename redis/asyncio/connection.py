@@ -486,7 +486,7 @@ class Connection:
             retry_on_error.append(socket.timeout)
             retry_on_error.append(asyncio.TimeoutError)
         self.retry_on_error = retry_on_error
-        if retry_on_error:
+        if retry or retry_on_error:
             if not retry:
                 self.retry = Retry(NoBackoff(), 1)
             else:

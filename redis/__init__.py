@@ -1,5 +1,6 @@
 import sys
 
+from redis.backoff import get_default_backoff
 from redis.client import Redis, StrictRedis
 from redis.cluster import RedisCluster
 from redis.connection import (
@@ -64,6 +65,7 @@ __all__ = [
     "ConnectionPool",
     "DataError",
     "from_url",
+    "get_default_backoff",
     "InvalidResponse",
     "PubSubError",
     "ReadOnlyError",

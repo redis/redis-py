@@ -25,6 +25,8 @@ from redis.asyncio.connection import (
     parse_url,
 )
 from redis.asyncio.parser import CommandsParser
+from redis.asyncio.retry import Retry
+from redis.backoff import get_default_backoff
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis
 from redis.cluster import (
     PIPELINE_BLOCKED_COMMANDS,
@@ -134,7 +136,10 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
           or :class:`~.ConnectionError` or :class:`~.ClusterDownError` are encountered
     :param connection_error_retry_attempts:
         | Number of times to retry before reinitializing when :class:`~.TimeoutError`
-          or :class:`~.ConnectionError` are encountered
+          or :class:`~.ConnectionError` are encountered.
+          The default backoff strategy will be set if Retry object is not passed (see
+          get_default_backoff in backoff.py). To change it, pass a custom Retry object
+          using the "retry" keyword.
     :param max_connections:
         | Maximum number of connections per node. If there are no free connections & the
           maximum number of connections are already created, a
@@ -214,7 +219,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         read_from_replicas: bool = False,
         reinitialize_steps: int = 10,
         cluster_error_retry_attempts: int = 3,
-        connection_error_retry_attempts: int = 5,
+        connection_error_retry_attempts: int = 3,
         max_connections: int = 2**31,
         # Client related kwargs
         db: Union[str, int] = 0,
@@ -232,6 +237,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         socket_keepalive: bool = False,
         socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
         socket_timeout: Optional[float] = None,
+        retry: Optional["Retry"] = None,
+        retry_on_error: Optional[list[Exception]] = None,
         # SSL related kwargs
         ssl: bool = False,
         ssl_ca_certs: Optional[str] = None,
@@ -278,6 +285,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_keepalive": socket_keepalive,
             "socket_keepalive_options": socket_keepalive_options,
             "socket_timeout": socket_timeout,
+            "retry": retry,
         }
 
         if ssl:
@@ -297,6 +305,17 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         if read_from_replicas:
             # Call our on_connect function to configure READONLY mode
             kwargs["redis_connect_func"] = self.on_connect
+
+        if retry or retry_on_error or connection_error_retry_attempts > 0:
+            # Set a retry object for all cluster nodes
+            self.retry = retry or Retry(
+                get_default_backoff(), connection_error_retry_attempts
+            )
+            if retry_on_error is None:
+                # Default errors for retrying
+                retry_on_error = [ConnectionError, TimeoutError]
+            self.retry.update_supported_errors(retry_on_error)
+            kwargs.update({"retry": self.retry})
 
         kwargs["response_callbacks"] = self.__class__.RESPONSE_CALLBACKS.copy()
         self.connection_kwargs = kwargs
@@ -318,8 +337,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self.read_from_replicas = read_from_replicas
         self.reinitialize_steps = reinitialize_steps
         self.cluster_error_retry_attempts = cluster_error_retry_attempts
-        self.connection_error_retry_attempts = connection_error_retry_attempts
-
+        self.retry = retry
         self.reinitialize_counter = 0
         self.commands_parser = CommandsParser()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
@@ -614,9 +632,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         if passed_targets and not self._is_node_flag(passed_targets):
             target_nodes = self._parse_target_nodes(passed_targets)
             target_nodes_specified = True
-            retry_attempts = 1
+            retry_attempts = 0
 
-        for _ in range(retry_attempts):
+        while True:
             if self._initialize:
                 await self.initialize()
             try:
@@ -654,17 +672,14 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                         )
                     return dict(zip(keys, values))
             except Exception as e:
-                if type(e) in self.__class__.ERRORS_ALLOW_RETRY:
-                    # The nodes and slots cache were reinitialized.
+                if retry_attempts > 0 and type(e) in self.__class__.ERRORS_ALLOW_RETRY:
+                    # The nodes and slots cache were should be reinitialized.
                     # Try again with the new cluster setup.
-                    exception = e
+                    retry_attempts -= 1
+                    continue
                 else:
-                    # All other errors should be raised.
-                    raise
-
-        # If it fails the configured number of times then raise exception back
-        # to caller of this method
-        raise exception
+                    # raise the exception
+                    raise e
 
     async def _execute_command(
         self, target_node: "ClusterNode", *args: Union[KeyT, EncodableT], **kwargs: Any
@@ -672,7 +687,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         asking = moved = False
         redirect_addr = None
         ttl = self.RedisClusterRequestTTL
-        connection_error_retry_counter = 0
 
         while ttl > 0:
             ttl -= 1
@@ -691,25 +705,18 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     moved = False
 
                 return await target_node.execute_command(*args, **kwargs)
-            except BusyLoadingError:
+            except (BusyLoadingError, MaxConnectionsError):
                 raise
             except (ConnectionError, TimeoutError) as e:
-                # Give the node 0.25 seconds to get back up and retry again with the
-                # same node and configuration. After the defined number of attempts, try
-                # to reinitialize the cluster and try again.
-                connection_error_retry_counter += 1
-                if (
-                    connection_error_retry_counter
-                    < self.connection_error_retry_attempts
-                ):
-                    await asyncio.sleep(0.25)
-                else:
-                    if isinstance(e, MaxConnectionsError):
-                        raise
-                    # Hard force of reinitialize of the node/slots setup
-                    # and try again with the new setup
-                    await self.close()
-                    raise
+                # Connection retries are being handled in the node's
+                # Retry object.
+                # Remove the failed node from the startup nodes before we try
+                # to reinitialize the cluster
+                self.nodes_manager.startup_nodes.pop(target_node.name, None)
+                # Hard force of reinitialize of the node/slots setup
+                # and try again with the new setup
+                await self.close()
+                raise
             except ClusterDownError:
                 # ClusterDownError can occur during a failover and to get
                 # self-healed, we will try to reinitialize the cluster layout
@@ -1071,26 +1078,11 @@ class NodesManager:
                     )
                 cluster_slots = await startup_node.execute_command("CLUSTER SLOTS")
                 startup_nodes_reachable = True
-            except (ConnectionError, TimeoutError) as e:
+            except Exception as e:
+                # Try the next startup node.
+                # The exception is saved and raised only if we have no more nodes.
                 exception = e
                 continue
-            except ResponseError as e:
-                # Isn't a cluster connection, so it won't parse these
-                # exceptions automatically
-                message = e.__str__()
-                if "CLUSTERDOWN" in message or "MASTERDOWN" in message:
-                    continue
-                else:
-                    raise RedisClusterException(
-                        'ERROR sending "cluster slots" command to redis '
-                        f"server: {startup_node}. error: {message}"
-                    )
-            except Exception as e:
-                message = e.__str__()
-                raise RedisClusterException(
-                    'ERROR sending "cluster slots" command to redis '
-                    f"server {startup_node.name}. error: {message}"
-                )
 
             # CLUSTER SLOTS command results in the following output:
             # [[slot_section[from_slot,to_slot,master,replica1,...,replicaN]]]
@@ -1171,8 +1163,8 @@ class NodesManager:
 
         if not startup_nodes_reachable:
             raise RedisClusterException(
-                "Redis Cluster cannot be connected. Please provide at least "
-                "one reachable node. "
+                f"Redis Cluster cannot be connected. Please provide at least "
+                f"one reachable node"
             ) from exception
 
         # Check if the slots are not fully covered

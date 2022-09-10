@@ -1,6 +1,9 @@
 import random
 from abc import ABC, abstractmethod
 
+DEFAULT_CAP = 0.512
+DEFAULT_BASE = 0.008
+
 
 class AbstractBackoff(ABC):
     """Backoff interface"""
@@ -40,7 +43,7 @@ class NoBackoff(ConstantBackoff):
 class ExponentialBackoff(AbstractBackoff):
     """Exponential backoff upon failure"""
 
-    def __init__(self, cap, base):
+    def __init__(self, cap=DEFAULT_CAP, base=DEFAULT_BASE):
         """
         `cap`: maximum backoff time in seconds
         `base`: base backoff time in seconds
@@ -55,7 +58,7 @@ class ExponentialBackoff(AbstractBackoff):
 class FullJitterBackoff(AbstractBackoff):
     """Full jitter backoff upon failure"""
 
-    def __init__(self, cap, base):
+    def __init__(self, cap=DEFAULT_CAP, base=DEFAULT_BASE):
         """
         `cap`: maximum backoff time in seconds
         `base`: base backoff time in seconds
@@ -70,7 +73,7 @@ class FullJitterBackoff(AbstractBackoff):
 class EqualJitterBackoff(AbstractBackoff):
     """Equal jitter backoff upon failure"""
 
-    def __init__(self, cap, base):
+    def __init__(self, cap=DEFAULT_CAP, base=DEFAULT_BASE):
         """
         `cap`: maximum backoff time in seconds
         `base`: base backoff time in seconds
@@ -86,7 +89,7 @@ class EqualJitterBackoff(AbstractBackoff):
 class DecorrelatedJitterBackoff(AbstractBackoff):
     """Decorrelated jitter backoff upon failure"""
 
-    def __init__(self, cap, base):
+    def __init__(self, cap=DEFAULT_CAP, base=DEFAULT_BASE):
         """
         `cap`: maximum backoff time in seconds
         `base`: base backoff time in seconds
@@ -103,3 +106,7 @@ class DecorrelatedJitterBackoff(AbstractBackoff):
         temp = random.uniform(self._base, max_backoff)
         self._previous_backoff = min(self._cap, temp)
         return self._previous_backoff
+
+
+def get_default_backoff():
+    return EqualJitterBackoff()
