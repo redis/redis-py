@@ -1,4 +1,3 @@
-import copy
 import random
 import socket
 import sys
@@ -474,8 +473,9 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
              If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
              specific IP addresses, it is best to set it to false.
         :param cluster_error_retry_attempts:
-             Number of times to retry before raising an error when :class:`~.TimeoutError`
-             or :class:`~.ConnectionError` or :class:`~.ClusterDownError` are encountered
+             Number of times to retry before raising an error when
+             :class:`~.TimeoutError` or :class:`~.ConnectionError` or
+             :class:`~.ClusterDownError` are encountered
         :param connection_error_retry_attempts:
             Number of times to retry before reinitializing when :class:`~.TimeoutError`
             or :class:`~.ConnectionError` are encountered.
@@ -1510,8 +1510,8 @@ class NodesManager:
 
         if not startup_nodes_reachable:
             raise RedisClusterException(
-                f"Redis Cluster cannot be connected. Please provide at least "
-                f"one reachable node"
+                "Redis Cluster cannot be connected. Please provide at least "
+                "one reachable node"
             ) from exception
 
         # Create Redis connections to all nodes

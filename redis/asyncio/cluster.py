@@ -707,7 +707,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 return await target_node.execute_command(*args, **kwargs)
             except (BusyLoadingError, MaxConnectionsError):
                 raise
-            except (ConnectionError, TimeoutError) as e:
+            except (ConnectionError, TimeoutError):
                 # Connection retries are being handled in the node's
                 # Retry object.
                 # Remove the failed node from the startup nodes before we try
@@ -1163,8 +1163,8 @@ class NodesManager:
 
         if not startup_nodes_reachable:
             raise RedisClusterException(
-                f"Redis Cluster cannot be connected. Please provide at least "
-                f"one reachable node"
+                "Redis Cluster cannot be connected. Please provide at least "
+                "one reachable node"
             ) from exception
 
         # Check if the slots are not fully covered
