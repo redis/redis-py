@@ -687,6 +687,14 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         self.nodes_manager.default_node = node
         return True
 
+    def get_retry(self) -> Optional["Retry"]:
+        return self.retry
+
+    def set_retry(self, retry: "Retry") -> None:
+        self.retry = retry
+        for node in self.get_nodes():
+            node.redis_connection.set_retry(retry)
+
     def monitor(self, target_node=None):
         """
         Returns a Monitor object for the specified target node.

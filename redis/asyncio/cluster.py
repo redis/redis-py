@@ -495,6 +495,14 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         """Get the kwargs passed to :class:`~redis.asyncio.connection.Connection`."""
         return self.connection_kwargs
 
+    def get_retry(self) -> Optional["Retry"]:
+        return self.retry
+
+    def set_retry(self, retry: "Retry") -> None:
+        self.retry = retry
+        for node in self.get_nodes():
+            node.connection_kwargs.update({"retry": retry})
+
     def set_response_callback(self, command: str, callback: ResponseCallbackT) -> None:
         """Set a custom response callback."""
         self.response_callbacks[command] = callback

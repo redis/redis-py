@@ -249,9 +249,32 @@ class TestRedisClusterObj:
                 ]
             )
 
-    async def test_cluster_retry_object(self) -> None:
+    async def test_cluster_get_set_retry_object(self, request):
+        retry = Retry(NoBackoff(), 2)
+        url = request.config.getoption("--redis-url")
+        r = await RedisCluster.from_url(url, retry=retry)
+        assert r.get_retry()._retries == retry._retries
+        assert isinstance(r.get_retry()._backoff, NoBackoff)
+        for node in r.get_nodes():
+            n_retry = node.connection_kwargs.get("retry")
+            assert n_retry is not None
+            assert n_retry._retries == retry._retries
+            assert isinstance(n_retry._backoff, NoBackoff)
+        # Change retry policy
+        new_retry = Retry(ExponentialBackoff(), 3)
+        r.set_retry(new_retry)
+        assert r.get_retry()._retries == new_retry._retries
+        assert isinstance(r.get_retry()._backoff, ExponentialBackoff)
+        for node in r.get_nodes():
+            n_retry = node.connection_kwargs.get("retry")
+            assert n_retry is not None
+            assert n_retry._retries == new_retry._retries
+            assert isinstance(n_retry._backoff, ExponentialBackoff)
+
+    async def test_cluster_retry_object(self, request) -> None:
+        url = request.config.getoption("--redis-url")
+        rc_default = await RedisCluster.from_url(url)
         # Test default retry
-        rc_default = await RedisCluster("127.0.0.1", 16379)
         retry = rc_default.connection_kwargs.get("retry")
         assert isinstance(retry, Retry)
         assert retry._retries == 3
@@ -262,23 +285,21 @@ class TestRedisClusterObj:
 
         # Test custom retry
         retry = Retry(ExponentialBackoff(10, 5), 5)
-        rc_custom_retry = await RedisCluster("127.0.0.1", 16379, retry=retry)
+        rc_custom_retry = await RedisCluster.from_url(url, retry=retry)
         assert (
             rc_custom_retry.get_node("127.0.0.1", 16379).connection_kwargs.get("retry")
             == retry
         )
 
         # Test no connection retries
-        rc_no_retries = await RedisCluster(
-            "127.0.0.1", 16379, connection_error_retry_attempts=0
+        rc_no_retries = await RedisCluster.from_url(
+            url, connection_error_retry_attempts=0
         )
         assert (
             rc_no_retries.get_node("127.0.0.1", 16379).connection_kwargs.get("retry")
             is None
         )
-        rc_no_retries = await RedisCluster(
-            "127.0.0.1", 16379, retry=Retry(NoBackoff(), 0)
-        )
+        rc_no_retries = await RedisCluster.from_url(url, retry=Retry(NoBackoff(), 0))
         assert (
             rc_no_retries.get_node("127.0.0.1", 16379)
             .connection_kwargs.get("retry")
