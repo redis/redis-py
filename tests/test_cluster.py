@@ -365,7 +365,7 @@ class TestRedisClusterObj:
         key = "key"
         r.set("key", "value")
         primary = r.get_node_from_key(key, replica=False)
-        assert r.get("key") == "value"
+        assert str_if_bytes(r.get("key")) == "value"
         # Get the current output of cluster slots
         cluster_slots = primary.redis_connection.execute_command("CLUSTER SLOTS")
         replica_host = ""

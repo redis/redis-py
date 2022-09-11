@@ -110,10 +110,10 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
     :param startup_nodes:
         | :class:`~.ClusterNode` to used as a startup node
     :param require_full_coverage:
-        | When set to ``False``: the client will not require a full coverage of the
-          slots. However, if not all slots are covered, and at least one node has
-          ``cluster-require-full-coverage`` set to ``yes``, the server will throw a
-          :class:`~.ClusterDownError` for some key-based commands.
+        | When set to ``False``: the client will not require a full coverage of
+          the slots. However, if not all slots are covered, and at least one node
+          has ``cluster-require-full-coverage`` set to ``yes``, the server will throw
+          a :class:`~.ClusterDownError` for some key-based commands.
         | When set to ``True``: all slots must be covered to construct the cluster
           client. If not all slots are covered, :class:`~.RedisClusterException` will be
           thrown.
