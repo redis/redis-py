@@ -25,6 +25,7 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.lock import Lock
+from redis.retry import Retry
 from redis.utils import safe_str, str_if_bytes
 
 SYM_EMPTY = b""
