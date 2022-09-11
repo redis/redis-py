@@ -4,7 +4,7 @@ import sys
 import threading
 import time
 from collections import OrderedDict
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from redis.backoff import get_default_backoff
 from redis.client import CaseInsensitiveDict, PubSub, Redis, parse_scan
@@ -428,11 +428,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         self,
         host: Optional[str] = None,
         port: int = 6379,
-        startup_nodes: Optional[list["ClusterNode"]] = None,
+        startup_nodes: Optional[List["ClusterNode"]] = None,
         cluster_error_retry_attempts: int = 3,
         connection_error_retry_attempts: int = 3,
         retry: Optional["Retry"] = None,
-        retry_on_error: Optional[list[Exception]] = None,
+        retry_on_error: Optional[List[Exception]] = None,
         require_full_coverage: bool = False,
         reinitialize_steps: int = 10,
         read_from_replicas: bool = False,
@@ -1510,8 +1510,8 @@ class NodesManager:
 
         if not startup_nodes_reachable:
             raise RedisClusterException(
-                "Redis Cluster cannot be connected. Please provide at least "
-                "one reachable node"
+                f"Redis Cluster cannot be connected. Please provide at least "
+                f"one reachable node: {str(exception)}"
             ) from exception
 
         # Create Redis connections to all nodes
@@ -1697,9 +1697,9 @@ class ClusterPipeline(RedisCluster):
         self,
         nodes_manager: "NodesManager",
         commands_parser: "CommandsParser",
-        result_callbacks: Optional[dict[str, Callable]] = None,
-        cluster_response_callbacks: Optional[dict[str, Callable]] = None,
-        startup_nodes: Optional[list["ClusterNode"]] = None,
+        result_callbacks: Optional[Dict[str, Callable]] = None,
+        cluster_response_callbacks: Optional[Dict[str, Callable]] = None,
+        startup_nodes: Optional[List["ClusterNode"]] = None,
         read_from_replicas: bool = False,
         cluster_error_retry_attempts: int = 3,
         reinitialize_steps: int = 10,

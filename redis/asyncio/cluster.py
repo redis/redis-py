@@ -238,7 +238,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
         socket_timeout: Optional[float] = None,
         retry: Optional["Retry"] = None,
-        retry_on_error: Optional[list[Exception]] = None,
+        retry_on_error: Optional[List[Exception]] = None,
         # SSL related kwargs
         ssl: bool = False,
         ssl_ca_certs: Optional[str] = None,
@@ -1163,8 +1163,8 @@ class NodesManager:
 
         if not startup_nodes_reachable:
             raise RedisClusterException(
-                "Redis Cluster cannot be connected. Please provide at least "
-                "one reachable node"
+                f"Redis Cluster cannot be connected. Please provide at least "
+                f"one reachable node: {str(exception)}"
             ) from exception
 
         # Check if the slots are not fully covered
