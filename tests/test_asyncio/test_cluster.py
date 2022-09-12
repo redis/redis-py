@@ -1356,8 +1356,11 @@ class TestClusterRedisCommands:
         assert "addr" in info
 
     @skip_if_server_version_lt("2.6.9")
-    async def test_client_kill(self, r: RedisCluster, r2: RedisCluster) -> None:
+    async def test_client_kill(
+        self, r: RedisCluster, create_redis: Callable[..., RedisCluster]
+    ) -> None:
         node = r.get_primaries()[0]
+        r2 = await create_redis(cls=RedisCluster, flushdb=False)
         await r.client_setname("redis-py-c1", target_nodes="all")
         await r2.client_setname("redis-py-c2", target_nodes="all")
         clients = [
@@ -1378,6 +1381,7 @@ class TestClusterRedisCommands:
         ]
         assert len(clients) == 1
         assert clients[0].get("name") == "redis-py-c1"
+        await r2.close()
 
     @skip_if_server_version_lt("2.6.0")
     async def test_cluster_bitop_not_empty_string(self, r: RedisCluster) -> None:
