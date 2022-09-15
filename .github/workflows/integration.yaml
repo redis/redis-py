@@ -66,9 +66,9 @@ jobs:
            pip install -U setuptools wheel
            pip install -r dev_requirements.txt
            tox -e ${{matrix.test-type}}-${{matrix.connection-type}}
-      - uses: actions/upload-artifact@v2
-        if: success() || failure()
-        with:
+       - uses: actions/upload-artifact@v2
+         if: success() || failure()
+         with:
            name: pytest-results-${{matrix.test-type}}
            path: '${{matrix.test-type}}*results.xml'
        - name: View Test Results
@@ -76,7 +76,7 @@ jobs:
          if: success() || failure()
          with:
            name: Test Results
-           path: '${{matrix.test-type}}*results.xml'
+           path: '${{matrix.type-type}}*results.xml'
            reporter: java-junit
            list-suites: failed
            list-tests: failed
