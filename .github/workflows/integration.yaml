@@ -69,7 +69,7 @@ jobs:
       - uses: actions/upload-artifact@v2
         if: success() || failure()
         with:
-          name: pytest-results-${{matrix.test-type}}
+           name: pytest-results-${{matrix.test-type}}
            path: '${{matrix.test-type}}*results.xml'
        - name: View Test Results
          uses: dorny/test-reporter@v1
