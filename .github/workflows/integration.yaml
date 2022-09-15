@@ -75,8 +75,8 @@ jobs:
          uses: dorny/test-reporter@v1
          if: success() || failure()
          with:
-           name: Test Results
-           path: '${{matrix.type-type}}*results.xml'
+           name: Test Results ${{matrix.python-version}} ${{matrix.test-type}}-${{matrix.connectype-type}}
+           path: '${{matrix.test-type}}*results.xml'
            reporter: java-junit
            list-suites: failed
            list-tests: failed
