@@ -73,8 +73,8 @@ jobs:
            name: Test Results
            path: '${{matrix.type-type}}*results.xml'
            reporter: java-junit
-           list-suites: all
-           list-tests: all
+           list-suites: failed
+           list-tests: failed
            max-annotations: 10
        - name: Upload codecov coverage
          uses: codecov/codecov-action@v2
