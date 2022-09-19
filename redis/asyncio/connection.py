@@ -847,7 +847,7 @@ class Connection:
                     if os.getpid() == self.pid:
                         self._writer.close()  # type: ignore[union-attr]
                         # wait for close to finish, except when handling errors and
-                        # forcecully disconnecting.
+                        # forcefully disconnecting.
                         if not nowait:
                             await self._writer.wait_closed()  # type: ignore[union-attr]
                 except OSError:
