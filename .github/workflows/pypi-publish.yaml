@@ -14,16 +14,10 @@ jobs:
         uses: actions/setup-python@v3
         with:
           python-version: 3.9
-      - name: Install dev tools
-        run: |
-          pip install -r dev_requirements.txt
-          pip install twine wheel
-
+      - name: Install build
+        run: pip install build
       - name: Build package
-        run: |
-          python setup.py build
-          python setup.py sdist bdist_wheel
-
+        run: python -m build .
       - name: Publish to Pypi
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
