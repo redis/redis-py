@@ -27,7 +27,8 @@ To install redis-py, simply:
 $ pip install redis
 ```
 
-For faster performance, install redis with hiredis support, this provides a compiled response parser, and *for most cases* requires zero code changes. By default, if hiredis is available, redis-py will attempt to use it for response parsing.
+For faster performance, install redis with hiredis support, this provides a compiled response parser, and *for most cases* requires zero code changes.
+By default, if hiredis >= 1.0 is available, redis-py will attempt to use it for response parsing.
 
 ``` bash
 $ pip install redis[hiredis]
