@@ -21,12 +21,10 @@ jobs:
       - name: Install dev tools
         run: |
           pip install -r dev_requirements.txt
-          pip install twine wheel
+          pip install build twine wheel
 
       - name: Build package
-        run: |
-          python setup.py build
-          python setup.py sdist bdist_wheel
+        run: python -m build .
 
       - name: Basic package test prior to upload
         run: |

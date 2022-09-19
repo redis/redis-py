@@ -1,8 +1,0 @@
-include INSTALL
-include LICENSE
-include README.md
-include dev_requirements.txt
-include pytest.ini
-exclude __pycache__
-recursive-include tests *
-recursive-exclude tests *.pyc
