@@ -1,8 +1,6 @@
-from deprecated import deprecated
-
 from redis.client import NEVER_DECODE
 from redis.exceptions import ModuleError
-from redis.utils import HIREDIS_AVAILABLE
+from redis.utils import HIREDIS_AVAILABLE, deprecated_function
 
 BF_RESERVE = "BF.RESERVE"
 BF_ADD = "BF.ADD"
@@ -327,7 +325,7 @@ class TOPKCommands:
         """  # noqa
         return self.execute_command(TOPK_QUERY, key, *items)
 
-    @deprecated(version="4.4.0", reason="deprecated since redisbloom 2.4.0")
+    @deprecated_function(version="4.4.0", reason="deprecated since redisbloom 2.4.0")
     def count(self, key, *items):
         """
         Return count for one `item` or more from `key`.

@@ -2,9 +2,8 @@ import itertools
 import time
 from typing import Dict, Optional, Union
 
-from deprecated import deprecated
-
 from redis.client import Pipeline
+from redis.utils import deprecated_function
 
 from ..helpers import parse_to_dict
 from ._util import to_string
@@ -238,7 +237,7 @@ class SearchCommands:
 
         return self.execute_command(*args)
 
-    @deprecated(
+    @deprecated_function(
         version="2.0.0", reason="deprecated since redisearch 2.0, call hset instead"
     )
     def add_document(
@@ -294,7 +293,7 @@ class SearchCommands:
             **fields,
         )
 
-    @deprecated(
+    @deprecated_function(
         version="2.0.0", reason="deprecated since redisearch 2.0, call hset instead"
     )
     def add_document_hash(self, doc_id, score=1.0, language=None, replace=False):
