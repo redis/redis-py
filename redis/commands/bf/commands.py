@@ -448,7 +448,7 @@ class TDigestCommands:
         that are smaller than value + half the number of observations that are equal to value).
 
         For more information see `TDIGEST.RANK <https://redis.io/commands/tdigest.rank>`_.
-        """ # noqa
+        """  # noqa
         return self.execute_command(TDIGEST_RANK, key, value, *values)
 
     def revrank(self, key, value, *values):
@@ -457,7 +457,7 @@ class TDigestCommands:
         that are larger than value + half the number of observations that are equal to value).
 
         For more information see `TDIGEST.REVRANK <https://redis.io/commands/tdigest.revrank>`_.
-        """ # noqa
+        """  # noqa
         return self.execute_command(TDIGEST_REVRANK, key, value, *values)
 
     def byrank(self, key, rank, *ranks):
@@ -465,7 +465,7 @@ class TDigestCommands:
         Retrieve an estimation of the value with the given rank.
 
         For more information see `TDIGEST.BY_RANK <https://redis.io/commands/tdigest.by_rank>`_.
-        """ # noqa
+        """  # noqa
         return self.execute_command(TDIGEST_BYRANK, key, rank, *ranks)
 
     def byrevrank(self, key, rank, *ranks):
@@ -473,7 +473,7 @@ class TDigestCommands:
         Retrieve an estimation of the value with the given reverse rank.
 
         For more information see `TDIGEST.BY_REVRANK <https://redis.io/commands/tdigest.by_revrank>`_.
-        """ # noqa
+        """  # noqa
         return self.execute_command(TDIGEST_BYREVRANK, key, rank, *ranks)
 
 
