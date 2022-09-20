@@ -1,4 +1,5 @@
 from math import inf
+
 import pytest
 
 import redis.commands.bf
