@@ -4,7 +4,7 @@ import string
 import pytest
 
 import redis
-from redis import AuthenticationError, ResponseError
+from redis import AuthenticationError, ResponseError, DataError
 from redis.credentials import CredentialProvider, StaticCredentialProvider
 from tests.conftest import _get_client, skip_if_redis_enterprise
 
@@ -186,3 +186,12 @@ class TestStaticCredentialProvider:
         )
         assert r2.auth(provider.password) is True
         assert r2.ping() is True
+
+    def test_password_and_username_together_with_cred_provider_raise_error(self, request):
+        provider = StaticCredentialProvider(password="password")
+        with pytest.raises(DataError) as e:
+            _get_client(
+                redis.Redis, request, flushdb=False, credential_provider=provider
+            )
+        assert e.match("'username' and 'password' cannot be passed along with "
+                       "'credential_provider'.")

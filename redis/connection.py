@@ -517,9 +517,20 @@ class Connection:
         self.port = int(port)
         self.db = db
         self.client_name = client_name
+        if (username or password) and credential_provider is not None:
+            raise DataError(
+                "'username' and 'password' cannot be passed along with 'credential_provider'. "
+                "Please provide only one of the following arguments: \n"
+                "1. 'password' and (optional) 'username'\n"
+                "2. 'credential_provider'"
+            )
+
         self.credential_provider = credential_provider
-        if (username or password) and self.credential_provider is None:
-            # username and password backward compatibility
+        self.username = username
+        self.password = password
+        if username or password:
+            # Keep backward compatibility by creating a static credential provider
+            # for the passed username and password
             self.credential_provider = StaticCredentialProvider(username, password)
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout
@@ -695,7 +706,7 @@ class Connection:
                 # https://github.com/andymccurdy/redis-py/issues/1274
                 self.send_command(
                     "AUTH",
-                    self.credential_provider.password,
+                    auth_args[-1],
                     check_health=False,
                 )
                 auth_response = self.read_response()
@@ -1068,9 +1079,19 @@ class UnixDomainSocketConnection(Connection):
         self.path = path
         self.db = db
         self.client_name = client_name
+        if (username or password) and credential_provider is not None:
+            raise DataError(
+                "'username' and 'password' cannot be passed along with 'credential_provider'. "
+                "Please provide only one of the following arguments: \n"
+                "1. 'password' and (optional) 'username'\n"
+                "2. 'credential_provider'"
+            )
         self.credential_provider = credential_provider
-        if (username or password) and self.credential_provider is None:
-            # username and password backward compatibility
+        self.username = username
+        self.password = password
+        if username or password:
+            # Keep backward compatibility by creating a static credential provider
+            # for the passed username and password
             self.credential_provider = StaticCredentialProvider(username, password)
         self.socket_timeout = socket_timeout
         self.retry_on_timeout = retry_on_timeout
