@@ -519,8 +519,8 @@ class Connection:
         self.client_name = client_name
         if (username or password) and credential_provider is not None:
             raise DataError(
-                "'username' and 'password' cannot be passed along with 'credential_provider'. "
-                "Please provide only one of the following arguments: \n"
+                "'username' and 'password' cannot be passed along with 'credential_"
+                "provider'. Please provide only one of the following arguments: \n"
                 "1. 'password' and (optional) 'username'\n"
                 "2. 'credential_provider'"
             )
@@ -1081,8 +1081,8 @@ class UnixDomainSocketConnection(Connection):
         self.client_name = client_name
         if (username or password) and credential_provider is not None:
             raise DataError(
-                "'username' and 'password' cannot be passed along with 'credential_provider'. "
-                "Please provide only one of the following arguments: \n"
+                "'username' and 'password' cannot be passed along with 'credential_"
+                "provider'. Please provide only one of the following arguments: \n"
                 "1. 'password' and (optional) 'username'\n"
                 "2. 'credential_provider'"
             )
