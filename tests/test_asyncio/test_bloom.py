@@ -1,5 +1,6 @@
-import pytest
 from math import inf
+
+import pytest
 
 import redis.asyncio as redis
 from redis.exceptions import ModuleError, RedisError
