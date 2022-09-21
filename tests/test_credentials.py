@@ -157,6 +157,28 @@ class TestCredentialsProvider:
             )
         assert e.match("invalid username-password")
 
+    @pytest.mark.onlynoncluster
+    def test_password_and_username_together_with_cred_provider_raise_error(
+        self, r, request
+    ):
+        init_acl_user(r, request, "username", "password")
+        cred_provider = StaticCredentialProvider(
+            username="username", password="password"
+        )
+        with pytest.raises(DataError) as e:
+            _get_client(
+                redis.Redis,
+                request,
+                flushdb=False,
+                username="username",
+                password="password",
+                credential_provider=cred_provider,
+            )
+        assert e.match(
+            "'username' and 'password' cannot be passed along with "
+            "'credential_provider'."
+        )
+
 
 class TestStaticCredentialProvider:
     def test_static_credential_provider_acl_user_and_pass(self, r, request):
@@ -186,14 +208,3 @@ class TestStaticCredentialProvider:
         )
         assert r2.auth(provider.password) is True
         assert r2.ping() is True
-
-    def test_password_and_username_together_with_cred_provider_raise_error(
-        self, request
-    ):
-        creds = StaticCredentialProvider(password="password")
-        with pytest.raises(DataError) as e:
-            _get_client(redis.Redis, request, flushdb=False, credential_provider=creds)
-        assert e.match(
-            "'username' and 'password' cannot be passed along with "
-            "'credential_provider'."
-        )
