@@ -52,7 +52,10 @@ TDIGEST_MIN = "TDIGEST.MIN"
 TDIGEST_MAX = "TDIGEST.MAX"
 TDIGEST_INFO = "TDIGEST.INFO"
 TDIGEST_TRIMMED_MEAN = "TDIGEST.TRIMMED_MEAN"
-TDIGEST_MERGESTORE = "TDIGEST.MERGESTORE"
+TDIGEST_RANK = "TDIGEST.RANK"
+TDIGEST_REVRANK = "TDIGEST.REVRANK"
+TDIGEST_BYRANK = "TDIGEST.BYRANK"
+TDIGEST_BYREVRANK = "TDIGEST.BYREVRANK"
 
 
 class BFCommands:
@@ -381,12 +384,22 @@ class TDigestCommands:
         self.append_values_and_weights(params, values, weights)
         return self.execute_command(TDIGEST_ADD, *params)
 
-    def merge(self, toKey, fromKey):
+    def merge(self, destination_key, num_keys, *keys, compression=None, override=False):
         """
-        Merge all of the values from 'fromKey' to 'toKey' sketch.
+        Merges all of the values from `keys` to 'destination-key' sketch.
+        It is mandatory to provide the `num_keys` before passing the input keys and
+        the other (optional) arguments.
+        If `destination_key` already exists its values are merged with the input keys.
+        If you wish to override the destination key contents use the `OVERRIDE` parameter.
+
         For more information see `TDIGEST.MERGE <https://redis.io/commands/tdigest.merge>`_.
         """  # noqa
-        return self.execute_command(TDIGEST_MERGE, toKey, fromKey)
+        params = [destination_key, num_keys, *keys]
+        if compression is not None:
+            params.extend(["COMPRESSION", compression])
+        if override:
+            params.append("OVERRIDE")
+        return self.execute_command(TDIGEST_MERGE, *params)
 
     def min(self, key):
         """
@@ -411,12 +424,12 @@ class TDigestCommands:
         """  # noqa
         return self.execute_command(TDIGEST_QUANTILE, key, quantile, *quantiles)
 
-    def cdf(self, key, value):
+    def cdf(self, key, value, *values):
         """
         Return double fraction of all points added which are <= value.
         For more information see `TDIGEST.CDF <https://redis.io/commands/tdigest.cdf>`_.
         """  # noqa
-        return self.execute_command(TDIGEST_CDF, key, value)
+        return self.execute_command(TDIGEST_CDF, key, value, *values)
 
     def info(self, key):
         """
@@ -436,18 +449,39 @@ class TDigestCommands:
             TDIGEST_TRIMMED_MEAN, key, low_cut_quantile, high_cut_quantile
         )
 
-    def mergestore(self, dest_key, numkeys, *sourcekeys, compression=False):
+    def rank(self, key, value, *values):
         """
-        Merges all of the values from `sourcekeys` keys to `dest_key` sketch.
-        If destination already exists, it is overwritten.
+        Retrieve the estimated rank of value (the number of observations in the sketch
+        that are smaller than value + half the number of observations that are equal to value).
 
-
-        For more information see `TDIGEST.MERGESTORE <https://redis.io/commands/tdigest.mergestore>`_.
+        For more information see `TDIGEST.RANK <https://redis.io/commands/tdigest.rank>`_.
         """  # noqa
-        params = [dest_key, numkeys, *sourcekeys]
-        if compression:
-            params.extend(["COMPRESSION", compression])
-        return self.execute_command(TDIGEST_MERGESTORE, *params)
+        return self.execute_command(TDIGEST_RANK, key, value, *values)
+
+    def revrank(self, key, value, *values):
+        """
+        Retrieve the estimated rank of value (the number of observations in the sketch
+        that are larger than value + half the number of observations that are equal to value).
+
+        For more information see `TDIGEST.REVRANK <https://redis.io/commands/tdigest.revrank>`_.
+        """  # noqa
+        return self.execute_command(TDIGEST_REVRANK, key, value, *values)
+
+    def byrank(self, key, rank, *ranks):
+        """
+        Retrieve an estimation of the value with the given rank.
+
+        For more information see `TDIGEST.BY_RANK <https://redis.io/commands/tdigest.by_rank>`_.
+        """  # noqa
+        return self.execute_command(TDIGEST_BYRANK, key, rank, *ranks)
+
+    def byrevrank(self, key, rank, *ranks):
+        """
+        Retrieve an estimation of the value with the given reverse rank.
+
+        For more information see `TDIGEST.BY_REVRANK <https://redis.io/commands/tdigest.by_revrank>`_.
+        """  # noqa
+        return self.execute_command(TDIGEST_BYREVRANK, key, rank, *ranks)
 
 
 class CMSCommands:
