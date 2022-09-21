@@ -71,6 +71,10 @@ jobs:
          with:
            name: pytest-results-${{matrix.test-type}}
            path: '${{matrix.test-type}}*results.xml'
+       - name: Upload codecov coverage
+         uses: codecov/codecov-action@v3
+         with:
+           fail_ci_if_error: false
       #  - name: View Test Results
       #    uses: dorny/test-reporter@v1
       #    if: success() || failure()
@@ -81,11 +85,6 @@ jobs:
       #      list-suites: failed
       #      list-tests: failed
       #      max-annotations: 10
-      #  - name: Upload codecov coverage
-      #    uses: codecov/codecov-action@v2
-      #    with:
-      #      fail_ci_if_error: false
-      #      token: ${{ secrets.CODECOV_TOKEN }}
 
    build_and_test_package:
     name: Validate building and installing the package
