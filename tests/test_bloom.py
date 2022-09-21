@@ -41,6 +41,21 @@ def test_create(client):
 
 
 @pytest.mark.redismod
+def test_bf_reserve(client):
+    """Testing BF.RESERVE"""
+    assert client.bf().reserve("bloom", 0.01, 1000)
+    assert client.bf().reserve("bloom_e", 0.01, 1000, expansion=1)
+    assert client.bf().reserve("bloom_ns", 0.01, 1000, noScale=True)
+    assert client.cf().reserve("cuckoo", 1000)
+    assert client.cf().reserve("cuckoo_e", 1000, expansion=1)
+    assert client.cf().reserve("cuckoo_bs", 1000, bucket_size=4)
+    assert client.cf().reserve("cuckoo_mi", 1000, max_iterations=10)
+    assert client.cms().initbydim("cmsDim", 100, 5)
+    assert client.cms().initbyprob("cmsProb", 0.01, 0.01)
+    assert client.topk().reserve("topk", 5, 100, 5, 0.9)
+
+
+@pytest.mark.redismod
 @pytest.mark.experimental
 def test_tdigest_create(client):
     assert client.tdigest().create("tDigest", 100)
@@ -267,9 +282,10 @@ def test_topk(client):
     assert [1, 1, 0, 0, 1, 0, 0] == client.topk().query(
         "topk", "A", "B", "C", "D", "E", "F", "G"
     )
-    assert [4, 3, 2, 3, 3, 0, 1] == client.topk().count(
-        "topk", "A", "B", "C", "D", "E", "F", "G"
-    )
+    with pytest.deprecated_call():
+        assert [4, 3, 2, 3, 3, 0, 1] == client.topk().count(
+            "topk", "A", "B", "C", "D", "E", "F", "G"
+        )
 
     # test full list
     assert client.topk().reserve("topklist", 3, 50, 3, 0.9)
@@ -309,9 +325,10 @@ def test_topk_incrby(client):
         "topk", ["bar", "baz", "42"], [3, 6, 2]
     )
     assert [None, "bar"] == client.topk().incrby("topk", ["42", "xyzzy"], [8, 4])
-    assert [3, 6, 10, 4, 0] == client.topk().count(
-        "topk", "bar", "baz", "42", "xyzzy", 4
-    )
+    with pytest.deprecated_call():
+        assert [3, 6, 10, 4, 0] == client.topk().count(
+            "topk", "bar", "baz", "42", "xyzzy", 4
+        )
 
 
 # region Test T-Digest

@@ -1,3 +1,5 @@
+from deprecated import deprecated
+
 from redis.client import NEVER_DECODE
 from redis.exceptions import ModuleError
 from redis.utils import HIREDIS_AVAILABLE
@@ -71,6 +73,8 @@ class BFCommands:
         self.append_expansion(params, expansion)
         self.append_no_scale(params, noScale)
         return self.execute_command(BF_RESERVE, *params)
+
+    reserve = create
 
     def add(self, key, item):
         """
@@ -180,6 +184,8 @@ class CFCommands:
         self.append_bucket_size(params, bucket_size)
         self.append_max_iterations(params, max_iterations)
         return self.execute_command(CF_RESERVE, *params)
+
+    reserve = create
 
     def add(self, key, item):
         """
@@ -321,6 +327,7 @@ class TOPKCommands:
         """  # noqa
         return self.execute_command(TOPK_QUERY, key, *items)
 
+    @deprecated(version="4.4.0", reason="deprecated since redisbloom 2.4.0")
     def count(self, key, *items):
         """
         Return count for one `item` or more from `key`.

@@ -2986,7 +2986,8 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     async def test_module_list(self, r: redis.Redis):
         assert isinstance(await r.module_list(), list)
-        assert not await r.module_list()
+        for x in await r.module_list():
+            assert isinstance(x, dict)
 
 
 @pytest.mark.onlynoncluster

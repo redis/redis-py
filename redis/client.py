@@ -945,6 +945,12 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         `retry_on_error` to a list of the error/s to retry on, then set
         `retry` to a valid `Retry` object.
         To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
+
+        Args:
+
+        single_connection_client:
+            if `True`, connection pool is not used. In that case `Redis`
+            instance use is not thread safe.
         """
         if not connection_pool:
             if charset is not None:
