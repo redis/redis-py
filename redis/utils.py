@@ -4,7 +4,8 @@ from typing import Any, Dict, Mapping, Union
 try:
     import hiredis  # noqa
 
-    HIREDIS_AVAILABLE = True
+    # Only support Hiredis >= 1.0:
+    HIREDIS_AVAILABLE = not hiredis.__version__.startswith("0.")
 except ImportError:
     HIREDIS_AVAILABLE = False
 
