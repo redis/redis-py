@@ -31,9 +31,8 @@ jobs:
      name: Code linters
      runs-on: ubuntu-latest
      steps:
-       - uses: actions/checkout@v2
-       - name: install python
-         uses: actions/setup-python@v4
+       - uses: actions/checkout@v3
+       - uses: actions/setup-python@v4
          with:
            python-version: 3.9
            cache: 'pip'
@@ -55,9 +54,8 @@ jobs:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
      name: Python ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}} tests
      steps:
-       - uses: actions/checkout@v2
-       - name: install python
-         uses: actions/setup-python@v4
+       - uses: actions/checkout@v3
+       - uses: actions/setup-python@v4
          with:
            python-version: ${{ matrix.python-version }}
            cache: 'pip'
@@ -93,9 +91,8 @@ jobs:
       matrix:
         extension: ['tar.gz', 'whl']
     steps:
-      - uses: actions/checkout@v2
-      - name: install python
-        uses: actions/setup-python@v3
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
           python-version: 3.9
       - name: Run installed unit tests
@@ -109,9 +106,8 @@ jobs:
       matrix:
         python-version: ['3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
     steps:
-      - uses: actions/checkout@v2
-      - name: install python ${{ matrix.python-version }}
-        uses: actions/setup-python@v3
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
