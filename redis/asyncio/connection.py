@@ -671,7 +671,6 @@ class Connection:
         self.set_parser(parser_class)
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
-        self._lock = asyncio.Lock()
 
     def __repr__(self):
         repr_args = ",".join((f"{k}={v}" for k, v in self.repr_pieces()))
@@ -942,39 +941,6 @@ class Connection:
     async def read_response(self, disable_decoding: bool = False):
         """Read the response from a previously sent command"""
         try:
-            async with self._lock:
-                if self.socket_timeout:
-                    async with async_timeout.timeout(self.socket_timeout):
-                        response = await self._parser.read_response(
-                            disable_decoding=disable_decoding
-                        )
-                else:
-                    response = await self._parser.read_response(
-                        disable_decoding=disable_decoding
-                    )
-        except asyncio.TimeoutError:
-            await self.disconnect()
-            raise TimeoutError(f"Timeout reading from {self.host}:{self.port}")
-        except OSError as e:
-            await self.disconnect()
-            raise ConnectionError(
-                f"Error while reading from {self.host}:{self.port} : {e.args}"
-            )
-        except BaseException:
-            await self.disconnect()
-            raise
-
-        if self.health_check_interval:
-            next_time = asyncio.get_running_loop().time() + self.health_check_interval
-            self.next_health_check = next_time
-
-        if isinstance(response, ResponseError):
-            raise response from None
-        return response
-
-    async def read_response_without_lock(self, disable_decoding: bool = False):
-        """Read the response from a previously sent command"""
-        try:
             if self.socket_timeout:
                 async with async_timeout.timeout(self.socket_timeout):
                     response = await self._parser.read_response(
@@ -1241,7 +1207,6 @@ class UnixDomainSocketConnection(Connection):  # lgtm [py/missing-call-to-init]
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
-        self._lock = asyncio.Lock()
 
     def repr_pieces(self) -> Iterable[Tuple[str, Union[str, int]]]:
         pieces = [("path", self.path), ("db", self.db)]
