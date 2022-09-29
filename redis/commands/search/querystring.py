@@ -131,6 +131,14 @@ class GeoValue(Value):
         self.lat = lat
         self.radius = radius
         self.unit = unit
+    
+    def to_string(self):
+        return "[{0} {1} {2} {3}]".format(
+            self.lon,
+            self.lat,
+            self.radius,
+            self.unit
+        )
 
 
 class Node:
