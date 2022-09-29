@@ -24,8 +24,6 @@ from typing import (
     cast,
 )
 
-import async_timeout
-
 from redis.asyncio.connection import (
     Connection,
     ConnectionPool,
