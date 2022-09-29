@@ -502,8 +502,6 @@ class HiredisParser(BaseParser):
             # data was read from the socket and added to the buffer.
             # return True to indicate that data was read.
             return True
-        except asyncio.CancelledError:
-            raise
         except (socket.timeout, asyncio.TimeoutError):
             if raise_on_timeout:
                 raise TimeoutError("Timeout reading from socket") from None
@@ -721,7 +719,7 @@ class Connection:
                 lambda: self._connect(), lambda error: self.disconnect()
             )
         except asyncio.CancelledError:
-            raise
+            raise  # in 3.7 and earlier, this is an Exception, not BaseException
         except (socket.timeout, asyncio.TimeoutError):
             raise TimeoutError("Timeout connecting to server")
         except OSError as e:
@@ -916,7 +914,7 @@ class Connection:
             raise ConnectionError(
                 f"Error {err_no} while writing to socket. {errmsg}."
             ) from e
-        except BaseException:
+        except Exception:
             await self.disconnect()
             raise
 
@@ -958,7 +956,7 @@ class Connection:
             raise ConnectionError(
                 f"Error while reading from {self.host}:{self.port} : {e.args}"
             )
-        except BaseException:
+        except Exception:
             await self.disconnect()
             raise
 

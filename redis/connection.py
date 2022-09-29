@@ -766,7 +766,7 @@ class Connection:
                 errno = e.args[0]
                 errmsg = e.args[1]
             raise ConnectionError(f"Error {errno} while writing to socket. {errmsg}.")
-        except BaseException:
+        except Exception:
             self.disconnect()
             raise
 
@@ -804,7 +804,7 @@ class Connection:
         except OSError as e:
             self.disconnect()
             raise ConnectionError(f"Error while reading from {hosterr}" f" : {e.args}")
-        except BaseException:
+        except Exception:
             self.disconnect()
             raise
 

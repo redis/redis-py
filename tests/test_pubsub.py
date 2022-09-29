@@ -735,3 +735,45 @@ class TestPubSubAutoReconnect:
         for message in self.pubsub.listen():
             self.messages.put(message)
             return True
+
+
+@pytest.mark.onlynoncluster
+class TestBaseException:
+    def test_base_exception(self, r: redis.Redis):
+        """
+        Manually trigger a BaseException inside the parser's .read_response method
+        and verify that it isn't caught
+        """
+        pubsub = r.pubsub()
+        pubsub.subscribe("foo")
+
+        def is_connected():
+            return pubsub.connection._sock is not None
+
+        assert is_connected()
+
+        def get_msg():
+            # blocking method to return messages
+            while True:
+                response = pubsub.parse_response(block=True)
+                message = pubsub.handle_message(
+                    response, ignore_subscribe_messages=False
+                )
+                if message is not None:
+                    return message
+
+        # get subscribe message
+        msg = get_msg()
+        assert msg is not None
+        # timeout waiting for another message which never arrives
+        assert is_connected()
+        with patch("redis.connection.PythonParser.read_response") as mock1:
+            mock1.side_effect = BaseException("boom")
+            with patch("redis.connection.HiredisParser.read_response") as mock2:
+                mock2.side_effect = BaseException("boom")
+
+                with pytest.raises(BaseException):
+                    get_msg()
+
+        # the timeout on the read should not cause disconnect
+        assert is_connected()
