@@ -18,8 +18,8 @@ class CredentialProvider:
         :param supplier_args: arguments to pass to the supplier function
         :param supplier_kwargs: keyword arguments to pass to the supplier function
         """
-        self.__username = "" if username is None else username
-        self.__password = "" if password is None else password
+        self._username_ = "" if username is None else username
+        self._password_ = "" if password is None else password
         self.supplier = supplier
         self.supplier_args = supplier_args
         self.supplier_kwargs = supplier_kwargs
@@ -31,34 +31,34 @@ class CredentialProvider:
             )
 
         return (
-            (self.__username, self.__password)
-            if self.__username
-            else (self.__password,)
+            (self._username_, self._password_)
+            if self._username_
+            else (self._password_,)
         )
 
     @property
     def password(self):
-        if self.supplier is not None and not self.__password:
+        if self.supplier is not None and not self._password_:
             self.username, self.password = self.supplier(
                 self, *self.supplier_args, **self.supplier_kwargs
             )
-        return self.__password
+        return self._password_
 
     @password.setter
     def password(self, value):
-        self.__password = value
+        self._password_ = value
 
     @property
     def username(self):
-        if self.supplier is not None and not self.__username:
+        if self.supplier is not None and not self._username_:
             self.username, self.password = self.supplier(
                 self, *self.supplier_args, **self.supplier_kwargs
             )
-        return self.__username
+        return self._username_
 
     @username.setter
     def username(self, value):
-        self.__username = value
+        self._username_ = value
 
 
 class StaticCredentialProvider(CredentialProvider):
