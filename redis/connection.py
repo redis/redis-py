@@ -8,6 +8,7 @@ import weakref
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
+from typing import Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
 from redis.backoff import NoBackoff
@@ -526,8 +527,6 @@ class Connection:
             )
 
         self.credential_provider = credential_provider
-        self.username = username
-        self.password = password
         if username or password:
             # Keep backward compatibility by creating a static credential provider
             # for the passed username and password
@@ -563,6 +562,38 @@ class Connection:
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
+
+    @property
+    def password(self) -> Optional[str]:
+        if self.credential_provider is not None:
+            return self.credential_provider.password
+        else:
+            return None
+
+    @password.setter
+    def password(self, value: Optional[str]):
+        if value is None:
+            # Delete the credential provider
+            self.credential_provider = None
+            return
+        if self.credential_provider is not None:
+            self.credential_provider.password = value
+        else:
+            self.credential_provider = StaticCredentialProvider(password=value)
+
+    @property
+    def username(self) -> Optional[str]:
+        if self.credential_provider is not None:
+            return self.credential_provider.username
+        else:
+            return None
+
+    @username.setter
+    def username(self, value: Optional[str]):
+        if self.credential_provider is not None:
+            self.credential_provider.username = value
+        else:
+            self.credential_provider = StaticCredentialProvider(username=value)
 
     def __repr__(self):
         repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
@@ -1087,8 +1118,6 @@ class UnixDomainSocketConnection(Connection):
                 "2. 'credential_provider'"
             )
         self.credential_provider = credential_provider
-        self.username = username
-        self.password = password
         if username or password:
             # Keep backward compatibility by creating a static credential provider
             # for the passed username and password
@@ -1120,6 +1149,38 @@ class UnixDomainSocketConnection(Connection):
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
+
+    @property
+    def password(self) -> Optional[str]:
+        if self.credential_provider is not None:
+            return self.credential_provider.password
+        else:
+            return None
+
+    @password.setter
+    def password(self, value: Optional[str]):
+        if value is None:
+            # Delete the credential provider
+            self.credential_provider = None
+            return
+        if self.credential_provider is not None:
+            self.credential_provider.password = value
+        else:
+            self.credential_provider = StaticCredentialProvider(password=value)
+
+    @property
+    def username(self) -> Optional[str]:
+        if self.credential_provider is not None:
+            return self.credential_provider.username
+        else:
+            return None
+
+    @username.setter
+    def username(self, value: Optional[str]):
+        if self.credential_provider is not None:
+            self.credential_provider.username = value
+        else:
+            self.credential_provider = StaticCredentialProvider(username=value)
 
     def repr_pieces(self):
         pieces = [("path", self.path), ("db", self.db)]

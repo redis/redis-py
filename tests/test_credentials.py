@@ -6,6 +6,7 @@ import pytest
 import redis
 from redis import AuthenticationError, DataError, ResponseError
 from redis.credentials import CredentialProvider, StaticCredentialProvider
+from redis.utils import str_if_bytes
 from tests.conftest import _get_client, skip_if_redis_enterprise
 
 
@@ -178,6 +179,34 @@ class TestCredentialsProvider:
             "'username' and 'password' cannot be passed along with "
             "'credential_provider'."
         )
+
+    @pytest.mark.onlynoncluster
+    def test_change_username_password_on_existing_connection(self, r, request):
+        username = "origin_username"
+        password = "origin_password"
+        new_username = "new_username"
+        new_password = "new_password"
+        init_acl_user(r, request, username, password)
+        r2 = _get_client(
+            redis.Redis, request, flushdb=False, username=username, password=password
+        )
+        assert r2.ping()
+        conn = r2.connection_pool.get_connection("_")
+        conn.send_command("PING")
+        assert str_if_bytes(conn.read_response()) == "PONG"
+        assert conn.username == username
+        assert conn.password == password
+        init_acl_user(r, request, new_username, new_password)
+        conn.password = new_password
+        conn.username = new_username
+        assert conn.credential_provider.password == new_password
+        assert conn.credential_provider.username == new_username
+        conn.send_command("PING")
+        assert str_if_bytes(conn.read_response()) == "PONG"
+        conn.username = None
+        assert conn.credential_provider.username == ""
+        conn.password = None
+        assert conn.credential_provider is None
 
 
 class TestStaticCredentialProvider:
