@@ -8,7 +8,6 @@ import weakref
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
-from typing import Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
 from redis.backoff import NoBackoff
@@ -527,10 +526,8 @@ class Connection:
             )
 
         self.credential_provider = credential_provider
-        if username or password:
-            # Keep backward compatibility by creating a static credential provider
-            # for the passed username and password
-            self.credential_provider = StaticCredentialProvider(username, password)
+        self.password = password
+        self.username = username
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout
         self.socket_keepalive = socket_keepalive
@@ -562,38 +559,6 @@ class Connection:
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
-
-    @property
-    def password(self) -> Optional[str]:
-        if self.credential_provider is not None:
-            return self.credential_provider.password
-        else:
-            return None
-
-    @password.setter
-    def password(self, value: Optional[str]):
-        if value is None:
-            # Delete the credential provider
-            self.credential_provider = None
-            return
-        if self.credential_provider is not None:
-            self.credential_provider.password = value
-        else:
-            self.credential_provider = StaticCredentialProvider(password=value)
-
-    @property
-    def username(self) -> Optional[str]:
-        if self.credential_provider is not None:
-            return self.credential_provider.username
-        else:
-            return None
-
-    @username.setter
-    def username(self, value: Optional[str]):
-        if self.credential_provider is not None:
-            self.credential_provider.username = value
-        else:
-            self.credential_provider = StaticCredentialProvider(username=value)
 
     def __repr__(self):
         repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
@@ -721,9 +686,14 @@ class Connection:
         "Initialize the connection, authenticate and select a database"
         self._parser.on_connect(self)
 
-        # if credentials provider is set, authenticate
-        if self.credential_provider is not None:
-            auth_args = self.credential_provider.get_credentials()
+        # if credential provider or username and/or password are set, authenticate
+        if self.credential_provider or (self.username or self.password):
+            cred_provider = (
+                self.credential_provider
+                if self.credential_provider
+                else StaticCredentialProvider(self.username, self.password)
+            )
+            auth_args = cred_provider.get_credentials()
             # avoid checking health here -- PING will fail if we try
             # to check the health prior to the AUTH
             self.send_command("AUTH", *auth_args, check_health=False)
@@ -1118,10 +1088,8 @@ class UnixDomainSocketConnection(Connection):
                 "2. 'credential_provider'"
             )
         self.credential_provider = credential_provider
-        if username or password:
-            # Keep backward compatibility by creating a static credential provider
-            # for the passed username and password
-            self.credential_provider = StaticCredentialProvider(username, password)
+        self.password = password
+        self.username = username
         self.socket_timeout = socket_timeout
         self.retry_on_timeout = retry_on_timeout
         if retry_on_error is SENTINEL:
@@ -1149,38 +1117,6 @@ class UnixDomainSocketConnection(Connection):
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
-
-    @property
-    def password(self) -> Optional[str]:
-        if self.credential_provider is not None:
-            return self.credential_provider.password
-        else:
-            return None
-
-    @password.setter
-    def password(self, value: Optional[str]):
-        if value is None:
-            # Delete the credential provider
-            self.credential_provider = None
-            return
-        if self.credential_provider is not None:
-            self.credential_provider.password = value
-        else:
-            self.credential_provider = StaticCredentialProvider(password=value)
-
-    @property
-    def username(self) -> Optional[str]:
-        if self.credential_provider is not None:
-            return self.credential_provider.username
-        else:
-            return None
-
-    @username.setter
-    def username(self, value: Optional[str]):
-        if self.credential_provider is not None:
-            self.credential_provider.username = value
-        else:
-            self.credential_provider = StaticCredentialProvider(username=value)
 
     def repr_pieces(self):
         pieces = [("path", self.path), ("db", self.db)]

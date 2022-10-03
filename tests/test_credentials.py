@@ -199,14 +199,10 @@ class TestCredentialsProvider:
         init_acl_user(r, request, new_username, new_password)
         conn.password = new_password
         conn.username = new_username
-        assert conn.credential_provider.password == new_password
-        assert conn.credential_provider.username == new_username
         conn.send_command("PING")
         assert str_if_bytes(conn.read_response()) == "PONG"
         conn.username = None
-        assert conn.credential_provider.username == ""
         conn.password = None
-        assert conn.credential_provider is None
 
 
 class TestStaticCredentialProvider:
