@@ -1,7 +1,9 @@
 import random
 from abc import ABC, abstractmethod
 
+# Maximum backoff between each retry in seconds
 DEFAULT_CAP = 0.512
+# Minimum backoff between each retry in seconds
 DEFAULT_BASE = 0.008
 
 
@@ -108,5 +110,5 @@ class DecorrelatedJitterBackoff(AbstractBackoff):
         return self._previous_backoff
 
 
-def get_default_backoff():
+def default_backoff():
     return EqualJitterBackoff()

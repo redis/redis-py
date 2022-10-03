@@ -6,7 +6,7 @@ import time
 from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from redis.backoff import get_default_backoff
+from redis.backoff import default_backoff, NoBackoff
 from redis.client import CaseInsensitiveDict, PubSub, Redis, parse_scan
 from redis.commands import READ_COMMANDS, CommandsParser, RedisClusterCommands
 from redis.connection import ConnectionPool, DefaultParser, Encoder, parse_url
@@ -430,9 +430,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         port: int = 6379,
         startup_nodes: Optional[List["ClusterNode"]] = None,
         cluster_error_retry_attempts: int = 3,
-        connection_error_retry_attempts: int = 3,
         retry: Optional["Retry"] = None,
-        retry_on_error: Optional[List[Exception]] = None,
         require_full_coverage: bool = False,
         reinitialize_steps: int = 10,
         read_from_replicas: bool = False,
@@ -476,13 +474,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
              Number of times to retry before raising an error when
              :class:`~.TimeoutError` or :class:`~.ConnectionError` or
              :class:`~.ClusterDownError` are encountered
-        :param connection_error_retry_attempts:
-            Number of times to retry before reinitializing when :class:`~.TimeoutError`
-            or :class:`~.ConnectionError` are encountered.
-            The default backoff strategy will be set if Retry object is not passed (see
-            get_default_backoff in backoff.py). To change it, pass a custom Retry object
-            using the "retry" keyword.
-        :reinitialize_steps: 'int'
+        :param reinitialize_steps:
             Specifies the number of MOVED errors that need to occur before
             reinitializing the whole cluster topology. If a MOVED error occurs
             and the cluster does not need to be reinitialized on this current
@@ -550,17 +542,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         self.user_on_connect_func = kwargs.pop("redis_connect_func", None)
         kwargs.update({"redis_connect_func": self.on_connect})
         kwargs = cleanup_kwargs(**kwargs)
-
-        if retry or retry_on_error or connection_error_retry_attempts > 0:
-            # Set a retry object for all cluster nodes
-            self.retry = retry or Retry(
-                get_default_backoff(), connection_error_retry_attempts
-            )
-            if retry_on_error is None:
-                # Default errors for retrying
-                retry_on_error = [ConnectionError, TimeoutError]
-            self.retry.update_supported_errors(retry_on_error)
+        if retry:
+            self.retry = retry
             kwargs.update({"retry": self.retry})
+        else:
+            kwargs.update({"retry": Retry(default_backoff(), 0)})
 
         self.encoder = Encoder(
             kwargs.get("encoding", "utf-8"),
@@ -1019,7 +1005,9 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         retry_attempts = (
             0 if target_nodes_specified else self.cluster_error_retry_attempts
         )
-        while True:
+        # Add one for the first execution
+        execute_attempts = 1 + retry_attempts
+        for _ in range(execute_attempts):
             try:
                 res = {}
                 if not target_nodes_specified:

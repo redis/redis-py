@@ -7,7 +7,7 @@ from unittest.mock import DEFAULT, Mock, call, patch
 import pytest
 
 from redis import Redis
-from redis.backoff import ExponentialBackoff, NoBackoff, get_default_backoff
+from redis.backoff import ExponentialBackoff, NoBackoff, default_backoff
 from redis.cluster import (
     PRIMARY,
     REDIS_CLUSTER_HASH_SLOTS,
@@ -770,8 +770,8 @@ class TestRedisClusterObj:
         # Test default retry
         retry = r.get_connection_kwargs().get("retry")
         assert isinstance(retry, Retry)
-        assert retry._retries == 3
-        assert isinstance(retry._backoff, type(get_default_backoff()))
+        assert retry._retries == 0
+        assert isinstance(retry._backoff, type(default_backoff()))
         node1 = r.get_node("127.0.0.1", 16379).redis_connection
         node2 = r.get_node("127.0.0.1", 16380).redis_connection
         assert node1.get_retry()._retries == node2.get_retry()._retries
@@ -784,22 +784,6 @@ class TestRedisClusterObj:
             .redis_connection.get_retry()
             ._retries
             == retry._retries
-        )
-
-        # Test no connection retries
-        rc_no_retries = RedisCluster(
-            "127.0.0.1", 16379, connection_error_retry_attempts=0
-        )
-        assert (
-            rc_no_retries.get_node("127.0.0.1", 16379).redis_connection.get_retry()
-            is None
-        )
-        rc_no_retries = RedisCluster("127.0.0.1", 16379, retry=Retry(NoBackoff(), 0))
-        assert (
-            rc_no_retries.get_node("127.0.0.1", 16379)
-            .redis_connection.get_retry()
-            ._retries
-            == 0
         )
 
 

@@ -26,7 +26,7 @@ from redis.asyncio.connection import (
 )
 from redis.asyncio.parser import CommandsParser
 from redis.asyncio.retry import Retry
-from redis.backoff import get_default_backoff
+from redis.backoff import default_backoff
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis
 from redis.cluster import (
     PIPELINE_BLOCKED_COMMANDS,
@@ -138,7 +138,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         | Number of times to retry before reinitializing when :class:`~.TimeoutError`
           or :class:`~.ConnectionError` are encountered.
           The default backoff strategy will be set if Retry object is not passed (see
-          get_default_backoff in backoff.py). To change it, pass a custom Retry object
+          default_backoff in backoff.py). To change it, pass a custom Retry object
           using the "retry" keyword.
     :param max_connections:
         | Maximum number of connections per node. If there are no free connections & the
@@ -309,7 +309,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         if retry or retry_on_error or connection_error_retry_attempts > 0:
             # Set a retry object for all cluster nodes
             self.retry = retry or Retry(
-                get_default_backoff(), connection_error_retry_attempts
+                default_backoff(), connection_error_retry_attempts
             )
             if retry_on_error is None:
                 # Default errors for retrying
@@ -642,7 +642,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             target_nodes_specified = True
             retry_attempts = 0
 
-        while True:
+        # Add one for the first execution
+        execute_attempts = 1 + retry_attempts
+        for _ in range(execute_attempts):
             if self._initialize:
                 await self.initialize()
             try:

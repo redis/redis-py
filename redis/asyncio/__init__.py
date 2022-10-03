@@ -15,7 +15,7 @@ from redis.asyncio.sentinel import (
     SentinelManagedSSLConnection,
 )
 from redis.asyncio.utils import from_url
-from redis.backoff import get_default_backoff
+from redis.backoff import default_backoff
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -44,7 +44,7 @@ __all__ = [
     "ConnectionPool",
     "DataError",
     "from_url",
-    "get_default_backoff",
+    "default_backoff",
     "InvalidResponse",
     "PubSubError",
     "ReadOnlyError",

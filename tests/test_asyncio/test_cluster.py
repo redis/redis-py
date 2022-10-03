@@ -14,7 +14,7 @@ from redis.asyncio.cluster import ClusterNode, NodesManager, RedisCluster
 from redis.asyncio.connection import Connection, SSLConnection
 from redis.asyncio.parser import CommandsParser
 from redis.asyncio.retry import Retry
-from redis.backoff import ExponentialBackoff, NoBackoff, get_default_backoff
+from redis.backoff import ExponentialBackoff, NoBackoff, default_backoff
 from redis.cluster import PIPELINE_BLOCKED_COMMANDS, PRIMARY, REPLICA, get_node_name
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
@@ -278,7 +278,7 @@ class TestRedisClusterObj:
             retry = rc_default.connection_kwargs.get("retry")
             assert isinstance(retry, Retry)
             assert retry._retries == 3
-            assert isinstance(retry._backoff, type(get_default_backoff()))
+            assert isinstance(retry._backoff, type(default_backoff()))
             assert rc_default.get_node("127.0.0.1", 16379).connection_kwargs.get(
                 "retry"
             ) == rc_default.get_node("127.0.0.1", 16380).connection_kwargs.get("retry")
