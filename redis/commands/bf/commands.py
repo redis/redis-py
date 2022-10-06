@@ -370,19 +370,13 @@ class TDigestCommands:
         """  # noqa
         return self.execute_command(TDIGEST_RESET, key)
 
-    def add(self, key, values, weights):
+    def add(self, key, values):
         """
-        Add one or more samples (value with weight) to a sketch `key`.
-        Both `values` and `weights` are lists.
+        Adds one or more observations to a t-digest sketch `key`.
+
         For more information see `TDIGEST.ADD <https://redis.io/commands/tdigest.add>`_.
-
-        Example:
-
-        >>> tdigestadd('A', [1500.0], [1.0])
         """  # noqa
-        params = [key]
-        self.append_values_and_weights(params, values, weights)
-        return self.execute_command(TDIGEST_ADD, *params)
+        return self.execute_command(TDIGEST_ADD, key, *values)
 
     def merge(self, destination_key, num_keys, *keys, compression=None, override=False):
         """

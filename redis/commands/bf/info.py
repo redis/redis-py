@@ -73,7 +73,6 @@ class TDigestInfo(object):
     merged_weight = None
     unmerged_weight = None
     total_compressions = None
-    sum_weights = None
     memory_usage = None
 
     def __init__(self, args):
@@ -85,5 +84,4 @@ class TDigestInfo(object):
         self.merged_weight = response["Merged weight"]
         self.unmerged_weight = response["Unmerged weight"]
         self.total_compressions = response["Total compressions"]
-        self.sum_weights = response["Sum weights"]
         self.memory_usage = response["Memory usage"]
