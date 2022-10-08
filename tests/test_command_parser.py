@@ -51,21 +51,21 @@ class TestCommandsParser:
         ]
         args7 = ["MIGRATE", "192.168.1.34", 6379, "key1", 0, 5000]
 
-        assert commands_parser.get_keys(r, *args1).sort() == ["key1", "key2"].sort()
+        assert sorted(commands_parser.get_keys(r, *args1)) == sorted(["key1", "key2"])
         assert (
-            commands_parser.get_keys(r, *args2).sort() == ["mystream", "writers"].sort()
+            sorted(commands_parser.get_keys(r, *args2)) == sorted(["mystream", "writers"])
         )
         assert (
-            commands_parser.get_keys(r, *args3).sort()
-            == ["out", "zset1", "zset2"].sort()
+            sorted(commands_parser.get_keys(r, *args3))
+            == sorted(["out", "zset1", "zset2"])
         )
-        assert commands_parser.get_keys(r, *args4).sort() == ["Sicily", "out"].sort()
-        assert commands_parser.get_keys(r, *args5).sort() == ["foo"].sort()
+        assert sorted(commands_parser.get_keys(r, *args4)) == sorted(["Sicily", "out"])
+        assert sorted(commands_parser.get_keys(r, *args5)) == ["foo"]
         assert (
-            commands_parser.get_keys(r, *args6).sort()
-            == ["key1", "key2", "key3"].sort()
+            sorted(commands_parser.get_keys(r, *args6))
+            == sorted(["key1", "key2", "key3"])
         )
-        assert commands_parser.get_keys(r, *args7).sort() == ["key1"].sort()
+        assert sorted(commands_parser.get_keys(r, *args7)) == ["key1"]
 
     # A bug in redis<7.0 causes this to fail: https://github.com/redis/redis/issues/9493
     @skip_if_server_version_lt("7.0.0")
