@@ -53,7 +53,8 @@ class TestCommandsParser:
 
         assert sorted(commands_parser.get_keys(r, *args1)) == sorted(["key1", "key2"])
         assert (
-            sorted(commands_parser.get_keys(r, *args2)) == sorted(["mystream", "writers"])
+            sorted(commands_parser.get_keys(r, *args2))
+            == sorted(["mystream", "writers"])
         )
         assert (
             sorted(commands_parser.get_keys(r, *args3))
