@@ -141,7 +141,7 @@ ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Except
 class BaseParser:
     """Plain Python parsing class"""
 
-    __slots__ = "_stream", "_buffer", "_read_size"
+    __slots__ = "_stream", "_read_size"
 
     EXCEPTION_CLASSES: ExceptionMappingT = {
         "ERR": {
@@ -171,7 +171,6 @@ class BaseParser:
 
     def __init__(self, socket_read_size: int):
         self._stream: Optional[asyncio.StreamReader] = None
-        self._buffer: Optional[SocketBuffer] = None
         self._read_size = socket_read_size
 
     def __del__(self):
@@ -204,54 +203,6 @@ class BaseParser:
         self, disable_decoding: bool = False
     ) -> Union[EncodableT, ResponseError, None, List[EncodableT]]:
         raise NotImplementedError()
-
-
-class SocketBuffer:
-    """Async-friendly re-impl of redis-py's SocketBuffer."""
-
-    def __init__(
-        self,
-        stream_reader: asyncio.StreamReader,
-        socket_read_size: int,
-    ):
-        self._stream: Optional[asyncio.StreamReader] = stream_reader
-
-    async def can_read_destructive(self) -> bool:
-        if self._stream is None:
-            raise RedisError("Buffer is closed.")
-        try:
-            async with async_timeout.timeout(0):
-                return await self._stream.read(1)
-        except asyncio.TimeoutError:
-            return False
-
-    async def read(self, length: int) -> bytes:
-        """
-        Read `length` bytes of data.  These are assumed to be followed
-        by a '\r\n' terminator which is subsequently discarded.
-        """
-        if self._stream is None:
-            raise RedisError("Buffer is closed.")
-        try:
-            data = await self._stream.readexactly(length + 2)
-        except asyncio.IncompleteReadError as error:
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
-        return data[:-2]
-
-    async def readline(self) -> bytes:
-        """
-        read an unknown number of bytes up to the next '\r\n'
-        line separator, which is discarded.
-        """
-        if self._stream is None:
-            raise RedisError("Buffer is closed.")
-        data = await self._stream.readline()
-        if not data.endswith(b"\r\n"):
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-        return data[:-2]
-
-    def close(self):
-        self._stream = None
 
 
 class PythonParser(BaseParser):
