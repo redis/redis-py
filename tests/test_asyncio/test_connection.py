@@ -13,22 +13,23 @@ from redis.asyncio.connection import (
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
-from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 
 from .compat import mock
 
 
 @pytest.mark.onlynoncluster
-@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 async def test_invalid_response(create_redis):
     r = await create_redis(single_connection_client=True)
 
     raw = b"x"
-    readline_mock = mock.AsyncMock(return_value=raw)
 
     parser: "PythonParser" = r.connection._parser
-    with mock.patch.object(parser._buffer, "readline", readline_mock):
+    if not isinstance(parser, PythonParser):
+        pytest.skip("PythonParser only")
+    stream_mock = mock.Mock(parser._stream)
+    stream_mock.readline.return_value = raw + b"\r\n"
+    with mock.patch.object(parser, "_stream", stream_mock):
         with pytest.raises(InvalidResponse) as cm:
             await parser.read_response()
     assert str(cm.value) == f"Protocol Error: {raw!r}"
