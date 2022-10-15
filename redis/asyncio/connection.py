@@ -184,7 +184,7 @@ class BaseParser:
         """Parse an error response"""
         error_code = response.split(" ")[0]
         if error_code in self.EXCEPTION_CLASSES:
-            response = response[len(error_code) + 1 :]
+            response = response[len(error_code) + 1:]
             exception_class = self.EXCEPTION_CLASSES[error_code]
             if isinstance(exception_class, dict):
                 exception_class = exception_class.get(response, ResponseError)
@@ -269,27 +269,29 @@ class PythonParser(BaseParser):
         if self._stream is None:
             raise RedisError("Buffer is closed.")
 
-        self._buffer = SocketBuffer(self._stream, self._read_size)
         self.encoder = connection.encoder
 
     def on_disconnect(self):
         """Called when the stream disconnects"""
         if self._stream is not None:
             self._stream = None
-        if self._buffer is not None:
-            self._buffer.close()
-            self._buffer = None
         self.encoder = None
 
-    async def can_read_destructive(self):
-        return self._buffer and bool(await self._buffer.can_read_destructive())
+    async def can_read_destructive(self) -> bool:
+        if self._stream is None:
+            raise RedisError("Buffer is closed.")
+        try:
+            async with async_timeout.timeout(0):
+                return await self._stream.read(1)
+        except asyncio.TimeoutError:
+            return False
 
     async def read_response(
         self, disable_decoding: bool = False
     ) -> Union[EncodableT, ResponseError, None]:
-        if not self._buffer or not self.encoder:
+        if not self._stream or not self.encoder:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-        raw = await self._buffer.readline()
+        raw = await self._readline()
         if not raw:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         response: Any
@@ -322,7 +324,7 @@ class PythonParser(BaseParser):
             length = int(response)
             if length == -1:
                 return None
-            response = await self._buffer.read(length)
+            response = await self._read(length)
         # multi-bulk response
         elif byte == b"*":
             length = int(response)
@@ -334,6 +336,31 @@ class PythonParser(BaseParser):
         if isinstance(response, bytes) and disable_decoding is False:
             response = self.encoder.decode(response)
         return response
+
+    async def _read(self, length: int) -> bytes:
+        """
+        Read `length` bytes of data.  These are assumed to be followed
+        by a '\r\n' terminator which is subsequently discarded.
+        """
+        if self._stream is None:
+            raise RedisError("Buffer is closed.")
+        try:
+            data = await self._stream.readexactly(length + 2)
+        except asyncio.IncompleteReadError as error:
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
+        return data[:-2]
+
+    async def _readline(self) -> bytes:
+        """
+        read an unknown number of bytes up to the next '\r\n'
+        line separator, which is discarded.
+        """
+        if self._stream is None:
+            raise RedisError("Buffer is closed.")
+        data = await self._stream.readline()
+        if not data.endswith(b"\r\n"):
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+        return data[:-2]
 
 
 class HiredisParser(BaseParser):
