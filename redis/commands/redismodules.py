@@ -101,3 +101,11 @@ class AsyncRedisModuleCommands(RedisModuleCommands):
 
         g = AsyncGraph(client=self, name=index_name)
         return g
+
+    def json(self, encoder=JSONEncoder(), decoder=JSONDecoder()):
+        """Access the json namespace, providing support for redis json."""
+
+        from .json import AsyncJSON
+
+        jj = AsyncJSON(client=self, encoder=encoder, decoder=decoder)
+        return jj

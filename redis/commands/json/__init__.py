@@ -1,9 +1,11 @@
 from json import JSONDecodeError, JSONDecoder, JSONEncoder
 
 import redis
-
+from redis.asyncio.cluster import RedisCluster as AsyncRedisCluster
+from ...asyncio.client import Pipeline as AsyncioPipeline
+from ...asyncio.cluster import ClusterPipeline as AsyncioClusterPipeline
 from ..helpers import nativestr
-from .commands import JSONCommands
+from .commands import JSONCommands, AsyncJSONCommands
 from .decoders import bulk_of_jsons, decode_list
 
 
@@ -130,4 +132,76 @@ class ClusterPipeline(JSONCommands, redis.cluster.ClusterPipeline):
 
 
 class Pipeline(JSONCommands, redis.client.Pipeline):
+    """Pipeline for the module."""
+
+
+class AsyncJSON(JSON, AsyncJSONCommands):
+    """
+    Create a client for talking to json.
+    :param decoder:
+    :type json.JSONDecoder: An instance of json.JSONDecoder
+    :param encoder:
+    :type json.JSONEncoder: An instance of json.JSONEncoder
+    """
+
+    def _decode(self, obj):
+        if obj is None:
+            return obj
+
+        try:
+            x = self.__decoder__.decode(obj)
+            if x is None:
+                raise TypeError
+            return x
+        except TypeError:
+            try:
+                return self.__decoder__.decode(obj.decode())
+            except AttributeError:
+                return decode_list(obj)
+        except (AttributeError, JSONDecodeError):
+            return decode_list(obj)
+
+    def _encode(self, obj):
+        return self.__encoder__.encode(obj)
+
+    def pipeline(self, transaction=True, shard_hint=None):
+        """Creates a pipeline for the JSON module, that can be used for executing
+        JSON commands, as well as classic core commands.
+        Usage example:
+        r = redis.Redis()
+        pipe = r.json().pipeline()
+        pipe.jsonset('foo', '.', {'hello!': 'world'})
+        pipe.jsonget('foo')
+        pipe.jsonget('notakey')
+        """
+        if isinstance(self.client, AsyncRedisCluster):
+            p = AsyncioClusterPipeline(
+                nodes_manager=self.client.nodes_manager,
+                commands_parser=self.client.commands_parser,
+                startup_nodes=self.client.nodes_manager.startup_nodes,
+                result_callbacks=self.client.result_callbacks,
+                cluster_response_callbacks=self.client.cluster_response_callbacks,
+                cluster_error_retry_attempts=self.client.cluster_error_retry_attempts,
+                read_from_replicas=self.client.read_from_replicas,
+                reinitialize_steps=self.client.reinitialize_steps,
+                lock=self.client._lock,
+            )
+
+        else:
+            p = AsyncioPipeline(
+                connection_pool=self.client.connection_pool,
+                response_callbacks=self.MODULE_CALLBACKS,
+                transaction=transaction,
+                shard_hint=shard_hint,
+            )
+        p._encode = self._encode
+        p._decode = self._decode
+        return p
+
+
+class AsyncClusterPipeline(AsyncJSONCommands, AsyncioClusterPipeline):
+    """Cluster pipeline for the module."""
+
+
+class AsyncPipeline(AsyncJSONCommands, AsyncioPipeline):
     """Pipeline for the module."""

@@ -10,6 +10,7 @@ from typing import (
     Generator,
     List,
     Mapping,
+    MutableMapping,
     Optional,
     Type,
     TypeVar,
@@ -25,7 +26,7 @@ from redis.asyncio.connection import (
     parse_url,
 )
 from redis.asyncio.parser import CommandsParser
-from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis
+from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis, CaseInsensitiveDict
 from redis.cluster import (
     PIPELINE_BLOCKED_COMMANDS,
     PRIMARY,
@@ -37,7 +38,7 @@ from redis.cluster import (
     get_node_name,
     parse_cluster_slots,
 )
-from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
+from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands, AsyncRedisModuleCommands
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
     AskError,
@@ -78,7 +79,7 @@ class ClusterParser(DefaultParser):
     )
 
 
-class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommands):
+class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommands, AsyncRedisModuleCommands):
     """
     Create a new RedisCluster client.
 
@@ -152,6 +153,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         - none of the `host`/`port` & `startup_nodes` were provided
 
     """
+    response_callbacks: MutableMapping[Union[str, bytes], ResponseCallbackT]
 
     @classmethod
     def from_url(cls, url: str, **kwargs: Any) -> "RedisCluster":
@@ -298,7 +300,10 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             # Call our on_connect function to configure READONLY mode
             kwargs["redis_connect_func"] = self.on_connect
 
-        kwargs["response_callbacks"] = self.__class__.RESPONSE_CALLBACKS.copy()
+        kwargs["cluster_response_callbacks"] = CaseInsensitiveDict(self.__class__.RESPONSE_CALLBACKS)
+        self.cluster_response_callbacks = CaseInsensitiveDict(
+            self.__class__.CLUSTER_COMMANDS_RESPONSE_CALLBACKS
+        )
         self.connection_kwargs = kwargs
 
         if startup_nodes:
@@ -324,7 +329,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self.commands_parser = CommandsParser()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
-        self.response_callbacks = kwargs["response_callbacks"]
+        self.cluster_response_callbacks = kwargs["cluster_response_callbacks"]
         self.result_callbacks = self.__class__.RESULT_CALLBACKS.copy()
         self.result_callbacks[
             "CLUSTER SLOTS"
@@ -479,7 +484,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
     def set_response_callback(self, command: str, callback: ResponseCallbackT) -> None:
         """Set a custom response callback."""
-        self.response_callbacks[command] = callback
+        self.cluster_response_callbacks[command] = callback
 
     async def _determine_nodes(
         self, command: str, *args: Any, node_flag: Optional[str] = None
@@ -809,7 +814,7 @@ class ClusterNode:
         self.max_connections = max_connections
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
-        self.response_callbacks = connection_kwargs.pop("response_callbacks", {})
+        self.response_callbacks = connection_kwargs.pop("cluster_response_callbacks", {})
 
         self._connections: List[Connection] = []
         self._free: Deque[Connection] = collections.deque(maxlen=self.max_connections)
@@ -1206,7 +1211,7 @@ class NodesManager:
         )
 
 
-class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommands):
+class ClusterPipeline(RedisCluster):
     """
     Create a new ClusterPipeline object.
 
@@ -1245,9 +1250,21 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
 
     __slots__ = ("_command_stack", "_client")
 
-    def __init__(self, client: RedisCluster) -> None:
+    def __init__(
+            self,
+            client: RedisCluster,
+            nodes_manager=None,
+            commands_parser=None,
+            result_callbacks=None,
+            startup_nodes=None,
+            read_from_replicas=False,
+            cluster_error_retry_attempts=5,
+            reinitialize_steps=10,
+            lock=None,
+            **kwargs,
+    ) -> None:
         self._client = client
-
+        self.cluster_response_callbacks = self.RESPONSE_CALLBACKS
         self._command_stack: List["PipelineCommand"] = []
 
     async def initialize(self) -> "ClusterPipeline":
