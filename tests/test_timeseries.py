@@ -233,7 +233,7 @@ def test_range_advanced(client):
     assert [(0, 5.0), (5, 6.0)] == client.ts().range(
         1, 0, 10, aggregation_type="count", bucket_size_msec=10, align=5
     )
-    assert [(0, 2.5500000000000003), (10, 3.0)] == client.ts().range(
+    assert [(0, 2.55), (10, 3.0)] == client.ts().range(
         1, 0, 10, aggregation_type="twa", bucket_size_msec=10
     )
 
@@ -343,7 +343,7 @@ def test_rev_range(client):
     assert [(1, 10.0), (0, 1.0)] == client.ts().revrange(
         1, 0, 10, aggregation_type="count", bucket_size_msec=10, align=1
     )
-    assert [(10, 3.0), (0, 2.5500000000000003)] == client.ts().revrange(
+    assert [(10, 3.0), (0, 2.55)] == client.ts().revrange(
         1, 0, 10, aggregation_type="twa", bucket_size_msec=10
     )
 
