@@ -1448,22 +1448,15 @@ def test_json_with_jsonpath(client):
     assert res.docs[0].id == "doc:1"
     assert res.docs[0].json == '{"prod:name":"RediSearch"}'
 
-    # query for an unsupported field fails
+    # query for an unsupported field
     res = client.ft().search("@name_unsupported:RediSearch")
-    assert res.total == 0
+    assert res.total == 1
 
     # return of a supported field succeeds
     res = client.ft().search(Query("@name:RediSearch").return_field("name"))
     assert res.total == 1
     assert res.docs[0].id == "doc:1"
     assert res.docs[0].name == "RediSearch"
-
-    # return of an unsupported field fails
-    res = client.ft().search(Query("@name:RediSearch").return_field("name_unsupported"))
-    assert res.total == 1
-    assert res.docs[0].id == "doc:1"
-    with pytest.raises(Exception):
-        res.docs[0].name_unsupported
 
 
 @pytest.mark.redismod
