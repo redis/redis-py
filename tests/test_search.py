@@ -1528,16 +1528,15 @@ def test_geo_params(modclient):
 def test_search_commands_in_pipeline(client):
     p = client.ft().pipeline()
     p.create_index((TextField("txt"),))
-    p.add_document("doc1", payload="foo baz", txt="foo bar")
-    p.add_document("doc2", txt="foo bar")
+    p.hset("doc1", mapping={"txt": "foo bar"})
+    p.hset("doc2", mapping={"txt": "foo bar"})
     q = Query("foo bar").with_payloads()
     p.search(q)
     res = p.execute()
-    assert res[:3] == ["OK", "OK", "OK"]
+    assert res[:3] == ["OK", True, True]
     assert 2 == res[3][0]
     assert "doc1" == res[3][1]
     assert "doc2" == res[3][4]
-    assert "foo baz" == res[3][2]
     assert res[3][5] is None
     assert res[3][3] == res[3][6] == ["txt", "foo bar"]
 
