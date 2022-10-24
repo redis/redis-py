@@ -687,8 +687,8 @@ def test_scorer(client):
     client.hset(
         "doc2",
         mapping={
-            "description": "Quick alice was beginning to get very tired of sitting by her quick sister on the bank, and of having nothing to do."
-        },  # noqa
+            "description": "Quick alice was beginning to get very tired of sitting by her quick sister on the bank, and of having nothing to do."  # noqa
+        },
     )
 
     # default scorer is TFIDF
