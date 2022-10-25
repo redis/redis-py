@@ -426,9 +426,9 @@ async def test_tdigest_rank(modclient: redis.Redis):
     assert await modclient.tdigest().create("t-digest", 500)
     assert await modclient.tdigest().add("t-digest", list(range(0, 20)))
     assert -1 == (await modclient.tdigest().rank("t-digest", -1))[0]
-    assert 1 == (await modclient.tdigest().rank("t-digest", 0))[0]
-    assert 11 == (await modclient.tdigest().rank("t-digest", 10))[0]
-    assert [-1, 20, 10] == await modclient.tdigest().rank("t-digest", -20, 20, 9)
+    assert 0 == (await modclient.tdigest().rank("t-digest", 0))[0]
+    assert 10 == (await modclient.tdigest().rank("t-digest", 10))[0]
+    assert [-1, 20, 9] == await modclient.tdigest().rank("t-digest", -20, 20, 9)
 
 
 @pytest.mark.redismod
