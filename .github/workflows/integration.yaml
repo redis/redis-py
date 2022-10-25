@@ -26,6 +26,8 @@ jobs:
        - uses: pypa/gh-action-pip-audit@v1.0.0
          with:
            inputs: requirements.txt dev_requirements.txt
+           ignore-vulns: |
+             GHSA-w596-4wvx-j9j6  # subversion related git pull, dependency for pytest. There is no impact here.
 
    lint:
      name: Code linters

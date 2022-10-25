@@ -29,7 +29,7 @@ def with_timeout(t):
     return wrapper
 
 
-async def wait_for_message(pubsub, timeout=0.1, ignore_subscribe_messages=False):
+async def wait_for_message(pubsub, timeout=0.2, ignore_subscribe_messages=False):
     now = asyncio.get_event_loop().time()
     timeout = now + timeout
     while now < timeout:

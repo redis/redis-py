@@ -85,7 +85,7 @@ async def createIndex(modclient, num_docs=100, definition=None):
     assert 50 == indexer.chunk_size
 
     for key, doc in chapters.items():
-        await indexer.add_document(key, **doc)
+        await indexer.client.client.hset(key, mapping=doc)
     await indexer.commit()
 
 
@@ -189,7 +189,7 @@ async def test_client(modclient: redis.Redis):
     assert 167 == (await modclient.ft().search(Query("henry king").slop(100))).total
 
     # test delete document
-    await modclient.ft().add_document("doc-5ghs2", play="Death of a Salesman")
+    await modclient.hset("doc-5ghs2", mapping={"play": "Death of a Salesman"})
     res = await modclient.ft().search(Query("death of a salesman"))
     assert 1 == res.total
 
@@ -198,27 +198,10 @@ async def test_client(modclient: redis.Redis):
     assert 0 == res.total
     assert 0 == await modclient.ft().delete_document("doc-5ghs2")
 
-    await modclient.ft().add_document("doc-5ghs2", play="Death of a Salesman")
+    await modclient.hset("doc-5ghs2", mapping={"play": "Death of a Salesman"})
     res = await modclient.ft().search(Query("death of a salesman"))
     assert 1 == res.total
     await modclient.ft().delete_document("doc-5ghs2")
-
-
-@pytest.mark.redismod
-@skip_ifmodversion_lt("2.2.0", "search")
-async def test_payloads(modclient: redis.Redis):
-    await modclient.ft().create_index((TextField("txt"),))
-
-    await modclient.ft().add_document("doc1", payload="foo baz", txt="foo bar")
-    await modclient.ft().add_document("doc2", txt="foo bar")
-
-    q = Query("foo bar").with_payloads()
-    res = await modclient.ft().search(q)
-    assert 2 == res.total
-    assert "doc1" == res.docs[0].id
-    assert "doc2" == res.docs[1].id
-    assert "foo baz" == res.docs[0].payload
-    assert res.docs[1].payload is None
 
 
 @pytest.mark.redismod
@@ -226,8 +209,8 @@ async def test_payloads(modclient: redis.Redis):
 async def test_scores(modclient: redis.Redis):
     await modclient.ft().create_index((TextField("txt"),))
 
-    await modclient.ft().add_document("doc1", txt="foo baz")
-    await modclient.ft().add_document("doc2", txt="foo bar")
+    await modclient.hset("doc1", mapping={"txt": "foo baz"})
+    await modclient.hset("doc2", mapping={"txt": "foo bar"})
 
     q = Query("foo ~bar").with_scores()
     res = await modclient.ft().search(q)
@@ -240,34 +223,11 @@ async def test_scores(modclient: redis.Redis):
 
 
 @pytest.mark.redismod
-async def test_replace(modclient: redis.Redis):
-    await modclient.ft().create_index((TextField("txt"),))
-
-    await modclient.ft().add_document("doc1", txt="foo bar")
-    await modclient.ft().add_document("doc2", txt="foo bar")
-    await waitForIndex(modclient, "idx")
-
-    res = await modclient.ft().search("foo bar")
-    assert 2 == res.total
-    await (
-        modclient.ft().add_document("doc1", replace=True, txt="this is a replaced doc")
-    )
-
-    res = await modclient.ft().search("foo bar")
-    assert 1 == res.total
-    assert "doc2" == res.docs[0].id
-
-    res = await modclient.ft().search("replaced doc")
-    assert 1 == res.total
-    assert "doc1" == res.docs[0].id
-
-
-@pytest.mark.redismod
 async def test_stopwords(modclient: redis.Redis):
     stopwords = ["foo", "bar", "baz"]
     await modclient.ft().create_index((TextField("txt"),), stopwords=stopwords)
-    await modclient.ft().add_document("doc1", txt="foo bar")
-    await modclient.ft().add_document("doc2", txt="hello world")
+    await modclient.hset("doc1", mapping={"txt": "foo bar"})
+    await modclient.hset("doc2", mapping={"txt": "hello world"})
     await waitForIndex(modclient, "idx")
 
     q1 = Query("foo bar").no_content()
@@ -285,11 +245,13 @@ async def test_filters(modclient: redis.Redis):
         )
     )
     await (
-        modclient.ft().add_document(
-            "doc1", txt="foo bar", num=3.141, loc="-0.441,51.458"
+        modclient.hset(
+            "doc1", mapping={"txt": "foo bar", "num": 3.141, "loc": "-0.441,51.458"}
         )
     )
-    await modclient.ft().add_document("doc2", txt="foo baz", num=2, loc="-0.1,51.2")
+    await (
+        modclient.hset("doc2", mapping={"txt": "foo baz", "num": 2, "loc": "-0.1,51.2"})
+    )
 
     await waitForIndex(modclient, "idx")
     # Test numerical filter
@@ -322,26 +284,15 @@ async def test_filters(modclient: redis.Redis):
 
 
 @pytest.mark.redismod
-async def test_payloads_with_no_content(modclient: redis.Redis):
-    await modclient.ft().create_index((TextField("txt"),))
-    await modclient.ft().add_document("doc1", payload="foo baz", txt="foo bar")
-    await modclient.ft().add_document("doc2", payload="foo baz2", txt="foo bar")
-
-    q = Query("foo bar").with_payloads().no_content()
-    res = await modclient.ft().search(q)
-    assert 2 == len(res.docs)
-
-
-@pytest.mark.redismod
 async def test_sort_by(modclient: redis.Redis):
     await (
         modclient.ft().create_index(
             (TextField("txt"), NumericField("num", sortable=True))
         )
     )
-    await modclient.ft().add_document("doc1", txt="foo bar", num=1)
-    await modclient.ft().add_document("doc2", txt="foo baz", num=2)
-    await modclient.ft().add_document("doc3", txt="foo qux", num=3)
+    await modclient.hset("doc1", mapping={"txt": "foo bar", "num": 1})
+    await modclient.hset("doc2", mapping={"txt": "foo baz", "num": 2})
+    await modclient.hset("doc3", mapping={"txt": "foo qux", "num": 3})
 
     # Test sort
     q1 = Query("foo").sort_by("num", asc=True).no_content()
@@ -385,10 +336,12 @@ async def test_example(modclient: redis.Redis):
     )
 
     # Indexing a document
-    await modclient.ft().add_document(
+    await modclient.hset(
         "doc1",
-        title="RediSearch",
-        body="Redisearch impements a search engine on top of redis",
+        mapping={
+            "title": "RediSearch",
+            "body": "Redisearch impements a search engine on top of redis",
+        },
     )
 
     # Searching with complex parameters:
@@ -461,11 +414,13 @@ async def test_no_index(modclient: redis.Redis):
         )
     )
 
-    await modclient.ft().add_document(
-        "doc1", field="aaa", text="1", numeric="1", geo="1,1", tag="1"
+    await modclient.hset(
+        "doc1",
+        mapping={"field": "aaa", "text": "1", "numeric": "1", "geo": "1,1", "tag": "1"},
     )
-    await modclient.ft().add_document(
-        "doc2", field="aab", text="2", numeric="2", geo="2,2", tag="2"
+    await modclient.hset(
+        "doc2",
+        mapping={"field": "aab", "text": "2", "numeric": "2", "geo": "2,2", "tag": "2"},
     )
     await waitForIndex(modclient, "idx")
 
@@ -500,53 +455,6 @@ async def test_no_index(modclient: redis.Redis):
         GeoField("name", no_index=True, sortable=False)
     with pytest.raises(Exception):
         TagField("name", no_index=True, sortable=False)
-
-
-@pytest.mark.redismod
-async def test_partial(modclient: redis.Redis):
-    await (
-        modclient.ft().create_index((TextField("f1"), TextField("f2"), TextField("f3")))
-    )
-    await modclient.ft().add_document("doc1", f1="f1_val", f2="f2_val")
-    await modclient.ft().add_document("doc2", f1="f1_val", f2="f2_val")
-    await modclient.ft().add_document("doc1", f3="f3_val", partial=True)
-    await modclient.ft().add_document("doc2", f3="f3_val", replace=True)
-    await waitForIndex(modclient, "idx")
-
-    # Search for f3 value. All documents should have it
-    res = await modclient.ft().search("@f3:f3_val")
-    assert 2 == res.total
-
-    # Only the document updated with PARTIAL should still have f1 and f2 values
-    res = await modclient.ft().search("@f3:f3_val @f2:f2_val @f1:f1_val")
-    assert 1 == res.total
-
-
-@pytest.mark.redismod
-async def test_no_create(modclient: redis.Redis):
-    await (
-        modclient.ft().create_index((TextField("f1"), TextField("f2"), TextField("f3")))
-    )
-    await modclient.ft().add_document("doc1", f1="f1_val", f2="f2_val")
-    await modclient.ft().add_document("doc2", f1="f1_val", f2="f2_val")
-    await modclient.ft().add_document("doc1", f3="f3_val", no_create=True)
-    await modclient.ft().add_document("doc2", f3="f3_val", no_create=True, partial=True)
-    await waitForIndex(modclient, "idx")
-
-    # Search for f3 value. All documents should have it
-    res = await modclient.ft().search("@f3:f3_val")
-    assert 2 == res.total
-
-    # Only the document updated with PARTIAL should still have f1 and f2 values
-    res = await modclient.ft().search("@f3:f3_val @f2:f2_val @f1:f1_val")
-    assert 1 == res.total
-
-    with pytest.raises(redis.ResponseError):
-        await (
-            modclient.ft().add_document(
-                "doc3", f2="f2_val", f3="f3_val", no_create=True
-            )
-        )
 
 
 @pytest.mark.redismod
@@ -640,11 +548,11 @@ async def test_alias_basic(modclient: redis.Redis):
     index1 = getClient(modclient).ft("testAlias")
 
     await index1.create_index((TextField("txt"),))
-    await index1.add_document("doc1", txt="text goes here")
+    await index1.client.hset("doc1", mapping={"txt": "text goes here"})
 
     index2 = getClient(modclient).ft("testAlias2")
     await index2.create_index((TextField("txt"),))
-    await index2.add_document("doc2", txt="text goes here")
+    await index2.client.hset("doc2", mapping={"txt": "text goes here"})
 
     # add the actual alias and check
     await index1.aliasadd("myalias")
@@ -674,8 +582,8 @@ async def test_tags(modclient: redis.Redis):
     tags = "foo,foo bar,hello;world"
     tags2 = "soba,ramen"
 
-    await modclient.ft().add_document("doc1", txt="fooz barz", tags=tags)
-    await modclient.ft().add_document("doc2", txt="noodles", tags=tags2)
+    await modclient.hset("doc1", mapping={"txt": "fooz barz", "tags": tags})
+    await modclient.hset("doc2", mapping={"txt": "noodles", "tags": tags2})
     await waitForIndex(modclient, "idx")
 
     q = Query("@tags:{foo}")
@@ -718,8 +626,8 @@ async def test_alter_schema_add(modclient: redis.Redis):
     await modclient.ft().alter_schema_add(TextField("body"))
 
     # Indexing a document
-    await modclient.ft().add_document(
-        "doc1", title="MyTitle", body="Some content only in the body"
+    await modclient.hset(
+        "doc1", mapping={"title": "MyTitle", "body": "Some content only in the body"}
     )
 
     # Searching with parameter only in the body (the added field)
@@ -735,11 +643,11 @@ async def test_spell_check(modclient: redis.Redis):
     await modclient.ft().create_index((TextField("f1"), TextField("f2")))
 
     await (
-        modclient.ft().add_document(
-            "doc1", f1="some valid content", f2="this is sample text"
+        modclient.hset(
+            "doc1", mapping={"f1": "some valid content", "f2": "this is sample text"}
         )
     )
-    await modclient.ft().add_document("doc2", f1="very important", f2="lorem ipsum")
+    await modclient.hset("doc2", mapping={"f1": "very important", "f2": "lorem ipsum"})
     await waitForIndex(modclient, "idx")
 
     # test spellcheck
@@ -793,8 +701,8 @@ async def test_dict_operations(modclient: redis.Redis):
 @pytest.mark.redismod
 async def test_phonetic_matcher(modclient: redis.Redis):
     await modclient.ft().create_index((TextField("name"),))
-    await modclient.ft().add_document("doc1", name="Jon")
-    await modclient.ft().add_document("doc2", name="John")
+    await modclient.hset("doc1", mapping={"name": "Jon"})
+    await modclient.hset("doc2", mapping={"name": "John"})
 
     res = await modclient.ft().search(Query("Jon"))
     assert 1 == len(res.docs)
@@ -804,8 +712,8 @@ async def test_phonetic_matcher(modclient: redis.Redis):
     await modclient.flushdb()
 
     await modclient.ft().create_index((TextField("name", phonetic_matcher="dm:en"),))
-    await modclient.ft().add_document("doc1", name="Jon")
-    await modclient.ft().add_document("doc2", name="John")
+    await modclient.hset("doc1", mapping={"name": "Jon"})
+    await modclient.hset("doc2", mapping={"name": "John"})
 
     res = await modclient.ft().search(Query("Jon"))
     assert 2 == len(res.docs)
@@ -817,12 +725,14 @@ async def test_phonetic_matcher(modclient: redis.Redis):
 async def test_scorer(modclient: redis.Redis):
     await modclient.ft().create_index((TextField("description"),))
 
-    await modclient.ft().add_document(
-        "doc1", description="The quick brown fox jumps over the lazy dog"
+    await modclient.hset(
+        "doc1", mapping={"description": "The quick brown fox jumps over the lazy dog"}
     )
-    await modclient.ft().add_document(
+    await modclient.hset(
         "doc2",
-        description="Quick alice was beginning to get very tired of sitting by her quick sister on the bank, and of having nothing to do.",  # noqa
+        mapping={
+            "description": "Quick alice was beginning to get very tired of sitting by her quick sister on the bank, and of having nothing to do."  # noqa
+        },
     )
 
     # default scorer is TFIDF
@@ -851,19 +761,19 @@ async def test_get(modclient: redis.Redis):
     assert [None] == await modclient.ft().get("doc1")
     assert [None, None] == await modclient.ft().get("doc2", "doc1")
 
-    await modclient.ft().add_document(
-        "doc1", f1="some valid content dd1", f2="this is sample text ff1"
+    await modclient.hset(
+        "doc1", mapping={"f1": "some valid content dd1", "f2": "this is sample text f1"}
     )
-    await modclient.ft().add_document(
-        "doc2", f1="some valid content dd2", f2="this is sample text ff2"
+    await modclient.hset(
+        "doc2", mapping={"f1": "some valid content dd2", "f2": "this is sample text f2"}
     )
 
     assert [
-        ["f1", "some valid content dd2", "f2", "this is sample text ff2"]
+        ["f1", "some valid content dd2", "f2", "this is sample text f2"]
     ] == await modclient.ft().get("doc2")
     assert [
-        ["f1", "some valid content dd1", "f2", "this is sample text ff1"],
-        ["f1", "some valid content dd2", "f2", "this is sample text ff2"],
+        ["f1", "some valid content dd1", "f2", "this is sample text f1"],
+        ["f1", "some valid content dd2", "f2", "this is sample text f2"],
     ] == await modclient.ft().get("doc1", "doc2")
 
 
@@ -894,26 +804,32 @@ async def test_aggregations_groupby(modclient: redis.Redis):
     )
 
     # Indexing a document
-    await modclient.ft().add_document(
+    await modclient.hset(
         "search",
-        title="RediSearch",
-        body="Redisearch impements a search engine on top of redis",
-        parent="redis",
-        random_num=10,
+        mapping={
+            "title": "RediSearch",
+            "body": "Redisearch impements a search engine on top of redis",
+            "parent": "redis",
+            "random_num": 10,
+        },
     )
-    await modclient.ft().add_document(
+    await modclient.hset(
         "ai",
-        title="RedisAI",
-        body="RedisAI executes Deep Learning/Machine Learning models and managing their data.",  # noqa
-        parent="redis",
-        random_num=3,
+        mapping={
+            "title": "RedisAI",
+            "body": "RedisAI executes Deep Learning/Machine Learning models and managing their data.",  # noqa
+            "parent": "redis",
+            "random_num": 3,
+        },
     )
-    await modclient.ft().add_document(
+    await modclient.hset(
         "json",
-        title="RedisJson",
-        body="RedisJSON implements ECMA-404 The JSON Data Interchange Standard as a native data type.",  # noqa
-        parent="redis",
-        random_num=8,
+        mapping={
+            "title": "RedisJson",
+            "body": "RedisJSON implements ECMA-404 The JSON Data Interchange Standard as a native data type.",  # noqa
+            "parent": "redis",
+            "random_num": 8,
+        },
     )
 
     req = aggregations.AggregateRequest("redis").group_by("@parent", reducers.count())
@@ -1074,15 +990,14 @@ async def test_withsuffixtrie(modclient: redis.Redis):
 async def test_search_commands_in_pipeline(modclient: redis.Redis):
     p = await modclient.ft().pipeline()
     p.create_index((TextField("txt"),))
-    p.add_document("doc1", payload="foo baz", txt="foo bar")
-    p.add_document("doc2", txt="foo bar")
+    p.hset("doc1", mapping={"txt": "foo bar"})
+    p.hset("doc2", mapping={"txt": "foo bar"})
     q = Query("foo bar").with_payloads()
     await p.search(q)
     res = await p.execute()
-    assert res[:3] == ["OK", "OK", "OK"]
+    assert res[:3] == ["OK", True, True]
     assert 2 == res[3][0]
     assert "doc1" == res[3][1]
     assert "doc2" == res[3][4]
-    assert "foo baz" == res[3][2]
     assert res[3][5] is None
     assert res[3][3] == res[3][6] == ["txt", "foo bar"]
