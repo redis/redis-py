@@ -824,7 +824,7 @@ def test_objlen_dollar(client):
         },
     )
     # Test multi
-    assert client.json().objlen("doc1", "$..a") == [2, None, 1]
+    assert client.json().objlen("doc1", "$..a") == [None, 2, 1]
     # Test single
     assert client.json().objlen("doc1", "$.nested1.a") == [2]
 
