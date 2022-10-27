@@ -207,6 +207,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         "reinitialize_steps",
         "response_callbacks",
         "result_callbacks",
+        "retry",
     )
 
     def __init__(
@@ -337,6 +338,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self.read_from_replicas = read_from_replicas
         self.reinitialize_steps = reinitialize_steps
         self.cluster_error_retry_attempts = cluster_error_retry_attempts
+        self.connection_error_retry_attempts = connection_error_retry_attempts
         self.retry = retry
         self.reinitialize_counter = 0
         self.commands_parser = CommandsParser()
