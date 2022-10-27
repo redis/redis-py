@@ -1050,6 +1050,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
 
     def set_retry(self, retry: "Retry") -> None:
         self.get_connection_kwargs().update({"retry": retry})
+        self.connection_pool.set_retry(retry)
 
     def set_response_callback(self, command, callback):
         """Set a custom Response Callback"""

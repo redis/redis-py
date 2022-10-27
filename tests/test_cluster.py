@@ -749,12 +749,14 @@ class TestRedisClusterObj:
 
     def test_cluster_get_set_retry_object(self, request):
         retry = Retry(NoBackoff(), 2)
-        r = _get_client(Redis, request, retry=retry)
+        r = _get_client(RedisCluster, request, retry=retry)
         assert r.get_retry()._retries == retry._retries
         assert isinstance(r.get_retry()._backoff, NoBackoff)
         for node in r.get_nodes():
             assert node.redis_connection.get_retry()._retries == retry._retries
             assert isinstance(node.redis_connection.get_retry()._backoff, NoBackoff)
+        rand_node = r.get_random_node()
+        existing_conn = rand_node.redis_connection.connection_pool.get_connection("_")
         # Change retry policy
         new_retry = Retry(ExponentialBackoff(), 3)
         r.set_retry(new_retry)
@@ -765,6 +767,9 @@ class TestRedisClusterObj:
             assert isinstance(
                 node.redis_connection.get_retry()._backoff, ExponentialBackoff
             )
+        assert existing_conn.retry._retries == new_retry._retries
+        new_conn = rand_node.redis_connection.connection_pool.get_connection("_")
+        assert new_conn.retry._retries == new_retry._retries
 
     def test_cluster_retry_object(self, r) -> None:
         # Test default retry

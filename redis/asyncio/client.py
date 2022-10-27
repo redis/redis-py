@@ -278,6 +278,7 @@ class Redis(
 
     def set_retry(self, retry: "Retry") -> None:
         self.get_connection_kwargs().update({"retry": retry})
+        self.connection_pool.set_retry(retry)
 
     def load_external_module(self, funcname, func):
         """

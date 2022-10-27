@@ -207,7 +207,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         "reinitialize_steps",
         "response_callbacks",
         "result_callbacks",
-        "retry",
     )
 
     def __init__(
@@ -504,6 +503,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self.retry = retry
         for node in self.get_nodes():
             node.connection_kwargs.update({"retry": retry})
+            for conn in node._connections:
+                conn.retry = retry
 
     def set_response_callback(self, command: str, callback: ResponseCallbackT) -> None:
         """Set a custom response callback."""

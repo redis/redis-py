@@ -1426,6 +1426,12 @@ class ConnectionPool:
             if exc:
                 raise exc
 
+    def set_retry(self, retry: "Retry") -> None:
+        for conn in self._available_connections:
+            conn.retry = retry
+        for conn in self._in_use_connections:
+            conn.retry = retry
+
 
 class BlockingConnectionPool(ConnectionPool):
     """

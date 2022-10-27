@@ -529,7 +529,7 @@ class Connection:
             # Add TimeoutError to the errors list to retry on
             retry_on_error.append(TimeoutError)
         self.retry_on_error = retry_on_error
-        if retry_on_error:
+        if retry or retry_on_error:
             if retry is None:
                 self.retry = Retry(NoBackoff(), 1)
             else:
@@ -1445,6 +1445,13 @@ class ConnectionPool:
 
             for connection in connections:
                 connection.disconnect()
+
+    def set_retry(self, retry: "Retry") -> None:
+        self.connection_kwargs.update({"retry": retry})
+        for conn in self._available_connections:
+            conn.retry = retry
+        for conn in self._in_use_connections:
+            conn.retry = retry
 
 
 class BlockingConnectionPool(ConnectionPool):
