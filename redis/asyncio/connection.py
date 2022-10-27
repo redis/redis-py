@@ -1445,7 +1445,7 @@ class ConnectionPool:
             try:
                 if await connection.can_read_destructive():
                     raise ConnectionError("Connection has data") from None
-            except ConnectionError:
+            except (ConnectionError, OSError):
                 await connection.disconnect()
                 await connection.connect()
                 if await connection.can_read_destructive():
@@ -1646,7 +1646,7 @@ class BlockingConnectionPool(ConnectionPool):
             try:
                 if await connection.can_read_destructive():
                     raise ConnectionError("Connection has data") from None
-            except ConnectionError:
+            except (ConnectionError, OSError):
                 await connection.disconnect()
                 await connection.connect()
                 if await connection.can_read_destructive():
