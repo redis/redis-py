@@ -802,7 +802,7 @@ class TestClusterRedisCommands:
         await asyncio.sleep(0.1)
         assert await r.unlink(*d.keys()) == 0
 
-    async def test_initialize_before_run_execute_multykey_command(
+    async def test_initialize_before_execute_multi_key_command(
         self, request: FixtureRequest
     ) -> None:
         # Test for issue https://github.com/redis/redis-py/issues/2437
