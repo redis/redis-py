@@ -805,6 +805,7 @@ class TestClusterRedisCommands:
     async def test_initialize_before_run_execute_multykey_command(
         self, request: FixtureRequest
     ) -> None:
+        # Test for issue https://github.com/redis/redis-py/issues/2437
         url = request.config.getoption("--redis-url")
         r = RedisCluster.from_url(url)
         assert 0 == await r.exists("a", "b", "c")
