@@ -1,7 +1,9 @@
 import asyncio
 import functools
 import socket
+import sys
 from typing import Optional
+from unittest.mock import patch
 
 import async_timeout
 import pytest
@@ -27,7 +29,7 @@ def with_timeout(t):
     return wrapper
 
 
-async def wait_for_message(pubsub, timeout=0.1, ignore_subscribe_messages=False):
+async def wait_for_message(pubsub, timeout=0.2, ignore_subscribe_messages=False):
     now = asyncio.get_event_loop().time()
     timeout = now + timeout
     while now < timeout:
@@ -817,7 +819,7 @@ class TestPubSubAutoReconnect:
             "type": "subscribe",
         }
 
-    async def mycleanup(self):
+    async def myfinish(self):
         message = await self.messages.get()
         assert message == {
             "channel": b"foo",
@@ -825,6 +827,8 @@ class TestPubSubAutoReconnect:
             "pattern": None,
             "type": "subscribe",
         }
+
+    async def mykill(self):
         # kill thread
         async with self.cond:
             self.state = 4  # quit
@@ -834,41 +838,52 @@ class TestPubSubAutoReconnect:
         """
         Test that a socket error will cause reconnect
         """
-        async with async_timeout.timeout(self.timeout):
-            await self.mysetup(r, method)
-            # now, disconnect the connection, and wait for it to be re-established
-            async with self.cond:
-                assert self.state == 0
-                self.state = 1
-                with mock.patch.object(self.pubsub.connection, "_parser") as mockobj:
-                    mockobj.read_response.side_effect = socket.error
-                    mockobj.can_read.side_effect = socket.error
-                    # wait until task noticies the disconnect until we undo the patch
-                    await self.cond.wait_for(lambda: self.state >= 2)
-                    assert not self.pubsub.connection.is_connected
-                    # it is in a disconnecte state
-                # wait for reconnect
-                await self.cond.wait_for(lambda: self.pubsub.connection.is_connected)
-                assert self.state == 3
+        try:
+            async with async_timeout.timeout(self.timeout):
+                await self.mysetup(r, method)
+                # now, disconnect the connection, and wait for it to be re-established
+                async with self.cond:
+                    assert self.state == 0
+                    self.state = 1
+                    with mock.patch.object(self.pubsub.connection, "_parser") as m:
+                        m.read_response.side_effect = socket.error
+                        m.can_read_destructive.side_effect = socket.error
+                        # wait until task noticies the disconnect until we
+                        # undo the patch
+                        await self.cond.wait_for(lambda: self.state >= 2)
+                        assert not self.pubsub.connection.is_connected
+                        # it is in a disconnecte state
+                    # wait for reconnect
+                    await self.cond.wait_for(
+                        lambda: self.pubsub.connection.is_connected
+                    )
+                    assert self.state == 3
 
-            await self.mycleanup()
+                await self.myfinish()
+        finally:
+            await self.mykill()
 
     async def test_reconnect_disconnect(self, r: redis.Redis, method):
         """
         Test that a manual disconnect() will cause reconnect
         """
-        async with async_timeout.timeout(self.timeout):
-            await self.mysetup(r, method)
-            # now, disconnect the connection, and wait for it to be re-established
-            async with self.cond:
-                self.state = 1
-                await self.pubsub.connection.disconnect()
-                assert not self.pubsub.connection.is_connected
-                # wait for reconnect
-                await self.cond.wait_for(lambda: self.pubsub.connection.is_connected)
-                assert self.state == 3
+        try:
+            async with async_timeout.timeout(self.timeout):
+                await self.mysetup(r, method)
+                # now, disconnect the connection, and wait for it to be re-established
+                async with self.cond:
+                    self.state = 1
+                    await self.pubsub.connection.disconnect()
+                    assert not self.pubsub.connection.is_connected
+                    # wait for reconnect
+                    await self.cond.wait_for(
+                        lambda: self.pubsub.connection.is_connected
+                    )
+                    assert self.state == 3
 
-            await self.mycleanup()
+                await self.myfinish()
+        finally:
+            await self.mykill()
 
     async def loop(self):
         # reader loop, performing state transitions as it
@@ -914,3 +929,75 @@ class TestPubSubAutoReconnect:
                     return True
         except asyncio.TimeoutError:
             return False
+
+
+@pytest.mark.onlynoncluster
+class TestBaseException:
+    @pytest.mark.skipif(
+        sys.version_info < (3, 8), reason="requires python 3.8 or higher"
+    )
+    async def test_outer_timeout(self, r: redis.Redis):
+        """
+        Using asyncio_timeout manually outside the inner method timeouts works.
+        This works on Python versions 3.8 and greater, at which time asyncio.
+        CancelledError became a BaseException instead of an Exception before.
+        """
+        pubsub = r.pubsub()
+        await pubsub.subscribe("foo")
+        assert pubsub.connection.is_connected
+
+        async def get_msg_or_timeout(timeout=0.1):
+            async with async_timeout.timeout(timeout):
+                # blocking method to return messages
+                while True:
+                    response = await pubsub.parse_response(block=True)
+                    message = await pubsub.handle_message(
+                        response, ignore_subscribe_messages=False
+                    )
+                    if message is not None:
+                        return message
+
+        # get subscribe message
+        msg = await get_msg_or_timeout(10)
+        assert msg is not None
+        # timeout waiting for another message which never arrives
+        assert pubsub.connection.is_connected
+        with pytest.raises(asyncio.TimeoutError):
+            await get_msg_or_timeout()
+        # the timeout on the read should not cause disconnect
+        assert pubsub.connection.is_connected
+
+    async def test_base_exception(self, r: redis.Redis):
+        """
+        Manually trigger a BaseException inside the parser's .read_response method
+        and verify that it isn't caught
+        """
+        pubsub = r.pubsub()
+        await pubsub.subscribe("foo")
+        assert pubsub.connection.is_connected
+
+        async def get_msg():
+            # blocking method to return messages
+            while True:
+                response = await pubsub.parse_response(block=True)
+                message = await pubsub.handle_message(
+                    response, ignore_subscribe_messages=False
+                )
+                if message is not None:
+                    return message
+
+        # get subscribe message
+        msg = await get_msg()
+        assert msg is not None
+        # timeout waiting for another message which never arrives
+        assert pubsub.connection.is_connected
+        with patch("redis.asyncio.connection.PythonParser.read_response") as mock1:
+            mock1.side_effect = BaseException("boom")
+            with patch("redis.asyncio.connection.HiredisParser.read_response") as mock2:
+                mock2.side_effect = BaseException("boom")
+
+                with pytest.raises(BaseException):
+                    await get_msg()
+
+        # the timeout on the read should not cause disconnect
+        assert pubsub.connection.is_connected

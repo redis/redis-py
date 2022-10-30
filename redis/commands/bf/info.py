@@ -68,18 +68,20 @@ class TopKInfo(object):
 class TDigestInfo(object):
     compression = None
     capacity = None
-    mergedNodes = None
-    unmergedNodes = None
-    mergedWeight = None
-    unmergedWeight = None
-    totalCompressions = None
+    merged_nodes = None
+    unmerged_nodes = None
+    merged_weight = None
+    unmerged_weight = None
+    total_compressions = None
+    memory_usage = None
 
     def __init__(self, args):
         response = dict(zip(map(nativestr, args[::2]), args[1::2]))
         self.compression = response["Compression"]
         self.capacity = response["Capacity"]
-        self.mergedNodes = response["Merged nodes"]
-        self.unmergedNodes = response["Unmerged nodes"]
-        self.mergedWeight = response["Merged weight"]
-        self.unmergedWeight = response["Unmerged weight"]
-        self.totalCompressions = response["Total compressions"]
+        self.merged_nodes = response["Merged nodes"]
+        self.unmerged_nodes = response["Unmerged nodes"]
+        self.merged_weight = response["Merged weight"]
+        self.unmerged_weight = response["Unmerged weight"]
+        self.total_compressions = response["Total compressions"]
+        self.memory_usage = response["Memory usage"]

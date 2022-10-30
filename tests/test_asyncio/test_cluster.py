@@ -120,7 +120,7 @@ async def get_mocked_redis_client(*args, **kwargs) -> RedisCluster:
 def mock_node_resp(node: ClusterNode, response: Any) -> ClusterNode:
     connection = mock.AsyncMock()
     connection.is_connected = True
-    connection.read_response_without_lock.return_value = response
+    connection.read_response.return_value = response
     while node._free:
         node._free.pop()
     node._free.append(connection)
@@ -130,7 +130,7 @@ def mock_node_resp(node: ClusterNode, response: Any) -> ClusterNode:
 def mock_node_resp_exc(node: ClusterNode, exc: Exception) -> ClusterNode:
     connection = mock.AsyncMock()
     connection.is_connected = True
-    connection.read_response_without_lock.side_effect = exc
+    connection.read_response.side_effect = exc
     while node._free:
         node._free.pop()
     node._free.append(connection)
@@ -275,16 +275,12 @@ class TestRedisClusterObj:
         for node in rc.get_nodes():
             assert node.max_connections == 10
 
-        with mock.patch.object(
-            Connection, "read_response_without_lock"
-        ) as read_response_without_lock:
+        with mock.patch.object(Connection, "read_response") as read_response:
 
-            async def read_response_without_lock_mocked(
-                *args: Any, **kwargs: Any
-            ) -> None:
+            async def read_response_mocked(*args: Any, **kwargs: Any) -> None:
                 await asyncio.sleep(10)
 
-            read_response_without_lock.side_effect = read_response_without_lock_mocked
+            read_response.side_effect = read_response_mocked
 
             with pytest.raises(MaxConnectionsError):
                 await asyncio.gather(
@@ -316,10 +312,10 @@ class TestRedisClusterObj:
         assert await r.ping(target_nodes=RedisCluster.PRIMARIES) is True
         for primary in primaries:
             conn = primary._free.pop()
-            assert conn.read_response_without_lock.called is True
+            assert conn.read_response.called is True
         for replica in replicas:
             conn = replica._free.pop()
-            assert conn.read_response_without_lock.called is not True
+            assert conn.read_response.called is not True
 
     async def test_execute_command_node_flag_replicas(self, r: RedisCluster) -> None:
         """
@@ -333,10 +329,10 @@ class TestRedisClusterObj:
         assert await r.ping(target_nodes=RedisCluster.REPLICAS) is True
         for replica in replicas:
             conn = replica._free.pop()
-            assert conn.read_response_without_lock.called is True
+            assert conn.read_response.called is True
         for primary in primaries:
             conn = primary._free.pop()
-            assert conn.read_response_without_lock.called is not True
+            assert conn.read_response.called is not True
 
         await r.close()
 
@@ -348,7 +344,7 @@ class TestRedisClusterObj:
         assert await r.ping(target_nodes=RedisCluster.ALL_NODES) is True
         for node in r.get_nodes():
             conn = node._free.pop()
-            assert conn.read_response_without_lock.called is True
+            assert conn.read_response.called is True
 
     async def test_execute_command_node_flag_random(self, r: RedisCluster) -> None:
         """
@@ -359,7 +355,7 @@ class TestRedisClusterObj:
         called_count = 0
         for node in r.get_nodes():
             conn = node._free.pop()
-            if conn.read_response_without_lock.called is True:
+            if conn.read_response.called is True:
                 called_count += 1
         assert called_count == 1
 
@@ -372,7 +368,7 @@ class TestRedisClusterObj:
         mock_node_resp(def_node, "PONG")
         assert await r.ping() is True
         conn = def_node._free.pop()
-        assert conn.read_response_without_lock.called
+        assert conn.read_response.called
 
     async def test_ask_redirection(self, r: RedisCluster) -> None:
         """
@@ -437,7 +433,7 @@ class TestRedisClusterObj:
                     Connection,
                     send_packed_command=mock.DEFAULT,
                     connect=mock.DEFAULT,
-                    can_read=mock.DEFAULT,
+                    can_read_destructive=mock.DEFAULT,
                 ) as mocks:
                     # simulate 7006 as a failed node
                     def execute_command_mock(self, *args, **options):
@@ -477,7 +473,7 @@ class TestRedisClusterObj:
                     execute_command.successful_calls = 0
                     execute_command.failed_calls = 0
                     initialize.side_effect = initialize_mock
-                    mocks["can_read"].return_value = False
+                    mocks["can_read_destructive"].return_value = False
                     mocks["send_packed_command"].return_value = "MOCK_OK"
                     mocks["connect"].return_value = None
                     with mock.patch.object(
@@ -516,9 +512,9 @@ class TestRedisClusterObj:
         with mock.patch.multiple(
             Connection,
             send_command=mock.DEFAULT,
-            read_response_without_lock=mock.DEFAULT,
+            read_response=mock.DEFAULT,
             _connect=mock.DEFAULT,
-            can_read=mock.DEFAULT,
+            can_read_destructive=mock.DEFAULT,
             on_connect=mock.DEFAULT,
         ) as mocks:
             with mock.patch.object(
@@ -548,9 +544,9 @@ class TestRedisClusterObj:
                 # so we'll mock some of the Connection's functions to allow it
                 execute_command.side_effect = execute_command_mock_first
                 mocks["send_command"].return_value = True
-                mocks["read_response_without_lock"].return_value = "OK"
+                mocks["read_response"].return_value = "OK"
                 mocks["_connect"].return_value = True
-                mocks["can_read"].return_value = False
+                mocks["can_read_destructive"].return_value = False
                 mocks["on_connect"].return_value = True
 
                 # Create a cluster with reading from replications
@@ -806,6 +802,15 @@ class TestClusterRedisCommands:
         await asyncio.sleep(0.1)
         assert await r.unlink(*d.keys()) == 0
 
+    async def test_initialize_before_execute_multi_key_command(
+        self, request: FixtureRequest
+    ) -> None:
+        # Test for issue https://github.com/redis/redis-py/issues/2437
+        url = request.config.getoption("--redis-url")
+        r = RedisCluster.from_url(url)
+        assert 0 == await r.exists("a", "b", "c")
+        await r.close()
+
     @skip_if_redis_enterprise()
     async def test_cluster_myid(self, r: RedisCluster) -> None:
         node = r.get_random_node()
@@ -857,8 +862,8 @@ class TestClusterRedisCommands:
         node0 = r.get_node(default_host, 7000)
         node1 = r.get_node(default_host, 7001)
         assert await r.cluster_delslots(0, 8192) == [True, True]
-        assert node0._free.pop().read_response_without_lock.called
-        assert node1._free.pop().read_response_without_lock.called
+        assert node0._free.pop().read_response.called
+        assert node1._free.pop().read_response.called
 
         await r.close()
 
@@ -1027,7 +1032,7 @@ class TestClusterRedisCommands:
         node = r.nodes_manager.get_node_from_slot(12182)
         mock_node_resp(node, "OK")
         assert await r.cluster_setslot_stable(12182) is True
-        assert node._free.pop().read_response_without_lock.called
+        assert node._free.pop().read_response.called
 
     @skip_if_redis_enterprise()
     async def test_cluster_replicas(self, r: RedisCluster) -> None:
@@ -1069,7 +1074,7 @@ class TestClusterRedisCommands:
         for res in all_replicas_results.values():
             assert res is True
         for replica in r.get_replicas():
-            assert replica._free.pop().read_response_without_lock.called
+            assert replica._free.pop().read_response.called
 
         await r.close()
 
@@ -1082,7 +1087,7 @@ class TestClusterRedisCommands:
         for res in all_replicas_results.values():
             assert res is True
         for replica in r.get_replicas():
-            assert replica._free.pop().read_response_without_lock.called
+            assert replica._free.pop().read_response.called
 
         await r.close()
 
@@ -2441,8 +2446,8 @@ class TestClusterPipeline:
             mock_node_resp_exc(first_node, AskError(ask_msg))
             mock_node_resp(ask_node, "MOCK_OK")
             res = await pipe.get(key).execute()
-            assert first_node._free.pop().read_response_without_lock.await_count
-            assert ask_node._free.pop().read_response_without_lock.await_count
+            assert first_node._free.pop().read_response.await_count
+            assert ask_node._free.pop().read_response.await_count
             assert res == ["MOCK_OK"]
 
     async def test_moved_redirection_on_slave_with_default(
@@ -2497,7 +2502,7 @@ class TestClusterPipeline:
             executed_on_replica = False
             for node in slot_nodes:
                 if node.server_type == REPLICA:
-                    if node._free.pop().read_response_without_lock.await_count:
+                    if node._free.pop().read_response.await_count:
                         executed_on_replica = True
                         break
             assert executed_on_replica

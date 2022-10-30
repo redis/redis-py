@@ -10,8 +10,6 @@ from queue import Empty, Full, LifoQueue
 from time import time
 from urllib.parse import parse_qs, unquote, urlparse
 
-from packaging.version import Version
-
 from redis.backoff import NoBackoff
 from redis.exceptions import (
     AuthenticationError,
@@ -53,16 +51,6 @@ NONBLOCKING_EXCEPTIONS = tuple(NONBLOCKING_EXCEPTION_ERROR_NUMBERS.keys())
 
 if HIREDIS_AVAILABLE:
     import hiredis
-
-    hiredis_version = Version(hiredis.__version__)
-    HIREDIS_SUPPORTS_CALLABLE_ERRORS = hiredis_version >= Version("0.1.3")
-    HIREDIS_SUPPORTS_BYTE_BUFFER = hiredis_version >= Version("0.1.4")
-    HIREDIS_SUPPORTS_ENCODING_ERRORS = hiredis_version >= Version("1.0.0")
-
-    HIREDIS_USE_BYTE_BUFFER = True
-    # only use byte buffer if hiredis supports it
-    if not HIREDIS_SUPPORTS_BYTE_BUFFER:
-        HIREDIS_USE_BYTE_BUFFER = False
 
 SYM_STAR = b"*"
 SYM_DOLLAR = b"$"
@@ -380,9 +368,7 @@ class HiredisParser(BaseParser):
         if not HIREDIS_AVAILABLE:
             raise RedisError("Hiredis is not installed")
         self.socket_read_size = socket_read_size
-
-        if HIREDIS_USE_BYTE_BUFFER:
-            self._buffer = bytearray(socket_read_size)
+        self._buffer = bytearray(socket_read_size)
 
     def __del__(self):
         try:
@@ -393,16 +379,14 @@ class HiredisParser(BaseParser):
     def on_connect(self, connection, **kwargs):
         self._sock = connection._sock
         self._socket_timeout = connection.socket_timeout
-        kwargs = {"protocolError": InvalidResponse, "replyError": self.parse_error}
-
-        # hiredis < 0.1.3 doesn't support functions that create exceptions
-        if not HIREDIS_SUPPORTS_CALLABLE_ERRORS:
-            kwargs["replyError"] = ResponseError
+        kwargs = {
+            "protocolError": InvalidResponse,
+            "replyError": self.parse_error,
+            "errors": connection.encoder.encoding_errors,
+        }
 
         if connection.encoder.decode_responses:
             kwargs["encoding"] = connection.encoder.encoding
-        if HIREDIS_SUPPORTS_ENCODING_ERRORS:
-            kwargs["errors"] = connection.encoder.encoding_errors
         self._reader = hiredis.Reader(**kwargs)
         self._next_response = False
 
@@ -427,17 +411,10 @@ class HiredisParser(BaseParser):
         try:
             if custom_timeout:
                 sock.settimeout(timeout)
-            if HIREDIS_USE_BYTE_BUFFER:
-                bufflen = self._sock.recv_into(self._buffer)
-                if bufflen == 0:
-                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-                self._reader.feed(self._buffer, 0, bufflen)
-            else:
-                buffer = self._sock.recv(self.socket_read_size)
-                # an empty string indicates the server shutdown the socket
-                if not isinstance(buffer, bytes) or len(buffer) == 0:
-                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-                self._reader.feed(buffer)
+            bufflen = self._sock.recv_into(self._buffer)
+            if bufflen == 0:
+                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+            self._reader.feed(self._buffer, 0, bufflen)
             # data was read from the socket and added to the buffer.
             # return True to indicate that data was read.
             return True
@@ -479,17 +456,6 @@ class HiredisParser(BaseParser):
                 response = self._reader.gets(False)
             else:
                 response = self._reader.gets()
-        # if an older version of hiredis is installed, we need to attempt
-        # to convert ResponseErrors to their appropriate types.
-        if not HIREDIS_SUPPORTS_CALLABLE_ERRORS:
-            if isinstance(response, ResponseError):
-                response = self.parse_error(response.args[0])
-            elif (
-                isinstance(response, list)
-                and response
-                and isinstance(response[0], ResponseError)
-            ):
-                response[0] = self.parse_error(response[0].args[0])
         # if the response is a ConnectionError or the response is a list and
         # the first item is a ConnectionError, raise it as something bad
         # happened
@@ -800,7 +766,7 @@ class Connection:
                 errno = e.args[0]
                 errmsg = e.args[1]
             raise ConnectionError(f"Error {errno} while writing to socket. {errmsg}.")
-        except BaseException:
+        except Exception:
             self.disconnect()
             raise
 
@@ -838,7 +804,7 @@ class Connection:
         except OSError as e:
             self.disconnect()
             raise ConnectionError(f"Error while reading from {hosterr}" f" : {e.args}")
-        except BaseException:
+        except Exception:
             self.disconnect()
             raise
 

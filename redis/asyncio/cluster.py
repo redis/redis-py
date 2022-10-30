@@ -390,7 +390,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         # regardless of the server type. If this is a primary connection,
         # READONLY would not affect executing write commands.
         await connection.send_command("READONLY")
-        if str_if_bytes(await connection.read_response_without_lock()) != "OK":
+        if str_if_bytes(await connection.read_response()) != "OK":
             raise ConnectionError("READONLY command failed")
 
     def get_nodes(self) -> List["ClusterNode"]:
@@ -866,11 +866,9 @@ class ClusterNode:
     ) -> Any:
         try:
             if NEVER_DECODE in kwargs:
-                response = await connection.read_response_without_lock(
-                    disable_decoding=True
-                )
+                response = await connection.read_response(disable_decoding=True)
             else:
-                response = await connection.read_response_without_lock()
+                response = await connection.read_response()
         except ResponseError:
             if EMPTY_RESPONSE in kwargs:
                 return kwargs[EMPTY_RESPONSE]
