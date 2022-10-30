@@ -32,7 +32,6 @@ setup(
     author_email="oss@redis.com",
     python_requires=">=3.6",
     install_requires=[
-        "deprecated>=1.2.3",
         "packaging>=20.4",
         'importlib-metadata >= 1.0; python_version < "3.8"',
         'typing-extensions; python_version<"3.8"',
