@@ -126,7 +126,7 @@ this, instead of using make test, you need to pass
 Our test suite uses `pytest`. You can run a specific test suite against
 a specific Python version like this:
 
-`$ docker-compose run test tox -e py36 -- --redis-url=redis://master:6379/9 tests/test_commands.py`
+`$ docker-compose run test tox -e py37 -- --redis-url=redis://master:6379/9 tests/test_commands.py`
 
 ### Troubleshooting
 

@@ -5,11 +5,9 @@ from tests.conftest import skip_if_server_version_lt
 
 from .conftest import wait_for_command
 
-pytestmark = pytest.mark.asyncio
 
-
-@pytest.mark.onlynoncluster
 class TestPipeline:
+    @pytest.mark.onlynoncluster
     async def test_pipeline_is_true(self, r):
         """Ensure pipeline instances are not false-y"""
         async with r.pipeline() as pipe:
@@ -37,10 +35,7 @@ class TestPipeline:
     async def test_pipeline_memoryview(self, r):
         async with r.pipeline() as pipe:
             (pipe.set("a", memoryview(b"a1")).get("a"))
-            assert await pipe.execute() == [
-                True,
-                b"a1",
-            ]
+            assert await pipe.execute() == [True, b"a1"]
 
     async def test_pipeline_length(self, r):
         async with r.pipeline() as pipe:
@@ -55,7 +50,6 @@ class TestPipeline:
             await pipe.execute()
             assert len(pipe) == 0
 
-    @pytest.mark.onlynoncluster
     async def test_pipeline_no_transaction(self, r):
         async with r.pipeline(transaction=False) as pipe:
             pipe.set("a", "a1").set("b", "b1").set("c", "c1")
@@ -64,6 +58,7 @@ class TestPipeline:
             assert await r.get("b") == b"b1"
             assert await r.get("c") == b"c1"
 
+    @pytest.mark.onlynoncluster
     async def test_pipeline_no_transaction_watch(self, r):
         await r.set("a", 0)
 
@@ -75,6 +70,7 @@ class TestPipeline:
             pipe.set("a", int(a) + 1)
             assert await pipe.execute() == [True]
 
+    @pytest.mark.onlynoncluster
     async def test_pipeline_no_transaction_watch_failure(self, r):
         await r.set("a", 0)
 
@@ -378,7 +374,7 @@ class TestPipeline:
     async def test_pipeline_get(self, r):
         await r.set("a", "a1")
         async with r.pipeline() as pipe:
-            await pipe.get("a")
+            pipe.get("a")
             assert await pipe.execute() == [b"a1"]
 
     @pytest.mark.onlynoncluster

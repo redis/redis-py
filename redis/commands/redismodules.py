@@ -3,7 +3,7 @@ from json import JSONDecoder, JSONEncoder
 
 class RedisModuleCommands:
     """This class contains the wrapper functions to bring supported redis
-    modules into the command namepsace.
+    modules into the command namespace.
     """
 
     def json(self, encoder=JSONEncoder(), decoder=JSONDecoder()):
@@ -73,11 +73,31 @@ class RedisModuleCommands:
         return tdigest
 
     def graph(self, index_name="idx"):
-        """Access the timeseries namespace, providing support for
-        redis timeseries data.
+        """Access the graph namespace, providing support for
+        redis graph data.
         """
 
         from .graph import Graph
 
         g = Graph(client=self, name=index_name)
+        return g
+
+
+class AsyncRedisModuleCommands(RedisModuleCommands):
+    def ft(self, index_name="idx"):
+        """Access the search namespace, providing support for redis search."""
+
+        from .search import AsyncSearch
+
+        s = AsyncSearch(client=self, index_name=index_name)
+        return s
+
+    def graph(self, index_name="idx"):
+        """Access the graph namespace, providing support for
+        redis graph data.
+        """
+
+        from .graph import AsyncGraph
+
+        g = AsyncGraph(client=self, name=index_name)
         return g

@@ -1,17 +1,10 @@
 import asyncio
-import sys
 
 import pytest
-
-if sys.version_info[0:2] == (3, 6):
-    import pytest as pytest_asyncio
-else:
-    import pytest_asyncio
+import pytest_asyncio
 
 from redis.asyncio.lock import Lock
 from redis.exceptions import LockError, LockNotOwnedError
-
-pytestmark = pytest.mark.asyncio
 
 
 @pytest.mark.onlynoncluster
@@ -114,7 +107,7 @@ class TestLock:
         start = event_loop.time()
         assert not await lock2.acquire()
         # The elapsed duration should be less than the total blocking_timeout
-        assert bt > (event_loop.time() - start) > bt - sleep
+        assert bt >= (event_loop.time() - start) > bt - sleep
         await lock1.release()
 
     async def test_context_manager(self, r):

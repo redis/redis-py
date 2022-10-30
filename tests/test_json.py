@@ -171,16 +171,7 @@ def test_arrindex(client):
 @pytest.mark.redismod
 def test_arrinsert(client):
     client.json().set("arr", Path.root_path(), [0, 4])
-    assert 5 - -client.json().arrinsert(
-        "arr",
-        Path.root_path(),
-        1,
-        *[
-            1,
-            2,
-            3,
-        ],
-    )
+    assert 5 - -client.json().arrinsert("arr", Path.root_path(), 1, *[1, 2, 3])
     assert [0, 1, 2, 3, 4] == client.json().get("arr")
 
     # test prepends
@@ -833,7 +824,7 @@ def test_objlen_dollar(client):
         },
     )
     # Test multi
-    assert client.json().objlen("doc1", "$..a") == [2, None, 1]
+    assert client.json().objlen("doc1", "$..a") == [None, 2, 1]
     # Test single
     assert client.json().objlen("doc1", "$.nested1.a") == [2]
 
@@ -893,7 +884,6 @@ def test_type_dollar(client):
 
 @pytest.mark.redismod
 def test_clear_dollar(client):
-
     client.json().set(
         "doc1",
         "$",
@@ -905,10 +895,10 @@ def test_clear_dollar(client):
         },
     )
     # Test multi
-    assert client.json().clear("doc1", "$..a") == 4
+    assert client.json().clear("doc1", "$..a") == 3
 
     assert client.json().get("doc1", "$") == [
-        {"nested1": {"a": {}}, "a": [], "nested2": {"a": ""}, "nested3": {"a": {}}}
+        {"nested1": {"a": {}}, "a": [], "nested2": {"a": "claro"}, "nested3": {"a": {}}}
     ]
 
     # Test single
@@ -1012,10 +1002,8 @@ def test_resp_dollar(client):
                     ],
                     "A1_B3_C3": [1],
                 },
-                "A1_B4": {
-                    "A1_B4_C1": "foo",
-                },
-            },
+                "A1_B4": {"A1_B4_C1": "foo"},
+            }
         },
         "L2": {
             "a": {
@@ -1033,10 +1021,8 @@ def test_resp_dollar(client):
                     ],
                     "A2_B3_C3": [2],
                 },
-                "A2_B4": {
-                    "A2_B4_C1": "bar",
-                },
-            },
+                "A2_B4": {"A2_B4_C1": "bar"},
+            }
         },
     }
     client.json().set("doc1", "$", data)
@@ -1425,7 +1411,8 @@ def test_set_path(client):
 
     with open(jsonfile, "w+") as fp:
         fp.write(json.dumps({"hello": "world"}))
-    open(nojsonfile, "a+").write("hello")
+    with open(nojsonfile, "a+") as fp:
+        fp.write("hello")
 
     result = {jsonfile: True, nojsonfile: False}
     assert client.json().set_path(Path.root_path(), root) == result

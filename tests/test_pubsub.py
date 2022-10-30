@@ -1,4 +1,6 @@
 import platform
+import queue
+import socket
 import threading
 import time
 from unittest import mock
@@ -608,3 +610,170 @@ class TestPubSubDeadlock:
             p = r.pubsub()
             p.subscribe("my-channel-1", "my-channel-2")
             pool.reset()
+
+
+@pytest.mark.timeout(5, method="thread")
+@pytest.mark.parametrize("method", ["get_message", "listen"])
+@pytest.mark.onlynoncluster
+class TestPubSubAutoReconnect:
+    def mysetup(self, r, method):
+        self.messages = queue.Queue()
+        self.pubsub = r.pubsub()
+        self.state = 0
+        self.cond = threading.Condition()
+        if method == "get_message":
+            self.get_message = self.loop_step_get_message
+        else:
+            self.get_message = self.loop_step_listen
+
+        self.thread = threading.Thread(target=self.loop)
+        self.thread.daemon = True
+        self.thread.start()
+        # get the initial connect message
+        message = self.messages.get(timeout=1)
+        assert message == {
+            "channel": b"foo",
+            "data": 1,
+            "pattern": None,
+            "type": "subscribe",
+        }
+
+    def wait_for_reconnect(self):
+        self.cond.wait_for(lambda: self.pubsub.connection._sock is not None, timeout=2)
+        assert self.pubsub.connection._sock is not None  # we didn't time out
+        assert self.state == 3
+
+        message = self.messages.get(timeout=1)
+        assert message == {
+            "channel": b"foo",
+            "data": 1,
+            "pattern": None,
+            "type": "subscribe",
+        }
+
+    def mycleanup(self):
+        # kill thread
+        with self.cond:
+            self.state = 4  # quit
+            self.cond.notify()
+        self.thread.join()
+
+    def test_reconnect_socket_error(self, r: redis.Redis, method):
+        """
+        Test that a socket error will cause reconnect
+        """
+        self.mysetup(r, method)
+        try:
+            # now, disconnect the connection, and wait for it to be re-established
+            with self.cond:
+                self.state = 1
+                with mock.patch.object(self.pubsub.connection, "_parser") as mockobj:
+                    mockobj.read_response.side_effect = socket.error
+                    mockobj.can_read.side_effect = socket.error
+                    # wait until thread notices the disconnect until we undo the patch
+                    self.cond.wait_for(lambda: self.state >= 2)
+                    assert (
+                        self.pubsub.connection._sock is None
+                    )  # it is in a disconnected state
+                self.wait_for_reconnect()
+
+        finally:
+            self.mycleanup()
+
+    def test_reconnect_disconnect(self, r: redis.Redis, method):
+        """
+        Test that a manual disconnect() will cause reconnect
+        """
+        self.mysetup(r, method)
+        try:
+            # now, disconnect the connection, and wait for it to be re-established
+            with self.cond:
+                self.state = 1
+                self.pubsub.connection.disconnect()
+                assert self.pubsub.connection._sock is None
+                # wait for reconnect
+                self.wait_for_reconnect()
+        finally:
+            self.mycleanup()
+
+    def loop(self):
+        # reader loop, performing state transitions as it
+        # discovers disconnects and reconnects
+        self.pubsub.subscribe("foo")
+        while True:
+            time.sleep(0.01)  # give main thread chance to get lock
+            with self.cond:
+                old_state = self.state
+                try:
+                    if self.state == 4:
+                        break
+                    # print ('state, %s, sock %s' % (state, pubsub.connection._sock))
+                    got_msg = self.get_message()
+                    assert got_msg
+                    if self.state in (1, 2):
+                        self.state = 3  # successful reconnect
+                except redis.ConnectionError:
+                    assert self.state in (1, 2)
+                    self.state = 2
+                finally:
+                    self.cond.notify()
+                # assert that we noticed a connect error, or automatically
+                # reconnected without error
+                if old_state == 1:
+                    assert self.state in (2, 3)
+
+    def loop_step_get_message(self):
+        # get a single message via listen()
+        message = self.pubsub.get_message(timeout=0.1)
+        if message is not None:
+            self.messages.put(message)
+            return True
+        return False
+
+    def loop_step_listen(self):
+        # get a single message via listen()
+        for message in self.pubsub.listen():
+            self.messages.put(message)
+            return True
+
+
+@pytest.mark.onlynoncluster
+class TestBaseException:
+    def test_base_exception(self, r: redis.Redis):
+        """
+        Manually trigger a BaseException inside the parser's .read_response method
+        and verify that it isn't caught
+        """
+        pubsub = r.pubsub()
+        pubsub.subscribe("foo")
+
+        def is_connected():
+            return pubsub.connection._sock is not None
+
+        assert is_connected()
+
+        def get_msg():
+            # blocking method to return messages
+            while True:
+                response = pubsub.parse_response(block=True)
+                message = pubsub.handle_message(
+                    response, ignore_subscribe_messages=False
+                )
+                if message is not None:
+                    return message
+
+        # get subscribe message
+        msg = get_msg()
+        assert msg is not None
+        # timeout waiting for another message which never arrives
+        assert is_connected()
+        with patch("redis.connection.PythonParser.read_response") as mock1:
+            mock1.side_effect = BaseException("boom")
+            with patch("redis.connection.HiredisParser.read_response") as mock2:
+                mock2.side_effect = BaseException("boom")
+
+                with pytest.raises(BaseException):
+                    get_msg()
+
+        # the timeout on the read should not cause disconnect
+        assert is_connected()

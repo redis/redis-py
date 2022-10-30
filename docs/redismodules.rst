@@ -91,7 +91,7 @@ These are the commands for interacting with the `RedisJSON module <https://redis
 
     import redis
     r = redis.Redis()
-    r.json().set("mykey", ".", {"hello": "world", "i am": ["a", "json", "object!"]}
+    r.json().set("mykey", ".", {"hello": "world", "i am": ["a", "json", "object!"]})
 
 Examples of how to combine search and json can be found `here <examples/search_json_examples.html>`_.
 
@@ -134,7 +134,7 @@ These are the commands for interacting with the `RedisTimeSeries module <https:/
 
     import redis
     r = redis.Redis()
-    r.ts().create(2, retension_msecs=5)
+    r.ts().create(2, retension_msecs=5000)
 
 .. automodule:: redis.commands.timeseries.commands
     :members: TimeSeriesCommands

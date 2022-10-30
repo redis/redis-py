@@ -50,38 +50,20 @@ class TestCommandsParser:
             "key3",
         ]
         args7 = ["MIGRATE", "192.168.1.34", 6379, "key1", 0, 5000]
-        args8 = ["STRALGO", "LCS", "STRINGS", "string_a", "string_b"]
-        args9 = ["STRALGO", "LCS", "KEYS", "key1", "key2"]
 
-        assert commands_parser.get_keys(r, *args1).sort() == ["key1", "key2"].sort()
-        assert (
-            commands_parser.get_keys(r, *args2).sort() == ["mystream", "writers"].sort()
-        )
-        assert (
-            commands_parser.get_keys(r, *args3).sort()
-            == ["out", "zset1", "zset2"].sort()
-        )
-        assert commands_parser.get_keys(r, *args4).sort() == ["Sicily", "out"].sort()
-        assert commands_parser.get_keys(r, *args5).sort() == ["foo"].sort()
-        assert (
-            commands_parser.get_keys(r, *args6).sort()
-            == ["key1", "key2", "key3"].sort()
-        )
-        assert commands_parser.get_keys(r, *args7).sort() == ["key1"].sort()
-        assert commands_parser.get_keys(r, *args8) is None
-        assert commands_parser.get_keys(r, *args9).sort() == ["key1", "key2"].sort()
+        assert sorted(commands_parser.get_keys(r, *args1)) == ["key1", "key2"]
+        assert sorted(commands_parser.get_keys(r, *args2)) == ["mystream", "writers"]
+        assert sorted(commands_parser.get_keys(r, *args3)) == ["out", "zset1", "zset2"]
+        assert sorted(commands_parser.get_keys(r, *args4)) == ["Sicily", "out"]
+        assert sorted(commands_parser.get_keys(r, *args5)) == ["foo"]
+        assert sorted(commands_parser.get_keys(r, *args6)) == ["key1", "key2", "key3"]
+        assert sorted(commands_parser.get_keys(r, *args7)) == ["key1"]
 
     # A bug in redis<7.0 causes this to fail: https://github.com/redis/redis/issues/9493
     @skip_if_server_version_lt("7.0.0")
     def test_get_eval_keys_with_0_keys(self, r):
         commands_parser = CommandsParser(r)
-        args = [
-            "EVAL",
-            "return {ARGV[1],ARGV[2]}",
-            0,
-            "key1",
-            "key2",
-        ]
+        args = ["EVAL", "return {ARGV[1],ARGV[2]}", 0, "key1", "key2"]
         assert commands_parser.get_keys(r, *args) == []
 
     def test_get_pubsub_keys(self, r):

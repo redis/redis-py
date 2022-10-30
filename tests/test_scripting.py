@@ -70,7 +70,7 @@ class TestScripting:
     @pytest.mark.onlynoncluster
     def test_eval_ro(self, r):
         r.set("a", "b")
-        assert r.eval_ro("return redis.call('GET', KEYS[1])", 1, "a") == "b"
+        assert r.eval_ro("return redis.call('GET', KEYS[1])", 1, "a") == b"b"
         with pytest.raises(redis.ResponseError):
             r.eval_ro("return redis.call('DEL', KEYS[1])", 1, "a")
 
@@ -162,7 +162,7 @@ class TestScripting:
         r.set("a", "b")
         get_sha = r.script_load("return redis.call('GET', KEYS[1])")
         del_sha = r.script_load("return redis.call('DEL', KEYS[1])")
-        assert r.evalsha_ro(get_sha, 1, "a") == "b"
+        assert r.evalsha_ro(get_sha, 1, "a") == b"b"
         with pytest.raises(redis.ResponseError):
             r.evalsha_ro(del_sha, 1, "a")
 

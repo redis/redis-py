@@ -41,8 +41,8 @@ from redis.client import (
 )
 from redis.commands import (
     AsyncCoreCommands,
+    AsyncRedisModuleCommands,
     AsyncSentinelCommands,
-    RedisModuleCommands,
     list_or_args,
 )
 from redis.compat import Protocol, TypedDict
@@ -81,7 +81,7 @@ ResponseCallbackT = Union[ResponseCallbackProtocol, AsyncResponseCallbackProtoco
 
 
 class Redis(
-    AbstractRedis, RedisModuleCommands, AsyncCoreCommands, AsyncSentinelCommands
+    AbstractRedis, AsyncRedisModuleCommands, AsyncCoreCommands, AsyncSentinelCommands
 ):
     """
     Implementation of the Redis protocol.
@@ -158,6 +158,7 @@ class Redis(
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         retry_on_timeout: bool = False,
+        retry_on_error: Optional[list] = None,
         ssl: bool = False,
         ssl_keyfile: Optional[str] = None,
         ssl_certfile: Optional[str] = None,
@@ -172,11 +173,14 @@ class Redis(
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
         auto_close_connection_pool: bool = True,
+        redis_connect_func=None,
     ):
         """
         Initialize a new Redis client.
-        To specify a retry policy, first set `retry_on_timeout` to `True`
-        then set `retry` to a valid `Retry` object
+        To specify a retry policy for specific errors, first set
+        `retry_on_error` to a list of the error/s to retry on, then set
+        `retry` to a valid `Retry` object.
+        To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
         """
         kwargs: Dict[str, Any]
         # auto_close_connection_pool only has an effect if connection_pool is
@@ -187,6 +191,10 @@ class Redis(
             auto_close_connection_pool if connection_pool is None else False
         )
         if not connection_pool:
+            if not retry_on_error:
+                retry_on_error = []
+            if retry_on_timeout is True:
+                retry_on_error.append(TimeoutError)
             kwargs = {
                 "db": db,
                 "username": username,
@@ -196,10 +204,12 @@ class Redis(
                 "encoding_errors": encoding_errors,
                 "decode_responses": decode_responses,
                 "retry_on_timeout": retry_on_timeout,
+                "retry_on_error": retry_on_error,
                 "retry": copy.deepcopy(retry),
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
+                "redis_connect_func": redis_connect_func,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -263,11 +273,7 @@ class Redis(
         """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
 
-    def load_external_module(
-        self,
-        funcname,
-        func,
-    ):
+    def load_external_module(self, funcname, func):
         """
         This function can be used to add externally defined redis modules,
         and their namespaces to the redis client.
@@ -426,9 +432,7 @@ class Redis(
     def __del__(self, _warnings: Any = warnings) -> None:
         if self.connection is not None:
             _warnings.warn(
-                f"Unclosed client session {self!r}",
-                ResourceWarning,
-                source=self,
+                f"Unclosed client session {self!r}", ResourceWarning, source=self
             )
             context = {"client": self, "message": self._DEL_MESSAGE}
             asyncio.get_event_loop().call_exception_handler(context)
@@ -465,7 +469,10 @@ class Redis(
         is not a TimeoutError
         """
         await conn.disconnect()
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
             raise error
 
     # COMMAND EXECUTION AND PROTOCOL PARSING
@@ -693,6 +700,15 @@ class PubSub:
         # legitimate message off the stack if the connection is already
         # subscribed to one or more channels
 
+        await self.connect()
+        connection = self.connection
+        kwargs = {"check_health": not self.subscribed}
+        await self._execute(connection, connection.send_command, *args, **kwargs)
+
+    async def connect(self):
+        """
+        Ensure that the PubSub is connected
+        """
         if self.connection is None:
             self.connection = await self.connection_pool.get_connection(
                 "pubsub", self.shard_hint
@@ -700,9 +716,8 @@ class PubSub:
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
-        connection = self.connection
-        kwargs = {"check_health": not self.subscribed}
-        await self._execute(connection, connection.send_command, *args, **kwargs)
+        else:
+            await self.connection.connect()
 
     async def _disconnect_raise_connect(self, conn, error):
         """
@@ -739,9 +754,11 @@ class PubSub:
 
         await self.check_health()
 
-        if not block and not await self._execute(conn, conn.can_read, timeout=timeout):
-            return None
-        response = await self._execute(conn, conn.read_response)
+        if not conn.is_connected:
+            await conn.connect()
+
+        read_timeout = None if block else timeout
+        response = await self._execute(conn, conn.read_response, timeout=read_timeout)
 
         if conn.health_check_interval and response == self.health_check_response:
             # ignore the health check message as user might not expect it
@@ -853,16 +870,16 @@ class PubSub:
                 yield response
 
     async def get_message(
-        self, ignore_subscribe_messages: bool = False, timeout: float = 0.0
+        self, ignore_subscribe_messages: bool = False, timeout: Optional[float] = 0.0
     ):
         """
         Get the next message if one is available, otherwise None.
 
         If timeout is specified, the system will wait for `timeout` seconds
         before returning. Timeout should be specified as a floating point
-        number.
+        number or None to wait indefinitely.
         """
-        response = await self.parse_response(block=False, timeout=timeout)
+        response = await self.parse_response(block=(timeout is None), timeout=timeout)
         if response:
             return await self.handle_message(response, ignore_subscribe_messages)
         return None
@@ -962,6 +979,7 @@ class PubSub:
             if handler is None:
                 raise PubSubError(f"Pattern: '{pattern}' has no handler registered")
 
+        await self.connect()
         while True:
             try:
                 await self.get_message(

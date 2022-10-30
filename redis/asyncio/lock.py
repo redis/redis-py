@@ -1,9 +1,8 @@
 import asyncio
-import sys
 import threading
 import uuid
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Awaitable, NoReturn, Optional, Union
+from typing import TYPE_CHECKING, Awaitable, Optional, Union
 
 from redis.exceptions import LockError, LockNotOwnedError
 
@@ -186,11 +185,6 @@ class Lock:
         object with the default encoding. If a token isn't specified, a UUID
         will be generated.
         """
-        if sys.version_info[0:2] != (3, 6):
-            loop = asyncio.get_running_loop()
-        else:
-            loop = asyncio.get_event_loop()
-
         sleep = self.sleep
         if token is None:
             token = uuid.uuid1().hex.encode()
@@ -203,14 +197,14 @@ class Lock:
             blocking_timeout = self.blocking_timeout
         stop_trying_at = None
         if blocking_timeout is not None:
-            stop_trying_at = loop.time() + blocking_timeout
+            stop_trying_at = asyncio.get_event_loop().time() + blocking_timeout
         while True:
             if await self.do_acquire(token):
                 self.local.token = token
                 return True
             if not blocking:
                 return False
-            next_try_at = loop.time() + sleep
+            next_try_at = asyncio.get_event_loop().time() + sleep
             if stop_trying_at is not None and next_try_at > stop_trying_at:
                 return False
             await asyncio.sleep(sleep)
@@ -243,7 +237,7 @@ class Lock:
             stored_token = encoder.encode(stored_token)
         return self.local.token is not None and stored_token == self.local.token
 
-    def release(self) -> Awaitable[NoReturn]:
+    def release(self) -> Awaitable[None]:
         """Releases the already acquired lock"""
         expected_token = self.local.token
         if expected_token is None:
@@ -251,7 +245,7 @@ class Lock:
         self.local.token = None
         return self.do_release(expected_token)
 
-    async def do_release(self, expected_token: bytes):
+    async def do_release(self, expected_token: bytes) -> None:
         if not bool(
             await self.lua_release(
                 keys=[self.name], args=[expected_token], client=self.redis

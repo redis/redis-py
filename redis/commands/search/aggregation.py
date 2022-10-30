@@ -104,7 +104,6 @@ class AggregateRequest:
         self._aggregateplan = []
         self._loadfields = []
         self._loadall = False
-        self._limit = Limit()
         self._max = 0
         self._with_schema = False
         self._verbatim = False
@@ -211,7 +210,8 @@ class AggregateRequest:
         `sort_by()` instead.
 
         """
-        self._limit = Limit(offset, num)
+        _limit = Limit(offset, num)
+        self._aggregateplan.extend(_limit.build_args())
         return self
 
     def sort_by(self, *fields, **kwargs):
@@ -322,8 +322,6 @@ class AggregateRequest:
             ret.extend(self._loadfields)
 
         ret.extend(self._aggregateplan)
-
-        ret += self._limit.build_args()
 
         return ret
 

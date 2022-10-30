@@ -1,9 +1,12 @@
 from contextlib import contextmanager
+from functools import wraps
+from typing import Any, Dict, Mapping, Union
 
 try:
     import hiredis  # noqa
 
-    HIREDIS_AVAILABLE = True
+    # Only support Hiredis >= 1.0:
+    HIREDIS_AVAILABLE = not hiredis.__version__.startswith("0.")
 except ImportError:
     HIREDIS_AVAILABLE = False
 
@@ -34,7 +37,7 @@ def pipeline(redis_obj):
     p.execute()
 
 
-def str_if_bytes(value):
+def str_if_bytes(value: Union[str, bytes]) -> str:
     return (
         value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
     )
@@ -44,7 +47,7 @@ def safe_str(value):
     return str(str_if_bytes(value))
 
 
-def dict_merge(*dicts):
+def dict_merge(*dicts: Mapping[str, Any]) -> Dict[str, Any]:
     """
     Merge all provided dicts into 1 dict.
     *dicts : `dict`
@@ -78,3 +81,30 @@ def merge_result(command, res):
             result.add(value)
 
     return list(result)
+
+
+def warn_deprecated(name, reason="", version="", stacklevel=2):
+    import warnings
+
+    msg = f"Call to deprecated {name}."
+    if reason:
+        msg += f" ({reason})"
+    if version:
+        msg += f" -- Deprecated since version {version}."
+    warnings.warn(msg, category=DeprecationWarning, stacklevel=stacklevel)
+
+
+def deprecated_function(reason="", version="", name=None):
+    """
+    Decorator to mark a function as deprecated.
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            warn_deprecated(name or func.__name__, reason, version, stacklevel=3)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator

@@ -130,15 +130,27 @@ def _get_info(redis_url):
 
 
 def pytest_sessionstart(session):
+    # during test discovery, e.g. with VS Code, we may not
+    # have a server running.
     redis_url = session.config.getoption("--redis-url")
-    info = _get_info(redis_url)
-    version = info["redis_version"]
-    arch_bits = info["arch_bits"]
-    cluster_enabled = info["cluster_enabled"]
+    try:
+        info = _get_info(redis_url)
+        version = info["redis_version"]
+        arch_bits = info["arch_bits"]
+        cluster_enabled = info["cluster_enabled"]
+        enterprise = info["enterprise"]
+    except redis.ConnectionError:
+        # provide optimistic defaults
+        version = "10.0.0"
+        arch_bits = 64
+        cluster_enabled = False
+        enterprise = False
     REDIS_INFO["version"] = version
     REDIS_INFO["arch_bits"] = arch_bits
     REDIS_INFO["cluster_enabled"] = cluster_enabled
-    REDIS_INFO["enterprise"] = info["enterprise"]
+    REDIS_INFO["enterprise"] = enterprise
+    # store REDIS_INFO in config so that it is available from "condition strings"
+    session.config.REDIS_INFO = REDIS_INFO
 
     # module info, if the second redis is running
     try:
@@ -199,20 +211,21 @@ def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=60):
 
 
 def skip_if_server_version_lt(min_version: str) -> _TestDecorator:
-    redis_version = REDIS_INFO["version"]
+    redis_version = REDIS_INFO.get("version", "0")
     check = Version(redis_version) < Version(min_version)
     return pytest.mark.skipif(check, reason=f"Redis version required >= {min_version}")
 
 
 def skip_if_server_version_gte(min_version: str) -> _TestDecorator:
-    redis_version = REDIS_INFO["version"]
+    redis_version = REDIS_INFO.get("version", "0")
     check = Version(redis_version) >= Version(min_version)
     return pytest.mark.skipif(check, reason=f"Redis version required < {min_version}")
 
 
 def skip_unless_arch_bits(arch_bits: int) -> _TestDecorator:
     return pytest.mark.skipif(
-        REDIS_INFO["arch_bits"] != arch_bits, reason=f"server is not {arch_bits}-bit"
+        REDIS_INFO.get("arch_bits", "") != arch_bits,
+        reason=f"server is not {arch_bits}-bit",
     )
 
 
@@ -235,12 +248,12 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
 
 
 def skip_if_redis_enterprise() -> _TestDecorator:
-    check = REDIS_INFO["enterprise"] is True
+    check = REDIS_INFO.get("enterprise", False) is True
     return pytest.mark.skipif(check, reason="Redis enterprise")
 
 
 def skip_ifnot_redis_enterprise() -> _TestDecorator:
-    check = REDIS_INFO["enterprise"] is False
+    check = REDIS_INFO.get("enterprise", False) is False
     return pytest.mark.skipif(check, reason="Not running in redis enterprise")
 
 

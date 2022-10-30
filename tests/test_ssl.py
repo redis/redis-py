@@ -68,8 +68,8 @@ class TestSSL:
         assert r.ping()
 
     def test_validating_self_signed_string_certificate(self, request):
-        f = open(self.SERVER_CERT)
-        cert_data = f.read()
+        with open(self.SERVER_CERT) as f:
+            cert_data = f.read()
         ssl_url = request.config.option.redis_ssl_url
         p = urlparse(ssl_url)[1].split(":")
         r = redis.Redis(

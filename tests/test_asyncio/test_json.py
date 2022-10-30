@@ -5,8 +5,6 @@ from redis import exceptions
 from redis.commands.json.path import Path
 from tests.conftest import skip_ifmodversion_lt
 
-pytestmark = pytest.mark.asyncio
-
 
 @pytest.mark.redismod
 async def test_json_setbinarykey(modclient: redis.Redis):
@@ -155,16 +153,7 @@ async def test_arrindex(modclient: redis.Redis):
 @pytest.mark.redismod
 async def test_arrinsert(modclient: redis.Redis):
     await modclient.json().set("arr", Path.root_path(), [0, 4])
-    assert 5 - -await modclient.json().arrinsert(
-        "arr",
-        Path.root_path(),
-        1,
-        *[
-            1,
-            2,
-            3,
-        ],
-    )
+    assert 5 - -await modclient.json().arrinsert("arr", Path.root_path(), 1, *[1, 2, 3])
     assert [0, 1, 2, 3, 4] == await modclient.json().get("arr")
 
     # test prepends
@@ -828,7 +817,7 @@ async def test_objlen_dollar(modclient: redis.Redis):
         },
     )
     # Test multi
-    assert await modclient.json().objlen("doc1", "$..a") == [2, None, 1]
+    assert await modclient.json().objlen("doc1", "$..a") == [None, 2, 1]
     # Test single
     assert await modclient.json().objlen("doc1", "$.nested1.a") == [2]
 
@@ -899,11 +888,12 @@ async def test_clear_dollar(modclient: redis.Redis):
             "nested3": {"a": {"baz": 50}},
         },
     )
+
     # Test multi
-    assert await modclient.json().clear("doc1", "$..a") == 4
+    assert await modclient.json().clear("doc1", "$..a") == 3
 
     assert await modclient.json().get("doc1", "$") == [
-        {"nested1": {"a": {}}, "a": [], "nested2": {"a": ""}, "nested3": {"a": {}}}
+        {"nested1": {"a": {}}, "a": [], "nested2": {"a": "claro"}, "nested3": {"a": {}}}
     ]
 
     # Test single

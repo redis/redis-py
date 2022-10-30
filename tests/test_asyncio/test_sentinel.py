@@ -1,12 +1,7 @@
 import socket
-import sys
 
 import pytest
-
-if sys.version_info[0:2] == (3, 6):
-    import pytest as pytest_asyncio
-else:
-    import pytest_asyncio
+import pytest_asyncio
 
 import redis.asyncio.sentinel
 from redis import exceptions
@@ -16,8 +11,6 @@ from redis.asyncio.sentinel import (
     SentinelConnectionPool,
     SlaveNotFoundError,
 )
-
-pytestmark = pytest.mark.asyncio
 
 
 @pytest_asyncio.fixture(scope="module")
@@ -203,7 +196,7 @@ async def test_master_for(cluster, sentinel, master_ip):
 @pytest.mark.onlynoncluster
 async def test_slave_for(cluster, sentinel):
     cluster.slaves = [
-        {"ip": "127.0.0.1", "port": 6379, "is_odown": False, "is_sdown": False},
+        {"ip": "127.0.0.1", "port": 6379, "is_odown": False, "is_sdown": False}
     ]
     slave = sentinel.slave_for("mymaster", db=9)
     assert await slave.ping()

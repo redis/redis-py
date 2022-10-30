@@ -116,6 +116,16 @@ class TestLock:
             assert r.get("foo") == lock.local.token
         assert r.get("foo") is None
 
+    def test_context_manager_blocking_timeout(self, r):
+        with self.get_lock(r, "foo", blocking=False):
+            bt = 0.4
+            sleep = 0.05
+            lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
+            start = time.monotonic()
+            assert not lock2.acquire()
+            # The elapsed duration should be less than the total blocking_timeout
+            assert bt > (time.monotonic() - start) > bt - sleep
+
     def test_context_manager_raises_when_locked_not_acquired(self, r):
         r.set("foo", "bar")
         with pytest.raises(LockError):
@@ -220,6 +230,16 @@ class TestLock:
         r.set("foo", "a")
         with pytest.raises(LockNotOwnedError):
             lock.reacquire()
+
+    def test_context_manager_reacquiring_lock_with_no_timeout_raises_error(self, r):
+        with self.get_lock(r, "foo", timeout=None, blocking=False) as lock:
+            with pytest.raises(LockError):
+                lock.reacquire()
+
+    def test_context_manager_reacquiring_lock_no_longer_owned_raises_error(self, r):
+        with pytest.raises(LockNotOwnedError):
+            with self.get_lock(r, "foo", timeout=10, blocking=False):
+                r.set("foo", "a")
 
 
 class TestLockClassSelection:

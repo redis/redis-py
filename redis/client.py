@@ -310,7 +310,8 @@ def parse_xclaim(response, **options):
 def parse_xautoclaim(response, **options):
     if options.get("parse_justid", False):
         return response[1]
-    return parse_stream_list(response[1])
+    response[1] = parse_stream_list(response[1])
+    return response
 
 
 def parse_xinfo_stream(response, **options):
@@ -410,11 +411,7 @@ def parse_slowlog_get(response, **options):
     space = " " if options.get("decode_responses", False) else b" "
 
     def parse_item(item):
-        result = {
-            "id": item[0],
-            "start_time": int(item[1]),
-            "duration": int(item[2]),
-        }
+        result = {"id": item[0], "start_time": int(item[1]), "duration": int(item[2])}
         # Redis Enterprise injects another entry at index [3], which has
         # the complexity info (i.e. the value N in case the command has
         # an O(N) complexity) instead of the command.
@@ -557,6 +554,10 @@ def parse_command(response, **options):
         cmd_dict["first_key_pos"] = command[3]
         cmd_dict["last_key_pos"] = command[4]
         cmd_dict["step_count"] = command[5]
+        if len(command) > 7:
+            cmd_dict["tips"] = command[7]
+            cmd_dict["key_specifications"] = command[8]
+            cmd_dict["subcommands"] = command[9]
         commands[cmd_name] = cmd_dict
     return commands
 
@@ -580,6 +581,19 @@ def parse_acl_getuser(response, **options):
     data["flags"] = list(map(str_if_bytes, data["flags"]))
     data["passwords"] = list(map(str_if_bytes, data["passwords"]))
     data["commands"] = str_if_bytes(data["commands"])
+    if isinstance(data["keys"], str) or isinstance(data["keys"], bytes):
+        data["keys"] = list(str_if_bytes(data["keys"]).split(" "))
+    if data["keys"] == [""]:
+        data["keys"] = []
+    if "channels" in data:
+        if isinstance(data["channels"], str) or isinstance(data["channels"], bytes):
+            data["channels"] = list(str_if_bytes(data["channels"]).split(" "))
+        if data["channels"] == [""]:
+            data["channels"] = []
+    if "selectors" in data:
+        data["selectors"] = [
+            list(map(str_if_bytes, selector)) for selector in data["selectors"]
+        ]
 
     # split 'commands' into separate 'categories' and 'commands' lists
     commands, categories = [], []
@@ -690,7 +704,7 @@ class AbstractRedis:
         **string_keys_to_dict("SORT", sort_return_tuples),
         **string_keys_to_dict("ZSCORE ZINCRBY GEODIST", float_or_none),
         **string_keys_to_dict(
-            "FLUSHALL FLUSHDB LSET LTRIM MSET PFMERGE READONLY READWRITE "
+            "FLUSHALL FLUSHDB LSET LTRIM MSET PFMERGE ASKING READONLY READWRITE "
             "RENAME SAVE SELECT SHUTDOWN SLAVEOF SWAPDB WATCH UNWATCH ",
             bool_ok,
         ),
@@ -740,17 +754,18 @@ class AbstractRedis:
         "CLUSTER DELSLOTSRANGE": bool_ok,
         "CLUSTER FAILOVER": bool_ok,
         "CLUSTER FORGET": bool_ok,
+        "CLUSTER GETKEYSINSLOT": lambda r: list(map(str_if_bytes, r)),
         "CLUSTER INFO": parse_cluster_info,
         "CLUSTER KEYSLOT": lambda x: int(x),
         "CLUSTER MEET": bool_ok,
         "CLUSTER NODES": parse_cluster_nodes,
+        "CLUSTER REPLICAS": parse_cluster_nodes,
         "CLUSTER REPLICATE": bool_ok,
         "CLUSTER RESET": bool_ok,
         "CLUSTER SAVECONFIG": bool_ok,
         "CLUSTER SET-CONFIG-EPOCH": bool_ok,
         "CLUSTER SETSLOT": bool_ok,
         "CLUSTER SLAVES": parse_cluster_nodes,
-        "CLUSTER REPLICAS": parse_cluster_nodes,
         "COMMAND": parse_command,
         "COMMAND COUNT": int,
         "COMMAND GETKEYS": lambda r: list(map(str_if_bytes, r)),
@@ -760,7 +775,6 @@ class AbstractRedis:
         "DEBUG OBJECT": parse_debug_object,
         "FUNCTION DELETE": bool_ok,
         "FUNCTION FLUSH": bool_ok,
-        "FUNCTION LOAD": bool_ok,
         "FUNCTION RESTORE": bool_ok,
         "GEOHASH": lambda r: list(map(str_if_bytes, r)),
         "GEOPOS": lambda r: list(
@@ -836,6 +850,8 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
     the commands are sent and received to the Redis server. Based on
     configuration, an instance will either use a ConnectionPool, or
     Connection object to talk to redis.
+
+    It is not safe to pass PubSub or Pipeline objects between threads.
     """
 
     @classmethod
@@ -901,7 +917,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         errors=None,
         decode_responses=False,
         retry_on_timeout=False,
-        retry_on_error=[],
+        retry_on_error=None,
         ssl=False,
         ssl_keyfile=None,
         ssl_certfile=None,
@@ -929,6 +945,12 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         `retry_on_error` to a list of the error/s to retry on, then set
         `retry` to a valid `Retry` object.
         To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
+
+        Args:
+
+        single_connection_client:
+            if `True`, connection pool is not used. In that case `Redis`
+            instance use is not thread safe.
         """
         if not connection_pool:
             if charset is not None:
@@ -945,6 +967,8 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
                     )
                 )
                 encoding_errors = errors
+            if not retry_on_error:
+                retry_on_error = []
             if retry_on_timeout is True:
                 retry_on_error.append(TimeoutError)
             kwargs = {
@@ -1023,11 +1047,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         """Set a custom Response Callback"""
         self.response_callbacks[command] = callback
 
-    def load_external_module(
-        self,
-        funcname,
-        func,
-    ):
+    def load_external_module(self, funcname, func):
         """
         This function can be used to add externally defined redis modules,
         and their namespaces to the redis client.
@@ -1089,6 +1109,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         name,
         timeout=None,
         sleep=0.1,
+        blocking=True,
         blocking_timeout=None,
         lock_class=None,
         thread_local=True,
@@ -1103,6 +1124,12 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         ``sleep`` indicates the amount of time to sleep per loop iteration
         when the lock is in blocking mode and another client is currently
         holding the lock.
+
+        ``blocking`` indicates whether calling ``acquire`` should block until
+        the lock has been acquired or to fail immediately, causing ``acquire``
+        to return False and the lock not being acquired. Defaults to True.
+        Note this value can be overridden by passing a ``blocking``
+        argument to ``acquire``.
 
         ``blocking_timeout`` indicates the maximum amount of time in seconds to
         spend trying to acquire the lock. A value of ``None`` indicates
@@ -1146,6 +1173,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
             name,
             timeout=timeout,
             sleep=sleep,
+            blocking=blocking,
             blocking_timeout=blocking_timeout,
             thread_local=thread_local,
         )
@@ -1475,9 +1503,15 @@ class PubSub:
 
         self.check_health()
 
-        if not block and not self._execute(conn, conn.can_read, timeout=timeout):
-            return None
-        response = self._execute(conn, conn.read_response)
+        def try_read():
+            if not block:
+                if not conn.can_read(timeout=timeout):
+                    return None
+            else:
+                conn.connect()
+            return conn.read_response()
+
+        response = self._execute(conn, try_read)
 
         if self.is_health_check_response(response):
             # ignore the health check message as user might not expect it
@@ -1603,13 +1637,13 @@ class PubSub:
             if response is not None:
                 yield response
 
-    def get_message(self, ignore_subscribe_messages=False, timeout=0):
+    def get_message(self, ignore_subscribe_messages=False, timeout=0.0):
         """
         Get the next message if one is available, otherwise None.
 
         If timeout is specified, the system will wait for `timeout` seconds
         before returning. Timeout should be specified as a floating point
-        number.
+        number, or None, to wait indefinitely.
         """
         if not self.subscribed:
             # Wait for subscription
@@ -1625,7 +1659,7 @@ class PubSub:
                 # so no messages are available
                 return None
 
-        response = self.parse_response(block=False, timeout=timeout)
+        response = self.parse_response(block=(timeout is None), timeout=timeout)
         if response:
             return self.handle_message(response, ignore_subscribe_messages)
         return None

@@ -19,11 +19,7 @@ class JSON(JSONCommands):
     """
 
     def __init__(
-        self,
-        client,
-        version=None,
-        decoder=JSONDecoder(),
-        encoder=JSONEncoder(),
+        self, client, version=None, decoder=JSONDecoder(), encoder=JSONEncoder()
     ):
         """
         Create a client for talking to json.
@@ -113,6 +109,7 @@ class JSON(JSONCommands):
                 cluster_error_retry_attempts=self.client.cluster_error_retry_attempts,
                 read_from_replicas=self.client.read_from_replicas,
                 reinitialize_steps=self.client.reinitialize_steps,
+                lock=self.client._lock,
             )
 
         else:

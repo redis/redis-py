@@ -29,6 +29,7 @@ from redis.exceptions import (
     RedisClusterException,
     RedisError,
     ResponseError,
+    TimeoutError,
 )
 from redis.utils import str_if_bytes
 from tests.test_pubsub import wait_for_message
@@ -44,12 +45,7 @@ from .conftest import (
 default_host = "127.0.0.1"
 default_port = 7000
 default_cluster_slots = [
-    [
-        0,
-        8191,
-        ["127.0.0.1", 7000, "node_0"],
-        ["127.0.0.1", 7003, "node_3"],
-    ],
+    [0, 8191, ["127.0.0.1", 7000, "node_0"], ["127.0.0.1", 7003, "node_3"]],
     [8192, 16383, ["127.0.0.1", 7001, "node_1"], ["127.0.0.1", 7002, "node_2"]],
 ]
 
@@ -656,6 +652,45 @@ class TestRedisClusterObj:
                 else:
                     raise e
 
+    def test_timeout_error_topology_refresh_reuse_connections(self, r):
+        """
+        By mucking TIMEOUT errors, we'll force the cluster topology to be reinitialized,
+        and then ensure that only the impacted connection is replaced
+        """
+        node = r.get_node_from_key("key")
+        r.set("key", "value")
+        node_conn_origin = {}
+        for n in r.get_nodes():
+            node_conn_origin[n.name] = n.redis_connection
+        real_func = r.get_redis_connection(node).parse_response
+
+        class counter:
+            def __init__(self, val=0):
+                self.val = int(val)
+
+        count = counter(0)
+        with patch.object(Redis, "parse_response") as parse_response:
+
+            def moved_redirect_effect(connection, *args, **options):
+                # raise a timeout for 5 times so we'll need to reinitialize the topology
+                if count.val == 4:
+                    parse_response.side_effect = real_func
+                count.val += 1
+                raise TimeoutError()
+
+            parse_response.side_effect = moved_redirect_effect
+            assert r.get("key") == b"value"
+            for node_name, conn in node_conn_origin.items():
+                if node_name == node.name:
+                    # The old redis connection of the timed out node should have been
+                    # deleted and replaced
+                    assert conn != r.get_redis_connection(node)
+                else:
+                    # other nodes' redis connection should have been reused during the
+                    # topology refresh
+                    cur_node = r.get_node(node_name=node_name)
+                    assert conn == r.get_redis_connection(cur_node)
+
 
 @pytest.mark.onlycluster
 class TestClusterRedisCommands:
@@ -665,8 +700,8 @@ class TestClusterRedisCommands:
 
     def test_case_insensitive_command_names(self, r):
         assert (
-            r.cluster_response_callbacks["cluster addslots"]
-            == r.cluster_response_callbacks["CLUSTER ADDSLOTS"]
+            r.cluster_response_callbacks["cluster slots"]
+            == r.cluster_response_callbacks["CLUSTER SLOTS"]
         )
 
     def test_get_and_set(self, r):
@@ -856,6 +891,29 @@ class TestClusterRedisCommands:
         assert cluster_slots.get((0, 8191)) is not None
         assert cluster_slots.get((0, 8191)).get("primary") == ("127.0.0.1", 7000)
 
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    def test_cluster_shards(self, r):
+        cluster_shards = r.cluster_shards()
+        assert isinstance(cluster_shards, list)
+        assert isinstance(cluster_shards[0], dict)
+        attributes = [
+            b"id",
+            b"endpoint",
+            b"ip",
+            b"hostname",
+            b"port",
+            b"tls-port",
+            b"role",
+            b"replication-offset",
+            b"health",
+        ]
+        for x in cluster_shards:
+            assert list(x.keys()) == ["slots", "nodes"]
+            for node in x["nodes"]:
+                for attribute in node.keys():
+                    assert attribute in attributes
+
     @skip_if_redis_enterprise()
     def test_cluster_addslots(self, r):
         node = r.get_random_node()
@@ -882,6 +940,23 @@ class TestClusterRedisCommands:
     @skip_if_redis_enterprise()
     def test_cluster_delslots(self):
         cluster_slots = [
+            [0, 8191, ["127.0.0.1", 7000, "node_0"]],
+            [8192, 16383, ["127.0.0.1", 7001, "node_1"]],
+        ]
+        r = get_mocked_redis_client(
+            host=default_host, port=default_port, cluster_slots=cluster_slots
+        )
+        mock_all_nodes_resp(r, "OK")
+        node0 = r.get_node(default_host, 7000)
+        node1 = r.get_node(default_host, 7001)
+        assert r.cluster_delslots(0, 8192) == [True, True]
+        assert node0.redis_connection.connection.read_response.called
+        assert node1.redis_connection.connection.read_response.called
+
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    def test_cluster_delslotsrange(self):
+        cluster_slots = [
             [
                 0,
                 8191,
@@ -897,17 +972,7 @@ class TestClusterRedisCommands:
             host=default_host, port=default_port, cluster_slots=cluster_slots
         )
         mock_all_nodes_resp(r, "OK")
-        node0 = r.get_node(default_host, 7000)
-        node1 = r.get_node(default_host, 7001)
-        assert r.cluster_delslots(0, 8192) == [True, True]
-        assert node0.redis_connection.connection.read_response.called
-        assert node1.redis_connection.connection.read_response.called
-
-    @skip_if_server_version_lt("7.0.0")
-    @skip_if_redis_enterprise()
-    def test_cluster_delslotsrange(self, r):
         node = r.get_random_node()
-        mock_node_resp(node, "OK")
         r.cluster_addslots(node, 1, 2, 3, 4, 5)
         assert r.cluster_delslotsrange(1, 5)
 
@@ -1038,7 +1103,7 @@ class TestClusterRedisCommands:
 
     @skip_if_redis_enterprise()
     def test_cluster_get_keys_in_slot(self, r):
-        response = [b"{foo}1", b"{foo}2"]
+        response = ["{foo}1", "{foo}2"]
         node = r.nodes_manager.get_node_from_slot(12182)
         mock_node_resp(node, response)
         keys = r.cluster_get_keys_in_slot(12182, 4)
@@ -1098,7 +1163,6 @@ class TestClusterRedisCommands:
         links_to = sum(x.count("to") for x in res)
         links_for = sum(x.count("from") for x in res)
         assert links_to == links_for
-        print(res)
         for i in range(0, len(res) - 1, 2):
             assert res[i][3] == res[i + 1][3]
 
@@ -2101,34 +2165,14 @@ class TestNodesManager:
                 """
                 if port == 7000:
                     result = [
-                        [
-                            0,
-                            5460,
-                            ["127.0.0.1", 7000],
-                            ["127.0.0.1", 7003],
-                        ],
-                        [
-                            5461,
-                            10922,
-                            ["127.0.0.1", 7001],
-                            ["127.0.0.1", 7004],
-                        ],
+                        [0, 5460, ["127.0.0.1", 7000], ["127.0.0.1", 7003]],
+                        [5461, 10922, ["127.0.0.1", 7001], ["127.0.0.1", 7004]],
                     ]
 
                 elif port == 7001:
                     result = [
-                        [
-                            0,
-                            5460,
-                            ["127.0.0.1", 7001],
-                            ["127.0.0.1", 7003],
-                        ],
-                        [
-                            5461,
-                            10922,
-                            ["127.0.0.1", 7000],
-                            ["127.0.0.1", 7004],
-                        ],
+                        [0, 5460, ["127.0.0.1", 7001], ["127.0.0.1", 7003]],
+                        [5461, 10922, ["127.0.0.1", 7000], ["127.0.0.1", 7004]],
                     ]
                 else:
                     result = []
@@ -2195,16 +2239,8 @@ class TestNodesManager:
                 def execute_command(*args, **kwargs):
                     if args[0] == "CLUSTER SLOTS":
                         return [
-                            [
-                                0,
-                                8191,
-                                ["127.0.0.1", 7001, "node_1"],
-                            ],
-                            [
-                                8192,
-                                16383,
-                                ["127.0.0.1", 7002, "node_2"],
-                            ],
+                            [0, 8191, ["127.0.0.1", 7001, "node_1"]],
+                            [8192, 16383, ["127.0.0.1", 7002, "node_2"]],
                         ]
                     elif args[0] == "INFO":
                         return {"cluster_enabled": True}
@@ -2248,6 +2284,27 @@ class TestNodesManager:
                 rc = RedisCluster(startup_nodes=[node_1, node_2])
                 assert rc.get_node(host=default_host, port=7001) is not None
                 assert rc.get_node(host=default_host, port=7002) is not None
+
+    @pytest.mark.parametrize("dynamic_startup_nodes", [True, False])
+    def test_init_slots_dynamic_startup_nodes(self, dynamic_startup_nodes):
+        rc = get_mocked_redis_client(
+            host="my@DNS.com",
+            port=7000,
+            cluster_slots=default_cluster_slots,
+            dynamic_startup_nodes=dynamic_startup_nodes,
+        )
+        # Nodes are taken from default_cluster_slots
+        discovered_nodes = [
+            "127.0.0.1:7000",
+            "127.0.0.1:7001",
+            "127.0.0.1:7002",
+            "127.0.0.1:7003",
+        ]
+        startup_nodes = list(rc.nodes_manager.startup_nodes.keys())
+        if dynamic_startup_nodes is True:
+            assert startup_nodes.sort() == discovered_nodes.sort()
+        else:
+            assert startup_nodes == ["my@DNS.com:7000"]
 
 
 @pytest.mark.onlycluster
@@ -2651,10 +2708,7 @@ class TestReadOnlyPipeline:
 
         with r.pipeline() as readonly_pipe:
             readonly_pipe.get("foo71").zrange("foo88", 0, 5, withscores=True)
-            assert readonly_pipe.execute() == [
-                b"a1",
-                [(b"z1", 1.0), (b"z2", 4)],
-            ]
+            assert readonly_pipe.execute() == [b"a1", [(b"z1", 1.0), (b"z2", 4)]]
 
     def test_moved_redirection_on_slave_with_default(self, r):
         """

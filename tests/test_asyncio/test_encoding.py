@@ -1,16 +1,8 @@
-import sys
-
 import pytest
-
-if sys.version_info[0:2] == (3, 6):
-    import pytest as pytest_asyncio
-else:
-    import pytest_asyncio
+import pytest_asyncio
 
 import redis.asyncio as redis
 from redis.exceptions import DataError
-
-pytestmark = pytest.mark.asyncio
 
 
 @pytest.mark.onlynoncluster
@@ -68,18 +60,12 @@ class TestEncoding:
 @pytest.mark.onlynoncluster
 class TestEncodingErrors:
     async def test_ignore(self, create_redis):
-        r = await create_redis(
-            decode_responses=True,
-            encoding_errors="ignore",
-        )
+        r = await create_redis(decode_responses=True, encoding_errors="ignore")
         await r.set("a", b"foo\xff")
         assert await r.get("a") == "foo"
 
     async def test_replace(self, create_redis):
-        r = await create_redis(
-            decode_responses=True,
-            encoding_errors="replace",
-        )
+        r = await create_redis(decode_responses=True, encoding_errors="replace")
         await r.set("a", b"foo\xff")
         assert await r.get("a") == "foo\ufffd"
 

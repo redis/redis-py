@@ -30,6 +30,7 @@ extensions = [
     "nbsphinx",
     "sphinx_gallery.load_style",
     "sphinx.ext.autodoc",
+    "sphinx_autodoc_typehints",
     "sphinx.ext.doctest",
     "sphinx.ext.viewcode",
     "sphinx.ext.autosectionlabel",
@@ -40,6 +41,10 @@ extensions = [
 # labels, so set max depth.
 autosectionlabel_prefix_document = True
 autosectionlabel_maxdepth = 2
+
+# AutodocTypehints settings.
+always_document_param_types = True
+typehints_defaults = "comma"
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
@@ -210,7 +215,7 @@ latex_elements = {
 # (source start file, target name, title, author, documentclass
 # [howto/manual]).
 latex_documents = [
-    ("index", "redis-py.tex", "redis-py Documentation", "Redis Inc", "manual"),
+    ("index", "redis-py.tex", "redis-py Documentation", "Redis Inc", "manual")
 ]
 
 # The name of an image file (relative to this directory) to place at the top of
@@ -258,7 +263,7 @@ texinfo_documents = [
         "redis-py",
         "One line description of project.",
         "Miscellaneous",
-    ),
+    )
 ]
 
 # Documents to append as an appendix to all manuals.
