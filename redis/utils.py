@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from functools import wraps
 from typing import Any, Dict, Mapping, Union
 
 try:
@@ -80,3 +81,30 @@ def merge_result(command, res):
             result.add(value)
 
     return list(result)
+
+
+def warn_deprecated(name, reason="", version="", stacklevel=2):
+    import warnings
+
+    msg = f"Call to deprecated {name}."
+    if reason:
+        msg += f" ({reason})"
+    if version:
+        msg += f" -- Deprecated since version {version}."
+    warnings.warn(msg, category=DeprecationWarning, stacklevel=stacklevel)
+
+
+def deprecated_function(reason="", version="", name=None):
+    """
+    Decorator to mark a function as deprecated.
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            warn_deprecated(name or func.__name__, reason, version, stacklevel=3)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
