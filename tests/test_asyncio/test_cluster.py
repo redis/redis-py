@@ -802,6 +802,14 @@ class TestClusterRedisCommands:
         await asyncio.sleep(0.1)
         assert await r.unlink(*d.keys()) == 0
 
+    async def test_initialize_before_run_execute_multykey_command(
+        self, request: FixtureRequest
+    ) -> None:
+        url = request.config.getoption("--redis-url")
+        r = RedisCluster.from_url(url)
+        assert 0 == await r.exists("a", "b", "c")
+        await r.close()
+
     @skip_if_redis_enterprise()
     async def test_cluster_myid(self, r: RedisCluster) -> None:
         node = r.get_random_node()
