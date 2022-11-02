@@ -8,6 +8,7 @@ import weakref
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
+from typing import Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
 from redis.backoff import NoBackoff
@@ -503,7 +504,7 @@ class Connection:
         username=None,
         retry=None,
         redis_connect_func=None,
-        credential_provider: CredentialProvider = None,
+        credential_provider: Optional[CredentialProvider] = None,
     ):
         """
         Initialize a new Connection.
@@ -1062,7 +1063,7 @@ class UnixDomainSocketConnection(Connection):
         client_name=None,
         retry=None,
         redis_connect_func=None,
-        credential_provider: CredentialProvider = None,
+        credential_provider: Optional[CredentialProvider] = None,
     ):
         """
         Initialize a new UnixDomainSocketConnection.

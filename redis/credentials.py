@@ -17,8 +17,8 @@ class UsernamePasswordCredentialProvider(CredentialProvider):
     """
 
     def __init__(self, username: Optional[str] = None, password: Optional[str] = None):
-        self.username = username
-        self.password = password
+        self.username = username or ""
+        self.password = password or ""
 
     def get_credentials(self):
         if self.username:

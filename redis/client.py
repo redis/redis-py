@@ -5,6 +5,7 @@ import threading
 import time
 import warnings
 from itertools import chain
+from typing import Optional
 
 from redis.commands import (
     CoreCommands,
@@ -939,7 +940,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         username=None,
         retry=None,
         redis_connect_func=None,
-        credential_provider: CredentialProvider = None,
+        credential_provider: Optional[CredentialProvider] = None,
     ):
         """
         Initialize a new Redis client.
