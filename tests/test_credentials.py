@@ -213,8 +213,6 @@ class TestCredentialsProvider:
         conn.username = new_username
         conn.send_command("PING")
         assert str_if_bytes(conn.read_response()) == "PONG"
-        conn.username = None
-        conn.password = None
 
 
 class TestUsernamePasswordCredentialProvider:
@@ -234,7 +232,7 @@ class TestUsernamePasswordCredentialProvider:
     def test_user_pass_provider_only_password(self, r, request):
         password = "password"
         provider = UsernamePasswordCredentialProvider(password=password)
-        assert provider.username is None
+        assert provider.username == ""
         assert provider.password == password
         assert provider.get_credentials() == (password,)
 
