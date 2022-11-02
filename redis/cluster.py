@@ -432,7 +432,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         cluster_error_retry_attempts: int = 3,
         retry: Optional["Retry"] = None,
         require_full_coverage: bool = False,
-        reinitialize_steps: int = 10,
+        reinitialize_steps: int = 5,
         read_from_replicas: bool = False,
         dynamic_startup_nodes: bool = True,
         url: Optional[str] = None,
@@ -1698,7 +1698,7 @@ class ClusterPipeline(RedisCluster):
         startup_nodes: Optional[List["ClusterNode"]] = None,
         read_from_replicas: bool = False,
         cluster_error_retry_attempts: int = 3,
-        reinitialize_steps: int = 10,
+        reinitialize_steps: int = 5,
         lock=None,
         **kwargs,
     ):

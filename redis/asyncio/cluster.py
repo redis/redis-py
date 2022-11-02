@@ -217,7 +217,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         startup_nodes: Optional[List["ClusterNode"]] = None,
         require_full_coverage: bool = True,
         read_from_replicas: bool = False,
-        reinitialize_steps: int = 10,
+        reinitialize_steps: int = 5,
         cluster_error_retry_attempts: int = 3,
         connection_error_retry_attempts: int = 3,
         max_connections: int = 2**31,
