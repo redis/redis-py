@@ -23,7 +23,7 @@ class RandomAuthCredProvider(CredentialProvider):
         self.endpoint = endpoint
 
     @functools.lru_cache(maxsize=10)
-    def get_credentials(self) -> Union[tuple[str, str], tuple[str]]:
+    def get_credentials(self) -> Union[Tuple[str, str], Tuple[str]]:
         def get_random_string(length):
             letters = string.ascii_lowercase
             result_str = "".join(random.choice(letters) for i in range(length))
