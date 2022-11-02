@@ -11,7 +11,7 @@ from time import time
 from urllib.parse import parse_qs, unquote, urlparse
 
 from redis.backoff import NoBackoff
-from redis.credentials import CredentialProvider, StaticCredentialProvider
+from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -690,8 +690,7 @@ class Connection:
         if self.credential_provider or (self.username or self.password):
             cred_provider = (
                 self.credential_provider
-                if self.credential_provider
-                else StaticCredentialProvider(self.username, self.password)
+                or UsernamePasswordCredentialProvider(self.username, self.password)
             )
             auth_args = cred_provider.get_credentials()
             # avoid checking health here -- PING will fail if we try
@@ -705,11 +704,7 @@ class Connection:
                 # server seems to be < 6.0.0 which expects a single password
                 # arg. retry auth with just the password.
                 # https://github.com/andymccurdy/redis-py/issues/1274
-                self.send_command(
-                    "AUTH",
-                    auth_args[-1],
-                    check_health=False,
-                )
+                self.send_command("AUTH", auth_args[-1], check_health=False)
                 auth_response = self.read_response()
 
             if str_if_bytes(auth_response) != "OK":
