@@ -16,6 +16,9 @@ on:
   schedule:
     - cron: '0 1 * * *' # nightly build
 
+permissions:
+  contents: read  #  to fetch code (actions/checkout)
+
 jobs:
 
    dependency-audit:
