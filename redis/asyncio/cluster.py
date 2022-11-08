@@ -306,12 +306,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             # Call our on_connect function to configure READONLY mode
             kwargs["redis_connect_func"] = self.on_connect
 
+        self.retry = retry
         if retry or retry_on_error or connection_error_retry_attempts > 0:
             # Set a retry object for all cluster nodes
             self.retry = retry or Retry(
                 default_backoff(), connection_error_retry_attempts
             )
-            if retry_on_error is None:
+            if not retry_on_error:
                 # Default errors for retrying
                 retry_on_error = [ConnectionError, TimeoutError]
             self.retry.update_supported_errors(retry_on_error)
@@ -338,7 +339,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self.reinitialize_steps = reinitialize_steps
         self.cluster_error_retry_attempts = cluster_error_retry_attempts
         self.connection_error_retry_attempts = connection_error_retry_attempts
-        self.retry = retry
         self.reinitialize_counter = 0
         self.commands_parser = CommandsParser()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
