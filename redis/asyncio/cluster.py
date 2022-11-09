@@ -867,7 +867,7 @@ class ClusterNode:
         try:
             if NEVER_DECODE in kwargs:
                 response = await connection.read_response(disable_decoding=True)
-                options.pop(NEVER_DECODE)
+                kwargs.pop(NEVER_DECODE)
             else:
                 response = await connection.read_response()
         except ResponseError:
@@ -876,7 +876,7 @@ class ClusterNode:
             raise
 
         if EMPTY_RESPONSE in options:
-            options.pop(EMPTY_RESPONSE)
+            kwargs.pop(EMPTY_RESPONSE)
 
         # Return response
         if command in self.response_callbacks:
