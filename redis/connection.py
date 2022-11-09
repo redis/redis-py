@@ -513,11 +513,6 @@ class Connection:
         `retry` to a valid `Retry` object.
         To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
         """
-        self.pid = os.getpid()
-        self.host = host
-        self.port = int(port)
-        self.db = db
-        self.client_name = client_name
         if (username or password) and credential_provider is not None:
             raise DataError(
                 "'username' and 'password' cannot be passed along with 'credential_"
@@ -525,7 +520,11 @@ class Connection:
                 "1. 'password' and (optional) 'username'\n"
                 "2. 'credential_provider'"
             )
-
+        self.pid = os.getpid()
+        self.host = host
+        self.port = int(port)
+        self.db = db
+        self.client_name = client_name
         self.credential_provider = credential_provider
         self.password = password
         self.username = username
@@ -1072,10 +1071,6 @@ class UnixDomainSocketConnection(Connection):
         `retry` to a valid `Retry` object.
         To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
         """
-        self.pid = os.getpid()
-        self.path = path
-        self.db = db
-        self.client_name = client_name
         if (username or password) and credential_provider is not None:
             raise DataError(
                 "'username' and 'password' cannot be passed along with 'credential_"
@@ -1083,6 +1078,10 @@ class UnixDomainSocketConnection(Connection):
                 "1. 'password' and (optional) 'username'\n"
                 "2. 'credential_provider'"
             )
+        self.pid = os.getpid()
+        self.path = path
+        self.db = db
+        self.client_name = client_name
         self.credential_provider = credential_provider
         self.password = password
         self.username = username

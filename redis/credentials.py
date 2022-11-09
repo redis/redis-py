@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, Union
+from typing import Coroutine, Optional, Tuple, Union
 
 
 class CredentialProvider:
@@ -16,7 +16,8 @@ class UsernamePasswordCredentialProvider(CredentialProvider):
     username and password.
     """
 
-    def __init__(self, username: Optional[str] = None, password: Optional[str] = None):
+    def __init__(self, username: Optional[str] = None,
+                 password: Optional[str] = None):
         self.username = username or ""
         self.password = password or ""
 
