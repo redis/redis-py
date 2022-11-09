@@ -875,7 +875,7 @@ class ClusterNode:
                 return kwargs[EMPTY_RESPONSE]
             raise
 
-        if EMPTY_RESPONSE in options:
+        if EMPTY_RESPONSE in kwargs:
             kwargs.pop(EMPTY_RESPONSE)
 
         # Return response
