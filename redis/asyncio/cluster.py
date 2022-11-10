@@ -42,6 +42,7 @@ from redis.cluster import (
 )
 from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
+from redis.credentials import CredentialProvider
 from redis.exceptions import (
     AskError,
     BusyLoadingError,
@@ -225,6 +226,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         # Client related kwargs
         db: Union[str, int] = 0,
         path: Optional[str] = None,
+        credential_provider: Optional[CredentialProvider] = None,
         username: Optional[str] = None,
         password: Optional[str] = None,
         client_name: Optional[str] = None,
@@ -273,6 +275,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "connection_class": Connection,
             "parser_class": ClusterParser,
             # Client related kwargs
+            "credential_provider": credential_provider,
             "username": username,
             "password": password,
             "client_name": client_name,

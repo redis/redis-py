@@ -26,6 +26,7 @@
     * The `deprecated` library is no longer a dependency
     * Failover handling improvements for RedisCluster and Async RedisCluster (#2377)
     * Fixed "cannot pickle '_thread.lock' object" bug (#2354, #2297)
+    * Added CredentialsProvider class to support password rotation
     * Enable Lock for asyncio cluster mode
 
 * 4.1.3 (Feb 8, 2022)
