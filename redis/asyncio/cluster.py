@@ -24,6 +24,7 @@ from redis.asyncio.connection import (
     SSLConnection,
     parse_url,
 )
+from redis.asyncio.lock import Lock
 from redis.asyncio.parser import CommandsParser
 from redis.asyncio.retry import Retry
 from redis.backoff import default_backoff
@@ -784,6 +785,72 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
         return ClusterPipeline(self)
 
+    def lock(
+        self,
+        name: KeyT,
+        timeout: Optional[float] = None,
+        sleep: float = 0.1,
+        blocking_timeout: Optional[float] = None,
+        lock_class: Optional[Type[Lock]] = None,
+        thread_local: bool = True,
+    ) -> Lock:
+        """
+        Return a new Lock object using key ``name`` that mimics
+        the behavior of threading.Lock.
+
+        If specified, ``timeout`` indicates a maximum life for the lock.
+        By default, it will remain locked until release() is called.
+
+        ``sleep`` indicates the amount of time to sleep per loop iteration
+        when the lock is in blocking mode and another client is currently
+        holding the lock.
+
+        ``blocking_timeout`` indicates the maximum amount of time in seconds to
+        spend trying to acquire the lock. A value of ``None`` indicates
+        continue trying forever. ``blocking_timeout`` can be specified as a
+        float or integer, both representing the number of seconds to wait.
+
+        ``lock_class`` forces the specified lock implementation. Note that as
+        of redis-py 3.0, the only lock class we implement is ``Lock`` (which is
+        a Lua-based lock). So, it's unlikely you'll need this parameter, unless
+        you have created your own custom lock class.
+
+        ``thread_local`` indicates whether the lock token is placed in
+        thread-local storage. By default, the token is placed in thread local
+        storage so that a thread only sees its token, not a token set by
+        another thread. Consider the following timeline:
+
+            time: 0, thread-1 acquires `my-lock`, with a timeout of 5 seconds.
+                     thread-1 sets the token to "abc"
+            time: 1, thread-2 blocks trying to acquire `my-lock` using the
+                     Lock instance.
+            time: 5, thread-1 has not yet completed. redis expires the lock
+                     key.
+            time: 5, thread-2 acquired `my-lock` now that it's available.
+                     thread-2 sets the token to "xyz"
+            time: 6, thread-1 finishes its work and calls release(). if the
+                     token is *not* stored in thread local storage, then
+                     thread-1 would see the token value as "xyz" and would be
+                     able to successfully release the thread-2's lock.
+
+        In some use cases it's necessary to disable thread local storage. For
+        example, if you have code where one thread acquires a lock and passes
+        that lock instance to a worker thread to release later. If thread
+        local storage isn't disabled in this case, the worker thread won't see
+        the token set by the thread that acquired the lock. Our assumption
+        is that these cases aren't common and as such default to using
+        thread local storage."""
+        if lock_class is None:
+            lock_class = Lock
+        return lock_class(
+            self,
+            name,
+            timeout=timeout,
+            sleep=sleep,
+            blocking_timeout=blocking_timeout,
+            thread_local=thread_local,
+        )
+
 
 class ClusterNode:
     """
@@ -887,12 +954,16 @@ class ClusterNode:
         try:
             if NEVER_DECODE in kwargs:
                 response = await connection.read_response(disable_decoding=True)
+                kwargs.pop(NEVER_DECODE)
             else:
                 response = await connection.read_response()
         except ResponseError:
             if EMPTY_RESPONSE in kwargs:
                 return kwargs[EMPTY_RESPONSE]
             raise
+
+        if EMPTY_RESPONSE in kwargs:
+            kwargs.pop(EMPTY_RESPONSE)
 
         # Return response
         if command in self.response_callbacks:
