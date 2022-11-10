@@ -497,7 +497,7 @@ class Connection:
             retry_on_error.append(socket.timeout)
             retry_on_error.append(asyncio.TimeoutError)
         self.retry_on_error = retry_on_error
-        if retry_on_error:
+        if retry or retry_on_error:
             if not retry:
                 self.retry = Retry(NoBackoff(), 1)
             else:
@@ -1444,6 +1444,12 @@ class ConnectionPool:
             exc = next((r for r in resp if isinstance(r, BaseException)), None)
             if exc:
                 raise exc
+
+    def set_retry(self, retry: "Retry") -> None:
+        for conn in self._available_connections:
+            conn.retry = retry
+        for conn in self._in_use_connections:
+            conn.retry = retry
 
 
 class BlockingConnectionPool(ConnectionPool):

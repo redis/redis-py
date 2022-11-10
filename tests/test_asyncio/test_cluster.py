@@ -13,6 +13,8 @@ from _pytest.fixtures import FixtureRequest
 from redis.asyncio.cluster import ClusterNode, NodesManager, RedisCluster
 from redis.asyncio.connection import Connection, SSLConnection
 from redis.asyncio.parser import CommandsParser
+from redis.asyncio.retry import Retry
+from redis.backoff import ExponentialBackoff, NoBackoff, default_backoff
 from redis.cluster import PIPELINE_BLOCKED_COMMANDS, PRIMARY, REPLICA, get_node_name
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
@@ -245,6 +247,76 @@ class TestRedisClusterObj:
                         await rc.client_getname(target_nodes=rc.ALL_NODES)
                     ).values()
                 ]
+            )
+
+    async def test_cluster_set_get_retry_object(self, request: FixtureRequest):
+        retry = Retry(NoBackoff(), 2)
+        url = request.config.getoption("--redis-url")
+        async with RedisCluster.from_url(url, retry=retry) as r:
+            assert r.get_retry()._retries == retry._retries
+            assert isinstance(r.get_retry()._backoff, NoBackoff)
+            for node in r.get_nodes():
+                n_retry = node.connection_kwargs.get("retry")
+                assert n_retry is not None
+                assert n_retry._retries == retry._retries
+                assert isinstance(n_retry._backoff, NoBackoff)
+            rand_cluster_node = r.get_random_node()
+            existing_conn = rand_cluster_node.acquire_connection()
+            # Change retry policy
+            new_retry = Retry(ExponentialBackoff(), 3)
+            r.set_retry(new_retry)
+            assert r.get_retry()._retries == new_retry._retries
+            assert isinstance(r.get_retry()._backoff, ExponentialBackoff)
+            for node in r.get_nodes():
+                n_retry = node.connection_kwargs.get("retry")
+                assert n_retry is not None
+                assert n_retry._retries == new_retry._retries
+                assert isinstance(n_retry._backoff, ExponentialBackoff)
+            assert existing_conn.retry._retries == new_retry._retries
+            new_conn = rand_cluster_node.acquire_connection()
+            assert new_conn.retry._retries == new_retry._retries
+
+    async def test_cluster_retry_object(self, request: FixtureRequest) -> None:
+        url = request.config.getoption("--redis-url")
+        async with RedisCluster.from_url(url) as rc_default:
+            # Test default retry
+            retry = rc_default.connection_kwargs.get("retry")
+            assert isinstance(retry, Retry)
+            assert retry._retries == 3
+            assert isinstance(retry._backoff, type(default_backoff()))
+            assert rc_default.get_node("127.0.0.1", 16379).connection_kwargs.get(
+                "retry"
+            ) == rc_default.get_node("127.0.0.1", 16380).connection_kwargs.get("retry")
+
+        retry = Retry(ExponentialBackoff(10, 5), 5)
+        async with RedisCluster.from_url(url, retry=retry) as rc_custom_retry:
+            # Test custom retry
+            assert (
+                rc_custom_retry.get_node("127.0.0.1", 16379).connection_kwargs.get(
+                    "retry"
+                )
+                == retry
+            )
+
+        async with RedisCluster.from_url(
+            url, connection_error_retry_attempts=0
+        ) as rc_no_retries:
+            # Test no connection retries
+            assert (
+                rc_no_retries.get_node("127.0.0.1", 16379).connection_kwargs.get(
+                    "retry"
+                )
+                is None
+            )
+
+        async with RedisCluster.from_url(
+            url, retry=Retry(NoBackoff(), 0)
+        ) as rc_no_retries:
+            assert (
+                rc_no_retries.get_node("127.0.0.1", 16379)
+                .connection_kwargs.get("retry")
+                ._retries
+                == 0
             )
 
     async def test_empty_startup_nodes(self) -> None:
@@ -1289,8 +1361,11 @@ class TestClusterRedisCommands:
         assert "addr" in info
 
     @skip_if_server_version_lt("2.6.9")
-    async def test_client_kill(self, r: RedisCluster, r2: RedisCluster) -> None:
+    async def test_client_kill(
+        self, r: RedisCluster, create_redis: Callable[..., RedisCluster]
+    ) -> None:
         node = r.get_primaries()[0]
+        r2 = await create_redis(cls=RedisCluster, flushdb=False)
         await r.client_setname("redis-py-c1", target_nodes="all")
         await r2.client_setname("redis-py-c2", target_nodes="all")
         clients = [
@@ -1311,6 +1386,7 @@ class TestClusterRedisCommands:
         ]
         assert len(clients) == 1
         assert clients[0].get("name") == "redis-py-c1"
+        await r2.close()
 
     @skip_if_server_version_lt("2.6.0")
     async def test_cluster_bitop_not_empty_string(self, r: RedisCluster) -> None:

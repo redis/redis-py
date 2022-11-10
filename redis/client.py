@@ -26,6 +26,7 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.lock import Lock
+from redis.retry import Retry
 from redis.utils import safe_str, str_if_bytes
 
 SYM_EMPTY = b""
@@ -1046,6 +1047,13 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
     def get_connection_kwargs(self):
         """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
+
+    def get_retry(self) -> Optional["Retry"]:
+        return self.get_connection_kwargs().get("retry")
+
+    def set_retry(self, retry: "Retry") -> None:
+        self.get_connection_kwargs().update({"retry": retry})
+        self.connection_pool.set_retry(retry)
 
     def set_response_callback(self, command, callback):
         """Set a custom Response Callback"""

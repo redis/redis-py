@@ -24,6 +24,8 @@
     * ClusterPipeline Doesn't Handle ConnectionError for Dead Hosts (#2225)
     * Remove compatibility code for old versions of Hiredis, drop Packaging dependency
     * The `deprecated` library is no longer a dependency
+    * Failover handling improvements for RedisCluster and Async RedisCluster (#2377)
+    * Fixed "cannot pickle '_thread.lock' object" bug (#2354, #2297)
     * Added CredentialsProvider class to support password rotation
     * Enable Lock for asyncio cluster mode
 
