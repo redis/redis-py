@@ -9,7 +9,6 @@ import pytest_asyncio
 
 import redis
 from redis import AuthenticationError, DataError, ResponseError
-from redis.asyncio.connection import HiredisParser
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.utils import str_if_bytes
 from tests.conftest import skip_if_redis_enterprise
