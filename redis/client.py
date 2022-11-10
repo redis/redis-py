@@ -5,6 +5,7 @@ import threading
 import time
 import warnings
 from itertools import chain
+from typing import Optional
 
 from redis.commands import (
     CoreCommands,
@@ -13,6 +14,7 @@ from redis.commands import (
     list_or_args,
 )
 from redis.connection import ConnectionPool, SSLConnection, UnixDomainSocketConnection
+from redis.credentials import CredentialProvider
 from redis.exceptions import (
     ConnectionError,
     ExecAbortError,
@@ -938,6 +940,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         username=None,
         retry=None,
         redis_connect_func=None,
+        credential_provider: Optional[CredentialProvider] = None,
     ):
         """
         Initialize a new Redis client.
@@ -985,6 +988,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
                 "redis_connect_func": redis_connect_func,
+                "credential_provider": credential_provider,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:

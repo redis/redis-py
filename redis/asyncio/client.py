@@ -46,6 +46,7 @@ from redis.commands import (
     list_or_args,
 )
 from redis.compat import Protocol, TypedDict
+from redis.credentials import CredentialProvider
 from redis.exceptions import (
     ConnectionError,
     ExecAbortError,
@@ -174,6 +175,7 @@ class Redis(
         retry: Optional[Retry] = None,
         auto_close_connection_pool: bool = True,
         redis_connect_func=None,
+        credential_provider: Optional[CredentialProvider] = None,
     ):
         """
         Initialize a new Redis client.
@@ -199,6 +201,7 @@ class Redis(
                 "db": db,
                 "username": username,
                 "password": password,
+                "credential_provider": credential_provider,
                 "socket_timeout": socket_timeout,
                 "encoding": encoding,
                 "encoding_errors": encoding_errors,
