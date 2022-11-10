@@ -1,4 +1,4 @@
-from typing import Coroutine, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 
 class CredentialProvider:
