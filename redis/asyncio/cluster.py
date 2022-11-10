@@ -217,7 +217,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         reinitialize_steps: int = 10,
         cluster_error_retry_attempts: int = 3,
         connection_error_retry_attempts: int = 5,
-        max_connections: int = 2 ** 31,
+        max_connections: int = 2**31,
         # Client related kwargs
         db: Union[str, int] = 0,
         path: Optional[str] = None,
@@ -862,7 +862,7 @@ class ClusterNode:
         port: Union[str, int],
         server_type: Optional[str] = None,
         *,
-        max_connections: int = 2 ** 31,
+        max_connections: int = 2**31,
         connection_class: Type[Connection] = Connection,
         **connection_kwargs: Any,
     ) -> None:
