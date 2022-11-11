@@ -354,6 +354,7 @@ class Redis(
         name: KeyT,
         timeout: Optional[float] = None,
         sleep: float = 0.1,
+        blocking: bool = True,
         blocking_timeout: Optional[float] = None,
         lock_class: Optional[Type[Lock]] = None,
         thread_local: bool = True,
@@ -368,6 +369,12 @@ class Redis(
         ``sleep`` indicates the amount of time to sleep per loop iteration
         when the lock is in blocking mode and another client is currently
         holding the lock.
+
+        ``blocking`` indicates whether calling ``acquire`` should block until
+        the lock has been acquired or to fail immediately, causing ``acquire``
+        to return False and the lock not being acquired. Defaults to True.
+        Note this value can be overridden by passing a ``blocking``
+        argument to ``acquire``.
 
         ``blocking_timeout`` indicates the maximum amount of time in seconds to
         spend trying to acquire the lock. A value of ``None`` indicates
@@ -411,6 +418,7 @@ class Redis(
             name,
             timeout=timeout,
             sleep=sleep,
+            blocking=blocking,
             blocking_timeout=blocking_timeout,
             thread_local=thread_local,
         )
