@@ -11,7 +11,7 @@ import pytest_asyncio
 
 import redis
 from redis import exceptions
-from redis.client import parse_info
+from redis.client import EMPTY_RESPONSE, NEVER_DECODE, parse_info
 from tests.conftest import (
     skip_if_server_version_gte,
     skip_if_server_version_lt,
@@ -541,6 +541,16 @@ class TestRedisCommands:
         assert len(t) == 2
         assert isinstance(t[0], int)
         assert isinstance(t[1], int)
+
+    async def test_never_decode_option(self, r: redis.Redis):
+        opts = {NEVER_DECODE: []}
+        await r.delete("a")
+        assert await r.execute_command("EXISTS", "a", **opts) == 0
+
+    async def test_empty_response_option(self, r: redis.Redis):
+        opts = {EMPTY_RESPONSE: []}
+        await r.delete("a")
+        assert await r.execute_command("EXISTS", "a", **opts) == 0
 
     # BASIC KEY COMMANDS
     async def test_append(self, r: redis.Redis):

@@ -46,6 +46,7 @@ from redis.commands import (
     list_or_args,
 )
 from redis.compat import Protocol, TypedDict
+from redis.credentials import CredentialProvider
 from redis.exceptions import (
     ConnectionError,
     ExecAbortError,
@@ -106,7 +107,7 @@ class Redis(
 
             redis://[[username]:[password]]@localhost:6379/0
             rediss://[[username]:[password]]@localhost:6379/0
-            unix://[[username]:[password]]@/path/to/socket.sock?db=0
+            unix://[username@]/path/to/socket.sock?db=0[&password=password]
 
         Three URL schemes are supported:
 
@@ -174,6 +175,7 @@ class Redis(
         retry: Optional[Retry] = None,
         auto_close_connection_pool: bool = True,
         redis_connect_func=None,
+        credential_provider: Optional[CredentialProvider] = None,
     ):
         """
         Initialize a new Redis client.
@@ -199,6 +201,7 @@ class Redis(
                 "db": db,
                 "username": username,
                 "password": password,
+                "credential_provider": credential_provider,
                 "socket_timeout": socket_timeout,
                 "encoding": encoding,
                 "encoding_errors": encoding_errors,
@@ -272,6 +275,13 @@ class Redis(
     def get_connection_kwargs(self):
         """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
+
+    def get_retry(self) -> Optional["Retry"]:
+        return self.get_connection_kwargs().get("retry")
+
+    def set_retry(self, retry: "Retry") -> None:
+        self.get_connection_kwargs().update({"retry": retry})
+        self.connection_pool.set_retry(retry)
 
     def load_external_module(self, funcname, func):
         """
@@ -501,12 +511,17 @@ class Redis(
         try:
             if NEVER_DECODE in options:
                 response = await connection.read_response(disable_decoding=True)
+                options.pop(NEVER_DECODE)
             else:
                 response = await connection.read_response()
         except ResponseError:
             if EMPTY_RESPONSE in options:
                 return options[EMPTY_RESPONSE]
             raise
+
+        if EMPTY_RESPONSE in options:
+            options.pop(EMPTY_RESPONSE)
+
         if command_name in self.response_callbacks:
             # Mypy bug: https://github.com/python/mypy/issues/10977
             command_name = cast(str, command_name)

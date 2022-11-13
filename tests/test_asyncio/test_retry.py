@@ -1,8 +1,9 @@
 import pytest
 
+from redis.asyncio import Redis
 from redis.asyncio.connection import Connection, UnixDomainSocketConnection
 from redis.asyncio.retry import Retry
-from redis.backoff import AbstractBackoff, NoBackoff
+from redis.backoff import AbstractBackoff, ExponentialBackoff, NoBackoff
 from redis.exceptions import ConnectionError, TimeoutError
 
 
@@ -114,3 +115,22 @@ class TestRetry:
 
         assert self.actual_attempts == 5
         assert self.actual_failures == 5
+
+
+class TestRedisClientRetry:
+    "Test the Redis client behavior with retries"
+
+    async def test_get_set_retry_object(self, request):
+        retry = Retry(NoBackoff(), 2)
+        url = request.config.getoption("--redis-url")
+        r = await Redis.from_url(url, retry_on_timeout=True, retry=retry)
+        assert r.get_retry()._retries == retry._retries
+        assert isinstance(r.get_retry()._backoff, NoBackoff)
+        new_retry_policy = Retry(ExponentialBackoff(), 3)
+        exiting_conn = await r.connection_pool.get_connection("_")
+        r.set_retry(new_retry_policy)
+        assert r.get_retry()._retries == new_retry_policy._retries
+        assert isinstance(r.get_retry()._backoff, ExponentialBackoff)
+        assert exiting_conn.retry._retries == new_retry_policy._retries
+        new_conn = await r.connection_pool.get_connection("_")
+        assert new_conn.retry._retries == new_retry_policy._retries
