@@ -42,7 +42,7 @@ Retry in Redis Cluster
 >>> from redis.cluster import RedisCluster
 >>>
 >>> # Run 3 retries with exponential backoff strategy
->>> retry = Retry(ExponentialBackoff(), 1)
+>>> retry = Retry(ExponentialBackoff(), 3)
 >>> # Redis Cluster client with retries
 >>> rc = RedisCluster(host='localhost', port=6379, retry=retry, cluster_error_retry_attempts=2)
 
