@@ -113,8 +113,9 @@ These are the commands for interacting with the `RediSearch module <https://redi
     from redis.commands.search.field import TextField
 
     r = redis.Redis()
-    r.ft().create_index(TextField("play", weight=5.0), TextField("ball"))
-    print(r.ft().info())
+    index_name = "my_index"
+    r.ft(index_name).create_index(TextField("play", weight=5.0), TextField("ball"))
+    print(r.ft(index_name).info())
 
 
 .. automodule:: redis.commands.search.commands
