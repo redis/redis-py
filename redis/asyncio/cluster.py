@@ -11,6 +11,7 @@ from typing import (
     List,
     Mapping,
     Optional,
+    Tuple,
     Type,
     TypeVar,
     Union,
@@ -516,7 +517,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
     async def _determine_nodes(
         self, command: str, *args: Any, node_flag: Optional[str] = None
-    ) -> tuple[list["ClusterNode"], bool]:
+    ) -> Tuple[List["ClusterNode"], bool]:
         """Determine which nodes should be executed the command on
 
         Returns:

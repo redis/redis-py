@@ -813,6 +813,8 @@ class TestRedisClusterObj:
         nodes = r.cluster_nodes()
         assert "myself" not in nodes.get(curr_default_node.name).get("flags")
         assert r.get_default_node() != curr_default_node
+        # Rollback to the old default node
+        r.replace_default_node(curr_default_node)
 
 
 @pytest.mark.onlycluster

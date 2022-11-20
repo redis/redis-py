@@ -4,7 +4,7 @@ import sys
 import threading
 import time
 from collections import OrderedDict
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from redis.backoff import default_backoff
 from redis.client import CaseInsensitiveDict, PubSub, Redis, parse_scan
@@ -36,10 +36,6 @@ from redis.utils import (
     merge_result,
     safe_str,
     str_if_bytes,
-)
-
-TargetNodesT = TypeVar(
-    "TargetNodesT", str, "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
 )
 
 
@@ -839,7 +835,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         """Set a custom Response Callback"""
         self.cluster_response_callbacks[command] = callback
 
-    def _determine_nodes(self, *args, **kwargs) -> tuple[list["ClusterNode"], bool]:
+    def _determine_nodes(self, *args, **kwargs) -> Tuple[List["ClusterNode"], bool]:
         """Determine which nodes should be executed the command on
 
         Returns:
