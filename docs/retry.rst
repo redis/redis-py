@@ -64,7 +64,7 @@ Let's consider the following example:
 #. given the hash slot, it then determines which node to connect to, in order to execute the command.
 #. during the connection, a :class:`~.ConnectionError` is raised.
 #. because we set ``retry=Retry(ExponentialBackoff(), 6)``, the client tries to reconnect to the node up to 6 times, with an exponential backoff between each attempt.
-#. even after 6 retries, the client is still unable to connect
+#. even after 6 retries, the client is still unable to connect.
 #. because we set ``cluster_error_retry_attempts=1``, before giving up, the client starts a cluster update, removes the failed node from the startup nodes, and re-initializes the cluster.
 #. after the cluster has been re-initialized, it starts a new cycle of retries, up to 6 retries, with an exponential backoff
 #. if the client can connect, we're good. Otherwise the exception if finally raised to the caller, because we run out of attempts
