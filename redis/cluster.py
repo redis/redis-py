@@ -4,7 +4,7 @@ import sys
 import threading
 import time
 from collections import OrderedDict
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union
 
 from redis.backoff import default_backoff
 from redis.client import CaseInsensitiveDict, PubSub, Redis, parse_scan
@@ -36,6 +36,10 @@ from redis.utils import (
     merge_result,
     safe_str,
     str_if_bytes,
+)
+
+TargetNodesT = TypeVar(
+    "TargetNodesT", str, "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
 )
 
 
