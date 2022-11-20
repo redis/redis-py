@@ -61,7 +61,7 @@ Let's consider the following example:
 >>> rc.set('foo', 'bar')
 
 #. the client library calculates the hash slot for key 'foo'
-#. given the hash slot it then determines which node to connect to, in order to execute the command
+#. given the hash slot, it then determines which node to connect to, in order to execute the command.
 #. during the connection a :class:`~.ConnectionError` is raised
 #. because we set ``retry=Retry(ExponentialBackoff(), 6)``, the client will try to reconnect to the node up to 6 times, with an exponential backoff between each attempt
 #. even after 6 retries, the client is still unable to connect
