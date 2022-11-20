@@ -67,4 +67,4 @@ Let's consider the following example:
 #. even after 6 retries, the client is still unable to connect.
 #. because we set ``cluster_error_retry_attempts=1``, before giving up, the client starts a cluster update, removes the failed node from the startup nodes, and re-initializes the cluster.
 #. after the cluster has been re-initialized, it starts a new cycle of retries, up to 6 retries, with an exponential backoff.
-#. if the client can connect, we're good. Otherwise the exception if finally raised to the caller, because we run out of attempts
+#. if the client can connect, we're good. Otherwise, the exception is finally raised to the caller, because we've run out of attempts.
