@@ -5581,7 +5581,7 @@ class GeoCommands(CommandsProtocol):
                     "GEOSEARCH member and longitude or latitude" " cant be set together"
                 )
             pieces.extend([b"FROMMEMBER", kwargs["member"]])
-        if kwargs["longitude"] and kwargs["latitude"]:
+        if kwargs["longitude"] is not None and kwargs["latitude"] is not None:
             pieces.extend([b"FROMLONLAT", kwargs["longitude"], kwargs["latitude"]])
 
         # BYRADIUS or BYBOX
