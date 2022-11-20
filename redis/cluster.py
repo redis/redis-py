@@ -379,6 +379,30 @@ class AbstractRedisCluster:
 
     ERRORS_ALLOW_RETRY = (ConnectionError, TimeoutError, ClusterDownError)
 
+    def replace_default_node(self, target_node: "ClusterNode" = None) -> None:
+        """Replace the default cluster node.
+        A random cluster node will be chosen if target_node isn't passed, and primaries
+        will be prioritized. The default node will not be changed if there are no other
+        nodes in the cluster.
+
+        Args:
+            target_node (ClusterNode, optional): Target node to replace the default
+            node. Defaults to None.
+        """
+        if target_node:
+            self.nodes_manager.default_node = target_node
+        else:
+            curr_node = self.get_default_node()
+            primaries = [node for node in self.get_primaries() if node != curr_node]
+            if primaries:
+                # Choose a primary if the cluster contains different primaries
+                self.nodes_manager.default_node = random.choice(primaries)
+            else:
+                # Otherwise, hoose a primary if the cluster contains different primaries
+                replicas = [node for node in self.get_replicas() if node != curr_node]
+                if replicas:
+                    self.nodes_manager.default_node = random.choice(replicas)
+
 
 class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
     @classmethod
@@ -811,7 +835,14 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         """Set a custom Response Callback"""
         self.cluster_response_callbacks[command] = callback
 
-    def _determine_nodes(self, *args, **kwargs):
+    def _determine_nodes(self, *args, **kwargs) -> tuple[list["ClusterNode"], bool]:
+        """Determine which nodes should be executed the command on
+
+        Returns:
+            tuple[list[Type[ClusterNode]], bool]:
+                A tuple containing a list of target nodes and a bool indicating
+                if the return node was chosen because it is the default node
+        """
         command = args[0].upper()
         if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
             command = f"{args[0]} {args[1]}".upper()
@@ -825,28 +856,28 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             command_flag = self.command_flags.get(command)
         if command_flag == self.__class__.RANDOM:
             # return a random node
-            return [self.get_random_node()]
+            return [self.get_random_node()], False
         elif command_flag == self.__class__.PRIMARIES:
             # return all primaries
-            return self.get_primaries()
+            return self.get_primaries(), False
         elif command_flag == self.__class__.REPLICAS:
             # return all replicas
-            return self.get_replicas()
+            return self.get_replicas(), False
         elif command_flag == self.__class__.ALL_NODES:
             # return all nodes
-            return self.get_nodes()
+            return self.get_nodes(), False
         elif command_flag == self.__class__.DEFAULT_NODE:
             # return the cluster's default node
-            return [self.nodes_manager.default_node]
+            return [self.nodes_manager.default_node], True
         elif command in self.__class__.SEARCH_COMMANDS[0]:
-            return [self.nodes_manager.default_node]
+            return [self.nodes_manager.default_node], True
         else:
             # get the node that holds the key's slot
             slot = self.determine_slot(*args)
             node = self.nodes_manager.get_node_from_slot(
                 slot, self.read_from_replicas and command in READ_COMMANDS
             )
-            return [node]
+            return [node], False
 
     def _should_reinitialized(self):
         # To reinitialize the cluster on every MOVED error,
@@ -990,6 +1021,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             dict<Any, ClusterNode>
         """
         target_nodes_specified = False
+        is_default_node = False
         target_nodes = None
         passed_targets = kwargs.pop("target_nodes", None)
         if passed_targets is not None and not self._is_nodes_flag(passed_targets):
@@ -1013,7 +1045,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 res = {}
                 if not target_nodes_specified:
                     # Determine the nodes to execute the command on
-                    target_nodes = self._determine_nodes(
+                    target_nodes, is_default_node = self._determine_nodes(
                         *args, **kwargs, nodes_flag=passed_targets
                     )
                     if not target_nodes:
@@ -1025,6 +1057,9 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 # Return the processed result
                 return self._process_result(args[0], res, **kwargs)
             except Exception as e:
+                if is_default_node:
+                    # Replace the default cluster node
+                    self.replace_default_node()
                 if retry_attempts > 0 and type(e) in self.__class__.ERRORS_ALLOW_RETRY:
                     # The nodes and slots cache were reinitialized.
                     # Try again with the new cluster setup.
@@ -1883,7 +1918,7 @@ class ClusterPipeline(RedisCluster):
         # if we have to run through it again, we only retry
         # the commands that failed.
         attempt = sorted(stack, key=lambda x: x.position)
-
+        is_default_node = False
         # build a list of node objects based on node names we need to
         nodes = {}
 
@@ -1900,7 +1935,7 @@ class ClusterPipeline(RedisCluster):
                 if passed_targets and not self._is_nodes_flag(passed_targets):
                     target_nodes = self._parse_target_nodes(passed_targets)
                 else:
-                    target_nodes = self._determine_nodes(
+                    target_nodes, is_default_node = self._determine_nodes(
                         *c.args, node_flag=passed_targets
                     )
                     if not target_nodes:
@@ -1926,6 +1961,8 @@ class ClusterPipeline(RedisCluster):
                         # Connection retries are being handled in the node's
                         # Retry object. Reinitialize the node -> slot table.
                         self.nodes_manager.initialize()
+                        if is_default_node:
+                            self.replace_default_node()
                         raise
                     nodes[node_name] = NodeCommands(
                         redis_node.parse_response,
@@ -2007,6 +2044,8 @@ class ClusterPipeline(RedisCluster):
             self.reinitialize_counter += 1
             if self._should_reinitialized():
                 self.nodes_manager.initialize()
+                if is_default_node:
+                    self.replace_default_node()
             for c in attempt:
                 try:
                     # send each command individually like we

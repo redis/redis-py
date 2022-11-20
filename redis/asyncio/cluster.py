@@ -516,7 +516,14 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
     async def _determine_nodes(
         self, command: str, *args: Any, node_flag: Optional[str] = None
-    ) -> List["ClusterNode"]:
+    ) -> tuple[list["ClusterNode"], bool]:
+        """Determine which nodes should be executed the command on
+
+        Returns:
+            tuple[list[Type[ClusterNode]], bool]:
+                A tuple containing a list of target nodes and a bool indicating
+                if the return node was chosen because it is the default node
+        """
         if not node_flag:
             # get the nodes group for this command if it was predefined
             node_flag = self.command_flags.get(command)
@@ -524,19 +531,21 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         if node_flag in self.node_flags:
             if node_flag == self.__class__.DEFAULT_NODE:
                 # return the cluster's default node
-                return [self.nodes_manager.default_node]
+                return [self.nodes_manager.default_node], True
             if node_flag == self.__class__.PRIMARIES:
                 # return all primaries
-                return self.nodes_manager.get_nodes_by_server_type(PRIMARY)
+                return self.nodes_manager.get_nodes_by_server_type(PRIMARY), False
             if node_flag == self.__class__.REPLICAS:
                 # return all replicas
-                return self.nodes_manager.get_nodes_by_server_type(REPLICA)
+                return self.nodes_manager.get_nodes_by_server_type(REPLICA), False
             if node_flag == self.__class__.ALL_NODES:
                 # return all nodes
-                return list(self.nodes_manager.nodes_cache.values())
+                return list(self.nodes_manager.nodes_cache.values()), False
             if node_flag == self.__class__.RANDOM:
                 # return a random node
-                return [random.choice(list(self.nodes_manager.nodes_cache.values()))]
+                return [
+                    random.choice(list(self.nodes_manager.nodes_cache.values()))
+                ], False
 
         # get the node that holds the key's slot
         return [
@@ -544,7 +553,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 await self._determine_slot(command, *args),
                 self.read_from_replicas and command in READ_COMMANDS,
             )
-        ]
+        ], False
 
     async def _determine_slot(self, command: str, *args: Any) -> int:
         if self.command_flags.get(command) == SLOT_ID:
@@ -641,6 +650,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         command = args[0]
         target_nodes = []
         target_nodes_specified = False
+        is_default_node = False
         retry_attempts = self.cluster_error_retry_attempts
 
         passed_targets = kwargs.pop("target_nodes", None)
@@ -654,10 +664,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         for _ in range(execute_attempts):
             if self._initialize:
                 await self.initialize()
+                if is_default_node:
+                    # Replace the default cluster node
+                    self.replace_default_node()
             try:
                 if not target_nodes_specified:
                     # Determine the nodes to execute the command on
-                    target_nodes = await self._determine_nodes(
+                    target_nodes, is_default_node = await self._determine_nodes(
                         *args, node_flag=passed_targets
                     )
                     if not target_nodes:
@@ -1436,12 +1449,13 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         ]
 
         nodes = {}
+        is_default_node = False
         for cmd in todo:
             passed_targets = cmd.kwargs.pop("target_nodes", None)
             if passed_targets and not client._is_node_flag(passed_targets):
                 target_nodes = client._parse_target_nodes(passed_targets)
             else:
-                target_nodes = await client._determine_nodes(
+                target_nodes, is_default_node = await client._determine_nodes(
                     *cmd.args, node_flag=passed_targets
                 )
                 if not target_nodes:
@@ -1486,6 +1500,9 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                         )
                         result.args = (msg,) + result.args[1:]
                         raise result
+
+            if is_default_node:
+                self.replace_default_node()
 
         return [cmd.result for cmd in stack]
 

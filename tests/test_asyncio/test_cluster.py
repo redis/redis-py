@@ -788,6 +788,26 @@ class TestRedisClusterObj:
         )
         await rc.close()
 
+    def test_replace_cluster_node(self, r: RedisCluster) -> None:
+        prev_default_node = r.get_default_node()
+        r.replace_default_node()
+        assert r.get_default_node() != prev_default_node
+        r.replace_default_node(prev_default_node)
+        assert r.get_default_node() == prev_default_node
+
+    async def test_default_node_is_replaced_after_exception(self, r):
+        curr_default_node = r.get_default_node()
+        # CLUSTER NODES command is being executed on the default node
+        nodes = await r.cluster_nodes()
+        assert "myself" in nodes.get(curr_default_node.name).get("flags")
+
+        # Mock connection error for the default node
+        mock_node_resp_exc(curr_default_node, ConnectionError("error"))
+        # Test that the command succeed from a different node
+        nodes = await r.cluster_nodes()
+        assert "myself" not in nodes.get(curr_default_node.name).get("flags")
+        assert r.get_default_node() != curr_default_node
+
 
 class TestClusterRedisCommands:
     """

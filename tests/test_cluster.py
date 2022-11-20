@@ -791,6 +791,29 @@ class TestRedisClusterObj:
             == retry._retries
         )
 
+    def test_replace_cluster_node(self, r) -> None:
+        prev_default_node = r.get_default_node()
+        r.replace_default_node()
+        assert r.get_default_node() != prev_default_node
+        r.replace_default_node(prev_default_node)
+        assert r.get_default_node() == prev_default_node
+
+    def test_default_node_is_replaced_after_exception(self, r):
+        curr_default_node = r.get_default_node()
+        # CLUSTER NODES command is being executed on the default node
+        nodes = r.cluster_nodes()
+        assert "myself" in nodes.get(curr_default_node.name).get("flags")
+
+        def raise_connection_error():
+            raise ConnectionError("error")
+
+        # Mock connection error for the default node
+        mock_node_resp_func(curr_default_node, raise_connection_error)
+        # Test that the command succeed from a different node
+        nodes = r.cluster_nodes()
+        assert "myself" not in nodes.get(curr_default_node.name).get("flags")
+        assert r.get_default_node() != curr_default_node
+
 
 @pytest.mark.onlycluster
 class TestClusterRedisCommands:
