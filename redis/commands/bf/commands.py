@@ -1,8 +1,6 @@
-from deprecated import deprecated
-
 from redis.client import NEVER_DECODE
 from redis.exceptions import ModuleError
-from redis.utils import HIREDIS_AVAILABLE
+from redis.utils import HIREDIS_AVAILABLE, deprecated_function
 
 BF_RESERVE = "BF.RESERVE"
 BF_ADD = "BF.ADD"
@@ -52,7 +50,10 @@ TDIGEST_MIN = "TDIGEST.MIN"
 TDIGEST_MAX = "TDIGEST.MAX"
 TDIGEST_INFO = "TDIGEST.INFO"
 TDIGEST_TRIMMED_MEAN = "TDIGEST.TRIMMED_MEAN"
-TDIGEST_MERGESTORE = "TDIGEST.MERGESTORE"
+TDIGEST_RANK = "TDIGEST.RANK"
+TDIGEST_REVRANK = "TDIGEST.REVRANK"
+TDIGEST_BYRANK = "TDIGEST.BYRANK"
+TDIGEST_BYREVRANK = "TDIGEST.BYREVRANK"
 
 
 class BFCommands:
@@ -324,7 +325,7 @@ class TOPKCommands:
         """  # noqa
         return self.execute_command(TOPK_QUERY, key, *items)
 
-    @deprecated(version="4.4.0", reason="deprecated since redisbloom 2.4.0")
+    @deprecated_function(version="4.4.0", reason="deprecated since redisbloom 2.4.0")
     def count(self, key, *items):
         """
         Return count for one `item` or more from `key`.
@@ -358,7 +359,7 @@ class TDigestCommands:
         Allocate the memory and initialize the t-digest.
         For more information see `TDIGEST.CREATE <https://redis.io/commands/tdigest.create>`_.
         """  # noqa
-        return self.execute_command(TDIGEST_CREATE, key, compression)
+        return self.execute_command(TDIGEST_CREATE, key, "COMPRESSION", compression)
 
     def reset(self, key):
         """
@@ -367,26 +368,30 @@ class TDigestCommands:
         """  # noqa
         return self.execute_command(TDIGEST_RESET, key)
 
-    def add(self, key, values, weights):
+    def add(self, key, values):
         """
-        Add one or more samples (value with weight) to a sketch `key`.
-        Both `values` and `weights` are lists.
+        Adds one or more observations to a t-digest sketch `key`.
+
         For more information see `TDIGEST.ADD <https://redis.io/commands/tdigest.add>`_.
-
-        Example:
-
-        >>> tdigestadd('A', [1500.0], [1.0])
         """  # noqa
-        params = [key]
-        self.append_values_and_weights(params, values, weights)
-        return self.execute_command(TDIGEST_ADD, *params)
+        return self.execute_command(TDIGEST_ADD, key, *values)
 
-    def merge(self, toKey, fromKey):
+    def merge(self, destination_key, num_keys, *keys, compression=None, override=False):
         """
-        Merge all of the values from 'fromKey' to 'toKey' sketch.
+        Merges all of the values from `keys` to 'destination-key' sketch.
+        It is mandatory to provide the `num_keys` before passing the input keys and
+        the other (optional) arguments.
+        If `destination_key` already exists its values are merged with the input keys.
+        If you wish to override the destination key contents use the `OVERRIDE` parameter.
+
         For more information see `TDIGEST.MERGE <https://redis.io/commands/tdigest.merge>`_.
         """  # noqa
-        return self.execute_command(TDIGEST_MERGE, toKey, fromKey)
+        params = [destination_key, num_keys, *keys]
+        if compression is not None:
+            params.extend(["COMPRESSION", compression])
+        if override:
+            params.append("OVERRIDE")
+        return self.execute_command(TDIGEST_MERGE, *params)
 
     def min(self, key):
         """
@@ -411,12 +416,12 @@ class TDigestCommands:
         """  # noqa
         return self.execute_command(TDIGEST_QUANTILE, key, quantile, *quantiles)
 
-    def cdf(self, key, value):
+    def cdf(self, key, value, *values):
         """
         Return double fraction of all points added which are <= value.
         For more information see `TDIGEST.CDF <https://redis.io/commands/tdigest.cdf>`_.
         """  # noqa
-        return self.execute_command(TDIGEST_CDF, key, value)
+        return self.execute_command(TDIGEST_CDF, key, value, *values)
 
     def info(self, key):
         """
@@ -436,18 +441,39 @@ class TDigestCommands:
             TDIGEST_TRIMMED_MEAN, key, low_cut_quantile, high_cut_quantile
         )
 
-    def mergestore(self, dest_key, numkeys, *sourcekeys, compression=False):
+    def rank(self, key, value, *values):
         """
-        Merges all of the values from `sourcekeys` keys to `dest_key` sketch.
-        If destination already exists, it is overwritten.
+        Retrieve the estimated rank of value (the number of observations in the sketch
+        that are smaller than value + half the number of observations that are equal to value).
 
-
-        For more information see `TDIGEST.MERGESTORE <https://redis.io/commands/tdigest.mergestore>`_.
+        For more information see `TDIGEST.RANK <https://redis.io/commands/tdigest.rank>`_.
         """  # noqa
-        params = [dest_key, numkeys, *sourcekeys]
-        if compression:
-            params.extend(["COMPRESSION", compression])
-        return self.execute_command(TDIGEST_MERGESTORE, *params)
+        return self.execute_command(TDIGEST_RANK, key, value, *values)
+
+    def revrank(self, key, value, *values):
+        """
+        Retrieve the estimated rank of value (the number of observations in the sketch
+        that are larger than value + half the number of observations that are equal to value).
+
+        For more information see `TDIGEST.REVRANK <https://redis.io/commands/tdigest.revrank>`_.
+        """  # noqa
+        return self.execute_command(TDIGEST_REVRANK, key, value, *values)
+
+    def byrank(self, key, rank, *ranks):
+        """
+        Retrieve an estimation of the value with the given rank.
+
+        For more information see `TDIGEST.BY_RANK <https://redis.io/commands/tdigest.by_rank>`_.
+        """  # noqa
+        return self.execute_command(TDIGEST_BYRANK, key, rank, *ranks)
+
+    def byrevrank(self, key, rank, *ranks):
+        """
+        Retrieve an estimation of the value with the given reverse rank.
+
+        For more information see `TDIGEST.BY_REVRANK <https://redis.io/commands/tdigest.by_revrank>`_.
+        """  # noqa
+        return self.execute_command(TDIGEST_BYREVRANK, key, rank, *ranks)
 
 
 class CMSCommands:

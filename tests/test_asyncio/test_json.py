@@ -5,8 +5,6 @@ from redis import exceptions
 from redis.commands.json.path import Path
 from tests.conftest import skip_ifmodversion_lt
 
-pytestmark = pytest.mark.asyncio
-
 
 @pytest.mark.redismod
 async def test_json_setbinarykey(modclient: redis.Redis):
@@ -819,7 +817,7 @@ async def test_objlen_dollar(modclient: redis.Redis):
         },
     )
     # Test multi
-    assert await modclient.json().objlen("doc1", "$..a") == [2, None, 1]
+    assert await modclient.json().objlen("doc1", "$..a") == [None, 2, 1]
     # Test single
     assert await modclient.json().objlen("doc1", "$.nested1.a") == [2]
 

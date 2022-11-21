@@ -2,9 +2,8 @@ import os
 from json import JSONDecodeError, loads
 from typing import Dict, List, Optional, Union
 
-from deprecated import deprecated
-
 from redis.exceptions import DataError
+from redis.utils import deprecated_function
 
 from ._util import JsonType
 from .decoders import decode_dict_keys
@@ -137,7 +136,7 @@ class JSONCommands:
             "JSON.NUMINCRBY", name, str(path), self._encode(number)
         )
 
-    @deprecated(version="4.0.0", reason="deprecated since redisjson 1.0.0")
+    @deprecated_function(version="4.0.0", reason="deprecated since redisjson 1.0.0")
     def nummultby(self, name: str, path: str, number: int) -> str:
         """Multiply the numeric (integer or floating point) JSON value under
         ``path`` at key ``name`` with the provided ``number``.
@@ -368,19 +367,19 @@ class JSONCommands:
             pieces.append(str(path))
         return self.execute_command("JSON.DEBUG", *pieces)
 
-    @deprecated(
+    @deprecated_function(
         version="4.0.0", reason="redisjson-py supported this, call get directly."
     )
     def jsonget(self, *args, **kwargs):
         return self.get(*args, **kwargs)
 
-    @deprecated(
+    @deprecated_function(
         version="4.0.0", reason="redisjson-py supported this, call get directly."
     )
     def jsonmget(self, *args, **kwargs):
         return self.mget(*args, **kwargs)
 
-    @deprecated(
+    @deprecated_function(
         version="4.0.0", reason="redisjson-py supported this, call get directly."
     )
     def jsonset(self, *args, **kwargs):
