@@ -81,6 +81,7 @@ def merge_result(command, res):
 
     return list(result)
 
+
 def warn_deprecated(name, reason="", version="", stacklevel=2):
     import warnings
 
