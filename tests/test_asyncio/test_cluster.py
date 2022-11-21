@@ -777,6 +777,15 @@ class TestClusterRedisCommands:
         await asyncio.sleep(0.1)
         assert await r.unlink(*d.keys()) == 0
 
+    async def test_initialize_before_execute_multi_key_command(
+        self, request: FixtureRequest
+    ) -> None:
+        # Test for issue https://github.com/redis/redis-py/issues/2437
+        url = request.config.getoption("--redis-url")
+        r = RedisCluster.from_url(url)
+        assert 0 == await r.exists("a", "b", "c")
+        await r.close()
+
     @skip_if_redis_enterprise()
     async def test_cluster_myid(self, r: RedisCluster) -> None:
         node = r.get_random_node()
@@ -2476,3 +2485,11 @@ class TestClusterPipeline:
                         executed_on_replica = True
                         break
             assert executed_on_replica
+
+    async def test_can_run_concurrent_pipelines(self, r: RedisCluster) -> None:
+        """Test that the pipeline can be used concurrently."""
+        await asyncio.gather(
+            *(self.test_redis_cluster_pipeline(r) for i in range(100)),
+            *(self.test_multi_key_operation_with_a_single_slot(r) for i in range(100)),
+            *(self.test_multi_key_operation_with_multi_slots(r) for i in range(100)),
+        )
