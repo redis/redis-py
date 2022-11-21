@@ -1,7 +1,10 @@
+import math
 import time
 from time import sleep
 
 import pytest
+
+import redis
 
 from .conftest import skip_ifmodversion_lt
 
@@ -230,6 +233,84 @@ def test_range_advanced(client):
     assert [(0, 5.0), (5, 6.0)] == client.ts().range(
         1, 0, 10, aggregation_type="count", bucket_size_msec=10, align=5
     )
+    assert [(0, 2.55), (10, 3.0)] == client.ts().range(
+        1, 0, 10, aggregation_type="twa", bucket_size_msec=10
+    )
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.8.0", "timeseries")
+def test_range_latest(client: redis.Redis):
+    timeseries = client.ts()
+    timeseries.create("t1")
+    timeseries.create("t2")
+    timeseries.createrule("t1", "t2", aggregation_type="sum", bucket_size_msec=10)
+    timeseries.add("t1", 1, 1)
+    timeseries.add("t1", 2, 3)
+    timeseries.add("t1", 11, 7)
+    timeseries.add("t1", 13, 1)
+    res = timeseries.range("t1", 0, 20)
+    assert res == [(1, 1.0), (2, 3.0), (11, 7.0), (13, 1.0)]
+    res = timeseries.range("t2", 0, 10)
+    assert res == [(0, 4.0)]
+    res = timeseries.range("t2", 0, 10, latest=True)
+    assert res == [(0, 4.0), (10, 8.0)]
+    res = timeseries.range("t2", 0, 9, latest=True)
+    assert res == [(0, 4.0)]
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.8.0", "timeseries")
+def test_range_bucket_timestamp(client: redis.Redis):
+    timeseries = client.ts()
+    timeseries.create("t1")
+    timeseries.add("t1", 15, 1)
+    timeseries.add("t1", 17, 4)
+    timeseries.add("t1", 51, 3)
+    timeseries.add("t1", 73, 5)
+    timeseries.add("t1", 75, 3)
+    assert [(10, 4.0), (50, 3.0), (70, 5.0)] == timeseries.range(
+        "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10
+    )
+    assert [(20, 4.0), (60, 3.0), (80, 5.0)] == timeseries.range(
+        "t1",
+        0,
+        100,
+        align=0,
+        aggregation_type="max",
+        bucket_size_msec=10,
+        bucket_timestamp="+",
+    )
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.8.0", "timeseries")
+def test_range_empty(client: redis.Redis):
+    timeseries = client.ts()
+    timeseries.create("t1")
+    timeseries.add("t1", 15, 1)
+    timeseries.add("t1", 17, 4)
+    timeseries.add("t1", 51, 3)
+    timeseries.add("t1", 73, 5)
+    timeseries.add("t1", 75, 3)
+    assert [(10, 4.0), (50, 3.0), (70, 5.0)] == timeseries.range(
+        "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10
+    )
+    res = timeseries.range(
+        "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10, empty=True
+    )
+    for i in range(len(res)):
+        if math.isnan(res[i][1]):
+            res[i] = (res[i][0], None)
+    assert [
+        (10, 4.0),
+        (20, None),
+        (30, None),
+        (40, None),
+        (50, 3.0),
+        (60, None),
+        (70, 5.0),
+    ] == res
 
 
 @pytest.mark.redismod
@@ -262,11 +343,87 @@ def test_rev_range(client):
     assert [(1, 10.0), (0, 1.0)] == client.ts().revrange(
         1, 0, 10, aggregation_type="count", bucket_size_msec=10, align=1
     )
+    assert [(10, 3.0), (0, 2.55)] == client.ts().revrange(
+        1, 0, 10, aggregation_type="twa", bucket_size_msec=10
+    )
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.8.0", "timeseries")
+def test_revrange_latest(client: redis.Redis):
+    timeseries = client.ts()
+    timeseries.create("t1")
+    timeseries.create("t2")
+    timeseries.createrule("t1", "t2", aggregation_type="sum", bucket_size_msec=10)
+    timeseries.add("t1", 1, 1)
+    timeseries.add("t1", 2, 3)
+    timeseries.add("t1", 11, 7)
+    timeseries.add("t1", 13, 1)
+    res = timeseries.revrange("t2", 0, 10)
+    assert res == [(0, 4.0)]
+    res = timeseries.revrange("t2", 0, 10, latest=True)
+    assert res == [(10, 8.0), (0, 4.0)]
+    res = timeseries.revrange("t2", 0, 9, latest=True)
+    assert res == [(0, 4.0)]
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.8.0", "timeseries")
+def test_revrange_bucket_timestamp(client: redis.Redis):
+    timeseries = client.ts()
+    timeseries.create("t1")
+    timeseries.add("t1", 15, 1)
+    timeseries.add("t1", 17, 4)
+    timeseries.add("t1", 51, 3)
+    timeseries.add("t1", 73, 5)
+    timeseries.add("t1", 75, 3)
+    assert [(70, 5.0), (50, 3.0), (10, 4.0)] == timeseries.revrange(
+        "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10
+    )
+    assert [(20, 4.0), (60, 3.0), (80, 5.0)] == timeseries.range(
+        "t1",
+        0,
+        100,
+        align=0,
+        aggregation_type="max",
+        bucket_size_msec=10,
+        bucket_timestamp="+",
+    )
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.8.0", "timeseries")
+def test_revrange_empty(client: redis.Redis):
+    timeseries = client.ts()
+    timeseries.create("t1")
+    timeseries.add("t1", 15, 1)
+    timeseries.add("t1", 17, 4)
+    timeseries.add("t1", 51, 3)
+    timeseries.add("t1", 73, 5)
+    timeseries.add("t1", 75, 3)
+    assert [(70, 5.0), (50, 3.0), (10, 4.0)] == timeseries.revrange(
+        "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10
+    )
+    res = timeseries.revrange(
+        "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10, empty=True
+    )
+    for i in range(len(res)):
+        if math.isnan(res[i][1]):
+            res[i] = (res[i][0], None)
+    assert [
+        (70, 5.0),
+        (60, None),
+        (50, 3.0),
+        (40, None),
+        (30, None),
+        (20, None),
+        (10, 4.0),
+    ] == res
 
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
-def testMultiRange(client):
+def test_mrange(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
     client.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
     for i in range(100):
@@ -353,6 +510,31 @@ def test_multi_range_advanced(client):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_ifmodversion_lt("1.8.0", "timeseries")
+def test_mrange_latest(client: redis.Redis):
+    timeseries = client.ts()
+    timeseries.create("t1")
+    timeseries.create("t2", labels={"is_compaction": "true"})
+    timeseries.create("t3")
+    timeseries.create("t4", labels={"is_compaction": "true"})
+    timeseries.createrule("t1", "t2", aggregation_type="sum", bucket_size_msec=10)
+    timeseries.createrule("t3", "t4", aggregation_type="sum", bucket_size_msec=10)
+    timeseries.add("t1", 1, 1)
+    timeseries.add("t1", 2, 3)
+    timeseries.add("t1", 11, 7)
+    timeseries.add("t1", 13, 1)
+    timeseries.add("t3", 1, 1)
+    timeseries.add("t3", 2, 3)
+    timeseries.add("t3", 11, 7)
+    timeseries.add("t3", 13, 1)
+    assert client.ts().mrange(0, 10, filters=["is_compaction=true"], latest=True) == [
+        {"t2": [{}, [(0, 4.0), (10, 8.0)]]},
+        {"t4": [{}, [(0, 4.0), (10, 8.0)]]},
+    ]
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 def test_multi_reverse_range(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
@@ -435,6 +617,30 @@ def test_multi_reverse_range(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_ifmodversion_lt("1.8.0", "timeseries")
+def test_mrevrange_latest(client: redis.Redis):
+    timeseries = client.ts()
+    timeseries.create("t1")
+    timeseries.create("t2", labels={"is_compaction": "true"})
+    timeseries.create("t3")
+    timeseries.create("t4", labels={"is_compaction": "true"})
+    timeseries.createrule("t1", "t2", aggregation_type="sum", bucket_size_msec=10)
+    timeseries.createrule("t3", "t4", aggregation_type="sum", bucket_size_msec=10)
+    timeseries.add("t1", 1, 1)
+    timeseries.add("t1", 2, 3)
+    timeseries.add("t1", 11, 7)
+    timeseries.add("t1", 13, 1)
+    timeseries.add("t3", 1, 1)
+    timeseries.add("t3", 2, 3)
+    timeseries.add("t3", 11, 7)
+    timeseries.add("t3", 13, 1)
+    assert client.ts().mrevrange(
+        0, 10, filters=["is_compaction=true"], latest=True
+    ) == [{"t2": [{}, [(10, 8.0), (0, 4.0)]]}, {"t4": [{}, [(10, 8.0), (0, 4.0)]]}]
+
+
+@pytest.mark.redismod
 def test_get(client):
     name = "test"
     client.ts().create(name)
@@ -443,6 +649,21 @@ def test_get(client):
     assert 2 == client.ts().get(name)[0]
     client.ts().add(name, 3, 4)
     assert 4 == client.ts().get(name)[1]
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.8.0", "timeseries")
+def test_get_latest(client: redis.Redis):
+    timeseries = client.ts()
+    timeseries.create("t1")
+    timeseries.create("t2")
+    timeseries.createrule("t1", "t2", aggregation_type="sum", bucket_size_msec=10)
+    timeseries.add("t1", 1, 1)
+    timeseries.add("t1", 2, 3)
+    timeseries.add("t1", 11, 7)
+    timeseries.add("t1", 13, 1)
+    assert (0, 4.0) == timeseries.get("t2")
+    assert (10, 8.0) == timeseries.get("t2", latest=True)
 
 
 @pytest.mark.redismod
@@ -465,6 +686,24 @@ def test_mget(client):
     assert {} == res[0]["2"][0]
     res = client.ts().mget(["Taste=That"], with_labels=True)
     assert {"Taste": "That", "Test": "This"} == res[0]["2"][0]
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_ifmodversion_lt("1.8.0", "timeseries")
+def test_mget_latest(client: redis.Redis):
+    timeseries = client.ts()
+    timeseries.create("t1")
+    timeseries.create("t2", labels={"is_compaction": "true"})
+    timeseries.createrule("t1", "t2", aggregation_type="sum", bucket_size_msec=10)
+    timeseries.add("t1", 1, 1)
+    timeseries.add("t1", 2, 3)
+    timeseries.add("t1", 11, 7)
+    timeseries.add("t1", 13, 1)
+    assert timeseries.mget(filters=["is_compaction=true"]) == [{"t2": [{}, 0, 4.0]}]
+    assert [{"t2": [{}, 10, 8.0]}] == timeseries.mget(
+        filters=["is_compaction=true"], latest=True
+    )
 
 
 @pytest.mark.redismod
@@ -506,7 +745,7 @@ def test_pipeline(client):
     pipeline.execute()
 
     info = client.ts().info("with_pipeline")
-    assert info.lastTimeStamp == 99
+    assert info.last_timestamp == 99
     assert info.total_samples == 100
     assert client.ts().get("with_pipeline")[1] == 99 * 1.1
 

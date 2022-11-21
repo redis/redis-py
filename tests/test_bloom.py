@@ -1,8 +1,12 @@
+from math import inf
+
 import pytest
 
 import redis.commands.bf
 from redis.exceptions import ModuleError, RedisError
 from redis.utils import HIREDIS_AVAILABLE
+
+from .conftest import skip_ifmodversion_lt
 
 
 def intlist(obj):
@@ -31,6 +35,21 @@ def test_create(client):
     assert client.cf().create("cuckoo_e", 1000, expansion=1)
     assert client.cf().create("cuckoo_bs", 1000, bucket_size=4)
     assert client.cf().create("cuckoo_mi", 1000, max_iterations=10)
+    assert client.cms().initbydim("cmsDim", 100, 5)
+    assert client.cms().initbyprob("cmsProb", 0.01, 0.01)
+    assert client.topk().reserve("topk", 5, 100, 5, 0.9)
+
+
+@pytest.mark.redismod
+def test_bf_reserve(client):
+    """Testing BF.RESERVE"""
+    assert client.bf().reserve("bloom", 0.01, 1000)
+    assert client.bf().reserve("bloom_e", 0.01, 1000, expansion=1)
+    assert client.bf().reserve("bloom_ns", 0.01, 1000, noScale=True)
+    assert client.cf().reserve("cuckoo", 1000)
+    assert client.cf().reserve("cuckoo_e", 1000, expansion=1)
+    assert client.cf().reserve("cuckoo_bs", 1000, bucket_size=4)
+    assert client.cf().reserve("cuckoo_mi", 1000, max_iterations=10)
     assert client.cms().initbydim("cmsDim", 100, 5)
     assert client.cms().initbyprob("cmsProb", 0.01, 0.01)
     assert client.topk().reserve("topk", 5, 100, 5, 0.9)
@@ -263,9 +282,10 @@ def test_topk(client):
     assert [1, 1, 0, 0, 1, 0, 0] == client.topk().query(
         "topk", "A", "B", "C", "D", "E", "F", "G"
     )
-    assert [4, 3, 2, 3, 3, 0, 1] == client.topk().count(
-        "topk", "A", "B", "C", "D", "E", "F", "G"
-    )
+    with pytest.deprecated_call():
+        assert [4, 3, 2, 3, 3, 0, 1] == client.topk().count(
+            "topk", "A", "B", "C", "D", "E", "F", "G"
+        )
 
     # test full list
     assert client.topk().reserve("topklist", 3, 50, 3, 0.9)
@@ -305,9 +325,10 @@ def test_topk_incrby(client):
         "topk", ["bar", "baz", "42"], [3, 6, 2]
     )
     assert [None, "bar"] == client.topk().incrby("topk", ["42", "xyzzy"], [8, 4])
-    assert [3, 6, 10, 4, 0] == client.topk().count(
-        "topk", "bar", "baz", "42", "xyzzy", 4
-    )
+    with pytest.deprecated_call():
+        assert [3, 6, 10, 4, 0] == client.topk().count(
+            "topk", "bar", "baz", "42", "xyzzy", 4
+        )
 
 
 # region Test T-Digest
@@ -318,11 +339,11 @@ def test_tdigest_reset(client):
     # reset on empty histogram
     assert client.tdigest().reset("tDigest")
     # insert data-points into sketch
-    assert client.tdigest().add("tDigest", list(range(10)), [1.0] * 10)
+    assert client.tdigest().add("tDigest", list(range(10)))
 
     assert client.tdigest().reset("tDigest")
     # assert we have 0 unmerged nodes
-    assert 0 == client.tdigest().info("tDigest").unmergedNodes
+    assert 0 == client.tdigest().info("tDigest").unmerged_nodes
 
 
 @pytest.mark.redismod
@@ -331,14 +352,24 @@ def test_tdigest_merge(client):
     assert client.tdigest().create("to-tDigest", 10)
     assert client.tdigest().create("from-tDigest", 10)
     # insert data-points into sketch
-    assert client.tdigest().add("from-tDigest", [1.0] * 10, [1.0] * 10)
-    assert client.tdigest().add("to-tDigest", [2.0] * 10, [10.0] * 10)
+    assert client.tdigest().add("from-tDigest", [1.0] * 10)
+    assert client.tdigest().add("to-tDigest", [2.0] * 10)
     # merge from-tdigest into to-tdigest
-    assert client.tdigest().merge("to-tDigest", "from-tDigest")
+    assert client.tdigest().merge("to-tDigest", 1, "from-tDigest")
     # we should now have 110 weight on to-histogram
     info = client.tdigest().info("to-tDigest")
-    total_weight_to = float(info.mergedWeight) + float(info.unmergedWeight)
-    assert 110 == total_weight_to
+    total_weight_to = float(info.merged_weight) + float(info.unmerged_weight)
+    assert 20 == total_weight_to
+    # test override
+    assert client.tdigest().create("from-override", 10)
+    assert client.tdigest().create("from-override-2", 10)
+    assert client.tdigest().add("from-override", [3.0] * 10)
+    assert client.tdigest().add("from-override-2", [4.0] * 10)
+    assert client.tdigest().merge(
+        "to-tDigest", 2, "from-override", "from-override-2", override=True
+    )
+    assert 3.0 == client.tdigest().min("to-tDigest")
+    assert 4.0 == client.tdigest().max("to-tDigest")
 
 
 @pytest.mark.redismod
@@ -346,7 +377,7 @@ def test_tdigest_merge(client):
 def test_tdigest_min_and_max(client):
     assert client.tdigest().create("tDigest", 100)
     # insert data-points into sketch
-    assert client.tdigest().add("tDigest", [1, 2, 3], [1.0] * 3)
+    assert client.tdigest().add("tDigest", [1, 2, 3])
     # min/max
     assert 3 == client.tdigest().max("tDigest")
     assert 1 == client.tdigest().min("tDigest")
@@ -354,18 +385,24 @@ def test_tdigest_min_and_max(client):
 
 @pytest.mark.redismod
 @pytest.mark.experimental
+@skip_ifmodversion_lt("2.4.0", "bf")
 def test_tdigest_quantile(client):
     assert client.tdigest().create("tDigest", 500)
     # insert data-points into sketch
-    assert client.tdigest().add(
-        "tDigest", list([x * 0.01 for x in range(1, 10000)]), [1.0] * 10000
-    )
+    assert client.tdigest().add("tDigest", list([x * 0.01 for x in range(1, 10000)]))
     # assert min min/max have same result as quantile 0 and 1
-    assert client.tdigest().max("tDigest") == client.tdigest().quantile("tDigest", 1.0)
-    assert client.tdigest().min("tDigest") == client.tdigest().quantile("tDigest", 0.0)
+    res = client.tdigest().quantile("tDigest", 1.0)
+    assert client.tdigest().max("tDigest") == res[0]
+    res = client.tdigest().quantile("tDigest", 0.0)
+    assert client.tdigest().min("tDigest") == res[0]
 
-    assert 1.0 == round(client.tdigest().quantile("tDigest", 0.01), 2)
-    assert 99.0 == round(client.tdigest().quantile("tDigest", 0.99), 2)
+    assert 1.0 == round(client.tdigest().quantile("tDigest", 0.01)[0], 2)
+    assert 99.0 == round(client.tdigest().quantile("tDigest", 0.99)[0], 2)
+
+    # test multiple quantiles
+    assert client.tdigest().create("t-digest", 100)
+    assert client.tdigest().add("t-digest", [1, 2, 3, 4, 5])
+    assert [3.0, 5.0] == client.tdigest().quantile("t-digest", 0.5, 0.8)
 
 
 @pytest.mark.redismod
@@ -373,9 +410,67 @@ def test_tdigest_quantile(client):
 def test_tdigest_cdf(client):
     assert client.tdigest().create("tDigest", 100)
     # insert data-points into sketch
-    assert client.tdigest().add("tDigest", list(range(1, 10)), [1.0] * 10)
-    assert 0.1 == round(client.tdigest().cdf("tDigest", 1.0), 1)
-    assert 0.9 == round(client.tdigest().cdf("tDigest", 9.0), 1)
+    assert client.tdigest().add("tDigest", list(range(1, 10)))
+    assert 0.1 == round(client.tdigest().cdf("tDigest", 1.0)[0], 1)
+    assert 0.9 == round(client.tdigest().cdf("tDigest", 9.0)[0], 1)
+    res = client.tdigest().cdf("tDigest", 1.0, 9.0)
+    assert [0.1, 0.9] == [round(x, 1) for x in res]
+
+
+@pytest.mark.redismod
+@pytest.mark.experimental
+@skip_ifmodversion_lt("2.4.0", "bf")
+def test_tdigest_trimmed_mean(client):
+    assert client.tdigest().create("tDigest", 100)
+    # insert data-points into sketch
+    assert client.tdigest().add("tDigest", list(range(1, 10)))
+    assert 5 == client.tdigest().trimmed_mean("tDigest", 0.1, 0.9)
+    assert 4.5 == client.tdigest().trimmed_mean("tDigest", 0.4, 0.5)
+
+
+@pytest.mark.redismod
+@pytest.mark.experimental
+def test_tdigest_rank(client):
+    assert client.tdigest().create("t-digest", 500)
+    assert client.tdigest().add("t-digest", list(range(0, 20)))
+    assert -1 == client.tdigest().rank("t-digest", -1)[0]
+    assert 0 == client.tdigest().rank("t-digest", 0)[0]
+    assert 10 == client.tdigest().rank("t-digest", 10)[0]
+    assert [-1, 20, 9] == client.tdigest().rank("t-digest", -20, 20, 9)
+
+
+@pytest.mark.redismod
+@pytest.mark.experimental
+def test_tdigest_revrank(client):
+    assert client.tdigest().create("t-digest", 500)
+    assert client.tdigest().add("t-digest", list(range(0, 20)))
+    assert -1 == client.tdigest().revrank("t-digest", 20)[0]
+    assert 19 == client.tdigest().revrank("t-digest", 0)[0]
+    assert [-1, 19, 9] == client.tdigest().revrank("t-digest", 21, 0, 10)
+
+
+@pytest.mark.redismod
+@pytest.mark.experimental
+def test_tdigest_byrank(client):
+    assert client.tdigest().create("t-digest", 500)
+    assert client.tdigest().add("t-digest", list(range(1, 11)))
+    assert 1 == client.tdigest().byrank("t-digest", 0)[0]
+    assert 10 == client.tdigest().byrank("t-digest", 9)[0]
+    assert client.tdigest().byrank("t-digest", 100)[0] == inf
+    with pytest.raises(redis.ResponseError):
+        client.tdigest().byrank("t-digest", -1)[0]
+
+
+@pytest.mark.redismod
+@pytest.mark.experimental
+def test_tdigest_byrevrank(client):
+    assert client.tdigest().create("t-digest", 500)
+    assert client.tdigest().add("t-digest", list(range(1, 11)))
+    assert 10 == client.tdigest().byrevrank("t-digest", 0)[0]
+    assert 1 == client.tdigest().byrevrank("t-digest", 9)[0]
+    assert client.tdigest().byrevrank("t-digest", 100)[0] == -inf
+    with pytest.raises(redis.ResponseError):
+        client.tdigest().byrevrank("t-digest", -1)[0]
 
 
 # @pytest.mark.redismod

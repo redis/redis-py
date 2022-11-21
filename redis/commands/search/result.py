@@ -38,7 +38,7 @@ class Result:
             score = float(res[i + 1]) if with_scores else None
 
             fields = {}
-            if hascontent:
+            if hascontent and res[i + fields_offset] is not None:
                 fields = (
                     dict(
                         dict(
