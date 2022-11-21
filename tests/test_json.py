@@ -824,7 +824,7 @@ def test_objlen_dollar(client):
         },
     )
     # Test multi
-    assert client.json().objlen("doc1", "$..a") == [2, None, 1]
+    assert client.json().objlen("doc1", "$..a") == [None, 2, 1]
     # Test single
     assert client.json().objlen("doc1", "$.nested1.a") == [2]
 
@@ -1411,7 +1411,8 @@ def test_set_path(client):
 
     with open(jsonfile, "w+") as fp:
         fp.write(json.dumps({"hello": "world"}))
-    open(nojsonfile, "a+").write("hello")
+    with open(nojsonfile, "a+") as fp:
+        fp.write("hello")
 
     result = {jsonfile: True, nojsonfile: False}
     assert client.json().set_path(Path.root_path(), root) == result

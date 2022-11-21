@@ -6,8 +6,6 @@ import pytest
 import redis.asyncio as redis
 from tests.conftest import skip_ifmodversion_lt
 
-pytestmark = pytest.mark.asyncio
-
 
 @pytest.mark.redismod
 async def test_create(modclient: redis.Redis):
@@ -241,6 +239,9 @@ async def test_range_advanced(modclient: redis.Redis):
     )
     assert [(0, 5.0), (5, 6.0)] == await modclient.ts().range(
         1, 0, 10, aggregation_type="count", bucket_size_msec=10, align=5
+    )
+    assert [(0, 2.55), (10, 3.0)] == await modclient.ts().range(
+        1, 0, 10, aggregation_type="twa", bucket_size_msec=10
     )
 
 

@@ -167,5 +167,5 @@ class Pipeline(SearchCommands, redis.client.Pipeline):
     """Pipeline for the module."""
 
 
-class AsyncPipeline(AsyncSearchCommands, AsyncioPipeline):
+class AsyncPipeline(AsyncSearchCommands, AsyncioPipeline, Pipeline):
     """AsyncPipeline for the module."""

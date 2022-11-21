@@ -165,11 +165,16 @@ class TDigestBloom(TDigestCommands, AbstractBloom):
             # TDIGEST_RESET: bool_ok,
             # TDIGEST_ADD: spaceHolder,
             # TDIGEST_MERGE: spaceHolder,
-            TDIGEST_CDF: float,
-            TDIGEST_QUANTILE: float,
+            TDIGEST_CDF: parse_to_list,
+            TDIGEST_QUANTILE: parse_to_list,
             TDIGEST_MIN: float,
             TDIGEST_MAX: float,
+            TDIGEST_TRIMMED_MEAN: float,
             TDIGEST_INFO: TDigestInfo,
+            TDIGEST_RANK: parse_to_list,
+            TDIGEST_REVRANK: parse_to_list,
+            TDIGEST_BYRANK: parse_to_list,
+            TDIGEST_BYREVRANK: parse_to_list,
         }
 
         self.client = client

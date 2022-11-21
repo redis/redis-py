@@ -132,6 +132,9 @@ class GeoValue(Value):
         self.radius = radius
         self.unit = unit
 
+    def to_string(self):
+        return f"[{self.lon} {self.lat} {self.radius} {self.unit}]"
+
 
 class Node:
     def __init__(self, *children, **kwparams):

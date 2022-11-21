@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 from collections import OrderedDict
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable, Dict, Tuple, Union
 
 from redis.client import CaseInsensitiveDict, PubSub, Redis, parse_scan
 from redis.commands import READ_COMMANDS, CommandsParser, RedisClusterCommands
@@ -42,7 +42,7 @@ from redis.utils import (
 log = logging.getLogger(__name__)
 
 
-def get_node_name(host: str, port: int) -> str:
+def get_node_name(host: str, port: Union[str, int]) -> str:
     return f"{host}:{port}"
 
 

@@ -3,6 +3,7 @@ import time
 from typing import Dict, Optional, Union
 
 from redis.client import Pipeline
+from redis.utils import deprecated_function
 
 from ..helpers import parse_to_dict
 from ._util import to_string
@@ -20,6 +21,7 @@ SEARCH_CMD = "FT.SEARCH"
 ADD_CMD = "FT.ADD"
 ADDHASH_CMD = "FT.ADDHASH"
 DROP_CMD = "FT.DROP"
+DROPINDEX_CMD = "FT.DROPINDEX"
 EXPLAIN_CMD = "FT.EXPLAIN"
 EXPLAINCLI_CMD = "FT.EXPLAINCLI"
 DEL_CMD = "FT.DEL"
@@ -170,8 +172,8 @@ class SearchCommands:
 
         For more information see `FT.DROPINDEX <https://redis.io/commands/ft.dropindex>`_.
         """  # noqa
-        keep_str = "" if delete_documents else "KEEPDOCS"
-        return self.execute_command(DROP_CMD, self.index_name, keep_str)
+        delete_str = "DD" if delete_documents else ""
+        return self.execute_command(DROPINDEX_CMD, self.index_name, delete_str)
 
     def _add_document(
         self,
@@ -235,6 +237,9 @@ class SearchCommands:
 
         return self.execute_command(*args)
 
+    @deprecated_function(
+        version="2.0.0", reason="deprecated since redisearch 2.0, call hset instead"
+    )
     def add_document(
         self,
         doc_id,
@@ -288,6 +293,9 @@ class SearchCommands:
             **fields,
         )
 
+    @deprecated_function(
+        version="2.0.0", reason="deprecated since redisearch 2.0, call hset instead"
+    )
     def add_document_hash(self, doc_id, score=1.0, language=None, replace=False):
         """
         Add a hash document to the index.
