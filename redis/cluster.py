@@ -298,40 +298,48 @@ class AbstractRedisCluster:
     )
 
     SEARCH_COMMANDS = (
-        [
-            "FT.CREATE",
-            "FT.SEARCH",
-            "FT.AGGREGATE",
-            "FT.EXPLAIN",
-            "FT.EXPLAINCLI",
-            "FT,PROFILE",
-            "FT.ALTER",
-            "FT.DROPINDEX",
-            "FT.ALIASADD",
-            "FT.ALIASUPDATE",
-            "FT.ALIASDEL",
-            "FT.TAGVALS",
-            "FT.SUGADD",
-            "FT.SUGGET",
-            "FT.SUGDEL",
-            "FT.SUGLEN",
-            "FT.SYNUPDATE",
-            "FT.SYNDUMP",
-            "FT.SPELLCHECK",
-            "FT.DICTADD",
-            "FT.DICTDEL",
-            "FT.DICTDUMP",
-            "FT.INFO",
-            "FT._LIST",
-            "FT.CONFIG",
-            "FT.ADD",
-            "FT.DEL",
-            "FT.DROP",
-            "FT.GET",
-            "FT.MGET",
-            "FT.SYNADD",
-        ],
+        "FT.CREATE",
+        "FT.SEARCH",
+        "FT.AGGREGATE",
+        "FT.EXPLAIN",
+        "FT.EXPLAINCLI",
+        "FT,PROFILE",
+        "FT.ALTER",
+        "FT.DROPINDEX",
+        "FT.ALIASADD",
+        "FT.ALIASUPDATE",
+        "FT.ALIASDEL",
+        "FT.TAGVALS",
+        "FT.SUGADD",
+        "FT.SUGGET",
+        "FT.SUGDEL",
+        "FT.SUGLEN",
+        "FT.SYNUPDATE",
+        "FT.SYNDUMP",
+        "FT.SPELLCHECK",
+        "FT.DICTADD",
+        "FT.DICTDEL",
+        "FT.DICTDUMP",
+        "FT.INFO",
+        "FT._LIST",
+        "FT.CONFIG",
+        "FT.ADD",
+        "FT.DEL",
+        "FT.DROP",
+        "FT.GET",
+        "FT.MGET",
+        "FT.SYNADD",
     )
+
+    # The following commands of the TimeSeries module do not operate on
+    # keys (time series) specified explicitly in their arguments. Instead,
+    # they operate on keys matched by specified filters (by label, value, etc.)
+    TIMESERIES_FILTER_COMMANDS = [
+        "TS.MGET",
+        "TS.MRANGE",
+        "TS.MREVRANGE",
+        "TS.QUERYINDEX",
+    ]
 
     CLUSTER_COMMANDS_RESPONSE_CALLBACKS = {
         "CLUSTER SLOTS": parse_cluster_slots,
@@ -838,7 +846,9 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         elif command_flag == self.__class__.DEFAULT_NODE:
             # return the cluster's default node
             return [self.nodes_manager.default_node]
-        elif command in self.__class__.SEARCH_COMMANDS[0]:
+        elif command in self.__class__.SEARCH_COMMANDS:
+            return [self.nodes_manager.default_node]
+        elif command in self.__class__.TIMESERIES_FILTER_COMMANDS:
             return [self.nodes_manager.default_node]
         else:
             # get the node that holds the key's slot
