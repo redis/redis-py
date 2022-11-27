@@ -11,7 +11,6 @@ from typing import (
     List,
     Mapping,
     Optional,
-    Tuple,
     Type,
     TypeVar,
     Union,
@@ -517,14 +516,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
     async def _determine_nodes(
         self, command: str, *args: Any, node_flag: Optional[str] = None
-    ) -> Tuple[List["ClusterNode"], bool]:
-        """Determine which nodes should be executed the command on
-
-        Returns:
-            tuple[list[Type[ClusterNode]], bool]:
-                A tuple containing a list of target nodes and a bool indicating
-                if the return node was chosen because it is the default node
-        """
+    ) -> List["ClusterNode"]:
+        # Determine which nodes should be executed the command on.
+        # Returns a list of target nodes.
         if not node_flag:
             # get the nodes group for this command if it was predefined
             node_flag = self.command_flags.get(command)
@@ -532,21 +526,19 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         if node_flag in self.node_flags:
             if node_flag == self.__class__.DEFAULT_NODE:
                 # return the cluster's default node
-                return [self.nodes_manager.default_node], True
+                return [self.nodes_manager.default_node]
             if node_flag == self.__class__.PRIMARIES:
                 # return all primaries
-                return self.nodes_manager.get_nodes_by_server_type(PRIMARY), False
+                return self.nodes_manager.get_nodes_by_server_type(PRIMARY)
             if node_flag == self.__class__.REPLICAS:
                 # return all replicas
-                return self.nodes_manager.get_nodes_by_server_type(REPLICA), False
+                return self.nodes_manager.get_nodes_by_server_type(REPLICA)
             if node_flag == self.__class__.ALL_NODES:
                 # return all nodes
-                return list(self.nodes_manager.nodes_cache.values()), False
+                return list(self.nodes_manager.nodes_cache.values())
             if node_flag == self.__class__.RANDOM:
                 # return a random node
-                return [
-                    random.choice(list(self.nodes_manager.nodes_cache.values()))
-                ], False
+                return [random.choice(list(self.nodes_manager.nodes_cache.values()))]
 
         # get the node that holds the key's slot
         return [
@@ -554,7 +546,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 await self._determine_slot(command, *args),
                 self.read_from_replicas and command in READ_COMMANDS,
             )
-        ], False
+        ]
 
     async def _determine_slot(self, command: str, *args: Any) -> int:
         if self.command_flags.get(command) == SLOT_ID:
@@ -671,13 +663,18 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             try:
                 if not target_nodes_specified:
                     # Determine the nodes to execute the command on
-                    target_nodes, is_default_node = await self._determine_nodes(
+                    target_nodes = await self._determine_nodes(
                         *args, node_flag=passed_targets
                     )
                     if not target_nodes:
                         raise RedisClusterException(
                             f"No targets were found to execute {args} command on"
                         )
+                    if (
+                        len(target_nodes) == 1
+                        and target_nodes[0] == self.get_default_node()
+                    ):
+                        is_default_node = True
 
                 if len(target_nodes) == 1:
                     # Return the processed result
@@ -1456,7 +1453,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
             if passed_targets and not client._is_node_flag(passed_targets):
                 target_nodes = client._parse_target_nodes(passed_targets)
             else:
-                target_nodes, is_default_node = await client._determine_nodes(
+                target_nodes = await client._determine_nodes(
                     *cmd.args, node_flag=passed_targets
                 )
                 if not target_nodes:
@@ -1465,8 +1462,9 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                     )
             if len(target_nodes) > 1:
                 raise RedisClusterException(f"Too many targets for command {cmd.args}")
-
             node = target_nodes[0]
+            if node == client.get_default_node():
+                is_default_node = True
             if node.name not in nodes:
                 nodes[node.name] = (node, [])
             nodes[node.name][1].append(cmd)
