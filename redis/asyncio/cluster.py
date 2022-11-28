@@ -1501,7 +1501,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                         raise result
 
             if is_default_node:
-                self.replace_default_node()
+                client.replace_default_node()
 
         return [cmd.result for cmd in stack]
 
