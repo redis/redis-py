@@ -1,12 +1,10 @@
-from redis.typing import EncodableT, EncodedT
-
 from ..exceptions import DataError
 
 
 class Encoder:
     "Encode strings to bytes-like and decode bytes-like to strings"
 
-    def __init__(self, encoding, encoding_errors, decode_responses):
+    def __init__(self, encoding, encoding_errors, decode_responses: bool):
         self.encoding = encoding
         self.encoding_errors = encoding_errors
         self.decode_responses = decode_responses

@@ -103,7 +103,7 @@ class AsyncRESP2Parser(AsyncBaseParser):
         super().__init__(socket_read_size)
         self.encoder: Optional[Encoder] = None
 
-    def on_connect(self, connection: "Connection"):
+    def on_connect(self, connection):
         """Called when the stream connects"""
         self._stream = connection._reader
         if self._stream is None:

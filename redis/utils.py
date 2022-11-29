@@ -11,7 +11,7 @@ except ImportError:
     HIREDIS_AVAILABLE = False
 
 try:
-    import ssl
+    import ssl  # noqa
 
     SSL_AVAILABLE = True
 except ImportError:

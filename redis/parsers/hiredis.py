@@ -148,12 +148,10 @@ class AsyncHiredisParser(AsyncBaseParser):
         if not HIREDIS_AVAILABLE:
             raise RedisError("Hiredis is not available.")
 
-        import hiredis
-
         super().__init__(socket_read_size=socket_read_size)
-        self._reader: Optional[hiredis.Reader] = None
+        self._reader = None
 
-    def on_connect(self, connection: "Connection"):
+    def on_connect(self, connection):
         import hiredis
 
         self._stream = connection._reader
@@ -201,7 +199,10 @@ class AsyncHiredisParser(AsyncBaseParser):
         response = self._reader.gets()
         while response is False:
             await self.read_from_socket()
-            response = self._reader.gets()
+            if disable_decoding:
+                response = self._reader.gets(False)
+            else:
+                response = self._reader.gets()
 
         # if the response is a ConnectionError or the response is a list and
         # the first item is a ConnectionError, raise it as something bad

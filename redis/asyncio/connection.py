@@ -40,7 +40,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
-from redis.typing import EncodableT, EncodedT
+from redis.typing import EncodableT
 from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 
 from ..parsers import AsyncHiredisParser, AsyncRESP2Parser, BaseParser, Encoder

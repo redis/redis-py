@@ -76,6 +76,12 @@ class BaseParser(ABC):
             return exception_class(response)
         return ResponseError(response)
 
+    def on_disconnect(self):
+        raise NotImplementedError()
+
+    def on_connect(self, connection):
+        raise NotImplementedError()
+
 
 class AsyncBaseParser(BaseParser):
     """Base parsing class for the python-backed async parser"""
@@ -91,12 +97,6 @@ class AsyncBaseParser(BaseParser):
             self.on_disconnect()
         except Exception:
             pass
-
-    def on_disconnect(self):
-        raise NotImplementedError()
-
-    def on_connect(self, connection: "Connection"):
-        raise NotImplementedError()
 
     async def can_read_destructive(self) -> bool:
         raise NotImplementedError()
