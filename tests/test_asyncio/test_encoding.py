@@ -95,7 +95,6 @@ class TestCommandsAreNotEncoded:
 
 
 class TestInvalidUserInput:
-
     async def test_none_fails(self, r: redis.Redis):
         with pytest.raises(DataError):
             await r.set("a", None)  # type: ignore

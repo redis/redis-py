@@ -12,7 +12,7 @@ from redis.asyncio.client import Monitor
 from redis.asyncio.connection import parse_url
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.parsers import AsyncHiredisParser, AsyncRESP2Parser
+from redis.parsers import AsyncHiredisParser, _AsyncRESP2Parser
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import REDIS_INFO
 
@@ -29,12 +29,12 @@ async def _get_info(redis_url):
 @pytest_asyncio.fixture(
     params=[
         pytest.param(
-            (True, AsyncRESP2Parser),
+            (True, _AsyncRESP2Parser),
             marks=pytest.mark.skipif(
                 'config.REDIS_INFO["cluster_enabled"]', reason="cluster mode enabled"
             ),
         ),
-        (False, AsyncRESP2Parser),
+        (False, _AsyncRESP2Parser),
         pytest.param(
             (True, AsyncHiredisParser),
             marks=[

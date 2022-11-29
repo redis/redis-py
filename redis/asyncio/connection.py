@@ -43,7 +43,7 @@ from redis.exceptions import (
 from redis.typing import EncodableT
 from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 
-from ..parsers import AsyncHiredisParser, AsyncRESP2Parser, BaseParser, Encoder
+from ..parsers import AsyncHiredisParser, _AsyncRESP2Parser, BaseParser, Encoder
 
 SYM_STAR = b"*"
 SYM_DOLLAR = b"$"
@@ -76,11 +76,11 @@ NO_AUTH_SET_ERROR = {
 }
 
 
-DefaultParser: Type[Union[AsyncRESP2Parser, AsyncHiredisParser]]
+DefaultParser: Type[Union[_AsyncRESP2Parser, AsyncHiredisParser]]
 if HIREDIS_AVAILABLE:
     DefaultParser = AsyncHiredisParser
 else:
-    DefaultParser = AsyncRESP2Parser
+    DefaultParser = _AsyncRESP2Parser
 
 
 class ConnectCallbackProtocol(Protocol):

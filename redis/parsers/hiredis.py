@@ -1,6 +1,7 @@
 import asyncio
 import socket
-from typing import Callable, List, Optional, TypedDict, Union
+from typing import Callable, List, Optional, Union
+from redis.compat import TypedDict
 
 import async_timeout
 
@@ -12,7 +13,7 @@ from ..exceptions import (
 )
 from ..typing import EncodableT
 from ..utils import HIREDIS_AVAILABLE
-from .protocol import AsyncBaseParser, BaseParser
+from .base import AsyncBaseParser, BaseParser
 from .socket import (
     NONBLOCKING_EXCEPTION_ERROR_NUMBERS,
     NONBLOCKING_EXCEPTIONS,

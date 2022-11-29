@@ -22,7 +22,7 @@ from .exceptions import (
     ResponseError,
     TimeoutError,
 )
-from .parsers import Encoder, HiredisParser, RESP2Parser
+from .parsers import Encoder, HiredisParser, _RESP2Parser
 from .retry import Retry
 from .utils import (
     CRYPTOGRAPHY_AVAILABLE,
@@ -56,11 +56,11 @@ NO_AUTH_SET_ERROR = {
 }
 
 
-DefaultParser: Type[Union[RESP2Parser, HiredisParser]]
+DefaultParser: Type[Union[_RESP2Parser, HiredisParser]]
 if HIREDIS_AVAILABLE:
     DefaultParser = HiredisParser
 else:
-    DefaultParser = RESP2Parser
+    DefaultParser = _RESP2Parser
 
 
 class Connection:

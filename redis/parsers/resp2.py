@@ -7,11 +7,11 @@ from redis.typing import EncodableT
 
 from ..exceptions import ConnectionError, InvalidResponse, RedisError, ResponseError
 from .encoders import Encoder
-from .protocol import AsyncBaseParser, BaseParser
+from .base import AsyncBaseParser, BaseParser
 from .socket import SERVER_CLOSED_CONNECTION_ERROR, SocketBuffer
 
 
-class RESP2Parser(BaseParser):
+class _RESP2Parser(BaseParser):
     "Plain Python parsing class"
 
     def __init__(self, socket_read_size):
@@ -94,7 +94,7 @@ class RESP2Parser(BaseParser):
         return response
 
 
-class AsyncRESP2Parser(AsyncBaseParser):
+class _AsyncRESP2Parser(AsyncBaseParser):
     """Parsing class for the RESP2 protocol"""
 
     __slots__ = AsyncBaseParser.__slots__ + ("encoder",)
