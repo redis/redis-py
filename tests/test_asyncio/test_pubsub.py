@@ -993,7 +993,7 @@ class TestBaseException:
         assert pubsub.connection.is_connected
         with patch("redis.parsers._AsyncRESP2Parser.read_response") as mock1:
             mock1.side_effect = BaseException("boom")
-            with patch("redis.parsers.AsyncHiredisParser.read_response") as mock2:
+            with patch("redis.parsers._AsyncHiredisParser.read_response") as mock2:
                 mock2.side_effect = BaseException("boom")
 
                 with pytest.raises(BaseException):

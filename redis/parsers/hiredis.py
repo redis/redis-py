@@ -29,7 +29,7 @@ class _HiredisReaderArgs(TypedDict, total=False):
     errors: Optional[str]
 
 
-class HiredisParser(BaseParser):
+class _HiredisParser(BaseParser):
     "Parser class for connections using Hiredis"
 
     def __init__(self, socket_read_size):
@@ -140,7 +140,7 @@ class HiredisParser(BaseParser):
         return response
 
 
-class AsyncHiredisParser(AsyncBaseParser):
+class _AsyncHiredisParser(AsyncBaseParser):
     """PAsync implementation of parser class for connections using Hiredis"""
 
     __slots__ = AsyncBaseParser.__slots__ + ("_reader",)
