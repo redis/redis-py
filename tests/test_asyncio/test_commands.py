@@ -19,6 +19,7 @@ from tests.conftest import (
 )
 
 REDIS_6_VERSION = "5.9.0"
+REDIS_6_2_VERSION = "6.2.0"
 
 
 @pytest_asyncio.fixture()
@@ -114,7 +115,7 @@ class TestRedisCommands:
         password = await r.acl_genpass()
         assert isinstance(password, str)
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt(REDIS_6_2_VERSION)
     @skip_if_server_version_gte("7.0.0")
     async def test_acl_getuser_setuser(self, r_teardown):
         username = "redis-py-user"
@@ -221,7 +222,7 @@ class TestRedisCommands:
         )
         assert len((await r.acl_getuser(username))["passwords"]) == 1
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt(REDIS_6_2_VERSION)
     @skip_if_server_version_gte("7.0.0")
     async def test_acl_list(self, r_teardown):
         username = "redis-py-user"
