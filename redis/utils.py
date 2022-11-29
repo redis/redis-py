@@ -11,6 +11,13 @@ except ImportError:
     HIREDIS_AVAILABLE = False
 
 try:
+    import ssl
+
+    SSL_AVAILABLE = True
+except ImportError:
+    SSL_AVAILABLE = False
+
+try:
     import cryptography  # noqa
 
     CRYPTOGRAPHY_AVAILABLE = True

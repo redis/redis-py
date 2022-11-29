@@ -12,7 +12,6 @@ from _pytest.fixtures import FixtureRequest
 
 from redis.asyncio.cluster import ClusterNode, NodesManager, RedisCluster
 from redis.asyncio.connection import Connection, SSLConnection
-from redis.asyncio.parser import CommandsParser
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialBackoff, NoBackoff, default_backoff
 from redis.cluster import PIPELINE_BLOCKED_COMMANDS, PRIMARY, REPLICA, get_node_name
@@ -29,6 +28,7 @@ from redis.exceptions import (
     RedisError,
     ResponseError,
 )
+from redis.parsers import AsyncCommandsParser
 from redis.utils import str_if_bytes
 from tests.conftest import (
     skip_if_redis_enterprise,
@@ -99,7 +99,7 @@ async def get_mocked_redis_client(*args, **kwargs) -> RedisCluster:
         execute_command_mock.side_effect = execute_command
 
         with mock.patch.object(
-            CommandsParser, "initialize", autospec=True
+            AsyncCommandsParser, "initialize", autospec=True
         ) as cmd_parser_initialize:
 
             def cmd_init_mock(self, r: ClusterNode) -> None:
@@ -549,7 +549,7 @@ class TestRedisClusterObj:
                     mocks["send_packed_command"].return_value = "MOCK_OK"
                     mocks["connect"].return_value = None
                     with mock.patch.object(
-                        CommandsParser, "initialize", autospec=True
+                        AsyncCommandsParser, "initialize", autospec=True
                     ) as cmd_parser_initialize:
 
                         def cmd_init_mock(self, r: ClusterNode) -> None:
@@ -2320,7 +2320,7 @@ class TestNodesManager:
             assert "Redis Cluster cannot be connected" in str(e.value)
 
             with mock.patch.object(
-                CommandsParser, "initialize", autospec=True
+                AsyncCommandsParser, "initialize", autospec=True
             ) as cmd_parser_initialize:
 
                 def cmd_init_mock(self, r: ClusterNode) -> None:

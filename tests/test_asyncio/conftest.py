@@ -9,14 +9,11 @@ from packaging.version import Version
 
 import redis.asyncio as redis
 from redis.asyncio.client import Monitor
-from redis.asyncio.connection import (
-    HIREDIS_AVAILABLE,
-    HiredisParser,
-    PythonParser,
-    parse_url,
-)
+from redis.asyncio.connection import parse_url
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
+from redis.parsers import AsyncHiredisParser, AsyncRESP2Parser
+from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import REDIS_INFO
 
 from .compat import mock
@@ -32,14 +29,14 @@ async def _get_info(redis_url):
 @pytest_asyncio.fixture(
     params=[
         pytest.param(
-            (True, PythonParser),
+            (True, AsyncRESP2Parser),
             marks=pytest.mark.skipif(
                 'config.REDIS_INFO["cluster_enabled"]', reason="cluster mode enabled"
             ),
         ),
-        (False, PythonParser),
+        (False, AsyncRESP2Parser),
         pytest.param(
-            (True, HiredisParser),
+            (True, AsyncHiredisParser),
             marks=[
                 pytest.mark.skipif(
                     'config.REDIS_INFO["cluster_enabled"]',
@@ -51,7 +48,7 @@ async def _get_info(redis_url):
             ],
         ),
         pytest.param(
-            (False, HiredisParser),
+            (False, AsyncHiredisParser),
             marks=pytest.mark.skipif(
                 not HIREDIS_AVAILABLE, reason="hiredis is not installed"
             ),

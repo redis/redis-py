@@ -1,6 +1,6 @@
 import pytest
 
-from redis.commands import CommandsParser
+from redis.parsers import CommandsParser
 
 from .conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 

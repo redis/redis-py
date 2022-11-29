@@ -33,16 +33,9 @@ from redis.credentials import CredentialProvider, UsernamePasswordCredentialProv
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
-    BusyLoadingError,
     ChildDeadlockedError,
     ConnectionError,
     DataError,
-    ExecAbortError,
-    InvalidResponse,
-    ModuleError,
-    NoPermissionError,
-    NoScriptError,
-    ReadOnlyError,
     RedisError,
     ResponseError,
     TimeoutError,
@@ -50,17 +43,13 @@ from redis.exceptions import (
 from redis.typing import EncodableT, EncodedT
 from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 
-hiredis = None
-if HIREDIS_AVAILABLE:
-    import hiredis
+from ..parsers import AsyncHiredisParser, AsyncRESP2Parser, BaseParser, Encoder
 
 SYM_STAR = b"*"
 SYM_DOLLAR = b"$"
 SYM_CRLF = b"\r\n"
 SYM_LF = b"\n"
 SYM_EMPTY = b""
-
-SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
 
 
 class _Sentinel(enum.Enum):
@@ -87,311 +76,11 @@ NO_AUTH_SET_ERROR = {
 }
 
 
-class _HiredisReaderArgs(TypedDict, total=False):
-    protocolError: Callable[[str], Exception]
-    replyError: Callable[[str], Exception]
-    encoding: Optional[str]
-    errors: Optional[str]
-
-
-class Encoder:
-    """Encode strings to bytes-like and decode bytes-like to strings"""
-
-    __slots__ = "encoding", "encoding_errors", "decode_responses"
-
-    def __init__(self, encoding: str, encoding_errors: str, decode_responses: bool):
-        self.encoding = encoding
-        self.encoding_errors = encoding_errors
-        self.decode_responses = decode_responses
-
-    def encode(self, value: EncodableT) -> EncodedT:
-        """Return a bytestring or bytes-like representation of the value"""
-        if isinstance(value, str):
-            return value.encode(self.encoding, self.encoding_errors)
-        if isinstance(value, (bytes, memoryview)):
-            return value
-        if isinstance(value, (int, float)):
-            if isinstance(value, bool):
-                # special case bool since it is a subclass of int
-                raise DataError(
-                    "Invalid input of type: 'bool'. "
-                    "Convert to a bytes, string, int or float first."
-                )
-            return repr(value).encode()
-        # a value we don't know how to deal with. throw an error
-        typename = value.__class__.__name__
-        raise DataError(
-            f"Invalid input of type: {typename!r}. "
-            "Convert to a bytes, string, int or float first."
-        )
-
-    def decode(self, value: EncodableT, force=False) -> EncodableT:
-        """Return a unicode string from the bytes-like representation"""
-        if self.decode_responses or force:
-            if isinstance(value, bytes):
-                return value.decode(self.encoding, self.encoding_errors)
-            if isinstance(value, memoryview):
-                return value.tobytes().decode(self.encoding, self.encoding_errors)
-        return value
-
-
-ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Exception]]]]
-
-
-class BaseParser:
-    """Plain Python parsing class"""
-
-    __slots__ = "_stream", "_read_size"
-
-    EXCEPTION_CLASSES: ExceptionMappingT = {
-        "ERR": {
-            "max number of clients reached": ConnectionError,
-            "Client sent AUTH, but no password is set": AuthenticationError,
-            "invalid password": AuthenticationError,
-            # some Redis server versions report invalid command syntax
-            # in lowercase
-            "wrong number of arguments for 'auth' command": AuthenticationWrongNumberOfArgsError,  # noqa: E501
-            # some Redis server versions report invalid command syntax
-            # in uppercase
-            "wrong number of arguments for 'AUTH' command": AuthenticationWrongNumberOfArgsError,  # noqa: E501
-            MODULE_LOAD_ERROR: ModuleError,
-            MODULE_EXPORTS_DATA_TYPES_ERROR: ModuleError,
-            NO_SUCH_MODULE_ERROR: ModuleError,
-            MODULE_UNLOAD_NOT_POSSIBLE_ERROR: ModuleError,
-            **NO_AUTH_SET_ERROR,
-        },
-        "WRONGPASS": AuthenticationError,
-        "EXECABORT": ExecAbortError,
-        "LOADING": BusyLoadingError,
-        "NOSCRIPT": NoScriptError,
-        "READONLY": ReadOnlyError,
-        "NOAUTH": AuthenticationError,
-        "NOPERM": NoPermissionError,
-    }
-
-    def __init__(self, socket_read_size: int):
-        self._stream: Optional[asyncio.StreamReader] = None
-        self._read_size = socket_read_size
-
-    def __del__(self):
-        try:
-            self.on_disconnect()
-        except Exception:
-            pass
-
-    def parse_error(self, response: str) -> ResponseError:
-        """Parse an error response"""
-        error_code = response.split(" ")[0]
-        if error_code in self.EXCEPTION_CLASSES:
-            response = response[len(error_code) + 1 :]
-            exception_class = self.EXCEPTION_CLASSES[error_code]
-            if isinstance(exception_class, dict):
-                exception_class = exception_class.get(response, ResponseError)
-            return exception_class(response)
-        return ResponseError(response)
-
-    def on_disconnect(self):
-        raise NotImplementedError()
-
-    def on_connect(self, connection: "Connection"):
-        raise NotImplementedError()
-
-    async def can_read_destructive(self) -> bool:
-        raise NotImplementedError()
-
-    async def read_response(
-        self, disable_decoding: bool = False
-    ) -> Union[EncodableT, ResponseError, None, List[EncodableT]]:
-        raise NotImplementedError()
-
-
-class PythonParser(BaseParser):
-    """Plain Python parsing class"""
-
-    __slots__ = BaseParser.__slots__ + ("encoder",)
-
-    def __init__(self, socket_read_size: int):
-        super().__init__(socket_read_size)
-        self.encoder: Optional[Encoder] = None
-
-    def on_connect(self, connection: "Connection"):
-        """Called when the stream connects"""
-        self._stream = connection._reader
-        if self._stream is None:
-            raise RedisError("Buffer is closed.")
-
-        self.encoder = connection.encoder
-
-    def on_disconnect(self):
-        """Called when the stream disconnects"""
-        if self._stream is not None:
-            self._stream = None
-        self.encoder = None
-
-    async def can_read_destructive(self) -> bool:
-        if self._stream is None:
-            raise RedisError("Buffer is closed.")
-        try:
-            async with async_timeout.timeout(0):
-                return await self._stream.read(1)
-        except asyncio.TimeoutError:
-            return False
-
-    async def read_response(
-        self, disable_decoding: bool = False
-    ) -> Union[EncodableT, ResponseError, None]:
-        if not self._stream or not self.encoder:
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-        raw = await self._readline()
-        if not raw:
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-        response: Any
-        byte, response = raw[:1], raw[1:]
-
-        if byte not in (b"-", b"+", b":", b"$", b"*"):
-            raise InvalidResponse(f"Protocol Error: {raw!r}")
-
-        # server returned an error
-        if byte == b"-":
-            response = response.decode("utf-8", errors="replace")
-            error = self.parse_error(response)
-            # if the error is a ConnectionError, raise immediately so the user
-            # is notified
-            if isinstance(error, ConnectionError):
-                raise error
-            # otherwise, we're dealing with a ResponseError that might belong
-            # inside a pipeline response. the connection's read_response()
-            # and/or the pipeline's execute() will raise this error if
-            # necessary, so just return the exception instance here.
-            return error
-        # single value
-        elif byte == b"+":
-            pass
-        # int value
-        elif byte == b":":
-            response = int(response)
-        # bulk response
-        elif byte == b"$":
-            length = int(response)
-            if length == -1:
-                return None
-            response = await self._read(length)
-        # multi-bulk response
-        elif byte == b"*":
-            length = int(response)
-            if length == -1:
-                return None
-            response = [
-                (await self.read_response(disable_decoding)) for _ in range(length)
-            ]
-        if isinstance(response, bytes) and disable_decoding is False:
-            response = self.encoder.decode(response)
-        return response
-
-    async def _read(self, length: int) -> bytes:
-        """
-        Read `length` bytes of data.  These are assumed to be followed
-        by a '\r\n' terminator which is subsequently discarded.
-        """
-        if self._stream is None:
-            raise RedisError("Buffer is closed.")
-        try:
-            data = await self._stream.readexactly(length + 2)
-        except asyncio.IncompleteReadError as error:
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
-        return data[:-2]
-
-    async def _readline(self) -> bytes:
-        """
-        read an unknown number of bytes up to the next '\r\n'
-        line separator, which is discarded.
-        """
-        if self._stream is None:
-            raise RedisError("Buffer is closed.")
-        data = await self._stream.readline()
-        if not data.endswith(b"\r\n"):
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-        return data[:-2]
-
-
-class HiredisParser(BaseParser):
-    """Parser class for connections using Hiredis"""
-
-    __slots__ = BaseParser.__slots__ + ("_reader",)
-
-    def __init__(self, socket_read_size: int):
-        if not HIREDIS_AVAILABLE:
-            raise RedisError("Hiredis is not available.")
-        super().__init__(socket_read_size=socket_read_size)
-        self._reader: Optional[hiredis.Reader] = None
-
-    def on_connect(self, connection: "Connection"):
-        self._stream = connection._reader
-        kwargs: _HiredisReaderArgs = {
-            "protocolError": InvalidResponse,
-            "replyError": self.parse_error,
-        }
-        if connection.encoder.decode_responses:
-            kwargs["encoding"] = connection.encoder.encoding
-            kwargs["errors"] = connection.encoder.encoding_errors
-
-        self._reader = hiredis.Reader(**kwargs)
-
-    def on_disconnect(self):
-        self._stream = None
-        self._reader = None
-
-    async def can_read_destructive(self):
-        if not self._stream or not self._reader:
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-        if self._reader.gets():
-            return True
-        try:
-            async with async_timeout.timeout(0):
-                return await self.read_from_socket()
-        except asyncio.TimeoutError:
-            return False
-
-    async def read_from_socket(self):
-        buffer = await self._stream.read(self._read_size)
-        if not buffer or not isinstance(buffer, bytes):
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
-        self._reader.feed(buffer)
-        # data was read from the socket and added to the buffer.
-        # return True to indicate that data was read.
-        return True
-
-    async def read_response(
-        self, disable_decoding: bool = False
-    ) -> Union[EncodableT, List[EncodableT]]:
-        if not self._stream or not self._reader:
-            self.on_disconnect()
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
-
-        response = self._reader.gets()
-        while response is False:
-            await self.read_from_socket()
-            response = self._reader.gets()
-
-        # if the response is a ConnectionError or the response is a list and
-        # the first item is a ConnectionError, raise it as something bad
-        # happened
-        if isinstance(response, ConnectionError):
-            raise response
-        elif (
-            isinstance(response, list)
-            and response
-            and isinstance(response[0], ConnectionError)
-        ):
-            raise response[0]
-        return response
-
-
-DefaultParser: Type[Union[PythonParser, HiredisParser]]
+DefaultParser: Type[Union[AsyncRESP2Parser, AsyncHiredisParser]]
 if HIREDIS_AVAILABLE:
-    DefaultParser = HiredisParser
+    DefaultParser = AsyncHiredisParser
 else:
-    DefaultParser = PythonParser
+    DefaultParser = AsyncRESP2Parser
 
 
 class ConnectCallbackProtocol(Protocol):

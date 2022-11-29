@@ -5,14 +5,11 @@ from unittest.mock import patch
 
 import pytest
 
-from redis.asyncio.connection import (
-    Connection,
-    PythonParser,
-    UnixDomainSocketConnection,
-)
+from redis.asyncio.connection import Connection, UnixDomainSocketConnection
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
+from redis.parsers import AsyncRESP2Parser
 from tests.conftest import skip_if_server_version_lt
 
 from .compat import mock
@@ -24,8 +21,8 @@ async def test_invalid_response(create_redis):
 
     raw = b"x"
 
-    parser: "PythonParser" = r.connection._parser
-    if not isinstance(parser, PythonParser):
+    parser: "AsyncRESP2Parser" = r.connection._parser
+    if not isinstance(parser, AsyncRESP2Parser):
         pytest.skip("PythonParser only")
     stream_mock = mock.Mock(parser._stream)
     stream_mock.readline.return_value = raw + b"\r\n"

@@ -97,10 +97,7 @@ class TestCommandsAreNotEncoded:
 
 
 class TestInvalidUserInput:
-    def test_boolean_fails(self, r):
-        with pytest.raises(redis.DataError):
-            r.set("a", True)
-
+    
     def test_none_fails(self, r):
         with pytest.raises(redis.DataError):
             r.set("a", None)

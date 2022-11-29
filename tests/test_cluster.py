@@ -17,7 +17,6 @@ from redis.cluster import (
     RedisCluster,
     get_node_name,
 )
-from redis.commands import CommandsParser
 from redis.connection import Connection
 from redis.crc import key_slot
 from redis.exceptions import (
@@ -32,6 +31,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
+from redis.parsers import CommandsParser
 from redis.retry import Retry
 from redis.utils import str_if_bytes
 from tests.test_pubsub import wait_for_message
