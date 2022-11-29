@@ -13,6 +13,7 @@ These are the commands for interacting with the `RedisBloom module <https://redi
 
 .. code-block:: python
 
+    r = redis.Redis()
     import redis
     filter = redis.bf().create("bloom", 0.01, 1000)
     filter.add("bloom", "foo")
@@ -21,6 +22,7 @@ These are the commands for interacting with the `RedisBloom module <https://redi
 
 .. code-block:: python
 
+    r = redis.Redis()
     import redis
     filter = redis.cf().create("cuckoo", 1000)
     filter.add("cuckoo", "filter")
@@ -29,6 +31,7 @@ These are the commands for interacting with the `RedisBloom module <https://redi
 
 .. code-block:: python
 
+    r = redis.Redis()
     import redis
     r = redis.cms().initbydim("dim", 1000, 5)
     r.cms().incrby("dim", ["foo"], [5])
@@ -38,6 +41,7 @@ These are the commands for interacting with the `RedisBloom module <https://redi
 
 .. code-block:: python
 
+    r = redis.Redis()
     import redis
     r = redis.topk().reserve("mytopk", 3, 50, 4, 0.9)
     info = r.topk().info("mytopk)
