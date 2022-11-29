@@ -643,7 +643,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         command = args[0]
         target_nodes = []
         target_nodes_specified = False
-        is_default_node = False
         retry_attempts = self.cluster_error_retry_attempts
 
         passed_targets = kwargs.pop("target_nodes", None)
@@ -657,7 +656,10 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         for _ in range(execute_attempts):
             if self._initialize:
                 await self.initialize()
-                if is_default_node:
+                if (
+                    len(target_nodes) == 1
+                    and target_nodes[0] == self.get_default_node()
+                ):
                     # Replace the default cluster node
                     self.replace_default_node()
             try:
@@ -670,11 +672,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                         raise RedisClusterException(
                             f"No targets were found to execute {args} command on"
                         )
-                    if (
-                        len(target_nodes) == 1
-                        and target_nodes[0] == self.get_default_node()
-                    ):
-                        is_default_node = True
 
                 if len(target_nodes) == 1:
                     # Return the processed result
@@ -1447,7 +1444,6 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         ]
 
         nodes = {}
-        is_default_node = False
         for cmd in todo:
             passed_targets = cmd.kwargs.pop("target_nodes", None)
             if passed_targets and not client._is_node_flag(passed_targets):
@@ -1463,8 +1459,6 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
             if len(target_nodes) > 1:
                 raise RedisClusterException(f"Too many targets for command {cmd.args}")
             node = target_nodes[0]
-            if node == client.get_default_node():
-                is_default_node = True
             if node.name not in nodes:
                 nodes[node.name] = (node, [])
             nodes[node.name][1].append(cmd)
@@ -1500,8 +1494,18 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                         result.args = (msg,) + result.args[1:]
                         raise result
 
-            if is_default_node:
-                client.replace_default_node()
+            default_node = nodes.get(client.get_default_node().name)
+            if default_node is not None:
+                # This pipeline execution used the default node, check if we need
+                # to replace it.
+                # Note: when the error is raised we'll reset the default node in the
+                # caller function.
+                for cmd in default_node[1]:
+                    # Check if it has a command that failed with a relevant
+                    # exception
+                    if type(cmd.result) in self.__class__.ERRORS_ALLOW_RETRY:
+                        client.replace_default_node()
+                        break
 
         return [cmd.result for cmd in stack]
 

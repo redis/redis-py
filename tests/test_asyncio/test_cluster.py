@@ -2612,6 +2612,25 @@ class TestClusterPipeline:
             *(self.test_multi_key_operation_with_multi_slots(r) for i in range(100)),
         )
 
+    @pytest.mark.onlycluster
+    async def test_cluster_pipeline_with_default_node_error_command(self, r):
+        """
+        Test that the default node is being replaced when it raises a relevant exception
+        """
+        curr_default_node = r.get_default_node()
+        err = ConnectionError("error")
+        cmd_count = await r.command_count()
+        mock_node_resp_exc(curr_default_node, err)
+        async with r.pipeline(transaction=False) as pipe:
+            pipe.command_count()
+            result = await pipe.execute(raise_on_error=False)
+
+            assert result[0] == err
+            assert r.get_default_node() != curr_default_node
+            pipe.command_count()
+            result = await pipe.execute(raise_on_error=False)
+            assert result[0] == cmd_count
+
 
 @pytest.mark.ssl
 class TestSSL:
