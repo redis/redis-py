@@ -1,8 +1,8 @@
 from abc import ABC
-from asyncio import StreamReader
+from asyncio import IncompleteReadError, StreamReader, TimeoutError
 from typing import List, Optional, Union
 
-from redis.typing import EncodableT
+import async_timeout
 
 from ..exceptions import (
     AuthenticationError,
@@ -14,8 +14,12 @@ from ..exceptions import (
     NoPermissionError,
     NoScriptError,
     ReadOnlyError,
+    RedisError,
     ResponseError,
 )
+from ..typing import EncodableT
+from .encoders import Encoder
+from .socket import SERVER_CLOSED_CONNECTION_ERROR, SocketBuffer
 
 MODULE_LOAD_ERROR = "Error loading the extension. " "Please check the server logs."
 NO_SUCH_MODULE_ERROR = "Error unloading module: no such module with that name"
@@ -83,6 +87,41 @@ class BaseParser(ABC):
         raise NotImplementedError()
 
 
+class _RESPBase(BaseParser):
+    """Base class for sync-based resp parsing"""
+
+    def __init__(self, socket_read_size):
+        self.socket_read_size = socket_read_size
+        self.encoder = None
+        self._sock = None
+        self._buffer = None
+
+    def __del__(self):
+        try:
+            self.on_disconnect()
+        except Exception:
+            pass
+
+    def on_connect(self, connection):
+        "Called when the socket connects"
+        self._sock = connection._sock
+        self._buffer = SocketBuffer(
+            self._sock, self.socket_read_size, connection.socket_timeout
+        )
+        self.encoder = connection.encoder
+
+    def on_disconnect(self):
+        "Called when the socket disconnects"
+        self._sock = None
+        if self._buffer is not None:
+            self._buffer.close()
+            self._buffer = None
+        self.encoder = None
+
+    def can_read(self, timeout):
+        return self._buffer and self._buffer.can_read(timeout)
+
+
 class AsyncBaseParser(BaseParser):
     """Base parsing class for the python-backed async parser"""
 
@@ -105,3 +144,63 @@ class AsyncBaseParser(BaseParser):
         self, disable_decoding: bool = False
     ) -> Union[EncodableT, ResponseError, None, List[EncodableT]]:
         raise NotImplementedError()
+
+
+class _AsyncRESPBase(AsyncBaseParser):
+    """Async class for the RESP2 protocol"""
+
+    """Base class for async resp parsing"""
+
+    __slots__ = AsyncBaseParser.__slots__ + ("encoder",)
+
+    def __init__(self, socket_read_size: int):
+        super().__init__(socket_read_size)
+        self.encoder: Optional[Encoder] = None
+
+    def on_connect(self, connection):
+        """Called when the stream connects"""
+        self._stream = connection._reader
+        if self._stream is None:
+            raise RedisError("Buffer is closed.")
+
+        self.encoder = connection.encoder
+
+    def on_disconnect(self):
+        """Called when the stream disconnects"""
+        if self._stream is not None:
+            self._stream = None
+        self.encoder = None
+
+    async def can_read_destructive(self) -> bool:
+        if self._stream is None:
+            raise RedisError("Buffer is closed.")
+        try:
+            async with async_timeout.timeout(0):
+                return await self._stream.read(1)
+        except TimeoutError:
+            return False
+
+    async def _read(self, length: int) -> bytes:
+        """
+        Read `length` bytes of data.  These are assumed to be followed
+        by a '\r\n' terminator which is subsequently discarded.
+        """
+        if self._stream is None:
+            raise RedisError("Buffer is closed.")
+        try:
+            data = await self._stream.readexactly(length + 2)
+        except IncompleteReadError as error:
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
+        return data[:-2]
+
+    async def _readline(self) -> bytes:
+        """
+        read an unknown number of bytes up to the next '\r\n'
+        line separator, which is discarded.
+        """
+        if self._stream is None:
+            raise RedisError("Buffer is closed.")
+        data = await self._stream.readline()
+        if not data.endswith(b"\r\n"):
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+        return data[:-2]

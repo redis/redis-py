@@ -1,7 +1,7 @@
+from .base import BaseParser
 from .commands import AsyncCommandsParser, CommandsParser
 from .encoders import Encoder
 from .hiredis import _AsyncHiredisParser, _HiredisParser
-from .base import BaseParser
 from .resp2 import _AsyncRESP2Parser, _RESP2Parser
 
 __all__ = [

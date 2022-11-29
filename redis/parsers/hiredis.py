@@ -1,9 +1,10 @@
 import asyncio
 import socket
 from typing import Callable, List, Optional, Union
-from redis.compat import TypedDict
 
 import async_timeout
+
+from redis.compat import TypedDict
 
 from ..exceptions import (
     AuthenticationError,

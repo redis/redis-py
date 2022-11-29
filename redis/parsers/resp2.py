@@ -1,49 +1,13 @@
-from asyncio import IncompleteReadError, TimeoutError
-from typing import Any, Optional, Union
+from typing import Any, Union
 
-import async_timeout
-
-from redis.typing import EncodableT
-
-from ..exceptions import ConnectionError, InvalidResponse, RedisError, ResponseError
-from .encoders import Encoder
-from .base import AsyncBaseParser, BaseParser
-from .socket import SERVER_CLOSED_CONNECTION_ERROR, SocketBuffer
+from ..exceptions import ConnectionError, InvalidResponse, ResponseError
+from ..typing import EncodableT
+from .base import AsyncBaseParser, _AsyncRESPBase, _RESPBase
+from .socket import SERVER_CLOSED_CONNECTION_ERROR
 
 
-class _RESP2Parser(BaseParser):
-    "Plain Python parsing class"
-
-    def __init__(self, socket_read_size):
-        self.socket_read_size = socket_read_size
-        self.encoder = None
-        self._sock = None
-        self._buffer = None
-
-    def __del__(self):
-        try:
-            self.on_disconnect()
-        except Exception:
-            pass
-
-    def on_connect(self, connection):
-        "Called when the socket connects"
-        self._sock = connection._sock
-        self._buffer = SocketBuffer(
-            self._sock, self.socket_read_size, connection.socket_timeout
-        )
-        self.encoder = connection.encoder
-
-    def on_disconnect(self):
-        "Called when the socket disconnects"
-        self._sock = None
-        if self._buffer is not None:
-            self._buffer.close()
-            self._buffer = None
-        self.encoder = None
-
-    def can_read(self, timeout):
-        return self._buffer and self._buffer.can_read(timeout)
+class _RESP2Parser(_RESPBase):
+    """RESP2 protocol implementation"""
 
     def read_response(self, disable_decoding=False):
         raw = self._buffer.readline()
@@ -94,37 +58,10 @@ class _RESP2Parser(BaseParser):
         return response
 
 
-class _AsyncRESP2Parser(AsyncBaseParser):
-    """Parsing class for the RESP2 protocol"""
+class _AsyncRESP2Parser(_AsyncRESPBase):
+    """Async class for the RESP2 protocol"""
 
     __slots__ = AsyncBaseParser.__slots__ + ("encoder",)
-
-    def __init__(self, socket_read_size: int):
-        super().__init__(socket_read_size)
-        self.encoder: Optional[Encoder] = None
-
-    def on_connect(self, connection):
-        """Called when the stream connects"""
-        self._stream = connection._reader
-        if self._stream is None:
-            raise RedisError("Buffer is closed.")
-
-        self.encoder = connection.encoder
-
-    def on_disconnect(self):
-        """Called when the stream disconnects"""
-        if self._stream is not None:
-            self._stream = None
-        self.encoder = None
-
-    async def can_read_destructive(self) -> bool:
-        if self._stream is None:
-            raise RedisError("Buffer is closed.")
-        try:
-            async with async_timeout.timeout(0):
-                return await self._stream.read(1)
-        except TimeoutError:
-            return False
 
     async def read_response(
         self, disable_decoding: bool = False
@@ -176,28 +113,3 @@ class _AsyncRESP2Parser(AsyncBaseParser):
         if isinstance(response, bytes) and disable_decoding is False:
             response = self.encoder.decode(response)
         return response
-
-    async def _read(self, length: int) -> bytes:
-        """
-        Read `length` bytes of data.  These are assumed to be followed
-        by a '\r\n' terminator which is subsequently discarded.
-        """
-        if self._stream is None:
-            raise RedisError("Buffer is closed.")
-        try:
-            data = await self._stream.readexactly(length + 2)
-        except IncompleteReadError as error:
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
-        return data[:-2]
-
-    async def _readline(self) -> bytes:
-        """
-        read an unknown number of bytes up to the next '\r\n'
-        line separator, which is discarded.
-        """
-        if self._stream is None:
-            raise RedisError("Buffer is closed.")
-        data = await self._stream.readline()
-        if not data.endswith(b"\r\n"):
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-        return data[:-2]

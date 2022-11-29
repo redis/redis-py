@@ -43,7 +43,7 @@ from redis.exceptions import (
 from redis.typing import EncodableT
 from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 
-from ..parsers import _AsyncHiredisParser, _AsyncRESP2Parser, BaseParser, Encoder
+from ..parsers import BaseParser, Encoder, _AsyncHiredisParser, _AsyncRESP2Parser
 
 SYM_STAR = b"*"
 SYM_DOLLAR = b"$"
