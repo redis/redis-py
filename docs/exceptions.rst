@@ -1,4 +1,4 @@
-
+.. _exceptions-label:
 
 Exceptions
 ##########
