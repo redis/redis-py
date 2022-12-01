@@ -1,6 +1,6 @@
 from base import Benchmark
 
-from redis.connection import _HiredisParser, PythonParser
+from redis.connection import PythonParser, _HiredisParser
 
 
 class SocketReadBenchmark(Benchmark):
