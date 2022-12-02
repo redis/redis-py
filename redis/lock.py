@@ -256,7 +256,7 @@ class Lock:
         if not bool(
             self.lua_release(keys=[self.name], args=[expected_token], client=self.redis)
         ):
-            raise LockNotOwnedError("Cannot release a lock" " that's no longer owned")
+            raise LockNotOwnedError("Cannot release a lock that's no longer owned")
 
     def extend(self, additional_time: int, replace_ttl: bool = False) -> bool:
         """

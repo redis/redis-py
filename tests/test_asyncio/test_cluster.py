@@ -171,7 +171,7 @@ async def moved_redirection_helper(
     prev_primary = rc.nodes_manager.get_node_from_slot(slot)
     if failover:
         if len(rc.nodes_manager.slots_cache[slot]) < 2:
-            warnings.warn("Skipping this test since it requires to have a " "replica")
+            warnings.warn("Skipping this test since it requires to have a replica")
             return
         redirect_node = rc.nodes_manager.slots_cache[slot][1]
     else:
@@ -327,7 +327,7 @@ class TestRedisClusterObj:
             RedisCluster(startup_nodes=[])
 
         assert str(ex.value).startswith(
-            "RedisCluster requires at least one node to discover the " "cluster"
+            "RedisCluster requires at least one node to discover the cluster"
         ), str_if_bytes(ex.value)
 
     async def test_from_url(self, request: FixtureRequest) -> None:
@@ -371,7 +371,7 @@ class TestRedisClusterObj:
         with pytest.raises(RedisClusterException) as ex:
             await r.execute_command("GET")
         assert str(ex.value).startswith(
-            "No way to dispatch this command to " "Redis Cluster. Missing key."
+            "No way to dispatch this command to Redis Cluster. Missing key."
         )
 
     async def test_execute_command_node_flag_primaries(self, r: RedisCluster) -> None:

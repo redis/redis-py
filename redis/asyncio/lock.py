@@ -259,7 +259,7 @@ class Lock:
                 keys=[self.name], args=[expected_token], client=self.redis
             )
         ):
-            raise LockNotOwnedError("Cannot release a lock" " that's no longer owned")
+            raise LockNotOwnedError("Cannot release a lock that's no longer owned")
 
     def extend(
         self, additional_time: float, replace_ttl: bool = False
@@ -289,7 +289,7 @@ class Lock:
                 client=self.redis,
             )
         ):
-            raise LockNotOwnedError("Cannot extend a lock that's" " no longer owned")
+            raise LockNotOwnedError("Cannot extend a lock that's no longer owned")
         return True
 
     def reacquire(self) -> Awaitable[bool]:
@@ -309,5 +309,5 @@ class Lock:
                 keys=[self.name], args=[self.local.token, timeout], client=self.redis
             )
         ):
-            raise LockNotOwnedError("Cannot reacquire a lock that's" " no longer owned")
+            raise LockNotOwnedError("Cannot reacquire a lock that's no longer owned")
         return True

@@ -101,7 +101,7 @@ class ACLCommands(CommandsProtocol):
                     raise ValueError
             except ValueError:
                 raise DataError(
-                    "genpass optionally accepts a bits argument, " "between 0 and 4096."
+                    "genpass optionally accepts a bits argument, between 0 and 4096."
                 )
         return self.execute_command("ACL GENPASS", *pieces, **kwargs)
 
@@ -142,7 +142,7 @@ class ACLCommands(CommandsProtocol):
         args = []
         if count is not None:
             if not isinstance(count, int):
-                raise DataError("ACL LOG count must be an " "integer")
+                raise DataError("ACL LOG count must be an integer")
             args.append(count)
 
         return self.execute_command("ACL LOG", *args, **kwargs)
@@ -276,7 +276,7 @@ class ACLCommands(CommandsProtocol):
 
         if (passwords or hashed_passwords) and nopass:
             raise DataError(
-                "Cannot set 'nopass' and supply " "'passwords' or 'hashed_passwords'"
+                "Cannot set 'nopass' and supply 'passwords' or 'hashed_passwords'"
             )
 
         if passwords:
@@ -1561,7 +1561,7 @@ class BasicKeyCommands(CommandsProtocol):
         if start is not None and end is not None:
             params.append(end)
         elif start is None and end is not None:
-            raise DataError("start argument is not set, " "when end is specified")
+            raise DataError("start argument is not set, when end is specified")
 
         if mode is not None:
             params.append(mode)
@@ -3405,9 +3405,7 @@ class StreamCommands(CommandsProtocol):
         """
         pieces: list[EncodableT] = []
         if maxlen is not None and minid is not None:
-            raise DataError(
-                "Only one of ```maxlen``` or ```minid``` " "may be specified"
-            )
+            raise DataError("Only one of ```maxlen``` or ```minid``` may be specified")
 
         if maxlen is not None:
             if not isinstance(maxlen, int) or maxlen < 1:
@@ -3463,7 +3461,7 @@ class StreamCommands(CommandsProtocol):
         try:
             if int(min_idle_time) < 0:
                 raise DataError(
-                    "XAUTOCLAIM min_idle_time must be a non" "negative integer"
+                    "XAUTOCLAIM min_idle_time must be a nonnegative integer"
                 )
         except TypeError:
             pass
@@ -3521,7 +3519,7 @@ class StreamCommands(CommandsProtocol):
          For more information see https://redis.io/commands/xclaim
         """
         if not isinstance(min_idle_time, int) or min_idle_time < 0:
-            raise DataError("XCLAIM min_idle_time must be a non negative " "integer")
+            raise DataError("XCLAIM min_idle_time must be a non negative integer")
         if not isinstance(message_ids, (list, tuple)) or not message_ids:
             raise DataError(
                 "XCLAIM message_ids must be a non empty list or "
@@ -3854,7 +3852,7 @@ class StreamCommands(CommandsProtocol):
             pieces.append(str(count))
         if block is not None:
             if not isinstance(block, int) or block < 0:
-                raise DataError("XREADGROUP block must be a non-negative " "integer")
+                raise DataError("XREADGROUP block must be a non-negative integer")
             pieces.append(b"BLOCK")
             pieces.append(str(block))
         if noack:
@@ -3916,7 +3914,7 @@ class StreamCommands(CommandsProtocol):
         """
         pieces: list[EncodableT] = []
         if maxlen is not None and minid is not None:
-            raise DataError("Only one of ``maxlen`` or ``minid`` " "may be specified")
+            raise DataError("Only one of ``maxlen`` or ``minid`` may be specified")
 
         if maxlen is None and minid is None:
             raise DataError("One of ``maxlen`` or ``minid`` must be specified")
@@ -4290,14 +4288,12 @@ class SortedSetCommands(CommandsProtocol):
         num: Union[int, None] = None,
     ) -> ResponseT:
         if byscore and bylex:
-            raise DataError(
-                "``byscore`` and ``bylex`` can not be " "specified together."
-            )
+            raise DataError("``byscore`` and ``bylex`` can not be specified together.")
         if (offset is not None and num is None) or (num is not None and offset is None):
             raise DataError("``offset`` and ``num`` must both be specified.")
         if bylex and withscores:
             raise DataError(
-                "``withscores`` not supported in combination " "with ``bylex``."
+                "``withscores`` not supported in combination with ``bylex``."
             )
         pieces = [command]
         if dest:
@@ -5249,7 +5245,7 @@ class GeoCommands(CommandsProtocol):
         if nx and xx:
             raise DataError("GEOADD allows either 'nx' or 'xx', not both")
         if len(values) % 3 != 0:
-            raise DataError("GEOADD requires places with lon, lat and name" " values")
+            raise DataError("GEOADD requires places with lon, lat and name values")
         pieces = [name]
         if nx:
             pieces.append("NX")
@@ -5435,7 +5431,7 @@ class GeoCommands(CommandsProtocol):
                 raise DataError("GEORADIUS invalid sort")
 
         if kwargs["store"] and kwargs["store_dist"]:
-            raise DataError("GEORADIUS store and store_dist cant be set" " together")
+            raise DataError("GEORADIUS store and store_dist cant be set together")
 
         if kwargs["store"]:
             pieces.extend([b"STORE", kwargs["store"]])
@@ -5572,13 +5568,11 @@ class GeoCommands(CommandsProtocol):
         # FROMMEMBER or FROMLONLAT
         if kwargs["member"] is None:
             if kwargs["longitude"] is None or kwargs["latitude"] is None:
-                raise DataError(
-                    "GEOSEARCH must have member or" " longitude and latitude"
-                )
+                raise DataError("GEOSEARCH must have member or longitude and latitude")
         if kwargs["member"]:
             if kwargs["longitude"] or kwargs["latitude"]:
                 raise DataError(
-                    "GEOSEARCH member and longitude or latitude" " cant be set together"
+                    "GEOSEARCH member and longitude or latitude cant be set together"
                 )
             pieces.extend([b"FROMMEMBER", kwargs["member"]])
         if kwargs["longitude"] is not None and kwargs["latitude"] is not None:
@@ -5587,7 +5581,7 @@ class GeoCommands(CommandsProtocol):
         # BYRADIUS or BYBOX
         if kwargs["radius"] is None:
             if kwargs["width"] is None or kwargs["height"] is None:
-                raise DataError("GEOSEARCH must have radius or" " width and height")
+                raise DataError("GEOSEARCH must have radius or width and height")
         if kwargs["unit"] is None:
             raise DataError("GEOSEARCH must have unit")
         if kwargs["unit"].lower() not in ("m", "km", "mi", "ft"):
@@ -5595,7 +5589,7 @@ class GeoCommands(CommandsProtocol):
         if kwargs["radius"]:
             if kwargs["width"] or kwargs["height"]:
                 raise DataError(
-                    "GEOSEARCH radius and width or height" " cant be set together"
+                    "GEOSEARCH radius and width or height cant be set together"
                 )
             pieces.extend([b"BYRADIUS", kwargs["radius"], kwargs["unit"]])
         if kwargs["width"] and kwargs["height"]:
@@ -5616,7 +5610,7 @@ class GeoCommands(CommandsProtocol):
             if kwargs["any"]:
                 pieces.append(b"ANY")
         elif kwargs["any"]:
-            raise DataError("GEOSEARCH ``any`` can't be provided " "without count")
+            raise DataError("GEOSEARCH ``any`` can't be provided without count")
 
         # other properties
         for arg_name, byte_repr in (
