@@ -7,7 +7,6 @@ from redis.asyncio.lock import Lock
 from redis.exceptions import LockError, LockNotOwnedError
 
 
-@pytest.mark.onlynoncluster
 class TestLock:
     @pytest_asyncio.fixture()
     async def r_decoded(self, create_redis):
@@ -97,6 +96,14 @@ class TestLock:
         assert await lock.acquire(blocking=False)
         assert 8 < (await r.pttl("foo")) <= 9500
         await lock.release()
+
+    async def test_blocking(self, r):
+        blocking = False
+        lock = self.get_lock(r, "foo", blocking=blocking)
+        assert not lock.blocking
+
+        lock_2 = self.get_lock(r, "foo")
+        assert lock_2.blocking
 
     async def test_blocking_timeout(self, r, event_loop):
         lock1 = self.get_lock(r, "foo")

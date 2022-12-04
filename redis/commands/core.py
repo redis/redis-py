@@ -4930,7 +4930,11 @@ class Script:
         if isinstance(script, str):
             # We need the encoding from the client in order to generate an
             # accurate byte representation of the script
-            encoder = registered_client.connection_pool.get_encoder()
+            try:
+                encoder = registered_client.connection_pool.get_encoder()
+            except AttributeError:
+                # Cluster
+                encoder = registered_client.get_encoder()
             script = encoder.encode(script)
         self.sha = hashlib.sha1(script).hexdigest()
 
@@ -4975,7 +4979,11 @@ class AsyncScript:
         if isinstance(script, str):
             # We need the encoding from the client in order to generate an
             # accurate byte representation of the script
-            encoder = registered_client.connection_pool.get_encoder()
+            try:
+                encoder = registered_client.connection_pool.get_encoder()
+            except AttributeError:
+                # Cluster
+                encoder = registered_client.get_encoder()
             script = encoder.encode(script)
         self.sha = hashlib.sha1(script).hexdigest()
 
@@ -5573,7 +5581,7 @@ class GeoCommands(CommandsProtocol):
                     "GEOSEARCH member and longitude or latitude" " cant be set together"
                 )
             pieces.extend([b"FROMMEMBER", kwargs["member"]])
-        if kwargs["longitude"] and kwargs["latitude"]:
+        if kwargs["longitude"] is not None and kwargs["latitude"] is not None:
             pieces.extend([b"FROMLONLAT", kwargs["longitude"], kwargs["latitude"]])
 
         # BYRADIUS or BYBOX

@@ -9,7 +9,7 @@ import pytest
 
 import redis
 from redis import exceptions
-from redis.client import parse_info
+from redis.client import EMPTY_RESPONSE, NEVER_DECODE, parse_info
 
 from .conftest import (
     _get_client,
@@ -916,6 +916,16 @@ class TestRedisCommands:
         assert r.bgsave()
         time.sleep(0.3)
         assert r.bgsave(True)
+
+    def test_never_decode_option(self, r: redis.Redis):
+        opts = {NEVER_DECODE: []}
+        r.delete("a")
+        assert r.execute_command("EXISTS", "a", **opts) == 0
+
+    def test_empty_response_option(self, r: redis.Redis):
+        opts = {EMPTY_RESPONSE: []}
+        r.delete("a")
+        assert r.execute_command("EXISTS", "a", **opts) == 0
 
     # BASIC KEY COMMANDS
     def test_append(self, r):

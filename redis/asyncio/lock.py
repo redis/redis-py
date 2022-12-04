@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Awaitable, Optional, Union
 from redis.exceptions import LockError, LockNotOwnedError
 
 if TYPE_CHECKING:
-    from redis.asyncio import Redis
+    from redis.asyncio import Redis, RedisCluster
 
 
 class Lock:
@@ -77,7 +77,7 @@ class Lock:
 
     def __init__(
         self,
-        redis: "Redis",
+        redis: Union["Redis", "RedisCluster"],
         name: Union[str, bytes, memoryview],
         timeout: Optional[float] = None,
         sleep: float = 0.1,
@@ -189,7 +189,11 @@ class Lock:
         if token is None:
             token = uuid.uuid1().hex.encode()
         else:
-            encoder = self.redis.connection_pool.get_encoder()
+            try:
+                encoder = self.redis.connection_pool.get_encoder()
+            except AttributeError:
+                # Cluster
+                encoder = self.redis.get_encoder()
             token = encoder.encode(token)
         if blocking is None:
             blocking = self.blocking
@@ -233,7 +237,11 @@ class Lock:
         # need to always compare bytes to bytes
         # TODO: this can be simplified when the context manager is finished
         if stored_token and not isinstance(stored_token, bytes):
-            encoder = self.redis.connection_pool.get_encoder()
+            try:
+                encoder = self.redis.connection_pool.get_encoder()
+            except AttributeError:
+                # Cluster
+                encoder = self.redis.get_encoder()
             stored_token = encoder.encode(stored_token)
         return self.local.token is not None and stored_token == self.local.token
 

@@ -5,6 +5,7 @@ import threading
 import time
 import warnings
 from itertools import chain
+from typing import Optional
 
 from redis.commands import (
     CoreCommands,
@@ -13,6 +14,7 @@ from redis.commands import (
     list_or_args,
 )
 from redis.connection import ConnectionPool, SSLConnection, UnixDomainSocketConnection
+from redis.credentials import CredentialProvider
 from redis.exceptions import (
     ConnectionError,
     ExecAbortError,
@@ -24,6 +26,7 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.lock import Lock
+from redis.retry import Retry
 from redis.utils import safe_str, str_if_bytes
 
 SYM_EMPTY = b""
@@ -863,7 +866,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
 
             redis://[[username]:[password]]@localhost:6379/0
             rediss://[[username]:[password]]@localhost:6379/0
-            unix://[[username]:[password]]@/path/to/socket.sock?db=0
+            unix://[username@]/path/to/socket.sock?db=0[&password=password]
 
         Three URL schemes are supported:
 
@@ -938,6 +941,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         username=None,
         retry=None,
         redis_connect_func=None,
+        credential_provider: Optional[CredentialProvider] = None,
     ):
         """
         Initialize a new Redis client.
@@ -985,6 +989,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
                 "redis_connect_func": redis_connect_func,
+                "credential_provider": credential_provider,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -1042,6 +1047,13 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
     def get_connection_kwargs(self):
         """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
+
+    def get_retry(self) -> Optional["Retry"]:
+        return self.get_connection_kwargs().get("retry")
+
+    def set_retry(self, retry: "Retry") -> None:
+        self.get_connection_kwargs().update({"retry": retry})
+        self.connection_pool.set_retry(retry)
 
     def set_response_callback(self, command, callback):
         """Set a custom Response Callback"""
@@ -1258,12 +1270,17 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         try:
             if NEVER_DECODE in options:
                 response = connection.read_response(disable_decoding=True)
+                options.pop(NEVER_DECODE)
             else:
                 response = connection.read_response()
         except ResponseError:
             if EMPTY_RESPONSE in options:
                 return options[EMPTY_RESPONSE]
             raise
+
+        if EMPTY_RESPONSE in options:
+            options.pop(EMPTY_RESPONSE)
+
         if command_name in self.response_callbacks:
             return self.response_callbacks[command_name](response, **options)
         return response
