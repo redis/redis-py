@@ -356,11 +356,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         )
 
         self._initialize = True
-        self._lock = asyncio.Lock()
+        self._lock: Optional[asyncio.Lock] = None
 
     async def initialize(self) -> "RedisCluster":
         """Get all nodes from startup nodes & creates connections if not initialized."""
         if self._initialize:
+            if not self._lock:
+                self._lock = asyncio.Lock()
             async with self._lock:
                 if self._initialize:
                     try:
@@ -378,6 +380,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
     async def close(self) -> None:
         """Close all connections & client if initialized."""
         if not self._initialize:
+            if not self._lock:
+                self._lock = asyncio.Lock()
             async with self._lock:
                 if not self._initialize:
                     self._initialize = True
