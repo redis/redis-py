@@ -908,7 +908,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         port=6379,
         db=0,
         password=None,
-        socket_timeout=100,
+        socket_timeout=1000,
         socket_connect_timeout=None,
         socket_keepalive=None,
         socket_keepalive_options=None,
