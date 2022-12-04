@@ -262,7 +262,8 @@ async def test_cached_execution(modclient: redis.Redis):
 
 @pytest.mark.redismod
 async def test_slowlog(modclient: redis.Redis):
-    create_query = """CREATE (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
+    create_query = """CREATE
+    (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
     (:Rider {name:'Dani Pedrosa'})-[:rides]->(:Team {name:'Honda'}),
     (:Rider {name:'Andrea Dovizioso'})-[:rides]->(:Team {name:'Ducati'})"""
     await modclient.graph().query(create_query)
@@ -395,7 +396,8 @@ async def test_multi_label(modclient: redis.Redis):
 @pytest.mark.redismod
 async def test_execution_plan(modclient: redis.Redis):
     redis_graph = modclient.graph("execution_plan")
-    create_query = """CREATE (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
+    create_query = """CREATE
+    (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
     (:Rider {name:'Dani Pedrosa'})-[:rides]->(:Team {name:'Honda'}),
     (:Rider {name:'Andrea Dovizioso'})-[:rides]->(:Team {name:'Ducati'})"""
     await redis_graph.query(create_query)
