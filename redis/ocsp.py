@@ -189,8 +189,8 @@ class OCSPVerifier:
         return cert
 
     def components_from_socket(self):
-        """This function returns the certificate, primary issuer, and primary ocsp server
-        in the chain for a socket already wrapped with ssl.
+        """This function returns the certificate, primary issuer, and primary ocsp
+        server in the chain for a socket already wrapped with ssl.
         """
 
         # convert the binary certifcate to text
