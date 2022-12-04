@@ -29,6 +29,7 @@ import async_timeout
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.compat import Protocol, TypedDict
+from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -416,6 +417,7 @@ class Connection:
         "db",
         "username",
         "client_name",
+        "credential_provider",
         "password",
         "socket_timeout",
         "socket_connect_timeout",
@@ -465,14 +467,23 @@ class Connection:
         retry: Optional[Retry] = None,
         redis_connect_func: Optional[ConnectCallbackT] = None,
         encoder_class: Type[Encoder] = Encoder,
+        credential_provider: Optional[CredentialProvider] = None,
     ):
+        if (username or password) and credential_provider is not None:
+            raise DataError(
+                "'username' and 'password' cannot be passed along with 'credential_"
+                "provider'. Please provide only one of the following arguments: \n"
+                "1. 'password' and (optional) 'username'\n"
+                "2. 'credential_provider'"
+            )
         self.pid = os.getpid()
         self.host = host
         self.port = int(port)
         self.db = db
-        self.username = username
         self.client_name = client_name
+        self.credential_provider = credential_provider
         self.password = password
+        self.username = username
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout or None
         self.socket_keepalive = socket_keepalive
@@ -486,7 +497,7 @@ class Connection:
             retry_on_error.append(socket.timeout)
             retry_on_error.append(asyncio.TimeoutError)
         self.retry_on_error = retry_on_error
-        if retry_on_error:
+        if retry or retry_on_error:
             if not retry:
                 self.retry = Retry(NoBackoff(), 1)
             else:
@@ -637,14 +648,13 @@ class Connection:
         """Initialize the connection, authenticate and select a database"""
         self._parser.on_connect(self)
 
-        # if username and/or password are set, authenticate
-        if self.username or self.password:
-            auth_args: Union[Tuple[str], Tuple[str, str]]
-            if self.username:
-                auth_args = (self.username, self.password or "")
-            else:
-                # Mypy bug: https://github.com/python/mypy/issues/10944
-                auth_args = (self.password or "",)
+        # if credential provider or username and/or password are set, authenticate
+        if self.credential_provider or (self.username or self.password):
+            cred_provider = (
+                self.credential_provider
+                or UsernamePasswordCredentialProvider(self.username, self.password)
+            )
+            auth_args = cred_provider.get_credentials()
             # avoid checking health here -- PING will fail if we try
             # to check the health prior to the AUTH
             await self.send_command("AUTH", *auth_args, check_health=False)
@@ -656,7 +666,7 @@ class Connection:
                 # server seems to be < 6.0.0 which expects a single password
                 # arg. retry auth with just the password.
                 # https://github.com/andymccurdy/redis-py/issues/1274
-                await self.send_command("AUTH", self.password, check_health=False)
+                await self.send_command("AUTH", auth_args[-1], check_health=False)
                 auth_response = await self.read_response()
 
             if str_if_bytes(auth_response) != "OK":
@@ -1014,18 +1024,27 @@ class UnixDomainSocketConnection(Connection):  # lgtm [py/missing-call-to-init]
         client_name: str = None,
         retry: Optional[Retry] = None,
         redis_connect_func=None,
+        credential_provider: Optional[CredentialProvider] = None,
     ):
         """
         Initialize a new UnixDomainSocketConnection.
         To specify a retry policy, first set `retry_on_timeout` to `True`
         then set `retry` to a valid `Retry` object
         """
+        if (username or password) and credential_provider is not None:
+            raise DataError(
+                "'username' and 'password' cannot be passed along with 'credential_"
+                "provider'. Please provide only one of the following arguments: \n"
+                "1. 'password' and (optional) 'username'\n"
+                "2. 'credential_provider'"
+            )
         self.pid = os.getpid()
         self.path = path
         self.db = db
-        self.username = username
         self.client_name = client_name
+        self.credential_provider = credential_provider
         self.password = password
+        self.username = username
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout or None
         self.retry_on_timeout = retry_on_timeout
@@ -1425,6 +1444,12 @@ class ConnectionPool:
             exc = next((r for r in resp if isinstance(r, BaseException)), None)
             if exc:
                 raise exc
+
+    def set_retry(self, retry: "Retry") -> None:
+        for conn in self._available_connections:
+            conn.retry = retry
+        for conn in self._in_use_connections:
+            conn.retry = retry
 
 
 class BlockingConnectionPool(ConnectionPool):
