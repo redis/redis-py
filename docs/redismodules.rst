@@ -12,17 +12,17 @@ These are the commands for interacting with the `RedisBloom module <https://redi
 **Create and add to a bloom filter**
 
 .. code-block:: python
-   
-    import redis 
+
+    import redis
     r = redis.Redis()
-    r.bf().create("bloom", 0.01, 1000) 
+    r.bf().create("bloom", 0.01, 1000)
     r.bf().add("bloom", "foo")
 
 **Create and add to a cuckoo filter**
 
 .. code-block:: python
 
-    import redis 
+    import redis
     r = redis.Redis()
     r.cf().create("cuckoo", 1000)
     r.cf().add("cuckoo", "filter")
@@ -107,7 +107,8 @@ Examples of how to combine search and json can be found `here <examples/search_j
 RediSearch Commands
 *******************
 
-These are the commands for interacting with the `RediSearch module <https://redisearch.io>`_. Below is a brief example, as well as documentation on the commands themselves.
+These are the commands for interacting with the `RediSearch module <https://redisearch.io>`_. Below is a brief example, as well as documentation on the commands themselves. In the example
+below, an index named *my_index* is being created. When an index name is not specified, an index named *idx* is created.
 
 **Create a search index, and display its information**
 
