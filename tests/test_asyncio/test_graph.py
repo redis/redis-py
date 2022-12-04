@@ -437,11 +437,11 @@ Results
 Distinct
     Join
         Project
-            Conditional Traverse | (t:Team)->(r:Rider)
+            Conditional Traverse | (t)->(r:Rider)
                 Filter
                     Node By Label Scan | (t:Team)
         Project
-            Conditional Traverse | (t:Team)->(r:Rider)
+            Conditional Traverse | (t)->(r:Rider)
                 Filter
                     Node By Label Scan | (t:Team)"""
     assert str(result).replace(" ", "").replace("\n", "") == expected.replace(
@@ -453,9 +453,7 @@ Distinct
             Operation("Join")
             .append_child(
                 Operation("Project").append_child(
-                    Operation(
-                        "Conditional Traverse", "(t:Team)->(r:Rider)"
-                    ).append_child(
+                    Operation("Conditional Traverse", "(t)->(r:Rider)").append_child(
                         Operation("Filter").append_child(
                             Operation("Node By Label Scan", "(t:Team)")
                         )
@@ -464,9 +462,7 @@ Distinct
             )
             .append_child(
                 Operation("Project").append_child(
-                    Operation(
-                        "Conditional Traverse", "(t:Team)->(r:Rider)"
-                    ).append_child(
+                    Operation("Conditional Traverse", "(t)->(r:Rider)").append_child(
                         Operation("Filter").append_child(
                             Operation("Node By Label Scan", "(t:Team)")
                         )
