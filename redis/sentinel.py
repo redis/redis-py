@@ -200,10 +200,10 @@ class Sentinel(SentinelCommands):
             kwargs.pop("once")
 
         if once:
+            random.choice(self.sentinels).execute_command(*args, **kwargs)
+        else:
             for sentinel in self.sentinels:
                 sentinel.execute_command(*args, **kwargs)
-        else:
-            random.choice(self.sentinels).execute_command(*args, **kwargs)
         return True
 
     def __repr__(self):

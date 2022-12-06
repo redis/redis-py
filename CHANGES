@@ -28,6 +28,8 @@
     * Fixed "cannot pickle '_thread.lock' object" bug (#2354, #2297)
     * Added CredentialsProvider class to support password rotation
     * Enable Lock for asyncio cluster mode
+    * Fix Sentinel.execute_command doesn't execute across the entire sentinel cluster bug (#2458)
+    * Added a replacement for the default cluster node in the event of failure (#2463)
 
 * 4.1.3 (Feb 8, 2022)
     * Fix flushdb and flushall (#1926)

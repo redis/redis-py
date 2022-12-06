@@ -280,7 +280,8 @@ def test_cached_execution(client):
 
 @pytest.mark.redismod
 def test_slowlog(client):
-    create_query = """CREATE (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
+    create_query = """CREATE (:Rider
+    {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
     (:Rider {name:'Dani Pedrosa'})-[:rides]->(:Team {name:'Honda'}),
     (:Rider {name:'Andrea Dovizioso'})-[:rides]->(:Team {name:'Ducati'})"""
     client.graph().query(create_query)
@@ -486,7 +487,8 @@ def test_cache_sync(client):
 @pytest.mark.redismod
 def test_execution_plan(client):
     redis_graph = client.graph("execution_plan")
-    create_query = """CREATE (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
+    create_query = """CREATE
+    (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
     (:Rider {name:'Dani Pedrosa'})-[:rides]->(:Team {name:'Honda'}),
     (:Rider {name:'Andrea Dovizioso'})-[:rides]->(:Team {name:'Ducati'})"""
     redis_graph.query(create_query)
