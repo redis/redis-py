@@ -4,21 +4,21 @@ Integrating OpenTelemetry
 What is OpenTelemetry?
 ----------------------
 
-`OpenTelemetry <https://opentelemetry.io>`_ is an open-source observability framework for `traces <https://uptrace.dev/opentelemetry/distributed-tracing.html>`_, `metrics <https://uptrace.dev/opentelemetry/metrics.html>`_, and logs.
+`OpenTelemetry <https://opentelemetry.io>`_ is an open-source observability framework for traces, metrics, and logs.
 
 OpenTelemetry allows developers to collect and export telemetry data in a vendor agnostic way. With OpenTelemetry, you can instrument your application once and then add or change vendors without changing the instrumentation, for example, here is a list of `popular DataDog competitors <https://uptrace.dev/get/compare/datadog-competitors.html>`_ that support OpenTelemetry.
 
 What is tracing?
 ----------------
 
-`Distributed tracing <https://uptrace.dev/opentelemetry/distributed-tracing.html>`_ allows you to see how a request progresses through different services and systems, timings of each operation, any logs and errors as they occur.
+`OpenTelemetry tracing <https://uptrace.dev/opentelemetry/distributed-tracing.html>`_ allows you to see how a request progresses through different services and systems, timings of each operation, any logs and errors as they occur.
 
 In a distributed environment, tracing also helps you understand relationships and interactions between microservices. Distributed tracing gives an insight into how a particular microservice is performing and how that service affects other microservices.
 
 .. image:: images/opentelemetry/distributed-tracing.png
   :alt: Trace
 
-Using tracing, you can break down requests into `spans <https://uptrace.dev/opentelemetry/distributed-tracing.html#spans>`_. **Span** is an operation (unit of work) your app performs handling a request, for example, a database query or a network call.
+Using tracing, you can break down requests into spans. **Span** is an operation (unit of work) your app performs handling a request, for example, a database query or a network call.
 
 **Trace** is a tree of spans that shows the path that a request makes through an app. Root span is the first span in a trace.
 
@@ -61,7 +61,7 @@ Once the code is patched, you can use redis-py as usually:
 OpenTelemetry API
 -----------------
 
-OpenTelemetry API is a programming interface that you can use to instrument code and collect telemetry data such as traces, metrics, and logs.
+`OpenTelemetry <https://uptrace.dev/opentelemetry/>`_ API is a programming interface that you can use to instrument code and collect telemetry data such as traces, metrics, and logs.
 
 You can use OpenTelemetry API to measure important operations:
 
@@ -123,7 +123,7 @@ See introduction to `OpenTelemetry Collector <https://uptrace.dev/opentelemetry/
 Alerting and notifications
 --------------------------
 
-Uptrace also allows you to monitor metrics using alerting rules. For example, the following rule uses the group by node expression to create an alert whenever an individual Redis shard is down:
+Uptrace also allows you to monitor `OpenTelemetry metrics <https://uptrace.dev/opentelemetry/metrics.html>`_ using alerting rules. For example, the following rule uses the group by node expression to create an alert whenever an individual Redis shard is down:
 
 .. code-block:: python
 
@@ -172,5 +172,6 @@ You may also be interested in the following guides:
 
 - `OpenTelemetry Django <https://uptrace.dev/opentelemetry/instrumentations/python-django.html>`_
 - `OpenTelemetry Flask <https://uptrace.dev/opentelemetry/instrumentations/python-flask.html>`_
-- `OpenTelemetry FastAPI <https://uptrace.dev/opentelemetry/instrumentations/python-sqlalchemy.html>`_
-- `OpenTelemetry instrumentations <http://localhost:8081/opentelemetry/instrumentations/>`_
+- `OpenTelemetry FastAPI <https://uptrace.dev/opentelemetry/instrumentations/python-fastapi.html>`_
+- `OpenTelemetry SQLAlchemy <https://uptrace.dev/opentelemetry/instrumentations/python-sqlalchemy.html>`_
+- `OpenTelemetry instrumentations <https://uptrace.dev/opentelemetry/instrumentations/>`_
