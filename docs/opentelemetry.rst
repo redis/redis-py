@@ -1,5 +1,5 @@
-OpenTelemetry: Monitoring Performance
-=====================================
+Integrating OpenTelemetry
+=========================
 
 What is OpenTelemetry?
 ----------------------
