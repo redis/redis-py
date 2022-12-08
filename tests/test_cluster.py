@@ -561,7 +561,15 @@ class TestRedisClusterObj:
                 read_cluster.get("foo")
                 read_cluster.get("foo")
                 read_cluster.get("foo")
-                mocks["send_command"].assert_has_calls([call("READONLY")])
+                mocks["send_command"].assert_has_calls(
+                    [
+                        call("READONLY"),
+                        call("GET", "foo"),
+                        call("READONLY"),
+                        call("GET", "foo"),
+                        call("GET", "foo"),
+                    ]
+                )
 
     def test_keyslot(self, r):
         """
