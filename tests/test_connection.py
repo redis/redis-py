@@ -122,3 +122,40 @@ class TestConnection:
         assert conn._connect.call_count == 1
         assert str(e.value) == "Timeout connecting to server"
         self.clear(conn)
+
+    @pytest.mark.parametrize('exc_type', [Exception, BaseException])
+    def test_read_response__interrupt_does_not_corrupt(self, exc_type):
+        conn = Connection()
+
+        # A note on BaseException:
+        # While socket.recv is not supposed to raise BaseException, gevent's version
+        # of socket (which, when using gevent + redis-py, one would monkey-patch in)
+        # can raise BaseException on a timer elapse, since `gevent.Timeout` derives
+        # from BaseException. This design suggests that a timeout should
+        # not be suppressed but rather allowed to propagate.
+        # asyncio.exceptions.CancelledError also derives from BaseException
+        # for same reason.
+        #
+        # The notion that one should never `expect:` or `expect BaseException`,
+        # however, is misguided. It's idiomatic to handle it, to provide
+        # for exception safety, as long as you re-raise.
+        #
+        #   with gevent.Timeout(5):
+        #     res = client.exists('my_key')
+
+        conn.send_command("GET non_existent_key")
+        resp = conn.read_response()
+        assert resp is None
+
+        with pytest.raises(exc_type):
+            conn.send_command("EXISTS non_existent_key")
+            # due to the interrupt, the integer '0' result of EXISTS will remain on the socket's buffer
+            with patch.object(socket.socket, "recv", side_effect=exc_type) as mock_recv:
+                _ = conn.read_response()
+            mock_recv.assert_called_once()
+
+        conn.send_command("GET non_existent_key")
+        resp = conn.read_response()
+        # If working properly, this will get a None.
+        # If not, it will get a zero (the integer result of the previous EXISTS command).
+        assert resp is None

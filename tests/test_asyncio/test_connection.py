@@ -112,3 +112,25 @@ async def test_connect_timeout_error_without_retry():
         await conn.connect()
     assert conn._connect.call_count == 1
     assert str(e.value) == "Timeout connecting to server"
+
+
+@pytest.mark.parametrize('exc_type', [Exception, BaseException])
+async def test_read_response__interrupt_does_not_corrupt(exc_type):
+    conn = Connection()
+
+    await conn.send_command("GET non_existent_key")
+    resp = await conn.read_response()
+    assert resp is None
+
+    with pytest.raises(exc_type):
+        await conn.send_command("EXISTS non_existent_key")
+        # due to the interrupt, the integer '0' result of EXISTS will remain on the socket's buffer
+        with patch.object(socket.socket, "recv", side_effect=exc_type) as mock_recv:
+            await conn.read_response()
+        mock_recv.assert_called_once()
+
+    await conn.send_command("GET non_existent_key")
+    resp = await conn.read_response()
+    # If working properly, this will get a None.
+    # If not, it will get a zero (the integer result of the previous EXISTS command).
+    assert resp is None
