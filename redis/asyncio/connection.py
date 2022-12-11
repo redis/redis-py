@@ -763,7 +763,10 @@ class Connection:
             raise ConnectionError(
                 f"Error {err_no} while writing to socket. {errmsg}."
             ) from e
-        except Exception:
+        except BaseException:
+            # On interruption (e.g. by CancelledError) there's no way to determine
+            # how much data, if any, was successfully sent, so this socket is unusable
+            # for subsequent commands (which may concatenate to an unfinished command).
             await self.disconnect(nowait=True)
             raise
 
@@ -812,11 +815,11 @@ class Connection:
             raise ConnectionError(
                 f"Error while reading from {self.host}:{self.port} : {e.args}"
             )
-        except asyncio.CancelledError:
-            # need this check for 3.7, where CancelledError
-            # is subclass of Exception, not BaseException
-            raise
-        except Exception:
+        except BaseException:
+            # On interruption (e.g. by CancelledError) there's no way to determine
+            # how much data, if any, was successfully read, so this socket is unusable
+            # for subsequent commands (which may read previous command's response
+            # as their own).
             await self.disconnect(nowait=True)
             raise
 

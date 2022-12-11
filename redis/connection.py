@@ -778,7 +778,10 @@ class Connection:
                 errno = e.args[0]
                 errmsg = e.args[1]
             raise ConnectionError(f"Error {errno} while writing to socket. {errmsg}.")
-        except Exception:
+        except BaseException:
+            # On interruption (e.g. by gevent.Timeout) there's no way to determine
+            # how much data, if any, was successfully sent, so this socket is unusable
+            # for subsequent commands (which may concatenate to an unfinished command).
             self.disconnect()
             raise
 
@@ -816,7 +819,11 @@ class Connection:
         except OSError as e:
             self.disconnect()
             raise ConnectionError(f"Error while reading from {hosterr}" f" : {e.args}")
-        except Exception:
+        except BaseException:
+            # On interruption (e.g. by gevent.Timeout) there's no way to determine
+            # how much data, if any, was successfully read, so this socket is unusable
+            # for subsequent commands (which may read previous command's response
+            # as their own).
             self.disconnect()
             raise
 
