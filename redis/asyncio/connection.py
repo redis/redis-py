@@ -731,7 +731,11 @@ class Connection:
         await self._writer.drain()
 
     async def send_packed_command(
-        self, command: Union[bytes, str, Iterable[bytes]], check_health: bool = True
+        self,
+        command: Union[bytes, str, Iterable[bytes]],
+        check_health: bool = True,
+        *,
+        disconnect_on_interrupt: bool = True,
     ) -> None:
         if not self.is_connected:
             await self.connect()
@@ -764,16 +768,21 @@ class Connection:
                 f"Error {err_no} while writing to socket. {errmsg}."
             ) from e
         except BaseException:
-            # On interruption (e.g. by CancelledError) there's no way to determine
+            # On interrupt (e.g. by CancelledError) there's no way to determine
             # how much data, if any, was successfully sent, so this socket is unusable
             # for subsequent commands (which may concatenate to an unfinished command).
-            await self.disconnect(nowait=True)
+            if disconnect_on_interrupt:
+                await self.disconnect(nowait=True)
             raise
 
-    async def send_command(self, *args: Any, **kwargs: Any) -> None:
+    async def send_command(
+        self, *args, check_health=True, disconnect_on_interrupt=True, **kwargs,
+    ):
         """Pack and send a command to the Redis server"""
         await self.send_packed_command(
-            self.pack_command(*args), check_health=kwargs.get("check_health", True)
+            self.pack_command(*args),
+            check_health=check_health,
+            disconnect_on_interrupt=disconnect_on_interrupt,
         )
 
     async def can_read_destructive(self):
@@ -790,6 +799,8 @@ class Connection:
         self,
         disable_decoding: bool = False,
         timeout: Optional[float] = None,
+        *,
+        disconnect_on_interrupt: bool = True,
     ):
         """Read the response from a previously sent command"""
         read_timeout = timeout if timeout is not None else self.socket_timeout
@@ -816,11 +827,12 @@ class Connection:
                 f"Error while reading from {self.host}:{self.port} : {e.args}"
             )
         except BaseException:
-            # On interruption (e.g. by CancelledError) there's no way to determine
+            # On interrupt (e.g. by CancelledError) there's no way to determine
             # how much data, if any, was successfully read, so this socket is unusable
             # for subsequent commands (which may read previous command's response
             # as their own).
-            await self.disconnect(nowait=True)
+            if disconnect_on_interrupt:
+                await self.disconnect(nowait=True)
             raise
 
         if self.health_check_interval:

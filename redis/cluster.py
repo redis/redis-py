@@ -1701,7 +1701,7 @@ class ClusterPubSub(PubSub):
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
         connection = self.connection
-        self._execute(connection, connection.send_command, *args)
+        self._execute(connection, lambda: connection.send_command(*args))
 
     def get_redis_connection(self):
         """

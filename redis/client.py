@@ -1462,10 +1462,16 @@ class PubSub:
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
         connection = self.connection
-        kwargs = {"check_health": not self.subscribed}
         if not self.subscribed:
             self.clean_health_check_responses()
-        self._execute(connection, connection.send_command, *args, **kwargs)
+        self._execute(
+            connection,
+            lambda: connection.send_command(
+                *args,
+                check_health=not self.subscribed,
+                disconnect_on_interrupt=True,
+            ),
+        )
 
     def clean_health_check_responses(self):
         """
@@ -1474,7 +1480,7 @@ class PubSub:
         ttl = 10
         conn = self.connection
         while self.health_check_response_counter > 0 and ttl > 0:
-            if self._execute(conn, conn.can_read, timeout=conn.socket_timeout):
+            if self._execute(conn, lambda: conn.can_read(timeout=conn.socket_timeout)):
                 response = self._execute(conn, conn.read_response)
                 if self.is_health_check_response(response):
                     self.health_check_response_counter -= 1
@@ -1496,7 +1502,7 @@ class PubSub:
             raise error
         conn.connect()
 
-    def _execute(self, conn, command, *args, **kwargs):
+    def _execute(self, conn, command):
         """
         Connect manually upon disconnection. If the Redis server is down,
         this will fail and raise a ConnectionError as desired.
@@ -1505,7 +1511,7 @@ class PubSub:
         patterns we were previously listening to
         """
         return conn.retry.call_with_retry(
-            lambda: command(*args, **kwargs),
+            command,
             lambda error: self._disconnect_raise_connect(conn, error),
         )
 
@@ -1526,7 +1532,7 @@ class PubSub:
                     return None
             else:
                 conn.connect()
-            return conn.read_response()
+            return conn.read_response(disconnect_on_interrupt=False)
 
         response = self._execute(conn, try_read)
 
@@ -1556,7 +1562,12 @@ class PubSub:
             )
 
         if conn.health_check_interval and time.time() > conn.next_health_check:
-            conn.send_command("PING", self.HEALTH_CHECK_MESSAGE, check_health=False)
+            conn.send_command(
+                "PING",
+                self.HEALTH_CHECK_MESSAGE,
+                check_health=False,
+                disconnect_on_interrupt=False,
+            )
             self.health_check_response_counter += 1
 
     def _normalize_keys(self, data):

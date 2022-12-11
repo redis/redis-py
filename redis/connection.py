@@ -755,7 +755,7 @@ class Connection:
         if self.health_check_interval and time() > self.next_health_check:
             self.retry.call_with_retry(self._send_ping, self._ping_failed)
 
-    def send_packed_command(self, command, check_health=True):
+    def send_packed_command(self, command, check_health=True, *, disconnect_on_interrupt=True):
         """Send an already packed command to the Redis server"""
         if not self._sock:
             self.connect()
@@ -778,17 +778,23 @@ class Connection:
                 errno = e.args[0]
                 errmsg = e.args[1]
             raise ConnectionError(f"Error {errno} while writing to socket. {errmsg}.")
-        except BaseException:
-            # On interruption (e.g. by gevent.Timeout) there's no way to determine
-            # how much data, if any, was successfully sent, so this socket is unusable
-            # for subsequent commands (which may concatenate to an unfinished command).
+        except Exception:
             self.disconnect()
             raise
+        except BaseException:
+            # On interrupt (e.g. by gevent.Timeout) there's no way to determine
+            # how much data, if any, was successfully sent, so this socket is unusable
+            # for subsequent commands (which may concatenate to an unfinished command).
+            if disconnect_on_interrupt:
+                self.disconnect()
+            raise
 
-    def send_command(self, *args, **kwargs):
+    def send_command(self, *args, check_health=True, disconnect_on_interrupt=True, **kwargs):
         """Pack and send a command to the Redis server"""
         self.send_packed_command(
-            self.pack_command(*args), check_health=kwargs.get("check_health", True)
+            self.pack_command(*args),
+            check_health=check_health,
+            disconnect_on_interrupt=disconnect_on_interrupt,
         )
 
     def can_read(self, timeout=0):
@@ -804,7 +810,7 @@ class Connection:
                 f"Error while reading from {self.host}:{self.port}: {e.args}"
             )
 
-    def read_response(self, disable_decoding=False):
+    def read_response(self, disable_decoding=False, *, disconnect_on_interrupt=True):
         """Read the response from a previously sent command"""
         try:
             hosterr = f"{self.host}:{self.port}"
@@ -819,12 +825,16 @@ class Connection:
         except OSError as e:
             self.disconnect()
             raise ConnectionError(f"Error while reading from {hosterr}" f" : {e.args}")
+        except Exception:
+            self.disconnect()
+            raise
         except BaseException:
-            # On interruption (e.g. by gevent.Timeout) there's no way to determine
+            # On interrupt (e.g. by gevent.Timeout) there's no way to determine
             # how much data, if any, was successfully read, so this socket is unusable
             # for subsequent commands (which may read previous command's response
             # as their own).
-            self.disconnect()
+            if disconnect_on_interrupt:
+                self.disconnect()
             raise
 
         if self.health_check_interval:

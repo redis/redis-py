@@ -725,8 +725,14 @@ class PubSub:
 
         await self.connect()
         connection = self.connection
-        kwargs = {"check_health": not self.subscribed}
-        await self._execute(connection, connection.send_command, *args, **kwargs)
+        await self._execute(
+            connection,
+            lambda: connection.send_command(
+                *args,
+                check_health=not self.subscribed,
+                disconnect_on_interrupt=False,
+            ),
+        )
 
     async def connect(self):
         """
@@ -753,7 +759,7 @@ class PubSub:
             raise error
         await conn.connect()
 
-    async def _execute(self, conn, command, *args, **kwargs):
+    async def _execute(self, conn, command):
         """
         Connect manually upon disconnection. If the Redis server is down,
         this will fail and raise a ConnectionError as desired.
@@ -762,7 +768,7 @@ class PubSub:
         patterns we were previously listening to
         """
         return await conn.retry.call_with_retry(
-            lambda: command(*args, **kwargs),
+            command,
             lambda error: self._disconnect_raise_connect(conn, error),
         )
 
@@ -781,7 +787,13 @@ class PubSub:
             await conn.connect()
 
         read_timeout = None if block else timeout
-        response = await self._execute(conn, conn.read_response, timeout=read_timeout)
+        response = await self._execute(
+            conn,
+            lambda: conn.read_response(
+                timeout=read_timeout,
+                disconnect_on_interrupt=False,
+            ),
+        )
 
         if conn.health_check_interval and response == self.health_check_response:
             # ignore the health check message as user might not expect it
@@ -801,7 +813,10 @@ class PubSub:
             and asyncio.get_event_loop().time() > conn.next_health_check
         ):
             await conn.send_command(
-                "PING", self.HEALTH_CHECK_MESSAGE, check_health=False
+                "PING",
+                self.HEALTH_CHECK_MESSAGE,
+                check_health=False,
+                disconnect_on_interrupt=False,
             )
 
     def _normalize_keys(self, data: _NormalizeKeysT) -> _NormalizeKeysT:
