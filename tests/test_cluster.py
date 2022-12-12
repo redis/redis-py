@@ -1289,6 +1289,14 @@ class TestClusterRedisCommands:
         for i in range(0, len(res) - 1, 2):
             assert res[i][3] == res[i + 1][3]
 
+    def test_cluster_flshslots_not_implemented(self, r):
+        with pytest.raises(NotImplementedError):
+            r.cluster_flushslots()
+
+    def test_cluster_bumpepoch_not_implemented(self, r):
+        with pytest.raises(NotImplementedError):
+            r.cluster_bumpepoch()
+
     @skip_if_redis_enterprise()
     def test_readonly(self):
         r = get_mocked_redis_client(host=default_host, port=default_port)
