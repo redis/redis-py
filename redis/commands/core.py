@@ -1151,6 +1151,30 @@ class ManagementCommands(CommandsProtocol):
             "LATENCY HISTOGRAM is intentionally not implemented in the client."
         )
 
+    def latency_history(self, event: str) -> ResponseT:
+        """
+        Returns the raw data of the ``event``'s latency spikes time series.
+
+        For more information see https://redis.io/commands/latency-history
+        """
+        return self.execute_command("LATENCY HISTORY", event)
+
+    def latency_latest(self) -> ResponseT:
+        """
+        Reports the latest latency events logged.
+
+        For more information see https://redis.io/commands/latency-latest
+        """
+        return self.execute_command("LATENCY LATEST")
+
+    def latency_reset(self, *events: str) -> ResponseT:
+        """
+        Resets the latency spikes time series of all, or only some, events.
+
+        For more information see https://redis.io/commands/latency-reset
+        """
+        return self.execute_command("LATENCY RESET", *events)
+
     def ping(self, **kwargs) -> ResponseT:
         """
         Ping the Redis server
