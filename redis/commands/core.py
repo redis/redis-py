@@ -980,6 +980,34 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("LASTSAVE", **kwargs)
 
+    def latency_doctor(self):
+        """Raise a NotImplementedError, as the client will not support LATENCY DOCTOR.
+        This funcion is best used within the redis-cli.
+
+        For more information see https://redis.io/commands/latency-doctor
+        """
+        raise NotImplementedError(
+            """
+            LATENCY DOCTOR is intentionally not implemented in the client.
+
+            For more information see https://redis.io/commands/latency-doctor
+            """
+        )
+
+    def latency_graph(self):
+        """Raise a NotImplementedError, as the client will not support LATENCY GRAPH.
+        This funcion is best used within the redis-cli.
+
+        For more information see https://redis.io/commands/latency-graph.
+        """
+        raise NotImplementedError(
+            """
+            LATENCY GRAPH is intentionally not implemented in the client.
+
+            For more information see https://redis.io/commands/latency-graph
+            """
+        )
+
     def lolwut(self, *version_numbers: Union[str, float], **kwargs) -> ResponseT:
         """
         Get the Redis version and a piece of generative computer art
