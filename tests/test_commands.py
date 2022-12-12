@@ -1,9 +1,13 @@
 import binascii
 import datetime
 import re
+import threading
 import time
 from string import ascii_letters
+from asyncio import CancelledError
 from unittest import mock
+from unittest.mock import patch
+import socket
 
 import pytest
 
@@ -4725,6 +4729,34 @@ class TestRedisCommands:
         r2 = redis.Redis(port=6380, decode_responses=False)
         res = r2.psync(r2.client_id(), 1)
         assert b"FULLRESYNC" in res
+
+    @pytest.mark.onlynoncluster
+    def test_interrupted_command(self, r: redis.Redis):
+        """
+        Regression test for issue #1128:  An Un-handled BaseException
+        will leave the socket with un-read response to a previous
+        command.
+        """
+        print("start")
+
+        def helper():
+            try:
+                # blocking pop
+                with patch.object(
+                    socket.socket, "recv_into", side_effect=CancelledError
+                ) as mock_recv:
+                    r.brpop(["nonexist"])
+            except CancelledError:
+                print("canc")
+                pass  # we got some BaseException.
+            # if all is well, we can continue.
+            r.set("status", "down")  # should not hang
+            return "done"
+
+        thread = threading.Thread(target=helper)
+        thread.start()
+        thread.join(0.1)
+        assert not thread.is_alive()
 
 
 @pytest.mark.onlynoncluster

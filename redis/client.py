@@ -1231,8 +1231,18 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         """
         Send a command and parse the response
         """
-        conn.send_command(*args)
-        return self.parse_response(conn, command_name, **options)
+        try:
+            conn.send_command(*args)
+            return self.parse_response(conn, command_name, **options)
+        except BaseException:
+            # An exception while reading or writing leaves the connection in
+            # an unknown state. There may be un-written or un-read data
+            # so we cannot re-use it for a subsequent command/response transaction.
+            # This can be any error not handled by the Connection itself, such
+            # as BaseExceptions may have been used to interrupt IO, when using
+            # gevent.
+            conn.disconnect()
+            raise
 
     def _disconnect_raise(self, conn, error):
         """

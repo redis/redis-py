@@ -1,10 +1,12 @@
 """
 Tests async overrides of commands from their mixins
 """
+import asyncio
 import binascii
 import datetime
 import re
 from string import ascii_letters
+import async_timeout
 
 import pytest
 import pytest_asyncio
@@ -2998,6 +3000,36 @@ class TestRedisCommands:
         assert isinstance(await r.module_list(), list)
         for x in await r.module_list():
             assert isinstance(x, dict)
+
+    @pytest.mark.onlynoncluster
+    async def test_interrupted_command(self, r: redis.Redis):
+        """
+        Regression test for issue #1128:  An Un-handled BaseException
+        will leave the socket with un-read response to a previous
+        command.
+        """
+        ready = asyncio.Event()
+
+        async def helper():
+            with pytest.raises(asyncio.CancelledError):
+                # blocking pop
+                ready.set()
+                await r.brpop(["nonexist"])
+            # if all is well, we can continue.  The following should not hang.
+            await r.set("status", "down")
+            return "done"
+
+        task = asyncio.create_task(helper())
+        await ready.wait()
+        await asyncio.sleep(0.01)
+        # the task is now sleeping, lets send it an exception
+        task.cancel()
+        try:
+            async with async_timeout.timeout(0.1):
+                assert await task == "done"
+        except asyncio.TimeoutError:
+            task.cancel()
+            await task
 
 
 @pytest.mark.onlynoncluster
