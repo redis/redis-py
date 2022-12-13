@@ -3017,18 +3017,14 @@ class TestRedisCommands:
                 await r.brpop(["nonexist"])
             # if all is well, we can continue.  The following should not hang.
             await r.set("status", "down")
-            return "done"
 
         task = asyncio.create_task(helper())
         await ready.wait()
         await asyncio.sleep(0.01)
         # the task is now sleeping, lets send it an exception
         task.cancel()
-        try:
-            async with async_timeout.timeout(0.1):
-                assert await task == "done"
-        except asyncio.TimeoutError:
-            task.cancel()
+        # If all is well, the task should finish right away, otherwise fail with Timeout
+        async with async_timeout.timeout(0.1):
             await task
 
 
