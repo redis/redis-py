@@ -162,6 +162,7 @@ class InterruptingReader:
         return result
 
 
+@pytest.mark.onlynoncluster
 async def test_connection_parse_response_resume(r: redis.Redis):
     """
     This test verifies that the Connection parser,
