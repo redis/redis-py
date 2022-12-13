@@ -356,11 +356,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         )
 
         self._initialize = True
-        self._lock = asyncio.Lock()
+        self._lock: Optional[asyncio.Lock] = None
 
     async def initialize(self) -> "RedisCluster":
         """Get all nodes from startup nodes & creates connections if not initialized."""
         if self._initialize:
+            if not self._lock:
+                self._lock = asyncio.Lock()
             async with self._lock:
                 if self._initialize:
                     try:
@@ -378,6 +380,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
     async def close(self) -> None:
         """Close all connections & client if initialized."""
         if not self._initialize:
+            if not self._lock:
+                self._lock = asyncio.Lock()
             async with self._lock:
                 if not self._initialize:
                     self._initialize = True
@@ -517,6 +521,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
     async def _determine_nodes(
         self, command: str, *args: Any, node_flag: Optional[str] = None
     ) -> List["ClusterNode"]:
+        # Determine which nodes should be executed the command on.
+        # Returns a list of target nodes.
         if not node_flag:
             # get the nodes group for this command if it was predefined
             node_flag = self.command_flags.get(command)
@@ -654,6 +660,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         for _ in range(execute_attempts):
             if self._initialize:
                 await self.initialize()
+                if (
+                    len(target_nodes) == 1
+                    and target_nodes[0] == self.get_default_node()
+                ):
+                    # Replace the default cluster node
+                    self.replace_default_node()
             try:
                 if not target_nodes_specified:
                     # Determine the nodes to execute the command on
@@ -793,6 +805,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         name: KeyT,
         timeout: Optional[float] = None,
         sleep: float = 0.1,
+        blocking: bool = True,
         blocking_timeout: Optional[float] = None,
         lock_class: Optional[Type[Lock]] = None,
         thread_local: bool = True,
@@ -807,6 +820,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ``sleep`` indicates the amount of time to sleep per loop iteration
         when the lock is in blocking mode and another client is currently
         holding the lock.
+
+        ``blocking`` indicates whether calling ``acquire`` should block until
+        the lock has been acquired or to fail immediately, causing ``acquire``
+        to return False and the lock not being acquired. Defaults to True.
+        Note this value can be overridden by passing a ``blocking``
+        argument to ``acquire``.
 
         ``blocking_timeout`` indicates the maximum amount of time in seconds to
         spend trying to acquire the lock. A value of ``None`` indicates
@@ -850,6 +869,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             name,
             timeout=timeout,
             sleep=sleep,
+            blocking=blocking,
             blocking_timeout=blocking_timeout,
             thread_local=thread_local,
         )
@@ -1450,7 +1470,6 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                     )
             if len(target_nodes) > 1:
                 raise RedisClusterException(f"Too many targets for command {cmd.args}")
-
             node = target_nodes[0]
             if node.name not in nodes:
                 nodes[node.name] = (node, [])
@@ -1486,6 +1505,19 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                         )
                         result.args = (msg,) + result.args[1:]
                         raise result
+
+            default_node = nodes.get(client.get_default_node().name)
+            if default_node is not None:
+                # This pipeline execution used the default node, check if we need
+                # to replace it.
+                # Note: when the error is raised we'll reset the default node in the
+                # caller function.
+                for cmd in default_node[1]:
+                    # Check if it has a command that failed with a relevant
+                    # exception
+                    if type(cmd.result) in self.__class__.ERRORS_ALLOW_RETRY:
+                        client.replace_default_node()
+                        break
 
         return [cmd.result for cmd in stack]
 

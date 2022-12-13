@@ -262,7 +262,8 @@ async def test_cached_execution(modclient: redis.Redis):
 
 @pytest.mark.redismod
 async def test_slowlog(modclient: redis.Redis):
-    create_query = """CREATE (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
+    create_query = """CREATE
+    (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
     (:Rider {name:'Dani Pedrosa'})-[:rides]->(:Team {name:'Honda'}),
     (:Rider {name:'Andrea Dovizioso'})-[:rides]->(:Team {name:'Ducati'})"""
     await modclient.graph().query(create_query)
@@ -395,7 +396,8 @@ async def test_multi_label(modclient: redis.Redis):
 @pytest.mark.redismod
 async def test_execution_plan(modclient: redis.Redis):
     redis_graph = modclient.graph("execution_plan")
-    create_query = """CREATE (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
+    create_query = """CREATE
+    (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
     (:Rider {name:'Dani Pedrosa'})-[:rides]->(:Team {name:'Honda'}),
     (:Rider {name:'Andrea Dovizioso'})-[:rides]->(:Team {name:'Ducati'})"""
     await redis_graph.query(create_query)
@@ -404,7 +406,7 @@ async def test_execution_plan(modclient: redis.Redis):
         "MATCH (r:Rider)-[:rides]->(t:Team) WHERE t.name = $name RETURN r.name, t.name, $params",  # noqa
         {"name": "Yehuda"},
     )
-    expected = "Results\n    Project\n        Conditional Traverse | (t:Team)->(r:Rider)\n            Filter\n                Node By Label Scan | (t:Team)"  # noqa
+    expected = "Results\n    Project\n        Conditional Traverse | (t)->(r:Rider)\n            Filter\n                Node By Label Scan | (t:Team)"  # noqa
     assert result == expected
 
     await redis_graph.delete()
@@ -435,11 +437,11 @@ Results
 Distinct
     Join
         Project
-            Conditional Traverse | (t:Team)->(r:Rider)
+            Conditional Traverse | (t)->(r:Rider)
                 Filter
                     Node By Label Scan | (t:Team)
         Project
-            Conditional Traverse | (t:Team)->(r:Rider)
+            Conditional Traverse | (t)->(r:Rider)
                 Filter
                     Node By Label Scan | (t:Team)"""
     assert str(result).replace(" ", "").replace("\n", "") == expected.replace(
@@ -451,9 +453,7 @@ Distinct
             Operation("Join")
             .append_child(
                 Operation("Project").append_child(
-                    Operation(
-                        "Conditional Traverse", "(t:Team)->(r:Rider)"
-                    ).append_child(
+                    Operation("Conditional Traverse", "(t)->(r:Rider)").append_child(
                         Operation("Filter").append_child(
                             Operation("Node By Label Scan", "(t:Team)")
                         )
@@ -462,9 +462,7 @@ Distinct
             )
             .append_child(
                 Operation("Project").append_child(
-                    Operation(
-                        "Conditional Traverse", "(t:Team)->(r:Rider)"
-                    ).append_child(
+                    Operation("Conditional Traverse", "(t)->(r:Rider)").append_child(
                         Operation("Filter").append_child(
                             Operation("Node By Label Scan", "(t:Team)")
                         )
