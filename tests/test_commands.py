@@ -4751,7 +4751,6 @@ class TestRedisCommands:
                 pass  # we got some BaseException.
             # if all is well, we can continue.
             r.set("status", "down")  # should not hang
-            return "done"
 
         thread = threading.Thread(target=helper)
         thread.start()
