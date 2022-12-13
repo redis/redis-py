@@ -217,6 +217,10 @@ class PythonParser(BaseParser):
         self._chunks = []
         self._pos = 0
 
+    def _clear(self):
+        self._buffer = b""
+        self._chunks.clear()
+
     def on_connect(self, connection: "Connection"):
         """Called when the stream connects"""
         self._stream = connection._reader
@@ -247,12 +251,17 @@ class PythonParser(BaseParser):
             # augment parsing buffer with previously read data
             self._buffer += b"".join(self._chunks)
             self._chunks.clear()
-        self._pos = 0
-        response = await self._read_response(disable_decoding=disable_decoding)
-        # Successfully parsing a response allows us to clear our parsing buffer
-        self._buffer = b""
-        self._chunks.clear()
-        return response
+        try:
+            self._pos = 0
+            response = await self._read_response(disable_decoding=disable_decoding)
+        except (ConnectionError, InvalidResponse):
+            # We don't want these errors to be resumable
+            self._clear()
+            raise
+        else:
+            # Successfully parsing a response allows us to clear our parsing buffer
+            self._clear()
+            return response
 
     async def _read_response(
         self, disable_decoding: bool = False
@@ -275,6 +284,7 @@ class PythonParser(BaseParser):
             # if the error is a ConnectionError, raise immediately so the user
             # is notified
             if isinstance(error, ConnectionError):
+                self._clear()  # Successful parse
                 raise error
             # otherwise, we're dealing with a ResponseError that might belong
             # inside a pipeline response. the connection's read_response()
