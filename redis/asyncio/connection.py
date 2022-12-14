@@ -264,8 +264,6 @@ class PythonParser(BaseParser):
         if not self._stream or not self.encoder:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         raw = await self._readline()
-        if not raw:
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         response: Any
         byte, response = raw[:1], raw[1:]
 
