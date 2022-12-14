@@ -72,6 +72,7 @@ Module Documentation
    advanced_features
    clustering
    lua_scripting
+   opentelemetry
    examples
 
 Contributing
