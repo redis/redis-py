@@ -265,6 +265,9 @@ class AbstractRedisCluster:
                 "READWRITE",
                 "TIME",
                 "GRAPH.CONFIG",
+                "LATENCY HISTORY",
+                "LATENCY LATEST",
+                "LATENCY RESET",
             ],
             DEFAULT_NODE,
         ),
@@ -1645,7 +1648,7 @@ class ClusterPubSub(PubSub):
             pubsub_node = node
         elif any([host, port]) is True:
             # only 'host' or 'port' passed
-            raise DataError("Passing a host requires passing a port, " "and vice versa")
+            raise DataError("Passing a host requires passing a port, and vice versa")
         else:
             # nothing passed by the user. set node to None
             pubsub_node = None
@@ -2123,7 +2126,7 @@ class ClusterPipeline(RedisCluster):
         """
         if len(names) != 1:
             raise RedisClusterException(
-                "deleting multiple keys is not " "implemented in pipeline command"
+                "deleting multiple keys is not implemented in pipeline command"
             )
 
         return self.execute_command("DEL", names[0])

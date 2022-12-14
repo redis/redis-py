@@ -77,7 +77,7 @@ def pytest_addoption(parser):
         "--redis-url",
         default=default_redis_url,
         action="store",
-        help="Redis connection string," " defaults to `%(default)s`",
+        help="Redis connection string, defaults to `%(default)s`",
     )
 
     parser.addoption(
@@ -93,7 +93,7 @@ def pytest_addoption(parser):
         "--redis-ssl-url",
         default=default_redis_ssl_url,
         action="store",
-        help="Redis SSL connection string," " defaults to `%(default)s`",
+        help="Redis SSL connection string, defaults to `%(default)s`",
     )
 
     parser.addoption(

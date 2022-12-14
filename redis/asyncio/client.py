@@ -1132,7 +1132,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             raise RedisError("Cannot issue nested calls to MULTI")
         if self.command_stack:
             raise RedisError(
-                "Commands without an initial WATCH have already " "been issued"
+                "Commands without an initial WATCH have already been issued"
             )
         self.explicit_transaction = True
 
@@ -1157,7 +1157,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         if self.watching:
             await self.reset()
             raise WatchError(
-                "A ConnectionError occurred on while " "watching one or more keys"
+                "A ConnectionError occurred on while watching one or more keys"
             )
         # if retry_on_timeout is not set, or the error is not
         # a TimeoutError, raise it
@@ -1345,7 +1345,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         # indicates the user should retry this transaction.
         if self.watching:
             raise WatchError(
-                "A ConnectionError occurred on while " "watching one or more keys"
+                "A ConnectionError occurred on while watching one or more keys"
             )
         # if retry_on_timeout is not set, or the error is not
         # a TimeoutError, raise it
