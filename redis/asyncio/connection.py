@@ -208,18 +208,13 @@ class BaseParser:
 class PythonParser(BaseParser):
     """Plain Python parsing class"""
 
-    __slots__ = BaseParser.__slots__ + ("encoder", "_buffer", "_pos", "_chunks")
+    __slots__ = BaseParser.__slots__ + ("encoder", "_buffer", "_pos")
 
     def __init__(self, socket_read_size: int):
         super().__init__(socket_read_size)
         self.encoder: Optional[Encoder] = None
         self._buffer = b""
-        self._chunks = []
         self._pos = 0
-
-    def _clear(self):
-        self._buffer = b""
-        self._chunks.clear()
 
     def on_connect(self, connection: "Connection"):
         """Called when the stream connects"""
@@ -234,6 +229,7 @@ class PythonParser(BaseParser):
         if self._stream is not None:
             self._stream = None
         self.encoder = None
+        self._buffer = b""
 
     async def can_read_destructive(self) -> bool:
         if self._buffer:
@@ -247,30 +243,37 @@ class PythonParser(BaseParser):
             return False
 
     async def read_response(self, disable_decoding: bool = False):
-        if self._stream is None:
-            raise RedisError("Buffer is closed.")   
-        if self._chunks:
-            # augment parsing buffer with previously read data
-            self._buffer += b"".join(self._chunks)
-            self._chunks.clear()
-        try:
-            self._pos = 0
-            response = await self._read_response(disable_decoding=disable_decoding)
-        except (ConnectionError, InvalidResponse):
-            # We don't want these errors to be resumable
-            self._clear()
-            raise
-        else:
-            # Successfully parsing a response allows us to clear our parsing buffer
-            self._clear()
-            return response
-
-    async def _read_response(
-        self, disable_decoding: bool = False
-    ) -> Union[EncodableT, ResponseError, None]:
         if not self._stream or not self.encoder:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-        raw = await self._readline()
+
+        if not self._buffer:
+            await self._fill_buffer()
+        while True:
+            self._pos = 0
+            try:
+                response = self._read_response(disable_decoding=disable_decoding)
+
+            except EOFError:
+                await self._fill_buffer()
+            else:
+                break
+        # Successfully parsing a response allows us to clear our parsing buffer
+        self._buffer = self._buffer[self._pos :]
+        return response
+
+    async def _fill_buffer(self):
+        """
+        IO is performed here
+        """
+        buffer = await self._stream.read(self._read_size)
+        if not buffer or not isinstance(buffer, bytes):
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
+        self._buffer += buffer
+
+    def _read_response(
+        self, disable_decoding: bool = False
+    ) -> Union[EncodableT, ResponseError, None]:
+        raw = self._readline()
         if not raw:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         response: Any
@@ -286,7 +289,7 @@ class PythonParser(BaseParser):
             # if the error is a ConnectionError, raise immediately so the user
             # is notified
             if isinstance(error, ConnectionError):
-                self._clear()  # Successful parse
+                self._buffer = self._buffer[self._pos :]  # Successful parse
                 raise error
             # otherwise, we're dealing with a ResponseError that might belong
             # inside a pipeline response. the connection's read_response()
@@ -304,55 +307,39 @@ class PythonParser(BaseParser):
             length = int(response)
             if length == -1:
                 return None
-            response = await self._read(length)
+            response = self._read(length)
         # multi-bulk response
         elif byte == b"*":
             length = int(response)
             if length == -1:
                 return None
-            response = [
-                (await self._read_response(disable_decoding)) for _ in range(length)
-            ]
+            response = [(self._read_response(disable_decoding)) for _ in range(length)]
         if isinstance(response, bytes) and disable_decoding is False:
             response = self.encoder.decode(response)
         return response
 
-    async def _read(self, length: int) -> bytes:
+    def _read(self, length: int) -> bytes:
         """
         Read `length` bytes of data.  These are assumed to be followed
         by a '\r\n' terminator which is subsequently discarded.
         """
-        want = length + 2
-        end = self._pos + want
-        if len(self._buffer) >= end:
-            result = self._buffer[self._pos : end - 2]
-        else:
-            tail = self._buffer[self._pos :]
-            try:
-                data = await self._stream.readexactly(want - len(tail))
-            except asyncio.IncompleteReadError as error:
-                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
-            result = (tail + data)[:-2]
-            self._chunks.append(data)
-        self._pos += want
+        end = self._pos + length + 2
+        if len(self._buffer) < end:
+            raise EOFError()  # Signal that we need more data
+        result = self._buffer[self._pos : end - 2]
+        self._pos = end
         return result
 
-    async def _readline(self) -> bytes:
+    def _readline(self) -> bytes:
         """
         read an unknown number of bytes up to the next '\r\n'
         line separator, which is discarded.
         """
         found = self._buffer.find(b"\r\n", self._pos)
-        if found >= 0:
-            result = self._buffer[self._pos : found]
-        else:
-            tail = self._buffer[self._pos :]
-            data = await self._stream.readline()
-            if not data.endswith(b"\r\n"):
-                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-            result = (tail + data)[:-2]
-            self._chunks.append(data)
-        self._pos += len(result) + 2
+        if found < 0:
+            raise EOFError()  # signal that we need more data
+        result = self._buffer[self._pos : found]
+        self._pos = found + 2
         return result
 
 
