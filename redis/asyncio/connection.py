@@ -274,8 +274,6 @@ class PythonParser(BaseParser):
         self, disable_decoding: bool = False
     ) -> Union[EncodableT, ResponseError, None]:
         raw = self._readline()
-        if not raw:
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         response: Any
         byte, response = raw[:1], raw[1:]
 
