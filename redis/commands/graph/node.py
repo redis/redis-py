@@ -32,7 +32,7 @@ class Node:
             self.labels = label
         else:
             raise AssertionError(
-                "label should be either None, " "string or a list of strings"
+                "label should be either None, string or a list of strings"
             )
 
         self.properties = properties or {}

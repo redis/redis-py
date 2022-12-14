@@ -411,7 +411,7 @@ class TestPubSubMessages:
         with pytest.raises(RuntimeError) as info:
             await p.get_message()
         expect = (
-            "connection not set: " "did you forget to call subscribe() or psubscribe()?"
+            "connection not set: did you forget to call subscribe() or psubscribe()?"
         )
         assert expect in info.exconly()
 

@@ -527,7 +527,7 @@ class SearchCommands:
             cmd += query.get_args()
             cmd += self.get_params_args(query_params)
         else:
-            raise ValueError("Must provide AggregateRequest object or " "Query object.")
+            raise ValueError("Must provide AggregateRequest object or Query object.")
 
         res = self.execute_command(*cmd)
 

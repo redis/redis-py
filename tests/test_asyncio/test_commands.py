@@ -199,7 +199,7 @@ class TestRedisCommands:
 
         # Resets and tests that hashed passwords are set properly.
         hashed_password = (
-            "5e884898da28047151d0e56f8dc629" "2773603d0d6aabbdd62a11ef721d1542d8"
+            "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
         )
         assert await r.acl_setuser(
             username, enabled=True, reset=True, hashed_passwords=["+" + hashed_password]

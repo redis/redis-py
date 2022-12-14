@@ -13,7 +13,7 @@ def parse_args():
     parser.add_argument(
         "-P",
         type=int,
-        help=("Pipeline <numreq> requests." " Default 1 (no pipeline)."),
+        help=("Pipeline <numreq> requests. Default 1 (no pipeline)."),
         default=1,
     )
     parser.add_argument(
