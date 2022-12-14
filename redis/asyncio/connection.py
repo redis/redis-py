@@ -234,6 +234,7 @@ class PythonParser(BaseParser):
         if self._stream is not None:
             self._stream = None
         self.encoder = None
+        self._clear()
 
     async def can_read_destructive(self) -> bool:
         if self._buffer:
@@ -247,23 +248,15 @@ class PythonParser(BaseParser):
             return False
 
     async def read_response(self, disable_decoding: bool = False):
-        if self._stream is None:
-            raise RedisError("Buffer is closed.")   
         if self._chunks:
             # augment parsing buffer with previously read data
             self._buffer += b"".join(self._chunks)
             self._chunks.clear()
-        try:
-            self._pos = 0
-            response = await self._read_response(disable_decoding=disable_decoding)
-        except (ConnectionError, InvalidResponse):
-            # We don't want these errors to be resumable
-            self._clear()
-            raise
-        else:
-            # Successfully parsing a response allows us to clear our parsing buffer
-            self._clear()
-            return response
+        self._pos = 0
+        response = await self._read_response(disable_decoding=disable_decoding)
+        # Successfully parsing a response allows us to clear our parsing buffer
+        self._clear()
+        return response
 
     async def _read_response(
         self, disable_decoding: bool = False
