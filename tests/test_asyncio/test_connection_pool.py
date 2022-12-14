@@ -416,7 +416,7 @@ class TestConnectionPoolURLParsing:
     def test_invalid_extra_typed_querystring_options(self):
         with pytest.raises(ValueError):
             redis.ConnectionPool.from_url(
-                "redis://localhost/2?socket_timeout=_&" "socket_connect_timeout=abc"
+                "redis://localhost/2?socket_timeout=_&socket_connect_timeout=abc"
             )
 
     def test_extra_querystring_options(self):
