@@ -247,6 +247,8 @@ class PythonParser(BaseParser):
             return False
 
     async def read_response(self, disable_decoding: bool = False):
+        if self._stream is None:
+            raise RedisError("Buffer is closed.")   
         if self._chunks:
             # augment parsing buffer with previously read data
             self._buffer += b"".join(self._chunks)
@@ -325,8 +327,6 @@ class PythonParser(BaseParser):
         if len(self._buffer) >= end:
             result = self._buffer[self._pos : end - 2]
         else:
-            if self._stream is None:
-                raise RedisError("Buffer is closed.")
             tail = self._buffer[self._pos :]
             try:
                 data = await self._stream.readexactly(want - len(tail))
@@ -346,8 +346,6 @@ class PythonParser(BaseParser):
         if found >= 0:
             result = self._buffer[self._pos : found]
         else:
-            if self._stream is None:
-                raise RedisError("Buffer is closed.")
             tail = self._buffer[self._pos :]
             data = await self._stream.readline()
             if not data.endswith(b"\r\n"):
