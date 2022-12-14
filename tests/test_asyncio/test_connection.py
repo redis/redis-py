@@ -7,6 +7,7 @@ import pytest
 
 import redis
 from redis.asyncio.connection import (
+    BaseParser,
     Connection,
     PythonParser,
     UnixDomainSocketConnection,
@@ -24,16 +25,19 @@ async def test_invalid_response(create_redis):
     r = await create_redis(single_connection_client=True)
 
     raw = b"x"
+    fake_stream = FakeStream(raw + b"\r\n")
 
-    parser: "PythonParser" = r.connection._parser
-    if not isinstance(parser, PythonParser):
-        pytest.skip("PythonParser only")
-    stream_mock = mock.Mock(parser._stream)
-    stream_mock.readline.return_value = raw + b"\r\n"
-    with mock.patch.object(parser, "_stream", stream_mock):
+    parser: BaseParser = r.connection._parser
+    with mock.patch.object(parser, "_stream", fake_stream):
         with pytest.raises(InvalidResponse) as cm:
             await parser.read_response()
-    assert str(cm.value) == f"Protocol Error: {raw!r}"
+    if isinstance(parser, PythonParser):
+        assert str(cm.value) == f"Protocol Error: {raw!r}"
+    else:
+        assert (
+            str(cm.value) == f'Protocol error, got "{raw.decode()}" as reply type byte'
+        )
+    await r.connection.disconnect()
 
 
 @skip_if_server_version_lt("4.0.0")
@@ -115,26 +119,27 @@ async def test_connect_timeout_error_without_retry():
     assert str(e.value) == "Timeout connecting to server"
 
 
-class TestError(BaseException):
-    pass
-
-
-class InterruptingReader:
+class FakeStream:
     """
     A class simulating an asyncio input buffer, but raising a
     special exception every other read.
     """
 
-    def __init__(self, data):
+    class TestError(BaseException):
+        pass
+
+    def __init__(self, data, interrupt_every=0):
         self.data = data
         self.counter = 0
         self.pos = 0
+        self.interrupt_every = interrupt_every
 
     def tick(self):
         self.counter += 1
-        # return
-        if (self.counter % 2) == 0:
-            raise TestError()
+        if not self.interrupt_every:
+            return
+        if (self.counter % self.interrupt_every) == 0:
+            raise self.TestError()
 
     async def read(self, want):
         self.tick()
@@ -176,12 +181,12 @@ async def test_connection_parse_response_resume(r: redis.Redis):
         b"$25\r\nhi\r\nthere\r\n+how\r\nare\r\nyou\r\n"
     )
 
-    conn._parser._stream = InterruptingReader(message)
+    conn._parser._stream = FakeStream(message, interrupt_every=2)
     for i in range(100):
         try:
             response = await conn.read_response()
             break
-        except TestError:
+        except FakeStream.TestError:
             pass
 
     else:
