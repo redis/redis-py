@@ -4527,15 +4527,22 @@ class TestRedisCommands:
         with pytest.raises(NotImplementedError):
             r.latency_histogram()
 
-    @skip_if_server_version_lt("7.0.0")
     def test_latency_graph_not_implemented(self, r: redis.Redis):
         with pytest.raises(NotImplementedError):
             r.latency_graph()
 
-    @skip_if_server_version_lt("7.0.0")
     def test_latency_doctor_not_implemented(self, r: redis.Redis):
         with pytest.raises(NotImplementedError):
             r.latency_doctor()
+
+    def test_latency_history(self, r: redis.Redis):
+        assert r.latency_history("command") == []
+
+    def test_latency_latest(self, r: redis.Redis):
+        assert r.latency_latest() == []
+
+    def test_latency_reset(self, r: redis.Redis):
+        assert r.latency_reset() == 0
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("4.0.0")
