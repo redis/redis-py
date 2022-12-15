@@ -820,6 +820,7 @@ class Connection:
         self,
         disable_decoding: bool = False,
         timeout: Optional[float] = None,
+        disconnect_on_error: bool = True,
     ):
         """Read the response from a previously sent command"""
         read_timeout = timeout if timeout is not None else self.socket_timeout
@@ -835,22 +836,24 @@ class Connection:
                 )
         except asyncio.TimeoutError:
             if timeout is not None:
-                # user requested timeout, return None
+                # user requested timeout, return None. Operation can be retried
                 return None
             # it was a self.socket_timeout error.
-            await self.disconnect(nowait=True)
+            if disconnect_on_error:
+                await self.disconnect(nowait=True)
             raise TimeoutError(f"Timeout reading from {self.host}:{self.port}")
         except OSError as e:
-            await self.disconnect(nowait=True)
+            if disconnect_on_error:
+                await self.disconnect(nowait=True)
             raise ConnectionError(
                 f"Error while reading from {self.host}:{self.port} : {e.args}"
             )
-        except asyncio.CancelledError:
-            # need this check for 3.7, where CancelledError
-            # is subclass of Exception, not BaseException
-            raise
-        except Exception:
-            await self.disconnect(nowait=True)
+        except BaseException:
+            # Also by default close in case of BaseException.  A lot of code
+            # relies on this behaviour when doing Command/Response pairs.
+            # See #1128.
+            if disconnect_on_error:
+                await self.disconnect(nowait=True)
             raise
 
         if self.health_check_interval:

@@ -1526,7 +1526,7 @@ class PubSub:
                     return None
             else:
                 conn.connect()
-            return conn.read_response()
+            return conn.read_response(disconnect_on_error=False)
 
         response = self._execute(conn, try_read)
 
