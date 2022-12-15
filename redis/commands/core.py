@@ -193,6 +193,7 @@ class ACLCommands(CommandsProtocol):
         selectors: Optional[Iterable[Tuple[str, KeyT]]] = None,
         reset: bool = False,
         reset_keys: bool = False,
+        reset_channels: bool = False,
         reset_passwords: bool = False,
         **kwargs,
     ) -> ResponseT:
@@ -248,6 +249,12 @@ class ACLCommands(CommandsProtocol):
         key permissions will be kept and any new specified key permissions
         will be applied on top.
 
+        ``reset_channels`` is a boolean indicating whether the user's channel
+        permissions should be reset prior to applying any new channel permissions
+        specified in ``channels``.If this is False, the user's existing
+        channel permissions will be kept and any new specified channel permissions
+        will be applied on top.
+
         ``reset_passwords`` is a boolean indicating whether to remove all
         existing passwords and the 'nopass' flag from the user prior to
         applying any new passwords specified in 'passwords' or
@@ -265,6 +272,9 @@ class ACLCommands(CommandsProtocol):
 
         if reset_keys:
             pieces.append(b"resetkeys")
+
+        if reset_channels:
+            pieces.append(b"resetchannels")
 
         if reset_passwords:
             pieces.append(b"resetpass")
