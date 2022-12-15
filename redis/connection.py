@@ -819,7 +819,7 @@ class Connection:
             # BaseExceptions can be raised when a send() is not finished, e.g. due
             # to a timeout.  Ideally, a caller could then re-try, to continue
             # sending partially-sent data. However, the send_packed_command() API
-            # does not it so there is no point in keeping the connection open.
+            # does not support it so there is no point in keeping the connection open.
              self.disconnect()
             raise
 
