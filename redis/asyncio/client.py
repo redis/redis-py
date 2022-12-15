@@ -477,17 +477,8 @@ class Redis(
         """
         Send a command and parse the response
         """
-        try:
-            await conn.send_command(*args)
-            return await self.parse_response(conn, command_name, **options)
-        except BaseException:
-            # An exception while reading or writing leaves the connection in
-            # an unknown state. There may be un-written or un-read data
-            # so we cannot re-use it for a subsequent command/response transaction.
-            # This may be a TimeoutError or any other error not handled by the
-            # Connection object itself.
-            await conn.disconnect(nowait=True)
-            raise
+        await conn.send_command(*args)
+        return await self.parse_response(conn, command_name, **options)
 
     async def _disconnect_raise(self, conn: Connection, error: Exception):
         """
