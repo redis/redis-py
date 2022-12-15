@@ -5,8 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
+import redis
 from redis.backoff import NoBackoff
-from redis.connection import Connection
+from redis.connection import Connection, PythonParser, HiredisParser
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
@@ -122,3 +123,82 @@ class TestConnection:
         assert conn._connect.call_count == 1
         assert str(e.value) == "Timeout connecting to server"
         self.clear(conn)
+
+
+class FakeSocket:
+    """
+    A class simulating an readable socket, but raising a
+    special exception every other read.
+    """
+
+    class TestError(BaseException):
+        pass
+
+    def __init__(self, data, interrupt_every=0):
+        self.data = data
+        self.counter = 0
+        self.pos = 0
+        self.interrupt_every = interrupt_every
+
+    def tick(self):
+        self.counter += 1
+        if not self.interrupt_every:
+            return
+        if (self.counter % self.interrupt_every) == 0:
+            raise self.TestError()
+
+    def recv(self, bufsize):
+        self.tick()
+        bufsize = min(5, bufsize)  # truncate the read size
+        result = self.data[self.pos : self.pos + bufsize]
+        self.pos += len(result)
+        return result
+
+    def recv_into(self, buffer, nbytes=0, flags=0):
+        self.tick()
+        if nbytes == 0:
+            nbytes = len(buffer)
+        nbytes = min(5, nbytes)  # truncate the read size
+        result = self.data[self.pos : self.pos + nbytes]
+        self.pos += len(result)
+        buffer[: len(result)] = result
+        return len(result)
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.parametrize(
+    "parser_class", [PythonParser, HiredisParser], ids=["PythonParser", "HiredisParser"]
+)
+def test_connection_parse_response_resume(r: redis.Redis, parser_class):
+    """
+    This test verifies that the Connection parser,
+    be that PythonParser or HiredisParser,
+    can be interrupted at IO time and then resume parsing.
+    """
+    if parser_class is HiredisParser and not HIREDIS_AVAILABLE:
+        pytest.skip("Hiredis not available)")
+    args = dict(r.connection_pool.connection_kwargs)
+    args["parser_class"] = parser_class
+    conn = Connection(**args)
+    conn.connect()
+    message = (
+        b"*3\r\n$7\r\nmessage\r\n$8\r\nchannel1\r\n"
+        b"$25\r\nhi\r\nthere\r\n+how\r\nare\r\nyou\r\n"
+    )
+    fake_socket = FakeSocket(message, interrupt_every=2)
+
+    if isinstance(conn._parser, PythonParser):
+        conn._parser._buffer._sock = fake_socket
+    else:
+        conn._parser._sock = fake_socket
+    for i in range(100):
+        try:
+            response = conn.read_response()
+            break
+        except FakeSocket.TestError:
+            pass
+
+    else:
+        pytest.fail("didn't receive a response")
+    assert response
+    assert i > 0
