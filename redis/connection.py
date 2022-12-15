@@ -778,7 +778,11 @@ class Connection:
                 errno = e.args[0]
                 errmsg = e.args[1]
             raise ConnectionError(f"Error {errno} while writing to socket. {errmsg}.")
-        except Exception:
+        except BaseException:
+            # The send_packed_command api does not support re-trying a partially
+            # sent message, so there is no point in keeping the connection open.
+            # An unknown number of bytes has been sent and the connection is therefore
+            # unusable.
             self.disconnect()
             raise
 
