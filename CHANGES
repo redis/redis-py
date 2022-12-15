@@ -1,3 +1,4 @@
+    * Revert #2104, add `disconnect_on_error` option to `read_response()` (#2506)
     * Make PythonParser resumable in case of error (#2510)
     * Add `timeout=None` in `SentinelConnectionManager.read_response`
     * Documentation fix: password protected socket connection (#2374)
