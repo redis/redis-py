@@ -7,7 +7,7 @@ import pytest
 
 import redis
 from redis.backoff import NoBackoff
-from redis.connection import Connection, PythonParser, HiredisParser
+from redis.connection import Connection, HiredisParser, PythonParser
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
