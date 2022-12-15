@@ -4737,13 +4737,13 @@ class TestRedisCommands:
         will leave the socket with un-read response to a previous
         command.
         """
-        
+
         def helper():
             with pytest.raises(BaseException):
                 # blocking pop
                 with patch.object(
                     socket.socket, "recv_into", side_effect=CancelledError
-                ) as mock_recv:
+                ):
                     r.brpop(["nonexist"])
             # if all is well, we can continue.
             r.set("status", "down")  # should not hang
