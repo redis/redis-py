@@ -816,11 +816,11 @@ class Connection:
                 errmsg = e.args[1]
             raise ConnectionError(f"Error {errno} while writing to socket. {errmsg}.")
         except BaseException:
-            # BaseExceptions can be raised when a send() is not finished, e.g. due
-            # to a timeout.  Ideally, a caller could then re-try, to continue
-            # sending partially-sent data. However, the send_packed_command() API
+            # BaseExceptions can be raised when a socket send operation is not
+            # finished, e.g. due to a timeout.  Ideally, a caller could then re-try
+            # to send un-sent data. However, the send_packed_command() API
             # does not support it so there is no point in keeping the connection open.
-             self.disconnect()
+            self.disconnect()
             raise
 
     def send_command(self, *args, **kwargs):
