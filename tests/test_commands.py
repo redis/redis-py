@@ -1,13 +1,13 @@
 import binascii
 import datetime
 import re
+import socket
 import threading
 import time
-from string import ascii_letters
 from asyncio import CancelledError
+from string import ascii_letters
 from unittest import mock
 from unittest.mock import patch
-import socket
 
 import pytest
 

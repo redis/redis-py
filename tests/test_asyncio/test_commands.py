@@ -6,8 +6,8 @@ import binascii
 import datetime
 import re
 from string import ascii_letters
-import async_timeout
 
+import async_timeout
 import pytest
 import pytest_asyncio
 
