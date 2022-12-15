@@ -796,7 +796,11 @@ class Connection:
             raise ConnectionError(
                 f"Error {err_no} while writing to socket. {errmsg}."
             ) from e
-        except Exception:
+        except BaseException:
+            # The send_packed_command api does not support re-trying a partially
+            # sent message, so there is no point in keeping the connection open.
+            # An unknown number of bytes has been sent and the connection is therefore
+            # unusable.
             await self.disconnect(nowait=True)
             raise
 
