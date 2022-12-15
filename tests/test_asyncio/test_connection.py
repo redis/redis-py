@@ -18,6 +18,7 @@ from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
 from tests.conftest import skip_if_server_version_lt
 
 from .compat import mock
+from .mocks import MockStream
 
 
 @pytest.mark.onlynoncluster
@@ -25,7 +26,7 @@ async def test_invalid_response(create_redis):
     r = await create_redis(single_connection_client=True)
 
     raw = b"x"
-    fake_stream = FakeStream(raw + b"\r\n")
+    fake_stream = MockStream(raw + b"\r\n")
 
     parser: BaseParser = r.connection._parser
     with mock.patch.object(parser, "_stream", fake_stream):
@@ -119,54 +120,6 @@ async def test_connect_timeout_error_without_retry():
     assert str(e.value) == "Timeout connecting to server"
 
 
-class FakeStream:
-    """
-    A class simulating an asyncio input buffer, but raising a
-    special exception every other read.
-    """
-
-    class TestError(BaseException):
-        pass
-
-    def __init__(self, data, interrupt_every=0):
-        self.data = data
-        self.counter = 0
-        self.pos = 0
-        self.interrupt_every = interrupt_every
-
-    def tick(self):
-        self.counter += 1
-        if not self.interrupt_every:
-            return
-        if (self.counter % self.interrupt_every) == 0:
-            raise self.TestError()
-
-    async def read(self, want):
-        self.tick()
-        want = 5
-        result = self.data[self.pos : self.pos + want]
-        self.pos += len(result)
-        return result
-
-    async def readline(self):
-        self.tick()
-        find = self.data.find(b"\n", self.pos)
-        if find >= 0:
-            result = self.data[self.pos : find + 1]
-        else:
-            result = self.data[self.pos :]
-        self.pos += len(result)
-        return result
-
-    async def readexactly(self, length):
-        self.tick()
-        result = self.data[self.pos : self.pos + length]
-        if len(result) < length:
-            raise asyncio.IncompleteReadError(result, None)
-        self.pos += len(result)
-        return result
-
-
 @pytest.mark.onlynoncluster
 async def test_connection_parse_response_resume(r: redis.Redis):
     """
@@ -181,12 +134,12 @@ async def test_connection_parse_response_resume(r: redis.Redis):
         b"$25\r\nhi\r\nthere\r\n+how\r\nare\r\nyou\r\n"
     )
 
-    conn._parser._stream = FakeStream(message, interrupt_every=2)
+    conn._parser._stream = MockStream(message, interrupt_every=2)
     for i in range(100):
         try:
             response = await conn.read_response()
             break
-        except FakeStream.TestError:
+        except MockStream.TestError:
             pass
 
     else:

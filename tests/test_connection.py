@@ -13,6 +13,7 @@ from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
 
 from .conftest import skip_if_server_version_lt
+from .mocks import MockSocket
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
@@ -125,46 +126,6 @@ class TestConnection:
         self.clear(conn)
 
 
-class FakeSocket:
-    """
-    A class simulating an readable socket, but raising a
-    special exception every other read.
-    """
-
-    class TestError(BaseException):
-        pass
-
-    def __init__(self, data, interrupt_every=0):
-        self.data = data
-        self.counter = 0
-        self.pos = 0
-        self.interrupt_every = interrupt_every
-
-    def tick(self):
-        self.counter += 1
-        if not self.interrupt_every:
-            return
-        if (self.counter % self.interrupt_every) == 0:
-            raise self.TestError()
-
-    def recv(self, bufsize):
-        self.tick()
-        bufsize = min(5, bufsize)  # truncate the read size
-        result = self.data[self.pos : self.pos + bufsize]
-        self.pos += len(result)
-        return result
-
-    def recv_into(self, buffer, nbytes=0, flags=0):
-        self.tick()
-        if nbytes == 0:
-            nbytes = len(buffer)
-        nbytes = min(5, nbytes)  # truncate the read size
-        result = self.data[self.pos : self.pos + nbytes]
-        self.pos += len(result)
-        buffer[: len(result)] = result
-        return len(result)
-
-
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize(
     "parser_class", [PythonParser, HiredisParser], ids=["PythonParser", "HiredisParser"]
@@ -185,17 +146,17 @@ def test_connection_parse_response_resume(r: redis.Redis, parser_class):
         b"*3\r\n$7\r\nmessage\r\n$8\r\nchannel1\r\n"
         b"$25\r\nhi\r\nthere\r\n+how\r\nare\r\nyou\r\n"
     )
-    fake_socket = FakeSocket(message, interrupt_every=2)
+    mock_socket = MockSocket(message, interrupt_every=2)
 
     if isinstance(conn._parser, PythonParser):
-        conn._parser._buffer._sock = fake_socket
+        conn._parser._buffer._sock = mock_socket
     else:
-        conn._parser._sock = fake_socket
+        conn._parser._sock = mock_socket
     for i in range(100):
         try:
             response = conn.read_response()
             break
-        except FakeSocket.TestError:
+        except MockSocket.TestError:
             pass
 
     else:
