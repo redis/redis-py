@@ -1,3 +1,4 @@
+    * Revert #2104, #2673, add `disconnect_on_error` option to `read_response()` (issues #2506, #2624)
     * Add `address_remap` parameter to `RedisCluster`
     * Fix incorrect usage of once flag in async Sentinel
     * asyncio: Fix memory leak caused by hiredis (#2693)
