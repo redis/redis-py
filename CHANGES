@@ -1,3 +1,4 @@
+    * Close Connection on all send_command() errors (#2516)
     * Documentation fix: password protected socket connection (#2374)
     * Allow `timeout=None` in `PubSub.get_message()` to wait forever
     * add `nowait` flag to `asyncio.Connection.disconnect()`
