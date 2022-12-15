@@ -797,10 +797,10 @@ class Connection:
                 f"Error {err_no} while writing to socket. {errmsg}."
             ) from e
         except BaseException:
-            # The send_packed_command api does not support re-trying a partially
-            # sent message, so there is no point in keeping the connection open.
-            # An unknown number of bytes has been sent and the connection is therefore
-            # unusable.
+            # BaseExceptions can be raised when a send*() is not finished, e.g. due
+            # to a timeout.  Ideally, a caller could then re-try, to continue
+            # sending partially-sent data. However, the send_packed_command() API
+            # does not it so there is no point in keeping the connection open.
             await self.disconnect(nowait=True)
             raise
 

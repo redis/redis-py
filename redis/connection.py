@@ -816,11 +816,11 @@ class Connection:
                 errmsg = e.args[1]
             raise ConnectionError(f"Error {errno} while writing to socket. {errmsg}.")
         except BaseException:
-            # The send_packed_command api does not support re-trying a partially
-            # sent message, so there is no point in keeping the connection open.
-            # An unknown number of bytes has been sent and the connection is therefore
-            # unusable.
-            self.disconnect()
+            # BaseExceptions can be raised when a send() is not finished, e.g. due
+            # to a timeout.  Ideally, a caller could then re-try, to continue
+            # sending partially-sent data. However, the send_packed_command() API
+            # does not it so there is no point in keeping the connection open.
+             self.disconnect()
             raise
 
     def send_command(self, *args, **kwargs):
