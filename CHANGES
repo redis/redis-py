@@ -1,3 +1,4 @@
+    * Add `timeout=None` in `SentinelConnectionManager.read_response`
     * Documentation fix: password protected socket connection (#2374)
     * Allow `timeout=None` in `PubSub.get_message()` to wait forever
     * add `nowait` flag to `asyncio.Connection.disconnect()`
