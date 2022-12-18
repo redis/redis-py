@@ -1237,6 +1237,19 @@ class ConnectionPool:
     ``connection_class``.
     """
 
+    __slots__ = (
+        "connection_class",
+        "connection_kwargs",
+        "max_connections",
+        "_fork_lock",
+        "_lock",
+        "_created_connections",
+        "_available_connections",
+        "_in_use_connections",
+        "encoder_class",
+        "pid",
+    )
+
     @classmethod
     def from_url(cls: Type[_CP], url: str, **kwargs) -> _CP:
         """
@@ -1519,18 +1532,23 @@ class BlockingConnectionPool(ConnectionPool):
         >>> pool = BlockingConnectionPool(timeout=5)
     """
 
+    __slots__ = (
+        "queue_class",
+        "timeout",
+        "pool",
+    )
+
     def __init__(
         self,
         max_connections: int = 50,
         timeout: Optional[int] = 20,
         connection_class: Type[Connection] = Connection,
-        queue_class: Type[asyncio.Queue] = asyncio.LifoQueue,
+        queue_class: Type[asyncio.Queue] = asyncio.Queue,
         **connection_kwargs,
     ):
 
         self.queue_class = queue_class
         self.timeout = timeout
-        self._connections: List[Connection]
         super().__init__(
             connection_class=connection_class,
             max_connections=max_connections,
@@ -1538,17 +1556,10 @@ class BlockingConnectionPool(ConnectionPool):
         )
 
     def reset(self):
-        # Create and fill up a thread safe queue with ``None`` values.
+        # a queue of ready connections. populated lazily
         self.pool = self.queue_class(self.max_connections)
-        while True:
-            try:
-                self.pool.put_nowait(None)
-            except asyncio.QueueFull:
-                break
-
-        # Keep a list of actual connection instances so that we can
-        # disconnect them later.
-        self._connections = []
+        # used to decide wether we can allocate new connection or wait
+        self._created_connections = 0
 
         # this must be the last operation in this method. while reset() is
         # called when holding _fork_lock, other threads in this process
@@ -1562,41 +1573,36 @@ class BlockingConnectionPool(ConnectionPool):
         self.pid = os.getpid()
 
     def make_connection(self):
-        """Make a fresh connection."""
-        connection = self.connection_class(**self.connection_kwargs)
-        self._connections.append(connection)
-        return connection
+        """Create a new connection"""
+        self._created_connections += 1
+        return self.connection_class(**self.connection_kwargs)
 
     async def get_connection(self, command_name, *keys, **options):
         """
         Get a connection, blocking for ``self.timeout`` until a connection
         is available from the pool.
 
-        If the connection returned is ``None`` then creates a new connection.
-        Because we use a last-in first-out queue, the existing connections
-        (having been returned to the pool after the initial ``None`` values
-        were added) will be returned before ``None`` values. This means we only
-        create new connections when we need to, i.e.: the actual number of
-        connections will only increase in response to demand.
+        Checks internal connection counter to ensure connections are allocated lazily.
         """
         # Make sure we haven't changed process.
         self._checkpid()
 
-        # Try and get a connection from the pool. If one isn't available within
-        # self.timeout then raise a ``ConnectionError``.
-        connection = None
-        try:
-            async with async_timeout.timeout(self.timeout):
-                connection = await self.pool.get()
-        except (asyncio.QueueEmpty, asyncio.TimeoutError):
-            # Note that this is not caught by the redis client and will be
-            # raised unless handled by application code. If you want never to
-            raise ConnectionError("No connection available.")
-
-        # If the ``connection`` is actually ``None`` then that's a cue to make
-        # a new connection to add to the pool.
-        if connection is None:
-            connection = self.make_connection()
+        # if we are under max_connections, try getting one immediately. if it fails
+        # it is ok to allocate new one
+        if self._created_connections < self.max_connections:
+            try:
+                connection = self.pool.get_nowait()
+            except asyncio.QueueEmpty:
+                connection = self.make_connection()
+        else:
+            # wait for available connection
+            try:
+                async with async_timeout.timeout(self.timeout):
+                    connection = await self.pool.get()
+            except asyncio.TimeoutError:
+                # Note that this is not caught by the redis client and will be
+                # raised unless handled by application code.
+                raise ConnectionError("No connection available.")
 
         try:
             # ensure this connection is connected to Redis
@@ -1646,7 +1652,10 @@ class BlockingConnectionPool(ConnectionPool):
         self._checkpid()
         async with self._lock:
             resp = await asyncio.gather(
-                *(connection.disconnect() for connection in self._connections),
+                *(
+                    self.pool.get_nowait().disconnect()
+                    for _ in range(self.pool.qsize())
+                ),
                 return_exceptions=True,
             )
             exc = next((r for r in resp if isinstance(r, BaseException)), None)
