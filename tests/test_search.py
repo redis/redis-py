@@ -1620,4 +1620,4 @@ def test_withsuffixtrie(modclient: redis.Redis):
 @pytest.mark.redismod
 def test_timeout(modclient: redis.Redis):
     q1 = Query("foo").timeout(5000)
-    assert q1.get_args() == ['foo', 'TIMEOUT', 5000, 'LIMIT', 0, 10]
+    assert q1.get_args() == ["foo", "TIMEOUT", 5000, "LIMIT", 0, 10]
