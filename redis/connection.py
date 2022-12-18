@@ -154,7 +154,7 @@ class BaseParser:
         "Parse an error response"
         error_code = response.split(" ")[0]
         if error_code in self.EXCEPTION_CLASSES:
-            response = response[len(error_code) + 1 :]
+            response = response[len(error_code) + 1:]
             exception_class = self.EXCEPTION_CLASSES[error_code]
             if isinstance(exception_class, dict):
                 exception_class = exception_class.get(response, ResponseError)
@@ -464,9 +464,9 @@ class HiredisParser(BaseParser):
         if isinstance(response, ConnectionError):
             raise response
         elif (
-            isinstance(response, list)
-            and response
-            and isinstance(response[0], ConnectionError)
+                isinstance(response, list)
+                and response
+                and isinstance(response[0], ConnectionError)
         ):
             raise response[0]
         return response
@@ -482,29 +482,29 @@ class Connection:
     "Manages TCP communication to and from a Redis server"
 
     def __init__(
-        self,
-        host="localhost",
-        port=6379,
-        db=0,
-        password=None,
-        socket_timeout=None,
-        socket_connect_timeout=None,
-        socket_keepalive=False,
-        socket_keepalive_options=None,
-        socket_type=0,
-        retry_on_timeout=False,
-        retry_on_error=SENTINEL,
-        encoding="utf-8",
-        encoding_errors="strict",
-        decode_responses=False,
-        parser_class=DefaultParser,
-        socket_read_size=65536,
-        health_check_interval=0,
-        client_name=None,
-        username=None,
-        retry=None,
-        redis_connect_func=None,
-        credential_provider: Optional[CredentialProvider] = None,
+            self,
+            host="localhost",
+            port=6379,
+            db=0,
+            password=None,
+            socket_timeout=None,
+            socket_connect_timeout=None,
+            socket_keepalive=False,
+            socket_keepalive_options=None,
+            socket_type=0,
+            retry_on_timeout=False,
+            retry_on_error=SENTINEL,
+            encoding="utf-8",
+            encoding_errors="strict",
+            decode_responses=False,
+            parser_class=DefaultParser,
+            socket_read_size=65536,
+            health_check_interval=0,
+            client_name=None,
+            username=None,
+            retry=None,
+            redis_connect_func=None,
+            credential_provider: Optional[CredentialProvider] = None,
     ):
         """
         Initialize a new Connection.
@@ -630,7 +630,7 @@ class Connection:
         # socket.connect()
         err = None
         for res in socket.getaddrinfo(
-            self.host, self.port, self.socket_type, socket.SOCK_STREAM
+                self.host, self.port, self.socket_type, socket.SOCK_STREAM
         ):
             family, socktype, proto, canonname, socket_address = res
             sock = None
@@ -664,12 +664,23 @@ class Connection:
             raise err
         raise OSError("socket.getaddrinfo returned an empty list")
 
+    def _host_error(self):
+        try:
+            host_error = f"{self.host}:{self.port}"
+        except AttributeError:
+            host_error = "connection"
+
+        return host_error
+
     def _error_message(self, exception):
         # args for socket.error can either be (errno, "message")
         # or just "message"
+
+        host_error = self._host_error()
+
         if len(exception.args) == 1:
             try:
-                return f"Error connecting to {self.host}:{self.port}. \
+                return f"Error connecting to {host_error}. \
                         {exception.args[0]}."
             except AttributeError:
                 return f"Connection Error: {exception.args[0]}"
@@ -677,7 +688,7 @@ class Connection:
             try:
                 return (
                     f"Error {exception.args[0]} connecting to "
-                    f"{self.host}:{self.port}. {exception.args[1]}."
+                    f"{host_error}. {exception.args[1]}."
                 )
             except AttributeError:
                 return f"Connection Error: {exception.args[0]}"
@@ -689,8 +700,8 @@ class Connection:
         # if credential provider or username and/or password are set, authenticate
         if self.credential_provider or (self.username or self.password):
             cred_provider = (
-                self.credential_provider
-                or UsernamePasswordCredentialProvider(self.username, self.password)
+                    self.credential_provider
+                    or UsernamePasswordCredentialProvider(self.username, self.password)
             )
             auth_args = cred_provider.get_credentials()
             # avoid checking health here -- PING will fail if we try
@@ -793,29 +804,30 @@ class Connection:
         sock = self._sock
         if not sock:
             self.connect()
+
+        host_error = self._host_error()
+
         try:
             return self._parser.can_read(timeout)
         except OSError as e:
             self.disconnect()
             raise ConnectionError(
-                f"Error while reading from {self.host}:{self.port}: {e.args}"
+                f"Error while reading from {host_error}: {e.args}"
             )
 
     def read_response(self, disable_decoding=False):
         """Read the response from a previously sent command"""
-        try:
-            hosterr = f"{self.host}:{self.port}"
-        except AttributeError:
-            hosterr = "connection"
+
+        host_error = self._host_error()
 
         try:
             response = self._parser.read_response(disable_decoding=disable_decoding)
         except socket.timeout:
             self.disconnect()
-            raise TimeoutError(f"Timeout reading from {hosterr}")
+            raise TimeoutError(f"Timeout reading from {host_error}")
         except OSError as e:
             self.disconnect()
-            raise ConnectionError(f"Error while reading from {hosterr}" f" : {e.args}")
+            raise ConnectionError(f"Error while reading from {host_error}" f" : {e.args}")
         except Exception:
             self.disconnect()
             raise
@@ -848,9 +860,9 @@ class Connection:
             # output list if we're sending large values or memoryviews
             arg_length = len(arg)
             if (
-                len(buff) > buffer_cutoff
-                or arg_length > buffer_cutoff
-                or isinstance(arg, memoryview)
+                    len(buff) > buffer_cutoff
+                    or arg_length > buffer_cutoff
+                    or isinstance(arg, memoryview)
             ):
                 buff = SYM_EMPTY.join(
                     (buff, SYM_DOLLAR, str(arg_length).encode(), SYM_CRLF)
@@ -883,9 +895,9 @@ class Connection:
             for chunk in self.pack_command(*cmd):
                 chunklen = len(chunk)
                 if (
-                    buffer_length > buffer_cutoff
-                    or chunklen > buffer_cutoff
-                    or isinstance(chunk, memoryview)
+                        buffer_length > buffer_cutoff
+                        or chunklen > buffer_cutoff
+                        or isinstance(chunk, memoryview)
                 ):
                     output.append(SYM_EMPTY.join(pieces))
                     buffer_length = 0
@@ -909,20 +921,20 @@ class SSLConnection(Connection):
     """  # noqa
 
     def __init__(
-        self,
-        ssl_keyfile=None,
-        ssl_certfile=None,
-        ssl_cert_reqs="required",
-        ssl_ca_certs=None,
-        ssl_ca_data=None,
-        ssl_check_hostname=False,
-        ssl_ca_path=None,
-        ssl_password=None,
-        ssl_validate_ocsp=False,
-        ssl_validate_ocsp_stapled=False,
-        ssl_ocsp_context=None,
-        ssl_ocsp_expected_cert=None,
-        **kwargs,
+            self,
+            ssl_keyfile=None,
+            ssl_certfile=None,
+            ssl_cert_reqs="required",
+            ssl_ca_certs=None,
+            ssl_ca_data=None,
+            ssl_check_hostname=False,
+            ssl_ca_path=None,
+            ssl_password=None,
+            ssl_validate_ocsp=False,
+            ssl_validate_ocsp_stapled=False,
+            ssl_ocsp_context=None,
+            ssl_ocsp_expected_cert=None,
+            **kwargs,
     ):
         """Constructor
 
@@ -988,9 +1000,9 @@ class SSLConnection(Connection):
                 password=self.certificate_password,
             )
         if (
-            self.ca_certs is not None
-            or self.ca_path is not None
-            or self.ca_data is not None
+                self.ca_certs is not None
+                or self.ca_path is not None
+                or self.ca_data is not None
         ):
             context.load_verify_locations(
                 cafile=self.ca_certs, capath=self.ca_path, cadata=self.ca_data
@@ -1045,24 +1057,24 @@ class SSLConnection(Connection):
 
 class UnixDomainSocketConnection(Connection):
     def __init__(
-        self,
-        path="",
-        db=0,
-        username=None,
-        password=None,
-        socket_timeout=None,
-        encoding="utf-8",
-        encoding_errors="strict",
-        decode_responses=False,
-        retry_on_timeout=False,
-        retry_on_error=SENTINEL,
-        parser_class=DefaultParser,
-        socket_read_size=65536,
-        health_check_interval=0,
-        client_name=None,
-        retry=None,
-        redis_connect_func=None,
-        credential_provider: Optional[CredentialProvider] = None,
+            self,
+            path="",
+            db=0,
+            username=None,
+            password=None,
+            socket_timeout=None,
+            encoding="utf-8",
+            encoding_errors="strict",
+            decode_responses=False,
+            retry_on_timeout=False,
+            retry_on_error=SENTINEL,
+            parser_class=DefaultParser,
+            socket_read_size=65536,
+            health_check_interval=0,
+            client_name=None,
+            retry=None,
+            redis_connect_func=None,
+            credential_provider: Optional[CredentialProvider] = None,
     ):
         """
         Initialize a new UnixDomainSocketConnection.
@@ -1164,9 +1176,9 @@ URL_QUERY_ARGUMENT_PARSERS = {
 
 def parse_url(url):
     if not (
-        url.startswith("redis://")
-        or url.startswith("rediss://")
-        or url.startswith("unix://")
+            url.startswith("redis://")
+            or url.startswith("rediss://")
+            or url.startswith("unix://")
     ):
         raise ValueError(
             "Redis URL must specify one of the following "
@@ -1283,9 +1295,9 @@ class ConnectionPool:
         return cls(**kwargs)
 
     def __init__(
-        self, connection_class=Connection, max_connections=None, **connection_kwargs
+            self, connection_class=Connection, max_connections=None, **connection_kwargs
     ):
-        max_connections = max_connections or 2**31
+        max_connections = max_connections or 2 ** 31
         if not isinstance(max_connections, int) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
 
@@ -1510,12 +1522,12 @@ class BlockingConnectionPool(ConnectionPool):
     """
 
     def __init__(
-        self,
-        max_connections=50,
-        timeout=20,
-        connection_class=Connection,
-        queue_class=LifoQueue,
-        **connection_kwargs,
+            self,
+            max_connections=50,
+            timeout=20,
+            connection_class=Connection,
+            queue_class=LifoQueue,
+            **connection_kwargs,
     ):
 
         self.queue_class = queue_class
