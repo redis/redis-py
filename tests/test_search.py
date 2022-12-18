@@ -1616,6 +1616,7 @@ def test_withsuffixtrie(modclient: redis.Redis):
     info = modclient.ft().info()
     assert "WITHSUFFIXTRIE" in info["attributes"][0]
 
+
 @pytest.mark.redismod
 def test_timeout(modclient: redis.Redis):
     q1 = Query("foo").timeout(5000)
