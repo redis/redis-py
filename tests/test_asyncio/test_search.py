@@ -1001,3 +1001,16 @@ async def test_search_commands_in_pipeline(modclient: redis.Redis):
     assert "doc2" == res[3][4]
     assert res[3][5] is None
     assert res[3][3] == res[3][6] == ["txt", "foo bar"]
+
+
+@pytest.mark.redismod
+def test_timeout():
+    q1 = Query("foo").timeout(5000)
+    assert q1.get_args() == ["foo", "TIMEOUT", 5000, "LIMIT", 0, 10]
+
+
+@pytest.mark.redismod
+def test_not_number_timeout(modclient: redis.Redis):
+    q1 = Query("foo").timeout("not a number")
+    with pytest.raises(Exception):
+        modclient.ft().search(q1)
