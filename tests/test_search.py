@@ -1623,4 +1623,4 @@ def test_query_timeout(modclient: redis.Redis):
     assert q1.get_args() == ["foo", "TIMEOUT", 5000, "LIMIT", 0, 10]
     q2 = Query("foo").timeout("not_a_number")
     with pytest.raises(redis.exceptions.ResponseError):
-        modclient.ft().search(q1)
+        modclient.ft().search(q2)
