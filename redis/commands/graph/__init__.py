@@ -253,3 +253,51 @@ class AsyncGraph(Graph, AsyncGraphCommands):
         return (
             await self.call_procedure(DB_RAELATIONSHIPTYPES, read_only=True)
         ).result_set
+
+    def pipeline(self, transaction=True, shard_hint=None):
+        """Creates a pipeline for the GRAPH module, that can be used for executing
+        GRAPH commands, as well as classic core commands.
+
+        Usage example: # TODO: add graph usage
+            r = redis.Redis()
+            pipe = r.graph().pipeline()
+            query = \"\"\"CREATE (p:person{name:'a',age:32, array:[0,1,2]})\"\"\"
+            pipe.query(query)
+
+            query = \"\"\"WITH [0,1,2] as x return x\"\"\"
+            pipe.query(query)
+            results = pipe.execute() # Execute the pipeline and return the results
+
+        """
+        if isinstance(self.client, redcumis.RedisCluster):
+            p = ClusterPipeline(
+                nodes_manager=self.client.nodes_manager,
+                commands_parser=self.client.commands_parser,
+                startup_nodes=self.client.nodes_manager.startup_nodes,
+                result_callbacks=self.client.result_callbacks,
+                cluster_response_callbacks=self.client.cluster_response_callbacks,
+                cluster_error_retry_attempts=self.client.cluster_error_retry_attempts,
+                read_from_replicas=self.client.read_from_replicas,
+                reinitialize_steps=self.client.reinitialize_steps,
+                lock=self.client._lock,
+            )
+
+        else:
+            p = Pipeline(
+                connection_pool=self.client.connection_pool,
+                response_callbacks=self.MODULE_CALLBACKS,
+                transaction=transaction,
+                shard_hint=shard_hint,
+            )
+
+        p._encode = self._encode
+        p._decode = self._decode
+        return p
+
+
+class ClusterPipeline(GRAPHCommands, redis.cluster.ClusterPipeline):
+    """Cluster pipeline for the module."""
+
+
+class Pipeline(GRAPHCommands, redis.client.Pipeline):
+    """Pipeline for the module."""
