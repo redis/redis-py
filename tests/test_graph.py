@@ -123,6 +123,28 @@ def test_path(client):
 
 
 @pytest.mark.redismod
+def test_path_in_pipeline(client):
+    node0 = Node(node_id=0, label="L1")
+    node1 = Node(node_id=1, label="L1")
+    edge01 = Edge(node0, "R1", node1, edge_id=0, properties={"value": 1})
+
+    pipe = client.graph().pipeline()
+    pipe.add_node(node0)
+    pipe.add_node(node1)
+    pipe.add_edge(edge01)
+    pipe.flush()
+
+    path01 = Path.new_empty_path().add_node(node0).add_edge(edge01).add_node(node1)
+    expected_results = [[path01]]
+
+    query = "MATCH p=(:L1)-[:R1]->(:L1) RETURN p ORDER BY p"
+    result = pipe.query(query)
+    print("pipe.execute(): ")
+    print(pipe.execute())
+    assert expected_results == result.result_set
+
+
+@pytest.mark.redismod
 def test_param(client):
     params = [1, 2.3, "str", True, False, None, [0, 1, 2]]
     query = "RETURN $param"

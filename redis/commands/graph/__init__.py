@@ -3,6 +3,7 @@ from .commands import AsyncGraphCommands, GraphCommands
 from .edge import Edge  # noqa
 from .node import Node  # noqa
 from .path import Path  # noqa
+import redis
 
 DB_LABELS = "DB.LABELS"
 DB_RAELATIONSHIPTYPES = "DB.RELATIONSHIPTYPES"
@@ -18,6 +19,9 @@ class Graph(GraphCommands):
         """
         Create a new graph.
         """
+        # Set the module commands' callbacks
+        self.MODULE_CALLBACKS = {}
+
         self.NAME = name  # Graph key
         self.client = client
         self.execute_command = client.execute_command
@@ -161,6 +165,74 @@ class Graph(GraphCommands):
     def property_keys(self):
         return self.call_procedure(DB_PROPERTYKEYS, read_only=True).result_set
 
+    def pipeline(self, transaction=True, shard_hint=None):
+        """Creates a pipeline for the GRAPH module, that can be used for executing
+        GRAPH commands, as well as classic core commands.
+
+        Usage example: # TODO: add graph usage
+            r = redis.Redis()
+            pipe = r.graph().pipeline()
+            query = \"\"\"CREATE (p:person{name:'a',age:32, array:[0,1,2]})\"\"\"
+            pipe.query(query)
+
+            query = \"\"\"WITH [0,1,2] as x return x\"\"\"
+            pipe.query(query)
+            results = pipe.execute() # Execute the pipeline and return the results
+
+        """
+        if isinstance(self.client, redis.RedisCluster):
+            p = ClusterPipeline(
+                nodes_manager=self.client.nodes_manager,
+                commands_parser=self.client.commands_parser,
+                startup_nodes=self.client.nodes_manager.startup_nodes,
+                result_callbacks=self.client.result_callbacks,
+                cluster_response_callbacks=self.client.cluster_response_callbacks,
+                cluster_error_retry_attempts=self.client.cluster_error_retry_attempts,
+                read_from_replicas=self.client.read_from_replicas,
+                reinitialize_steps=self.client.reinitialize_steps,
+                lock=self.client._lock,
+            )
+
+        else:
+            p = Pipeline(
+                connection_pool=self.client.connection_pool,
+                response_callbacks=self.MODULE_CALLBACKS,
+                transaction=transaction,
+                shard_hint=shard_hint,
+            )
+
+        p._clear_schema = self._clear_schema
+        p._refresh_schema = self._refresh_schema
+        p._refresh_labels = self._refresh_labels
+        p._refresh_relations = self._refresh_relations
+        p._refresh_attributes = self._refresh_attributes
+        p.get_label = self.get_label
+        p.get_relation = self.get_relation
+        p.get_property = self.get_property
+        p.add_node = self.add_node
+        p.add_edge = self.add_edge
+        p._build_params_header = self._build_params_header
+        p.call_procedure = self.call_procedure
+        p.labels = self.labels
+        p.relationship_types = self.relationship_types
+        p.property_keys = self.property_keys
+
+
+        p.nodes = self.nodes
+        p.edges = self.edges
+        p.name = self.name
+
+
+        return p
+
+
+class ClusterPipeline(GraphCommands, redis.cluster.ClusterPipeline):
+    """Cluster pipeline for the module."""
+
+
+class Pipeline(GraphCommands, redis.client.Pipeline):
+    """Pipeline for the module."""
+
 
 class AsyncGraph(Graph, AsyncGraphCommands):
     """Async version for Graph"""
@@ -253,51 +325,3 @@ class AsyncGraph(Graph, AsyncGraphCommands):
         return (
             await self.call_procedure(DB_RAELATIONSHIPTYPES, read_only=True)
         ).result_set
-
-    def pipeline(self, transaction=True, shard_hint=None):
-        """Creates a pipeline for the GRAPH module, that can be used for executing
-        GRAPH commands, as well as classic core commands.
-
-        Usage example: # TODO: add graph usage
-            r = redis.Redis()
-            pipe = r.graph().pipeline()
-            query = \"\"\"CREATE (p:person{name:'a',age:32, array:[0,1,2]})\"\"\"
-            pipe.query(query)
-
-            query = \"\"\"WITH [0,1,2] as x return x\"\"\"
-            pipe.query(query)
-            results = pipe.execute() # Execute the pipeline and return the results
-
-        """
-        if isinstance(self.client, redcumis.RedisCluster):
-            p = ClusterPipeline(
-                nodes_manager=self.client.nodes_manager,
-                commands_parser=self.client.commands_parser,
-                startup_nodes=self.client.nodes_manager.startup_nodes,
-                result_callbacks=self.client.result_callbacks,
-                cluster_response_callbacks=self.client.cluster_response_callbacks,
-                cluster_error_retry_attempts=self.client.cluster_error_retry_attempts,
-                read_from_replicas=self.client.read_from_replicas,
-                reinitialize_steps=self.client.reinitialize_steps,
-                lock=self.client._lock,
-            )
-
-        else:
-            p = Pipeline(
-                connection_pool=self.client.connection_pool,
-                response_callbacks=self.MODULE_CALLBACKS,
-                transaction=transaction,
-                shard_hint=shard_hint,
-            )
-
-        p._encode = self._encode
-        p._decode = self._decode
-        return p
-
-
-class ClusterPipeline(GRAPHCommands, redis.cluster.ClusterPipeline):
-    """Cluster pipeline for the module."""
-
-
-class Pipeline(GRAPHCommands, redis.client.Pipeline):
-    """Pipeline for the module."""

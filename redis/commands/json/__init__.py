@@ -95,9 +95,9 @@ class JSON(JSONCommands):
 
         r = redis.Redis()
         pipe = r.json().pipeline()
-        pipe.jsonset('foo', '.', {'hello!': 'world'})
-        pipe.jsonget('foo')
-        pipe.jsonget('notakey')
+        pipe.set('foo', '.', {'hello!': 'world'})
+        pipe.get('foo')
+        pipe.get('notakey')
         """
         if isinstance(self.client, redis.RedisCluster):
             p = ClusterPipeline(
