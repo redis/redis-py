@@ -1327,10 +1327,9 @@ def test_arrindex_dollar(client):
     ]
 
     # Test with none-scalar value
-    assert (
-        client.json().arrindex("test_None", "$..nested42_empty_arr.arr", {"arr": []})
-        == [-1]
-    )
+    assert client.json().arrindex(
+        "test_None", "$..nested42_empty_arr.arr", {"arr": []}
+    ) == [-1]
 
     # Test legacy (path begins with dot)
     # Test index of int scalar in single value
