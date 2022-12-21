@@ -28,6 +28,7 @@ class Query:
         self._filters = list()
         self._ids = None
         self._slop = -1
+        self._timeout = None
         self._in_order = False
         self._sortby = None
         self._return_fields = []
@@ -131,6 +132,11 @@ class Query:
         self._slop = slop
         return self
 
+    def timeout(self, timeout):
+        """overrides the timeout parameter of the module"""
+        self._timeout = timeout
+        return self
+
     def in_order(self):
         """
         Match only documents where the query terms appear in
@@ -188,6 +194,8 @@ class Query:
             args += self._ids
         if self._slop >= 0:
             args += ["SLOP", self._slop]
+        if self._timeout:
+            args += ["TIMEOUT", self._timeout]
         if self._in_order:
             args.append("INORDER")
         if self._return_fields:
