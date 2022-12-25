@@ -52,6 +52,8 @@ READ_COMMANDS = frozenset(
     [
         "BITCOUNT",
         "BITPOS",
+        "EVAL_RO",
+        "EVALSHA_RO",
         "EXISTS",
         "GEODIST",
         "GEOHASH",
