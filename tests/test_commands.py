@@ -274,7 +274,7 @@ class TestRedisCommands:
 
         # Resets and tests that hashed passwords are set properly.
         hashed_password = (
-            "5e884898da28047151d0e56f8dc629" "2773603d0d6aabbdd62a11ef721d1542d8"
+            "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
         )
         assert r.acl_setuser(
             username, enabled=True, reset=True, hashed_passwords=["+" + hashed_password]
@@ -4526,6 +4526,23 @@ class TestRedisCommands:
     def test_latency_histogram_not_implemented(self, r: redis.Redis):
         with pytest.raises(NotImplementedError):
             r.latency_histogram()
+
+    def test_latency_graph_not_implemented(self, r: redis.Redis):
+        with pytest.raises(NotImplementedError):
+            r.latency_graph()
+
+    def test_latency_doctor_not_implemented(self, r: redis.Redis):
+        with pytest.raises(NotImplementedError):
+            r.latency_doctor()
+
+    def test_latency_history(self, r: redis.Redis):
+        assert r.latency_history("command") == []
+
+    def test_latency_latest(self, r: redis.Redis):
+        assert r.latency_latest() == []
+
+    def test_latency_reset(self, r: redis.Redis):
+        assert r.latency_reset() == 0
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("4.0.0")

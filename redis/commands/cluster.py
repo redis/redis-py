@@ -646,6 +646,16 @@ class ClusterManagementCommands(ManagementCommands):
         """
         return self.execute_command("CLUSTER LINKS", target_nodes=target_node)
 
+    def cluster_flushslots(self, target_nodes: Optional["TargetNodesT"] = None) -> None:
+        raise NotImplementedError(
+            "CLUSTER FLUSHSLOTS is intentionally not implemented in the client."
+        )
+
+    def cluster_bumpepoch(self, target_nodes: Optional["TargetNodesT"] = None) -> None:
+        raise NotImplementedError(
+            "CLUSTER BUMPEPOCH is intentionally not implemented in the client."
+        )
+
     def readonly(self, target_nodes: Optional["TargetNodesT"] = None) -> ResponseT:
         """
         Enables read queries.

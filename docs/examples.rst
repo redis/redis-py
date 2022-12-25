@@ -13,4 +13,5 @@ Examples
    examples/search_vector_similarity_examples
    examples/pipeline_examples
    examples/timeseries_examples
-   examples/redis-stream-example.ipynb
+   examples/redis-stream-example
+   examples/opentelemetry_api_examples

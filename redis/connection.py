@@ -62,9 +62,9 @@ SYM_EMPTY = b""
 SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
 
 SENTINEL = object()
-MODULE_LOAD_ERROR = "Error loading the extension. " "Please check the server logs."
+MODULE_LOAD_ERROR = "Error loading the extension. Please check the server logs."
 NO_SUCH_MODULE_ERROR = "Error unloading module: no such module with that name"
-MODULE_UNLOAD_NOT_POSSIBLE_ERROR = "Error unloading module: operation not " "possible."
+MODULE_UNLOAD_NOT_POSSIBLE_ERROR = "Error unloading module: operation not possible."
 MODULE_EXPORTS_DATA_TYPES_ERROR = (
     "Error unloading module: the module "
     "exports one or more module-side data "
@@ -664,12 +664,23 @@ class Connection:
             raise err
         raise OSError("socket.getaddrinfo returned an empty list")
 
+    def _host_error(self):
+        try:
+            host_error = f"{self.host}:{self.port}"
+        except AttributeError:
+            host_error = "connection"
+
+        return host_error
+
     def _error_message(self, exception):
         # args for socket.error can either be (errno, "message")
         # or just "message"
+
+        host_error = self._host_error()
+
         if len(exception.args) == 1:
             try:
-                return f"Error connecting to {self.host}:{self.port}. \
+                return f"Error connecting to {host_error}. \
                         {exception.args[0]}."
             except AttributeError:
                 return f"Connection Error: {exception.args[0]}"
@@ -677,7 +688,7 @@ class Connection:
             try:
                 return (
                     f"Error {exception.args[0]} connecting to "
-                    f"{self.host}:{self.port}. {exception.args[1]}."
+                    f"{host_error}. {exception.args[1]}."
                 )
             except AttributeError:
                 return f"Connection Error: {exception.args[0]}"
@@ -793,29 +804,30 @@ class Connection:
         sock = self._sock
         if not sock:
             self.connect()
+
+        host_error = self._host_error()
+
         try:
             return self._parser.can_read(timeout)
         except OSError as e:
             self.disconnect()
-            raise ConnectionError(
-                f"Error while reading from {self.host}:{self.port}: {e.args}"
-            )
+            raise ConnectionError(f"Error while reading from {host_error}: {e.args}")
 
     def read_response(self, disable_decoding=False):
         """Read the response from a previously sent command"""
-        try:
-            hosterr = f"{self.host}:{self.port}"
-        except AttributeError:
-            hosterr = "connection"
+
+        host_error = self._host_error()
 
         try:
             response = self._parser.read_response(disable_decoding=disable_decoding)
         except socket.timeout:
             self.disconnect()
-            raise TimeoutError(f"Timeout reading from {hosterr}")
+            raise TimeoutError(f"Timeout reading from {host_error}")
         except OSError as e:
             self.disconnect()
-            raise ConnectionError(f"Error while reading from {hosterr}" f" : {e.args}")
+            raise ConnectionError(
+                f"Error while reading from {host_error}" f" : {e.args}"
+            )
         except Exception:
             self.disconnect()
             raise

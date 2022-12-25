@@ -122,7 +122,7 @@ class TestPipeline:
             with pytest.raises(redis.ResponseError) as ex:
                 pipe.execute()
             assert str(ex.value).startswith(
-                "Command # 3 (LPUSH c 3) of " "pipeline caused error: "
+                "Command # 3 (LPUSH c 3) of pipeline caused error: "
             )
 
             # make sure the pipe was restored to a working state
@@ -167,7 +167,7 @@ class TestPipeline:
                 pipe.execute()
 
             assert str(ex.value).startswith(
-                "Command # 2 (ZREM b) of " "pipeline caused error: "
+                "Command # 2 (ZREM b) of pipeline caused error: "
             )
 
             # make sure the pipe was restored to a working state
@@ -184,7 +184,7 @@ class TestPipeline:
                 pipe.execute()
 
             assert str(ex.value).startswith(
-                "Command # 2 (ZREM b) of " "pipeline caused error: "
+                "Command # 2 (ZREM b) of pipeline caused error: "
             )
 
             # make sure the pipe was restored to a working state
@@ -331,7 +331,7 @@ class TestPipeline:
                 pipe.execute()
 
             assert str(ex.value).startswith(
-                "Command # 1 (LLEN a) of " "pipeline caused error: "
+                "Command # 1 (LLEN a) of pipeline caused error: "
             )
 
         assert r["a"] == b"1"
