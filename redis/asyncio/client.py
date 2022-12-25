@@ -453,7 +453,7 @@ class Redis(
                 f"Unclosed client session {self!r}", ResourceWarning, source=self
             )
             context = {"client": self, "message": self._DEL_MESSAGE}
-            asyncio.get_event_loop().call_exception_handler(context)
+            asyncio.get_running_loop().call_exception_handler(context)
 
     async def close(self, close_connection_pool: Optional[bool] = None) -> None:
         """
@@ -798,7 +798,7 @@ class PubSub:
 
         if (
             conn.health_check_interval
-            and asyncio.get_event_loop().time() > conn.next_health_check
+            and asyncio.get_running_loop().time() > conn.next_health_check
         ):
             await conn.send_command(
                 "PING", self.HEALTH_CHECK_MESSAGE, check_health=False

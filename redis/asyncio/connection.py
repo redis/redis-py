@@ -532,7 +532,7 @@ class Connection:
     def __del__(self):
         try:
             if self.is_connected:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 coro = self.disconnect()
                 if loop.is_running():
                     loop.create_task(coro)

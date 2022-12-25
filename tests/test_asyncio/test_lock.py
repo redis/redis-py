@@ -136,11 +136,11 @@ class TestLock:
         sleep = 60
         bt = 1
         lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
-        start = asyncio.get_event_loop().time()
+        start = asyncio.get_running_loop().time()
         assert not await lock2.acquire()
         # the elapsed timed is less than the blocking_timeout as the lock is
         # unattainable given the sleep/blocking_timeout configuration
-        assert bt > (asyncio.get_event_loop().time() - start)
+        assert bt > (asyncio.get_running_loop().time() - start)
         await lock1.release()
 
     async def test_releasing_unlocked_lock_raises_error(self, r):
