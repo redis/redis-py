@@ -1,7 +1,7 @@
 import asyncio
 import random
 import weakref
-from typing import AsyncIterator, Iterable, Mapping, Sequence, Tuple, Type
+from typing import AsyncIterator, Iterable, Mapping, Optional, Sequence, Tuple, Type
 
 from redis.asyncio.client import Redis
 from redis.asyncio.connection import (
@@ -63,9 +63,16 @@ class SentinelManagedConnection(Connection):
             lambda error: asyncio.sleep(0),
         )
 
-    async def read_response(self, disable_decoding: bool = False):
+    async def read_response(
+        self,
+        disable_decoding: bool = False,
+        timeout: Optional[float] = None,
+    ):
         try:
-            return await super().read_response(disable_decoding=disable_decoding)
+            return await super().read_response(
+                disable_decoding=disable_decoding,
+                timeout=timeout,
+            )
         except ReadOnlyError:
             if self.connection_pool.is_master:
                 # When talking to a master, a ReadOnlyError when likely

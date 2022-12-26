@@ -5149,7 +5149,7 @@ class ScriptCommands(CommandsProtocol):
         """
         The read-only variant of the EVAL command
 
-        Execute the read-only Lue ``script`` specifying the ``numkeys`` the script
+        Execute the read-only Lua ``script`` specifying the ``numkeys`` the script
         will touch and the key names and argument values in ``keys_and_args``.
         Returns the result of the script.
 

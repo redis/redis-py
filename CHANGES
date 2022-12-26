@@ -1,3 +1,4 @@
+    * Add `timeout=None` in `SentinelConnectionManager.read_response`
     * Documentation fix: password protected socket connection (#2374)
     * Allow `timeout=None` in `PubSub.get_message()` to wait forever
     * add `nowait` flag to `asyncio.Connection.disconnect()`
@@ -30,6 +31,7 @@
     * Enable Lock for asyncio cluster mode
     * Fix Sentinel.execute_command doesn't execute across the entire sentinel cluster bug (#2458)
     * Added a replacement for the default cluster node in the event of failure (#2463)
+    * Fix for Unhandled exception related to self.host with unix socket (#2496)
 
 * 4.1.3 (Feb 8, 2022)
     * Fix flushdb and flushall (#1926)
