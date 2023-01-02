@@ -832,100 +832,127 @@ async def test_aggregations_groupby(modclient: redis.Redis):
         },
     )
 
-    req = aggregations.AggregateRequest("redis").group_by("@parent", reducers.count())
+    for dialect in [1, 2]:
+        req = (
+            aggregations.AggregateRequest("redis")
+            .group_by("@parent", reducers.count())
+            .dialect(dialect)
+        )
 
-    res = (await modclient.ft().aggregate(req)).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "3"
+        res = (await modclient.ft().aggregate(req)).rows[0]
+        assert res[1] == "redis"
+        assert res[3] == "3"
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.count_distinct("@title")
-    )
+        req = (
+            aggregations.AggregateRequest("redis")
+            .group_by("@parent", reducers.count_distinct("@title"))
+            .dialect(dialect)
+        )
 
-    res = (await modclient.ft().aggregate(req)).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "3"
+        res = (await modclient.ft().aggregate(req)).rows[0]
+        assert res[1] == "redis"
+        assert res[3] == "3"
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.count_distinctish("@title")
-    )
+        req = (
+            aggregations.AggregateRequest("redis")
+            .group_by("@parent", reducers.count_distinctish("@title"))
+            .dialect(dialect)
+        )
 
-    res = (await modclient.ft().aggregate(req)).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "3"
+        res = (await modclient.ft().aggregate(req)).rows[0]
+        assert res[1] == "redis"
+        assert res[3] == "3"
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.sum("@random_num")
-    )
+        req = (
+            aggregations.AggregateRequest("redis")
+            .group_by("@parent", reducers.sum("@random_num"))
+            .dialect(dialect)
+        )
 
-    res = (await modclient.ft().aggregate(req)).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "21"  # 10+8+3
+        res = (await modclient.ft().aggregate(req)).rows[0]
+        assert res[1] == "redis"
+        assert res[3] == "21"  # 10+8+3
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.min("@random_num")
-    )
+        req = (
+            aggregations.AggregateRequest("redis")
+            .group_by("@parent", reducers.min("@random_num"))
+            .dialect(dialect)
+        )
 
-    res = (await modclient.ft().aggregate(req)).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "3"  # min(10,8,3)
+        res = (await modclient.ft().aggregate(req)).rows[0]
+        assert res[1] == "redis"
+        assert res[3] == "3"  # min(10,8,3)
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.max("@random_num")
-    )
+        req = (
+            aggregations.AggregateRequest("redis")
+            .group_by("@parent", reducers.max("@random_num"))
+            .dialect(dialect)
+        )
 
-    res = (await modclient.ft().aggregate(req)).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "10"  # max(10,8,3)
+        res = (await modclient.ft().aggregate(req)).rows[0]
+        assert res[1] == "redis"
+        assert res[3] == "10"  # max(10,8,3)
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.avg("@random_num")
-    )
+        req = (
+            aggregations.AggregateRequest("redis")
+            .group_by("@parent", reducers.avg("@random_num"))
+            .dialect(dialect)
+        )
 
-    res = (await modclient.ft().aggregate(req)).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "7"  # (10+3+8)/3
+        res = (await modclient.ft().aggregate(req)).rows[0]
+        assert res[1] == "redis"
+        assert res[3] == "7"  # (10+3+8)/3
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.stddev("random_num")
-    )
+        req = (
+            aggregations.AggregateRequest("redis")
+            .group_by("@parent", reducers.stddev("random_num"))
+            .dialect(dialect)
+        )
 
-    res = (await modclient.ft().aggregate(req)).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "3.60555127546"
+        res = (await modclient.ft().aggregate(req)).rows[0]
+        assert res[1] == "redis"
+        assert res[3] == "3.60555127546"
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.quantile("@random_num", 0.5)
-    )
+        req = (
+            aggregations.AggregateRequest("redis")
+            .group_by("@parent", reducers.quantile("@random_num", 0.5))
+            .dialect(dialect)
+        )
 
-    res = (await modclient.ft().aggregate(req)).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "8"  # median of 3,8,10
+        res = (await modclient.ft().aggregate(req)).rows[0]
+        assert res[1] == "redis"
+        assert res[3] == "8"  # median of 3,8,10
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.tolist("@title")
-    )
+        req = (
+            aggregations.AggregateRequest("redis")
+            .group_by("@parent", reducers.tolist("@title"))
+            .dialect(dialect)
+        )
 
-    res = (await modclient.ft().aggregate(req)).rows[0]
-    assert res[1] == "redis"
-    assert set(res[3]) == {"RediSearch", "RedisAI", "RedisJson"}
+        res = (await modclient.ft().aggregate(req)).rows[0]
+        assert res[1] == "redis"
+        assert set(res[3]) == {"RediSearch", "RedisAI", "RedisJson"}
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.first_value("@title").alias("first")
-    )
+        req = (
+            aggregations.AggregateRequest("redis")
+            .group_by("@parent", reducers.first_value("@title").alias("first"))
+            .dialect(dialect)
+        )
 
-    res = (await modclient.ft().aggregate(req)).rows[0]
-    assert res == ["parent", "redis", "first", "RediSearch"]
+        res = (await modclient.ft().aggregate(req)).rows[0]
+        assert res == ["parent", "redis", "first", "RediSearch"]
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.random_sample("@title", 2).alias("random")
-    )
+        req = (
+            aggregations.AggregateRequest("redis")
+            .group_by("@parent", reducers.random_sample("@title", 2).alias("random"))
+            .dialect(dialect)
+        )
 
-    res = (await modclient.ft().aggregate(req)).rows[0]
-    assert res[1] == "redis"
-    assert res[2] == "random"
-    assert len(res[3]) == 2
-    assert res[3][0] in ["RediSearch", "RedisAI", "RedisJson"]
+        res = (await modclient.ft().aggregate(req)).rows[0]
+        assert res[1] == "redis"
+        assert res[2] == "random"
+        assert len(res[3]) == 2
+        assert res[3][0] in ["RediSearch", "RedisAI", "RedisJson"]
 
 
 @pytest.mark.redismod
