@@ -974,12 +974,21 @@ def test_aggregations_filter(client):
     client.ft().client.hset("doc2", mapping={"name": "foo", "age": "19"})
 
     for dialect in [1, 2]:
-        req = aggregations.AggregateRequest("*").filter("@name=='foo' && @age < 20").dialect(dialect)
+        req = (
+            aggregations.AggregateRequest("*")
+            .filter("@name=='foo' && @age < 20")
+            .dialect(dialect)
+        )
         res = client.ft().aggregate(req)
         assert len(res.rows) == 1
         assert res.rows[0] == ["name", "foo", "age", "19"]
 
-        req = aggregations.AggregateRequest("*").filter("@age > 15").sort_by("@age").dialect(dialect)
+        req = (
+            aggregations.AggregateRequest("*")
+            .filter("@age > 15")
+            .sort_by("@age")
+            .dialect(dialect)
+        )
         res = client.ft().aggregate(req)
         assert len(res.rows) == 2
         assert res.rows[0] == ["age", "19"]

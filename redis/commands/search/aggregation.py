@@ -110,7 +110,6 @@ class AggregateRequest:
         self._cursor = []
         self._dialect = None
 
-
     def load(self, *fields):
         """
         Indicate the fields to be returned in the response. These fields are
