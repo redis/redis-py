@@ -13,6 +13,7 @@ SLOWLOG_CMD = "GRAPH.SLOWLOG"
 CONFIG_CMD = "GRAPH.CONFIG"
 LIST_CMD = "GRAPH.LIST"
 EXPLAIN_CMD = "GRAPH.EXPLAIN"
+CONSTRAINT_CMD = "GRAPH.CONSTRAINT"
 
 
 class GraphCommands:
@@ -212,6 +213,18 @@ class GraphCommands:
         query = self._build_params_header(params) + query
 
         plan = self.execute_command(EXPLAIN_CMD, self.name, query)
+        return ExecutionPlan(plan)
+
+    def constraint(self, query):
+        """
+        Constraint operation,
+        For more information see `GRAPH.CONSTRAINT <https://redis.io/commands/graph.constraint>`_. # noqa
+
+        Args:
+            query: the query that will be executed
+        """
+
+        plan = self.execute_command(CONSTRAINT_CMD, self.name, query)
         return ExecutionPlan(plan)
 
 
