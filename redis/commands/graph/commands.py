@@ -220,22 +220,21 @@ class GraphCommands:
     def constraint(
         self,
         key: KeyT,
-        op: str,
-        type: str,
+        operation: str,
+        constraint_type: str,
         entity_type: str,
         label_name: str,
-        n_props: int,
-        props: List[str]):
+        *properties):
         """
-        Constraint operation,
+        Constraint operation, enforce a constraint on the graph nodes/edges properties.
         For more information see `GRAPH.CONSTRAINT <https://redis.io/commands/graph.constraint>`_. # noqa
 
         Args:
             query: the query that will be executed
         """
 
-        params = [key, op, type, entity_type, label_name, 'PROPERTIES', n_props]
-        params.extend(props)
+        params = [key, operation, constraint_type, entity_type, label_name, 'PROPERTIES', len(properties)]
+        params.extend(properties)
         return self.execute_command(CONSTRAINT_CMD, *params)
 
 class AsyncGraphCommands(GraphCommands):

@@ -642,7 +642,7 @@ def test_constraint(client):
 (:Rider {age:40})"""
     redis_graph.query(create_query)
 
-    res = redis_graph.constraint("G", "CREATE", "UNIQUE", "LABEL", "Rider", 1, ["age"])
+    res = redis_graph.constraint("G", "CREATE", "UNIQUE", "LABEL", "Rider", "age")
     assert res == 0
     _wait_for_constraints_to_sync(redis_graph)
 
@@ -650,12 +650,12 @@ def test_constraint(client):
     result = redis_graph.query(q)
     assert result.result_set == [['unique', 'Rider', ['age'], 'NODE', 'OPERATIONAL']]
 
-    res = redis_graph.constraint("G", "DEL", "UNIQUE", "LABEL", "Rider", 1, ["age"])
+    res = redis_graph.constraint("G", "DEL", "UNIQUE", "LABEL", "Rider", "age")
     assert res == 0
     result = redis_graph.query(q)
     assert result.result_set == []
 
-    res = redis_graph.constraint("G", "CREATE", "UNIQUE", "LABEL", "Rider", 1, ["age"])
+    res = redis_graph.constraint("G", "CREATE", "UNIQUE", "LABEL", "Rider", "age")
     assert res == 0
     _wait_for_constraints_to_sync(redis_graph)
     result = redis_graph.query(q)
