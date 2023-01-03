@@ -411,7 +411,6 @@ async def test_execution_plan(modclient: redis.Redis):
 
     await redis_graph.delete()
 
-
 @pytest.mark.redismod
 async def test_explain(modclient: redis.Redis):
     redis_graph = modclient.graph("execution_plan")

@@ -1,4 +1,5 @@
 from unittest.mock import patch
+import time
 
 import pytest
 
@@ -620,3 +621,43 @@ def test_resultset_statistics(client):
         mock_get_stats.assert_called_with(CACHED_EXECUTION)
         result.run_time_ms
         mock_get_stats.assert_called_with(INTERNAL_EXECUTION_TIME)
+
+# wait for all graph constraints to by operational
+def _wait_for_constraints_to_sync(graph):
+    q = "CALL db.constraints() YIELD status WHERE status <> 'OPERATIONAL' RETURN count(1)"
+
+    while True:
+        result = graph.query(q)
+        if result.result_set[0][0] == 0:
+            break
+        time.sleep(0.5) # sleep 500ms
+
+@pytest.mark.redismod
+def test_constraint(client):
+    redis_graph = client.graph("G")
+
+    create_query = """CREATE
+(:Rider {age:20}),
+(:Rider {age:30}),
+(:Rider {age:40})"""
+    redis_graph.query(create_query)
+
+    res = redis_graph.constraint("G", "CREATE", "UNIQUE", "LABEL", "Rider", 1, ["age"])
+    assert res == 0
+    _wait_for_constraints_to_sync(redis_graph)
+
+    q = "CALL db.constraints()"
+    result = redis_graph.query(q)
+    assert result.result_set == [['unique', 'Rider', ['age'], 'NODE', 'OPERATIONAL']]
+
+    res = redis_graph.constraint("G", "DEL", "UNIQUE", "LABEL", "Rider", 1, ["age"])
+    assert res == 0
+    result = redis_graph.query(q)
+    assert result.result_set == []
+
+    res = redis_graph.constraint("G", "CREATE", "UNIQUE", "LABEL", "Rider", 1, ["age"])
+    assert res == 0
+    _wait_for_constraints_to_sync(redis_graph)
+    result = redis_graph.query(q)
+    assert result.result_set == [['unique', 'Rider', ['age'], 'NODE', 'OPERATIONAL']]
+

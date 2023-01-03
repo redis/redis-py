@@ -1,5 +1,7 @@
 from redis import DataError
 from redis.exceptions import ResponseError
+from redis.typing import KeyT
+from typing import List
 
 from .exceptions import VersionMismatchException
 from .execution_plan import ExecutionPlan
@@ -215,7 +217,15 @@ class GraphCommands:
         plan = self.execute_command(EXPLAIN_CMD, self.name, query)
         return ExecutionPlan(plan)
 
-    def constraint(self, query):
+    def constraint(
+        self,
+        key: KeyT,
+        op: str,
+        type: str,
+        entity_type: str,
+        label_name: str,
+        n_props: int,
+        props: List[str]):
         """
         Constraint operation,
         For more information see `GRAPH.CONSTRAINT <https://redis.io/commands/graph.constraint>`_. # noqa
@@ -224,9 +234,9 @@ class GraphCommands:
             query: the query that will be executed
         """
 
-        plan = self.execute_command(CONSTRAINT_CMD, self.name, query)
-        return ExecutionPlan(plan)
-
+        params = [key, op, type, entity_type, label_name, 'PROPERTIES', n_props]
+        params.extend(props)
+        return self.execute_command(CONSTRAINT_CMD, *params)
 
 class AsyncGraphCommands(GraphCommands):
     async def query(self, q, params=None, timeout=None, read_only=False, profile=False):
