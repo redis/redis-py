@@ -21,6 +21,12 @@ redis-py 4.3.x will be the last generation of redis-py to support python 3.6 as 
 
 ## Installation
 
+Start a redis via docker:
+
+``` bash
+docker run -p 6379:6379 -it redis/redis-stack:latest
+```
+
 To install redis-py, simply:
 
 ``` bash
