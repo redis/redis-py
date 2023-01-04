@@ -108,6 +108,7 @@ class AggregateRequest:
         self._with_schema = False
         self._verbatim = False
         self._cursor = []
+        self._dialect = None
 
     def load(self, *fields):
         """
@@ -321,9 +322,21 @@ class AggregateRequest:
             ret.append(str(len(self._loadfields)))
             ret.extend(self._loadfields)
 
+        if self._dialect:
+            ret.extend(["DIALECT", self._dialect])
+
         ret.extend(self._aggregateplan)
 
         return ret
+
+    def dialect(self, dialect):
+        """
+        Add a dialect field to the aggregate command.
+
+        - **dialect** - dialect version to execute the query under
+        """
+        self._dialect = dialect
+        return self
 
 
 class Cursor:
