@@ -221,27 +221,27 @@ class GraphCommands:
         constraint_type: str,
         entity_type: str,
         label_name: str,
-        *properties
-                ):
+        *properties,
+    ):
         """
-        Constraint operation, enforce a constraint on the graph nodes/edges properties.
-        For instance Unique constraint, enforces that for a given label and properties there are no two entities
-        with the same property values.
+         Constraint operation, enforce a constraint on the graph nodes/edges properties.
+         For instance Unique constraint, enforces that for a given label and properties there are no two entities
+         with the same property values.
 
-       Args:
+        Args:
 
-        operation:
-            The type of operation on the constraint (DEL or CREATE).
-        constraint_type:
-            Type of the constraint, currently only "UNIQUE" constraint is supported.
-        entity_type:
-            The type of entity that the constraint enforces "LABEL" for nodes and "RELTYPE" for edges.
-        label_name:
-            The label/relation-type name that the constraint is enforced on.
-        properties:
-            tuple of properties to enforce the constraint upon.
+         operation:
+             The type of operation on the constraint (DEL or CREATE).
+         constraint_type:
+             Type of the constraint, currently only "UNIQUE" constraint is supported.
+         entity_type:
+             The type of entity that the constraint enforces "LABEL" for nodes and "RELTYPE" for edges.
+         label_name:
+             The label/relation-type name that the constraint is enforced on.
+         properties:
+             tuple of properties to enforce the constraint upon.
 
-        For more information see `GRAPH.CONSTRAINT <https://redis.io/commands/graph.constraint>`_. # noqa
+         For more information see `GRAPH.CONSTRAINT <https://redis.io/commands/graph.constraint>`_. # noqa
         """
 
         params = [
@@ -250,8 +250,9 @@ class GraphCommands:
             constraint_type,
             entity_type,
             label_name,
-            'PROPERTIES',
-            len(properties)]
+            "PROPERTIES",
+            len(properties),
+        ]
         params.extend(properties)
         return self.execute_command(CONSTRAINT_CMD, *params)
 

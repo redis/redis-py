@@ -1,5 +1,5 @@
-from unittest.mock import patch
 import time
+from unittest.mock import patch
 
 import pytest
 
@@ -651,7 +651,7 @@ def test_constraint(client):
 
     q = "CALL db.constraints()"
     result = redis_graph.query(q)
-    assert result.result_set == [['unique', 'Rider', ['age'], 'NODE', 'OPERATIONAL']]
+    assert result.result_set == [["unique", "Rider", ["age"], "NODE", "OPERATIONAL"]]
 
     res = redis_graph.constraint("DEL", "UNIQUE", "LABEL", "Rider", "age")
     assert res == 0
@@ -662,4 +662,4 @@ def test_constraint(client):
     assert res == 0
     _wait_for_constraints_to_sync(redis_graph)
     result = redis_graph.query(q)
-    assert result.result_set == [['unique', 'Rider', ['age'], 'NODE', 'OPERATIONAL']]
+    assert result.result_set == [["unique", "Rider", ["age"], "NODE", "OPERATIONAL"]]
