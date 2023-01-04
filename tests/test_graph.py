@@ -622,15 +622,18 @@ def test_resultset_statistics(client):
         result.run_time_ms
         mock_get_stats.assert_called_with(INTERNAL_EXECUTION_TIME)
 
+
 # wait for all graph constraints to by operational
 def _wait_for_constraints_to_sync(graph):
-    q = "CALL db.constraints() YIELD status WHERE status <> 'OPERATIONAL' RETURN count(1)"
+    q = "CALL db.constraints() YIELD status WHERE status <> 'OPERATIONAL' \
+        RETURN count(1)"
 
     while True:
         result = graph.query(q)
         if result.result_set[0][0] == 0:
             break
-        time.sleep(0.5) # sleep 500ms
+        time.sleep(0.5)  # sleep 500ms
+
 
 @pytest.mark.redismod
 def test_constraint(client):
@@ -660,4 +663,3 @@ def test_constraint(client):
     _wait_for_constraints_to_sync(redis_graph)
     result = redis_graph.query(q)
     assert result.result_set == [['unique', 'Rider', ['age'], 'NODE', 'OPERATIONAL']]
-

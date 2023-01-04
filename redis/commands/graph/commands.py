@@ -221,7 +221,8 @@ class GraphCommands:
         constraint_type: str,
         entity_type: str,
         label_name: str,
-        *properties):
+        *properties
+                ):
         """
         Constraint operation, enforce a constraint on the graph nodes/edges properties.
         For instance Unique constraint, enforces that for a given label and properties there are no two entities
@@ -243,9 +244,17 @@ class GraphCommands:
         For more information see `GRAPH.CONSTRAINT <https://redis.io/commands/graph.constraint>`_. # noqa
         """
 
-        params = [self.name, operation, constraint_type, entity_type, label_name, 'PROPERTIES', len(properties)]
+        params = [
+            self.name,
+            operation,
+            constraint_type,
+            entity_type,
+            label_name,
+            'PROPERTIES',
+            len(properties)]
         params.extend(properties)
         return self.execute_command(CONSTRAINT_CMD, *params)
+
 
 class AsyncGraphCommands(GraphCommands):
     async def query(self, q, params=None, timeout=None, read_only=False, profile=False):
