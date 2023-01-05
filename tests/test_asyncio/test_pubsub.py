@@ -30,7 +30,7 @@ def with_timeout(t):
 
 
 async def wait_for_message(pubsub, timeout=0.2, ignore_subscribe_messages=False):
-    now = asyncio.get_event_loop().time()
+    now = asyncio.get_running_loop().time()
     timeout = now + timeout
     while now < timeout:
         message = await pubsub.get_message(
@@ -39,7 +39,7 @@ async def wait_for_message(pubsub, timeout=0.2, ignore_subscribe_messages=False)
         if message is not None:
             return message
         await asyncio.sleep(0.01)
-        now = asyncio.get_event_loop().time()
+        now = asyncio.get_running_loop().time()
     return None
 
 
@@ -675,7 +675,7 @@ class TestPubSubReconnect:
                 await messages.put(message)
                 break
 
-        task = asyncio.get_event_loop().create_task(loop())
+        task = asyncio.get_running_loop().create_task(loop())
         # get the initial connect message
         async with async_timeout.timeout(1):
             message = await messages.get()
@@ -724,7 +724,7 @@ class TestPubSubRun:
         messages = asyncio.Queue()
         p = pubsub
         await self._subscribe(p, foo=callback)
-        task = asyncio.get_event_loop().create_task(p.run())
+        task = asyncio.get_running_loop().create_task(p.run())
         await r.publish("foo", "bar")
         message = await messages.get()
         task.cancel()
@@ -748,7 +748,7 @@ class TestPubSubRun:
         p = pubsub
         await self._subscribe(p, foo=lambda x: None)
         with mock.patch.object(p, "get_message", side_effect=Exception("error")):
-            task = asyncio.get_event_loop().create_task(
+            task = asyncio.get_running_loop().create_task(
                 p.run(exception_handler=exception_handler_callback)
             )
             e = await exceptions.get()
@@ -765,7 +765,7 @@ class TestPubSubRun:
 
         messages = asyncio.Queue()
         p = pubsub
-        task = asyncio.get_event_loop().create_task(p.run())
+        task = asyncio.get_running_loop().create_task(p.run())
         # wait until loop gets settled.  Add a subscription
         await asyncio.sleep(0.1)
         await p.subscribe(foo=callback)
