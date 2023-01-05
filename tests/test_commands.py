@@ -1,7 +1,6 @@
 import binascii
 import datetime
 import re
-import socket
 import threading
 import time
 from asyncio import CancelledError
@@ -4738,20 +4737,29 @@ class TestRedisCommands:
         command.
         """
 
+        ok = False
+
         def helper():
-            with pytest.raises(BaseException):
+            with pytest.raises(CancelledError):
                 # blocking pop
                 with patch.object(
-                    socket.socket, "recv_into", side_effect=CancelledError
+                    r.connection._parser, "read_response", side_effect=CancelledError
                 ):
                     r.brpop(["nonexist"])
             # if all is well, we can continue.
             r.set("status", "down")  # should not hang
+            nonlocal ok
+            ok = True
 
         thread = threading.Thread(target=helper)
         thread.start()
         thread.join(0.1)
-        assert not thread.is_alive()
+        try:
+            assert not thread.is_alive()
+            assert ok
+        finally:
+            # disconnect here so that fixture cleanup can proceed
+            r.connection.disconnect()
 
 
 @pytest.mark.onlynoncluster
