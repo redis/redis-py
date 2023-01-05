@@ -1601,6 +1601,13 @@ class TestRedisCommands:
             assert r.set("a", "1", ex=10.0)
 
     @skip_if_server_version_lt("2.6.0")
+    def test_set_ex_str(self, r):
+        assert r.set("a", "1", ex="10")
+        assert 0 < r.ttl("a") <= 10
+        with pytest.raises(exceptions.DataError):
+            assert r.set("a", "1", ex="10.5")
+
+    @skip_if_server_version_lt("2.6.0")
     def test_set_ex_timedelta(self, r):
         expire_at = datetime.timedelta(seconds=60)
         assert r.set("a", "1", ex=expire_at)
