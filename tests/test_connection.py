@@ -5,13 +5,15 @@ from unittest.mock import patch
 
 import pytest
 
+import redis
 from redis.backoff import NoBackoff
-from redis.connection import Connection
+from redis.connection import Connection, HiredisParser, PythonParser
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
 
 from .conftest import skip_if_server_version_lt
+from .mocks import MockSocket
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
@@ -122,3 +124,42 @@ class TestConnection:
         assert conn._connect.call_count == 1
         assert str(e.value) == "Timeout connecting to server"
         self.clear(conn)
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.parametrize(
+    "parser_class", [PythonParser, HiredisParser], ids=["PythonParser", "HiredisParser"]
+)
+def test_connection_parse_response_resume(r: redis.Redis, parser_class):
+    """
+    This test verifies that the Connection parser,
+    be that PythonParser or HiredisParser,
+    can be interrupted at IO time and then resume parsing.
+    """
+    if parser_class is HiredisParser and not HIREDIS_AVAILABLE:
+        pytest.skip("Hiredis not available)")
+    args = dict(r.connection_pool.connection_kwargs)
+    args["parser_class"] = parser_class
+    conn = Connection(**args)
+    conn.connect()
+    message = (
+        b"*3\r\n$7\r\nmessage\r\n$8\r\nchannel1\r\n"
+        b"$25\r\nhi\r\nthere\r\n+how\r\nare\r\nyou\r\n"
+    )
+    mock_socket = MockSocket(message, interrupt_every=2)
+
+    if isinstance(conn._parser, PythonParser):
+        conn._parser._buffer._sock = mock_socket
+    else:
+        conn._parser._sock = mock_socket
+    for i in range(100):
+        try:
+            response = conn.read_response()
+            break
+        except MockSocket.TestError:
+            pass
+
+    else:
+        pytest.fail("didn't receive a response")
+    assert response
+    assert i > 0
