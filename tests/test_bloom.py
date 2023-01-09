@@ -167,7 +167,6 @@ def test_bf_info(client):
 
 @pytest.mark.redismod
 def test_bf_card(client):
-    expansion = 4
     # return 0 if the key does not exist
     assert client.bf().card("not_exist") == 0
 
