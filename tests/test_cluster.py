@@ -18,7 +18,7 @@ from redis.cluster import (
     get_node_name,
 )
 from redis.commands import CommandsParser
-from redis.connection import Connection
+from redis.connection import Connection, ConnectionPool, BlockingConnectionPool
 from redis.crc import key_slot
 from redis.exceptions import (
     AskError,
@@ -2445,6 +2445,16 @@ class TestNodesManager:
         else:
             assert startup_nodes == ["my@DNS.com:7000"]
 
+    @pytest.mark.parametrize("connection_pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_connection_pool_class(self, connection_pool_class):
+        rc = get_mocked_redis_client(
+            url=f"redis://my@DNS.com:7000",
+            cluster_slots=default_cluster_slots,
+            connection_pool_class=connection_pool_class,
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            assert isinstance(node.redis_connection.connection_pool, connection_pool_class)
 
 @pytest.mark.onlycluster
 class TestClusterPubSubObject:
