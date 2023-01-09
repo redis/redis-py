@@ -198,6 +198,7 @@ class BFBloom(BFCommands, AbstractBloom):
             # BF_MEXISTS: spaceHolder,
             # BF_SCANDUMP: spaceHolder,
             # BF_LOADCHUNK: spaceHolder,
+            # BF_CARD: spaceHolder,
             BF_INFO: BFInfo,
         }
 
