@@ -1437,6 +1437,8 @@ class NodesManager:
             if target_node is None or target_node.redis_connection is None:
                 # create new cluster node for this cluster
                 target_node = ClusterNode(host, port, role)
+            if target_node.server_type != role:
+                target_node.server_type = role
 
         return target_node
 

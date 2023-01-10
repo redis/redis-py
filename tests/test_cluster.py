@@ -2262,6 +2262,57 @@ class TestNodesManager:
 
         assert len(n_manager.nodes_cache) == 6
 
+    def test_init_promote_server_type_for_node_in_cache(self):
+        """
+        When replica is promoted to master, nodes_cache must change the server type
+        accordingly
+        """
+        cluster_slots_before_promotion = [
+            [0, 16383, ["127.0.0.1", 7000], ["127.0.0.1", 7003]]
+        ]
+        cluster_slots_after_promotion = [
+            [0, 16383, ["127.0.0.1", 7003], ["127.0.0.1", 7004]]
+        ]
+
+        cluster_slots_results = [
+            cluster_slots_before_promotion,
+            cluster_slots_after_promotion,
+        ]
+
+        with patch.object(Redis, "execute_command") as execute_command_mock:
+
+            def execute_command(*_args, **_kwargs):
+                if _args[0] == "CLUSTER SLOTS":
+                    mock_cluster_slots = cluster_slots_results.pop(0)
+                    return mock_cluster_slots
+                elif _args[0] == "COMMAND":
+                    return {"get": [], "set": []}
+                elif _args[0] == "INFO":
+                    return {"cluster_enabled": True}
+                elif len(_args) > 1 and _args[1] == "cluster-require-full-coverage":
+                    return {"cluster-require-full-coverage": False}
+                else:
+                    return execute_command_mock(*_args, **_kwargs)
+
+            execute_command_mock.side_effect = execute_command
+
+            nm = NodesManager(
+                startup_nodes=[ClusterNode(host=default_host, port=default_port)],
+                from_url=False,
+                require_full_coverage=False,
+                dynamic_startup_nodes=True,
+            )
+
+            assert nm.default_node.host == "127.0.0.1"
+            assert nm.default_node.port == 7000
+            assert nm.default_node.server_type == PRIMARY
+
+            nm.initialize()
+
+            assert nm.default_node.host == "127.0.0.1"
+            assert nm.default_node.port == 7003
+            assert nm.default_node.server_type == PRIMARY
+
     def test_init_slots_cache_cluster_mode_disabled(self):
         """
         Test that creating a RedisCluster failes if one of the startup nodes
