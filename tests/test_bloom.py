@@ -174,13 +174,10 @@ def test_bf_card(client):
     assert client.bf().add("bf1", "item_foo") == 1
     assert client.bf().card("bf1") == 1
 
-    try:
-        # Error when key is of a type other than Bloom filter.
+    # Error when key is of a type other than Bloom filter.
+    with pytest.raises(redis.ResponseError):
         client.set("setKey", "value")
         client.bf().card("setKey")
-        assert False
-    except RedisError:
-        assert True
 
 
 # region Test Cuckoo Filter

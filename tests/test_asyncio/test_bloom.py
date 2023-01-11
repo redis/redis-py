@@ -158,13 +158,10 @@ async def test_bf_card(modclient: redis.Redis):
     assert await modclient.bf().add("bf1", "item_foo") == 1
     assert await modclient.bf().card("bf1") == 1
 
-    try:
-        # Error when key is of a type other than Bloom filter.
+    # Error when key is of a type other than Bloom filter.
+    with pytest.raises(redis.ResponseError):
         await modclient.set("setKey", "value")
         await modclient.bf().card("setKey")
-        assert False
-    except RedisError:
-        assert True
 
 
 # region Test Cuckoo Filter
