@@ -17,6 +17,12 @@ try:
 except ImportError:
     CRYPTOGRAPHY_AVAILABLE = False
 
+try:
+    import redisrs_py
+    REDISRS_PY_AVAILABLE = True
+except ImportError:
+    REDISRS_PY_AVAILABLE = False
+
 
 def from_url(url, **kwargs):
     """

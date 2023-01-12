@@ -31,7 +31,7 @@ from redis.exceptions import (
     TimeoutError,
 )
 from redis.retry import Retry
-from redis.utils import CRYPTOGRAPHY_AVAILABLE, HIREDIS_AVAILABLE, str_if_bytes
+from redis.utils import CRYPTOGRAPHY_AVAILABLE, HIREDIS_AVAILABLE, REDISRS_PY_AVAILABLE, str_if_bytes
 
 try:
     import ssl
@@ -53,6 +53,11 @@ NONBLOCKING_EXCEPTIONS = tuple(NONBLOCKING_EXCEPTION_ERROR_NUMBERS.keys())
 
 if HIREDIS_AVAILABLE:
     import hiredis
+
+
+if REDISRS_PY_AVAILABLE:
+    import redisrs_py
+
 
 SYM_STAR = b"*"
 SYM_DOLLAR = b"$"
@@ -504,6 +509,23 @@ else:
     DefaultParser = PythonParser
 
 
+def pack_command_redisrs(*args):
+    """Pack a series of arguments into the Redis protocol"""
+    output = []
+    if isinstance(args[0], str):
+        args = tuple(args[0].encode().split()) + args[1:]
+    elif b" " in args[0]:
+        args = tuple(args[0].split()) + args[1:]
+    output.append(redisrs_py.pack_command(args))
+    return output
+
+
+if REDISRS_PY_AVAILABLE:
+    print("REDISRS_PY_AVAILABLE")
+    DefaultCommandPacker = pack_command_redisrs
+else:
+    DefaultCommandPacker = None
+
 class Connection:
     "Manages TCP communication to and from a Redis server"
 
@@ -531,6 +553,7 @@ class Connection:
         retry=None,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
+        pack_command=DefaultCommandPacker,
     ):
         """
         Initialize a new Connection.
@@ -585,6 +608,10 @@ class Connection:
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
+        if pack_command is not None:
+            self.pack_command = pack_command
+        else:
+            self.pack_command = self._pack_command_python
 
     def __repr__(self):
         repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
@@ -865,7 +892,7 @@ class Connection:
             raise response
         return response
 
-    def pack_command(self, *args):
+    def _pack_command_python(self, *args):
         """Pack a series of arguments into the Redis protocol"""
         output = []
         # the client might have included 1 or more literal arguments in
