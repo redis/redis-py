@@ -165,6 +165,21 @@ def test_bf_info(client):
         assert True
 
 
+@pytest.mark.redismod
+def test_bf_card(client):
+    # return 0 if the key does not exist
+    assert client.bf().card("not_exist") == 0
+
+    # Store a filter
+    assert client.bf().add("bf1", "item_foo") == 1
+    assert client.bf().card("bf1") == 1
+
+    # Error when key is of a type other than Bloom filter.
+    with pytest.raises(redis.ResponseError):
+        client.set("setKey", "value")
+        client.bf().card("setKey")
+
+
 # region Test Cuckoo Filter
 @pytest.mark.redismod
 def test_cf_add_and_insert(client):
