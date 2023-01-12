@@ -149,6 +149,21 @@ async def test_bf_info(modclient: redis.Redis):
         assert True
 
 
+@pytest.mark.redismod
+async def test_bf_card(modclient: redis.Redis):
+    # return 0 if the key does not exist
+    assert await modclient.bf().card("not_exist") == 0
+
+    # Store a filter
+    assert await modclient.bf().add("bf1", "item_foo") == 1
+    assert await modclient.bf().card("bf1") == 1
+
+    # Error when key is of a type other than Bloom filter.
+    with pytest.raises(redis.ResponseError):
+        await modclient.set("setKey", "value")
+        await modclient.bf().card("setKey")
+
+
 # region Test Cuckoo Filter
 @pytest.mark.redismod
 async def test_cf_add_and_insert(modclient: redis.Redis):

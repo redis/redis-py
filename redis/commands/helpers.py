@@ -115,6 +115,7 @@ def quote_string(v):
     if len(v) == 0:
         return '""'
 
+    v = v.replace("\\", "\\\\")
     v = v.replace('"', '\\"')
 
     return f'"{v}"'
