@@ -173,13 +173,22 @@ def lpop(conn, num, pipeline_size, data_size):
     if pipeline_size > 1:
         conn.execute()
 
+from random import choice
+from string import ascii_uppercase
+
+def get_data(number_of_fields):
+    fields = {}
+    for i in range(number_of_fields):
+        fields[f"field{i}"] = ''.join(choice(ascii_uppercase) for _ in range(10))
+    return fields
 
 @timer
 def hmset(conn, num, pipeline_size, data_size):
     if pipeline_size > 1:
         conn = conn.pipeline()
 
-    set_data = {"str_value": "string", "int_value": 123456, "float_value": 123456.0}
+    # set_data = {"str_value": "string", "int_value": 123456, "float_value": 123456.0}
+    set_data = get_data(17) #{"str_value": "string", "int_value": 123456, "float_value": 123456.0}
     for i in range(num):
         conn.hmset("hmset_key", set_data)
         if pipeline_size > 1 and i % pipeline_size == 0:

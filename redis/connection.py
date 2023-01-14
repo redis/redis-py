@@ -501,7 +501,7 @@ class HiredisParser(BaseParser):
         ):
             raise response[0]
         return response
-
+# HIREDIS_AVAILABLE = False
 
 if HIREDIS_AVAILABLE:
     DefaultParser = HiredisParser
@@ -520,11 +520,18 @@ def pack_command_redisrs(*args):
     return output
 
 
-if REDISRS_PY_AVAILABLE:
-    print("REDISRS_PY_AVAILABLE")
-    DefaultCommandPacker = pack_command_redisrs
-else:
-    DefaultCommandPacker = None
+def pack_command_hiredis(*args):
+    """Pack a series of arguments into the Redis protocol"""
+    output = []
+    if isinstance(args[0], str):
+        args = tuple(args[0].encode().split()) + args[1:]
+    elif b" " in args[0]:
+        args = tuple(args[0].split()) + args[1:]
+    output.append(hiredis.pack_command(args))
+    return output
+
+# temporary, until we decide on actual impl
+PACK_BYTES = True
 
 class Connection:
     "Manages TCP communication to and from a Redis server"
@@ -553,7 +560,7 @@ class Connection:
         retry=None,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
-        pack_command=DefaultCommandPacker,
+        pack_command=None,
     ):
         """
         Initialize a new Connection.
@@ -608,10 +615,7 @@ class Connection:
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
-        if pack_command is not None:
-            self.pack_command = pack_command
-        else:
-            self.pack_command = self._pack_command_python
+        self.pack_command = self._construct_pack_command(pack_command)
 
     def __repr__(self):
         repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
@@ -628,6 +632,25 @@ class Connection:
             self.disconnect()
         except Exception:
             pass
+    
+    def _construct_pack_command(self, packer):
+        # print-s are temporary
+        if packer is not None:
+            return packer
+        else:
+            if REDISRS_PY_AVAILABLE:
+                print("PACK COMMAND BY REDISRS_PY")
+                return pack_command_redisrs
+            elif HIREDIS_AVAILABLE and hiredis.__version__ >= "2.1.2":
+                if PACK_BYTES:
+                    print("PACK BYTES BY HIREDIS")
+                    return self._pack_bytes_hiredis
+                else:
+                    print("PACK COMMAND BY HIREDIS")
+                    return pack_command_hiredis
+            else:
+                print("PACK COMMAND BY PYTHON")
+                return self._pack_command_python
 
     def register_connect_callback(self, callback):
         self._connect_callbacks.append(weakref.WeakMethod(callback))
@@ -891,6 +914,21 @@ class Connection:
         if isinstance(response, ResponseError):
             raise response
         return response
+
+    def _pack_bytes_hiredis(self, *args):
+        """Pack a series of arguments into the Redis protocol"""
+        output = []
+        if isinstance(args[0], str):
+            args = tuple(args[0].encode().split()) + args[1:]
+        elif b" " in args[0]:
+            args = tuple(args[0].split()) + args[1:]
+
+        global encoder
+        cmd = b' '.join(map(self.encoder.encode, args))
+
+        output.append(hiredis.pack_bytes(cmd))
+        return output
+
 
     def _pack_command_python(self, *args):
         """Pack a series of arguments into the Redis protocol"""

@@ -22,7 +22,7 @@ try:
     REDISRS_PY_AVAILABLE = True
 except ImportError:
     REDISRS_PY_AVAILABLE = False
-
+REDISRS_PY_AVAILABLE = False
 
 def from_url(url, **kwargs):
     """
