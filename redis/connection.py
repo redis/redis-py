@@ -3,11 +3,13 @@ import errno
 import io
 import os
 import socket
+import sys
 import threading
 import weakref
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
+from packaging.version import Version
 from typing import Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -501,7 +503,6 @@ class HiredisParser(BaseParser):
         ):
             raise response[0]
         return response
-# HIREDIS_AVAILABLE = False
 
 if HIREDIS_AVAILABLE:
     DefaultParser = HiredisParser
@@ -509,29 +510,22 @@ else:
     DefaultParser = PythonParser
 
 
-def pack_command_redisrs(*args):
-    """Pack a series of arguments into the Redis protocol"""
-    output = []
-    if isinstance(args[0], str):
-        args = tuple(args[0].encode().split()) + args[1:]
-    elif b" " in args[0]:
-        args = tuple(args[0].split()) + args[1:]
-    output.append(redisrs_py.pack_command(args))
-    return output
-
-
 def pack_command_hiredis(*args):
     """Pack a series of arguments into the Redis protocol"""
     output = []
+
     if isinstance(args[0], str):
         args = tuple(args[0].encode().split()) + args[1:]
     elif b" " in args[0]:
         args = tuple(args[0].split()) + args[1:]
-    output.append(hiredis.pack_command(args))
+    try:
+        output.append(hiredis.pack_command(args))
+    except TypeError as err:
+        _, value, traceback = sys.exc_info()
+        raise DataError(value).with_traceback(traceback)
+
     return output
 
-# temporary, until we decide on actual impl
-PACK_BYTES = True
 
 class Connection:
     "Manages TCP communication to and from a Redis server"
@@ -634,23 +628,12 @@ class Connection:
             pass
     
     def _construct_pack_command(self, packer):
-        # print-s are temporary
         if packer is not None:
             return packer
+        elif HIREDIS_AVAILABLE and Version(hiredis.__version__) >= Version("2.1.2"):
+            return pack_command_hiredis
         else:
-            if REDISRS_PY_AVAILABLE:
-                print("PACK COMMAND BY REDISRS_PY")
-                return pack_command_redisrs
-            elif HIREDIS_AVAILABLE and hiredis.__version__ >= "2.1.2":
-                if PACK_BYTES:
-                    print("PACK BYTES BY HIREDIS")
-                    return self._pack_bytes_hiredis
-                else:
-                    print("PACK COMMAND BY HIREDIS")
-                    return pack_command_hiredis
-            else:
-                print("PACK COMMAND BY PYTHON")
-                return self._pack_command_python
+            return self._pack_command_python
 
     def register_connect_callback(self, callback):
         self._connect_callbacks.append(weakref.WeakMethod(callback))
