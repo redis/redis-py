@@ -453,7 +453,7 @@ class Redis(
                 f"Unclosed client session {self!r}", ResourceWarning, source=self
             )
             context = {"client": self, "message": self._DEL_MESSAGE}
-            asyncio.get_event_loop().call_exception_handler(context)
+            asyncio.get_running_loop().call_exception_handler(context)
 
     async def close(self, close_connection_pool: Optional[bool] = None) -> None:
         """
@@ -483,8 +483,8 @@ class Redis(
     async def _disconnect_raise(self, conn: Connection, error: Exception):
         """
         Close the connection and raise an exception
-        if retry_on_timeout is not set or the error
-        is not a TimeoutError
+        if retry_on_error is not set or the error
+        is not one of the specified error types
         """
         await conn.disconnect()
         if (
@@ -798,7 +798,7 @@ class PubSub:
 
         if (
             conn.health_check_interval
-            and asyncio.get_event_loop().time() > conn.next_health_check
+            and asyncio.get_running_loop().time() > conn.next_health_check
         ):
             await conn.send_command(
                 "PING", self.HEALTH_CHECK_MESSAGE, check_health=False
@@ -1132,7 +1132,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             raise RedisError("Cannot issue nested calls to MULTI")
         if self.command_stack:
             raise RedisError(
-                "Commands without an initial WATCH have already " "been issued"
+                "Commands without an initial WATCH have already been issued"
             )
         self.explicit_transaction = True
 
@@ -1157,7 +1157,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         if self.watching:
             await self.reset()
             raise WatchError(
-                "A ConnectionError occurred on while " "watching one or more keys"
+                "A ConnectionError occurred on while watching one or more keys"
             )
         # if retry_on_timeout is not set, or the error is not
         # a TimeoutError, raise it
@@ -1345,7 +1345,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         # indicates the user should retry this transaction.
         if self.watching:
             raise WatchError(
-                "A ConnectionError occurred on while " "watching one or more keys"
+                "A ConnectionError occurred on while watching one or more keys"
             )
         # if retry_on_timeout is not set, or the error is not
         # a TimeoutError, raise it

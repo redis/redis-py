@@ -201,14 +201,14 @@ class Lock:
             blocking_timeout = self.blocking_timeout
         stop_trying_at = None
         if blocking_timeout is not None:
-            stop_trying_at = asyncio.get_event_loop().time() + blocking_timeout
+            stop_trying_at = asyncio.get_running_loop().time() + blocking_timeout
         while True:
             if await self.do_acquire(token):
                 self.local.token = token
                 return True
             if not blocking:
                 return False
-            next_try_at = asyncio.get_event_loop().time() + sleep
+            next_try_at = asyncio.get_running_loop().time() + sleep
             if stop_trying_at is not None and next_try_at > stop_trying_at:
                 return False
             await asyncio.sleep(sleep)
@@ -259,7 +259,7 @@ class Lock:
                 keys=[self.name], args=[expected_token], client=self.redis
             )
         ):
-            raise LockNotOwnedError("Cannot release a lock" " that's no longer owned")
+            raise LockNotOwnedError("Cannot release a lock that's no longer owned")
 
     def extend(
         self, additional_time: float, replace_ttl: bool = False
@@ -289,7 +289,7 @@ class Lock:
                 client=self.redis,
             )
         ):
-            raise LockNotOwnedError("Cannot extend a lock that's" " no longer owned")
+            raise LockNotOwnedError("Cannot extend a lock that's no longer owned")
         return True
 
     def reacquire(self) -> Awaitable[bool]:
@@ -309,5 +309,5 @@ class Lock:
                 keys=[self.name], args=[self.local.token, timeout], client=self.redis
             )
         ):
-            raise LockNotOwnedError("Cannot reacquire a lock that's" " no longer owned")
+            raise LockNotOwnedError("Cannot reacquire a lock that's no longer owned")
         return True

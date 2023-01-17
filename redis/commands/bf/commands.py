@@ -11,6 +11,7 @@ BF_MEXISTS = "BF.MEXISTS"
 BF_SCANDUMP = "BF.SCANDUMP"
 BF_LOADCHUNK = "BF.LOADCHUNK"
 BF_INFO = "BF.INFO"
+BF_CARD = "BF.CARD"
 
 CF_RESERVE = "CF.RESERVE"
 CF_ADD = "CF.ADD"
@@ -164,6 +165,14 @@ class BFCommands:
         For more information see `BF.INFO <https://redis.io/commands/bf.info>`_.
         """  # noqa
         return self.execute_command(BF_INFO, key)
+
+    def card(self, key):
+        """
+        Returns the cardinality of a Bloom filter - number of items that were added to a Bloom filter and detected as unique
+        (items that caused at least one bit to be set in at least one sub-filter).
+        For more information see `BF.CARD <https://redis.io/commands/bf.card>`_.
+        """  # noqa
+        return self.execute_command(BF_CARD, key)
 
 
 class CFCommands:

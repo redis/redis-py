@@ -18,7 +18,7 @@ from redis.cluster import (
     get_node_name,
 )
 from redis.commands import CommandsParser
-from redis.connection import Connection
+from redis.connection import BlockingConnectionPool, Connection, ConnectionPool
 from redis.crc import key_slot
 from redis.exceptions import (
     AskError,
@@ -176,7 +176,7 @@ def moved_redirection_helper(request, failover=False):
     prev_primary = rc.nodes_manager.get_node_from_slot(slot)
     if failover:
         if len(rc.nodes_manager.slots_cache[slot]) < 2:
-            warnings.warn("Skipping this test since it requires to have a " "replica")
+            warnings.warn("Skipping this test since it requires to have a replica")
             return
         redirect_node = rc.nodes_manager.slots_cache[slot][1]
     else:
@@ -244,7 +244,7 @@ class TestRedisClusterObj:
             RedisCluster(startup_nodes=[])
 
         assert str(ex.value).startswith(
-            "RedisCluster requires at least one node to discover the " "cluster"
+            "RedisCluster requires at least one node to discover the cluster"
         ), str_if_bytes(ex.value)
 
     def test_from_url(self, r):
@@ -265,7 +265,7 @@ class TestRedisClusterObj:
         with pytest.raises(RedisClusterException) as ex:
             r.execute_command("GET")
         assert str(ex.value).startswith(
-            "No way to dispatch this command to " "Redis Cluster. Missing key."
+            "No way to dispatch this command to Redis Cluster. Missing key."
         )
 
     def test_execute_command_node_flag_primaries(self, r):
@@ -561,7 +561,15 @@ class TestRedisClusterObj:
                 read_cluster.get("foo")
                 read_cluster.get("foo")
                 read_cluster.get("foo")
-                mocks["send_command"].assert_has_calls([call("READONLY")])
+                mocks["send_command"].assert_has_calls(
+                    [
+                        call("READONLY"),
+                        call("GET", "foo"),
+                        call("READONLY"),
+                        call("GET", "foo"),
+                        call("GET", "foo"),
+                    ]
+                )
 
     def test_keyslot(self, r):
         """
@@ -1288,6 +1296,14 @@ class TestClusterRedisCommands:
         assert links_to == links_for
         for i in range(0, len(res) - 1, 2):
             assert res[i][3] == res[i + 1][3]
+
+    def test_cluster_flshslots_not_implemented(self, r):
+        with pytest.raises(NotImplementedError):
+            r.cluster_flushslots()
+
+    def test_cluster_bumpepoch_not_implemented(self, r):
+        with pytest.raises(NotImplementedError):
+            r.cluster_bumpepoch()
 
     @skip_if_redis_enterprise()
     def test_readonly(self):
@@ -2246,6 +2262,57 @@ class TestNodesManager:
 
         assert len(n_manager.nodes_cache) == 6
 
+    def test_init_promote_server_type_for_node_in_cache(self):
+        """
+        When replica is promoted to master, nodes_cache must change the server type
+        accordingly
+        """
+        cluster_slots_before_promotion = [
+            [0, 16383, ["127.0.0.1", 7000], ["127.0.0.1", 7003]]
+        ]
+        cluster_slots_after_promotion = [
+            [0, 16383, ["127.0.0.1", 7003], ["127.0.0.1", 7004]]
+        ]
+
+        cluster_slots_results = [
+            cluster_slots_before_promotion,
+            cluster_slots_after_promotion,
+        ]
+
+        with patch.object(Redis, "execute_command") as execute_command_mock:
+
+            def execute_command(*_args, **_kwargs):
+                if _args[0] == "CLUSTER SLOTS":
+                    mock_cluster_slots = cluster_slots_results.pop(0)
+                    return mock_cluster_slots
+                elif _args[0] == "COMMAND":
+                    return {"get": [], "set": []}
+                elif _args[0] == "INFO":
+                    return {"cluster_enabled": True}
+                elif len(_args) > 1 and _args[1] == "cluster-require-full-coverage":
+                    return {"cluster-require-full-coverage": False}
+                else:
+                    return execute_command_mock(*_args, **_kwargs)
+
+            execute_command_mock.side_effect = execute_command
+
+            nm = NodesManager(
+                startup_nodes=[ClusterNode(host=default_host, port=default_port)],
+                from_url=False,
+                require_full_coverage=False,
+                dynamic_startup_nodes=True,
+            )
+
+            assert nm.default_node.host == "127.0.0.1"
+            assert nm.default_node.port == 7000
+            assert nm.default_node.server_type == PRIMARY
+
+            nm.initialize()
+
+            assert nm.default_node.host == "127.0.0.1"
+            assert nm.default_node.port == 7003
+            assert nm.default_node.server_type == PRIMARY
+
     def test_init_slots_cache_cluster_mode_disabled(self):
         """
         Test that creating a RedisCluster failes if one of the startup nodes
@@ -2428,6 +2495,21 @@ class TestNodesManager:
             assert startup_nodes.sort() == discovered_nodes.sort()
         else:
             assert startup_nodes == ["my@DNS.com:7000"]
+
+    @pytest.mark.parametrize(
+        "connection_pool_class", [ConnectionPool, BlockingConnectionPool]
+    )
+    def test_connection_pool_class(self, connection_pool_class):
+        rc = get_mocked_redis_client(
+            url="redis://my@DNS.com:7000",
+            cluster_slots=default_cluster_slots,
+            connection_pool_class=connection_pool_class,
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            assert isinstance(
+                node.redis_connection.connection_pool, connection_pool_class
+            )
 
 
 @pytest.mark.onlycluster
@@ -2789,7 +2871,7 @@ class TestClusterPipeline:
                 ask_node = node
                 break
         if ask_node is None:
-            warnings.warn("skipping this test since the cluster has only one " "node")
+            warnings.warn("skipping this test since the cluster has only one node")
             return
         ask_msg = f"{r.keyslot(key)} {ask_node.host}:{ask_node.port}"
 

@@ -973,16 +973,26 @@ def test_aggregations_filter(client):
     client.ft().client.hset("doc1", mapping={"name": "bar", "age": "25"})
     client.ft().client.hset("doc2", mapping={"name": "foo", "age": "19"})
 
-    req = aggregations.AggregateRequest("*").filter("@name=='foo' && @age < 20")
-    res = client.ft().aggregate(req)
-    assert len(res.rows) == 1
-    assert res.rows[0] == ["name", "foo", "age", "19"]
+    for dialect in [1, 2]:
+        req = (
+            aggregations.AggregateRequest("*")
+            .filter("@name=='foo' && @age < 20")
+            .dialect(dialect)
+        )
+        res = client.ft().aggregate(req)
+        assert len(res.rows) == 1
+        assert res.rows[0] == ["name", "foo", "age", "19"]
 
-    req = aggregations.AggregateRequest("*").filter("@age > 15").sort_by("@age")
-    res = client.ft().aggregate(req)
-    assert len(res.rows) == 2
-    assert res.rows[0] == ["age", "19"]
-    assert res.rows[1] == ["age", "25"]
+        req = (
+            aggregations.AggregateRequest("*")
+            .filter("@age > 15")
+            .sort_by("@age")
+            .dialect(dialect)
+        )
+        res = client.ft().aggregate(req)
+        assert len(res.rows) == 2
+        assert res.rows[0] == ["age", "19"]
+        assert res.rows[1] == ["age", "25"]
 
 
 @pytest.mark.redismod
@@ -1615,3 +1625,12 @@ def test_withsuffixtrie(modclient: redis.Redis):
     waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
     info = modclient.ft().info()
     assert "WITHSUFFIXTRIE" in info["attributes"][0]
+
+
+@pytest.mark.redismod
+def test_query_timeout(modclient: redis.Redis):
+    q1 = Query("foo").timeout(5000)
+    assert q1.get_args() == ["foo", "TIMEOUT", 5000, "LIMIT", 0, 10]
+    q2 = Query("foo").timeout("not_a_number")
+    with pytest.raises(redis.ResponseError):
+        modclient.ft().search(q2)

@@ -124,7 +124,7 @@ def test_path(client):
 
 @pytest.mark.redismod
 def test_param(client):
-    params = [1, 2.3, "str", True, False, None, [0, 1, 2]]
+    params = [1, 2.3, "str", True, False, None, [0, 1, 2], r"\" RETURN 1337 //"]
     query = "RETURN $param"
     for param in params:
         result = client.graph().query(query, {"param": param})

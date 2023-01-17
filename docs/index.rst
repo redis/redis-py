@@ -3,7 +3,7 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to redis-py's documentation!
+redis-py - Python Client for Redis
 ====================================
 
 Getting Started
@@ -72,6 +72,7 @@ Module Documentation
    advanced_features
    clustering
    lua_scripting
+   opentelemetry
    examples
 
 Contributing

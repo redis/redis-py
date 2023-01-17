@@ -62,9 +62,9 @@ SYM_EMPTY = b""
 SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
 
 SENTINEL = object()
-MODULE_LOAD_ERROR = "Error loading the extension. " "Please check the server logs."
+MODULE_LOAD_ERROR = "Error loading the extension. Please check the server logs."
 NO_SUCH_MODULE_ERROR = "Error unloading module: no such module with that name"
-MODULE_UNLOAD_NOT_POSSIBLE_ERROR = "Error unloading module: operation not " "possible."
+MODULE_UNLOAD_NOT_POSSIBLE_ERROR = "Error unloading module: operation not possible."
 MODULE_EXPORTS_DATA_TYPES_ERROR = (
     "Error unloading module: the module "
     "exports one or more module-side data "
@@ -232,12 +232,6 @@ class SocketBuffer:
         self._buffer.seek(self.bytes_read)
         data = self._buffer.read(length)
         self.bytes_read += len(data)
-
-        # purge the buffer when we've consumed it all so it doesn't
-        # grow forever
-        if self.bytes_read == self.bytes_written:
-            self.purge()
-
         return data[:-2]
 
     def readline(self):
@@ -251,23 +245,44 @@ class SocketBuffer:
             data = buf.readline()
 
         self.bytes_read += len(data)
-
-        # purge the buffer when we've consumed it all so it doesn't
-        # grow forever
-        if self.bytes_read == self.bytes_written:
-            self.purge()
-
         return data[:-2]
 
+    def get_pos(self):
+        """
+        Get current read position
+        """
+        return self.bytes_read
+
+    def rewind(self, pos):
+        """
+        Rewind the buffer to a specific position, to re-start reading
+        """
+        self.bytes_read = pos
+
     def purge(self):
-        self._buffer.seek(0)
-        self._buffer.truncate()
-        self.bytes_written = 0
+        """
+        After a successful read, purge the read part of buffer
+        """
+        unread = self.bytes_written - self.bytes_read
+
+        # Only if we have read all of the buffer do we truncate, to
+        # reduce the amount of memory thrashing.  This heuristic
+        # can be changed or removed later.
+        if unread > 0:
+            return
+
+        if unread > 0:
+            # move unread data to the front
+            view = self._buffer.getbuffer()
+            view[:unread] = view[-unread:]
+        self._buffer.truncate(unread)
+        self.bytes_written = unread
         self.bytes_read = 0
+        self._buffer.seek(0)
 
     def close(self):
         try:
-            self.purge()
+            self.bytes_written = self.bytes_read = 0
             self._buffer.close()
         except Exception:
             # issue #633 suggests the purge/close somehow raised a
@@ -315,6 +330,17 @@ class PythonParser(BaseParser):
         return self._buffer and self._buffer.can_read(timeout)
 
     def read_response(self, disable_decoding=False):
+        pos = self._buffer.get_pos()
+        try:
+            result = self._read_response(disable_decoding=disable_decoding)
+        except BaseException:
+            self._buffer.rewind(pos)
+            raise
+        else:
+            self._buffer.purge()
+            return result
+
+    def _read_response(self, disable_decoding=False):
         raw = self._buffer.readline()
         if not raw:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
@@ -355,7 +381,7 @@ class PythonParser(BaseParser):
             if length == -1:
                 return None
             response = [
-                self.read_response(disable_decoding=disable_decoding)
+                self._read_response(disable_decoding=disable_decoding)
                 for i in range(length)
             ]
         if isinstance(response, bytes) and disable_decoding is False:
@@ -664,12 +690,23 @@ class Connection:
             raise err
         raise OSError("socket.getaddrinfo returned an empty list")
 
+    def _host_error(self):
+        try:
+            host_error = f"{self.host}:{self.port}"
+        except AttributeError:
+            host_error = "connection"
+
+        return host_error
+
     def _error_message(self, exception):
         # args for socket.error can either be (errno, "message")
         # or just "message"
+
+        host_error = self._host_error()
+
         if len(exception.args) == 1:
             try:
-                return f"Error connecting to {self.host}:{self.port}. \
+                return f"Error connecting to {host_error}. \
                         {exception.args[0]}."
             except AttributeError:
                 return f"Connection Error: {exception.args[0]}"
@@ -677,7 +714,7 @@ class Connection:
             try:
                 return (
                     f"Error {exception.args[0]} connecting to "
-                    f"{self.host}:{self.port}. {exception.args[1]}."
+                    f"{host_error}. {exception.args[1]}."
                 )
             except AttributeError:
                 return f"Connection Error: {exception.args[0]}"
@@ -793,29 +830,30 @@ class Connection:
         sock = self._sock
         if not sock:
             self.connect()
+
+        host_error = self._host_error()
+
         try:
             return self._parser.can_read(timeout)
         except OSError as e:
             self.disconnect()
-            raise ConnectionError(
-                f"Error while reading from {self.host}:{self.port}: {e.args}"
-            )
+            raise ConnectionError(f"Error while reading from {host_error}: {e.args}")
 
     def read_response(self, disable_decoding=False):
         """Read the response from a previously sent command"""
-        try:
-            hosterr = f"{self.host}:{self.port}"
-        except AttributeError:
-            hosterr = "connection"
+
+        host_error = self._host_error()
 
         try:
             response = self._parser.read_response(disable_decoding=disable_decoding)
         except socket.timeout:
             self.disconnect()
-            raise TimeoutError(f"Timeout reading from {hosterr}")
+            raise TimeoutError(f"Timeout reading from {host_error}")
         except OSError as e:
             self.disconnect()
-            raise ConnectionError(f"Error while reading from {hosterr}" f" : {e.args}")
+            raise ConnectionError(
+                f"Error while reading from {host_error}" f" : {e.args}"
+            )
         except Exception:
             self.disconnect()
             raise

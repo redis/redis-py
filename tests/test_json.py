@@ -1326,17 +1326,10 @@ def test_arrindex_dollar(client):
         [],
     ]
 
-    # Fail with none-scalar value
-    with pytest.raises(exceptions.ResponseError):
-        client.json().arrindex("test_None", "$..nested42_empty_arr.arr", {"arr": []})
-
-    # Do not fail with none-scalar value in legacy mode
-    assert (
-        client.json().arrindex(
-            "test_None", ".[4][1].nested42_empty_arr.arr", '{"arr":[]}'
-        )
-        == -1
-    )
+    # Test with none-scalar value
+    assert client.json().arrindex(
+        "test_None", "$..nested42_empty_arr.arr", {"arr": []}
+    ) == [-1]
 
     # Test legacy (path begins with dot)
     # Test index of int scalar in single value

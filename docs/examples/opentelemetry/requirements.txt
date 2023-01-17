@@ -1,0 +1,3 @@
+redis==4.3.4
+uptrace==1.14.0
+opentelemetry-instrumentation-redis==0.35b0
