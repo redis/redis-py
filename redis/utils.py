@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from functools import wraps
+from packaging.version import Version
 from typing import Any, Dict, Mapping, Union
 
 try:
@@ -7,8 +8,10 @@ try:
 
     # Only support Hiredis >= 1.0:
     HIREDIS_AVAILABLE = not hiredis.__version__.startswith("0.")
+    HIREDIS_PACK_AVAILABLE = Version(hiredis.__version__) >= Version("2.1.2")
 except ImportError:
     HIREDIS_AVAILABLE = False
+    HIREDIS_PACK_AVAILABLE = False
 
 try:
     import cryptography  # noqa
@@ -17,12 +20,6 @@ try:
 except ImportError:
     CRYPTOGRAPHY_AVAILABLE = False
 
-try:
-    import redisrs_py
-    REDISRS_PY_AVAILABLE = True
-except ImportError:
-    REDISRS_PY_AVAILABLE = False
-REDISRS_PY_AVAILABLE = False
 
 def from_url(url, **kwargs):
     """

@@ -9,7 +9,6 @@ import weakref
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
-from packaging.version import Version
 from typing import Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -33,7 +32,8 @@ from redis.exceptions import (
     TimeoutError,
 )
 from redis.retry import Retry
-from redis.utils import CRYPTOGRAPHY_AVAILABLE, HIREDIS_AVAILABLE, REDISRS_PY_AVAILABLE, str_if_bytes
+
+from redis.utils import CRYPTOGRAPHY_AVAILABLE, HIREDIS_AVAILABLE, HIREDIS_PACK_AVAILABLE, str_if_bytes
 
 try:
     import ssl
@@ -55,11 +55,6 @@ NONBLOCKING_EXCEPTIONS = tuple(NONBLOCKING_EXCEPTION_ERROR_NUMBERS.keys())
 
 if HIREDIS_AVAILABLE:
     import hiredis
-
-
-if REDISRS_PY_AVAILABLE:
-    import redisrs_py
-
 
 SYM_STAR = b"*"
 SYM_DOLLAR = b"$"
@@ -161,7 +156,7 @@ class BaseParser:
         "Parse an error response"
         error_code = response.split(" ")[0]
         if error_code in self.EXCEPTION_CLASSES:
-            response = response[len(error_code) + 1 :]
+            response = response[len(error_code) + 1:]
             exception_class = self.EXCEPTION_CLASSES[error_code]
             if isinstance(exception_class, dict):
                 exception_class = exception_class.get(response, ResponseError)
@@ -504,27 +499,80 @@ class HiredisParser(BaseParser):
             raise response[0]
         return response
 
+
 if HIREDIS_AVAILABLE:
     DefaultParser = HiredisParser
 else:
     DefaultParser = PythonParser
 
 
-def pack_command_hiredis(*args):
-    """Pack a series of arguments into the Redis protocol"""
-    output = []
+class HiredisRespSerializer:
+    def pack(self, *args):
+        """Pack a series of arguments into the Redis protocol"""
+        output = []
 
-    if isinstance(args[0], str):
-        args = tuple(args[0].encode().split()) + args[1:]
-    elif b" " in args[0]:
-        args = tuple(args[0].split()) + args[1:]
-    try:
-        output.append(hiredis.pack_command(args))
-    except TypeError as err:
-        _, value, traceback = sys.exc_info()
-        raise DataError(value).with_traceback(traceback)
+        if isinstance(args[0], str):
+            args = tuple(args[0].encode().split()) + args[1:]
+        elif b" " in args[0]:
+            args = tuple(args[0].split()) + args[1:]
+        try:
+            output.append(hiredis.pack_command(args))
+        except TypeError as err:
+            _, value, traceback = sys.exc_info()
+            raise DataError(value).with_traceback(traceback)
 
-    return output
+        return output
+
+
+class PythonRespSerializer:
+    def __init__(self, buffer_cutoff, encode) -> None:
+        self._buffer_cutoff = buffer_cutoff
+        self.encode = encode
+
+    def pack(self, *args):
+        """Pack a series of arguments into the Redis protocol"""
+        output = []
+        # the client might have included 1 or more literal arguments in
+        # the command name, e.g., 'CONFIG GET'. The Redis server expects these
+        # arguments to be sent separately, so split the first argument
+        # manually. These arguments should be bytestrings so that they are
+        # not encoded.
+        if isinstance(args[0], str):
+            args = tuple(args[0].encode().split()) + args[1:]
+        elif b" " in args[0]:
+            args = tuple(args[0].split()) + args[1:]
+
+        buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
+
+        buffer_cutoff = self._buffer_cutoff
+        for arg in map(self.encode, args):
+            # to avoid large string mallocs, chunk the command into the
+            # output list if we're sending large values or memoryviews
+            arg_length = len(arg)
+            if (
+                len(buff) > buffer_cutoff
+                or arg_length > buffer_cutoff
+                or isinstance(arg, memoryview)
+            ):
+                buff = SYM_EMPTY.join(
+                    (buff, SYM_DOLLAR, str(arg_length).encode(), SYM_CRLF)
+                )
+                output.append(buff)
+                output.append(arg)
+                buff = SYM_CRLF
+            else:
+                buff = SYM_EMPTY.join(
+                    (
+                        buff,
+                        SYM_DOLLAR,
+                        str(arg_length).encode(),
+                        SYM_CRLF,
+                        arg,
+                        SYM_CRLF,
+                    )
+                )
+        output.append(buff)
+        return output
 
 
 class Connection:
@@ -554,7 +602,7 @@ class Connection:
         retry=None,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
-        pack_command=None,
+        command_packer=None,
     ):
         """
         Initialize a new Connection.
@@ -609,7 +657,7 @@ class Connection:
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
-        self.pack_command = self._construct_pack_command(pack_command)
+        self._command_packer = self._construct_command_packer(command_packer)
 
     def __repr__(self):
         repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
@@ -626,14 +674,14 @@ class Connection:
             self.disconnect()
         except Exception:
             pass
-    
-    def _construct_pack_command(self, packer):
+
+    def _construct_command_packer(self, packer):
         if packer is not None:
             return packer
-        elif HIREDIS_AVAILABLE and Version(hiredis.__version__) >= Version("2.1.2"):
-            return pack_command_hiredis
+        elif HIREDIS_PACK_AVAILABLE:
+            return HiredisRespSerializer()
         else:
-            return self._pack_command_python
+            return PythonRespSerializer(self._buffer_cutoff, self.encoder.encode)
 
     def register_connect_callback(self, callback):
         self._connect_callbacks.append(weakref.WeakMethod(callback))
@@ -855,7 +903,7 @@ class Connection:
     def send_command(self, *args, **kwargs):
         """Pack and send a command to the Redis server"""
         self.send_packed_command(
-            self.pack_command(*args), check_health=kwargs.get("check_health", True)
+            self._command_packer.pack(*args), check_health=kwargs.get("check_health", True)
         )
 
     def can_read(self, timeout=0):
@@ -898,65 +946,9 @@ class Connection:
             raise response
         return response
 
-    def _pack_bytes_hiredis(self, *args):
+    def pack_command(self, *args):
         """Pack a series of arguments into the Redis protocol"""
-        output = []
-        if isinstance(args[0], str):
-            args = tuple(args[0].encode().split()) + args[1:]
-        elif b" " in args[0]:
-            args = tuple(args[0].split()) + args[1:]
-
-        global encoder
-        cmd = b' '.join(map(self.encoder.encode, args))
-
-        output.append(hiredis.pack_bytes(cmd))
-        return output
-
-
-    def _pack_command_python(self, *args):
-        """Pack a series of arguments into the Redis protocol"""
-        output = []
-        # the client might have included 1 or more literal arguments in
-        # the command name, e.g., 'CONFIG GET'. The Redis server expects these
-        # arguments to be sent separately, so split the first argument
-        # manually. These arguments should be bytestrings so that they are
-        # not encoded.
-        if isinstance(args[0], str):
-            args = tuple(args[0].encode().split()) + args[1:]
-        elif b" " in args[0]:
-            args = tuple(args[0].split()) + args[1:]
-
-        buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
-
-        buffer_cutoff = self._buffer_cutoff
-        for arg in map(self.encoder.encode, args):
-            # to avoid large string mallocs, chunk the command into the
-            # output list if we're sending large values or memoryviews
-            arg_length = len(arg)
-            if (
-                len(buff) > buffer_cutoff
-                or arg_length > buffer_cutoff
-                or isinstance(arg, memoryview)
-            ):
-                buff = SYM_EMPTY.join(
-                    (buff, SYM_DOLLAR, str(arg_length).encode(), SYM_CRLF)
-                )
-                output.append(buff)
-                output.append(arg)
-                buff = SYM_CRLF
-            else:
-                buff = SYM_EMPTY.join(
-                    (
-                        buff,
-                        SYM_DOLLAR,
-                        str(arg_length).encode(),
-                        SYM_CRLF,
-                        arg,
-                        SYM_CRLF,
-                    )
-                )
-        output.append(buff)
-        return output
+        return self._command_packer.pack(*args)
 
     def pack_commands(self, commands):
         """Pack multiple commands into the Redis protocol"""
@@ -966,7 +958,7 @@ class Connection:
         buffer_cutoff = self._buffer_cutoff
 
         for cmd in commands:
-            for chunk in self.pack_command(*cmd):
+            for chunk in self._command_packer.pack(*cmd):
                 chunklen = len(chunk)
                 if (
                     buffer_length > buffer_cutoff
