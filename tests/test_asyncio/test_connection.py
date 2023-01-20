@@ -1,7 +1,7 @@
 import asyncio
 import socket
 import types
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -9,12 +9,14 @@ import redis
 from redis.asyncio.connection import (
     BaseParser,
     Connection,
+    HiredisParser,
     PythonParser,
     UnixDomainSocketConnection,
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
+from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 
 from .compat import mock
@@ -146,3 +148,65 @@ async def test_connection_parse_response_resume(r: redis.Redis):
         pytest.fail("didn't receive a response")
     assert response
     assert i > 0
+
+
+@pytest.mark.xfail
+@pytest.mark.onlynoncluster
+async def test_connection_hiredis_disconect_race():
+    """
+    This test reproduces the case in issue #2349
+    where a connection is closed while the parser is reading to feed the internal buffer.
+    The stremam read() will succeed, but when it returns, another task has already called
+    `disconnect()` and is waiting for close to finish.  When it attempts to feed the
+    buffer, it will fail, since the buffer is no longer there.
+    """
+    if not HIREDIS_AVAILABLE:
+        pytest.skip("Hiredis not available)")
+    parser_class = HiredisParser
+
+    args = {}
+    args["parser_class"] = parser_class
+    conn = Connection(**args)
+
+    cond = asyncio.Condition()
+    # 0 == initial
+    # 1 == reader is reading
+    # 2 == closer has closed and is waiting for close to finish
+    state = 0
+
+    # mock read function, which wait for a close to happen before returning
+    async def read(_):
+        nonlocal state
+        async with cond:
+            state = 1  # we are reading
+            cond.notify()
+            # wait until the closing task has done
+            await cond.wait_for(lambda: state == 2)
+        return b" "
+
+    # function closes the connection while reader is still blocked reading
+    async def do_close():
+        nonlocal state
+        async with cond:
+            await cond.wait_for(lambda: state == 1)
+            state = 2
+            cond.notify()
+        await conn.disconnect()
+
+    async def do_read():
+        await conn.read_response()
+
+    reader = AsyncMock()
+    writer = AsyncMock()
+    writer.transport = Mock()
+    writer.transport.get_extra_info.side_effect = None
+
+    reader.read.side_effect = read
+
+    async def open_connection(*args, **kwargs):
+        return reader, writer
+
+    with patch.object(asyncio, "open_connection", open_connection):
+        await conn.connect()
+
+    await asyncio.gather(do_read(), do_close())
