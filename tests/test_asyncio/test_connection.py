@@ -150,15 +150,18 @@ async def test_connection_parse_response_resume(r: redis.Redis):
     assert i > 0
 
 
-@pytest.mark.xfail
 @pytest.mark.onlynoncluster
 async def test_connection_hiredis_disconect_race():
     """
     This test reproduces the case in issue #2349
-    where a connection is closed while the parser is reading to feed the internal buffer.
-    The stremam read() will succeed, but when it returns, another task has already called
-    `disconnect()` and is waiting for close to finish.  When it attempts to feed the
-    buffer, it will fail, since the buffer is no longer there.
+    where a connection is closed while the parser is reading to feed the
+    internal buffer.The stremam read() will succeed, but when it returns,
+    another task hasalready called `disconnect()` and is waiting for
+    close to finish.  When it attempts to feed the buffer, it will fail
+    since the buffer is no longer there.
+
+    This test verifies that a read in progress can finish even
+    if the `disconnect()` method is called.
     """
     if not HIREDIS_AVAILABLE:
         pytest.skip("Hiredis not available)")
@@ -194,7 +197,8 @@ async def test_connection_hiredis_disconect_race():
         await conn.disconnect()
 
     async def do_read():
-        await conn.read_response()
+        with pytest.raises(InvalidResponse):
+            await conn.read_response()
 
     reader = AsyncMock()
     writer = AsyncMock()
