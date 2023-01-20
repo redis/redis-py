@@ -158,9 +158,9 @@ async def test_connection_disconect_race(parser_class):
     """
     This test reproduces the case in issue #2349
     where a connection is closed while the parser is reading to feed the
-    internal buffer.The stremam read() will succeed, but when it returns,
-    another task hasalready called `disconnect()` and is waiting for
-    close to finish.  When it attempts to feed the buffer, it will fail
+    internal buffer.The stream `read()` will succeed, but when it returns,
+    another task has already called `disconnect()` and is waiting for
+    close to finish.  When we attempts to feed the buffer, we will fail
     since the buffer is no longer there.
 
     This test verifies that a read in progress can finish even
