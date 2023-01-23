@@ -1,6 +1,5 @@
 from contextlib import contextmanager
 from functools import wraps
-from packaging.version import Version
 from typing import Any, Dict, Mapping, Union
 
 try:
@@ -8,7 +7,7 @@ try:
 
     # Only support Hiredis >= 1.0:
     HIREDIS_AVAILABLE = not hiredis.__version__.startswith("0.")
-    HIREDIS_PACK_AVAILABLE = Version(hiredis.__version__) >= Version("2.1.2")
+    HIREDIS_PACK_AVAILABLE = hasattr(hiredis, 'pack_command')
 except ImportError:
     HIREDIS_AVAILABLE = False
     HIREDIS_PACK_AVAILABLE = False
