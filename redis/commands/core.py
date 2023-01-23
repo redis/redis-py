@@ -3551,7 +3551,7 @@ class StreamCommands(CommandsProtocol):
         groupname: GroupT,
         consumername: ConsumerT,
         min_idle_time: int,
-        message_ids: [List[StreamIdT], Tuple[StreamIdT]],
+        message_ids: Union[List[StreamIdT], Tuple[StreamIdT]],
         idle: Union[int, None] = None,
         time: Union[int, None] = None,
         retrycount: Union[int, None] = None,

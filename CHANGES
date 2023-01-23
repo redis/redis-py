@@ -1,3 +1,4 @@
+    * Simplify synchronous SocketBuffer state management
     * Revert #2104, add `disconnect_on_error` option to `read_response()` (#2506)
     * Fix string cleanse in Redis Graph
     * Make PythonParser resumable in case of error (#2510)
