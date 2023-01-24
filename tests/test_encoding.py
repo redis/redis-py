@@ -75,6 +75,7 @@ class TestEncodingErrors:
         r.set("a", b"foo\xff")
         assert r.get("a") == "foo\ufffd"
 
+
 @pytest.mark.skipif(HIREDIS_PACK_AVAILABLE,
                     reason="Packing via hiredis does not preserve memoryviews")
 class TestMemoryviewsAreNotPacked:

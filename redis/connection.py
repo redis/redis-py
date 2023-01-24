@@ -32,8 +32,8 @@ from redis.exceptions import (
     TimeoutError,
 )
 from redis.retry import Retry
-
-from redis.utils import CRYPTOGRAPHY_AVAILABLE, HIREDIS_AVAILABLE, HIREDIS_PACK_AVAILABLE, str_if_bytes
+from redis.utils import CRYPTOGRAPHY_AVAILABLE, HIREDIS_AVAILABLE, \
+    HIREDIS_PACK_AVAILABLE, str_if_bytes
 
 try:
     import ssl
@@ -517,7 +517,7 @@ class HiredisRespSerializer:
             args = tuple(args[0].split()) + args[1:]
         try:
             output.append(hiredis.pack_command(args))
-        except TypeError as err:
+        except TypeError:
             _, value, traceback = sys.exc_info()
             raise DataError(value).with_traceback(traceback)
 
@@ -903,7 +903,8 @@ class Connection:
     def send_command(self, *args, **kwargs):
         """Pack and send a command to the Redis server"""
         self.send_packed_command(
-            self._command_packer.pack(*args), check_health=kwargs.get("check_health", True)
+            self._command_packer.pack(*args),
+            check_health=kwargs.get("check_health", True)
         )
 
     def can_read(self, timeout=0):
