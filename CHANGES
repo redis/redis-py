@@ -1,3 +1,4 @@
+    * Support `.unlink()` in ClusterPipeline
     * Simplify synchronous SocketBuffer state management
     * Fix string cleanse in Redis Graph
     * Make PythonParser resumable in case of error (#2510)
