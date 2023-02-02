@@ -1546,9 +1546,10 @@ class BlockingConnectionPool(ConnectionPool):
         queue_class: Type[asyncio.Queue] = asyncio.Queue,
         **connection_kwargs,
     ):
-
         self.queue_class = queue_class
         self.timeout = timeout
+        self._in_use_connections: Set[Connection]
+
         super().__init__(
             connection_class=connection_class,
             max_connections=max_connections,
@@ -1560,6 +1561,8 @@ class BlockingConnectionPool(ConnectionPool):
         self.pool = self.queue_class(self.max_connections)
         # used to decide wether we can allocate new connection or wait
         self._created_connections = 0
+        # keep track of connections that are outside queue to close them
+        self._in_use_connections = set()
 
         # this must be the last operation in this method. while reset() is
         # called when holding _fork_lock, other threads in this process
@@ -1604,6 +1607,9 @@ class BlockingConnectionPool(ConnectionPool):
                 # raised unless handled by application code.
                 raise ConnectionError("No connection available.")
 
+        # add to set before try block to ensure release does not try to .remove missing
+        # value
+        self._in_use_connections.add(connection)
         try:
             # ensure this connection is connected to Redis
             await connection.connect()
@@ -1630,14 +1636,14 @@ class BlockingConnectionPool(ConnectionPool):
         """Releases the connection back to the pool."""
         # Make sure we haven't changed process.
         self._checkpid()
+
         if not self.owns_connection(connection):
             # pool doesn't own this connection. do not add it back
-            # to the pool. instead add a None value which is a placeholder
-            # that will cause the pool to recreate the connection if
-            # its needed.
+            # to the pool
             await connection.disconnect()
-            self.pool.put_nowait(None)
             return
+
+        self._in_use_connections.remove(connection)
 
         # Put the connection back into the pool.
         try:
@@ -1655,6 +1661,11 @@ class BlockingConnectionPool(ConnectionPool):
                 *(
                     self.pool.get_nowait().disconnect()
                     for _ in range(self.pool.qsize())
+                ),
+                *(
+                    connection.disconnect()
+                    for connection in self._in_use_connections
+                    if inuse_connections
                 ),
                 return_exceptions=True,
             )
