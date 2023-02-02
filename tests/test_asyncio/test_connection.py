@@ -70,7 +70,7 @@ async def test_single_connection():
     mock_conn = mock.MagicMock()
     mock_conn.retry = Retry_()
 
-    async def get_conn(_):
+    async def get_conn(*_):
         # Validate only one client is created in single-client mode when
         # concurrent requests are made
         nonlocal init_call_count
@@ -78,8 +78,8 @@ async def test_single_connection():
         init_call_count += 1
         return mock_conn
 
-    with mock.patch.object(r.connection_pool, "get_connection", get_conn):
-        with mock.patch.object(r.connection_pool, "release"):
+    with mock.patch.object(type(r.connection_pool), "get_connection", get_conn):
+        with mock.patch.object(type(r.connection_pool), "release"):
             await asyncio.gather(r.set("a", "b"), r.set("c", "d"))
 
     assert init_call_count == 1
