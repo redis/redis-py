@@ -32,8 +32,12 @@ from redis.exceptions import (
     TimeoutError,
 )
 from redis.retry import Retry
-from redis.utils import CRYPTOGRAPHY_AVAILABLE, HIREDIS_AVAILABLE, \
-    HIREDIS_PACK_AVAILABLE, str_if_bytes
+from redis.utils import (
+    CRYPTOGRAPHY_AVAILABLE,
+    HIREDIS_AVAILABLE,
+    HIREDIS_PACK_AVAILABLE,
+    str_if_bytes,
+)
 
 try:
     import ssl
@@ -156,7 +160,7 @@ class BaseParser:
         "Parse an error response"
         error_code = response.split(" ")[0]
         if error_code in self.EXCEPTION_CLASSES:
-            response = response[len(error_code) + 1:]
+            response = response[len(error_code) + 1 :]
             exception_class = self.EXCEPTION_CLASSES[error_code]
             if isinstance(exception_class, dict):
                 exception_class = exception_class.get(response, ResponseError)
@@ -904,7 +908,7 @@ class Connection:
         """Pack and send a command to the Redis server"""
         self.send_packed_command(
             self._command_packer.pack(*args),
-            check_health=kwargs.get("check_health", True)
+            check_health=kwargs.get("check_health", True),
         )
 
     def can_read(self, timeout=0):
