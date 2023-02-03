@@ -18,7 +18,7 @@ from redis.cluster import (
     get_node_name,
 )
 from redis.commands import CommandsParser
-from redis.connection import Connection
+from redis.connection import BlockingConnectionPool, Connection, ConnectionPool
 from redis.crc import key_slot
 from redis.exceptions import (
     AskError,
@@ -2262,6 +2262,57 @@ class TestNodesManager:
 
         assert len(n_manager.nodes_cache) == 6
 
+    def test_init_promote_server_type_for_node_in_cache(self):
+        """
+        When replica is promoted to master, nodes_cache must change the server type
+        accordingly
+        """
+        cluster_slots_before_promotion = [
+            [0, 16383, ["127.0.0.1", 7000], ["127.0.0.1", 7003]]
+        ]
+        cluster_slots_after_promotion = [
+            [0, 16383, ["127.0.0.1", 7003], ["127.0.0.1", 7004]]
+        ]
+
+        cluster_slots_results = [
+            cluster_slots_before_promotion,
+            cluster_slots_after_promotion,
+        ]
+
+        with patch.object(Redis, "execute_command") as execute_command_mock:
+
+            def execute_command(*_args, **_kwargs):
+                if _args[0] == "CLUSTER SLOTS":
+                    mock_cluster_slots = cluster_slots_results.pop(0)
+                    return mock_cluster_slots
+                elif _args[0] == "COMMAND":
+                    return {"get": [], "set": []}
+                elif _args[0] == "INFO":
+                    return {"cluster_enabled": True}
+                elif len(_args) > 1 and _args[1] == "cluster-require-full-coverage":
+                    return {"cluster-require-full-coverage": False}
+                else:
+                    return execute_command_mock(*_args, **_kwargs)
+
+            execute_command_mock.side_effect = execute_command
+
+            nm = NodesManager(
+                startup_nodes=[ClusterNode(host=default_host, port=default_port)],
+                from_url=False,
+                require_full_coverage=False,
+                dynamic_startup_nodes=True,
+            )
+
+            assert nm.default_node.host == "127.0.0.1"
+            assert nm.default_node.port == 7000
+            assert nm.default_node.server_type == PRIMARY
+
+            nm.initialize()
+
+            assert nm.default_node.host == "127.0.0.1"
+            assert nm.default_node.port == 7003
+            assert nm.default_node.server_type == PRIMARY
+
     def test_init_slots_cache_cluster_mode_disabled(self):
         """
         Test that creating a RedisCluster failes if one of the startup nodes
@@ -2444,6 +2495,21 @@ class TestNodesManager:
             assert startup_nodes.sort() == discovered_nodes.sort()
         else:
             assert startup_nodes == ["my@DNS.com:7000"]
+
+    @pytest.mark.parametrize(
+        "connection_pool_class", [ConnectionPool, BlockingConnectionPool]
+    )
+    def test_connection_pool_class(self, connection_pool_class):
+        rc = get_mocked_redis_client(
+            url="redis://my@DNS.com:7000",
+            cluster_slots=default_cluster_slots,
+            connection_pool_class=connection_pool_class,
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            assert isinstance(
+                node.redis_connection.connection_pool, connection_pool_class
+            )
 
 
 @pytest.mark.onlycluster
@@ -2636,6 +2702,25 @@ class TestClusterPipeline:
             r["b"] = 2
             with pytest.raises(RedisClusterException):
                 pipe.delete("a", "b")
+
+    def test_unlink_single(self, r):
+        """
+        Test a single unlink operation
+        """
+        r["a"] = 1
+        with r.pipeline(transaction=False) as pipe:
+            pipe.unlink("a")
+            assert pipe.execute() == [1]
+
+    def test_multi_unlink_unsupported(self, r):
+        """
+        Test that multi unlink operation is unsupported
+        """
+        with r.pipeline(transaction=False) as pipe:
+            r["a"] = 1
+            r["b"] = 2
+            with pytest.raises(RedisClusterException):
+                pipe.unlink("a", "b")
 
     def test_brpoplpush_disabled(self, r):
         """

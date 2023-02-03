@@ -121,6 +121,7 @@ REDIS_ALLOWED_KEYS = (
     "charset",
     "connection_class",
     "connection_pool",
+    "connection_pool_class",
     "client_name",
     "credential_provider",
     "db",
@@ -1267,6 +1268,7 @@ class NodesManager:
         require_full_coverage=False,
         lock=None,
         dynamic_startup_nodes=True,
+        connection_pool_class=ConnectionPool,
         **kwargs,
     ):
         self.nodes_cache = {}
@@ -1277,6 +1279,7 @@ class NodesManager:
         self.from_url = from_url
         self._require_full_coverage = require_full_coverage
         self._dynamic_startup_nodes = dynamic_startup_nodes
+        self.connection_pool_class = connection_pool_class
         self._moved_exception = None
         self.connection_kwargs = kwargs
         self.read_load_balancer = LoadBalancer()
@@ -1420,7 +1423,7 @@ class NodesManager:
             # Create a redis node with a costumed connection pool
             kwargs.update({"host": host})
             kwargs.update({"port": port})
-            r = Redis(connection_pool=ConnectionPool(**kwargs))
+            r = Redis(connection_pool=self.connection_pool_class(**kwargs))
         else:
             r = Redis(host=host, port=port, **kwargs)
         return r
@@ -1437,6 +1440,8 @@ class NodesManager:
             if target_node is None or target_node.redis_connection is None:
                 # create new cluster node for this cluster
                 target_node = ClusterNode(host, port, role)
+            if target_node.server_type != role:
+                target_node.server_type = role
 
         return target_node
 
@@ -2130,6 +2135,17 @@ class ClusterPipeline(RedisCluster):
             )
 
         return self.execute_command("DEL", names[0])
+
+    def unlink(self, *names):
+        """
+        "Unlink a key specified by ``names``"
+        """
+        if len(names) != 1:
+            raise RedisClusterException(
+                "unlinking multiple keys is not implemented in pipeline command"
+            )
+
+        return self.execute_command("UNLINK", names[0])
 
 
 def block_pipeline_command(name: str) -> Callable[..., Any]:

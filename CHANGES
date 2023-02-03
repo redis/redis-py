@@ -1,4 +1,7 @@
     * Use hiredis-py pack_command if available.
+    * Support `.unlink()` in ClusterPipeline
+    * Simplify synchronous SocketBuffer state management
+    * Fix string cleanse in Redis Graph
     * Make PythonParser resumable in case of error (#2510)
     * Add `timeout=None` in `SentinelConnectionManager.read_response`
     * Documentation fix: password protected socket connection (#2374)
