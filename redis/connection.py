@@ -96,10 +96,7 @@ class Encoder:
             return value
         elif isinstance(value, bool):
             # special case bool since it is a subclass of int
-            raise DataError(
-                "Invalid input of type: 'bool'. Convert to a "
-                "bytes, string, int or float first."
-            )
+            value = repr(int(value)).encode()
         elif isinstance(value, (int, float)):
             value = repr(value).encode()
         elif not isinstance(value, str):
