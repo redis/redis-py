@@ -991,9 +991,9 @@ class TestBaseException:
         assert msg is not None
         # timeout waiting for another message which never arrives
         assert pubsub.connection.is_connected
-        with patch("redis.asyncio.connection.PythonParser.read_response") as mock1:
+        with patch("redis.parsers._AsyncRESP2Parser.read_response") as mock1:
             mock1.side_effect = BaseException("boom")
-            with patch("redis.asyncio.connection.HiredisParser.read_response") as mock2:
+            with patch("redis.parsers._AsyncHiredisParser.read_response") as mock2:
                 mock2.side_effect = BaseException("boom")
 
                 with pytest.raises(BaseException):
