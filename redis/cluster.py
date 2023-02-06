@@ -1379,7 +1379,10 @@ class NodesManager:
             # randomly choose one of the replicas
             node_idx = random.randint(1, len(self.slots_cache[slot]) - 1)
 
-        return self.slots_cache[slot][node_idx]
+        try:
+            return self.slots_cache[slot][node_idx]
+        except IndexError:
+            return self.slots_cache[slot][0]
 
     def get_nodes_by_server_type(self, server_type):
         """
