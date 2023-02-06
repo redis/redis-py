@@ -129,7 +129,9 @@ class TestConnection:
 
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize(
-    "parser_class", [_RESP2Parser, _HiredisParser], ids=["PythonParser", "HiredisParser"]
+    "parser_class",
+    [_RESP2Parser, _HiredisParser],
+    ids=["PythonParser", "HiredisParser"],
 )
 def test_connection_parse_response_resume(r: redis.Redis, parser_class):
     """
