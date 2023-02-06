@@ -2518,7 +2518,7 @@ class TestNodesManager:
             url="redis://my@DNS.com:7000",
             cluster_slots=default_cluster_slots,
             connection_pool_class=BlockingConnectionPool,
-            queue_class=queue_class
+            queue_class=queue_class,
         )
 
         for node in rc.nodes_manager.nodes_cache.values():
