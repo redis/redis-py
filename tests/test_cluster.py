@@ -1,7 +1,7 @@
 import binascii
 import datetime
 import warnings
-from queue import Queue, LifoQueue
+from queue import LifoQueue, Queue
 from time import sleep
 from unittest.mock import DEFAULT, Mock, call, patch
 
