@@ -1902,7 +1902,7 @@ class ClusterPipeline(RedisCluster):
                     raise_on_error=raise_on_error,
                     allow_redirections=allow_redirections,
                 )
-            except (ClusterDownError, ConnectionError) as e:
+            except (ClusterDownError, ConnectionError, TimeoutError) as e:
                 if retry_attempts > 0:
                     # Try again with the new cluster setup. All other errors
                     # should be raised.
@@ -1967,7 +1967,7 @@ class ClusterPipeline(RedisCluster):
                     redis_node = self.get_redis_connection(node)
                     try:
                         connection = get_connection(redis_node, c.args)
-                    except ConnectionError:
+                    except (ConnectionError, TimeoutError):
                         # Connection retries are being handled in the node's
                         # Retry object. Reinitialize the node -> slot table.
                         self.nodes_manager.initialize()
