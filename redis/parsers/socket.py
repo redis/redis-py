@@ -4,7 +4,6 @@ import socket
 from io import SEEK_END
 from typing import Optional, Union
 
-from ..connection import SYM_CRLF
 from ..exceptions import ConnectionError, TimeoutError
 from ..utils import SSL_AVAILABLE
 
@@ -23,6 +22,8 @@ NONBLOCKING_EXCEPTIONS = tuple(NONBLOCKING_EXCEPTION_ERROR_NUMBERS.keys())
 
 SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
 SENTINEL = object()
+
+SYM_CRLF = b"\r\n"
 
 
 class SocketBuffer:
