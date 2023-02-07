@@ -1,3 +1,4 @@
+    * Allow data to drain from async PythonParser when reading during a disconnect()
     * Add test and fix async HiredisParser when reading during a disconnect() (#2349)
     * Use hiredis-py pack_command if available.
     * Support `.unlink()` in ClusterPipeline
