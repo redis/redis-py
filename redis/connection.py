@@ -72,6 +72,7 @@ class Connection:
         retry=None,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
+        resp: Optional[int] = None,
     ):
         """
         Initialize a new Connection.
@@ -126,6 +127,7 @@ class Connection:
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
+        self.resp = resp
 
     def __repr__(self):
         repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
@@ -287,6 +289,11 @@ class Connection:
 
             if str_if_bytes(auth_response) != "OK":
                 raise AuthenticationError("Invalid Username or Password")
+
+        # if resp version is specified, switch to it
+        if self.resp:
+            self.send_command("HELLO", self.resp)
+            self.read_response()
 
         # if a client_name is given, set it
         if self.client_name:
