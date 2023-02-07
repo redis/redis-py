@@ -1153,6 +1153,7 @@ class UnixDomainSocketConnection(Connection):
         retry=None,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
+        command_packer=None,
     ):
         """
         Initialize a new UnixDomainSocketConnection.
@@ -1202,6 +1203,7 @@ class UnixDomainSocketConnection(Connection):
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
+        self._command_packer = self._construct_command_packer(command_packer)
 
     def repr_pieces(self):
         pieces = [("path", self.path), ("db", self.db)]

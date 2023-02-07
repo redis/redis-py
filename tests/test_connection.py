@@ -7,7 +7,13 @@ import pytest
 
 import redis
 from redis.backoff import NoBackoff
-from redis.connection import Connection, HiredisParser, PythonParser
+from redis.connection import (
+    Connection,
+    HiredisParser,
+    PythonParser,
+    SSLConnection,
+    UnixDomainSocketConnection,
+)
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
@@ -163,3 +169,41 @@ def test_connection_parse_response_resume(r: redis.Redis, parser_class):
         pytest.fail("didn't receive a response")
     assert response
     assert i > 0
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.parametrize(
+    "Class",
+    [
+        Connection,
+        SSLConnection,
+        UnixDomainSocketConnection,
+    ],
+)
+def test_pack_command(Class):
+    """
+    This test verifies that the pack_command works
+    on all supported connections. #2581
+    """
+    cmd = (
+        "HSET",
+        "foo",
+        "key",
+        "value1",
+        b"key_b",
+        b"bytes str",
+        "key_mv",
+        memoryview(b"bytes str"),
+        b"key_i",
+        67,
+        "key_f",
+        3.14159265359,
+    )
+    expected = (
+        b"*12\r\n$4\r\nHSET\r\n$3\r\nfoo\r\n$3\r\nkey\r\n$6\r\nvalue1\r\n"
+        b"$5\r\nkey_b\r\n$9\r\nbytes str\r\n$6\r\nkey_mv\r\n$9\r\n"
+        b"bytes str\r\n$5\r\nkey_i\r\n$2\r\n67\r\n$5\r\nkey_f\r\n$13\r\n"
+        b"3.14159265359\r\n"
+    )
+
+    assert Class().pack_command(*cmd)[0] == expected
