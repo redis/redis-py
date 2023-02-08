@@ -1,3 +1,6 @@
+    * Add test and fix async HiredisParser when reading during a disconnect() (#2349)
+    * Use hiredis-py pack_command if available.
+    * Support `.unlink()` in ClusterPipeline
     * Simplify synchronous SocketBuffer state management
     * Revert #2104, add `disconnect_on_error` option to `read_response()` (#2506)
     * Fix string cleanse in Redis Graph

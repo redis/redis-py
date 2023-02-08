@@ -6,15 +6,18 @@ from unittest.mock import patch
 import pytest
 
 import redis
+from redis.asyncio import Redis
 from redis.asyncio.connection import (
     BaseParser,
     Connection,
+    HiredisParser,
     PythonParser,
     UnixDomainSocketConnection,
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
+from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 
 from .compat import mock
@@ -39,6 +42,50 @@ async def test_invalid_response(create_redis):
             str(cm.value) == f'Protocol error, got "{raw.decode()}" as reply type byte'
         )
     await r.connection.disconnect()
+
+
+@pytest.mark.onlynoncluster
+async def test_single_connection():
+    """Test that concurrent requests on a single client are synchronised."""
+    r = Redis(single_connection_client=True)
+
+    init_call_count = 0
+    command_call_count = 0
+    in_use = False
+
+    class Retry_:
+        async def call_with_retry(self, _, __):
+            # If we remove the single-client lock, this error gets raised as two
+            # coroutines will be vying for the `in_use` flag due to the two
+            # asymmetric sleep calls
+            nonlocal command_call_count
+            nonlocal in_use
+            if in_use is True:
+                raise ValueError("Commands should be executed one at a time.")
+            in_use = True
+            await asyncio.sleep(0.01)
+            command_call_count += 1
+            await asyncio.sleep(0.03)
+            in_use = False
+            return "foo"
+
+    mock_conn = mock.MagicMock()
+    mock_conn.retry = Retry_()
+
+    async def get_conn(_):
+        # Validate only one client is created in single-client mode when
+        # concurrent requests are made
+        nonlocal init_call_count
+        await asyncio.sleep(0.01)
+        init_call_count += 1
+        return mock_conn
+
+    with mock.patch.object(r.connection_pool, "get_connection", get_conn):
+        with mock.patch.object(r.connection_pool, "release"):
+            await asyncio.gather(r.set("a", "b"), r.set("c", "d"))
+
+    assert init_call_count == 1
+    assert command_call_count == 2
 
 
 @skip_if_server_version_lt("4.0.0")
@@ -146,3 +193,83 @@ async def test_connection_parse_response_resume(r: redis.Redis):
         pytest.fail("didn't receive a response")
     assert response
     assert i > 0
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.parametrize(
+    "parser_class", [PythonParser, HiredisParser], ids=["PythonParser", "HiredisParser"]
+)
+async def test_connection_disconect_race(parser_class):
+    """
+    This test reproduces the case in issue #2349
+    where a connection is closed while the parser is reading to feed the
+    internal buffer.The stream `read()` will succeed, but when it returns,
+    another task has already called `disconnect()` and is waiting for
+    close to finish.  When we attempts to feed the buffer, we will fail
+    since the buffer is no longer there.
+
+    This test verifies that a read in progress can finish even
+    if the `disconnect()` method is called.
+    """
+    if parser_class == PythonParser:
+        pytest.xfail("doesn't work yet with PythonParser")
+    if parser_class == HiredisParser and not HIREDIS_AVAILABLE:
+        pytest.skip("Hiredis not available")
+
+    args = {}
+    args["parser_class"] = parser_class
+
+    conn = Connection(**args)
+
+    cond = asyncio.Condition()
+    # 0 == initial
+    # 1 == reader is reading
+    # 2 == closer has closed and is waiting for close to finish
+    state = 0
+
+    # Mock read function, which wait for a close to happen before returning
+    # Can either be invoked as two `read()` calls (HiredisParser)
+    # or as a `readline()` followed by `readexact()` (PythonParser)
+    chunks = [b"$13\r\n", b"Hello, World!\r\n"]
+
+    async def read(_=None):
+        nonlocal state
+        async with cond:
+            if state == 0:
+                state = 1  # we are reading
+                cond.notify()
+                # wait until the closing task has done
+                await cond.wait_for(lambda: state == 2)
+        return chunks.pop(0)
+
+    # function closes the connection while reader is still blocked reading
+    async def do_close():
+        nonlocal state
+        async with cond:
+            await cond.wait_for(lambda: state == 1)
+            state = 2
+            cond.notify()
+        await conn.disconnect()
+
+    async def do_read():
+        return await conn.read_response()
+
+    reader = mock.AsyncMock()
+    writer = mock.AsyncMock()
+    writer.transport = mock.Mock()
+    writer.transport.get_extra_info.side_effect = None
+
+    # for HiredisParser
+    reader.read.side_effect = read
+    # for PythonParser
+    reader.readline.side_effect = read
+    reader.readexactly.side_effect = read
+
+    async def open_connection(*args, **kwargs):
+        return reader, writer
+
+    with patch.object(asyncio, "open_connection", open_connection):
+        await conn.connect()
+
+    vals = await asyncio.gather(do_read(), do_close())
+    assert vals == [b"Hello, World!", None]

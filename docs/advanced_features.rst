@@ -162,7 +162,7 @@ instance will wait for all the nodes to respond before returning the
 result to the caller. Command responses are returned as a list sorted in
 the same order in which they were sent. Pipelines can be used to
 dramatically increase the throughput of Redis Cluster by significantly
-reducing the the number of network round trips between the client and
+reducing the number of network round trips between the client and
 the server.
 
 .. code:: pycon
