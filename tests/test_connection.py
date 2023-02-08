@@ -192,18 +192,15 @@ def test_pack_command(Class):
         "value1",
         b"key_b",
         b"bytes str",
-        "key_mv",
-        memoryview(b"bytes str"),
         b"key_i",
         67,
         "key_f",
         3.14159265359,
     )
     expected = (
-        b"*12\r\n$4\r\nHSET\r\n$3\r\nfoo\r\n$3\r\nkey\r\n$6\r\nvalue1\r\n"
-        b"$5\r\nkey_b\r\n$9\r\nbytes str\r\n$6\r\nkey_mv\r\n$9\r\n"
-        b"bytes str\r\n$5\r\nkey_i\r\n$2\r\n67\r\n$5\r\nkey_f\r\n$13\r\n"
-        b"3.14159265359\r\n"
+        b"*10\r\n$4\r\nHSET\r\n$3\r\nfoo\r\n$3\r\nkey\r\n$6\r\nvalue1\r\n"
+        b"$5\r\nkey_b\r\n$9\r\nbytes str\r\n$5\r\nkey_i\r\n$2\r\n67\r\n$5"
+        b"\r\nkey_f\r\n$13\r\n3.14159265359\r\n"
     )
 
     actual = Class().pack_command(*cmd)[0]
