@@ -206,4 +206,5 @@ def test_pack_command(Class):
         b"3.14159265359\r\n"
     )
 
-    assert Class().pack_command(*cmd)[0] == expected
+    actual = Class().pack_command(*cmd)[0]
+    assert actual == expected, f"actual = {actual}, expected = {expected}"
