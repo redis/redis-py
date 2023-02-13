@@ -73,7 +73,7 @@ jobs:
          if: success() || failure()
          with:
            name: pytest-results-${{matrix.test-type}}
-           path: '${{matrix.test-type}}*results.xml'
+           path: 'coverage_redis.xml'
 
        - name: Upload codecov coverage
          uses: codecov/codecov-action@v3
