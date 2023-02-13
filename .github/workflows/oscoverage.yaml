@@ -18,16 +18,18 @@ permissions:
   contents: read
 
 jobs:
+
   os-tests:
     name: ${{matrix.os}} ${{matrix.connection-type}} ${{matrix.test-type}} Py${{matrix.python-version}}
     runs-on: ${{matrix.os}}
     timeout-minutes: 30
     strategy:
       max-parallel: 2
+      fail-fast: false
       matrix:
         python-version: ['3.9']
         connection-type: ['hiredis', 'plain']
-        os: ['macos-latest']
+        os: ['macos-latest', 'windows-latest']
         test-type: ['standalone', 'cluster']
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
@@ -42,9 +44,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
       - name: run tests
+        shell: bash
         run: |
           pip install -U setuptools wheel
-          pip install -r dev_requirements.txt || exit 0
+          pip install -r dev_requirements.txt || exit 0  # just because of windows
           tox -e ${{matrix.test-type}}-${{matrix.connection-type}}
       - uses: actions/upload-artifact@v2
         if: success() || failure()
@@ -56,15 +59,3 @@ jobs:
         uses: codecov/codecov-action@v3
         with:
           fail_ci_if_error: false
-
-      - name: View Test Results
-        uses: dorny/test-reporter@v1
-        if: success() || failure()
-        with:
-          artifact: 'pytest-results-${{matrix.test-type}}'
-          name: Test Results ${{matrix.python-version}} ${{matrix.test-type}}-${{matrix.connection-type}}
-          path: '*.xml'
-          reporter: java-junit
-          list-suites: failed
-          list-tests: failed
-          max-annotations: 10
