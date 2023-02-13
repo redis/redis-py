@@ -33,6 +33,9 @@ jobs:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
 
     steps:
+      # https://github.com/orgs/community/discussions/25777#discussioncomment-3249229
+      - uses: docker-practice/actions-setup-docker@master
+        timeout-minutes: 12
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
         with:
