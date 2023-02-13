@@ -80,17 +80,17 @@ jobs:
          with:
            fail_ci_if_error: false
 
-        - name: View Test Results
-          uses: dorny/test-reporter@v1
-          if: success() || failure()
-          with:
-            artifact: 'pytest-results-${{matrix.test-type}}'
-            name: Test Results ${{matrix.python-version}} ${{matrix.test-type}}-${{matrix.connection-type}}
-            path: '*.xml'
-            reporter: java-junit
-            list-suites: failed
-            list-tests: failed
-            max-annotations: 10
+       - name: View Test Results
+         uses: dorny/test-reporter@v1
+         if: success() || failure()
+         with:
+           artifact: 'pytest-results-${{matrix.test-type}}'
+           name: Test Results ${{matrix.python-version}} ${{matrix.test-type}}-${{matrix.connection-type}}
+           path: '*.xml'
+           reporter: java-junit
+           list-suites: failed
+           list-tests: failed
+           max-annotations: 10
 
    build_and_test_package:
     name: Validate building and installing the package
