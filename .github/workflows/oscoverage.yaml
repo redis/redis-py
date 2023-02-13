@@ -24,7 +24,7 @@ jobs:
     runs-on: ${{matrix.os}}
     timeout-minutes: 30
     strategy:
-      max-parallel: 2
+      max-parallel: 10
       fail-fast: false
       matrix:
         python-version: ['3.9']
