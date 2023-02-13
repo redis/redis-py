@@ -1,0 +1,64 @@
+name: OS Coverage
+
+on:
+  push:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.rst'
+      - '**/*.md'
+    branches:
+      - master
+      - '[0-9].[0-9]'
+  pull_request:
+    branches:
+      - master
+      - '[0-9].[0-9]'
+
+permissions:
+  contents: read
+
+jobs:
+  os-tests:
+    name: ${{matrix.os}} ${{matrix.connection-type}} ${{matrix.test-type}} Py${{matrix.python-version}}
+    runs-on: ${{matrix.os}}
+    timeout-minutes: 30
+    strategy:
+      max-parallel: 2
+      matrix:
+        python-version: ['3.9']
+        connection-type: ['hiredis', 'plain']
+        os: ['windows-latest', 'macos-latest']
+        test-type: ['standalone', 'cluster']
+     env:
+       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+
+     name: Python ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}} tests
+     steps:
+       - uses: actions/checkout@v3
+       - uses: actions/setup-python@v4
+         with:
+           python-version: ${{ matrix.python-version }}
+           cache: 'pip'
+       - name: run tests
+         run: |
+           pip install -U setuptools wheel
+           pip install -r dev_requirements.txt
+           tox -e ${{matrix.test-type}}-${{matrix.connection-type}}
+       - uses: actions/upload-artifact@v2
+         if: success() || failure()
+         with:
+           name: pytest-results-${{matrix.test-type}}
+           path: '${{matrix.test-type}}*results.xml'
+
+       - name: Upload codecov coverage
+         uses: codecov/codecov-action@v3
+         with:
+           fail_ci_if_error: false
+
+        - name: View Test Results
+          uses: dorny/test-reporter@v1
+          if: success() || failure()
+          with:
+            artifact: 'pytest-results-${{matrix.test-type}}'
+            name: Test Results ${{matrix.python-version}} ${{matrix.test-type}}-${{matrix.connection-type}}
+            path: '*.xml'
