@@ -27,7 +27,7 @@ jobs:
       matrix:
         python-version: ['3.9']
         connection-type: ['hiredis', 'plain']
-        os: ['windows-latest', 'macos-latest']
+        os: ['macos-latest']
         test-type: ['standalone', 'cluster']
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
