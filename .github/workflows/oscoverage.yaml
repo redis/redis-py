@@ -49,34 +49,3 @@ jobs:
           pip install -U setuptools wheel
           pip install -r dev_requirements.txt
           tox -e ${{matrix.test-type}}-${{matrix.connection-type}}
-
-  windows:
-    name: ${{matrix.os}} ${{matrix.connection-type}} ${{matrix.test-type}} Py${{matrix.python-version}}
-    runs-on: ${{matrix.os}}
-    timeout-minutes: 30
-    strategy:
-      max-parallel: 10
-      fail-fast: false
-      matrix:
-        python-version: ['3.9']
-        connection-type: ['hiredis', 'plain']
-        os: ['windows-latest']
-        test-type: ['standalone', 'cluster']
-    env:
-      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-
-    steps:
-      # https://github.com/orgs/community/discussions/25777#discussioncomment-3249229
-      - uses: docker-practice/actions-setup-docker@master
-        timeout-minutes: 12
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: 'pip'
-      - name: run tests
-        shell: bash
-        run: |
-          pip install -U setuptools wheel
-          pip install -r windows_dev_requirements.txt
-          tox -e ${{matrix.test-type}}-${{matrix.connection-type}}
