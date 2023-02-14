@@ -2703,6 +2703,25 @@ class TestClusterPipeline:
             with pytest.raises(RedisClusterException):
                 pipe.delete("a", "b")
 
+    def test_unlink_single(self, r):
+        """
+        Test a single unlink operation
+        """
+        r["a"] = 1
+        with r.pipeline(transaction=False) as pipe:
+            pipe.unlink("a")
+            assert pipe.execute() == [1]
+
+    def test_multi_unlink_unsupported(self, r):
+        """
+        Test that multi unlink operation is unsupported
+        """
+        with r.pipeline(transaction=False) as pipe:
+            r["a"] = 1
+            r["b"] = 2
+            with pytest.raises(RedisClusterException):
+                pipe.unlink("a", "b")
+
     def test_brpoplpush_disabled(self, r):
         """
         Test that brpoplpush is disabled for ClusterPipeline

@@ -2146,6 +2146,17 @@ class ClusterPipeline(RedisCluster):
 
         return self.execute_command("DEL", names[0])
 
+    def unlink(self, *names):
+        """
+        "Unlink a key specified by ``names``"
+        """
+        if len(names) != 1:
+            raise RedisClusterException(
+                "unlinking multiple keys is not implemented in pipeline command"
+            )
+
+        return self.execute_command("UNLINK", names[0])
+
 
 def block_pipeline_command(name: str) -> Callable[..., Any]:
     """
