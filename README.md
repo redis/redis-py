@@ -37,7 +37,7 @@ For faster performance, install redis with hiredis support, this provides a comp
 By default, if hiredis >= 1.0 is available, redis-py will attempt to use it for response parsing.
 
 ``` bash
-$ pip install redis[hiredis]
+$ pip install "redis[hiredis]"
 ```
 
 Looking for a high-level library to handle object mapping? See [redis-om-python](https://github.com/redis/redis-om-python)!
