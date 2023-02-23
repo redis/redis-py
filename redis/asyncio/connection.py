@@ -288,16 +288,17 @@ class PythonParser(BaseParser):
         elif byte == b":":
             response = int(response)
         # bulk response
-        elif byte == b"$" and response == b'-1':
-                return None
-        elif byte == b"$" and response != b'-1':
+        elif byte == b"$" and response == b"-1":
+            return None
+        elif byte == b"$" and response != b"-1":
             response = await self._read(int(response))
         # multi-bulk response
-        elif byte == b"*" and response == b'-1':
+        elif byte == b"*" and response == b"-1":
             return None
-        elif byte == b"*" and response != b'-1':
+        elif byte == b"*" and response != b"-1":
             response = [
-                (await self._read_response(disable_decoding)) for _ in range(int(response))
+                (await self._read_response(disable_decoding))
+                for _ in range(int(response))  # noqa
             ]
         elif byte not in (b"-", b"+", b":", b"$", b"*"):
             raise InvalidResponse(f"Protocol Error: {raw!r}")

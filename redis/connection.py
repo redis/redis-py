@@ -378,14 +378,14 @@ class PythonParser(BaseParser):
         elif byte == b":":
             response = int(response)
         # bulk response
-        elif byte == b"$" and response == b'-1':
+        elif byte == b"$" and response == b"-1":
             return None
-        elif byte == b"$" and response != b'-1':
+        elif byte == b"$" and response != b"-1":
             response = self._buffer.read(int(response))
         # multi-bulk response
-        elif byte == b"*" and response == b'-1':
+        elif byte == b"*" and response == b"-1":
             return None
-        elif byte == b"*" and response != b'-1':
+        elif byte == b"*" and response != b"-1":
             response = [
                 self._read_response(disable_decoding=disable_decoding)
                 for i in range(int(response))
