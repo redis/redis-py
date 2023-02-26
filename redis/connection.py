@@ -376,24 +376,24 @@ class PythonParser(BaseParser):
             pass
         # int value
         elif byte == b":":
-            response = int(response)
+            return int(response)
         # bulk response
         elif byte == b"$" and response == b"-1":
             return None
-        elif byte == b"$" and response != b"-1":
+        elif byte == b"$":
             response = self._buffer.read(int(response))
         # multi-bulk response
         elif byte == b"*" and response == b"-1":
             return None
-        elif byte == b"*" and response != b"-1":
+        elif byte == b"*":
             response = [
                 self._read_response(disable_decoding=disable_decoding)
                 for i in range(int(response))
             ]
-        elif byte not in (b"-", b"+", b":", b"$", b"*"):
+        else:
             raise InvalidResponse(f"Protocol Error: {raw!r}")
 
-        if isinstance(response, bytes) and disable_decoding is False:
+        if disable_decoding is False:
             response = self.encoder.decode(response)
         return response
 
