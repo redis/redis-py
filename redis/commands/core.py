@@ -2667,7 +2667,11 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LLEN", name)
 
-    def lpop(self, name: str, count: Optional[int] = None) -> Union[str, List, None]:
+    def lpop(
+        self,
+        name: str,
+        count: Optional[int] = None,
+    ) -> Union[Awaitable[Union[str, List, None]], Union[str, List, None]]:
         """
         Removes and returns the first elements of the list ``name``.
 
@@ -2744,7 +2748,11 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LTRIM", name, start, end)
 
-    def rpop(self, name: str, count: Optional[int] = None) -> Union[str, List, None]:
+    def rpop(
+        self,
+        name: str,
+        count: Optional[int] = None,
+    ) -> Union[Awaitable[Union[str, List, None]], Union[str, List, None]]:
         """
         Removes and returns the last elements of the list ``name``.
 
