@@ -340,6 +340,12 @@ def parse_xread(response):
     return [[r[0], parse_stream_list(r[1])] for r in response]
 
 
+def parse_xread_resp3(response):
+    if response is None:
+        return {}
+    return {key: [parse_stream_list(value)] for key, value in response.items()}
+
+
 def parse_xpending(response, **options):
     if options.get("parse_detail", False):
         return parse_xpending_range(response)
@@ -841,6 +847,43 @@ class AbstractRedis:
         "ZMSCORE": parse_zmscore,
     }
 
+    RESP3_RESPONSE_CALLBACKS = {
+        **string_keys_to_dict(
+            "ZRANGE ZINTER ZPOPMAX ZPOPMIN ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE "
+            "ZUNION HGETALL XREADGROUP",
+            lambda r, **kwargs: r,
+        ),
+        "CONFIG GET": lambda r: {
+            str_if_bytes(key)
+            if key is not None
+            else None: str_if_bytes(value)
+            if value is not None
+            else None
+            for key, value in r.items()
+        },
+        "ACL LOG": lambda r: [
+            {str_if_bytes(key): str_if_bytes(value) for key, value in x.items()}
+            for x in r
+        ]
+        if isinstance(r, list)
+        else bool_ok(r),
+        **string_keys_to_dict("XREAD XREADGROUP", parse_xread_resp3),
+        "STRALGO": lambda r, **options: {
+            str_if_bytes(key): str_if_bytes(value) for key, value in r.items()
+        }
+        if isinstance(r, dict)
+        else str_if_bytes(r),
+        "XINFO CONSUMERS": lambda r: [
+            {str_if_bytes(key): value for key, value in x.items()} for x in r
+        ],
+        "XINFO STREAM": lambda r, **options: {
+            str_if_bytes(key): str_if_bytes(value) for key, value in r.items()
+        },
+        "MEMORY STATS": lambda r: {
+            str_if_bytes(key): value for key, value in r.items()
+        },
+    }
+
 
 class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
     """
@@ -942,6 +985,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         retry=None,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
+        protocol: Optional[int] = 2,
     ):
         """
         Initialize a new Redis client.
@@ -990,6 +1034,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
                 "client_name": client_name,
                 "redis_connect_func": redis_connect_func,
                 "credential_provider": credential_provider,
+                "protocol": protocol,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -1036,6 +1081,9 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
             self.connection = self.connection_pool.get_connection("_")
 
         self.response_callbacks = CaseInsensitiveDict(self.__class__.RESPONSE_CALLBACKS)
+
+        if self.connection_pool.connection_kwargs.get("protocol") == "3":
+            self.response_callbacks.update(self.__class__.RESP3_RESPONSE_CALLBACKS)
 
     def __repr__(self):
         return f"{type(self).__name__}<{repr(self.connection_pool)}>"
