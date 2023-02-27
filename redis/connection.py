@@ -22,7 +22,7 @@ from .exceptions import (
     ResponseError,
     TimeoutError,
 )
-from .parsers import Encoder, _HiredisParser, _RESP2Parser
+from .parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .retry import Retry
 from .utils import (
     CRYPTOGRAPHY_AVAILABLE,
@@ -38,7 +38,7 @@ SYM_EMPTY = b""
 
 SENTINEL = object()
 
-DefaultParser: Type[Union[_RESP2Parser, _HiredisParser]]
+DefaultParser: Type[Union[_RESP2Parser, _RESP3Parser, _HiredisParser]]
 if HIREDIS_AVAILABLE:
     DefaultParser = _HiredisParser
 else:
@@ -292,6 +292,9 @@ class Connection:
 
         # if resp version is specified, switch to it
         if self.protocol != 2:
+            if isinstance(self._parser, _RESP2Parser):
+                self.set_parser(_RESP3Parser)
+                self._parser.on_connect(self)
             self.send_command("HELLO", self.protocol)
             response = self.read_response()
             if response[b"proto"] != int(self.protocol):

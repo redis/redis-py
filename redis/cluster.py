@@ -138,6 +138,7 @@ REDIS_ALLOWED_KEYS = (
     "port",
     "retry",
     "retry_on_timeout",
+    "protocol",
     "socket_connect_timeout",
     "socket_keepalive",
     "socket_keepalive_options",
