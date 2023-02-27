@@ -9,7 +9,7 @@ import redis
 from redis.backoff import NoBackoff
 from redis.connection import Connection
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
-from redis.parsers import _HiredisParser, _RESP2Parser
+from redis.parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
 
@@ -130,8 +130,8 @@ class TestConnection:
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize(
     "parser_class",
-    [_RESP2Parser, _HiredisParser],
-    ids=["PythonParser", "HiredisParser"],
+    [_RESP2Parser, _RESP3Parser, _HiredisParser],
+    ids=["RESP2Parser", "RESP3Parser", "HiredisParser"],
 )
 def test_connection_parse_response_resume(r: redis.Redis, parser_class):
     """
@@ -151,7 +151,7 @@ def test_connection_parse_response_resume(r: redis.Redis, parser_class):
     )
     mock_socket = MockSocket(message, interrupt_every=2)
 
-    if isinstance(conn._parser, _RESP2Parser):
+    if isinstance(conn._parser, _RESP2Parser) or isinstance(conn._parser, _RESP3Parser):
         conn._parser._buffer._sock = mock_socket
     else:
         conn._parser._sock = mock_socket

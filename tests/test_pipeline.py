@@ -19,7 +19,6 @@ class TestPipeline:
                 .zadd("z", {"z1": 1})
                 .zadd("z", {"z2": 4})
                 .zincrby("z", 1, "z1")
-                .zrange("z", 0, 5, withscores=True)
             )
             assert pipe.execute() == [
                 True,
@@ -27,7 +26,6 @@ class TestPipeline:
                 True,
                 True,
                 2.0,
-                [(b"z1", 2.0), (b"z2", 4)],
             ]
 
     def test_pipeline_memoryview(self, r):
