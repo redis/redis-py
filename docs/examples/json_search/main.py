@@ -1,8 +1,9 @@
+# HIDE_START
 import redis
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField, NumericField, TagField
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType
-
+# HIDE_END
 
 r = redis.Redis(host='localhost', port=6379)
 user1 = {
@@ -33,15 +34,3 @@ user3 = {
 r.json().set("user:1", Path.root_path(), user1)
 r.json().set("user:2", Path.root_path(), user2)
 r.json().set("user:3", Path.root_path(), user3)
-
-schema = (
-    TextField("$.user.name", as_name="name"),
-    TagField("$.user.city", as_name="city"),
-    NumericField("$.user.age", as_name="age")
-)
-
-r.ft().create_index(schema, definition=
-    IndexDefinition(prefix=["user:"], index_type=IndexType.JSON)
-)
-
-r.ft().search("Paul")
