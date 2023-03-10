@@ -517,6 +517,12 @@ class Redis(
                 ),
                 lambda error: self._disconnect_raise(conn, error),
             )
+        except asyncio.CancelledError:
+            # If we're cancelled and cancel happened after we sent the command
+            # but before we read the response, we need to read the response
+            # to avoid reading responses out of order.
+            await conn.read_response(timeout=0.001)
+            raise
         finally:
             if self.single_connection_client:
                 self._single_conn_lock.release()
