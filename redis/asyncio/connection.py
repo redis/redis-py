@@ -43,7 +43,13 @@ from redis.exceptions import (
 from redis.typing import EncodableT
 from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 
-from ..parsers import BaseParser, Encoder, _AsyncHiredisParser, _AsyncRESP2Parser
+from ..parsers import (
+    BaseParser,
+    Encoder,
+    _AsyncHiredisParser,
+    _AsyncRESP2Parser,
+    _AsyncRESP3Parser,
+)
 
 SYM_STAR = b"*"
 SYM_DOLLAR = b"$"
@@ -59,7 +65,7 @@ class _Sentinel(enum.Enum):
 SENTINEL = _Sentinel.sentinel
 
 
-DefaultParser: Type[Union[_AsyncRESP2Parser, _AsyncHiredisParser]]
+DefaultParser: Type[Union[_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisParser]]
 if HIREDIS_AVAILABLE:
     DefaultParser = _AsyncHiredisParser
 else:
@@ -104,6 +110,7 @@ class Connection:
         "last_active_at",
         "encoder",
         "ssl_context",
+        "protocol",
         "_reader",
         "_writer",
         "_parser",
@@ -140,6 +147,7 @@ class Connection:
         redis_connect_func: Optional[ConnectCallbackT] = None,
         encoder_class: Type[Encoder] = Encoder,
         credential_provider: Optional[CredentialProvider] = None,
+        protocol: Optional[int] = 2,
     ):
         if (username or password) and credential_provider is not None:
             raise DataError(
@@ -190,6 +198,7 @@ class Connection:
         self.set_parser(parser_class)
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
+        self.protocol = protocol
 
     def __repr__(self):
         repr_args = ",".join((f"{k}={v}" for k, v in self.repr_pieces()))
@@ -343,6 +352,17 @@ class Connection:
 
             if str_if_bytes(auth_response) != "OK":
                 raise AuthenticationError("Invalid Username or Password")
+
+        # if resp version is specified, switch to it
+        if self.protocol != 2:
+            if isinstance(self._parser, _AsyncRESP2Parser):
+                self.set_parser(_AsyncRESP3Parser)
+                self._parser.on_connect(self)
+            await self.send_command("HELLO", self.protocol)
+            response = await self.read_response()
+            if (response.get(b"proto") != int(self.protocol) and
+                response.get("proto") != int(self.protocol)):
+                raise ConnectionError("Invalid RESP version")
 
         # if a client_name is given, set it
         if self.client_name:

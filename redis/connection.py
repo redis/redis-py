@@ -285,7 +285,7 @@ class Connection:
                 # arg. retry auth with just the password.
                 # https://github.com/andymccurdy/redis-py/issues/1274
                 self.send_command("AUTH", auth_args[-1], check_health=False)
-                auth_response = self.read_response()                
+                auth_response = self.read_response()
 
             if str_if_bytes(auth_response) != "OK":
                 raise AuthenticationError("Invalid Username or Password")
