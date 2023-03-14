@@ -44,9 +44,9 @@ class JSONCommands:
         For more information see `JSON.ARRINDEX <https://redis.io/commands/json.arrindex>`_.
         """  # noqa
         pieces = [name, str(path), self._encode(scalar)]
-        if start:
+        if start is not None:
             pieces.append(start)
-            if stop:
+            if stop is not None:
                 pieces.append(stop)
 
         return self.execute_command("JSON.ARRINDEX", *pieces)

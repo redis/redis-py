@@ -167,7 +167,7 @@ def test_arrindex(client):
     assert 1 == client.json().arrindex("arr", Path.root_path(), 1)
     assert -1 == client.json().arrindex("arr", Path.root_path(), 1, 2)
     assert 4 == client.json().arrindex("arr", Path.root_path(), 4)
-    # assert -1 == client.json().arrindex("arr", Path.root_path(), 4, start=0, stop=-1)
+    assert -1 == client.json().arrindex("arr", Path.root_path(), 4, start=0, stop=-1)
 
 
 @pytest.mark.redismod
