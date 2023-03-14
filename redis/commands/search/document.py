@@ -11,3 +11,6 @@ class Document:
 
     def __repr__(self):
         return f"Document {self.__dict__}"
+
+    def __getitem__(self, item):
+        return self.Document[item]
