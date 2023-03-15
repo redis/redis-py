@@ -3357,7 +3357,10 @@ class SetCommands(CommandsProtocol):
 
     def smismember(
         self, name: str, values: List, *args: List
-    ) -> Union[Awaitable[List[int]], List[int]]:
+    ) -> Union[
+        Awaitable[List[Union[Literal[0], Literal[1]]]],
+        List[Union[Literal[0], Literal[1]]],
+    ]:
         """
         Return whether each value in ``values`` is a member of the set ``name``
         as a list of ``int`` in the order of ``values``:
