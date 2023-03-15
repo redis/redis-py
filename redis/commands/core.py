@@ -3357,10 +3357,15 @@ class SetCommands(CommandsProtocol):
 
     def smismember(
         self, name: str, values: List, *args: List
-    ) -> Union[Awaitable[List[bool]], List[bool]]:
+    ) -> Union[
+        Awaitable[List[Union[Literal[0], Literal[1]]]],
+        List[Union[Literal[0], Literal[1]]],
+    ]:
         """
         Return whether each value in ``values`` is a member of the set ``name``
-        as a list of ``bool`` in the order of ``values``
+        as a list of ``int`` in the order of ``values``:
+        - 1 if the value is a member of the set.
+        - 0 if the value is not a member of the set or if key does not exist.
 
         For more information see https://redis.io/commands/smismember
         """
