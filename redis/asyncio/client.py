@@ -154,6 +154,7 @@ class Redis(
         socket_keepalive: Optional[bool] = None,
         socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
         connection_pool: Optional[ConnectionPool] = None,
+        connection_pool_class: Type[ConnectionPool] = ConnectionPool,
         unix_socket_path: Optional[str] = None,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
@@ -246,7 +247,7 @@ class Redis(
                             "ssl_check_hostname": ssl_check_hostname,
                         }
                     )
-            connection_pool = ConnectionPool(**kwargs)
+            connection_pool = connection_pool_class(**kwargs)
         self.connection_pool = connection_pool
         self.single_connection_client = single_connection_client
         self.connection: Optional[Connection] = None
