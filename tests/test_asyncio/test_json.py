@@ -145,9 +145,15 @@ async def test_arrappend(modclient: redis.Redis):
 
 @pytest.mark.redismod
 async def test_arrindex(modclient: redis.Redis):
-    await modclient.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
-    assert 1 == await modclient.json().arrindex("arr", Path.root_path(), 1)
-    assert -1 == await modclient.json().arrindex("arr", Path.root_path(), 1, 2)
+    r_path = Path.root_path()
+    await modclient.json().set("arr", r_path, [0, 1, 2, 3, 4])
+    assert 1 == await modclient.json().arrindex("arr", r_path, 1)
+    assert -1 == await modclient.json().arrindex("arr", r_path, 1, 2)
+    assert 4 == await modclient.json().arrindex("arr", r_path, 4)
+    assert 4 == await modclient.json().arrindex("arr", r_path, 4, start=0)
+    assert 4 == await modclient.json().arrindex("arr", r_path, 4, start=0, stop=5000)
+    assert -1 == await modclient.json().arrindex("arr", r_path, 4, start=0, stop=-1)
+    assert -1 == await modclient.json().arrindex("arr", r_path, 4, start=1, stop=3)
 
 
 @pytest.mark.redismod
