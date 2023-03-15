@@ -244,6 +244,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_certfile: Optional[str] = None,
         ssl_check_hostname: bool = False,
         ssl_keyfile: Optional[str] = None,
+        protocol: Optional[int] = 2,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -284,6 +285,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_keepalive_options": socket_keepalive_options,
             "socket_timeout": socket_timeout,
             "retry": retry,
+            "protocol": protocol,
         }
 
         if ssl:
