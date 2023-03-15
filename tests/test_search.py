@@ -140,7 +140,9 @@ def test_client(client):
 
     for doc in res.docs:
         assert doc.id
+        assert doc["id"]
         assert doc.play == "Henry IV"
+        assert doc["play"] == "Henry IV"
         assert len(doc.txt) > 0
 
     # test no content
@@ -176,9 +178,7 @@ def test_client(client):
     doc = client.ft().load_document("henry vi part 3:62")
     assert doc is not None
     assert "henry vi part 3:62" == doc.id
-    assert "henry vi part 3:62" == doc['id']
     assert doc.play == "Henry VI Part 3"
-    assert doc['play'] == "Henry VI Part 3"
     assert len(doc.txt) > 0
 
     # test in-keys
