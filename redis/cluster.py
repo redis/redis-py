@@ -588,7 +588,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         self.read_from_replicas = read_from_replicas
         self.reinitialize_counter = 0
         self.reinitialize_steps = reinitialize_steps
-        self.nodes_manager = None
         self.nodes_manager = NodesManager(
             startup_nodes=startup_nodes,
             from_url=from_url,
