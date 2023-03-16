@@ -1,6 +1,7 @@
 import binascii
 import datetime
 import warnings
+from queue import LifoQueue, Queue
 from time import sleep
 from unittest.mock import DEFAULT, Mock, call, patch
 
@@ -2510,6 +2511,18 @@ class TestNodesManager:
             assert isinstance(
                 node.redis_connection.connection_pool, connection_pool_class
             )
+
+    @pytest.mark.parametrize("queue_class", [Queue, LifoQueue])
+    def test_allow_custom_queue_class(self, queue_class):
+        rc = get_mocked_redis_client(
+            url="redis://my@DNS.com:7000",
+            cluster_slots=default_cluster_slots,
+            connection_pool_class=BlockingConnectionPool,
+            queue_class=queue_class,
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            assert node.redis_connection.connection_pool.queue_class == queue_class
 
 
 @pytest.mark.onlycluster

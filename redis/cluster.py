@@ -135,6 +135,7 @@ REDIS_ALLOWED_KEYS = (
     "redis_connect_func",
     "password",
     "port",
+    "queue_class",
     "retry",
     "retry_on_timeout",
     "socket_connect_timeout",
