@@ -52,7 +52,7 @@ jobs:
      strategy:
        max-parallel: 15
        matrix:
-         python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', 'pypy-3.7', 'pypy-3.8']
+         python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', 'pypy-3.7', 'pypy-3.8', 'pypy-3.9']
          test-type: ['standalone', 'cluster']
          connection-type: ['hiredis', 'plain']
      env:
@@ -109,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', 'pypy-3.7']
+        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', 'pypy-3.7', 'pypy-3.8', 'pypy-3.9']
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
