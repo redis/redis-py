@@ -2667,7 +2667,11 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LLEN", name)
 
-    def lpop(self, name: str, count: Optional[int] = None) -> Union[str, List, None]:
+    def lpop(
+        self,
+        name: str,
+        count: Optional[int] = None,
+    ) -> Union[Awaitable[Union[str, List, None]], Union[str, List, None]]:
         """
         Removes and returns the first elements of the list ``name``.
 
@@ -2744,7 +2748,11 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LTRIM", name, start, end)
 
-    def rpop(self, name: str, count: Optional[int] = None) -> Union[str, List, None]:
+    def rpop(
+        self,
+        name: str,
+        count: Optional[int] = None,
+    ) -> Union[Awaitable[Union[str, List, None]], Union[str, List, None]]:
         """
         Removes and returns the last elements of the list ``name``.
 
@@ -3349,10 +3357,15 @@ class SetCommands(CommandsProtocol):
 
     def smismember(
         self, name: str, values: List, *args: List
-    ) -> Union[Awaitable[List[bool]], List[bool]]:
+    ) -> Union[
+        Awaitable[List[Union[Literal[0], Literal[1]]]],
+        List[Union[Literal[0], Literal[1]]],
+    ]:
         """
         Return whether each value in ``values`` is a member of the set ``name``
-        as a list of ``bool`` in the order of ``values``
+        as a list of ``int`` in the order of ``values``:
+        - 1 if the value is a member of the set.
+        - 0 if the value is not a member of the set or if key does not exist.
 
         For more information see https://redis.io/commands/smismember
         """

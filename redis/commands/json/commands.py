@@ -31,8 +31,8 @@ class JSONCommands:
         name: str,
         path: str,
         scalar: int,
-        start: Optional[int] = 0,
-        stop: Optional[int] = -1,
+        start: Optional[int] = None,
+        stop: Optional[int] = None,
     ) -> List[Union[int, None]]:
         """
         Return the index of ``scalar`` in the JSON array under ``path`` at key
@@ -43,9 +43,13 @@ class JSONCommands:
 
         For more information see `JSON.ARRINDEX <https://redis.io/commands/json.arrindex>`_.
         """  # noqa
-        return self.execute_command(
-            "JSON.ARRINDEX", name, str(path), self._encode(scalar), start, stop
-        )
+        pieces = [name, str(path), self._encode(scalar)]
+        if start is not None:
+            pieces.append(start)
+            if stop is not None:
+                pieces.append(stop)
+
+        return self.execute_command("JSON.ARRINDEX", *pieces)
 
     def arrinsert(
         self, name: str, path: str, index: int, *args: List[JsonType]
