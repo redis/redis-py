@@ -23,7 +23,7 @@ class TestCommandsParser:
     def test_step_count_as_zero_not_failing(self, r):
         commands_parser = CommandsParser(r)
         # Intentionally updating
-        commands_parser.update({"first_key_pos": 1, "last_key_pos": 0, "step_count": 0})
+        commands_parser.commands.update({"first_key_pos": 1, "last_key_pos": 0, "step_count": 0})
         args1 = ["GET", "foo"]
         assert commands_parser.get_keys(r, *args1) == []
 
