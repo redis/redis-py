@@ -5,9 +5,9 @@ import asyncio
 import binascii
 import datetime
 import re
+import sys
 from string import ascii_letters
 
-import async_timeout
 import pytest
 import pytest_asyncio
 
@@ -19,6 +19,11 @@ from tests.conftest import (
     skip_if_server_version_lt,
     skip_unless_arch_bits,
 )
+
+if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
+    from asyncio import timeout as async_timeout
+else:
+    from async_timeout import timeout as async_timeout
 
 REDIS_6_VERSION = "5.9.0"
 
@@ -3015,6 +3020,11 @@ class TestRedisCommands:
                 # blocking pop
                 ready.set()
                 await r.brpop(["nonexist"])
+            # If the following is not done, further Timout operations will fail,
+            # because the timeout won't catch its Cancelled Error if the task
+            # has a pending cancel.  Python documentation probably should reflect this.
+            if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
+                asyncio.current_task().uncancel()
             # if all is well, we can continue.  The following should not hang.
             await r.set("status", "down")
 
@@ -3024,7 +3034,7 @@ class TestRedisCommands:
         # the task is now sleeping, lets send it an exception
         task.cancel()
         # If all is well, the task should finish right away, otherwise fail with Timeout
-        async with async_timeout.timeout(0.1):
+        async with async_timeout(0.1):
             await task
 
 
