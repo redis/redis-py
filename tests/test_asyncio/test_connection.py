@@ -211,8 +211,6 @@ async def test_connection_disconect_race(parser_class):
     This test verifies that a read in progress can finish even
     if the `disconnect()` method is called.
     """
-    if parser_class == PythonParser:
-        pytest.xfail("doesn't work yet with PythonParser")
     if parser_class == HiredisParser and not HIREDIS_AVAILABLE:
         pytest.skip("Hiredis not available")
 
