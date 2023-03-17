@@ -101,6 +101,7 @@ class CommandsParser:
             last_key_pos = command["last_key_pos"]
             if last_key_pos < 0:
                 last_key_pos = len(args) - abs(last_key_pos)
+            command["step_count"] = command["step_count"] if command["step_count"] else 1
             keys_pos = list(
                 range(command["first_key_pos"], last_key_pos + 1, command["step_count"])
             )
