@@ -3509,6 +3509,12 @@ class TestRedisCommands:
         assert r.zscore("places_barcelona", "place1") == 88.05060698409301
 
     @skip_if_server_version_lt("3.2.0")
+    def test_georadius_Issue2609(self, r):
+        # test for issue #2609 (Geo search functions don't work with execute_command)
+        r.geoadd(name="my-key", values=[1, 2, "data"])
+        assert r.execute_command("GEORADIUS", 'my-key', 1, 2, 400, "m") == [b"data"]
+
+    @skip_if_server_version_lt("3.2.0")
     def test_georadius(self, r):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
