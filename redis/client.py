@@ -524,7 +524,7 @@ def parse_geosearch_generic(response, **options):
             # with other command arguments.
             # relevant to 'GEORADIUS' and 'GEORADIUSBYMEMBER'
             return response
-    except KeyError: # it means the command was sent via execute_command
+    except KeyError:  # it means the command was sent via execute_command
         return response
 
     if type(response) != list:
