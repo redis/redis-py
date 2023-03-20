@@ -5,6 +5,7 @@ import inspect
 import os
 import socket
 import ssl
+import sys
 import threading
 import weakref
 from itertools import chain
@@ -24,7 +25,11 @@ from typing import (
 )
 from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
-import async_timeout
+if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
+    from asyncio import timeout as async_timeout
+else:
+    from async_timeout import timeout as async_timeout
+
 
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
@@ -141,7 +146,7 @@ ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Except
 class BaseParser:
     """Plain Python parsing class"""
 
-    __slots__ = "_stream", "_read_size"
+    __slots__ = "_stream", "_read_size", "_connected"
 
     EXCEPTION_CLASSES: ExceptionMappingT = {
         "ERR": {
@@ -172,6 +177,7 @@ class BaseParser:
     def __init__(self, socket_read_size: int):
         self._stream: Optional[asyncio.StreamReader] = None
         self._read_size = socket_read_size
+        self._connected = False
 
     def __del__(self):
         try:
@@ -208,7 +214,7 @@ class BaseParser:
 class PythonParser(BaseParser):
     """Plain Python parsing class"""
 
-    __slots__ = BaseParser.__slots__ + ("encoder", "_buffer", "_pos", "_chunks")
+    __slots__ = ("encoder", "_buffer", "_pos", "_chunks")
 
     def __init__(self, socket_read_size: int):
         super().__init__(socket_read_size)
@@ -226,28 +232,28 @@ class PythonParser(BaseParser):
         self._stream = connection._reader
         if self._stream is None:
             raise RedisError("Buffer is closed.")
-
         self.encoder = connection.encoder
+        self._clear()
+        self._connected = True
 
     def on_disconnect(self):
         """Called when the stream disconnects"""
-        if self._stream is not None:
-            self._stream = None
-        self.encoder = None
-        self._clear()
+        self._connected = False
 
     async def can_read_destructive(self) -> bool:
+        if not self._connected:
+            raise RedisError("Buffer is closed.")
         if self._buffer:
             return True
-        if self._stream is None:
-            raise RedisError("Buffer is closed.")
         try:
-            async with async_timeout.timeout(0):
+            async with async_timeout(0):
                 return await self._stream.read(1)
         except asyncio.TimeoutError:
             return False
 
     async def read_response(self, disable_decoding: bool = False):
+        if not self._connected:
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         if self._chunks:
             # augment parsing buffer with previously read data
             self._buffer += b"".join(self._chunks)
@@ -261,8 +267,6 @@ class PythonParser(BaseParser):
     async def _read_response(
         self, disable_decoding: bool = False
     ) -> Union[EncodableT, ResponseError, None]:
-        if not self._stream or not self.encoder:
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         raw = await self._readline()
         response: Any
         byte, response = raw[:1], raw[1:]
@@ -349,14 +353,13 @@ class PythonParser(BaseParser):
 class HiredisParser(BaseParser):
     """Parser class for connections using Hiredis"""
 
-    __slots__ = BaseParser.__slots__ + ("_reader", "_connected")
+    __slots__ = ("_reader",)
 
     def __init__(self, socket_read_size: int):
         if not HIREDIS_AVAILABLE:
             raise RedisError("Hiredis is not available.")
         super().__init__(socket_read_size=socket_read_size)
         self._reader: Optional[hiredis.Reader] = None
-        self._connected: bool = False
 
     def on_connect(self, connection: "Connection"):
         self._stream = connection._reader
@@ -380,7 +383,7 @@ class HiredisParser(BaseParser):
         if self._reader.gets():
             return True
         try:
-            async with async_timeout.timeout(0):
+            async with async_timeout(0):
                 return await self.read_from_socket()
         except asyncio.TimeoutError:
             return False
@@ -635,7 +638,7 @@ class Connection:
 
     async def _connect(self):
         """Create a TCP socket connection"""
-        async with async_timeout.timeout(self.socket_connect_timeout):
+        async with async_timeout(self.socket_connect_timeout):
             reader, writer = await asyncio.open_connection(
                 host=self.host,
                 port=self.port,
@@ -722,7 +725,7 @@ class Connection:
     async def disconnect(self, nowait: bool = False) -> None:
         """Disconnects from the Redis server"""
         try:
-            async with async_timeout.timeout(self.socket_connect_timeout):
+            async with async_timeout(self.socket_connect_timeout):
                 self._parser.on_disconnect()
                 if not self.is_connected:
                     return
@@ -827,7 +830,7 @@ class Connection:
         read_timeout = timeout if timeout is not None else self.socket_timeout
         try:
             if read_timeout is not None:
-                async with async_timeout.timeout(read_timeout):
+                async with async_timeout(read_timeout):
                     response = await self._parser.read_response(
                         disable_decoding=disable_decoding
                     )
@@ -1118,7 +1121,7 @@ class UnixDomainSocketConnection(Connection):  # lgtm [py/missing-call-to-init]
         return pieces
 
     async def _connect(self):
-        async with async_timeout.timeout(self.socket_connect_timeout):
+        async with async_timeout(self.socket_connect_timeout):
             reader, writer = await asyncio.open_unix_connection(path=self.path)
         self._reader = reader
         self._writer = writer
@@ -1589,7 +1592,7 @@ class BlockingConnectionPool(ConnectionPool):
         # self.timeout then raise a ``ConnectionError``.
         connection = None
         try:
-            async with async_timeout.timeout(self.timeout):
+            async with async_timeout(self.timeout):
                 connection = await self.pool.get()
         except (asyncio.QueueEmpty, asyncio.TimeoutError):
             # Note that this is not caught by the redis client and will be
