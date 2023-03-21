@@ -140,7 +140,9 @@ def test_client(client):
 
     for doc in res.docs:
         assert doc.id
+        assert doc["id"]
         assert doc.play == "Henry IV"
+        assert doc["play"] == "Henry IV"
         assert len(doc.txt) > 0
 
     # test no content

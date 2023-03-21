@@ -4,6 +4,10 @@ import socket
 import ssl
 import threading
 import weakref
+import sys
+import threading
+import weakref
+from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
@@ -27,9 +31,13 @@ from .retry import Retry
 from .utils import (
     CRYPTOGRAPHY_AVAILABLE,
     HIREDIS_AVAILABLE,
+    HIREDIS_PACK_AVAILABLE,
     SSL_AVAILABLE,
     str_if_bytes,
 )
+
+if HIREDIS_AVAILABLE:
+    import hiredis
 
 SYM_STAR = b"*"
 SYM_DOLLAR = b"$"
@@ -45,20 +53,82 @@ else:
     DefaultParser = _RESP2Parser
 
 
-class Connection:
-    "Manages TCP communication to and from a Redis server"
+class HiredisRespSerializer:
+    def pack(self, *args):
+        """Pack a series of arguments into the Redis protocol"""
+        output = []
+
+        if isinstance(args[0], str):
+            args = tuple(args[0].encode().split()) + args[1:]
+        elif b" " in args[0]:
+            args = tuple(args[0].split()) + args[1:]
+        try:
+            output.append(hiredis.pack_command(args))
+        except TypeError:
+            _, value, traceback = sys.exc_info()
+            raise DataError(value).with_traceback(traceback)
+
+        return output
+
+
+class PythonRespSerializer:
+    def __init__(self, buffer_cutoff, encode) -> None:
+        self._buffer_cutoff = buffer_cutoff
+        self.encode = encode
+
+    def pack(self, *args):
+        """Pack a series of arguments into the Redis protocol"""
+        output = []
+        # the client might have included 1 or more literal arguments in
+        # the command name, e.g., 'CONFIG GET'. The Redis server expects these
+        # arguments to be sent separately, so split the first argument
+        # manually. These arguments should be bytestrings so that they are
+        # not encoded.
+        if isinstance(args[0], str):
+            args = tuple(args[0].encode().split()) + args[1:]
+        elif b" " in args[0]:
+            args = tuple(args[0].split()) + args[1:]
+
+        buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
+
+        buffer_cutoff = self._buffer_cutoff
+        for arg in map(self.encode, args):
+            # to avoid large string mallocs, chunk the command into the
+            # output list if we're sending large values or memoryviews
+            arg_length = len(arg)
+            if (
+                len(buff) > buffer_cutoff
+                or arg_length > buffer_cutoff
+                or isinstance(arg, memoryview)
+            ):
+                buff = SYM_EMPTY.join(
+                    (buff, SYM_DOLLAR, str(arg_length).encode(), SYM_CRLF)
+                )
+                output.append(buff)
+                output.append(arg)
+                buff = SYM_CRLF
+            else:
+                buff = SYM_EMPTY.join(
+                    (
+                        buff,
+                        SYM_DOLLAR,
+                        str(arg_length).encode(),
+                        SYM_CRLF,
+                        arg,
+                        SYM_CRLF,
+                    )
+                )
+        output.append(buff)
+        return output
+
+
+class AbstractConnection:
+    "Manages communication to and from a Redis server"
 
     def __init__(
         self,
-        host="localhost",
-        port=6379,
         db=0,
         password=None,
-        socket_timeout=None,
-        socket_connect_timeout=None,
-        socket_keepalive=False,
-        socket_keepalive_options=None,
-        socket_type=0,
         retry_on_timeout=False,
         retry_on_error=SENTINEL,
         encoding="utf-8",
@@ -73,6 +143,7 @@ class Connection:
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
+        command_packer=None,
     ):
         """
         Initialize a new Connection.
@@ -89,18 +160,11 @@ class Connection:
                 "2. 'credential_provider'"
             )
         self.pid = os.getpid()
-        self.host = host
-        self.port = int(port)
         self.db = db
         self.client_name = client_name
         self.credential_provider = credential_provider
         self.password = password
         self.username = username
-        self.socket_timeout = socket_timeout
-        self.socket_connect_timeout = socket_connect_timeout or socket_timeout
-        self.socket_keepalive = socket_keepalive
-        self.socket_keepalive_options = socket_keepalive_options or {}
-        self.socket_type = socket_type
         self.retry_on_timeout = retry_on_timeout
         if retry_on_error is SENTINEL:
             retry_on_error = []
@@ -128,22 +192,29 @@ class Connection:
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
         self.protocol = protocol
+        self._command_packer = self._construct_command_packer(command_packer)
 
     def __repr__(self):
         repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
         return f"{self.__class__.__name__}<{repr_args}>"
 
+    @abstractmethod
     def repr_pieces(self):
-        pieces = [("host", self.host), ("port", self.port), ("db", self.db)]
-        if self.client_name:
-            pieces.append(("client_name", self.client_name))
-        return pieces
+        pass
 
     def __del__(self):
         try:
             self.disconnect()
         except Exception:
             pass
+
+    def _construct_command_packer(self, packer):
+        if packer is not None:
+            return packer
+        elif HIREDIS_PACK_AVAILABLE:
+            return HiredisRespSerializer()
+        else:
+            return PythonRespSerializer(self._buffer_cutoff, self.encoder.encode)
 
     def register_connect_callback(self, callback):
         self._connect_callbacks.append(weakref.WeakMethod(callback))
@@ -192,75 +263,17 @@ class Connection:
             if callback:
                 callback(self)
 
+    @abstractmethod
     def _connect(self):
-        "Create a TCP socket connection"
-        # we want to mimic what socket.create_connection does to support
-        # ipv4/ipv6, but we want to set options prior to calling
-        # socket.connect()
-        err = None
-        for res in socket.getaddrinfo(
-            self.host, self.port, self.socket_type, socket.SOCK_STREAM
-        ):
-            family, socktype, proto, canonname, socket_address = res
-            sock = None
-            try:
-                sock = socket.socket(family, socktype, proto)
-                # TCP_NODELAY
-                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        pass
 
-                # TCP_KEEPALIVE
-                if self.socket_keepalive:
-                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                    for k, v in self.socket_keepalive_options.items():
-                        sock.setsockopt(socket.IPPROTO_TCP, k, v)
-
-                # set the socket_connect_timeout before we connect
-                sock.settimeout(self.socket_connect_timeout)
-
-                # connect
-                sock.connect(socket_address)
-
-                # set the socket_timeout now that we're connected
-                sock.settimeout(self.socket_timeout)
-                return sock
-
-            except OSError as _:
-                err = _
-                if sock is not None:
-                    sock.close()
-
-        if err is not None:
-            raise err
-        raise OSError("socket.getaddrinfo returned an empty list")
-
+    @abstractmethod
     def _host_error(self):
-        try:
-            host_error = f"{self.host}:{self.port}"
-        except AttributeError:
-            host_error = "connection"
+        pass
 
-        return host_error
-
+    @abstractmethod
     def _error_message(self, exception):
-        # args for socket.error can either be (errno, "message")
-        # or just "message"
-
-        host_error = self._host_error()
-
-        if len(exception.args) == 1:
-            try:
-                return f"Error connecting to {host_error}. \
-                        {exception.args[0]}."
-            except AttributeError:
-                return f"Connection Error: {exception.args[0]}"
-        else:
-            try:
-                return (
-                    f"Error {exception.args[0]} connecting to "
-                    f"{host_error}. {exception.args[1]}."
-                )
-            except AttributeError:
-                return f"Connection Error: {exception.args[0]}"
+        pass
 
     def on_connect(self):
         "Initialize the connection, authenticate and select a database"
@@ -376,7 +389,8 @@ class Connection:
     def send_command(self, *args, **kwargs):
         """Pack and send a command to the Redis server"""
         self.send_packed_command(
-            self.pack_command(*args), check_health=kwargs.get("check_health", True)
+            self._command_packer.pack(*args),
+            check_health=kwargs.get("check_health", True),
         )
 
     def can_read(self, timeout=0):
@@ -421,48 +435,7 @@ class Connection:
 
     def pack_command(self, *args):
         """Pack a series of arguments into the Redis protocol"""
-        output = []
-        # the client might have included 1 or more literal arguments in
-        # the command name, e.g., 'CONFIG GET'. The Redis server expects these
-        # arguments to be sent separately, so split the first argument
-        # manually. These arguments should be bytestrings so that they are
-        # not encoded.
-        if isinstance(args[0], str):
-            args = tuple(args[0].encode().split()) + args[1:]
-        elif b" " in args[0]:
-            args = tuple(args[0].split()) + args[1:]
-
-        buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
-
-        buffer_cutoff = self._buffer_cutoff
-        for arg in map(self.encoder.encode, args):
-            # to avoid large string mallocs, chunk the command into the
-            # output list if we're sending large values or memoryviews
-            arg_length = len(arg)
-            if (
-                len(buff) > buffer_cutoff
-                or arg_length > buffer_cutoff
-                or isinstance(arg, memoryview)
-            ):
-                buff = SYM_EMPTY.join(
-                    (buff, SYM_DOLLAR, str(arg_length).encode(), SYM_CRLF)
-                )
-                output.append(buff)
-                output.append(arg)
-                buff = SYM_CRLF
-            else:
-                buff = SYM_EMPTY.join(
-                    (
-                        buff,
-                        SYM_DOLLAR,
-                        str(arg_length).encode(),
-                        SYM_CRLF,
-                        arg,
-                        SYM_CRLF,
-                    )
-                )
-        output.append(buff)
-        return output
+        return self._command_packer.pack(*args)
 
     def pack_commands(self, commands):
         """Pack multiple commands into the Redis protocol"""
@@ -472,14 +445,15 @@ class Connection:
         buffer_cutoff = self._buffer_cutoff
 
         for cmd in commands:
-            for chunk in self.pack_command(*cmd):
+            for chunk in self._command_packer.pack(*cmd):
                 chunklen = len(chunk)
                 if (
                     buffer_length > buffer_cutoff
                     or chunklen > buffer_cutoff
                     or isinstance(chunk, memoryview)
                 ):
-                    output.append(SYM_EMPTY.join(pieces))
+                    if pieces:
+                        output.append(SYM_EMPTY.join(pieces))
                     buffer_length = 0
                     pieces = []
 
@@ -492,6 +466,101 @@ class Connection:
         if pieces:
             output.append(SYM_EMPTY.join(pieces))
         return output
+
+
+class Connection(AbstractConnection):
+    "Manages TCP communication to and from a Redis server"
+
+    def __init__(
+        self,
+        host="localhost",
+        port=6379,
+        socket_timeout=None,
+        socket_connect_timeout=None,
+        socket_keepalive=False,
+        socket_keepalive_options=None,
+        socket_type=0,
+        **kwargs,
+    ):
+        self.host = host
+        self.port = int(port)
+        self.socket_timeout = socket_timeout
+        self.socket_connect_timeout = socket_connect_timeout or socket_timeout
+        self.socket_keepalive = socket_keepalive
+        self.socket_keepalive_options = socket_keepalive_options or {}
+        self.socket_type = socket_type
+        super().__init__(**kwargs)
+
+    def repr_pieces(self):
+        pieces = [("host", self.host), ("port", self.port), ("db", self.db)]
+        if self.client_name:
+            pieces.append(("client_name", self.client_name))
+        return pieces
+
+    def _connect(self):
+        "Create a TCP socket connection"
+        # we want to mimic what socket.create_connection does to support
+        # ipv4/ipv6, but we want to set options prior to calling
+        # socket.connect()
+        err = None
+        for res in socket.getaddrinfo(
+            self.host, self.port, self.socket_type, socket.SOCK_STREAM
+        ):
+            family, socktype, proto, canonname, socket_address = res
+            sock = None
+            try:
+                sock = socket.socket(family, socktype, proto)
+                # TCP_NODELAY
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+                # TCP_KEEPALIVE
+                if self.socket_keepalive:
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                    for k, v in self.socket_keepalive_options.items():
+                        sock.setsockopt(socket.IPPROTO_TCP, k, v)
+
+                # set the socket_connect_timeout before we connect
+                sock.settimeout(self.socket_connect_timeout)
+
+                # connect
+                sock.connect(socket_address)
+
+                # set the socket_timeout now that we're connected
+                sock.settimeout(self.socket_timeout)
+                return sock
+
+            except OSError as _:
+                err = _
+                if sock is not None:
+                    sock.close()
+
+        if err is not None:
+            raise err
+        raise OSError("socket.getaddrinfo returned an empty list")
+
+    def _host_error(self):
+        return f"{self.host}:{self.port}"
+
+    def _error_message(self, exception):
+        # args for socket.error can either be (errno, "message")
+        # or just "message"
+
+        host_error = self._host_error()
+
+        if len(exception.args) == 1:
+            try:
+                return f"Error connecting to {host_error}. \
+                        {exception.args[0]}."
+            except AttributeError:
+                return f"Connection Error: {exception.args[0]}"
+        else:
+            try:
+                return (
+                    f"Error {exception.args[0]} connecting to "
+                    f"{host_error}. {exception.args[1]}."
+                )
+            except AttributeError:
+                return f"Connection Error: {exception.args[0]}"
 
 
 class SSLConnection(Connection):
@@ -539,8 +608,6 @@ class SSLConnection(Connection):
         if not SSL_AVAILABLE:
             raise RedisError("Python wasn't built with SSL support")
 
-        super().__init__(**kwargs)
-
         self.keyfile = ssl_keyfile
         self.certfile = ssl_certfile
         if ssl_cert_reqs is None:
@@ -566,6 +633,7 @@ class SSLConnection(Connection):
         self.ssl_validate_ocsp_stapled = ssl_validate_ocsp_stapled
         self.ssl_ocsp_context = ssl_ocsp_context
         self.ssl_ocsp_expected_cert = ssl_ocsp_expected_cert
+        super().__init__(**kwargs)
 
     def _connect(self):
         "Wrap the socket with SSL support"
@@ -635,75 +703,12 @@ class SSLConnection(Connection):
         return sslsock
 
 
-class UnixDomainSocketConnection(Connection):
-    def __init__(
-        self,
-        path="",
-        db=0,
-        username=None,
-        password=None,
-        socket_timeout=None,
-        encoding="utf-8",
-        encoding_errors="strict",
-        decode_responses=False,
-        retry_on_timeout=False,
-        retry_on_error=SENTINEL,
-        parser_class=DefaultParser,
-        socket_read_size=65536,
-        health_check_interval=0,
-        client_name=None,
-        retry=None,
-        redis_connect_func=None,
-        credential_provider: Optional[CredentialProvider] = None,
-    ):
-        """
-        Initialize a new UnixDomainSocketConnection.
-        To specify a retry policy for specific errors, first set
-        `retry_on_error` to a list of the error/s to retry on, then set
-        `retry` to a valid `Retry` object.
-        To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
-        """
-        if (username or password) and credential_provider is not None:
-            raise DataError(
-                "'username' and 'password' cannot be passed along with 'credential_"
-                "provider'. Please provide only one of the following arguments: \n"
-                "1. 'password' and (optional) 'username'\n"
-                "2. 'credential_provider'"
-            )
-        self.pid = os.getpid()
+class UnixDomainSocketConnection(AbstractConnection):
+    "Manages UDS communication to and from a Redis server"
+
+    def __init__(self, path="", **kwargs):
         self.path = path
-        self.db = db
-        self.client_name = client_name
-        self.credential_provider = credential_provider
-        self.password = password
-        self.username = username
-        self.socket_timeout = socket_timeout
-        self.retry_on_timeout = retry_on_timeout
-        if retry_on_error is SENTINEL:
-            retry_on_error = []
-        if retry_on_timeout:
-            # Add TimeoutError to the errors list to retry on
-            retry_on_error.append(TimeoutError)
-        self.retry_on_error = retry_on_error
-        if self.retry_on_error:
-            if retry is None:
-                self.retry = Retry(NoBackoff(), 1)
-            else:
-                # deep-copy the Retry object as it is mutable
-                self.retry = copy.deepcopy(retry)
-            # Update the retry's supported errors with the specified errors
-            self.retry.update_supported_errors(retry_on_error)
-        else:
-            self.retry = Retry(NoBackoff(), 0)
-        self.health_check_interval = health_check_interval
-        self.next_health_check = 0
-        self.redis_connect_func = redis_connect_func
-        self.encoder = Encoder(encoding, encoding_errors, decode_responses)
-        self._sock = None
-        self._socket_read_size = socket_read_size
-        self.set_parser(parser_class)
-        self._connect_callbacks = []
-        self._buffer_cutoff = 6000
+        super().__init__(**kwargs)
 
     def repr_pieces(self):
         pieces = [("path", self.path), ("db", self.db)]
@@ -718,15 +723,21 @@ class UnixDomainSocketConnection(Connection):
         sock.connect(self.path)
         return sock
 
+    def _host_error(self):
+        return self.path
+
     def _error_message(self, exception):
         # args for socket.error can either be (errno, "message")
         # or just "message"
+        host_error = self._host_error()
         if len(exception.args) == 1:
-            return f"Error connecting to unix socket: {self.path}. {exception.args[0]}."
+            return (
+                f"Error connecting to unix socket: {host_error}. {exception.args[0]}."
+            )
         else:
             return (
                 f"Error {exception.args[0]} connecting to unix socket: "
-                f"{self.path}. {exception.args[1]}."
+                f"{host_error}. {exception.args[1]}."
             )
 
 

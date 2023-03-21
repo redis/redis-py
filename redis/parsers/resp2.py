@@ -27,9 +27,6 @@ class _RESP2Parser(_RESPBase):
 
         byte, response = raw[:1], raw[1:]
 
-        if byte not in (b"-", b"+", b":", b"$", b"*"):
-            raise InvalidResponse(f"Protocol Error: {raw!r}")
-
         # server returned an error
         if byte == b"-":
             response = response.decode("utf-8", errors="replace")
@@ -48,23 +45,24 @@ class _RESP2Parser(_RESPBase):
             pass
         # int value
         elif byte == b":":
-            response = int(response)
+            return int(response)
         # bulk response
+        elif byte == b"$" and response == b"-1":
+            return None
         elif byte == b"$":
-            length = int(response)
-            if length == -1:
-                return None
-            response = self._buffer.read(length)
+            response = self._buffer.read(int(response))
         # multi-bulk response
+        elif byte == b"*" and response == b"-1":
+            return None
         elif byte == b"*":
-            length = int(response)
-            if length == -1:
-                return None
             response = [
                 self._read_response(disable_decoding=disable_decoding)
-                for i in range(length)
+                for i in range(int(response))
             ]
-        if isinstance(response, bytes) and disable_decoding is False:
+        else:
+            raise InvalidResponse(f"Protocol Error: {raw!r}")
+
+        if disable_decoding is False:
             response = self.encoder.decode(response)
         return response
 
@@ -73,6 +71,8 @@ class _AsyncRESP2Parser(_AsyncRESPBase):
     """Async class for the RESP2 protocol"""
 
     async def read_response(self, disable_decoding: bool = False):
+        if not self._connected:
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         if self._chunks:
             # augment parsing buffer with previously read data
             self._buffer += b"".join(self._chunks)
@@ -86,14 +86,9 @@ class _AsyncRESP2Parser(_AsyncRESPBase):
     async def _read_response(
         self, disable_decoding: bool = False
     ) -> Union[EncodableT, ResponseError, None]:
-        if not self._stream or not self.encoder:
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         raw = await self._readline()
         response: Any
         byte, response = raw[:1], raw[1:]
-
-        if byte not in (b"-", b"+", b":", b"$", b"*"):
-            raise InvalidResponse(f"Protocol Error: {raw!r}")
 
         # server returned an error
         if byte == b"-":
@@ -114,21 +109,23 @@ class _AsyncRESP2Parser(_AsyncRESPBase):
             pass
         # int value
         elif byte == b":":
-            response = int(response)
+            return int(response)
         # bulk response
+        elif byte == b"$" and response == b"-1":
+            return None
         elif byte == b"$":
-            length = int(response)
-            if length == -1:
-                return None
-            response = await self._read(length)
+            response = await self._read(int(response))
         # multi-bulk response
+        elif byte == b"*" and response == b"-1":
+            return None
         elif byte == b"*":
-            length = int(response)
-            if length == -1:
-                return None
             response = [
-                (await self._read_response(disable_decoding)) for _ in range(length)
+                (await self._read_response(disable_decoding))
+                for _ in range(int(response))  # noqa
             ]
-        if isinstance(response, bytes) and disable_decoding is False:
+        else:
+            raise InvalidResponse(f"Protocol Error: {raw!r}")
+
+        if disable_decoding is False:
             response = self.encoder.decode(response)
         return response

@@ -1,8 +1,12 @@
 from abc import ABC
 from asyncio import IncompleteReadError, StreamReader, TimeoutError
 from typing import List, Optional, Union
+import sys
 
-import async_timeout
+if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
+    from asyncio import timeout as async_timeout
+else:
+    from async_timeout import timeout as async_timeout
 
 from ..exceptions import (
     AuthenticationError,
@@ -162,28 +166,26 @@ class _AsyncRESPBase(AsyncBaseParser):
         self._buffer = b""
         self._chunks.clear()
 
-    def on_connect(self, connection):
+    def on_connect(self, connection: "Connection"):
         """Called when the stream connects"""
         self._stream = connection._reader
         if self._stream is None:
             raise RedisError("Buffer is closed.")
-
         self.encoder = connection.encoder
+        self._clear()
+        self._connected = True
 
     def on_disconnect(self):
         """Called when the stream disconnects"""
-        if self._stream is not None:
-            self._stream = None
-        self.encoder = None
-        self._clear()
+        self._connected = False
 
     async def can_read_destructive(self) -> bool:
+        if not self._connected:
+            raise RedisError("Buffer is closed.")
         if self._buffer:
             return True
-        if self._stream is None:
-            raise RedisError("Buffer is closed.")
         try:
-            async with async_timeout.timeout(0):
+            async with async_timeout(0):
                 return await self._stream.read(1)
         except TimeoutError:
             return False
