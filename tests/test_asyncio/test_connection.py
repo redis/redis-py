@@ -9,14 +9,12 @@ import redis
 from redis.asyncio import Redis
 from redis.asyncio.connection import (
     Connection,
-    HiredisParser,
-    PythonParser,
     UnixDomainSocketConnection,
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
-from redis.parsers import _AsyncRESP2Parser
+from redis.parsers import _AsyncHiredisParser, _AsyncRESP2Parser, _AsyncRESP3Parser
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 
@@ -197,7 +195,9 @@ async def test_connection_parse_response_resume(r: redis.Redis):
 
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize(
-    "parser_class", [PythonParser, HiredisParser], ids=["PythonParser", "HiredisParser"]
+    "parser_class",
+    [_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisParser],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser", "AsyncHiredisParser"],
 )
 async def test_connection_disconect_race(parser_class):
     """
@@ -211,7 +211,7 @@ async def test_connection_disconect_race(parser_class):
     This test verifies that a read in progress can finish even
     if the `disconnect()` method is called.
     """
-    if parser_class == HiredisParser and not HIREDIS_AVAILABLE:
+    if parser_class == _AsyncHiredisParser and not HIREDIS_AVAILABLE:
         pytest.skip("Hiredis not available")
 
     args = {}
