@@ -3339,8 +3339,9 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(keys, args)
         return self.execute_command("SINTERSTORE", dest, *args)
 
-    def sismember(self, name: str, value: str) -> Union[Awaitable[Union[Literal[0],Literal[1]]],
-                                                        Union[Literal[0], Literal[1]]]:
+    def sismember(
+        self, name: str, value: str
+    ) -> Union[Awaitable[Union[Literal[0], Literal[1]]], Union[Literal[0], Literal[1]]]:
         """
         Return whether ``value`` is a member of set ``name``:
         - 1 if the value is a member of the set.
