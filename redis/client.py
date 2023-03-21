@@ -687,7 +687,7 @@ class AbstractRedis:
         **string_keys_to_dict(
             "AUTH COPY EXPIRE EXPIREAT PEXPIRE PEXPIREAT "
             "HEXISTS HMSET MOVE MSETNX PERSIST "
-            "PSETEX RENAMENX SISMEMBER SMOVE SETEX SETNX",
+            "PSETEX RENAMENX SMOVE SETEX SETNX",
             bool,
         ),
         **string_keys_to_dict(
