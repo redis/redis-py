@@ -19,6 +19,7 @@ setup(
             "redis.commands.search",
             "redis.commands.timeseries",
             "redis.commands.graph",
+            "redis.parsers",
         ]
     ),
     url="https://github.com/redis/redis-py",
