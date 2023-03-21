@@ -42,6 +42,7 @@ from .conftest import (
     skip_if_server_version_lt,
     skip_unless_arch_bits,
     wait_for_command,
+    is_resp2_connection,
 )
 
 default_host = "127.0.0.1"
@@ -1723,7 +1724,10 @@ class TestClusterRedisCommands:
         r.zadd("{foo}a", {"a1": 1, "a2": 2, "a3": 3})
         r.zadd("{foo}b", {"a1": 1, "a2": 2})
         assert r.zdiff(["{foo}a", "{foo}b"]) == [b"a3"]
-        assert r.zdiff(["{foo}a", "{foo}b"], withscores=True) == [b"a3", b"3"]
+        if is_resp2_connection(r):
+            assert r.zdiff(["{foo}a", "{foo}b"], withscores=True) == [b"a3", b"3"]
+        else:
+            assert r.zdiff(["{foo}a", "{foo}b"], withscores=True) == [[b"a3", 3.0]]
 
     @skip_if_server_version_lt("6.2.0")
     def test_cluster_zdiffstore(self, r):
@@ -1731,7 +1735,10 @@ class TestClusterRedisCommands:
         r.zadd("{foo}b", {"a1": 1, "a2": 2})
         assert r.zdiffstore("{foo}out", ["{foo}a", "{foo}b"])
         assert r.zrange("{foo}out", 0, -1) == [b"a3"]
-        assert r.zrange("{foo}out", 0, -1, withscores=True) == [(b"a3", 3.0)]
+        if is_resp2_connection(r):
+            assert r.zrange("{foo}out", 0, -1, withscores=True) == [(b"a3", 3.0)]
+        else:
+            assert r.zrange("{foo}out", 0, -1, withscores=True) == [[b"a3", 3.0]]
 
     @skip_if_server_version_lt("6.2.0")
     def test_cluster_zinter(self, r):
@@ -1742,24 +1749,45 @@ class TestClusterRedisCommands:
         # invalid aggregation
         with pytest.raises(DataError):
             r.zinter(["{foo}a", "{foo}b", "{foo}c"], aggregate="foo", withscores=True)
-        # aggregate with SUM
-        assert r.zinter(["{foo}a", "{foo}b", "{foo}c"], withscores=True) == [
-            (b"a3", 8),
-            (b"a1", 9),
-        ]
-        # aggregate with MAX
-        assert r.zinter(
-            ["{foo}a", "{foo}b", "{foo}c"], aggregate="MAX", withscores=True
-        ) == [(b"a3", 5), (b"a1", 6)]
-        # aggregate with MIN
-        assert r.zinter(
-            ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN", withscores=True
-        ) == [(b"a1", 1), (b"a3", 1)]
-        # with weights
-        assert r.zinter({"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True) == [
-            (b"a3", 20),
-            (b"a1", 23),
-        ]
+        if is_resp2_connection(r):
+            # aggregate with SUM
+            assert r.zinter(["{foo}a", "{foo}b", "{foo}c"], withscores=True) == [
+                (b"a3", 8),
+                (b"a1", 9),
+            ]
+            # aggregate with MAX
+            assert r.zinter(
+                ["{foo}a", "{foo}b", "{foo}c"], aggregate="MAX", withscores=True
+            ) == [(b"a3", 5), (b"a1", 6)]
+            # aggregate with MIN
+            assert r.zinter(
+                ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN", withscores=True
+            ) == [(b"a1", 1), (b"a3", 1)]
+            # with weights
+            assert r.zinter({"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True) == [
+                (b"a3", 20),
+                (b"a1", 23),
+            ]
+        else:
+            # aggregate with SUM
+            assert r.zinter(["{foo}a", "{foo}b", "{foo}c"], withscores=True) == [
+                [b"a3", 8]
+                [b"a1", 9]
+            ]
+            # aggregate with MAX
+            assert r.zinter(
+                ["{foo}a", "{foo}b", "{foo}c"], aggregate="MAX", withscores=True
+            ) == [[b"a3", 5] [b"a1", 6]]
+            # aggregate with MIN
+            assert r.zinter(
+                ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN", withscores=True
+            ) == [[b"a1", 1] [b"a3", 1]]
+            # with weights
+            assert r.zinter({"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True) == [
+                [b"a3", 2],
+                [b"a1", 2],
+            ]
+
 
     def test_cluster_zinterstore_sum(self, r):
         r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})

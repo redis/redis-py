@@ -318,7 +318,10 @@ def parse_xautoclaim(response, **options):
 
 
 def parse_xinfo_stream(response, **options):
-    data = pairs_to_dict(response, decode_keys=True)
+    if isinstance(response, list):
+        data = pairs_to_dict(response, decode_keys=True)
+    else:
+        data = {str_if_bytes(k): v for k, v in response.items()}
     if not options.get("full", False):
         first = data["first-entry"]
         if first is not None:
@@ -584,7 +587,10 @@ def parse_client_kill(response, **options):
 def parse_acl_getuser(response, **options):
     if response is None:
         return None
-    data = pairs_to_dict(response, decode_keys=True)
+    if isinstance(response, list):
+        data = pairs_to_dict(response, decode_keys=True)
+    else:
+        data = {str_if_bytes(key): value for key, value in response.items()}
 
     # convert everything but user-defined data in 'keys' to native strings
     data["flags"] = list(map(str_if_bytes, data["flags"]))
@@ -876,12 +882,13 @@ class AbstractRedis:
         "XINFO CONSUMERS": lambda r: [
             {str_if_bytes(key): value for key, value in x.items()} for x in r
         ],
-        "XINFO STREAM": lambda r, **options: {
-            str_if_bytes(key): str_if_bytes(value) for key, value in r.items()
-        },
         "MEMORY STATS": lambda r: {
             str_if_bytes(key): value for key, value in r.items()
         },
+        "XINFO GROUPS": lambda r: [
+            {str_if_bytes(key): value for key, value in d.items()}
+            for d in r
+        ],
     }
 
 
