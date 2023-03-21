@@ -1,7 +1,7 @@
+import sys
 from abc import ABC
 from asyncio import IncompleteReadError, StreamReader, TimeoutError
 from typing import List, Optional, Union
-import sys
 
 if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
     from asyncio import timeout as async_timeout
@@ -166,7 +166,7 @@ class _AsyncRESPBase(AsyncBaseParser):
         self._buffer = b""
         self._chunks.clear()
 
-    def on_connect(self, connection: "Connection"):
+    def on_connect(self, connection):
         """Called when the stream connects"""
         self._stream = connection._reader
         if self._stream is None:

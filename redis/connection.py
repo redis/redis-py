@@ -2,8 +2,6 @@ import copy
 import os
 import socket
 import ssl
-import threading
-import weakref
 import sys
 import threading
 import weakref
@@ -310,8 +308,9 @@ class AbstractConnection:
                 self._parser.on_connect(self)
             self.send_command("HELLO", self.protocol)
             response = self.read_response()
-            if (response.get(b"proto") != int(self.protocol) and
-                response.get("proto") != int(self.protocol)):
+            if response.get(b"proto") != int(self.protocol) and response.get(
+                "proto"
+            ) != int(self.protocol):
                 raise ConnectionError("Invalid RESP version")
 
         # if a client_name is given, set it

@@ -39,11 +39,11 @@ from tests.test_pubsub import wait_for_message
 
 from .conftest import (
     _get_client,
+    is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
     wait_for_command,
-    is_resp2_connection,
 )
 
 default_host = "127.0.0.1"
@@ -1765,30 +1765,26 @@ class TestClusterRedisCommands:
                 ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN", withscores=True
             ) == [(b"a1", 1), (b"a3", 1)]
             # with weights
-            assert r.zinter({"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True) == [
-                (b"a3", 20),
-                (b"a1", 23),
-            ]
+            assert r.zinter(
+                {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True
+            ) == [(b"a3", 20), (b"a1", 23)]
         else:
             # aggregate with SUM
             assert r.zinter(["{foo}a", "{foo}b", "{foo}c"], withscores=True) == [
-                [b"a3", 8]
-                [b"a1", 9]
+                [b"a3", 8][b"a1", 9]
             ]
             # aggregate with MAX
             assert r.zinter(
                 ["{foo}a", "{foo}b", "{foo}c"], aggregate="MAX", withscores=True
-            ) == [[b"a3", 5] [b"a1", 6]]
+            ) == [[b"a3", 5], [b"a1", 6]]
             # aggregate with MIN
             assert r.zinter(
                 ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN", withscores=True
-            ) == [[b"a1", 1] [b"a3", 1]]
+            ) == [[b"a1", 1], [b"a3", 1]]
             # with weights
-            assert r.zinter({"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True) == [
-                [b"a3", 2],
-                [b"a1", 2],
-            ]
-
+            assert r.zinter(
+                {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True
+            ) == [[b"a3", 2], [b"a1", 2]]
 
     def test_cluster_zinterstore_sum(self, r):
         r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})

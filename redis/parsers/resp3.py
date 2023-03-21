@@ -161,9 +161,9 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
         # map response
         elif byte == b"%":
             response = {
-                (await self._read_response(
-                    disable_decoding=disable_decoding
-                )): (await self._read_response(disable_decoding=disable_decoding))
+                (await self._read_response(disable_decoding=disable_decoding)): (
+                    await self._read_response(disable_decoding=disable_decoding)
+                )
                 for _ in range(int(response))
             }
         else:

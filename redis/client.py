@@ -886,8 +886,7 @@ class AbstractRedis:
             str_if_bytes(key): value for key, value in r.items()
         },
         "XINFO GROUPS": lambda r: [
-            {str_if_bytes(key): value for key, value in d.items()}
-            for d in r
+            {str_if_bytes(key): value for key, value in d.items()} for d in r
         ],
     }
 

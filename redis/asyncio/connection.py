@@ -365,8 +365,9 @@ class Connection:
                 self._parser.on_connect(self)
             await self.send_command("HELLO", self.protocol)
             response = await self.read_response()
-            if (response.get(b"proto") != int(self.protocol) and
-                response.get("proto") != int(self.protocol)):
+            if response.get(b"proto") != int(self.protocol) and response.get(
+                "proto"
+            ) != int(self.protocol):
                 raise ConnectionError("Invalid RESP version")
 
         # if a client_name is given, set it

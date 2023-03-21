@@ -235,12 +235,14 @@ async def wait_for_command(
         if key in monitor_response["command"]:
             return None
 
+
 def get_protocol_version(r):
     if isinstance(r, redis.Redis):
         return r.connection_pool.connection_kwargs.get("protocol")
     elif isinstance(r, redis.RedisCluster):
         return r.nodes_manager.connection_kwargs.get("protocol")
-    
+
+
 def assert_resp_response(r, response, resp2_expected, resp3_expected):
     protocol = get_protocol_version(r)
     if protocol == "2" or protocol is None:

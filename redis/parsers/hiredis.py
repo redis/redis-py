@@ -1,12 +1,13 @@
 import asyncio
 import socket
-from typing import Callable, List, Optional, Union
 import sys
+from typing import Callable, List, Optional, Union
 
 if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
     from asyncio import timeout as async_timeout
 else:
     from async_timeout import timeout as async_timeout
+
 from redis.compat import TypedDict
 
 from ..exceptions import ConnectionError, InvalidResponse, RedisError
