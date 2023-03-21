@@ -1771,7 +1771,8 @@ class TestClusterRedisCommands:
         else:
             # aggregate with SUM
             assert r.zinter(["{foo}a", "{foo}b", "{foo}c"], withscores=True) == [
-                [b"a3", 8], [b"a1", 9]
+                [b"a3", 8],
+                [b"a1", 9],
             ]
             # aggregate with MAX
             assert r.zinter(

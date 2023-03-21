@@ -7,10 +7,7 @@ import pytest
 
 import redis
 from redis.asyncio import Redis
-from redis.asyncio.connection import (
-    Connection,
-    UnixDomainSocketConnection,
-)
+from redis.asyncio.connection import Connection, UnixDomainSocketConnection
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
