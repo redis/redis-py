@@ -6,13 +6,13 @@ on:
       - 'docs/**'
       - '**/*.rst'
       - '**/*.md'
-#    branches:
-#      - master
-#      - '[0-9].[0-9]'
-#  pull_request:
-#    branches:
-#      - master
-#      - '[0-9].[0-9]'
+    branches:
+      - master
+      - '[0-9].[0-9]'
+  pull_request:
+    branches:
+      - master
+      - '[0-9].[0-9]'
 
 jobs:
 
@@ -32,7 +32,7 @@ jobs:
            invoke linters
 
    run-tests:
-     runs-on: ubuntu-latest
+     runs-on: ubuntu-20.04
      timeout-minutes: 30
      strategy:
        max-parallel: 15
@@ -80,7 +80,7 @@ jobs:
 
    install_package_from_commit:
     name: Install package from commit hash
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
       matrix:
