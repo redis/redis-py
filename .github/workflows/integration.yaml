@@ -6,13 +6,13 @@ on:
       - 'docs/**'
       - '**/*.rst'
       - '**/*.md'
-#    branches:
-#      - master
-#      - '[0-9].[0-9]'
-#  pull_request:
-#    branches:
-#      - master
-#      - '[0-9].[0-9]'
+    branches:
+      - master
+      - '[0-9].[0-9]'
+  pull_request:
+    branches:
+      - master
+      - '[0-9].[0-9]'
 #  schedule:
 #    - cron: '0 1 * * *' # nightly build
 
