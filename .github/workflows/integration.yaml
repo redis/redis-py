@@ -32,10 +32,11 @@ jobs:
            invoke linters
 
    run-tests:
-     runs-on: ubuntu-latest
+     runs-on: ubuntu-20.04
      timeout-minutes: 30
      strategy:
        max-parallel: 15
+       fail-fast: false
        matrix:
          python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
          test-type: ['standalone', 'cluster']
@@ -79,8 +80,9 @@ jobs:
 
    install_package_from_commit:
     name: Install package from commit hash
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
     steps:
