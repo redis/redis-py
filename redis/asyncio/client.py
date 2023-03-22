@@ -1357,7 +1357,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             )
         except asyncio.CancelledError:
             # not supposed to be possible, yet here we are
-            await connection.disconnect(nowait=True)
+            await conn.disconnect(nowait=True)
             raise
         finally:
             await self.reset()
