@@ -253,7 +253,7 @@ def assert_resp_response(r, response, resp2_expected, resp3_expected):
 
 def assert_resp_response_in(r, response, resp2_expected, resp3_expected):
     protocol = get_protocol_version(r)
-    if protocol == "2" or protocol is None:
+    if protocol in [2, "2", None]:
         assert response in resp2_expected
     else:
         assert response in resp3_expected
