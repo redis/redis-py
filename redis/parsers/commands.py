@@ -126,7 +126,7 @@ class CommandsParser:
         # e.g. 'MEMORY USAGE' will be splitted into ['MEMORY', 'USAGE']
         pieces = args[0].split() + list(args[1:])
         try:
-            keys = redis_conn.command_getkeys(*pieces)
+            keys = redis_conn.execute_command("COMMAND GETKEYS", *pieces)
         except ResponseError as e:
             message = e.__str__()
             if (
