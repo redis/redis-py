@@ -340,6 +340,23 @@ class TestRedisClusterObj:
         rc = RedisCluster.from_url("rediss://localhost:16379")
         assert rc.connection_kwargs["connection_class"] is SSLConnection
 
+    async def test_asynckills(self, r) -> None:
+
+        await r.set("foo", "foo")
+        await r.set("bar", "bar")
+
+        t = asyncio.create_task(r.get("foo"))
+        await asyncio.sleep(1)
+        t.cancel()
+        try:
+            await t
+        except asyncio.CancelledError:
+            pytest.fail("connection is left open with unread response")
+
+        assert await r.get("bar") == b"bar"
+        assert await r.ping()
+        assert await r.get("foo") == b"foo"
+
     async def test_max_connections(
         self, create_redis: Callable[..., RedisCluster]
     ) -> None:
