@@ -1374,10 +1374,16 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         conn = cast(Connection, conn)
 
         try:
-            return await conn.retry.call_with_retry(
-                lambda: execute(conn, stack, raise_on_error),
-                lambda error: self._disconnect_raise_reset(conn, error),
+            return await asyncio.shield(
+                conn.retry.call_with_retry(
+                    lambda: execute(conn, stack, raise_on_error),
+                    lambda error: self._disconnect_raise_reset(conn, error),
+                )
             )
+        except asyncio.CancelledError:
+            # not supposed to be possible, yet here we are
+            await connection.disconnect(nowait=True)
+            raise
         finally:
             await self.reset()
 
