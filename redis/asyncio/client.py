@@ -176,6 +176,7 @@ class Redis(
         auto_close_connection_pool: bool = True,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
+        protocol: Optional[int] = 2,
     ):
         """
         Initialize a new Redis client.
@@ -213,6 +214,7 @@ class Redis(
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
                 "redis_connect_func": redis_connect_func,
+                "protocol": protocol,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
