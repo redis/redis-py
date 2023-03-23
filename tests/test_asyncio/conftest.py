@@ -9,14 +9,11 @@ from packaging.version import Version
 
 import redis.asyncio as redis
 from redis.asyncio.client import Monitor
-from redis.asyncio.connection import (
-    HIREDIS_AVAILABLE,
-    HiredisParser,
-    PythonParser,
-    parse_url,
-)
+from redis.asyncio.connection import parse_url
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
+from redis.parsers import _AsyncHiredisParser, _AsyncRESP2Parser
+from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import REDIS_INFO
 
 from .compat import mock
@@ -32,14 +29,14 @@ async def _get_info(redis_url):
 @pytest_asyncio.fixture(
     params=[
         pytest.param(
-            (True, PythonParser),
+            (True, _AsyncRESP2Parser),
             marks=pytest.mark.skipif(
                 'config.REDIS_INFO["cluster_enabled"]', reason="cluster mode enabled"
             ),
         ),
-        (False, PythonParser),
+        (False, _AsyncRESP2Parser),
         pytest.param(
-            (True, HiredisParser),
+            (True, _AsyncHiredisParser),
             marks=[
                 pytest.mark.skipif(
                     'config.REDIS_INFO["cluster_enabled"]',
@@ -51,7 +48,7 @@ async def _get_info(redis_url):
             ],
         ),
         pytest.param(
-            (False, HiredisParser),
+            (False, _AsyncHiredisParser),
             marks=pytest.mark.skipif(
                 not HIREDIS_AVAILABLE, reason="hiredis is not installed"
             ),
@@ -237,6 +234,29 @@ async def wait_for_command(
             return monitor_response
         if key in monitor_response["command"]:
             return None
+
+
+def get_protocol_version(r):
+    if isinstance(r, redis.Redis):
+        return r.connection_pool.connection_kwargs.get("protocol")
+    elif isinstance(r, redis.RedisCluster):
+        return r.nodes_manager.connection_kwargs.get("protocol")
+
+
+def assert_resp_response(r, response, resp2_expected, resp3_expected):
+    protocol = get_protocol_version(r)
+    if protocol in [2, "2", None]:
+        assert response == resp2_expected
+    else:
+        assert response == resp3_expected
+
+
+def assert_resp_response_in(r, response, resp2_expected, resp3_expected):
+    protocol = get_protocol_version(r)
+    if protocol in [2, "2", None]:
+        assert response in resp2_expected
+    else:
+        assert response in resp3_expected
 
 
 # python 3.6 doesn't have the asynccontextmanager decorator.  Provide it here.

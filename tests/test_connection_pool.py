@@ -7,7 +7,8 @@ from unittest import mock
 import pytest
 
 import redis
-from redis.connection import ssl_available, to_bool
+from redis.connection import to_bool
+from redis.utils import SSL_AVAILABLE
 
 from .conftest import _get_client, skip_if_redis_enterprise, skip_if_server_version_lt
 from .test_pubsub import wait_for_message
@@ -425,7 +426,7 @@ class TestConnectionPoolUnixSocketURLParsing:
         assert pool.connection_class == MyConnection
 
 
-@pytest.mark.skipif(not ssl_available, reason="SSL not installed")
+@pytest.mark.skipif(not SSL_AVAILABLE, reason="SSL not installed")
 class TestSSLConnectionURLParsing:
     def test_host(self):
         pool = redis.ConnectionPool.from_url("rediss://my.host")

@@ -8,7 +8,7 @@ setup(
     long_description_content_type="text/markdown",
     keywords=["Redis", "key-value store", "database"],
     license="MIT",
-    version="4.5.3",
+    version="5.0.0b1",
     packages=find_packages(
         include=[
             "redis",
@@ -19,6 +19,7 @@ setup(
             "redis.commands.search",
             "redis.commands.timeseries",
             "redis.commands.graph",
+            "redis.parsers",
         ]
     ),
     url="https://github.com/redis/redis-py",

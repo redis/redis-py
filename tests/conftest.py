@@ -15,7 +15,7 @@ from redis.exceptions import RedisClusterException
 from redis.retry import Retry
 
 REDIS_INFO = {}
-default_redis_url = "redis://localhost:6379/9"
+default_redis_url = "redis://localhost:6379/0"
 default_redismod_url = "redis://localhost:36379"
 default_redis_unstable_url = "redis://localhost:6378"
 
@@ -472,3 +472,11 @@ def wait_for_command(client, monitor, command, key=None):
             return monitor_response
         if key in monitor_response["command"]:
             return None
+
+
+def is_resp2_connection(r):
+    if isinstance(r, redis.Redis):
+        protocol = r.connection_pool.connection_kwargs.get("protocol")
+    elif isinstance(r, redis.RedisCluster):
+        protocol = r.nodes_manager.connection_kwargs.get("protocol")
+    return protocol == "2" or protocol is None

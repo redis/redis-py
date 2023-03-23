@@ -17,15 +17,8 @@ from typing import (
 )
 
 from redis.asyncio.client import ResponseCallbackT
-from redis.asyncio.connection import (
-    Connection,
-    DefaultParser,
-    Encoder,
-    SSLConnection,
-    parse_url,
-)
+from redis.asyncio.connection import Connection, DefaultParser, SSLConnection, parse_url
 from redis.asyncio.lock import Lock
-from redis.asyncio.parser import CommandsParser
 from redis.asyncio.retry import Retry
 from redis.backoff import default_backoff
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis
@@ -60,6 +53,7 @@ from redis.exceptions import (
     TimeoutError,
     TryAgainError,
 )
+from redis.parsers import AsyncCommandsParser, Encoder
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import dict_merge, safe_str, str_if_bytes
 
@@ -250,6 +244,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_certfile: Optional[str] = None,
         ssl_check_hostname: bool = False,
         ssl_keyfile: Optional[str] = None,
+        protocol: Optional[int] = 2,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -290,6 +285,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_keepalive_options": socket_keepalive_options,
             "socket_timeout": socket_timeout,
             "retry": retry,
+            "protocol": protocol,
         }
 
         if ssl:
@@ -344,7 +340,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self.cluster_error_retry_attempts = cluster_error_retry_attempts
         self.connection_error_retry_attempts = connection_error_retry_attempts
         self.reinitialize_counter = 0
-        self.commands_parser = CommandsParser()
+        self.commands_parser = AsyncCommandsParser()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.response_callbacks = kwargs["response_callbacks"]

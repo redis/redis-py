@@ -7,16 +7,11 @@ import pytest
 
 import redis
 from redis.asyncio import Redis
-from redis.asyncio.connection import (
-    BaseParser,
-    Connection,
-    HiredisParser,
-    PythonParser,
-    UnixDomainSocketConnection,
-)
+from redis.asyncio.connection import Connection, UnixDomainSocketConnection
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
+from redis.parsers import _AsyncHiredisParser, _AsyncRESP2Parser, _AsyncRESP3Parser
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 
@@ -31,11 +26,11 @@ async def test_invalid_response(create_redis):
     raw = b"x"
     fake_stream = MockStream(raw + b"\r\n")
 
-    parser: BaseParser = r.connection._parser
+    parser: _AsyncRESP2Parser = r.connection._parser
     with mock.patch.object(parser, "_stream", fake_stream):
         with pytest.raises(InvalidResponse) as cm:
             await parser.read_response()
-    if isinstance(parser, PythonParser):
+    if isinstance(parser, _AsyncRESP2Parser):
         assert str(cm.value) == f"Protocol Error: {raw!r}"
     else:
         assert (
@@ -218,7 +213,9 @@ async def test_connection_parse_response_resume(r: redis.Redis):
 
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize(
-    "parser_class", [PythonParser, HiredisParser], ids=["PythonParser", "HiredisParser"]
+    "parser_class",
+    [_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisParser],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser", "AsyncHiredisParser"],
 )
 async def test_connection_disconect_race(parser_class):
     """
@@ -232,7 +229,7 @@ async def test_connection_disconect_race(parser_class):
     This test verifies that a read in progress can finish even
     if the `disconnect()` method is called.
     """
-    if parser_class == HiredisParser and not HIREDIS_AVAILABLE:
+    if parser_class == _AsyncHiredisParser and not HIREDIS_AVAILABLE:
         pytest.skip("Hiredis not available")
 
     args = {}
