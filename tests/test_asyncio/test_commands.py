@@ -377,6 +377,27 @@ class TestRedisCommands:
         assert isinstance(clients[0], dict)
         assert "addr" in clients[0]
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    async def test_client_info(self, r: redis.Redis):
+        info = await r.client_info()
+        assert isinstance(info, dict)
+        assert "addr" in info
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("5.0.0")
+    async def test_client_list_types_not_replica(self, r: redis.Redis):
+        with pytest.raises(exceptions.RedisError):
+            await r.client_list(_type="not a client type")
+        for client_type in ["normal", "master", "pubsub"]:
+            clients = await r.client_list(_type=client_type)
+            assert isinstance(clients, list)
+
+    @skip_if_redis_enterprise()
+    async def test_client_list_replica(self, r: redis.Redis):
+        clients = await r.client_list(_type="replica")
+        assert isinstance(clients, list)
+
     @skip_if_server_version_lt("5.0.0")
     async def test_client_list_type(self, r: redis.Redis):
         with pytest.raises(exceptions.RedisError):
