@@ -285,6 +285,12 @@ class TestRedisCommands:
         assert len((await r.acl_getuser(username))["passwords"]) == 1
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
+    async def test_acl_help(self, r: redis.Redis):
+        res = await r.acl_help()
+        assert isinstance(res, list)
+        assert len(res) != 0
+
+    @skip_if_server_version_lt(REDIS_6_VERSION)
     @skip_if_server_version_gte("7.0.0")
     async def test_acl_list(self, r_teardown):
         username = "redis-py-user"
