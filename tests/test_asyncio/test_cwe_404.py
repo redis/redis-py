@@ -1,7 +1,10 @@
 import asyncio
 import sys
+
 import pytest
+
 from redis.asyncio import Redis
+from redis.asyncio.cluster import RedisCluster
 
 
 async def pipe(
@@ -32,7 +35,7 @@ class DelayProxy:
         )
         await asyncio.gather(pipe1, pipe2)
 
-    async def kill(self):
+    async def stop(self):
         # clean up enough so that we can reuse the looper
         self.ROUTINE.cancel()
         loop = self.server.get_loop()
@@ -41,13 +44,14 @@ class DelayProxy:
 
 async def test_standalone():
 
-    # create a tcp socket proxy that relays data to Redis and back, inserting 0.1 seconds of delay
-    dp = DelayProxy(addr=("localhost", 6380), redis_addr=("localhost", 6379), delay=0.1)
+    # create a tcp socket proxy that relays data to Redis and back,
+    # inserting 0.1 seconds of delay
+    dp = DelayProxy(addr=("localhost", 5380), redis_addr=("localhost", 6379), delay=0.1)
     await dp.start()
 
     for b in [True, False]:
         # note that we connect to proxy, rather than to Redis directly
-        async with Redis(host="localhost", port=6380, single_connection_client=b) as r:
+        async with Redis(host="localhost", port=5380, single_connection_client=b) as r:
 
             await r.set("foo", "foo")
             await r.set("bar", "bar")
@@ -60,20 +64,20 @@ async def test_standalone():
                 sys.stderr.write("try again, we did not cancel the task in time\n")
             except asyncio.CancelledError:
                 sys.stderr.write(
-                    "managed to cancel the task, connection is left open with unread response\n"
+                    "canceled task, connection is left open with unread response\n"
                 )
 
             assert await r.get("bar") == b"bar"
             assert await r.ping()
             assert await r.get("foo") == b"foo"
 
-    await dp.kill()
+    await dp.stop()
 
 
 async def test_standalone_pipeline():
-    dp = DelayProxy(addr=("localhost", 6380), redis_addr=("localhost", 6379), delay=0.1)
+    dp = DelayProxy(addr=("localhost", 5380), redis_addr=("localhost", 6379), delay=0.1)
     await dp.start()
-    async with Redis(host="localhost", port=6380) as r:
+    async with Redis(host="localhost", port=5380) as r:
         await r.set("foo", "foo")
         await r.set("bar", "bar")
 
@@ -94,4 +98,29 @@ async def test_standalone_pipeline():
         assert await pipe.execute() == [b"foo", b"bar", True, b"foo"]
         assert await pipe2.execute() == [b"bar", True, b"foo"]
 
-    await dp.kill()
+    await dp.stop()
+
+
+async def test_cluster(request):
+
+    dp = DelayProxy(addr=("localhost", 5381), redis_addr=("localhost", 6372), delay=0.1)
+    await dp.start()
+
+    r = RedisCluster.from_url("redis://localhost:5381")
+    await r.initialize()
+    await r.set("foo", "foo")
+    await r.set("bar", "bar")
+
+    t = asyncio.create_task(r.get("foo"))
+    await asyncio.sleep(0.050)
+    t.cancel()
+    try:
+        await t
+    except asyncio.CancelledError:
+        pytest.fail("connection is left open with unread response")
+
+    assert await r.get("bar") == b"bar"
+    assert await r.ping()
+    assert await r.get("foo") == b"foo"
+
+    await dp.stop()
