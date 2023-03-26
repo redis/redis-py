@@ -511,12 +511,17 @@ class Redis(
         if self.single_connection_client:
             await self._single_conn_lock.acquire()
         try:
-            return await conn.retry.call_with_retry(
-                lambda: self._send_command_parse_response(
-                    conn, command_name, *args, **options
-                ),
-                lambda error: self._disconnect_raise(conn, error),
+            return await asyncio.shield(
+                conn.retry.call_with_retry(
+                    lambda: self._send_command_parse_response(
+                        conn, command_name, *args, **options
+                    ),
+                    lambda error: self._disconnect_raise(conn, error),
+                )
             )
+        except asyncio.CancelledError:
+            await conn.disconnect(nowait=True)
+            raise
         finally:
             if self.single_connection_client:
                 self._single_conn_lock.release()
@@ -772,10 +777,16 @@ class PubSub:
         called by the # connection to resubscribe us to any channels and
         patterns we were previously listening to
         """
-        return await conn.retry.call_with_retry(
-            lambda: command(*args, **kwargs),
-            lambda error: self._disconnect_raise_connect(conn, error),
-        )
+        try:
+            return await asyncio.shield(
+                conn.retry.call_with_retry(
+                    lambda: command(*args, **kwargs),
+                    lambda error: self._disconnect_raise_connect(conn, error),
+                )
+            )
+        except asyncio.CancelledError:
+            await conn.disconnect()
+            raise
 
     async def parse_response(self, block: bool = True, timeout: float = 0):
         """Parse the response from a publish/subscribe command"""
@@ -1191,13 +1202,18 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                 command_name, self.shard_hint
             )
             self.connection = conn
-
-        return await conn.retry.call_with_retry(
-            lambda: self._send_command_parse_response(
-                conn, command_name, *args, **options
-            ),
-            lambda error: self._disconnect_reset_raise(conn, error),
-        )
+        try:
+            return await asyncio.shield(
+                conn.retry.call_with_retry(
+                    lambda: self._send_command_parse_response(
+                        conn, command_name, *args, **options
+                    ),
+                    lambda error: self._disconnect_reset_raise(conn, error),
+                )
+            )
+        except asyncio.CancelledError:
+            await conn.disconnect()
+            raise
 
     def pipeline_execute_command(self, *args, **options):
         """
