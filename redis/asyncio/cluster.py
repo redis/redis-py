@@ -1030,9 +1030,7 @@ class ClusterNode:
         for cmd in commands:
             try:
                 cmd.result = await asyncio.shield(
-                    self.parse_response(
-                        connection, cmd.args[0], **cmd.kwargs
-                    )
+                    self.parse_response(connection, cmd.args[0], **cmd.kwargs)
                 )
             except asyncio.CancelledError:
                 await connection.disconnect(nowait=True)
