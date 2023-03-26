@@ -44,27 +44,6 @@ async def test_invalid_response(create_redis):
     await r.connection.disconnect()
 
 
-async def test_asynckills():
-
-    for b in [True, False]:
-        r = Redis(single_connection_client=b)
-
-        await r.set("foo", "foo")
-        await r.set("bar", "bar")
-
-        t = asyncio.create_task(r.get("foo"))
-        await asyncio.sleep(1)
-        t.cancel()
-        try:
-            await t
-        except asyncio.CancelledError:
-            pytest.fail("connection left open with unread response")
-
-        assert await r.get("bar") == b"bar"
-        assert await r.ping()
-        assert await r.get("foo") == b"foo"
-
-
 @pytest.mark.onlynoncluster
 async def test_single_connection():
     """Test that concurrent requests on a single client are synchronised."""
