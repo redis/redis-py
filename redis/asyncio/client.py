@@ -787,6 +787,9 @@ class PubSub:
         except asyncio.CancelledError:
             await conn.disconnect()
             raise
+        except TimeoutError:
+            await conn.disconnect()
+            await conn.connect()
 
     async def parse_response(self, block: bool = True, timeout: float = 0):
         """Parse the response from a publish/subscribe command"""
