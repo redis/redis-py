@@ -764,7 +764,12 @@ class PubSub:
         if retry_on_timeout is not set or the error
         is not a TimeoutError. Otherwise, try to reconnect
         """
-        await conn.disconnect()
+        try:
+            await asyncio.shield(conn.disconnect())
+        except asyncio.CancelledError:
+            await conn.disconnect()
+            raise
+
         if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
             raise error
         await conn.connect()
@@ -777,19 +782,10 @@ class PubSub:
         called by the # connection to resubscribe us to any channels and
         patterns we were previously listening to
         """
-        try:
-            return await asyncio.shield(
-                conn.retry.call_with_retry(
+        return await conn.retry.call_with_retry(
                     lambda: command(*args, **kwargs),
                     lambda error: self._disconnect_raise_connect(conn, error),
-                )
-            )
-        except asyncio.CancelledError:
-            await conn.disconnect()
-            raise
-        except TimeoutError:
-            await conn.disconnect()
-            await conn.connect()
+        )
 
     async def parse_response(self, block: bool = True, timeout: float = 0):
         """Parse the response from a publish/subscribe command"""
