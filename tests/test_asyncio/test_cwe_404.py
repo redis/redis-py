@@ -10,7 +10,10 @@ from redis.asyncio.cluster import RedisCluster
 async def pipe(
     reader: asyncio.StreamReader, writer: asyncio.StreamWriter, delay: float, name=""
 ):
-    while data := await reader.read(1000):
+    while True:
+        data = await reader.read(1000)
+        if not data:
+            break
         await asyncio.sleep(delay)
         writer.write(data)
         await writer.drain()
