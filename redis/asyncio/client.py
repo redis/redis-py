@@ -702,6 +702,11 @@ class PubSub:
             self.pending_unsubscribe_patterns = set()
 
     def close(self) -> Awaitable[NoReturn]:
+        # In case a connection property does not yet exist
+        # (due to a crash earlier in the Redis() constructor), return
+        # immediately as there is nothing to clean-up.
+        if not hasattr(self, "connection"):
+            return
         return self.reset()
 
     async def on_connect(self, connection: Connection):
