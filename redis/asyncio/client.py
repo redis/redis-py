@@ -783,8 +783,8 @@ class PubSub:
         patterns we were previously listening to
         """
         return await conn.retry.call_with_retry(
-                    lambda: command(*args, **kwargs),
-                    lambda error: self._disconnect_raise_connect(conn, error),
+            lambda: command(*args, **kwargs),
+            lambda error: self._disconnect_raise_connect(conn, error),
         )
 
     async def parse_response(self, block: bool = True, timeout: float = 0):
