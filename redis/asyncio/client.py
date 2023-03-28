@@ -1397,7 +1397,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
 
     async def _try_execute(self, conn, execute, stack, raise_on_error):
         try:
-            conn.retry.call_with_retry(
+            return await conn.retry.call_with_retry(
                 lambda: execute(conn, stack, raise_on_error),
                 lambda error: self._disconnect_raise_reset(conn, error),
             )
