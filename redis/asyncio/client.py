@@ -1428,9 +1428,12 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             self.connection = conn
         conn = cast(Connection, conn)
 
-        return await asyncio.shield(
-            self._try_execute(conn, execute, stack, raise_on_error)
-        )
+        try:
+            return await asyncio.shield(
+                self._try_execute(conn, execute, stack, raise_on_error)
+            )
+        except RuntimeError:
+            self.reset()
 
     async def discard(self):
         """Flushes all previously queued commands

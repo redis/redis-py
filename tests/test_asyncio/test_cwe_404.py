@@ -45,11 +45,14 @@ class DelayProxy:
         await loop.shutdown_asyncgens()
 
 
-async def test_standalone():
+@pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
+async def test_standalone(delay):
 
     # create a tcp socket proxy that relays data to Redis and back,
     # inserting 0.1 seconds of delay
-    dp = DelayProxy(addr=("localhost", 5380), redis_addr=("localhost", 6379), delay=0.1)
+    dp = DelayProxy(
+        addr=("localhost", 5380), redis_addr=("localhost", 6379), delay=delay * 2
+    )
     await dp.start()
 
     for b in [True, False]:
@@ -60,7 +63,7 @@ async def test_standalone():
             await r.set("bar", "bar")
 
             t = asyncio.create_task(r.get("foo"))
-            await asyncio.sleep(0.050)
+            await asyncio.sleep(delay)
             t.cancel()
             try:
                 await t
@@ -77,8 +80,11 @@ async def test_standalone():
     await dp.stop()
 
 
-async def test_standalone_pipeline():
-    dp = DelayProxy(addr=("localhost", 5380), redis_addr=("localhost", 6379), delay=0.1)
+@pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
+async def test_standalone_pipeline(delay):
+    dp = DelayProxy(
+        addr=("localhost", 5380), redis_addr=("localhost", 6379), delay=delay * 2
+    )
     await dp.start()
     async with Redis(host="localhost", port=5380) as r:
         await r.set("foo", "foo")
@@ -92,13 +98,21 @@ async def test_standalone_pipeline():
         pipe2.get("foo")
 
         t = asyncio.create_task(pipe.get("foo").execute())
-        await asyncio.sleep(0.050)
+        await asyncio.sleep(delay)
         t.cancel()
 
         pipe.get("bar")
         pipe.ping()
         pipe.get("foo")
-        assert await pipe.execute() == [b"foo", b"bar", True, b"foo"]
+        pipe.reset()
+
+        assert await pipe.execute() is None
+
+        # validating that the pipeline can be used as it could previously
+        pipe.get("bar")
+        pipe.ping()
+        pipe.get("foo")
+        assert await pipe.execute() == [b"bar", True, b"foo"]
         assert await pipe2.execute() == [b"bar", True, b"foo"]
 
     await dp.stop()
