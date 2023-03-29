@@ -45,6 +45,7 @@ class DelayProxy:
         await loop.shutdown_asyncgens()
 
 
+@pytest.mark.onlynoncluster
 @pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
 async def test_standalone(delay):
 
@@ -80,6 +81,7 @@ async def test_standalone(delay):
     await dp.stop()
 
 
+@pytest.mark.onlynoncluster
 @pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
 async def test_standalone_pipeline(delay):
     dp = DelayProxy(
@@ -118,6 +120,7 @@ async def test_standalone_pipeline(delay):
     await dp.stop()
 
 
+@pytest.mark.onlycluster
 async def test_cluster(request):
 
     dp = DelayProxy(addr=("localhost", 5381), redis_addr=("localhost", 6372), delay=0.1)
