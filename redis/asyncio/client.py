@@ -505,8 +505,6 @@ class Redis(
             await conn.disconnect(nowait=True)
             raise
         finally:
-            if self.single_connection_client:
-                self._single_conn_lock.release()
             if not self.connection:
                 await self.connection_pool.release(conn)
 

@@ -42,50 +42,6 @@ async def test_invalid_response(create_redis):
     await r.connection.disconnect()
 
 
-@pytest.mark.onlynoncluster
-async def test_single_connection():
-    """Test that concurrent requests on a single client are synchronised."""
-    r = Redis(single_connection_client=True)
-
-    init_call_count = 0
-    command_call_count = 0
-    in_use = False
-
-    class Retry_:
-        async def call_with_retry(self, _, __):
-            # If we remove the single-client lock, this error gets raised as two
-            # coroutines will be vying for the `in_use` flag due to the two
-            # asymmetric sleep calls
-            nonlocal command_call_count
-            nonlocal in_use
-            if in_use is True:
-                raise ValueError("Commands should be executed one at a time.")
-            in_use = True
-            await asyncio.sleep(0.01)
-            command_call_count += 1
-            await asyncio.sleep(0.03)
-            in_use = False
-            return "foo"
-
-    mock_conn = mock.MagicMock()
-    mock_conn.retry = Retry_()
-
-    async def get_conn(_):
-        # Validate only one client is created in single-client mode when
-        # concurrent requests are made
-        nonlocal init_call_count
-        await asyncio.sleep(0.01)
-        init_call_count += 1
-        return mock_conn
-
-    with mock.patch.object(r.connection_pool, "get_connection", get_conn):
-        with mock.patch.object(r.connection_pool, "release"):
-            await asyncio.gather(r.set("a", "b"), r.set("c", "d"))
-
-    assert init_call_count == 1
-    assert command_call_count == 2
-
-
 @skip_if_server_version_lt("4.0.0")
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
