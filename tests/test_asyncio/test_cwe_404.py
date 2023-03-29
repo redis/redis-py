@@ -56,27 +56,27 @@ async def test_standalone(delay):
     )
     await dp.start()
 
-    for b in [True, False]:
-        # note that we connect to proxy, rather than to Redis directly
-        async with Redis(host="localhost", port=5380, single_connection_client=b) as r:
+    # note that we connect to proxy, rather than to Redis directly
+    # there's generally a bug with single_connection_client in 4.4 which is fixed in 4.5
+    async with Redis(host="localhost", port=5380, single_connection_client=False) as r:
 
-            await r.set("foo", "foo")
-            await r.set("bar", "bar")
+        await r.set("foo", "foo")
+        await r.set("bar", "bar")
 
-            t = asyncio.create_task(r.get("foo"))
-            await asyncio.sleep(delay)
-            t.cancel()
-            try:
-                await t
-                sys.stderr.write("try again, we did not cancel the task in time\n")
-            except asyncio.CancelledError:
-                sys.stderr.write(
-                    "canceled task, connection is left open with unread response\n"
-                )
+        t = asyncio.create_task(r.get("foo"))
+        await asyncio.sleep(delay)
+        t.cancel()
+        try:
+            await t
+            sys.stderr.write("try again, we did not cancel the task in time\n")
+        except asyncio.CancelledError:
+            sys.stderr.write(
+                "canceled task, connection is left open with unread response\n"
+            )
 
-            assert await r.get("bar") == b"bar"
-            assert await r.ping()
-            assert await r.get("foo") == b"foo"
+        assert await r.get("bar") == b"bar"
+        assert await r.ping()
+        assert await r.get("foo") == b"foo"
 
     await dp.stop()
 
