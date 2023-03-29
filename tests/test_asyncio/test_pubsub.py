@@ -967,6 +967,9 @@ class TestBaseException:
         # the timeout on the read should not cause disconnect
         assert pubsub.connection.is_connected
 
+    @pytest.mark.skipif(
+        sys.version_info < (3, 8), reason="requires python 3.8 or higher"
+    )
     async def test_base_exception(self, r: redis.Redis):
         """
         Manually trigger a BaseException inside the parser's .read_response method
