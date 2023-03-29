@@ -88,34 +88,35 @@ async def test_standalone_pipeline(delay):
         addr=("localhost", 5380), redis_addr=("localhost", 6379), delay=delay * 2
     )
     await dp.start()
-    async with Redis(host="localhost", port=5380) as r:
-        await r.set("foo", "foo")
-        await r.set("bar", "bar")
+    for b in [True, False]:
+        async with Redis(host="localhost", port=5380, single_connection_client=b) as r:
+            await r.set("foo", "foo")
+            await r.set("bar", "bar")
 
-        pipe = r.pipeline()
+            pipe = r.pipeline()
 
-        pipe2 = r.pipeline()
-        pipe2.get("bar")
-        pipe2.ping()
-        pipe2.get("foo")
+            pipe2 = r.pipeline()
+            pipe2.get("bar")
+            pipe2.ping()
+            pipe2.get("foo")
 
-        t = asyncio.create_task(pipe.get("foo").execute())
-        await asyncio.sleep(delay)
-        t.cancel()
+            t = asyncio.create_task(pipe.get("foo").execute())
+            await asyncio.sleep(delay)
+            t.cancel()
 
-        pipe.get("bar")
-        pipe.ping()
-        pipe.get("foo")
-        pipe.reset()
+            pipe.get("bar")
+            pipe.ping()
+            pipe.get("foo")
+            pipe.reset()
 
-        assert await pipe.execute() is None
+            assert await pipe.execute() is None
 
-        # validating that the pipeline can be used as it could previously
-        pipe.get("bar")
-        pipe.ping()
-        pipe.get("foo")
-        assert await pipe.execute() == [b"bar", True, b"foo"]
-        assert await pipe2.execute() == [b"bar", True, b"foo"]
+            # validating that the pipeline can be used as it could previously
+            pipe.get("bar")
+            pipe.ping()
+            pipe.get("foo")
+            assert await pipe.execute() == [b"bar", True, b"foo"]
+            assert await pipe2.execute() == [b"bar", True, b"foo"]
 
     await dp.stop()
 
