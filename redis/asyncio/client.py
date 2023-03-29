@@ -1434,6 +1434,8 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             )
         except RuntimeError:
             self.reset()
+        finally:
+            self.reset()
 
     async def discard(self):
         """Flushes all previously queued commands
