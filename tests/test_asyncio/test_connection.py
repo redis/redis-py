@@ -6,7 +6,6 @@ from unittest.mock import patch
 import pytest
 
 import redis
-from redis.asyncio import Redis
 from redis.asyncio.connection import (
     BaseParser,
     Connection,
