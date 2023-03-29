@@ -44,7 +44,7 @@ class DelayProxy:
         loop = self.server.get_loop()
         await loop.shutdown_asyncgens()
 
-
+@pytest.mark.asyncio
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
 async def test_standalone(delay):
@@ -81,6 +81,7 @@ async def test_standalone(delay):
     await dp.stop()
 
 
+@pytest.mark.asyncio
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
 async def test_standalone_pipeline(delay):
@@ -120,6 +121,7 @@ async def test_standalone_pipeline(delay):
     await dp.stop()
 
 
+@pytest.mark.asyncio
 @pytest.mark.onlycluster
 async def test_cluster(request):
 
