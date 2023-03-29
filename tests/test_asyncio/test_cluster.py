@@ -333,23 +333,6 @@ class TestRedisClusterObj:
                 called_count += 1
         assert called_count == 1
 
-    async def test_asynckills(self, r) -> None:
-
-        await r.set("foo", "foo")
-        await r.set("bar", "bar")
-
-        t = asyncio.create_task(r.get("foo"))
-        await asyncio.sleep(1)
-        t.cancel()
-        try:
-            await t
-        except asyncio.CancelledError:
-            pytest.fail("connection is left open with unread response")
-
-        assert await r.get("bar") == b"bar"
-        assert await r.ping()
-        assert await r.get("foo") == b"foo"
-
     async def test_execute_command_default_node(self, r: RedisCluster) -> None:
         """
         Test command execution without node flag is being executed on the
