@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 import redis
+from redis.asyncio import Redis
 from redis.asyncio.connection import (
     BaseParser,
     Connection,
@@ -42,25 +43,47 @@ async def test_invalid_response(create_redis):
 
 
 @pytest.mark.onlynoncluster
-async def test_asynckills(create_redis):
+async def test_single_connection():
+    """Test that concurrent requests on a single client are synchronised."""
+    r = Redis(single_connection_client=True)
 
-    for b in [True, False]:
-        r = await create_redis(single_connection_client=b)
+    init_call_count = 0
+    command_call_count = 0
+    in_use = False
 
-        await r.set("foo", "foo")
-        await r.set("bar", "bar")
+    class Retry_:
+        async def call_with_retry(self, _, __):
+            # If we remove the single-client lock, this error gets raised as two
+            # coroutines will be vying for the `in_use` flag due to the two
+            # asymmetric sleep calls
+            nonlocal command_call_count
+            nonlocal in_use
+            if in_use is True:
+                raise ValueError("Commands should be executed one at a time.")
+            in_use = True
+            await asyncio.sleep(0.01)
+            command_call_count += 1
+            await asyncio.sleep(0.03)
+            in_use = False
+            return "foo"
 
-        t = asyncio.create_task(r.get("foo"))
-        await asyncio.sleep(1)
-        t.cancel()
-        try:
-            await t
-        except asyncio.CancelledError:
-            pytest.fail("connection left open with unread response")
+    mock_conn = mock.MagicMock()
+    mock_conn.retry = Retry_()
 
-        assert await r.get("bar") == b"bar"
-        assert await r.ping()
-        assert await r.get("foo") == b"foo"
+    async def get_conn(_):
+        # Validate only one client is created in single-client mode when
+        # concurrent requests are made
+        nonlocal init_call_count
+        await asyncio.sleep(0.01)
+        init_call_count += 1
+        return mock_conn
+
+    with mock.patch.object(r.connection_pool, "get_connection", get_conn):
+        with mock.patch.object(r.connection_pool, "release"):
+            await asyncio.gather(r.set("a", "b"), r.set("c", "d"))
+
+    assert init_call_count == 1
+    assert command_call_count == 2
 
 
 @skip_if_server_version_lt("4.0.0")
