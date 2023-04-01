@@ -1043,7 +1043,7 @@ class PubSub:
                 await self.get_message(
                     ignore_subscribe_messages=True, timeout=poll_timeout
                 )
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, GeneratorExit):
                 raise
             except BaseException as e:
                 if exception_handler is None:
