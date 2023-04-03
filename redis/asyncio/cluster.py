@@ -1002,11 +1002,32 @@ class ClusterNode:
         await connection.send_packed_command(connection.pack_command(*args), False)
 
         # Read response
+        return await asyncio.shield(
+            self._parse_and_release(connection, args[0], **kwargs)
+        )
+
+    async def _parse_and_release(self, connection, *args, **kwargs):
         try:
-            return await self.parse_response(connection, args[0], **kwargs)
+            return await self.parse_response(connection, *args, **kwargs)
+        except asyncio.CancelledError:
+            # should not be possible
+            await connection.disconnect(nowait=True)
+            raise
         finally:
-            # Release connection
             self._free.append(connection)
+
+    async def _try_parse_response(self, cmd, connection, ret):
+        try:
+            cmd.result = await asyncio.shield(
+                self.parse_response(connection, cmd.args[0], **cmd.kwargs)
+            )
+        except asyncio.CancelledError:
+            await connection.disconnect(nowait=True)
+            raise
+        except Exception as e:
+            cmd.result = e
+            ret = True
+        return ret
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
@@ -1020,13 +1041,7 @@ class ClusterNode:
         # Read responses
         ret = False
         for cmd in commands:
-            try:
-                cmd.result = await self.parse_response(
-                    connection, cmd.args[0], **cmd.kwargs
-                )
-            except Exception as e:
-                cmd.result = e
-                ret = True
+            ret = await asyncio.shield(self._try_parse_response(cmd, connection, ret))
 
         # Release connection
         self._free.append(connection)
