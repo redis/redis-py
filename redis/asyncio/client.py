@@ -512,8 +512,6 @@ class Redis(
             await conn.disconnect(nowait=True)
             raise
         finally:
-            if self.single_connection_client:
-                self._single_conn_lock.release()
             if not self.connection:
                 await self.connection_pool.release(conn)
 
@@ -525,12 +523,20 @@ class Redis(
         command_name = args[0]
         conn = self.connection or await pool.get_connection(command_name, **options)
 
+        # locking / unlocking must be handled in same task, otherwise we will deadlock
+        # if parent task is cancelled.
+        # Parent task is preferable because it always gets cancelled, child task won´t
+        # get cancelled if parent is cancelled and the lock may be held indefinitely.
         if self.single_connection_client:
             await self._single_conn_lock.acquire()
 
-        return await asyncio.shield(
-            self._try_send_command_parse_response(conn, *args, **options)
-        )
+        try:
+            return await asyncio.shield(
+                self._try_send_command_parse_response(conn, *args, **options)
+            )
+        finally:
+            if self.single_connection_client:
+                self._single_conn_lock.release()
 
     async def parse_response(
         self, connection: Connection, command_name: Union[str, bytes], **options
