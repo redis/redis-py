@@ -1185,13 +1185,9 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                 command_name, self.shard_hint
             )
             self.connection = conn
-        try:
-            return await asyncio.shield(
-                self._try_send_command_parse_response(conn, *args, **options)
-            )
-        except asyncio.CancelledError:
-            await conn.disconnect()
-            raise
+        return await asyncio.shield(
+            self._try_send_command_parse_response(conn, *args, **options)
+        )
 
     def pipeline_execute_command(self, *args, **options):
         """

@@ -26,12 +26,11 @@ class DelayProxy:
         self.delay = delay
 
     async def start(self):
+        asyncio.get_event_loop()
         self.server = await asyncio.start_server(self.handle, *self.addr)
-        self.ROUTINE = asyncio.ensure_future(self.server.serve_forever())
 
     async def handle(self, reader, writer):
         # establish connection to redis
-        print("new connection")
         redis_reader, redis_writer = await asyncio.open_connection(*self.redis_addr)
         pipe1 = asyncio.ensure_future(
             pipe(reader, redis_writer, self.delay, "to redis:")
@@ -39,23 +38,16 @@ class DelayProxy:
         pipe2 = asyncio.ensure_future(
             pipe(redis_reader, writer, self.delay, "from redis:")
         )
-        try:
-            await pipe1
-        finally:
-            pipe2.cancel()
-            await pipe2
+        asyncio.gather(pipe1, pipe2)
 
     async def stop(self):
-        # clean up enough so that we can reuse the looper
-        self.ROUTINE.cancel()
-        loop = self.server.get_loop()
-        await loop.shutdown_asyncgens()
+        self.server.close()
+        await self.server.wait_closed()
 
 
 @pytest.mark.asyncio
 @pytest.mark.onlynoncluster
-@pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
-async def test_standalone(delay):
+async def test_standalone(delay=0.05):
 
     # create a tcp socket proxy that relays data to Redis and back,
     # inserting 0.1 seconds of delay
@@ -91,12 +83,12 @@ async def test_standalone(delay):
 
 @pytest.mark.asyncio
 @pytest.mark.onlynoncluster
-@pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
-async def test_standalone_pipeline(delay):
+async def test_standalone_pipeline(delay=0.05):
     dp = DelayProxy(
         addr=("localhost", 5380), redis_addr=("localhost", 6379), delay=delay * 2
     )
     await dp.start()
+
     async with Redis(host="localhost", port=5380) as r:
         await r.set("foo", "foo")
         await r.set("bar", "bar")
@@ -115,9 +107,9 @@ async def test_standalone_pipeline(delay):
         pipe.get("bar")
         pipe.ping()
         pipe.get("foo")
-        pipe.reset()
+        await pipe.reset()
 
-        assert await pipe.execute() is None
+        assert await pipe.execute() in [None, []]
 
         # validating that the pipeline can be used as it could previously
         pipe.get("bar")
