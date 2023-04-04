@@ -29,20 +29,33 @@ class DelayProxy:
         self.server = await asyncio.start_server(self.handle, *self.addr)
         self.ROUTINE = asyncio.create_task(self.server.serve_forever())
 
+    # async def handle(self, reader, writer):
+    #     # establish connection to redis
+    #     redis_reader, redis_writer = await asyncio.open_connection(*self.redis_addr)
+    #     pipe1 = asyncio.create_task(pipe(reader, redis_writer, self.delay, "to redis:"))
+    #     pipe2 = asyncio.create_task(
+    #         pipe(redis_reader, writer, self.delay, "from redis:")
+    #     )
+    #     await asyncio.gather(pipe1, pipe2)
+
     async def handle(self, reader, writer):
         # establish connection to redis
+        print('new connection')
         redis_reader, redis_writer = await asyncio.open_connection(*self.redis_addr)
-        pipe1 = asyncio.create_task(pipe(reader, redis_writer, self.delay, "to redis:"))
-        pipe2 = asyncio.create_task(
-            pipe(redis_reader, writer, self.delay, "from redis:")
-        )
-        await asyncio.gather(pipe1, pipe2)
-
+        pipe1 = asyncio.ensure_future(pipe(reader, redis_writer, self.delay, 'to redis:'))
+        pipe2 = asyncio.ensure_future(pipe(redis_reader, writer, self.delay, 'from redis:'))
+        try:
+            await pipe1
+        finally:
+            pipe2.cancel()
+            await pipe2
+            
     async def stop(self):
         # clean up enough so that we can reuse the looper
         self.ROUTINE.cancel()
         loop = self.server.get_loop()
         await loop.shutdown_asyncgens()
+        
 
 @pytest.mark.asyncio
 @pytest.mark.onlynoncluster
