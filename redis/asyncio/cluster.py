@@ -5,12 +5,14 @@ import socket
 import warnings
 from typing import (
     Any,
+    Callable,
     Deque,
     Dict,
     Generator,
     List,
     Mapping,
     Optional,
+    Tuple,
     Type,
     TypeVar,
     Union,
@@ -250,6 +252,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_certfile: Optional[str] = None,
         ssl_check_hostname: bool = False,
         ssl_keyfile: Optional[str] = None,
+        host_port_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -337,7 +340,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         if host and port:
             startup_nodes.append(ClusterNode(host, port, **self.connection_kwargs))
 
-        self.nodes_manager = NodesManager(startup_nodes, require_full_coverage, kwargs)
+        self.nodes_manager = NodesManager(
+            startup_nodes,
+            require_full_coverage,
+            kwargs,
+            host_port_remap=host_port_remap,
+        )
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self.read_from_replicas = read_from_replicas
         self.reinitialize_steps = reinitialize_steps
@@ -1059,6 +1067,7 @@ class NodesManager:
         "require_full_coverage",
         "slots_cache",
         "startup_nodes",
+        "host_port_remap",
     )
 
     def __init__(
@@ -1066,10 +1075,12 @@ class NodesManager:
         startup_nodes: List["ClusterNode"],
         require_full_coverage: bool,
         connection_kwargs: Dict[str, Any],
+        host_port_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
     ) -> None:
         self.startup_nodes = {node.name: node for node in startup_nodes}
         self.require_full_coverage = require_full_coverage
         self.connection_kwargs = connection_kwargs
+        self.host_port_remap = host_port_remap
 
         self.default_node: "ClusterNode" = None
         self.nodes_cache: Dict[str, "ClusterNode"] = {}
@@ -1228,6 +1239,7 @@ class NodesManager:
                 if host == "":
                     host = startup_node.host
                 port = int(primary_node[1])
+                host, port = self.remap_host_port(host, port)
 
                 target_node = tmp_nodes_cache.get(get_node_name(host, port))
                 if not target_node:
@@ -1246,6 +1258,7 @@ class NodesManager:
                         for replica_node in replica_nodes:
                             host = replica_node[0]
                             port = replica_node[1]
+                            host, port = self.remap_host_port(host, port)
 
                             target_replica_node = tmp_nodes_cache.get(
                                 get_node_name(host, port)
@@ -1318,6 +1331,16 @@ class NodesManager:
                 for node in getattr(self, attr).values()
             )
         )
+
+    def remap_host_port(self, host: str, port: int) -> Tuple[str, int]:
+        """
+        Remap the host and port returned from the cluster to a different
+        internal value.  Useful if the client is not connecting directly
+        to the cluster.
+        """
+        if self.host_port_remap:
+            return self.host_port_remap(host, port)
+        return host, port
 
 
 class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommands):
