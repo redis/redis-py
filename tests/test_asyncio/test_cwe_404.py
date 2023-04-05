@@ -41,25 +41,32 @@ class DelayProxy:
         Allow to override the delay for parts of tests which aren't time dependent,
         to speed up execution.
         """
-        old = self.delay
+        old_delay = self.delay
         self.delay = delay
         try:
             yield
         finally:
-            self.delay = old
+            self.delay = old_delay
 
     async def handle(self, reader, writer):
         # establish connection to redis
         redis_reader, redis_writer = await asyncio.open_connection(*self.redis_addr)
-        pipe1 = asyncio.create_task(
-            self.pipe(reader, redis_writer, "to redis:", self.send_event)
-        )
-        pipe2 = asyncio.create_task(self.pipe(redis_reader, writer, "from redis:"))
-        await asyncio.gather(pipe1, pipe2)
+        try:
+            pipe1 = asyncio.create_task(
+                self.pipe(reader, redis_writer, "to redis:", self.send_event)
+            )
+            pipe2 = asyncio.create_task(self.pipe(redis_reader, writer, "from redis:"))
+            await asyncio.gather(pipe1, pipe2)
+        finally:
+            redis_writer.close()
 
     async def stop(self):
         # clean up enough so that we can reuse the looper
         self.ROUTINE.cancel()
+        try:
+            await self.ROUTINE
+        except asyncio.CancelledError:
+            pass
         loop = self.server.get_loop()
         await loop.shutdown_asyncgens()
 
@@ -183,25 +190,25 @@ async def test_cluster(request, redis_addr):
     dp = DelayProxy(addr=("127.0.0.1", 5381), redis_addr=redis_addr)
     await dp.start()
 
-    r = RedisCluster.from_url("redis://127.0.0.1:5381")
-    await r.initialize()
-    await r.set("foo", "foo")
-    await r.set("bar", "bar")
+    with contextlib.closing(RedisCluster.from_url("redis://127.0.0.1:5381")) as r:
+        await r.initialize()
+        await r.set("foo", "foo")
+        await r.set("bar", "bar")
 
-    async def op(r):
-        with dp.set_delay(delay):
-            return await r.get("foo")
+        async def op(r):
+            with dp.set_delay(delay):
+                return await r.get("foo")
 
-    dp.send_event.clear()
-    t = asyncio.create_task(op(r))
-    await dp.send_event.wait()
-    await asyncio.sleep(0.01)
-    t.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await t
+        dp.send_event.clear()
+        t = asyncio.create_task(op(r))
+        await dp.send_event.wait()
+        await asyncio.sleep(0.01)
+        t.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await t
 
-    assert await r.get("bar") == b"bar"
-    assert await r.ping()
-    assert await r.get("foo") == b"foo"
+        assert await r.get("bar") == b"bar"
+        assert await r.ping()
+        assert await r.get("foo") == b"foo"
 
     await dp.stop()
