@@ -4643,7 +4643,12 @@ class SortedSetCommands(CommandsProtocol):
         options = {"withscores": withscores, "score_cast_func": score_cast_func}
         return self.execute_command(*pieces, **options)
 
-    def zrank(self, name: KeyT, value: EncodableT, withscore: bool = False) -> ResponseT:
+    def zrank(
+            self, 
+            name: KeyT, 
+            value: EncodableT, 
+            withscore: bool = False
+    ) -> ResponseT:
         """
         Returns a 0-based value indicating the rank of ``value`` in sorted set
         ``name``. If `withscore` is True, the score of the element is also returned.
