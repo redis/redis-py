@@ -1630,6 +1630,11 @@ class TestRedisCommands:
         assert await r.zrank("a", "a2") == 1
         assert await r.zrank("a", "a6") is None
 
+        await r.zadd("b", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
+        assert await r.zrank("b", "a1", True) == [0, 1.0]
+        assert await r.zrank("b", "a2", True) == [1, 2.0]
+        assert await r.zrank("b", "a6", True) is None
+
     async def test_zrem(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         assert await r.zrem("a", "a2") == 1
