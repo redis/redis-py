@@ -978,6 +978,15 @@ class TestClusterRedisCommands:
         client_name = await r.client_getname(target_nodes=node)
         assert client_name == "redis_py_test"
 
+    @skip_if_server_version_lt("7.2.0")
+    async def test_client_setinfo(self, r: RedisCluster) -> None:
+        node = r.get_random_node()
+        await r.client_setinfo("lib-name", "redis-py", target_nodes=node)
+        await r.client_setinfo("lib-ver", "4.33", target_nodes=node)
+        info = await r.client_info(target_nodes=node)
+        assert "lib-name" in info
+        assert "lib-ver" in info
+
     async def test_exists(self, r: RedisCluster) -> None:
         d = {"a": b"1", "b": b"2", "c": b"3", "d": b"4"}
         await r.mset_nonatomic(d)

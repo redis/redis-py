@@ -38,6 +38,7 @@ from redis.utils import (
     CRYPTOGRAPHY_AVAILABLE,
     HIREDIS_AVAILABLE,
     HIREDIS_PACK_AVAILABLE,
+    get_lib_version,
     str_if_bytes,
 )
 
@@ -769,6 +770,14 @@ class AbstractConnection:
             self.send_command("CLIENT", "SETNAME", self.client_name)
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Error setting client name")
+
+        try:
+            self.send_command("CLIENT", "SETINFO", "LIB-NAME", "redis-py")
+            self.read_response()
+            self.send_command("CLIENT", "SETINFO", "LIB-VERSION", get_lib_version())
+            self.read_response()
+        except ResponseError:
+            pass
 
         # if a database is specified, switch to it
         if self.db:

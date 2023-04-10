@@ -748,6 +748,7 @@ class AbstractRedis:
         "CLIENT LIST": parse_client_list,
         "CLIENT INFO": parse_client_info,
         "CLIENT SETNAME": bool_ok,
+        "CLIENT SETINFO": bool_ok,
         "CLIENT UNBLOCK": lambda r: r and int(r) == 1 or False,
         "CLIENT PAUSE": bool_ok,
         "CLIENT GETREDIR": int,

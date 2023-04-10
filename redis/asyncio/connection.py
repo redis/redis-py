@@ -55,7 +55,7 @@ from redis.exceptions import (
     TimeoutError,
 )
 from redis.typing import EncodableT, EncodedT
-from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
+from redis.utils import HIREDIS_AVAILABLE, get_lib_version, str_if_bytes
 
 hiredis = None
 if HIREDIS_AVAILABLE:
@@ -718,6 +718,14 @@ class Connection:
             await self.send_command("CLIENT", "SETNAME", self.client_name)
             if str_if_bytes(await self.read_response()) != "OK":
                 raise ConnectionError("Error setting client name")
+
+        try:
+            await self.send_command("CLIENT", "SETINFO", "LIB-NAME", "redis-py")
+            await self.read_response()
+            await self.send_command("CLIENT", "SETINFO", "LIB-VERSION", get_lib_version())
+            await self.read_response()
+        except ResponseError:
+            pass
 
         # if a database is specified, switch to it
         if self.db:

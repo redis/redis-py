@@ -706,6 +706,14 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT SETNAME", name, **kwargs)
 
+    def client_setinfo(self, attr: str, value: str, **kwargs) -> ResponseT:
+        """
+        Sets the current connection libname or version
+
+        For mor information see https://redis.io/commands/client-setinfo
+        """
+        return self.execute_command("CLIENT SETINFO", attr, value, **kwargs)
+
     def client_unblock(
         self, client_id: int, error: bool = False, **kwargs
     ) -> ResponseT:

@@ -212,6 +212,7 @@ class AbstractRedisCluster:
                 "AUTH",
                 "CLIENT LIST",
                 "CLIENT SETNAME",
+                "CLIENT SETINFO",
                 "CLIENT GETNAME",
                 "CONFIG SET",
                 "CONFIG REWRITE",

@@ -340,6 +340,15 @@ class TestRedisCommands:
         assert await r.client_setname("redis_py_test")
         assert await r.client_getname() == "redis_py_test"
 
+    @skip_if_server_version_lt("7.2.0")
+    @pytest.mark.onlynoncluster
+    async def test_client_setinfo(self, r: redis.Redis):
+        assert await r.client_setinfo("lib-name", "redis-py")
+        assert await r.client_setinfo("lib-ver", "4.33")
+        info = await r.client_info()
+        assert "lib-name" in info
+        assert "lib-ver" in info
+
     @skip_if_server_version_lt("2.6.9")
     @pytest.mark.onlynoncluster
     async def test_client_kill(self, r: redis.Redis, r2):
@@ -437,6 +446,14 @@ class TestRedisCommands:
         clients = await r.client_list()
         # we don't know which client ours will be
         assert "redis_py_test" in [c["name"] for c in clients]
+
+    @skip_if_server_version_lt("7.2.0")
+    async def test_client_list_after_client_setinfo(self, r: redis.Redis):
+        await r.client_setinfo("lib-name", "redis-py")
+        await r.client_setinfo("lib-ver", "4.33")
+        clients = await r.client_list()
+        assert "redis-py" in [c["lib-name"] for c in clients]
+        assert "4.33" in [c["lib-ver"] for c in clients]
 
     @skip_if_server_version_lt("2.9.50")
     @pytest.mark.onlynoncluster

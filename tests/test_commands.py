@@ -377,7 +377,7 @@ class TestRedisCommands:
             user_client.hset("cache:0", "hkey", "hval")
 
         assert isinstance(r.acl_log(), list)
-        assert len(r.acl_log()) == 2
+        assert len(r.acl_log()) == 3
         assert len(r.acl_log(count=1)) == 1
         assert isinstance(r.acl_log()[0], dict)
         assert "client-info" in r.acl_log(count=1)[0]
@@ -531,6 +531,15 @@ class TestRedisCommands:
         assert r.client_getname() == "redis_py_test"
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.2.0")
+    def test_client_setinfo(self, r):
+        assert r.client_setinfo("lib-name", "redis-py")
+        assert r.client_setinfo("lib-ver", "4.33")
+        info = r.client_info()
+        assert "lib-name" in info
+        assert "lib-ver" in info
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.9")
     def test_client_kill(self, r, r2):
         r.client_setname("redis-py-c1")
@@ -627,6 +636,14 @@ class TestRedisCommands:
         clients = r.client_list()
         # we don't know which client ours will be
         assert "redis_py_test" in [c["name"] for c in clients]
+
+    @skip_if_server_version_lt("7.2.0")
+    def test_client_list_after_client_setinfo(self, r):
+        r.client_setinfo("lib-name", "redis-py")
+        r.client_setinfo("lib-ver", "4.33")
+        clients = r.client_list()
+        assert "redis-py" in [c["lib-name"] for c in clients]
+        assert "4.33" in [c["lib-ver"] for c in clients]
 
     @skip_if_server_version_lt("6.2.0")
     def test_client_kill_filter_by_laddr(self, r, r2):
