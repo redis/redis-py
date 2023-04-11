@@ -633,6 +633,14 @@ class ClusterManagementCommands(ManagementCommands):
         For more information see https://redis.io/commands/cluster-shards
         """
         return self.execute_command("CLUSTER SHARDS", target_nodes=target_nodes)
+    
+    def cluster_myshardid(self, target_nodes=None):
+        """
+        Returns details about the shards of the cluster.
+
+        For more information see https://redis.io/commands/cluster-shards
+        """
+        return self.execute_command("CLUSTER MYSHARDID", target_nodes=target_nodes)
 
     def cluster_links(self, target_node: "TargetNodesT") -> ResponseT:
         """
