@@ -1,3 +1,4 @@
+# EXAMPLE: bike_index
 import redis
 import json
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType
@@ -39,8 +40,3 @@ schema_info = IndexDefinition(
 
 # create the index
 r.ft("idx:bikes").create_index(bike_schema,definition=schema_info)
-
-r.ft("idx:bikes").search(Query("@type:{eBikes}"))
-r.ft("idx:bikes").search(Query("@type:{eBikes} @price:[200 1200]").return_fields("model", "type", "price"))
-r.ft("idx:bikes").search(Query("mudguards @type:{Mountain bikes} @price:[1000 3000]").return_fields("model", "type", "price", "description"))
-
