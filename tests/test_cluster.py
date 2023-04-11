@@ -107,7 +107,7 @@ def get_mocked_redis_client(func=None, *args, **kwargs):
         execute_command_mock.side_effect = execute_command
 
         with patch.object(
-            CommandsParser, "initialize", autospec=True
+                CommandsParser, "initialize", autospec=True
         ) as cmd_parser_initialize:
 
             def cmd_init_mock(self, r):
@@ -233,8 +233,8 @@ class TestRedisClusterObj:
         ]
         cluster = get_mocked_redis_client(startup_nodes=startup_nodes)
         assert (
-            cluster.get_node(host=default_host, port=port_1) is not None
-            and cluster.get_node(host=default_host, port=port_2) is not None
+                cluster.get_node(host=default_host, port=port_1) is not None
+                and cluster.get_node(host=default_host, port=port_2) is not None
         )
 
     def test_empty_startup_nodes(self):
@@ -251,7 +251,6 @@ class TestRedisClusterObj:
     def test_from_url(self, r):
         redis_url = f"redis://{default_host}:{default_port}/0"
         with patch.object(RedisCluster, "from_url") as from_url:
-
             def from_url_mocked(_url, **_kwargs):
                 return get_mocked_redis_client(url=_url, **_kwargs)
 
@@ -346,7 +345,6 @@ class TestRedisClusterObj:
         """
         redirect_node = r.get_nodes()[0]
         with patch.object(Redis, "parse_response") as parse_response:
-
             def ask_redirect_effect(connection, *args, **options):
                 def ok_response(connection, *args, **options):
                     assert connection.host == redirect_node.host
@@ -437,7 +435,7 @@ class TestRedisClusterObj:
         with patch.object(Redis, "parse_response") as parse_response:
             with patch.object(NodesManager, "initialize", autospec=True) as initialize:
                 with patch.multiple(
-                    Connection, send_command=DEFAULT, connect=DEFAULT, can_read=DEFAULT
+                        Connection, send_command=DEFAULT, connect=DEFAULT, can_read=DEFAULT
                 ) as mocks:
                     # simulate 7006 as a failed node
                     def parse_response_mock(connection, command_name, **options):
@@ -481,7 +479,7 @@ class TestRedisClusterObj:
                     mocks["send_command"].return_value = "MOCK_OK"
                     mocks["connect"].return_value = None
                     with patch.object(
-                        CommandsParser, "initialize", autospec=True
+                            CommandsParser, "initialize", autospec=True
                     ) as cmd_parser_initialize:
 
                         def cmd_init_mock(self, r):
@@ -514,15 +512,14 @@ class TestRedisClusterObj:
 
     def test_reading_from_replicas_in_round_robin(self):
         with patch.multiple(
-            Connection,
-            send_command=DEFAULT,
-            read_response=DEFAULT,
-            _connect=DEFAULT,
-            can_read=DEFAULT,
-            on_connect=DEFAULT,
+                Connection,
+                send_command=DEFAULT,
+                read_response=DEFAULT,
+                _connect=DEFAULT,
+                can_read=DEFAULT,
+                on_connect=DEFAULT,
         ) as mocks:
             with patch.object(Redis, "parse_response") as parse_response:
-
                 def parse_response_mock_first(connection, *args, **options):
                     # Primary
                     assert connection.port == 7001
@@ -591,8 +588,8 @@ class TestRedisClusterObj:
 
     def test_get_node_name(self):
         assert (
-            get_node_name(default_host, default_port)
-            == f"{default_host}:{default_port}"
+                get_node_name(default_host, default_port)
+                == f"{default_host}:{default_port}"
         )
 
     def test_all_nodes(self, r):
@@ -626,7 +623,6 @@ class TestRedisClusterObj:
         and then raise the exception
         """
         with patch.object(RedisCluster, "_execute_command") as execute_command:
-
             def raise_error(target_node, *args, **kwargs):
                 execute_command.failed_calls += 1
                 raise error("mocked error")
@@ -794,10 +790,10 @@ class TestRedisClusterObj:
         retry = Retry(ExponentialBackoff(10, 5), 5)
         rc_custom_retry = RedisCluster("127.0.0.1", 16379, retry=retry)
         assert (
-            rc_custom_retry.get_node("127.0.0.1", 16379)
-            .redis_connection.get_retry()
-            ._retries
-            == retry._retries
+                rc_custom_retry.get_node("127.0.0.1", 16379)
+                .redis_connection.get_retry()
+                ._retries
+                == retry._retries
         )
 
     def test_replace_cluster_node(self, r) -> None:
@@ -832,8 +828,8 @@ class TestClusterRedisCommands:
 
     def test_case_insensitive_command_names(self, r):
         assert (
-            r.cluster_response_callbacks["cluster slots"]
-            == r.cluster_response_callbacks["CLUSTER SLOTS"]
+                r.cluster_response_callbacks["cluster slots"]
+                == r.cluster_response_callbacks["CLUSTER SLOTS"]
         )
 
     def test_get_and_set(self, r):
@@ -1167,8 +1163,8 @@ class TestClusterRedisCommands:
         assert len(nodes) == 7
         assert nodes.get("172.17.0.7:7006") is not None
         assert (
-            nodes.get("172.17.0.7:7006").get("node_id")
-            == "c8253bae761cb1ecb2b61857d85dfe455a0fec8b"
+                nodes.get("172.17.0.7:7006").get("node_id")
+                == "c8253bae761cb1ecb2b61857d85dfe455a0fec8b"
         )
 
     @skip_if_redis_enterprise()
@@ -1291,8 +1287,8 @@ class TestClusterRedisCommands:
         assert replicas.get("127.0.0.1:6377") is not None
         assert replicas.get("127.0.0.1:6378") is not None
         assert (
-            replicas.get("127.0.0.1:6378").get("node_id")
-            == "r4xfga22229cf3c652b6fca0d09ff69f3e0d4d"
+                replicas.get("127.0.0.1:6378").get("node_id")
+                == "r4xfga22229cf3c652b6fca0d09ff69f3e0d4d"
         )
 
     @skip_if_server_version_lt("7.0.0")
@@ -1361,8 +1357,8 @@ class TestClusterRedisCommands:
 
     def _teardown_slowlog_test(self, r, node, prev_limit):
         assert (
-            r.config_set("slowlog-log-slower-than", prev_limit, target_nodes=node)
-            is True
+                r.config_set("slowlog-log-slower-than", prev_limit, target_nodes=node)
+                is True
         )
 
     def test_slowlog_get(self, r, slowlog):
@@ -1781,8 +1777,8 @@ class TestClusterRedisCommands:
         r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
         assert (
-            r.zinterstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="MAX")
-            == 2
+                r.zinterstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="MAX")
+                == 2
         )
         assert r.zrange("{foo}d", 0, -1, withscores=True) == [(b"a3", 5), (b"a1", 6)]
 
@@ -1791,8 +1787,8 @@ class TestClusterRedisCommands:
         r.zadd("{foo}b", {"a1": 2, "a2": 3, "a3": 5})
         r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
         assert (
-            r.zinterstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN")
-            == 2
+                r.zinterstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN")
+                == 2
         )
         assert r.zrange("{foo}d", 0, -1, withscores=True) == [(b"a1", 1), (b"a3", 3)]
 
@@ -1895,8 +1891,8 @@ class TestClusterRedisCommands:
         r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
         assert (
-            r.zunionstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="MAX")
-            == 4
+                r.zunionstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="MAX")
+                == 4
         )
         assert r.zrange("{foo}d", 0, -1, withscores=True) == [
             (b"a2", 2),
@@ -1910,8 +1906,8 @@ class TestClusterRedisCommands:
         r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 4})
         r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
         assert (
-            r.zunionstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN")
-            == 4
+                r.zunionstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN")
+                == 4
         )
         assert r.zrange("{foo}d", 0, -1, withscores=True) == [
             (b"a1", 1),
@@ -2042,8 +2038,8 @@ class TestClusterRedisCommands:
         for key in keys:
             r[key] = 1
         assert (
-            set(r.keys(pattern="test_*", target_nodes="primaries"))
-            == keys_with_underscores
+                set(r.keys(pattern="test_*", target_nodes="primaries"))
+                == keys_with_underscores
         )
         assert set(r.keys(pattern="test*", target_nodes="primaries")) == keys
 
@@ -2055,7 +2051,7 @@ class TestClusterRedisCommands:
         r.set("c", 3)
 
         for target_nodes, nodes in zip(
-            ["primaries", "replicas"], [r.get_primaries(), r.get_replicas()]
+                ["primaries", "replicas"], [r.get_primaries(), r.get_replicas()]
         ):
             cursors, keys = r.scan(target_nodes=target_nodes)
             assert sorted(keys) == [b"a", b"b", b"c"]
@@ -2076,7 +2072,7 @@ class TestClusterRedisCommands:
         r.lpush("a-list", "aux", 3)
 
         for target_nodes, nodes in zip(
-            ["primaries", "replicas"], [r.get_primaries(), r.get_replicas()]
+                ["primaries", "replicas"], [r.get_primaries(), r.get_replicas()]
         ):
             cursors, keys = r.scan(_type="SET", target_nodes=target_nodes)
             assert sorted(keys) == [b"a-set", b"b-set", b"c-set"]
@@ -2461,7 +2457,7 @@ class TestNodesManager:
             assert "Redis Cluster cannot be connected" in str(e.value)
 
             with patch.object(
-                CommandsParser, "initialize", autospec=True
+                    CommandsParser, "initialize", autospec=True
             ) as cmd_parser_initialize:
 
                 def cmd_init_mock(self, r):
@@ -2652,15 +2648,15 @@ class TestClusterPipeline:
             r.pipeline(transaction=True)
 
         assert (
-            str(ex.value).startswith("transaction is deprecated in cluster mode")
-            is True
+                str(ex.value).startswith("transaction is deprecated in cluster mode")
+                is True
         )
 
         with pytest.raises(RedisClusterException) as ex:
             r.pipeline(shard_hint=True)
 
         assert (
-            str(ex.value).startswith("shard_hint is deprecated in cluster mode") is True
+                str(ex.value).startswith("shard_hint is deprecated in cluster mode") is True
         )
 
     def test_redis_cluster_pipeline(self, r):

@@ -74,7 +74,7 @@ def parse_pubsub_numsub(command, res, **options):
 
 
 def parse_cluster_slots(
-    resp: Any, **options: Any
+        resp: Any, **options: Any
 ) -> Dict[Tuple[int, int], Dict[str, Any]]:
     current_host = options.get("current_host", "")
 
@@ -112,11 +112,13 @@ def parse_cluster_shards(resp, **options):
 
     return shards
 
+
 def parse_cluster_myshardid(resp, **options):
     """
     Parse CLUSTER MYSHARDID response.
     """
     return resp.decode('utf-8')
+
 
 PRIMARY = "primary"
 REPLICA = "replica"
@@ -461,18 +463,18 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         return cls(url=url, **kwargs)
 
     def __init__(
-        self,
-        host: Optional[str] = None,
-        port: int = 6379,
-        startup_nodes: Optional[List["ClusterNode"]] = None,
-        cluster_error_retry_attempts: int = 3,
-        retry: Optional["Retry"] = None,
-        require_full_coverage: bool = False,
-        reinitialize_steps: int = 5,
-        read_from_replicas: bool = False,
-        dynamic_startup_nodes: bool = True,
-        url: Optional[str] = None,
-        **kwargs,
+            self,
+            host: Optional[str] = None,
+            port: int = 6379,
+            startup_nodes: Optional[List["ClusterNode"]] = None,
+            cluster_error_retry_attempts: int = 3,
+            retry: Optional["Retry"] = None,
+            require_full_coverage: bool = False,
+            reinitialize_steps: int = 5,
+            read_from_replicas: bool = False,
+            dynamic_startup_nodes: bool = True,
+            url: Optional[str] = None,
+            **kwargs,
     ):
         """
          Initialize a new RedisCluster client.
@@ -768,14 +770,14 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         )
 
     def lock(
-        self,
-        name,
-        timeout=None,
-        sleep=0.1,
-        blocking=True,
-        blocking_timeout=None,
-        lock_class=None,
-        thread_local=True,
+            self,
+            name,
+            timeout=None,
+            sleep=0.1,
+            blocking=True,
+            blocking_timeout=None,
+            lock_class=None,
+            thread_local=True,
     ):
         """
         Return a new Lock object using key ``name`` that mimics
@@ -941,7 +943,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             if len(args) <= 2:
                 raise RedisClusterException(f"Invalid args in command: {args}")
             num_actual_keys = args[2]
-            eval_keys = args[3 : 3 + num_actual_keys]
+            eval_keys = args[3: 3 + num_actual_keys]
             # if there are 0 keys, that means the script can be run on any node
             # so we can just return a random slot
             if len(eval_keys) == 0:
@@ -1058,8 +1060,8 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                             f"No targets were found to execute {args} command on"
                         )
                     if (
-                        len(target_nodes) == 1
-                        and target_nodes[0] == self.get_default_node()
+                            len(target_nodes) == 1
+                            and target_nodes[0] == self.get_default_node()
                     ):
                         is_default_node = True
                 for node in target_nodes:
@@ -1268,14 +1270,14 @@ class LoadBalancer:
 
 class NodesManager:
     def __init__(
-        self,
-        startup_nodes,
-        from_url=False,
-        require_full_coverage=False,
-        lock=None,
-        dynamic_startup_nodes=True,
-        connection_pool_class=ConnectionPool,
-        **kwargs,
+            self,
+            startup_nodes,
+            from_url=False,
+            require_full_coverage=False,
+            lock=None,
+            dynamic_startup_nodes=True,
+            connection_pool_class=ConnectionPool,
+            **kwargs,
     ):
         self.nodes_cache = {}
         self.slots_cache = {}
@@ -1374,9 +1376,9 @@ class NodesManager:
                 primary_name, len(self.slots_cache[slot])
             )
         elif (
-            server_type is None
-            or server_type == PRIMARY
-            or len(self.slots_cache[slot]) == 1
+                server_type is None
+                or server_type == PRIMARY
+                or len(self.slots_cache[slot]) == 1
         ):
             # return a primary
             node_idx = 0
@@ -1496,9 +1498,9 @@ class NodesManager:
             # If there's only one server in the cluster, its ``host`` is ''
             # Fix it to the host in startup_nodes
             if (
-                len(cluster_slots) == 1
-                and len(cluster_slots[0][2][0]) == 0
-                and len(self.startup_nodes) == 1
+                    len(cluster_slots) == 1
+                    and len(cluster_slots[0][2][0]) == 0
+                    and len(self.startup_nodes) == 1
             ):
                 cluster_slots[0][2][0] = startup_node.host
 
@@ -1740,17 +1742,17 @@ class ClusterPipeline(RedisCluster):
     )
 
     def __init__(
-        self,
-        nodes_manager: "NodesManager",
-        commands_parser: "CommandsParser",
-        result_callbacks: Optional[Dict[str, Callable]] = None,
-        cluster_response_callbacks: Optional[Dict[str, Callable]] = None,
-        startup_nodes: Optional[List["ClusterNode"]] = None,
-        read_from_replicas: bool = False,
-        cluster_error_retry_attempts: int = 3,
-        reinitialize_steps: int = 5,
-        lock=None,
-        **kwargs,
+            self,
+            nodes_manager: "NodesManager",
+            commands_parser: "CommandsParser",
+            result_callbacks: Optional[Dict[str, Callable]] = None,
+            cluster_response_callbacks: Optional[Dict[str, Callable]] = None,
+            startup_nodes: Optional[List["ClusterNode"]] = None,
+            read_from_replicas: bool = False,
+            cluster_error_retry_attempts: int = 3,
+            reinitialize_steps: int = 5,
+            lock=None,
+            **kwargs,
     ):
         """ """
         self.command_stack = []
@@ -1758,7 +1760,7 @@ class ClusterPipeline(RedisCluster):
         self.commands_parser = commands_parser
         self.refresh_table_asap = False
         self.result_callbacks = (
-            result_callbacks or self.__class__.RESULT_CALLBACKS.copy()
+                result_callbacks or self.__class__.RESULT_CALLBACKS.copy()
         )
         self.startup_nodes = startup_nodes if startup_nodes else []
         self.read_from_replicas = read_from_replicas
@@ -1881,7 +1883,7 @@ class ClusterPipeline(RedisCluster):
         #     self.connection = None
 
     def send_cluster_commands(
-        self, stack, raise_on_error=True, allow_redirections=True
+            self, stack, raise_on_error=True, allow_redirections=True
     ):
         """
         Wrapper for CLUSTERDOWN error handling.
@@ -1918,7 +1920,7 @@ class ClusterPipeline(RedisCluster):
                     raise e
 
     def _send_cluster_commands(
-        self, stack, raise_on_error=True, allow_redirections=True
+            self, stack, raise_on_error=True, allow_redirections=True
     ):
         """
         Send a bunch of cluster commands to the redis cluster.
