@@ -119,7 +119,11 @@ below, an index named *my_index* is being created. When an index name is not spe
 
     r = redis.Redis()
     index_name = "my_index"
-    r.ft(index_name).create_index(TextField("play", weight=5.0), TextField("ball"))
+    schema = (
+        TextField("play", weight=5.0),
+        TextField("ball"),
+    )
+    r.ft(index_name).create_index(schema)
     print(r.ft(index_name).info())
 
 
