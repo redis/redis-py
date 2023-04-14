@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import urllib.parse
 
 import pytest
@@ -20,7 +21,7 @@ def redis_addr(request):
 
 
 class DelayProxy:
-    def __init__(self, addr, redis_addr, delay: float):
+    def __init__(self, addr, redis_addr, delay: float = 0.0):
         self.addr = addr
         self.redis_addr = redis_addr
         self.delay = delay
@@ -33,6 +34,19 @@ class DelayProxy:
         redis_writer.close()
         self.server = await asyncio.start_server(self.handle, *self.addr)
         self.ROUTINE = asyncio.create_task(self.server.serve_forever())
+
+    @contextlib.contextmanager
+    def set_delay(self, delay: float = 0.0):
+        """
+        Allow to override the delay for parts of tests which aren't time dependent,
+        to speed up execution.
+        """
+        old = self.delay
+        self.delay = delay
+        try:
+            yield
+        finally:
+            self.delay = old
 
     async def handle(self, reader, writer):
         # establish connection to redis
@@ -74,7 +88,7 @@ async def test_standalone(delay, redis_addr):
 
     # create a tcp socket proxy that relays data to Redis and back,
     # inserting 0.1 seconds of delay
-    dp = DelayProxy(addr=("127.0.0.1", 5380), redis_addr=redis_addr, delay=delay * 2)
+    dp = DelayProxy(addr=("127.0.0.1", 5380), redis_addr=redis_addr)
     await dp.start()
 
     for b in [True, False]:
@@ -84,8 +98,14 @@ async def test_standalone(delay, redis_addr):
             await r.set("foo", "foo")
             await r.set("bar", "bar")
 
+            async def op(r):
+                with dp.set_delay(delay * 2):
+                    return await r.get(
+                        "foo"
+                    )  # <-- this is the operation we want to cancel
+
             dp.send_event.clear()
-            t = asyncio.create_task(r.get("foo"))
+            t = asyncio.create_task(op(r))
             # Wait until the task has sent, and then some, to make sure it has
             # settled on the read.
             await dp.send_event.wait()
@@ -106,7 +126,7 @@ async def test_standalone(delay, redis_addr):
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
 async def test_standalone_pipeline(delay, redis_addr):
-    dp = DelayProxy(addr=("127.0.0.1", 5380), redis_addr=redis_addr, delay=delay * 2)
+    dp = DelayProxy(addr=("127.0.0.1", 5380), redis_addr=redis_addr)
     await dp.start()
     for b in [True, False]:
         async with Redis(host="127.0.0.1", port=5380, single_connection_client=b) as r:
@@ -120,8 +140,14 @@ async def test_standalone_pipeline(delay, redis_addr):
             pipe2.ping()
             pipe2.get("foo")
 
+            async def op(pipe):
+                with dp.set_delay(delay * 2):
+                    return await pipe.get(
+                        "foo"
+                    ).execute()  # <-- this is the operation we want to cancel
+
             dp.send_event.clear()
-            t = asyncio.create_task(pipe.get("foo").execute())
+            t = asyncio.create_task(op(pipe))
             # wait until task has settled on the read
             await dp.send_event.wait()
             await asyncio.sleep(0.01)
@@ -153,7 +179,8 @@ async def test_standalone_pipeline(delay, redis_addr):
 async def test_cluster(request, redis_addr):
 
     redis_addr = redis_addr[0], 6372  # use the cluster port
-    dp = DelayProxy(addr=("127.0.0.1", 5381), redis_addr=redis_addr, delay=0.1)
+    delay = 0.1
+    dp = DelayProxy(addr=("127.0.0.1", 5381), redis_addr=redis_addr)
     await dp.start()
 
     r = RedisCluster.from_url("redis://127.0.0.1:5381")
@@ -161,8 +188,12 @@ async def test_cluster(request, redis_addr):
     await r.set("foo", "foo")
     await r.set("bar", "bar")
 
+    async def op(r):
+        with dp.set_delay(delay):
+            return await r.get("foo")
+
     dp.send_event.clear()
-    t = asyncio.create_task(r.get("foo"))
+    t = asyncio.create_task(op(r))
     await dp.send_event.wait()
     await asyncio.sleep(0.01)
     t.cancel()
