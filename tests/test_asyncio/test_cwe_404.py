@@ -1,5 +1,4 @@
 import asyncio
-import sys
 import urllib.parse
 
 import pytest
@@ -20,23 +19,12 @@ def redis_addr(request):
         return netloc, "6379"
 
 
-async def pipe(
-    reader: asyncio.StreamReader, writer: asyncio.StreamWriter, delay: float, name=""
-):
-    while True:
-        data = await reader.read(1000)
-        if not data:
-            break
-        await asyncio.sleep(delay)
-        writer.write(data)
-        await writer.drain()
-
-
 class DelayProxy:
     def __init__(self, addr, redis_addr, delay: float):
         self.addr = addr
         self.redis_addr = redis_addr
         self.delay = delay
+        self.send_event = asyncio.Event()
 
     async def start(self):
         # test that we can connect to redis
@@ -49,10 +37,10 @@ class DelayProxy:
     async def handle(self, reader, writer):
         # establish connection to redis
         redis_reader, redis_writer = await asyncio.open_connection(*self.redis_addr)
-        pipe1 = asyncio.create_task(pipe(reader, redis_writer, self.delay, "to redis:"))
-        pipe2 = asyncio.create_task(
-            pipe(redis_reader, writer, self.delay, "from redis:")
+        pipe1 = asyncio.create_task(
+            self.pipe(reader, redis_writer, "to redis:", self.send_event)
         )
+        pipe2 = asyncio.create_task(self.pipe(redis_reader, writer, "from redis:"))
         await asyncio.gather(pipe1, pipe2)
 
     async def stop(self):
@@ -60,6 +48,24 @@ class DelayProxy:
         self.ROUTINE.cancel()
         loop = self.server.get_loop()
         await loop.shutdown_asyncgens()
+
+    async def pipe(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        name="",
+        event: asyncio.Event = None,
+    ):
+        while True:
+            data = await reader.read(1000)
+            if not data:
+                break
+            # print(f"{name} read {len(data)} delay {self.delay}")
+            if event:
+                event.set()
+            await asyncio.sleep(self.delay)
+            writer.write(data)
+            await writer.drain()
 
 
 @pytest.mark.onlynoncluster
@@ -78,17 +84,18 @@ async def test_standalone(delay, redis_addr):
             await r.set("foo", "foo")
             await r.set("bar", "bar")
 
+            dp.send_event.clear()
             t = asyncio.create_task(r.get("foo"))
-            await asyncio.sleep(delay)
+            # Wait until the task has sent, and then some, to make sure it has
+            # settled on the read.
+            await dp.send_event.wait()
+            await asyncio.sleep(0.01)  # a little extra time for prudence
             t.cancel()
-            try:
+            with pytest.raises(asyncio.CancelledError):
                 await t
-                sys.stderr.write("try again, we did not cancel the task in time\n")
-            except asyncio.CancelledError:
-                sys.stderr.write(
-                    "canceled task, connection is left open with unread response\n"
-                )
 
+            # make sure that our previous request, cancelled while waiting for
+            # a repsponse, didn't leave the connection open andin a bad state
             assert await r.get("bar") == b"bar"
             assert await r.ping()
             assert await r.get("foo") == b"foo"
@@ -113,10 +120,17 @@ async def test_standalone_pipeline(delay, redis_addr):
             pipe2.ping()
             pipe2.get("foo")
 
+            dp.send_event.clear()
             t = asyncio.create_task(pipe.get("foo").execute())
-            await asyncio.sleep(delay)
+            # wait until task has settled on the read
+            await dp.send_event.wait()
+            await asyncio.sleep(0.01)
             t.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await t
 
+            # we have now cancelled the pieline in the middle of a request, make sure
+            # that the connection is still usable
             pipe.get("bar")
             pipe.ping()
             pipe.get("foo")
@@ -147,13 +161,13 @@ async def test_cluster(request, redis_addr):
     await r.set("foo", "foo")
     await r.set("bar", "bar")
 
+    dp.send_event.clear()
     t = asyncio.create_task(r.get("foo"))
-    await asyncio.sleep(0.050)
+    await dp.send_event.wait()
+    await asyncio.sleep(0.01)
     t.cancel()
-    try:
+    with pytest.raises(asyncio.CancelledError):
         await t
-    except asyncio.CancelledError:
-        pytest.fail("connection is left open with unread response")
 
     assert await r.get("bar") == b"bar"
     assert await r.ping()
