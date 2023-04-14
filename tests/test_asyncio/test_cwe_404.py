@@ -1,10 +1,23 @@
 import asyncio
 import sys
+import urllib.parse
 
 import pytest
 
 from redis.asyncio import Redis
 from redis.asyncio.cluster import RedisCluster
+from redis.asyncio.connection import async_timeout
+
+
+@pytest.fixture
+def redis_addr(request):
+    redis_url = request.config.getoption("--redis-url")
+    scheme, netloc = urllib.parse.urlparse(redis_url)[:2]
+    assert scheme == "redis"
+    if ":" in netloc:
+        return netloc.split(":")
+    else:
+        return netloc, "6379"
 
 
 async def pipe(
@@ -26,6 +39,10 @@ class DelayProxy:
         self.delay = delay
 
     async def start(self):
+        # test that we can connect to redis
+        async with async_timeout(2):
+            _, redis_writer = await asyncio.open_connection(*self.redis_addr)
+        redis_writer.close()
         self.server = await asyncio.start_server(self.handle, *self.addr)
         self.ROUTINE = asyncio.create_task(self.server.serve_forever())
 
@@ -47,18 +64,16 @@ class DelayProxy:
 
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
-async def test_standalone(delay):
+async def test_standalone(delay, redis_addr):
 
     # create a tcp socket proxy that relays data to Redis and back,
     # inserting 0.1 seconds of delay
-    dp = DelayProxy(
-        addr=("localhost", 5380), redis_addr=("localhost", 6379), delay=delay * 2
-    )
+    dp = DelayProxy(addr=("127.0.0.1", 5380), redis_addr=redis_addr, delay=delay * 2)
     await dp.start()
 
     for b in [True, False]:
         # note that we connect to proxy, rather than to Redis directly
-        async with Redis(host="localhost", port=5380, single_connection_client=b) as r:
+        async with Redis(host="127.0.0.1", port=5380, single_connection_client=b) as r:
 
             await r.set("foo", "foo")
             await r.set("bar", "bar")
@@ -83,13 +98,11 @@ async def test_standalone(delay):
 
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
-async def test_standalone_pipeline(delay):
-    dp = DelayProxy(
-        addr=("localhost", 5380), redis_addr=("localhost", 6379), delay=delay * 2
-    )
+async def test_standalone_pipeline(delay, redis_addr):
+    dp = DelayProxy(addr=("127.0.0.1", 5380), redis_addr=redis_addr, delay=delay * 2)
     await dp.start()
     for b in [True, False]:
-        async with Redis(host="localhost", port=5380, single_connection_client=b) as r:
+        async with Redis(host="127.0.0.1", port=5380, single_connection_client=b) as r:
             await r.set("foo", "foo")
             await r.set("bar", "bar")
 
@@ -122,12 +135,13 @@ async def test_standalone_pipeline(delay):
 
 
 @pytest.mark.onlycluster
-async def test_cluster(request):
+async def test_cluster(request, redis_addr):
 
-    dp = DelayProxy(addr=("localhost", 5381), redis_addr=("localhost", 6372), delay=0.1)
+    redis_addr = redis_addr[0], 6372  # use the cluster port
+    dp = DelayProxy(addr=("127.0.0.1", 5381), redis_addr=redis_addr, delay=0.1)
     await dp.start()
 
-    r = RedisCluster.from_url("redis://localhost:5381")
+    r = RedisCluster.from_url("redis://127.0.0.1:5381")
     await r.initialize()
     await r.set("foo", "foo")
     await r.set("bar", "bar")
