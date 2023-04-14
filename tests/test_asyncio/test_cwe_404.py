@@ -120,9 +120,10 @@ async def test_standalone_pipeline(delay, redis_addr):
             pipe.get("bar")
             pipe.ping()
             pipe.get("foo")
-            pipe.reset()
+            await pipe.reset()
 
-            assert await pipe.execute() is None
+            # check that the pipeline is empty after reset
+            assert await pipe.execute() == []
 
             # validating that the pipeline can be used as it could previously
             pipe.get("bar")
