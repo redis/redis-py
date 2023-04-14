@@ -1,3 +1,4 @@
+    * asyncio: Fix memory leak caused by hiredis (#2693)
     * Allow data to drain from async PythonParser when reading during a disconnect()
     * Use asyncio.timeout() instead of async_timeout.timeout() for python >= 3.11 (#2602)
     * Add test and fix async HiredisParser when reading during a disconnect() (#2349)
