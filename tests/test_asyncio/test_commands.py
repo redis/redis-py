@@ -2213,6 +2213,7 @@ class TestRedisCommands:
             None,
         ]
 
+    @skip_unless_arch_bits(64)
     @skip_if_server_version_lt("3.2.0")
     async def test_geopos(self, r: redis.Redis):
         values = (2.1909389952632, 41.433791470673, "place1") + (
