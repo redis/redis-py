@@ -1,3 +1,4 @@
+# EXAMPLE: set_and_get
 # HIDE_START
 import redis
 

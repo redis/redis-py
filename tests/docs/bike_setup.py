@@ -1,3 +1,4 @@
+# EXAMPLE: bike_setup
 import redis
 import json
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType

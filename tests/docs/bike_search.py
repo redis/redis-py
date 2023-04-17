@@ -1,3 +1,4 @@
+# EXAMPLE: bike_search
 import redis
 import json
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType
@@ -40,14 +41,7 @@ schema_info = IndexDefinition(
 # create the index
 r.ft("idx:bikes").create_index(bike_schema,definition=schema_info)
 
-# aggregate request to get the number of bikes of each type that are priced between 1000 and 3000
-x = AggregateRequest("@price:[1000 3000]").group_by("@type", reducers.count()).sort_by(Desc("@type"))
-r.ft("idx:bikes").aggregate(x).rows
+r.ft("idx:bikes").search(Query("@type:{eBikes}"))
+r.ft("idx:bikes").search(Query("@type:{eBikes} @price:[200 1200]").return_fields("model", "type", "price"))
+r.ft("idx:bikes").search(Query("mudguards @type:{Mountain bikes} @price:[1000 3000]").return_fields("model", "type", "price", "description"))
 
-# aggregate request to get average weight of bikes in each category (type)
-y = AggregateRequest("*").group_by("@type", reducers.avg("@weight").alias("average_bike_weight")).sort_by(Desc("@average_bike_weight"))
-r.ft("idx:bikes").aggregate(y).rows
-
-# aggregate request to get the number of bikes per weight range using the floor() function to create weight groups
-z = AggregateRequest("*").apply(weight="floor(@weight)").group_by("@weight", reducers.count().alias("count")).sort_by("@weight")
-r.ft("idx:bikes").aggregate(z).rows
