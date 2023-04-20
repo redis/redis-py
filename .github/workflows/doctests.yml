@@ -25,7 +25,9 @@ jobs:
         with:
           python-version: 3.9
           cache: 'pip'
-      - run: apt install -y redis-tools
+      - run: |
+          sudo apt update
+          sudo apt install -y redis-tools
       - name: lint check
         run: |
           pip install -r dev_requirements.txt
