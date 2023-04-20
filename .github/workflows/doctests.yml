@@ -6,8 +6,8 @@ on:
       - 'doctests/**'
       - '.github/workflows/doctests.yml'
   pull_request:
-    branches:
-      - master
+
+  workflow_dispatch:
 
 permissions:
   contents: read
