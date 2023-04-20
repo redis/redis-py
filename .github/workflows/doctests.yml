@@ -36,4 +36,7 @@ jobs:
           black --target-version py39 --check --diff doctests/*.py
 
       - name: run tests
-        run: sh doctests/run_examples.sh
+        run: |
+          python setup.py build
+          python setup.py install
+          sh doctests/run_examples.sh
