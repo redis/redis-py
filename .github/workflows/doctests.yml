@@ -2,9 +2,6 @@ name: Documentation Tests
 
 on:
   push:
-    paths:
-      - 'doctests/**'
-      - '.github/workflows/doctests.yml'
   pull_request:
 
   workflow_dispatch:
