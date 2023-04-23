@@ -366,7 +366,7 @@ class TestPubSubRESP3Handler:
     def test_push_handler(self, r):
         if is_resp2_connection(r):
             return
-        p = r.pubsub(push_handler=self.my_handler)
+        p = r.pubsub(push_handler_func=self.my_handler)
         p.subscribe("foo")
         assert wait_for_message(p) is None
         assert self.message == ["my handler", [b"subscribe", b"foo", 1]]

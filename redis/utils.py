@@ -120,10 +120,10 @@ def deprecated_function(reason="", version="", name=None):
     return decorator
 
 
-logger = logging.getLogger("push_response")
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-handler.setLevel(logging.INFO)
-logger.addHandler(handler)
-
-INFO_LOGGER = logger
+def _set_info_logger():
+    if "push_response" not in logging.root.manager.loggerDict.keys():
+        logger = logging.getLogger("push_response")
+        logger.setLevel(logging.INFO)
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.INFO)
+        logger.addHandler(handler)
