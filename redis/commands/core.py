@@ -4644,10 +4644,7 @@ class SortedSetCommands(CommandsProtocol):
         return self.execute_command(*pieces, **options)
 
     def zrank(
-            self, 
-            name: KeyT, 
-            value: EncodableT, 
-            withscore: bool = False
+        self, name: KeyT, value: EncodableT, withscore: bool = False
     ) -> ResponseT:
         """
         Returns a 0-based value indicating the rank of ``value`` in sorted set
