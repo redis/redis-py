@@ -27,7 +27,7 @@ from redis.exceptions import (
 )
 from redis.lock import Lock
 from redis.retry import Retry
-from redis.utils import safe_str, str_if_bytes
+from redis.utils import HIREDIS_AVAILABLE, safe_str, str_if_bytes
 
 SYM_EMPTY = b""
 EMPTY_RESPONSE = "EMPTY_RESPONSE"
@@ -1517,7 +1517,7 @@ class PubSub:
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
-            if self.push_handler is not None:
+            if self.push_handler is not None and not HIREDIS_AVAILABLE:
                 self.connection._parser.set_push_handler(self.push_handler)
         connection = self.connection
         kwargs = {"check_health": not self.subscribed}

@@ -10,8 +10,14 @@ import pytest
 
 import redis
 from redis.exceptions import ConnectionError
+from redis.utils import HIREDIS_AVAILABLE
 
-from .conftest import _get_client, skip_if_redis_enterprise, skip_if_server_version_lt
+from .conftest import (
+    _get_client,
+    is_resp2_connection,
+    skip_if_redis_enterprise,
+    skip_if_server_version_lt,
+)
 
 
 def wait_for_message(pubsub, timeout=0.5, ignore_subscribe_messages=False):
@@ -356,16 +362,19 @@ class TestPubSubRESP3Handler:
     def my_handler(self, message):
         self.message = ["my handler", message]
 
+    @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
     def test_push_handler(self, r):
+        if is_resp2_connection(r):
+            return
         p = r.pubsub(push_handler=self.my_handler)
         p.subscribe("foo")
-        assert wait_for_message(p) == None
-        assert self.message == ["my handler", [b'subscribe', b'foo', 1]]
+        assert wait_for_message(p) is None
+        assert self.message == ["my handler", [b"subscribe", b"foo", 1]]
         assert r.publish("foo", "test message") == 1
-        assert wait_for_message(p) == None
-        assert self.message == ["my handler", [b'message', b'foo', b'test message']]
+        assert wait_for_message(p) is None
+        assert self.message == ["my handler", [b"message", b"foo", b"test message"]]
 
-    
+
 class TestPubSubAutoDecoding:
     "These tests only validate that we get unicode values back"
 
@@ -781,15 +790,15 @@ class TestBaseException:
         assert msg is not None
         # timeout waiting for another message which never arrives
         assert is_connected()
-        with patch("redis.parsers._RESP2Parser.read_response") as mock1:
+        with patch("redis.parsers._RESP2Parser.read_response") as mock1, patch(
+            "redis.parsers._HiredisParser.read_response"
+        ) as mock2, patch("redis.parsers._RESP3Parser.read_response") as mock3:
             mock1.side_effect = BaseException("boom")
-            with patch("redis.parsers._RESP3Parser.read_response") as mock2:
-                mock2.side_effect = BaseException("boom")
-                with patch("redis.parsers._HiredisParser.read_response") as mock3:
-                    mock3.side_effect = BaseException("boom")
+            mock2.side_effect = BaseException("boom")
+            mock3.side_effect = BaseException("boom")
 
-                with pytest.raises(BaseException):
-                    get_msg()
+            with pytest.raises(BaseException):
+                get_msg()
 
         # the timeout on the read should not cause disconnect
         assert is_connected()
