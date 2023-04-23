@@ -1429,6 +1429,7 @@ class PubSub:
         shard_hint=None,
         ignore_subscribe_messages=False,
         encoder=None,
+        push_handler=None,
     ):
         self.connection_pool = connection_pool
         self.shard_hint = shard_hint
@@ -1438,6 +1439,7 @@ class PubSub:
         # we need to know the encoding options for this connection in order
         # to lookup channel and pattern names for callback handlers.
         self.encoder = encoder
+        self.push_handler = push_handler
         if self.encoder is None:
             self.encoder = self.connection_pool.get_encoder()
         self.health_check_response_b = self.encoder.encode(self.HEALTH_CHECK_MESSAGE)
@@ -1515,6 +1517,8 @@ class PubSub:
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
+            if self.push_handler is not None:
+                self.connection._parser.set_push_handler(self.push_handler)
         connection = self.connection
         kwargs = {"check_health": not self.subscribed}
         if not self.subscribed:
@@ -1580,7 +1584,7 @@ class PubSub:
                     return None
             else:
                 conn.connect()
-            return conn.read_response()
+            return conn.read_response(push_request=True)
 
         response = self._execute(conn, try_read)
 
@@ -1739,8 +1743,8 @@ class PubSub:
         """
         Ping the Redis server
         """
-        message = "" if message is None else message
-        return self.execute_command("PING", message)
+        args = ["PING", message] if message is not None else ["PING"]
+        return self.execute_command(*args)
 
     def handle_message(self, response, ignore_subscribe_messages=False):
         """
@@ -1750,6 +1754,8 @@ class PubSub:
         """
         if response is None:
             return None
+        if isinstance(response, bytes):
+            response = [b"pong", response] if response != b"PONG" else [b"pong", b""]
         message_type = str_if_bytes(response[0])
         if message_type == "pmessage":
             message = {

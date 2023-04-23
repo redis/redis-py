@@ -2,6 +2,7 @@ from typing import Any, Union
 
 from ..exceptions import ConnectionError, InvalidResponse, ResponseError
 from ..typing import EncodableT
+from ..utils import INFO_LOGGER
 from .base import _AsyncRESPBase, _RESPBase
 from .socket import SERVER_CLOSED_CONNECTION_ERROR
 
@@ -9,10 +10,20 @@ from .socket import SERVER_CLOSED_CONNECTION_ERROR
 class _RESP3Parser(_RESPBase):
     """RESP3 protocol implementation"""
 
-    def read_response(self, disable_decoding=False):
+    def __init__(self, socket_read_size):
+        super().__init__(socket_read_size)
+        self.push_handler = self.handle_push_response
+
+    def handle_push_response(self, response):
+        INFO_LOGGER.info("Push response: " + str(response))
+        return response
+
+    def read_response(self, disable_decoding=False, push_request=False):
         pos = self._buffer.get_pos()
         try:
-            result = self._read_response(disable_decoding=disable_decoding)
+            result = self._read_response(
+                disable_decoding=disable_decoding, push_request=push_request
+            )
         except BaseException:
             self._buffer.rewind(pos)
             raise
@@ -20,7 +31,7 @@ class _RESP3Parser(_RESPBase):
             self._buffer.purge()
             return result
 
-    def _read_response(self, disable_decoding=False):
+    def _read_response(self, disable_decoding=False, push_request=False):
         raw = self._buffer.readline()
         if not raw:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
@@ -77,15 +88,35 @@ class _RESP3Parser(_RESPBase):
             response = {
                 self._read_response(
                     disable_decoding=disable_decoding
-                ): self._read_response(disable_decoding=disable_decoding)
+                ): self._read_response(
+                    disable_decoding=disable_decoding, push_request=push_request
+                )
                 for _ in range(int(response))
             }
+        # push response
+        elif byte == b">":
+            response = [
+                self._read_response(
+                    disable_decoding=disable_decoding, push_request=push_request
+                )
+                for _ in range(int(response))
+            ]
+            res = self.push_handler(response)
+            if not push_request:
+                return self._read_response(
+                    disable_decoding=disable_decoding, push_request=push_request
+                )
+            else:
+                return res
         else:
             raise InvalidResponse(f"Protocol Error: {raw!r}")
 
         if isinstance(response, bytes) and disable_decoding is False:
             response = self.encoder.decode(response)
         return response
+
+    def set_push_handler(self, push_handler):
+        self.push_handler = push_handler
 
 
 class _AsyncRESP3Parser(_AsyncRESPBase):

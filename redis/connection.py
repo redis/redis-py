@@ -406,13 +406,18 @@ class AbstractConnection:
             self.disconnect()
             raise ConnectionError(f"Error while reading from {host_error}: {e.args}")
 
-    def read_response(self, disable_decoding=False):
+    def read_response(self, disable_decoding=False, push_request=False):
         """Read the response from a previously sent command"""
 
         host_error = self._host_error()
 
         try:
-            response = self._parser.read_response(disable_decoding=disable_decoding)
+            if self.protocol == "3" and not HIREDIS_AVAILABLE:
+                response = self._parser.read_response(
+                    disable_decoding=disable_decoding, push_request=push_request
+                )
+            else:
+                response = self._parser.read_response(disable_decoding=disable_decoding)
         except socket.timeout:
             self.disconnect()
             raise TimeoutError(f"Timeout reading from {host_error}")
@@ -705,8 +710,9 @@ class SSLConnection(Connection):
 class UnixDomainSocketConnection(AbstractConnection):
     "Manages UDS communication to and from a Redis server"
 
-    def __init__(self, path="", **kwargs):
+    def __init__(self, path="", socket_timeout=None, **kwargs):
         self.path = path
+        self.socket_timeout = socket_timeout
         super().__init__(**kwargs)
 
     def repr_pieces(self):

@@ -1,3 +1,4 @@
+import logging
 from contextlib import contextmanager
 from functools import wraps
 from typing import Any, Dict, Mapping, Union
@@ -117,3 +118,12 @@ def deprecated_function(reason="", version="", name=None):
         return wrapper
 
     return decorator
+
+
+logger = logging.getLogger("push_response")
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+handler.setLevel(logging.INFO)
+logger.addHandler(handler)
+
+INFO_LOGGER = logger

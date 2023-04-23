@@ -352,6 +352,20 @@ class TestPubSubMessages:
         )
 
 
+class TestPubSubRESP3Handler:
+    def my_handler(self, message):
+        self.message = ["my handler", message]
+
+    def test_push_handler(self, r):
+        p = r.pubsub(push_handler=self.my_handler)
+        p.subscribe("foo")
+        assert wait_for_message(p) == None
+        assert self.message == ["my handler", [b'subscribe', b'foo', 1]]
+        assert r.publish("foo", "test message") == 1
+        assert wait_for_message(p) == None
+        assert self.message == ["my handler", [b'message', b'foo', b'test message']]
+
+    
 class TestPubSubAutoDecoding:
     "These tests only validate that we get unicode values back"
 
@@ -769,8 +783,10 @@ class TestBaseException:
         assert is_connected()
         with patch("redis.parsers._RESP2Parser.read_response") as mock1:
             mock1.side_effect = BaseException("boom")
-            with patch("redis.parsers._HiredisParser.read_response") as mock2:
+            with patch("redis.parsers._RESP3Parser.read_response") as mock2:
                 mock2.side_effect = BaseException("boom")
+                with patch("redis.parsers._HiredisParser.read_response") as mock3:
+                    mock3.side_effect = BaseException("boom")
 
                 with pytest.raises(BaseException):
                     get_msg()
