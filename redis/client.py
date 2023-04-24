@@ -27,7 +27,7 @@ from redis.exceptions import (
 )
 from redis.lock import Lock
 from redis.retry import Retry
-from redis.utils import safe_str, str_if_bytes
+from redis.utils import HIREDIS_AVAILABLE, _set_info_logger, safe_str, str_if_bytes
 
 SYM_EMPTY = b""
 EMPTY_RESPONSE = "EMPTY_RESPONSE"
@@ -1429,6 +1429,7 @@ class PubSub:
         shard_hint=None,
         ignore_subscribe_messages=False,
         encoder=None,
+        push_handler_func=None,
     ):
         self.connection_pool = connection_pool
         self.shard_hint = shard_hint
@@ -1438,6 +1439,7 @@ class PubSub:
         # we need to know the encoding options for this connection in order
         # to lookup channel and pattern names for callback handlers.
         self.encoder = encoder
+        self.push_handler_func = push_handler_func
         if self.encoder is None:
             self.encoder = self.connection_pool.get_encoder()
         self.health_check_response_b = self.encoder.encode(self.HEALTH_CHECK_MESSAGE)
@@ -1445,6 +1447,8 @@ class PubSub:
             self.health_check_response = ["pong", self.HEALTH_CHECK_MESSAGE]
         else:
             self.health_check_response = [b"pong", self.health_check_response_b]
+        if self.push_handler_func is None:
+            _set_info_logger()
         self.reset()
 
     def __enter__(self):
@@ -1515,6 +1519,8 @@ class PubSub:
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
+            if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
+                self.connection._parser.set_push_handler(self.push_handler_func)
         connection = self.connection
         kwargs = {"check_health": not self.subscribed}
         if not self.subscribed:
@@ -1580,7 +1586,7 @@ class PubSub:
                     return None
             else:
                 conn.connect()
-            return conn.read_response()
+            return conn.read_response(push_request=True)
 
         response = self._execute(conn, try_read)
 
@@ -1739,8 +1745,8 @@ class PubSub:
         """
         Ping the Redis server
         """
-        message = "" if message is None else message
-        return self.execute_command("PING", message)
+        args = ["PING", message] if message is not None else ["PING"]
+        return self.execute_command(*args)
 
     def handle_message(self, response, ignore_subscribe_messages=False):
         """
@@ -1750,6 +1756,8 @@ class PubSub:
         """
         if response is None:
             return None
+        if isinstance(response, bytes):
+            response = [b"pong", response] if response != b"PONG" else [b"pong", b""]
         message_type = str_if_bytes(response[0])
         if message_type == "pmessage":
             message = {
