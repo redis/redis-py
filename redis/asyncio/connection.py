@@ -485,15 +485,29 @@ class Connection:
         self,
         disable_decoding: bool = False,
         timeout: Optional[float] = None,
+        push_request: Optional[bool] = False,
     ):
         """Read the response from a previously sent command"""
         read_timeout = timeout if timeout is not None else self.socket_timeout
         try:
-            if read_timeout is not None:
+            if (
+                read_timeout is not None
+                and self.protocol == "3"
+                and not HIREDIS_AVAILABLE
+            ):
+                async with async_timeout(read_timeout):
+                    response = await self._parser.read_response(
+                        disable_decoding=disable_decoding, push_request=push_request
+                    )
+            elif read_timeout is not None:
                 async with async_timeout(read_timeout):
                     response = await self._parser.read_response(
                         disable_decoding=disable_decoding
                     )
+            elif self.protocol == "3" and not HIREDIS_AVAILABLE:
+                response = await self._parser.read_response(
+                    disable_decoding=disable_decoding, push_request=push_request
+                )
             else:
                 response = await self._parser.read_response(
                     disable_decoding=disable_decoding

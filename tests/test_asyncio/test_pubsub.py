@@ -16,9 +16,11 @@ import pytest_asyncio
 import redis.asyncio as redis
 from redis.exceptions import ConnectionError
 from redis.typing import EncodableT
+from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 
 from .compat import create_task, mock
+from .conftest import get_protocol_version
 
 
 def with_timeout(t):
@@ -418,6 +420,23 @@ class TestPubSubMessages:
             "connection not set: did you forget to call subscribe() or psubscribe()?"
         )
         assert expect in info.exconly()
+
+
+class TestPubSubRESP3Handler:
+    def my_handler(self, message):
+        self.message = ["my handler", message]
+
+    @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+    async def test_push_handler(self, r):
+        if get_protocol_version(r) in [2, "2", None]:
+            return
+        p = r.pubsub(push_handler_func=self.my_handler)
+        await p.subscribe("foo")
+        assert await wait_for_message(p) is None
+        assert self.message == ["my handler", [b"subscribe", b"foo", 1]]
+        assert await r.publish("foo", "test message") == 1
+        assert await wait_for_message(p) is None
+        assert self.message == ["my handler", [b"message", b"foo", b"test message"]]
 
 
 @pytest.mark.onlynoncluster
@@ -995,13 +1014,15 @@ class TestBaseException:
         assert msg is not None
         # timeout waiting for another message which never arrives
         assert pubsub.connection.is_connected
-        with patch("redis.parsers._AsyncRESP2Parser.read_response") as mock1:
+        with patch("redis.parsers._AsyncRESP2Parser.read_response") as mock1, patch(
+            "redis.parsers._AsyncHiredisParser.read_response"
+        ) as mock2, patch("redis.parsers._AsyncRESP3Parser.read_response") as mock3:
             mock1.side_effect = BaseException("boom")
-            with patch("redis.parsers._AsyncHiredisParser.read_response") as mock2:
-                mock2.side_effect = BaseException("boom")
+            mock2.side_effect = BaseException("boom")
+            mock3.side_effect = BaseException("boom")
 
-                with pytest.raises(BaseException):
-                    await get_msg()
+            with pytest.raises(BaseException):
+                await get_msg()
 
         # the timeout on the read should not cause disconnect
         assert pubsub.connection.is_connected

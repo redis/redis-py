@@ -121,19 +121,32 @@ class _RESP3Parser(_RESPBase):
 
 
 class _AsyncRESP3Parser(_AsyncRESPBase):
-    async def read_response(self, disable_decoding: bool = False):
+    def __init__(self, socket_read_size):
+        super().__init__(socket_read_size)
+        self.push_handler_func = self.handle_push_response
+
+    def handle_push_response(self, response):
+        logger = getLogger("push_response")
+        logger.info("Push response: " + str(response))
+        return response
+
+    async def read_response(
+        self, disable_decoding: bool = False, push_request: bool = False
+    ):
         if self._chunks:
             # augment parsing buffer with previously read data
             self._buffer += b"".join(self._chunks)
             self._chunks.clear()
         self._pos = 0
-        response = await self._read_response(disable_decoding=disable_decoding)
+        response = await self._read_response(
+            disable_decoding=disable_decoding, push_request=push_request
+        )
         # Successfully parsing a response allows us to clear our parsing buffer
         self._clear()
         return response
 
     async def _read_response(
-        self, disable_decoding: bool = False
+        self, disable_decoding: bool = False, push_request: bool = False
     ) -> Union[EncodableT, ResponseError, None]:
         if not self._stream or not self.encoder:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
@@ -198,9 +211,31 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
                 )
                 for _ in range(int(response))
             }
+        # push response
+        elif byte == b">":
+            response = [
+                (
+                    await self._read_response(
+                        disable_decoding=disable_decoding, push_request=push_request
+                    )
+                )
+                for _ in range(int(response))
+            ]
+            res = self.push_handler_func(response)
+            if not push_request:
+                return await (
+                    self._read_response(
+                        disable_decoding=disable_decoding, push_request=push_request
+                    )
+                )
+            else:
+                return res
         else:
             raise InvalidResponse(f"Protocol Error: {raw!r}")
 
         if isinstance(response, bytes) and disable_decoding is False:
             response = self.encoder.decode(response)
         return response
+
+    def set_push_handler(self, push_handler_func):
+        self.push_handler_func = push_handler_func
