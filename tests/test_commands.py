@@ -2640,6 +2640,8 @@ class TestRedisCommands:
         assert r.zrevrank("a", "a1") == 4
         assert r.zrevrank("a", "a2") == 3
         assert r.zrevrank("a", "a6") is None
+        assert r.zrevrank("a", "a3", withscores=True) == [0, "3"]
+        assert r.zrevrank("a", "a6", withscores=True) is None
 
     def test_zscore(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
