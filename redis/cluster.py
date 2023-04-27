@@ -466,6 +466,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         read_from_replicas: bool = False,
         dynamic_startup_nodes: bool = True,
         url: Optional[str] = None,
+        host_port_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
         **kwargs,
     ):
         """
@@ -594,6 +595,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             from_url=from_url,
             require_full_coverage=require_full_coverage,
             dynamic_startup_nodes=dynamic_startup_nodes,
+            host_port_remap=host_port_remap,
             **kwargs,
         )
 
@@ -1269,6 +1271,7 @@ class NodesManager:
         lock=None,
         dynamic_startup_nodes=True,
         connection_pool_class=ConnectionPool,
+        host_port_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
         **kwargs,
     ):
         self.nodes_cache = {}
@@ -1280,6 +1283,7 @@ class NodesManager:
         self._require_full_coverage = require_full_coverage
         self._dynamic_startup_nodes = dynamic_startup_nodes
         self.connection_pool_class = connection_pool_class
+        self.host_port_remap = host_port_remap
         self._moved_exception = None
         self.connection_kwargs = kwargs
         self.read_load_balancer = LoadBalancer()
@@ -1502,6 +1506,7 @@ class NodesManager:
                 if host == "":
                     host = startup_node.host
                 port = int(primary_node[1])
+                host, port = self.remap_host_port(host, port)
 
                 target_node = self._get_or_create_cluster_node(
                     host, port, PRIMARY, tmp_nodes_cache
@@ -1518,6 +1523,7 @@ class NodesManager:
                         for replica_node in replica_nodes:
                             host = str_if_bytes(replica_node[0])
                             port = replica_node[1]
+                            host, port = self.remap_host_port(host, port)
 
                             target_replica_node = self._get_or_create_cluster_node(
                                 host, port, REPLICA, tmp_nodes_cache
@@ -1590,6 +1596,16 @@ class NodesManager:
         except TypeError:
             # The read_load_balancer is None, do nothing
             pass
+
+    def remap_host_port(self, host: str, port: int) -> Tuple[str, int]:
+        """
+        Remap the host and port returned from the cluster to a different
+        internal value.  Useful if the client is not connecting directly
+        to the cluster.
+        """
+        if self.host_port_remap:
+            return self.host_port_remap(host, port)
+        return host, port
 
 
 class ClusterPubSub(PubSub):
