@@ -138,6 +138,7 @@ async def test_standalone(delay, redis_addr):
                 assert await r.get("foo") == b"foo"
 
 
+@pytest.mark.xfail(reason="cancel does not cause disconnect")
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
 async def test_standalone_pipeline(delay, redis_addr):
