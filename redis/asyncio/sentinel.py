@@ -220,13 +220,13 @@ class Sentinel(AsyncSentinelCommands):
             kwargs.pop("once")
 
         if once:
+            await random.choice(self.sentinels).execute_command(*args, **kwargs)
+        else:
             tasks = [
                 asyncio.Task(sentinel.execute_command(*args, **kwargs))
                 for sentinel in self.sentinels
             ]
             await asyncio.gather(*tasks)
-        else:
-            await random.choice(self.sentinels).execute_command(*args, **kwargs)
         return True
 
     def __repr__(self):
