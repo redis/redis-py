@@ -515,6 +515,12 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             reinitialize_steps to 1.
             To avoid reinitializing the cluster on moved errors, set
             reinitialize_steps to 0.
+        :param address_remap:
+            An optional callable which, when provided with an internal network
+            address of a node, e.g. a `(host, port)` tuple, will return the address
+            where the node is reachable.  This can be used to map the addresses at
+            which the nodes _think_ they are, to addresses at which a client may
+            reach them, such as when they sit behind a proxy.
 
          :**kwargs:
              Extra arguments that will be sent into Redis instance when created

@@ -149,6 +149,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
           maximum number of connections are already created, a
           :class:`~.MaxConnectionsError` is raised. This error may be retried as defined
           by :attr:`connection_error_retry_attempts`
+    :param address_remap:
+        | An optional callable which, when provided with an internal network
+          address of a node, e.g. a `(host, port)` tuple, will return the address
+          where the node is reachable.  This can be used to map the addresses at
+          which the nodes _think_ they are, to addresses at which a client may
+          reach them, such as when they sit behind a proxy.
 
     | Rest of the arguments will be passed to the
       :class:`~redis.asyncio.connection.Connection` instances when created
