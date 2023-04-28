@@ -466,7 +466,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         read_from_replicas: bool = False,
         dynamic_startup_nodes: bool = True,
         url: Optional[str] = None,
-        host_port_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
+        address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
         **kwargs,
     ):
         """
@@ -595,7 +595,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             from_url=from_url,
             require_full_coverage=require_full_coverage,
             dynamic_startup_nodes=dynamic_startup_nodes,
-            host_port_remap=host_port_remap,
+            address_remap=address_remap,
             **kwargs,
         )
 
@@ -1271,7 +1271,7 @@ class NodesManager:
         lock=None,
         dynamic_startup_nodes=True,
         connection_pool_class=ConnectionPool,
-        host_port_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
+        address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
         **kwargs,
     ):
         self.nodes_cache = {}
@@ -1283,7 +1283,7 @@ class NodesManager:
         self._require_full_coverage = require_full_coverage
         self._dynamic_startup_nodes = dynamic_startup_nodes
         self.connection_pool_class = connection_pool_class
-        self.host_port_remap = host_port_remap
+        self.address_remap = address_remap
         self._moved_exception = None
         self.connection_kwargs = kwargs
         self.read_load_balancer = LoadBalancer()
@@ -1603,8 +1603,8 @@ class NodesManager:
         internal value.  Useful if the client is not connecting directly
         to the cluster.
         """
-        if self.host_port_remap:
-            return self.host_port_remap(host, port)
+        if self.address_remap:
+            return self.address_remap((host, port))
         return host, port
 
 

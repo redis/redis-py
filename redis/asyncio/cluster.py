@@ -252,7 +252,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_certfile: Optional[str] = None,
         ssl_check_hostname: bool = False,
         ssl_keyfile: Optional[str] = None,
-        host_port_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
+        address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -344,7 +344,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             startup_nodes,
             require_full_coverage,
             kwargs,
-            host_port_remap=host_port_remap,
+            address_remap=address_remap,
         )
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self.read_from_replicas = read_from_replicas
@@ -1067,7 +1067,7 @@ class NodesManager:
         "require_full_coverage",
         "slots_cache",
         "startup_nodes",
-        "host_port_remap",
+        "address_remap",
     )
 
     def __init__(
@@ -1075,12 +1075,12 @@ class NodesManager:
         startup_nodes: List["ClusterNode"],
         require_full_coverage: bool,
         connection_kwargs: Dict[str, Any],
-        host_port_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
+        address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
     ) -> None:
         self.startup_nodes = {node.name: node for node in startup_nodes}
         self.require_full_coverage = require_full_coverage
         self.connection_kwargs = connection_kwargs
-        self.host_port_remap = host_port_remap
+        self.address_remap = address_remap
 
         self.default_node: "ClusterNode" = None
         self.nodes_cache: Dict[str, "ClusterNode"] = {}
@@ -1338,8 +1338,8 @@ class NodesManager:
         internal value.  Useful if the client is not connecting directly
         to the cluster.
         """
-        if self.host_port_remap:
-            return self.host_port_remap(host, port)
+        if self.address_remap:
+            return self.address_remap((host, port))
         return host, port
 
 

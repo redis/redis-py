@@ -874,7 +874,7 @@ class TestRedisClusterObj:
         # Rollback to the old default node
         r.replace_default_node(curr_default_node)
 
-    async def test_host_port_remap(self, create_redis, redis_addr):
+    async def test_address_remap(self, create_redis, redis_addr):
         """Test that we can create a rediscluster object with
         a host-port remapper and map connections through proxy objects
         """
@@ -884,9 +884,10 @@ class TestRedisClusterObj:
         n = 6
         ports = [redis_addr[1] + i for i in range(n)]
 
-        def host_port_remap(host, port):
+        def address_remap(address):
             # remap first three nodes to our local proxy
             # old = host, port
+            host, port = address
             if int(port) in ports:
                 host, port = "127.0.0.1", int(port) + offset
             # print(f"{old} {host, port}")
@@ -901,7 +902,7 @@ class TestRedisClusterObj:
         try:
             # create cluster:
             r = await create_redis(
-                cls=RedisCluster, flushdb=False, host_port_remap=host_port_remap
+                cls=RedisCluster, flushdb=False, address_remap=address_remap
             )
             try:
                 assert await r.ping() is True

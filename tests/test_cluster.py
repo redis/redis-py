@@ -907,7 +907,7 @@ class TestRedisClusterObj:
         assert "myself" not in nodes.get(curr_default_node.name).get("flags")
         assert r.get_default_node() != curr_default_node
 
-    def test_host_port_remap(self, request, redis_addr):
+    def test_address_remap(self, request, redis_addr):
         """Test that we can create a rediscluster object with
         a host-port remapper and map connections through proxy objects
         """
@@ -917,9 +917,10 @@ class TestRedisClusterObj:
         n = 6
         ports = [redis_addr[1] + i for i in range(n)]
 
-        def host_port_remap(host, port):
+        def address_remap(address):
             # remap first three nodes to our local proxy
             # old = host, port
+            host, port = address
             if int(port) in ports:
                 host, port = "127.0.0.1", int(port) + offset
             # print(f"{old} {host, port}")
@@ -935,7 +936,7 @@ class TestRedisClusterObj:
         try:
             # create cluster:
             r = _get_client(
-                RedisCluster, request, flushdb=False, host_port_remap=host_port_remap
+                RedisCluster, request, flushdb=False, address_remap=address_remap
             )
             try:
                 assert r.ping() is True
