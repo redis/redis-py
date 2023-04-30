@@ -1710,6 +1710,15 @@ class TestRedisCommands:
         assert await r.zrevrank("a", "a2") == 3
         assert await r.zrevrank("a", "a6") is None
 
+    @skip_if_server_version_lt("7.2.0")
+    async def test_zrevrank_withscore(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
+        assert await r.zrevrank("a", "a1") == 4
+        assert await r.zrevrank("a", "a2") == 3
+        assert await r.zrevrank("a", "a6") is None
+        assert await r.zrevrank("a", "a3", withscore=True) == [2, "3"]
+        assert await r.zrevrank("a", "a6", withscore=True) is None
+
     async def test_zscore(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         assert await r.zscore("a", "a1") == 1.0
