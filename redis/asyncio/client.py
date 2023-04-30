@@ -455,7 +455,7 @@ class Redis(
     _DEL_MESSAGE = "Unclosed Redis client"
 
     def __del__(self, _warnings: Any = warnings) -> None:
-        if self.connection is not None:
+        if hasattr(self, "connection") and (self.connection is not None):
             _warnings.warn(
                 f"Unclosed client session {self!r}", ResourceWarning, source=self
             )
