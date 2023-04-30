@@ -861,6 +861,8 @@ class TestRedisCommands:
         # make sure other attributes are typed correctly
         assert isinstance(slowlog[0]["start_time"], int)
         assert isinstance(slowlog[0]["duration"], int)
+        assert isinstance(slowlog[0]["client_address"], bytes)
+        assert isinstance(slowlog[0]["client_name"], bytes)
 
         # Mock result if we didn't get slowlog complexity info.
         if "complexity" not in slowlog[0]:
