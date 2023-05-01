@@ -158,12 +158,13 @@ class BaseParser:
         "NOPERM": NoPermissionError,
     }
 
-    def parse_error(self, response):
+    @classmethod
+    def parse_error(cls, response):
         "Parse an error response"
         error_code = response.split(" ")[0]
-        if error_code in self.EXCEPTION_CLASSES:
+        if error_code in cls.EXCEPTION_CLASSES:
             response = response[len(error_code) + 1 :]
-            exception_class = self.EXCEPTION_CLASSES[error_code]
+            exception_class = cls.EXCEPTION_CLASSES[error_code]
             if isinstance(exception_class, dict):
                 exception_class = exception_class.get(response, ResponseError)
             return exception_class(response)
@@ -778,20 +779,22 @@ class AbstractConnection:
     def disconnect(self, *args):
         "Disconnects from the Redis server"
         self._parser.on_disconnect()
-        if self._sock is None:
+
+        conn_sock = self._sock
+        self._sock = None
+        if conn_sock is None:
             return
 
         if os.getpid() == self.pid:
             try:
-                self._sock.shutdown(socket.SHUT_RDWR)
+                conn_sock.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
 
         try:
-            self._sock.close()
+            conn_sock.close()
         except OSError:
             pass
-        self._sock = None
 
     def _send_ping(self):
         """Send PING, expect PONG in return"""

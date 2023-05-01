@@ -2646,6 +2646,15 @@ class TestRedisCommands:
         assert r.zrevrank("a", "a2") == 3
         assert r.zrevrank("a", "a6") is None
 
+    @skip_if_server_version_lt("7.2.0")
+    def test_zrevrank_withscore(self, r):
+        r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
+        assert r.zrevrank("a", "a1") == 4
+        assert r.zrevrank("a", "a2") == 3
+        assert r.zrevrank("a", "a6") is None
+        assert r.zrevrank("a", "a3", withscore=True) == [2, "3"]
+        assert r.zrevrank("a", "a6", withscore=True) is None
+
     def test_zscore(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         assert r.zscore("a", "a1") == 1.0
@@ -3512,6 +3521,12 @@ class TestRedisCommands:
         )
         # instead of save the geo score, the distance is saved.
         assert r.zscore("places_barcelona", "place1") == 88.05060698409301
+
+    @skip_if_server_version_lt("3.2.0")
+    def test_georadius_Issue2609(self, r):
+        # test for issue #2609 (Geo search functions don't work with execute_command)
+        r.geoadd(name="my-key", values=[1, 2, "data"])
+        assert r.execute_command("GEORADIUS", "my-key", 1, 2, 400, "m") == [b"data"]
 
     @skip_if_server_version_lt("3.2.0")
     def test_georadius(self, r):
