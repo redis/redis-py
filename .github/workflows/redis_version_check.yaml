@@ -1,10 +1,18 @@
 name: Redis Daily Version Check
 on:
+
   workflow_dispatch:
+
+  pull_request:
+    branches:
+      - master
+      - '[0.9]-[0.9]'
+
   push:
     branches:
       - master
       - '[0.9]-[0.9]'
+
   schedule:
     - cron: '0 3 * * *'
 
