@@ -435,7 +435,7 @@ class TestRedisClusterObj:
         with patch.object(Redis, "parse_response") as parse_response:
             with patch.object(NodesManager, "initialize", autospec=True) as initialize:
                 with patch.multiple(
-                        Connection, send_command=DEFAULT, connect=DEFAULT, can_read=DEFAULT
+                    Connection, send_command=DEFAULT, connect=DEFAULT, can_read=DEFAULT
                 ) as mocks:
                     # simulate 7006 as a failed node
                     def parse_response_mock(connection, command_name, **options):
@@ -1967,6 +1967,7 @@ class TestClusterRedisCommands:
 
         r.geoadd("{foo}barcelona", values)
         r.geosearchstore(
+
             "{foo}places_barcelona",
             "{foo}barcelona",
             longitude=2.191,
@@ -2656,7 +2657,7 @@ class TestClusterPipeline:
             r.pipeline(shard_hint=True)
 
         assert (
-                str(ex.value).startswith("shard_hint is deprecated in cluster mode") is True
+            str(ex.value).startswith("shard_hint is deprecated in cluster mode") is True
         )
 
     def test_redis_cluster_pipeline(self, r):

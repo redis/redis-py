@@ -635,9 +635,9 @@ class ClusterManagementCommands(ManagementCommands):
 
     def cluster_myshardid(self, target_nodes=None):
         """
-        Returns details about the shards of the cluster.
+        Returns the shard ID of the node.
 
-        For more information see https://redis.io/commands/cluster-shards
+        For more information see https://redis.io/commands/cluster-myshardid/
         """
         return self.execute_command("CLUSTER MYSHARDID", target_nodes=target_nodes)
 
