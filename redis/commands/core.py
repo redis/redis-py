@@ -4693,13 +4693,22 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZREMRANGEBYSCORE", name, min, max)
 
-    def zrevrank(self, name: KeyT, value: EncodableT) -> ResponseT:
+    def zrevrank(
+        self,
+        name: KeyT,
+        value: EncodableT,
+        withscore: bool = False,
+    ) -> ResponseT:
         """
         Returns a 0-based value indicating the descending rank of
-        ``value`` in sorted set ``name``
+        ``value`` in sorted set ``name``.
+        The optional ``withscore`` argument supplements the command's
+        reply with the score of the element returned.
 
         For more information see https://redis.io/commands/zrevrank
         """
+        if withscore:
+            return self.execute_command("ZREVRANK", name, value, "WITHSCORE")
         return self.execute_command("ZREVRANK", name, value)
 
     def zscore(self, name: KeyT, value: EncodableT) -> ResponseT:

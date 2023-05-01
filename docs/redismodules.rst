@@ -44,7 +44,7 @@ These are the commands for interacting with the `RedisBloom module <https://redi
     import redis
     r = redis.Redis()
     r.topk().reserve("mytopk", 3, 50, 4, 0.9)
-    r.topk().info("mytopk)
+    r.topk().info("mytopk")
 
 .. automodule:: redis.commands.bf.commands
     :members: BFCommands, CFCommands, CMSCommands, TOPKCommands
