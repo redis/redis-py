@@ -1,3 +1,4 @@
+    * Add `address_remap` parameter to `RedisCluster`
     * Fix incorrect usage of once flag in async Sentinel
     * asyncio: Fix memory leak caused by hiredis (#2693)
     * Allow data to drain from async PythonParser when reading during a disconnect()
