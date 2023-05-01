@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
+        fail-fast: false
         redis: ['5.0.14', '6.0', '6.2', '7.0', '7.2-rc']
         python-version: ['3.11']
     steps:
