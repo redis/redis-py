@@ -779,20 +779,22 @@ class AbstractConnection:
     def disconnect(self, *args):
         "Disconnects from the Redis server"
         self._parser.on_disconnect()
-        if self._sock is None:
+
+        conn_sock = self._sock
+        self._sock = None
+        if conn_sock is None:
             return
 
         if os.getpid() == self.pid:
             try:
-                self._sock.shutdown(socket.SHUT_RDWR)
+                conn_sock.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
 
         try:
-            self._sock.close()
+            conn_sock.close()
         except OSError:
             pass
-        self._sock = None
 
     def _send_ping(self):
         """Send PING, expect PONG in return"""
