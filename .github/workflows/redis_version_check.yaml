@@ -21,9 +21,10 @@ jobs:
   sanity_test_redis:
     name: Redis ${{matrix.redis}} Sanity Test
     services:
-      image: redis:${{matrix.redis}}
-      ports:
-        - 6379:6379
+      redis:
+        image: redis:${{matrix.redis}}
+        ports:
+          - 6379:6379
     runs-on: ubuntu-latest
     strategy:
       matrix:
