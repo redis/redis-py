@@ -110,7 +110,7 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
         return slots_to_keys
 
     def _partition_pairs_by_slot(
-            self, mapping: Mapping[AnyKeyT, EncodableT]
+        self, mapping: Mapping[AnyKeyT, EncodableT]
     ) -> Dict[int, List[EncodableT]]:
         """Split pairs into a dictionary that maps a slot to a list of pairs."""
 
@@ -122,11 +122,12 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
         return slots_to_pairs
 
     def _execute_pipeline_by_slot(
-            self, command: str, slots_to_args: Mapping[int, Iterable[EncodableT]]
+        self, command: str, slots_to_args: Mapping[int, Iterable[EncodableT]]
     ) -> List[Any]:
         read_from_replicas = self.read_from_replicas and command in READ_COMMANDS
         pipe = self.pipeline()
         [
+            pipe.execute_command(
             pipe.execute_command(
                 command,
                 *slot_args,
@@ -139,10 +140,10 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
         return pipe.execute()
 
     def _reorder_keys_by_command(
-            self,
-            keys: Iterable[KeyT],
-            slots_to_args: Mapping[int, Iterable[EncodableT]],
-            responses: Iterable[Any],
+        self,
+        keys: Iterable[KeyT],
+        slots_to_args: Mapping[int, Iterable[EncodableT]],
+        responses: Iterable[Any],
     ) -> List[Any]:
         results = {
             k: v
@@ -318,7 +319,7 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
         return sum(await self._execute_pipeline_by_slot(command, slots_to_keys))
 
     async def _execute_pipeline_by_slot(
-            self, command: str, slots_to_args: Mapping[int, Iterable[EncodableT]]
+       self, command: str, slots_to_args: Mapping[int, Iterable[EncodableT]]
     ) -> List[Any]:
         if self._initialize:
             await self.initialize()
@@ -381,7 +382,7 @@ class ClusterManagementCommands(ManagementCommands):
         return self.execute_command("CLUSTER MYID", target_nodes=target_node)
 
     def cluster_addslots(
-            self, target_node: "TargetNodesT", *slots: EncodableT
+        self, target_node: "TargetNodesT", *slots: EncodableT
     ) -> ResponseT:
         """
         Assign new hash slots to receiving node. Sends to specified node.
@@ -396,7 +397,7 @@ class ClusterManagementCommands(ManagementCommands):
         )
 
     def cluster_addslotsrange(
-            self, target_node: "TargetNodesT", *slots: EncodableT
+        self, target_node: "TargetNodesT", *slots: EncodableT
     ) -> ResponseT:
         """
         Similar to the CLUSTER ADDSLOTS command.
@@ -454,7 +455,7 @@ class ClusterManagementCommands(ManagementCommands):
         return self.execute_command("CLUSTER DELSLOTSRANGE", *slots)
 
     def cluster_failover(
-            self, target_node: "TargetNodesT", option: Optional[str] = None
+        self, target_node: "TargetNodesT", option: Optional[str] = None
     ) -> ResponseT:
         """
         Forces a slave to perform a manual failover of its master
@@ -497,7 +498,7 @@ class ClusterManagementCommands(ManagementCommands):
         return self.execute_command("CLUSTER KEYSLOT", key)
 
     def cluster_meet(
-            self, host: str, port: int, target_nodes: Optional["TargetNodesT"] = None
+        self, host: str, port: int, target_nodes: Optional["TargetNodesT"] = None
     ) -> ResponseT:
         """
         Force a node cluster to handshake with another node.
@@ -519,7 +520,7 @@ class ClusterManagementCommands(ManagementCommands):
         return self.execute_command("CLUSTER NODES")
 
     def cluster_replicate(
-            self, target_nodes: "TargetNodesT", node_id: str
+        self, target_nodes: "TargetNodesT", node_id: str
     ) -> ResponseT:
         """
         Reconfigure a node as a slave of the specified master node
@@ -531,7 +532,7 @@ class ClusterManagementCommands(ManagementCommands):
         )
 
     def cluster_reset(
-            self, soft: bool = True, target_nodes: Optional["TargetNodesT"] = None
+        self, soft: bool = True, target_nodes: Optional["TargetNodesT"] = None
     ) -> ResponseT:
         """
         Reset a Redis Cluster node
@@ -546,7 +547,7 @@ class ClusterManagementCommands(ManagementCommands):
         )
 
     def cluster_save_config(
-            self, target_nodes: Optional["TargetNodesT"] = None
+        self, target_nodes: Optional["TargetNodesT"] = None
     ) -> ResponseT:
         """
         Forces the node to save cluster state on disk
@@ -564,7 +565,7 @@ class ClusterManagementCommands(ManagementCommands):
         return self.execute_command("CLUSTER GETKEYSINSLOT", slot, num_keys)
 
     def cluster_set_config_epoch(
-            self, epoch: int, target_nodes: Optional["TargetNodesT"] = None
+        self, epoch: int, target_nodes: Optional["TargetNodesT"] = None
     ) -> ResponseT:
         """
         Set the configuration epoch in a new node
@@ -576,7 +577,7 @@ class ClusterManagementCommands(ManagementCommands):
         )
 
     def cluster_setslot(
-            self, target_node: "TargetNodesT", node_id: str, slot_id: int, state: str
+        self, target_node: "TargetNodesT", node_id: str, slot_id: int, state: str
     ) -> ResponseT:
         """
         Bind an hash slot to a specific node
@@ -605,7 +606,7 @@ class ClusterManagementCommands(ManagementCommands):
         return self.execute_command("CLUSTER SETSLOT", slot_id, "STABLE")
 
     def cluster_replicas(
-            self, node_id: str, target_nodes: Optional["TargetNodesT"] = None
+        self, node_id: str, target_nodes: Optional["TargetNodesT"] = None
     ) -> ResponseT:
         """
         Provides a list of replica nodes replicating from the specified primary
@@ -726,16 +727,16 @@ class ClusterDataAccessCommands(DataAccessCommands):
     """
 
     def stralgo(
-            self,
-            algo: Literal["LCS"],
-            value1: KeyT,
-            value2: KeyT,
-            specific_argument: Union[Literal["strings"], Literal["keys"]] = "strings",
-            len: bool = False,
-            idx: bool = False,
-            minmatchlen: Optional[int] = None,
-            withmatchlen: bool = False,
-            **kwargs,
+        self,
+        algo: Literal["LCS"],
+        value1: KeyT,
+        value2: KeyT,
+        specific_argument: Union[Literal["strings"], Literal["keys"]] = "strings",
+        len: bool = False,
+        idx: bool = False,
+        minmatchlen: Optional[int] = None,
+        withmatchlen: bool = False,
+        **kwargs,
     ) -> ResponseT:
         """
         Implements complex algorithms that operate on strings.
@@ -773,11 +774,11 @@ class ClusterDataAccessCommands(DataAccessCommands):
         )
 
     def scan_iter(
-            self,
-            match: Optional[PatternT] = None,
-            count: Optional[int] = None,
-            _type: Optional[str] = None,
-            **kwargs,
+        self,
+        match: Optional[PatternT] = None,
+        count: Optional[int] = None,
+        _type: Optional[str] = None,
+        **kwargs,
     ) -> Iterator:
         # Do the first query with cursor=0 for all nodes
         cursors, data = self.scan(match=match, count=count, _type=_type, **kwargs)
@@ -819,11 +820,11 @@ class AsyncClusterDataAccessCommands(
     """
 
     async def scan_iter(
-            self,
-            match: Optional[PatternT] = None,
-            count: Optional[int] = None,
-            _type: Optional[str] = None,
-            **kwargs,
+       self,
+       match: Optional[PatternT] = None,
+       count: Optional[int] = None,
+       _type: Optional[str] = None,
+       **kwargs,
     ) -> AsyncIterator:
         # Do the first query with cursor=0 for all nodes
         cursors, data = await self.scan(match=match, count=count, _type=_type, **kwargs)
