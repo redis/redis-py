@@ -1,0 +1,32 @@
+name: Redis Daily Version Check
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - '[0.9]-[0.9]'
+  schedule:
+    - cron: '0 3 * * *'
+
+jobs:
+
+  sanity_test_redis:
+    name: Redis ${{matrix.redis}} Sanity Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        redis: ['5', '6.', '6.2', '7', '7.2-rc']
+        python-version: ['3.11']
+    steps:
+       - uses: actions/checkout@v3
+       - uses: actions/setup-python@v4
+         with:
+           python-version: ${{ matrix.python-version }}
+           cache: 'pip'
+       - name: install dependencies
+         run: |
+           pip install -U setuptools wheel
+           pip install -r dev_requirements.txt
+       - name: run tests
+         run: |
+           pytest -m 'not onlycluster and not redismod'
