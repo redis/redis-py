@@ -479,4 +479,4 @@ def is_resp2_connection(r):
         protocol = r.connection_pool.connection_kwargs.get("protocol")
     elif isinstance(r, redis.RedisCluster):
         protocol = r.nodes_manager.connection_kwargs.get("protocol")
-    return protocol == "2" or protocol is None
+    return protocol in ["2", 2, None]
