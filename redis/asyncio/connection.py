@@ -831,8 +831,8 @@ class Connection:
     async def read_response(
         self,
         disable_decoding: bool = False,
-        *,
         timeout: Optional[float] = None,
+        *,
         disconnect_on_error: bool = True,
     ):
         """Read the response from a previously sent command"""

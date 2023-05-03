@@ -20,7 +20,7 @@ from tests.conftest import (
     skip_unless_arch_bits,
 )
 
-if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
+if sys.version_info >= (3, 11, 3):
     from asyncio import timeout as async_timeout
 else:
     from async_timeout import timeout as async_timeout
@@ -3032,7 +3032,7 @@ class TestRedisCommands:
             # If the following is not done, further Timout operations will fail,
             # because the timeout won't catch its Cancelled Error if the task
             # has a pending cancel.  Python documentation probably should reflect this.
-            if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
+            if sys.version_info >= (3, 11):
                 asyncio.current_task().uncancel()
             # if all is well, we can continue.  The following should not hang.
             await r.set("status", "down")
