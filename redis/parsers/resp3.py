@@ -88,7 +88,7 @@ class _RESP3Parser(_RESPBase):
             ]
             try:
                 response = set(response)
-            except TypeError as e:
+            except TypeError:
                 pass
         # map response
         elif byte == b"%":
