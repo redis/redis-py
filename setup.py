@@ -21,6 +21,8 @@ setup(
             "redis.commands.graph",
         ]
     ),
+    package_data={"redis": ["py.typed"]},
+    include_package_data=True,
     url="https://github.com/redis/redis-py",
     project_urls={
         "Documentation": "https://redis.readthedocs.io/en/latest/",
