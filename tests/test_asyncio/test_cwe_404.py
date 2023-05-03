@@ -172,8 +172,8 @@ async def test_standalone_pipeline(delay, redis_addr):
                 with pytest.raises(asyncio.CancelledError):
                     await t
 
-                # we have now cancelled the pieline in the middle of a request, make sure
-                # that the connection is still usable
+                # we have now cancelled the pieline in the middle of a request,
+                # make sure that the connection is still usable
                 pipe.get("bar")
                 pipe.ping()
                 pipe.get("foo")
