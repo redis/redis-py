@@ -1,3 +1,4 @@
+    * Fix `xadd` command to accept non-negative `maxlen` including 0
     * Add `address_remap` parameter to `RedisCluster`
     * Fix incorrect usage of once flag in async Sentinel
     * asyncio: Fix memory leak caused by hiredis (#2693)
