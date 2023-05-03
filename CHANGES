@@ -1,3 +1,4 @@
+    * Add `py.typed` file to the root of the package to proclaim that the package is typed
     * Add `address_remap` parameter to `RedisCluster`
     * Fix incorrect usage of once flag in async Sentinel
     * asyncio: Fix memory leak caused by hiredis (#2693)
