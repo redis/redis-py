@@ -317,9 +317,14 @@ class TestRedisCommands:
         assert set(acl["keys"]) == {"~cache:*", "~objects:*"}
         assert len(acl["passwords"]) == 2
         assert set(acl["channels"]) == {"&message:*"}
-        assert acl["selectors"] == [
-            ["commands", "-@all +set", "keys", "%W~app*", "channels", ""]
-        ]
+        if is_resp2_connection(r):
+            assert acl["selectors"] == [
+                ["commands", "-@all +set", "keys", "%W~app*", "channels", ""]
+            ]
+        else:
+            assert acl["selectors"] == [
+                {"commands": "-@all +set", "keys": "%W~app*", "channels": ""}
+            ]
 
     @skip_if_server_version_lt("6.0.0")
     def test_acl_help(self, r):

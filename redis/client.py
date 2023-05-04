@@ -626,17 +626,17 @@ def parse_acl_getuser(response, **options):
         if data["channels"] == [""]:
             data["channels"] = []
     if "selectors" in data:
-        data["selectors"] = [
-            list(map(str_if_bytes, selector)) for selector in data["selectors"]
-        ]
+        if data["selectors"] != [] and isinstance(data["selectors"][0], list):
+            data["selectors"] = [
+                list(map(str_if_bytes, selector)) for selector in data["selectors"]
+            ]
+        elif data["selectors"] != []:
+            data["selectors"] = [{str_if_bytes(k): str_if_bytes(v) for k, v in selector.items()} for selector in data["selectors"]]
 
     # split 'commands' into separate 'categories' and 'commands' lists
     commands, categories = [], []
     for command in data["commands"].split(" "):
-        if "@" in command:
-            categories.append(command)
-        else:
-            commands.append(command)
+        categories.append(command) if "@" in command else commands.append(command)
 
     data["commands"] = commands
     data["categories"] = categories
