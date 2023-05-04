@@ -694,6 +694,13 @@ class TestRedisCommands:
             r.client_no_evict()
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.2.0")
+    def test_client_no_touch(self, r):
+        assert r.client_no_touch("ON")
+        with pytest.raises(TypeError):
+            r.client_no_touch()
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("3.2.0")
     def test_client_reply(self, r, r_timeout):
         assert r_timeout.client_reply("ON") == b"OK"
