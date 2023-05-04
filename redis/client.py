@@ -574,6 +574,26 @@ def parse_command(response, **options):
     return commands
 
 
+def parse_command_resp3(response, **options):
+    commands = {}
+    for command in response:
+        cmd_dict = {}
+        cmd_name = str_if_bytes(command[0])
+        cmd_dict["name"] = cmd_name
+        cmd_dict["arity"] = command[1]
+        cmd_dict["flags"] = command[2]
+        cmd_dict["first_key_pos"] = command[3]
+        cmd_dict["last_key_pos"] = command[4]
+        cmd_dict["step_count"] = command[5]
+        cmd_dict["acl_categories"] = command[6]
+        cmd_dict["tips"] = command[7]
+        cmd_dict["key_specifications"] = command[8]
+        cmd_dict["subcommands"] = command[9]
+
+        commands[cmd_name] = cmd_dict
+    return commands
+
+
 def parse_pubsub_numsub(response, **options):
     return list(zip(response[0::2], response[1::2]))
 
@@ -874,6 +894,7 @@ class AbstractRedis:
         if isinstance(r, list)
         else bool_ok(r),
         **string_keys_to_dict("XREAD XREADGROUP", parse_xread_resp3),
+        "COMMAND": parse_command_resp3,
         "STRALGO": lambda r, **options: {
             str_if_bytes(key): str_if_bytes(value) for key, value in r.items()
         }
