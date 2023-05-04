@@ -1109,7 +1109,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
 
         self.response_callbacks = CaseInsensitiveDict(self.__class__.RESPONSE_CALLBACKS)
 
-        if self.connection_pool.connection_kwargs.get("protocol") == "3":
+        if self.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
             self.response_callbacks.update(self.__class__.RESP3_RESPONSE_CALLBACKS)
 
     def __repr__(self):
