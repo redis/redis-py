@@ -1,6 +1,5 @@
 import asyncio
 import contextlib
-import urllib.parse
 
 import pytest
 
@@ -9,23 +8,14 @@ from redis.asyncio.cluster import RedisCluster
 from redis.asyncio.connection import async_timeout
 
 
-@pytest.fixture
-def redis_addr(request):
-    redis_url = request.config.getoption("--redis-url")
-    scheme, netloc = urllib.parse.urlparse(redis_url)[:2]
-    assert scheme == "redis"
-    if ":" in netloc:
-        return netloc.split(":")
-    else:
-        return netloc, "6379"
-
-
 class DelayProxy:
     def __init__(self, addr, redis_addr, delay: float = 0.0):
         self.addr = addr
         self.redis_addr = redis_addr
         self.delay = delay
         self.send_event = asyncio.Event()
+        self.server = None
+        self.task = None
 
     async def __aenter__(self):
         await self.start()
@@ -42,7 +32,7 @@ class DelayProxy:
         self.server = await asyncio.start_server(
             self.handle, *self.addr, reuse_address=True
         )
-        self.ROUTINE = asyncio.create_task(self.server.serve_forever())
+        self.task = asyncio.create_task(self.server.serve_forever())
 
     @contextlib.contextmanager
     def set_delay(self, delay: float = 0.0):
@@ -71,9 +61,9 @@ class DelayProxy:
 
     async def stop(self):
         # clean up enough so that we can reuse the looper
-        self.ROUTINE.cancel()
+        self.task.cancel()
         try:
-            await self.ROUTINE
+            await self.task
         except asyncio.CancelledError:
             pass
         loop = self.server.get_loop()
@@ -100,11 +90,11 @@ class DelayProxy:
 
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
-async def test_standalone(delay, redis_addr):
+async def test_standalone(delay, master_host):
 
     # create a tcp socket proxy that relays data to Redis and back,
     # inserting 0.1 seconds of delay
-    async with DelayProxy(addr=("127.0.0.1", 5380), redis_addr=redis_addr) as dp:
+    async with DelayProxy(addr=("127.0.0.1", 5380), redis_addr=master_host) as dp:
 
         for b in [True, False]:
             # note that we connect to proxy, rather than to Redis directly
@@ -141,8 +131,8 @@ async def test_standalone(delay, redis_addr):
 @pytest.mark.xfail(reason="cancel does not cause disconnect")
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
-async def test_standalone_pipeline(delay, redis_addr):
-    async with DelayProxy(addr=("127.0.0.1", 5380), redis_addr=redis_addr) as dp:
+async def test_standalone_pipeline(delay, master_host):
+    async with DelayProxy(addr=("127.0.0.1", 5380), redis_addr=master_host) as dp:
         for b in [True, False]:
             async with Redis(
                 host="127.0.0.1", port=5380, single_connection_client=b
@@ -191,12 +181,13 @@ async def test_standalone_pipeline(delay, redis_addr):
 
 
 @pytest.mark.onlycluster
-async def test_cluster(request, redis_addr):
+async def test_cluster(master_host):
 
     delay = 0.1
     cluster_port = 6372
     remap_base = 7372
     n_nodes = 6
+    hostname, _ = master_host
 
     def remap(address):
         host, port = address
@@ -206,7 +197,7 @@ async def test_cluster(request, redis_addr):
     for i in range(n_nodes):
         port = cluster_port + i
         remapped = remap_base + i
-        forward_addr = redis_addr[0], port
+        forward_addr = hostname, port
         proxy = DelayProxy(addr=("127.0.0.1", remapped), redis_addr=forward_addr)
         proxies.append(proxy)
 
