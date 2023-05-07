@@ -8,7 +8,6 @@ import warnings
 from queue import LifoQueue, Queue
 from time import sleep
 from unittest.mock import DEFAULT, Mock, call, patch
-from urllib.parse import urlparse
 
 import pytest
 
@@ -123,18 +122,6 @@ class NodeProxy:
 
     def close(self):
         self.server.shutdown()
-
-
-@pytest.fixture
-def redis_addr(request):
-    redis_url = request.config.getoption("--redis-url")
-    scheme, netloc = urlparse(redis_url)[:2]
-    assert scheme == "redis"
-    if ":" in netloc:
-        host, port = netloc.split(":")
-        return host, int(port)
-    else:
-        return netloc, 6379
 
 
 @pytest.fixture()
@@ -907,7 +894,7 @@ class TestRedisClusterObj:
         assert "myself" not in nodes.get(curr_default_node.name).get("flags")
         assert r.get_default_node() != curr_default_node
 
-    def test_address_remap(self, request, redis_addr):
+    def test_address_remap(self, request, master_host):
         """Test that we can create a rediscluster object with
         a host-port remapper and map connections through proxy objects
         """
@@ -915,7 +902,8 @@ class TestRedisClusterObj:
         # we remap the first n nodes
         offset = 1000
         n = 6
-        ports = [redis_addr[1] + i for i in range(n)]
+        hostname, master_port = master_host
+        ports = [master_port + i for i in range(n)]
 
         def address_remap(address):
             # remap first three nodes to our local proxy
@@ -928,8 +916,7 @@ class TestRedisClusterObj:
 
         # create the proxies
         proxies = [
-            NodeProxy(("127.0.0.1", port + offset), (redis_addr[0], port))
-            for port in ports
+            NodeProxy(("127.0.0.1", port + offset), (hostname, port)) for port in ports
         ]
         for p in proxies:
             p.start()
