@@ -102,18 +102,6 @@ class NodeProxy:
             await writer.drain()
 
 
-@pytest.fixture
-def redis_addr(request):
-    redis_url = request.config.getoption("--redis-url")
-    scheme, netloc = urlparse(redis_url)[:2]
-    assert scheme == "redis"
-    if ":" in netloc:
-        host, port = netloc.split(":")
-        return host, int(port)
-    else:
-        return netloc, 6379
-
-
 @pytest_asyncio.fixture()
 async def slowlog(r: RedisCluster) -> None:
     """
@@ -874,7 +862,7 @@ class TestRedisClusterObj:
         # Rollback to the old default node
         r.replace_default_node(curr_default_node)
 
-    async def test_address_remap(self, create_redis, redis_addr):
+    async def test_address_remap(self, create_redis, master_host):
         """Test that we can create a rediscluster object with
         a host-port remapper and map connections through proxy objects
         """
@@ -882,7 +870,8 @@ class TestRedisClusterObj:
         # we remap the first n nodes
         offset = 1000
         n = 6
-        ports = [redis_addr[1] + i for i in range(n)]
+        hostname, master_port = master_host
+        ports = [master_port + i for i in range(n)]
 
         def address_remap(address):
             # remap first three nodes to our local proxy
@@ -895,8 +884,7 @@ class TestRedisClusterObj:
 
         # create the proxies
         proxies = [
-            NodeProxy(("127.0.0.1", port + offset), (redis_addr[0], port))
-            for port in ports
+            NodeProxy(("127.0.0.1", port + offset), (hostname, port)) for port in ports
         ]
         await asyncio.gather(*[p.start() for p in proxies])
         try:
