@@ -2,15 +2,15 @@
 
 ## Introduction
 
-First off, thank you for considering contributing to redis-py. We value
-community contributions!
+We appreciate your interest in considering contributing to redis-py.
+Community contributions mean a lot to us.
 
-## Contributions We Need
+## Contributions we need
 
-You may already know what you want to contribute \-- a fix for a bug you
+You may already know how you'd like to contribute, whether it's a fix for a bug you
 encountered, or a new feature your team wants to use.
 
-If you don't know what to contribute, keep an open mind! Improving
+If you don't know where to start, consider improving
 documentation, bug triaging, and writing tutorials are all examples of
 helpful contributions that mean less work for you.
 
@@ -166,19 +166,19 @@ When filing an issue, make sure to answer these five questions:
 4.  What did you expect to see?
 5.  What did you see instead?
 
-## How to Suggest a Feature or Enhancement
+## Suggest a feature or enhancement
 
 If you'd like to contribute a new feature, make sure you check our
 issue list to see if someone has already proposed it. Work may already
-be under way on the feature you want -- or we may have rejected a
+be underway on the feature you want or we may have rejected a
 feature like it already.
 
 If you don't see anything, open a new issue that describes the feature
 you would like and how it should work.
 
-## Code Review Process
+## Code review process
 
-The core team looks at Pull Requests on a regular basis. We will give
-feedback as as soon as possible. After feedback, we expect a response
+The core team regularly looks at pull requests. We will provide
+feedback as as soon as possible. After receiving our feedback, please respond
 within two weeks. After that time, we may close your PR if it isn't
 showing any activity.

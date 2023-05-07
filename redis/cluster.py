@@ -463,18 +463,19 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         return cls(url=url, **kwargs)
 
     def __init__(
-            self,
-            host: Optional[str] = None,
-            port: int = 6379,
-            startup_nodes: Optional[List["ClusterNode"]] = None,
-            cluster_error_retry_attempts: int = 3,
-            retry: Optional["Retry"] = None,
-            require_full_coverage: bool = False,
-            reinitialize_steps: int = 5,
-            read_from_replicas: bool = False,
-            dynamic_startup_nodes: bool = True,
-            url: Optional[str] = None,
-            **kwargs,
+        self,
+        host: Optional[str] = None,
+        port: int = 6379,
+        startup_nodes: Optional[List["ClusterNode"]] = None,
+        cluster_error_retry_attempts: int = 3,
+        retry: Optional["Retry"] = None,
+        require_full_coverage: bool = False,
+        reinitialize_steps: int = 5,
+        read_from_replicas: bool = False,
+        dynamic_startup_nodes: bool = True,
+        url: Optional[str] = None,
+        address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
+        **kwargs,
     ):
         """
          Initialize a new RedisCluster client.
@@ -522,6 +523,12 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             reinitialize_steps to 1.
             To avoid reinitializing the cluster on moved errors, set
             reinitialize_steps to 0.
+        :param address_remap:
+            An optional callable which, when provided with an internal network
+            address of a node, e.g. a `(host, port)` tuple, will return the address
+            where the node is reachable.  This can be used to map the addresses at
+            which the nodes _think_ they are, to addresses at which a client may
+            reach them, such as when they sit behind a proxy.
 
          :**kwargs:
              Extra arguments that will be sent into Redis instance when created
@@ -602,6 +609,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             from_url=from_url,
             require_full_coverage=require_full_coverage,
             dynamic_startup_nodes=dynamic_startup_nodes,
+            address_remap=address_remap,
             **kwargs,
         )
 
@@ -1270,14 +1278,15 @@ class LoadBalancer:
 
 class NodesManager:
     def __init__(
-            self,
-            startup_nodes,
-            from_url=False,
-            require_full_coverage=False,
-            lock=None,
-            dynamic_startup_nodes=True,
-            connection_pool_class=ConnectionPool,
-            **kwargs,
+        self,
+        startup_nodes,
+        from_url=False,
+        require_full_coverage=False,
+        lock=None,
+        dynamic_startup_nodes=True,
+        connection_pool_class=ConnectionPool,
+        address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
+        **kwargs,
     ):
         self.nodes_cache = {}
         self.slots_cache = {}
@@ -1288,6 +1297,7 @@ class NodesManager:
         self._require_full_coverage = require_full_coverage
         self._dynamic_startup_nodes = dynamic_startup_nodes
         self.connection_pool_class = connection_pool_class
+        self.address_remap = address_remap
         self._moved_exception = None
         self.connection_kwargs = kwargs
         self.read_load_balancer = LoadBalancer()
@@ -1510,6 +1520,7 @@ class NodesManager:
                 if host == "":
                     host = startup_node.host
                 port = int(primary_node[1])
+                host, port = self.remap_host_port(host, port)
 
                 target_node = self._get_or_create_cluster_node(
                     host, port, PRIMARY, tmp_nodes_cache
@@ -1526,6 +1537,7 @@ class NodesManager:
                         for replica_node in replica_nodes:
                             host = str_if_bytes(replica_node[0])
                             port = replica_node[1]
+                            host, port = self.remap_host_port(host, port)
 
                             target_replica_node = self._get_or_create_cluster_node(
                                 host, port, REPLICA, tmp_nodes_cache
@@ -1598,6 +1610,16 @@ class NodesManager:
         except TypeError:
             # The read_load_balancer is None, do nothing
             pass
+
+    def remap_host_port(self, host: str, port: int) -> Tuple[str, int]:
+        """
+        Remap the host and port returned from the cluster to a different
+        internal value.  Useful if the client is not connecting directly
+        to the cluster.
+        """
+        if self.address_remap:
+            return self.address_remap((host, port))
+        return host, port
 
 
 class ClusterPubSub(PubSub):
