@@ -453,7 +453,7 @@ class TestRedisCommands:
         assert await r.client_no_touch("OFF") == b"OK"
         with pytest.raises(TypeError):
             await r.client_no_touch()
-    
+
     async def test_config_get(self, r: redis.Redis):
         data = await r.config_get()
         assert "maxmemory" in data
