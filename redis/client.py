@@ -906,8 +906,12 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         arguments always win.
 
         """
+        single_connection_client = kwargs.pop("single_connection_client", False)
         connection_pool = ConnectionPool.from_url(url, **kwargs)
-        return cls(connection_pool=connection_pool)
+        return cls(
+            connection_pool=connection_pool,
+            single_connection_client=single_connection_client,
+        )
 
     def __init__(
         self,

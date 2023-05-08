@@ -271,3 +271,9 @@ async def test_connection_disconect_race(parser_class):
 
     vals = await asyncio.gather(do_read(), do_close())
     assert vals == [b"Hello, World!", None]
+
+
+@pytest.mark.onlynoncluster
+def test_create_single_connection_client_from_url():
+    client = Redis.from_url("redis://localhost:6379/0?", single_connection_client=True)
+    assert client.single_connection_client is True

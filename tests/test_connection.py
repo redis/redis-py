@@ -205,3 +205,11 @@ def test_pack_command(Class):
 
     actual = Class().pack_command(*cmd)[0]
     assert actual == expected, f"actual = {actual}, expected = {expected}"
+
+
+@pytest.mark.onlynoncluster
+def test_create_single_connection_client_from_url():
+    client = redis.Redis.from_url(
+        "redis://localhost:6379/0?", single_connection_client=True
+    )
+    assert client.connection is not None
