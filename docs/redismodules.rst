@@ -144,7 +144,7 @@ These are the commands for interacting with the `RedisTimeSeries module <https:/
 
     import redis
     r = redis.Redis()
-    r.ts().create(2, retension_msecs=5000)
+    r.ts().create(2, retention_msecs=5000)
 
 .. automodule:: redis.commands.timeseries.commands
     :members: TimeSeriesCommands

@@ -184,7 +184,7 @@ async def test_connection_parse_response_resume(r: redis.Redis):
     conn._parser._stream = MockStream(message, interrupt_every=2)
     for i in range(100):
         try:
-            response = await conn.read_response()
+            response = await conn.read_response(disconnect_on_error=False)
             break
         except MockStream.TestError:
             pass
