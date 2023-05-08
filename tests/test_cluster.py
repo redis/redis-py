@@ -1162,6 +1162,13 @@ class TestClusterRedisCommands:
                 for attribute in node.keys():
                     assert attribute in attributes
 
+    @skip_if_server_version_lt("7.2.0")
+    @skip_if_redis_enterprise()
+    def test_cluster_myshardid(self, r):
+        myshardid = r.cluster_myshardid()
+        assert isinstance(myshardid, str)
+        assert len(myshardid) > 0
+
     @skip_if_redis_enterprise()
     def test_cluster_addslots(self, r):
         node = r.get_random_node()
