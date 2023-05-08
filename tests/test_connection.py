@@ -160,7 +160,7 @@ def test_connection_parse_response_resume(r: redis.Redis, parser_class):
         conn._parser._sock = mock_socket
     for i in range(100):
         try:
-            response = conn.read_response()
+            response = conn.read_response(disconnect_on_error=False)
             break
         except MockSocket.TestError:
             pass
