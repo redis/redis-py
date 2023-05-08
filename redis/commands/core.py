@@ -763,7 +763,7 @@ class ManagementCommands(CommandsProtocol):
 
     def client_no_touch(self, mode: str) -> Union[Awaitable[str], str]:
         """
-        # Commands sent by the client will alter
+        # The command controls whether commands sent by the client will alter
         # the LRU/LFU of the keys they access.
         # When turned on, the current client will not change LFU/LRU stats,
         # unless it sends the TOUCH command.
