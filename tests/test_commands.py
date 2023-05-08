@@ -696,7 +696,8 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.2.0")
     def test_client_no_touch(self, r):
-        assert r.client_no_touch("ON")
+        assert r.client_no_touch("ON") == b"OK"
+        assert r.client_no_touch("OFF") == b"OK"
         with pytest.raises(TypeError):
             r.client_no_touch()
 
