@@ -128,7 +128,6 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
         pipe = self.pipeline()
         [
             pipe.execute_command(
-            pipe.execute_command(
                 command,
                 *slot_args,
                 target_nodes=[
@@ -319,7 +318,7 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
         return sum(await self._execute_pipeline_by_slot(command, slots_to_keys))
 
     async def _execute_pipeline_by_slot(
-       self, command: str, slots_to_args: Mapping[int, Iterable[EncodableT]]
+        self, command: str, slots_to_args: Mapping[int, Iterable[EncodableT]]
     ) -> List[Any]:
         if self._initialize:
             await self.initialize()
@@ -820,11 +819,11 @@ class AsyncClusterDataAccessCommands(
     """
 
     async def scan_iter(
-       self,
-       match: Optional[PatternT] = None,
-       count: Optional[int] = None,
-       _type: Optional[str] = None,
-       **kwargs,
+        self,
+        match: Optional[PatternT] = None,
+        count: Optional[int] = None,
+        _type: Optional[str] = None,
+        **kwargs,
     ) -> AsyncIterator:
         # Do the first query with cursor=0 for all nodes
         cursors, data = await self.scan(match=match, count=count, _type=_type, **kwargs)
