@@ -3496,8 +3496,8 @@ class StreamCommands(CommandsProtocol):
             raise DataError("Only one of ```maxlen``` or ```minid``` may be specified")
 
         if maxlen is not None:
-            if not isinstance(maxlen, int) or maxlen < 1:
-                raise DataError("XADD maxlen must be a positive integer")
+            if not isinstance(maxlen, int) or maxlen < 0:
+                raise DataError("XADD maxlen must be non-negative integer")
             pieces.append(b"MAXLEN")
             if approximate:
                 pieces.append(b"~")
