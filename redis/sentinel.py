@@ -6,6 +6,7 @@ from redis.commands import SentinelCommands
 from redis.connection import Connection, ConnectionPool, SSLConnection
 from redis.exceptions import ConnectionError, ReadOnlyError, ResponseError, TimeoutError
 from redis.utils import str_if_bytes
+from typing import Optional
 
 
 class MasterNotFoundError(ConnectionError):
@@ -53,9 +54,14 @@ class SentinelManagedConnection(Connection):
     def connect(self):
         return self.retry.call_with_retry(self._connect_retry, lambda error: None)
 
-    def read_response(self, disable_decoding=False):
+    def read_response(
+        self, disable_decoding=False, *, disconnect_on_error: Optional[bool] = False
+    ):
         try:
-            return super().read_response(disable_decoding=disable_decoding)
+            return super().read_response(
+                disable_decoding=disable_decoding,
+                disconnect_on_error=disconnect_on_error,
+            )
         except ReadOnlyError:
             if self.connection_pool.is_master:
                 # When talking to a master, a ReadOnlyError when likely
