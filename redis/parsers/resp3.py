@@ -97,7 +97,9 @@ class _RESP3Parser(_RESPBase):
             resp_dict = {}
             for _ in range(int(response)):
                 key = self._read_response(disable_decoding=disable_decoding)
-                resp_dict[key] = self._read_response(disable_decoding=disable_decoding, push_request=push_request)
+                resp_dict[key] = self._read_response(
+                    disable_decoding=disable_decoding, push_request=push_request
+                )
             response = resp_dict
         # push response
         elif byte == b">":
