@@ -67,11 +67,14 @@ class SentinelManagedConnection(Connection):
         self,
         disable_decoding: bool = False,
         timeout: Optional[float] = None,
+        *,
+        disconnect_on_error: Optional[float] = True,
     ):
         try:
             return await super().read_response(
                 disable_decoding=disable_decoding,
                 timeout=timeout,
+                disconnect_on_error=disconnect_on_error,
             )
         except ReadOnlyError:
             if self.connection_pool.is_master:
