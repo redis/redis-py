@@ -139,8 +139,12 @@ class Redis(
         arguments always win.
 
         """
+        single_connection_client = kwargs.pop("single_connection_client", False)
         connection_pool = ConnectionPool.from_url(url, **kwargs)
-        return cls(connection_pool=connection_pool)
+        return cls(
+            connection_pool=connection_pool,
+            single_connection_client=single_connection_client,
+        )
 
     def __init__(
         self,
@@ -455,7 +459,7 @@ class Redis(
     _DEL_MESSAGE = "Unclosed Redis client"
 
     def __del__(self, _warnings: Any = warnings) -> None:
-        if self.connection is not None:
+        if hasattr(self, "connection") and (self.connection is not None):
             _warnings.warn(
                 f"Unclosed client session {self!r}", ResourceWarning, source=self
             )
@@ -702,6 +706,11 @@ class PubSub:
             self.pending_unsubscribe_patterns = set()
 
     def close(self) -> Awaitable[NoReturn]:
+        # In case a connection property does not yet exist
+        # (due to a crash earlier in the Redis() constructor), return
+        # immediately as there is nothing to clean-up.
+        if not hasattr(self, "connection"):
+            return
         return self.reset()
 
     async def on_connect(self, connection: Connection):
@@ -792,7 +801,9 @@ class PubSub:
             await conn.connect()
 
         read_timeout = None if block else timeout
-        response = await self._execute(conn, conn.read_response, timeout=read_timeout)
+        response = await self._execute(
+            conn, conn.read_response, timeout=read_timeout, disconnect_on_error=False
+        )
 
         if conn.health_check_interval and response == self.health_check_response:
             # ignore the health check message as user might not expect it

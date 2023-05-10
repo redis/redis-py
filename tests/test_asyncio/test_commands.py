@@ -1,9 +1,11 @@
 """
 Tests async overrides of commands from their mixins
 """
+import asyncio
 import binascii
 import datetime
 import re
+import sys
 from string import ascii_letters
 
 import pytest
@@ -17,6 +19,11 @@ from tests.conftest import (
     skip_if_server_version_lt,
     skip_unless_arch_bits,
 )
+
+if sys.version_info >= (3, 11, 3):
+    from asyncio import timeout as async_timeout
+else:
+    from async_timeout import timeout as async_timeout
 
 REDIS_6_VERSION = "5.9.0"
 
@@ -445,6 +452,14 @@ class TestRedisCommands:
         assert await r.client_pause(timeout=1)
         with pytest.raises(exceptions.RedisError):
             await r.client_pause(timeout="not an integer")
+
+    @skip_if_server_version_lt("7.2.0")
+    @pytest.mark.onlynoncluster
+    async def test_client_no_touch(self, r: redis.Redis):
+        assert await r.client_no_touch("ON") == b"OK"
+        assert await r.client_no_touch("OFF") == b"OK"
+        with pytest.raises(TypeError):
+            await r.client_no_touch()
 
     async def test_config_get(self, r: redis.Redis):
         data = await r.config_get()
@@ -1709,6 +1724,15 @@ class TestRedisCommands:
         assert await r.zrevrank("a", "a1") == 4
         assert await r.zrevrank("a", "a2") == 3
         assert await r.zrevrank("a", "a6") is None
+
+    @skip_if_server_version_lt("7.2.0")
+    async def test_zrevrank_withscore(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
+        assert await r.zrevrank("a", "a1") == 4
+        assert await r.zrevrank("a", "a2") == 3
+        assert await r.zrevrank("a", "a6") is None
+        assert await r.zrevrank("a", "a3", withscore=True) == [2, "3"]
+        assert await r.zrevrank("a", "a6", withscore=True) is None
 
     async def test_zscore(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
@@ -2998,6 +3022,37 @@ class TestRedisCommands:
         assert isinstance(await r.module_list(), list)
         for x in await r.module_list():
             assert isinstance(x, dict)
+
+    @pytest.mark.onlynoncluster
+    async def test_interrupted_command(self, r: redis.Redis):
+        """
+        Regression test for issue #1128:  An Un-handled BaseException
+        will leave the socket with un-read response to a previous
+        command.
+        """
+        ready = asyncio.Event()
+
+        async def helper():
+            with pytest.raises(asyncio.CancelledError):
+                # blocking pop
+                ready.set()
+                await r.brpop(["nonexist"])
+            # If the following is not done, further Timout operations will fail,
+            # because the timeout won't catch its Cancelled Error if the task
+            # has a pending cancel.  Python documentation probably should reflect this.
+            if sys.version_info >= (3, 11):
+                asyncio.current_task().uncancel()
+            # if all is well, we can continue.  The following should not hang.
+            await r.set("status", "down")
+
+        task = asyncio.create_task(helper())
+        await ready.wait()
+        await asyncio.sleep(0.01)
+        # the task is now sleeping, lets send it an exception
+        task.cancel()
+        # If all is well, the task should finish right away, otherwise fail with Timeout
+        async with async_timeout(1.0):
+            await task
 
 
 @pytest.mark.onlynoncluster
