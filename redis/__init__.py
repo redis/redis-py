@@ -56,7 +56,7 @@ except metadata.PackageNotFoundError:
 try:
     VERSION = tuple(map(int_or_str, __version__.split(".")))
 except AttributeError:
-    VERSION = tuple(99, 99, 99)
+    VERSION = tuple([99, 99, 99])
 
 __all__ = [
     "AuthenticationError",

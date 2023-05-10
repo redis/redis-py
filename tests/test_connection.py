@@ -7,7 +7,13 @@ import pytest
 
 import redis
 from redis.backoff import NoBackoff
-from redis.connection import Connection, HiredisParser, PythonParser
+from redis.connection import (
+    Connection,
+    HiredisParser,
+    PythonParser,
+    SSLConnection,
+    UnixDomainSocketConnection,
+)
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
@@ -154,7 +160,7 @@ def test_connection_parse_response_resume(r: redis.Redis, parser_class):
         conn._parser._sock = mock_socket
     for i in range(100):
         try:
-            response = conn.read_response()
+            response = conn.read_response(disconnect_on_error=False)
             break
         except MockSocket.TestError:
             pass
@@ -163,3 +169,47 @@ def test_connection_parse_response_resume(r: redis.Redis, parser_class):
         pytest.fail("didn't receive a response")
     assert response
     assert i > 0
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.parametrize(
+    "Class",
+    [
+        Connection,
+        SSLConnection,
+        UnixDomainSocketConnection,
+    ],
+)
+def test_pack_command(Class):
+    """
+    This test verifies that the pack_command works
+    on all supported connections. #2581
+    """
+    cmd = (
+        "HSET",
+        "foo",
+        "key",
+        "value1",
+        b"key_b",
+        b"bytes str",
+        b"key_i",
+        67,
+        "key_f",
+        3.14159265359,
+    )
+    expected = (
+        b"*10\r\n$4\r\nHSET\r\n$3\r\nfoo\r\n$3\r\nkey\r\n$6\r\nvalue1\r\n"
+        b"$5\r\nkey_b\r\n$9\r\nbytes str\r\n$5\r\nkey_i\r\n$2\r\n67\r\n$5"
+        b"\r\nkey_f\r\n$13\r\n3.14159265359\r\n"
+    )
+
+    actual = Class().pack_command(*cmd)[0]
+    assert actual == expected, f"actual = {actual}, expected = {expected}"
+
+
+@pytest.mark.onlynoncluster
+def test_create_single_connection_client_from_url():
+    client = redis.Redis.from_url(
+        "redis://localhost:6379/0?", single_connection_client=True
+    )
+    assert client.connection is not None

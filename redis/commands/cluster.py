@@ -45,7 +45,6 @@ from .redismodules import RedisModuleCommands
 if TYPE_CHECKING:
     from redis.asyncio.cluster import TargetNodesT
 
-
 # Not complete, but covers the major ones
 # https://redis.io/commands
 READ_COMMANDS = frozenset(
@@ -633,6 +632,14 @@ class ClusterManagementCommands(ManagementCommands):
         For more information see https://redis.io/commands/cluster-shards
         """
         return self.execute_command("CLUSTER SHARDS", target_nodes=target_nodes)
+
+    def cluster_myshardid(self, target_nodes=None):
+        """
+        Returns the shard ID of the node.
+
+        For more information see https://redis.io/commands/cluster-myshardid/
+        """
+        return self.execute_command("CLUSTER MYSHARDID", target_nodes=target_nodes)
 
     def cluster_links(self, target_node: "TargetNodesT") -> ResponseT:
         """

@@ -2,6 +2,7 @@ import pytest
 
 import redis
 from redis.connection import Connection
+from redis.utils import HIREDIS_PACK_AVAILABLE
 
 from .conftest import _get_client
 
@@ -75,6 +76,10 @@ class TestEncodingErrors:
         assert r.get("a") == "foo\ufffd"
 
 
+@pytest.mark.skipif(
+    HIREDIS_PACK_AVAILABLE,
+    reason="Packing via hiredis does not preserve memoryviews",
+)
 class TestMemoryviewsAreNotPacked:
     def test_memoryviews_are_not_packed(self):
         c = Connection()
