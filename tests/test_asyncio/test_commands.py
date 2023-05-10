@@ -1645,6 +1645,15 @@ class TestRedisCommands:
         assert await r.zrank("a", "a2") == 1
         assert await r.zrank("a", "a6") is None
 
+    @skip_if_server_version_lt("7.2.0")
+    async def test_zrank_withscore(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
+        assert await r.zrank("a", "a1") == 0
+        assert await r.rank("a", "a2") == 1
+        assert await r.zrank("a", "a6") is None
+        assert await r.zrank("a", "a3", withscore=True) == [2, "3"]
+        assert await r.zrank("a", "a6", withscore=True) is None
+
     async def test_zrem(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         assert await r.zrem("a", "a2") == 1

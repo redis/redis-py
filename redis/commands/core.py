@@ -4654,13 +4654,22 @@ class SortedSetCommands(CommandsProtocol):
         options = {"withscores": withscores, "score_cast_func": score_cast_func}
         return self.execute_command(*pieces, **options)
 
-    def zrank(self, name: KeyT, value: EncodableT) -> ResponseT:
+    def zrank(
+        self,
+        name: KeyT,
+        value: EncodableT,
+        withscore: bool = False,
+    ) -> ResponseT:
         """
         Returns a 0-based value indicating the rank of ``value`` in sorted set
-        ``name``
+        ``name``.
+        The optional WITHSCORE argument supplements the command's
+        reply with the score of the element returned.
 
         For more information see https://redis.io/commands/zrank
         """
+        if withscore:
+            return self.execute_command("ZRANK", name, value, "WITHSCORE")
         return self.execute_command("ZRANK", name, value)
 
     def zrem(self, name: KeyT, *values: FieldT) -> ResponseT:
