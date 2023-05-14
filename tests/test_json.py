@@ -50,17 +50,32 @@ def test_json_get_jset(client):
 @pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "ReJSON")  # todo: update after the release
 def test_json_merge(client):
-    assert client.json().set("test_merge", Path.root_path(), '{"person":{"name":"John Doe","age":25,"address":{"home":"123 Main Street"},"phone":"123-456-7890"}}')
+    assert client.json().set(
+        "test_merge",
+        Path.root_path(),
+        '{"person":{"name":"John Doe","age":25,"address":{"home":"123 Main Street"},"phone":"123-456-7890"}}',
+    )
     assert client.json().merge("test_merge", Path.root_path(), '{"person":{"age":30}}')
-    assert client.json().get("test_merge") == '{"person":{"name":"John Doe","age":30,"address":{"home":"123 Main Street"},"phone":"123-456-7890"}}'
+    assert (
+        client.json().get("test_merge")
+        == '{"person":{"name":"John Doe","age":30,"address":{"home":"123 Main Street"},"phone":"123-456-7890"}}'
+    )
 
     # Test with root path path $.a.b
-    assert client.json().merge("test_merge", Path("person", "address"), '{"work":"Redis office"}')
-    assert client.json().get("test_merge") == '{"person":{"name":"John Doe","age":30,"address":{"home":"123 Main Street","work":"Redis office"},"phone":"123-456-7890"}}'
+    assert client.json().merge(
+        "test_merge", Path("person", "address"), '{"work":"Redis office"}'
+    )
+    assert (
+        client.json().get("test_merge")
+        == '{"person":{"name":"John Doe","age":30,"address":{"home":"123 Main Street","work":"Redis office"},"phone":"123-456-7890"}}'
+    )
 
     # Test with null value to delete a value
     assert client.json().merge("test_merge", Path("person", "address"), '{"work":null}')
-    assert client.json().get("test_merge") == '{"person":{"name":"John Doe","age":30,"address":{"home":"123 Main Street"},"phone":"123-456-7890"}}'
+    assert (
+        client.json().get("test_merge")
+        == '{"person":{"name":"John Doe","age":30,"address":{"home":"123 Main Street"},"phone":"123-456-7890"}}'
+    )
 
 
 @pytest.mark.redismod
