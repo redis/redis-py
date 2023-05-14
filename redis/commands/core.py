@@ -1341,6 +1341,21 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("WAIT", num_replicas, timeout, **kwargs)
 
+    def waitaof(
+        self, num_local: int, num_replicas: int, timeout: int, **kwargs
+    ) -> ResponseT:
+        """
+        This command block until the next fsync on AOF file
+        for the specified `num_replicas` or if the "number of replicas" parameter is 0,
+        blocks until the next fsync on AOF file for the current Redis instance.
+        If AOF persistence is not enabled, the command returns an error.
+
+        For more information see https://redis.io/commands/waitaof
+        """
+        return self.execute_command(
+            "WAITAOF", num_local, num_replicas, timeout, **kwargs
+        )
+
     def hello(self):
         """
         This function throws a NotImplementedError since it is intentionally
