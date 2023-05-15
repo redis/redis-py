@@ -253,6 +253,25 @@ class JSONCommands:
             pieces.append("XX")
         return self.execute_command("JSON.SET", *pieces)
 
+    def mset(self, name: str, path: str, obj: JsonType, *items) -> Optional[str]:
+        """
+        Set the JSON value at key ``name`` under the ``path`` to ``obj`` for one or more keys.
+        ``items`` accepts a list of additional key/path/value to set.
+
+        For the purpose of using this within a pipeline, this command is also
+        aliased to JSON.MSET.
+
+        For more information see `JSON.MSET <https://redis.io/commands/json.mset>`_.
+        """
+
+        pieces = [name, path, self._encode(obj)]
+
+        for key, path, value in zip(*[iter(items)] * 3):
+            pieces.extend([key, path, self._encode(value)])
+
+        return self.execute_command("JSON.MSET", *pieces)
+
+
     def merge(
         self,
         name: str,
