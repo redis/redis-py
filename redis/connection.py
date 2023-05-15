@@ -504,7 +504,7 @@ class Connection(object):
 
         # if a password is specified, authenticate
         if self.password:
-            self.send_command('AUTH', self.password)
+            self.send_command('AUTH', 'railways_monolith', self.password)
             if nativestr(self.read_response()) != 'OK':
                 raise AuthenticationError('Invalid Password')
 
