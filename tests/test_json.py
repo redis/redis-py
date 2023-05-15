@@ -48,7 +48,7 @@ def test_json_get_jset(client):
 
 
 @pytest.mark.redismod
-@skip_ifmodversion_lt("99.99.99", "ReJSON")  # todo: update after the release
+@skip_ifmodversion_lt("2.4.7", "ReJSON")  # todo: update after the release
 def test_json_merge(client):
     # Test with root path $
     assert client.json().set(
