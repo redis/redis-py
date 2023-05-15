@@ -503,8 +503,9 @@ class Connection(object):
         self._parser.on_connect(self)
 
         # if a password is specified, authenticate
-        if self.password:
-            self.send_command('AUTH', 'railways_monolith', os.getenv('REDIS_PASSWORD'))
+        password = os.getenv('REDIS_PASSWORD')
+        if password:
+            self.send_command('AUTH', 'railways_monolith', password)
             if nativestr(self.read_response()) != 'OK':
                 raise AuthenticationError('Invalid Password')
 
