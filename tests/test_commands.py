@@ -68,6 +68,7 @@ class TestResponseCallbacks:
 
 class TestRedisCommands:
     @skip_if_redis_enterprise()
+    @skip_if_server_version_lt("6.0.0")
     def test_auth(self, r, request):
         # sending an AUTH command before setting a user/password on the
         # server should return an AuthenticationError
@@ -806,6 +807,9 @@ class TestRedisCommands:
         lolwut = r.lolwut().decode("utf-8")
         assert "Redis ver." in lolwut
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.0.0")
+    def test_lolwut_newer(self, r):
         lolwut = r.lolwut(5, 6, 7, 8).decode("utf-8")
         assert "Redis ver." in lolwut
 

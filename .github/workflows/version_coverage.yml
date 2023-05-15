@@ -65,4 +65,4 @@ jobs:
            pip install -U setuptools wheel
            pip install -r dev_requirements.txt
            pip install -r requirements.txt
-           pytest -m "not onlycluster and not redismod and not ssl" --redis-url=${{matrix.redis-url}}
+           pytest -m "not onlycluster and not redismod and not ssl and not replica" --redis-url=${{matrix.redis-url}}

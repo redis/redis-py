@@ -9,7 +9,7 @@ import redis
 from redis import AuthenticationError, DataError, ResponseError
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.utils import str_if_bytes
-from tests.conftest import _get_client, skip_if_redis_enterprise
+from tests.conftest import _get_client, skip_if_redis_enterprise, skip_if_server_version_lt
 
 
 class NoPassCredProvider(CredentialProvider):
@@ -97,8 +97,9 @@ def init_required_pass(r, request, password):
 
     request.addfinalizer(teardown)
 
-
+@skip_if_server_version_lt("6.0.0")
 class TestCredentialsProvider:
+    
     @skip_if_redis_enterprise()
     def test_only_pass_without_creds_provider(self, r, request):
         # test for default user (`username` is supposed to be optional)
@@ -215,6 +216,7 @@ class TestCredentialsProvider:
         assert str_if_bytes(conn.read_response()) == "PONG"
 
 
+@skip_if_server_version_lt("6.0.0")
 class TestUsernamePasswordCredentialProvider:
     def test_user_pass_credential_provider_acl_user_and_pass(self, r, request):
         username = "username"

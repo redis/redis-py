@@ -10,7 +10,7 @@ import redis
 from redis import AuthenticationError, DataError, ResponseError
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.utils import str_if_bytes
-from tests.conftest import skip_if_redis_enterprise
+from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
 
 @pytest_asyncio.fixture()
@@ -54,6 +54,7 @@ class NoPassCredProvider(CredentialProvider):
         return "username", ""
 
 
+@skip_if_server_version_lt("6.0.0")
 class AsyncRandomAuthCredProvider(CredentialProvider):
     def __init__(self, user: Optional[str], endpoint: str):
         self.user = user
@@ -120,6 +121,7 @@ async def init_required_pass(r, password):
 
 
 @pytest.mark.asyncio
+@skip_if_server_version_lt("6.0.0")
 class TestCredentialsProvider:
     @skip_if_redis_enterprise()
     async def test_only_pass_without_creds_provider(
@@ -252,6 +254,7 @@ class TestCredentialsProvider:
 
 
 @pytest.mark.asyncio
+@skip_if_server_version_lt("6.0.0")
 class TestUsernamePasswordCredentialProvider:
     async def test_user_pass_credential_provider_acl_user_and_pass(
         self, r_acl_teardown, create_redis
