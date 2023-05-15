@@ -1,0 +1,51 @@
+name: Redis Converage Matrix
+
+on:
+  push:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.rst'
+      - '**/*.md'
+    branches:
+      - master
+      - '[0-9].[0-9]'
+  pull_request:
+    branches:
+      - master
+      - '[0-9].[0-9]'
+
+permissions:
+    contents: read
+
+jobs:
+
+  run-tests:
+    services:
+        redis:
+            image: redis:${{matrix.redis-version}}
+            ports:
+                - 6379:6379
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+       max-parallel: 15
+       fail-fast: false
+       matrix:
+         python-version: ['3.7', '3.11']
+         redis-version: ['5.0', '6.0', '6.2', '7.0']
+
+    env:
+       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    name: redis ${{matrix.redis-version}} ${{matrix.python-version}}
+
+    steps:
+       - uses: actions/checkout@v3
+       - uses: actions/setup-python@v4
+         with:
+           python-version: ${{ matrix.python-version }}
+           cache: 'pip'
+       - name: run tests
+         run: |
+           pip install -U setuptools wheel
+           pip install -r dev_requirements.txt
+           pytest -m "not onlycluster and not redismod"
