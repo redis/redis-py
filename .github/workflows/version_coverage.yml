@@ -33,10 +33,11 @@ jobs:
        matrix:
          python-version: ['3.7', '3.11']
          redis-version: ['5.0', '6.0', '6.2', '7.0']
+         resp: ['2', '3']
 
     env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: redis ${{matrix.redis-version}} ${{matrix.python-version}}
+    name: redis ${{matrix.redis-version}} [resp ${{matrix.resp}} [py ${{matrix.python-version}}]
 
     steps:
        - uses: actions/checkout@v3
@@ -48,4 +49,4 @@ jobs:
          run: |
            pip install -U setuptools wheel
            pip install -r dev_requirements.txt
-           pytest -m "not onlycluster and not redismod"
+           pytest -m "not onlycluster and not redismod and not ssl" --redis-url=redis://localhost:6379?protocol=${{matrix.resp}}
