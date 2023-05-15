@@ -21,7 +21,7 @@ class TestCommandsParser:
         assert commands_parser.get_keys(r, *args3) == ["foo", "bar", "foobar"]
 
     @pytest.mark.filterwarnings("ignore:ResponseError")
-    @pytest.mark.skip_if_server_version_lt("6.0.0")
+    @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
     def test_get_moveable_keys(self, r):
         commands_parser = CommandsParser(r)

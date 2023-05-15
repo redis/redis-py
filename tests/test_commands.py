@@ -4039,7 +4039,10 @@ class TestRedisCommands:
         # trying to claim a message that isn't already pending doesn't
         # do anything
         response = r.xautoclaim(stream, group, consumer2, min_idle_time=0)
-        assert response == [b"0-0", []]
+        try:
+            assert response == [b"0-0", []]
+        except AssertionError:
+            assert response == [b"0-0", [], []]
 
         # read the group as consumer1 to initially claim the messages
         r.xreadgroup(group, consumer1, streams={stream: ">"})

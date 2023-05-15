@@ -19,7 +19,7 @@ permissions:
 
 jobs:
 
-  run-tests:
+  run-tests-pre-7:
     services:
       redis:
         image: redis:${{matrix.redis-version}}
@@ -31,7 +31,7 @@ jobs:
       max-parallel: 15
       fail-fast: false
       matrix:
-        redis-version: ['5.0', '6.0', '6.2', '7.0']
+        redis-version: ['5.0', '6.0', '6.2']
         python-version: ['3.7', '3.11']
         redis-url: ["redis://localhost:6379"]
         resp: ["2"]
@@ -55,6 +55,51 @@ jobs:
     name: redis ${{matrix.redis-version}} [resp ${{matrix.resp}}] [py ${{matrix.python-version}}]
 
     steps:
+       - uses: actions/checkout@v3
+       - uses: actions/setup-python@v4
+         with:
+           python-version: ${{ matrix.python-version }}
+           cache: 'pip'
+       - name: run tests
+         run: |
+           pip install -U setuptools wheel
+           pip install -r dev_requirements.txt
+           pip install -r requirements.txt
+           pytest -m "not onlycluster and not redismod and not ssl and not replica" --redis-url=${{matrix.redis-url}}
+
+ run-tests-7-plus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      max-parallel: 15
+      fail-fast: false
+      matrix:
+        redis-version: ['7.0']
+        python-version: ['3.7', '3.11']
+        redis-url: ["redis://localhost:6379"]
+        resp: ["2"]
+        include:
+            - redis-version: 7.0
+              redis-url: "redis://localhost:6379?protocol=3"
+              resp: "3"
+              python-version: '3.7'
+            - redis-version: 7.0
+              redis-url: "redis://localhost:6379?protocol=3"
+              resp: "3"
+              python-version: '3.11'
+            - redis-version: 7.0
+              python-version: '3.7'
+            - redis-version: 7.0
+              python-version: '3.11'
+
+
+    env:
+       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    name: redis ${{matrix.redis-version}} [resp ${{matrix.resp}}] [py ${{matrix.python-version}}]
+
+    steps:
+       - run: |
+          docker run -p 6379:6379 -d redis:${{matrix.redis-version}}  --enable-module-command yes --enable-debug-command yes
        - uses: actions/checkout@v3
        - uses: actions/setup-python@v4
          with:
