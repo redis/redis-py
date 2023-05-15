@@ -255,7 +255,9 @@ class JSONCommands:
 
     def mset(self, name: str, path: str, obj: JsonType, *items) -> Optional[str]:
         """
-        Set the JSON value at key ``name`` under the ``path`` to ``obj`` for one or more keys.
+        Set the JSON value at key ``name`` under the ``path`` to ``obj``
+        for one or more keys.
+
         ``items`` accepts a list of additional key/path/value to set.
 
         For the purpose of using this within a pipeline, this command is also
@@ -270,7 +272,6 @@ class JSONCommands:
             pieces.extend([key, path, self._encode(value)])
 
         return self.execute_command("JSON.MSET", *pieces)
-
 
     def merge(
         self,
