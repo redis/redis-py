@@ -52,51 +52,20 @@ def test_json_get_jset(client):
 def test_json_merge(client):
     # Test with root path $
     assert client.json().set(
-        "test_merge",
-        Path.root_path(),
-        '{"a":{"b":{"c":"d"}}}',
+        "person_data",
+        "$",
+        {"person1":{"personal_data":{"name":"John"}}},
     )
-    assert client.json().merge("test_merge", Path.root_path(), '{"a":{"b":{"e":"f"}}}')
-    assert client.json().get("test_merge") == '{"a":{"b":{"c":"d","e":"f"}}}'
+    assert client.json().merge("person_data", "$", {"person1":{"personal_data":{"hobbies":"reading"}}})
+    assert client.json().get("person_data") == {"person1":{"personal_data":{"name":"John","hobbies":"reading"}}}
 
-    # Test with root path path $.a.b
-    assert client.json().merge("test_merge", "$.a.b", '{"h":"i"}')
-    assert client.json().get("test_merge") == '{"a":{"b":{"c":"d","e":"f","h":"i"}}}'
+    # Test with root path path $.person1.personal_data
+    assert client.json().merge("person_data", "$.person1.personal_data", {"country":"Israel"})
+    assert client.json().get("person_data") == {"person1":{"personal_data":{"name":"John","hobbies":"reading","country":"Israel"}}}
 
     # Test with null value to delete a value
-    assert client.json().merge("test_merge", "$.a.b", '{"c":null}')
-    assert client.json().get("test_merge") == '{"a":{"b":{"h":"i","e":"f"}}}'
-
-
-# @pytest.mark.redismod
-# @skip_ifmodversion_lt("99.99.99", "ReJSON")  # todo: update after the release
-# def test_json_merge(client):
-#     assert client.json().set(
-#         "test_merge",
-#         Path.root_path(),
-#         '{"person":{"name":"John Doe","age":25,"address":{"home":"123 Main Street"},"phone":"123-456-7890"}}',
-#     )
-#     assert client.json().merge("test_merge", Path.root_path(), '{"person":{"age":30}}')
-#     assert (
-#         client.json().get("test_merge")
-#         == '{"person":{"name":"John Doe","age":30,"address":{"home":"123 Main Street"},"phone":"123-456-7890"}}'
-#     )
-#
-#     # Test with root path path $.a.b
-#     assert client.json().merge(
-#         "test_merge", Path("person", "address"), '{"work":"Redis office"}'
-#     )
-#     assert (
-#         client.json().get("test_merge")
-#         == '{"person":{"name":"John Doe","age":30,"address":{"home":"123 Main Street","work":"Redis office"},"phone":"123-456-7890"}}'
-#     )
-#
-#     # Test with null value to delete a value
-#     assert client.json().merge("test_merge", Path("person", "address"), '{"work":null}')
-#     assert (
-#         client.json().get("test_merge")
-#         == '{"person":{"name":"John Doe","age":30,"address":{"home":"123 Main Street"},"phone":"123-456-7890"}}'
-#     )
+    assert client.json().merge("person_data", "$.person1.personal_data", {"name":None})
+    assert client.json().get("person_data") == {"person1":{"personal_data":{"country":"Israel","hobbies":"reading"}}}
 
 
 @pytest.mark.redismod
