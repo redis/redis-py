@@ -20,13 +20,18 @@ from .conftest import (
 )
 
 
-def wait_for_message(pubsub, timeout=0.5, ignore_subscribe_messages=False):
+def wait_for_message(pubsub, timeout=0.5, ignore_subscribe_messages=False, node=None):
     now = time.time()
     timeout = now + timeout
     while now < timeout:
-        message = pubsub.get_message(
-            ignore_subscribe_messages=ignore_subscribe_messages
-        )
+        if node:
+            message = pubsub.get_message(
+                ignore_subscribe_messages=ignore_subscribe_messages, node=node
+            )
+        else:
+            message = pubsub.get_message(
+                ignore_subscribe_messages=ignore_subscribe_messages
+            )
         if message is not None:
             return message
         time.sleep(0.01)
@@ -53,6 +58,15 @@ def make_subscribe_test_data(pubsub, type):
             "unsub_func": pubsub.unsubscribe,
             "keys": ["foo", "bar", "uni" + chr(4456) + "code"],
         }
+    elif type == "shard_channel":
+        return {
+            "p": pubsub,
+            "sub_type": "ssubscribe",
+            "unsub_type": "sunsubscribe",
+            "sub_func": pubsub.ssubscribe,
+            "unsub_func": pubsub.sunsubscribe,
+            "keys": ["foo", "bar", "uni" + chr(4456) + "code"],
+        }
     elif type == "pattern":
         return {
             "p": pubsub,
@@ -71,7 +85,7 @@ class TestPubSubSubscribeUnsubscribe:
     ):
         for key in keys:
             assert sub_func(key) is None
-
+        print("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
         # should be a message for each channel/pattern we just subscribed to
         for i, key in enumerate(keys):
             assert wait_for_message(p) == make_message(sub_type, key, i + 1)
@@ -92,6 +106,37 @@ class TestPubSubSubscribeUnsubscribe:
     def test_pattern_subscribe_unsubscribe(self, r):
         kwargs = make_subscribe_test_data(r.pubsub(), "pattern")
         self._test_subscribe_unsubscribe(**kwargs)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_shard_channel_subscribe_unsubscribe(self, r):
+        kwargs = make_subscribe_test_data(r.pubsub(), "shard_channel")
+        self._test_subscribe_unsubscribe(**kwargs)
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_shard_channel_subscribe_unsubscribe_cluster(self, r):
+        p = r.pubsub()
+        keys = {
+            "foo": r.get_node_from_key("foo"),
+            # "bar": r.get_node_from_key("bar"),
+            # "uni" + chr(4456) + "code": r.get_node_from_key("uni" + chr(4456) + "code"),
+        }
+        for key, node in keys.items():
+            assert p.ssubscribe(key, target_node=node) is None
+        print("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+        # should be a message for each channel/pattern we just subscribed to
+        for i, (key, node) in enumerate(keys.items()):
+            assert wait_for_message(p,node=node) == make_message("ssubscribe", key, i + 1)
+
+        for key, node in keys.items():
+            assert p.sunsubscribe(key, node) is None
+
+        # should be a message for each channel/pattern we just unsubscribed
+        # from
+        for i, key in enumerate(keys.keys()):
+            i = len(keys) - 1 - i
+            assert wait_for_message(p) == make_message("sunsubscribe", key, i)
 
     def _test_resubscribe_on_reconnection(
         self, p, sub_type, unsub_type, sub_func, unsub_func, keys
@@ -134,6 +179,12 @@ class TestPubSubSubscribeUnsubscribe:
     @pytest.mark.onlynoncluster
     def test_resubscribe_to_patterns_on_reconnection(self, r):
         kwargs = make_subscribe_test_data(r.pubsub(), "pattern")
+        self._test_resubscribe_on_reconnection(**kwargs)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_resubscribe_to_shard_channels_on_reconnection(self, r):
+        kwargs = make_subscribe_test_data(r.pubsub(), "shard_channel")
         self._test_resubscribe_on_reconnection(**kwargs)
 
     def _test_subscribed_property(
@@ -192,6 +243,12 @@ class TestPubSubSubscribeUnsubscribe:
         kwargs = make_subscribe_test_data(r.pubsub(), "pattern")
         self._test_subscribed_property(**kwargs)
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_subscribe_property_with_shard_channels(self, r):
+        kwargs = make_subscribe_test_data(r.pubsub(), "shard_channel")
+        self._test_subscribed_property(**kwargs)
+
     def test_ignore_all_subscribe_messages(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
 
@@ -236,6 +293,12 @@ class TestPubSubSubscribeUnsubscribe:
         kwargs = make_subscribe_test_data(r.pubsub(), "pattern")
         self._test_sub_unsub_resub(**kwargs)
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_sub_unsub_resub_shard_channels(self, r):
+        kwargs = make_subscribe_test_data(r.pubsub(), "shard_channel")
+        self._test_sub_unsub_resub(**kwargs)
+
     def _test_sub_unsub_resub(
         self, p, sub_type, unsub_type, sub_func, unsub_func, keys
     ):
@@ -256,6 +319,12 @@ class TestPubSubSubscribeUnsubscribe:
 
     def test_sub_unsub_all_resub_patterns(self, r):
         kwargs = make_subscribe_test_data(r.pubsub(), "pattern")
+        self._test_sub_unsub_all_resub(**kwargs)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_sub_unsub_all_resub_shard_channels(self, r):
+        kwargs = make_subscribe_test_data(r.pubsub(), "shard_channel")
         self._test_sub_unsub_all_resub(**kwargs)
 
     def _test_sub_unsub_all_resub(
@@ -290,6 +359,18 @@ class TestPubSubMessages:
         assert isinstance(message, dict)
         assert message == make_message("message", "foo", "test message")
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_published_message_to_shard_channel(self, r):
+        p = r.pubsub()
+        p.ssubscribe("foo")
+        assert wait_for_message(p) == make_message("ssubscribe", "foo", 1)
+        assert r.spublish("foo", "test message") == 1
+
+        message = wait_for_message(p)
+        assert isinstance(message, dict)
+        assert message == make_message("smessage", "foo", "test message")
+
     def test_published_message_to_pattern(self, r):
         p = r.pubsub()
         p.subscribe("foo")
@@ -322,6 +403,16 @@ class TestPubSubMessages:
         assert self.message == make_message("message", "foo", "test message")
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_shard_channel_message_handler(self, r):
+        p = r.pubsub(ignore_subscribe_messages=True)
+        p.ssubscribe(foo=self.message_handler)
+        assert wait_for_message(p) is None
+        assert r.spublish("foo", "test message") == 1
+        assert wait_for_message(p) is None
+        assert self.message == make_message("smessage", "foo", "test message")
+
+    @pytest.mark.onlynoncluster
     def test_pattern_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
         p.psubscribe(**{"f*": self.message_handler})
@@ -341,6 +432,18 @@ class TestPubSubMessages:
         assert r.publish(channel, "test message") == 1
         assert wait_for_message(p) is None
         assert self.message == make_message("message", channel, "test message")
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_unicode_shard_channel_message_handler(self, r):
+        p = r.pubsub(ignore_subscribe_messages=True)
+        channel = "uni" + chr(4456) + "code"
+        channels = {channel: self.message_handler}
+        p.ssubscribe(**channels)
+        assert wait_for_message(p) is None
+        assert r.spublish(channel, "test message") == 1
+        assert wait_for_message(p) is None
+        assert self.message == make_message("smessage", channel, "test message")
 
     @pytest.mark.onlynoncluster
     # see: https://redis-py-cluster.readthedocs.io/en/stable/pubsub.html

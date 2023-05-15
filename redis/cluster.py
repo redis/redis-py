@@ -1687,6 +1687,16 @@ class ClusterPubSub(PubSub):
         # NOTE: don't parse the response in this function -- it could pull a
         # legitimate message off the stack if the connection is already
         # subscribed to one or more channels
+        node = kwargs.get("node")
+        if node is not None:
+            self.node = node
+            self.connection_pool = (
+                self.cluster.get_redis_connection(self.node).connection_pool
+            )
+            self.connection = self.connection_pool.get_connection(
+                "pubsub", self.shard_hint
+            )
+            self.connection.register_connect_callback(self.on_connect)
 
         if self.connection is None:
             if self.connection_pool is None:
@@ -1720,6 +1730,14 @@ class ClusterPubSub(PubSub):
         if self.node is not None:
             return self.node.redis_connection
 
+    def parse_response(self, block=True, timeout=0, node=None):
+        if node is not None:
+            self.node = node
+            self.connection_pool = node.redis_connection.connection_pool
+            self.connection = self.connection_pool.get_connection(
+                "pubsub", self.shard_hint
+            )
+        return super().parse_response(block=block, timeout=timeout)
 
 class ClusterPipeline(RedisCluster):
     """

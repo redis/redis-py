@@ -5103,6 +5103,15 @@ class PubSubCommands(CommandsProtocol):
         """
         return self.execute_command("PUBLISH", channel, message, **kwargs)
 
+    def spublish(self, shard_channel: ChannelT, message: EncodableT) -> ResponseT:
+        """
+        Posts a message to the given shard channel.
+        Returns the number of clients that received the message
+
+        For more information see https://redis.io/commands/spublish
+        """
+        return self.execute_command("SPUBLISH", shard_channel, message)
+
     def pubsub_channels(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
         """
         Return a list of channels that have at least one subscriber
