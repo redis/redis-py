@@ -1,4 +1,4 @@
-name: Redis Converage Matrix
+name: Redis Coverage Matrix
 
 on:
   push:
@@ -43,7 +43,7 @@ jobs:
 
     env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: redis ${{matrix.redis-version}} [resp ${{matrix.resp}} [py ${{matrix.python-version}}]
+    name: redis ${{matrix.redis-version}} [resp ${{matrix.resp}}] [py ${{matrix.python-version}}]
 
     steps:
        - uses: actions/checkout@v3
@@ -55,4 +55,5 @@ jobs:
          run: |
            pip install -U setuptools wheel
            pip install -r dev_requirements.txt
+           pip install -r requirements.txt
            pytest -m "not onlycluster and not redismod and not ssl" --redis-url=${{matrix.redis-url}}
