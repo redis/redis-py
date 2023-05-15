@@ -12,6 +12,7 @@ on:
   pull_request:
     branches:
       - master
+      - AddJsonCommands
       - '[0-9].[0-9]'
   schedule:
     - cron: '0 1 * * *' # nightly build
