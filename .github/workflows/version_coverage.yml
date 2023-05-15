@@ -39,7 +39,16 @@ jobs:
             - redis-version: 7.0
               redis-url: "redis://localhost:6379?protocol=3"
               resp: "3"
+              python-version: '3.7'
             - redis-version: 7.0
+              redis-url: "redis://localhost:6379?protocol=3"
+              resp: "3"
+              python-version: '3.11'
+            - redis-version: 7.0
+              python-version: '3.7'
+            - redis-version: 7.0
+              python-version: '3.11'
+
 
     env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
