@@ -21,19 +21,25 @@ jobs:
 
   run-tests:
     services:
-        redis:
-            image: redis:${{matrix.redis-version}}
-            ports:
-                - 6379:6379
+      redis:
+        image: redis:${{matrix.redis-version}}
+        ports:
+          - 6379:6379
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
-       max-parallel: 15
-       fail-fast: false
-       matrix:
-         python-version: ['3.7', '3.11']
-         redis-version: ['5.0', '6.0', '6.2', '7.0']
-         resp: ['2', '3']
+      max-parallel: 15
+      fail-fast: false
+      matrix:
+        redis-version: ['5.0', '6.0', '6.2', '7.0']
+        python-version: ['3.7', '3.11']
+        redis-url: ["redis://localhost:6379"]
+        resp: ["2"]
+        include:
+            - redis-version: 7.0
+              redis-url: "redis://localhost:6379?protocol=3"
+              resp: "3"
+            - redis-version: 7.0
 
     env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
@@ -49,4 +55,4 @@ jobs:
          run: |
            pip install -U setuptools wheel
            pip install -r dev_requirements.txt
-           pytest -m "not onlycluster and not redismod and not ssl" --redis-url=redis://localhost:6379?protocol=${{matrix.resp}}
+           pytest -m "not onlycluster and not redismod and not ssl" --redis-url=${{matrix.redis-url}}
