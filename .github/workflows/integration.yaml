@@ -12,7 +12,6 @@ on:
   pull_request:
     branches:
       - master
-      - AddJsonCommands # delete this line when the branch is merged
       - '[0-9].[0-9]'
   schedule:
     - cron: '0 1 * * *' # nightly build
