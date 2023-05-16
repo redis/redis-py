@@ -67,7 +67,7 @@ jobs:
            pip install -r requirements.txt
            pytest -m "not onlycluster and not redismod and not ssl and not replica" --redis-url=${{matrix.redis-url}}
 
- run-tests-7-plus:
+  run-tests-7-plus:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
