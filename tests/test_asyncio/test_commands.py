@@ -20,8 +20,6 @@ from tests.conftest import (
 
 from .conftest import assert_resp_response, assert_resp_response_in
 
-REDIS_6_VERSION = "5.9.0"
-
 
 @pytest_asyncio.fixture()
 async def r_teardown(r: redis.Redis):
@@ -90,19 +88,19 @@ class TestRedisCommands:
             await r.get("a")
 
     # SERVER INFORMATION
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt('6.0.0')
     async def test_acl_cat_no_category(self, r: redis.Redis):
         categories = await r.acl_cat()
         assert isinstance(categories, list)
         assert "read" in categories
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt('6.0.0')
     async def test_acl_cat_with_category(self, r: redis.Redis):
         commands = await r.acl_cat("read")
         assert isinstance(commands, list)
         assert "get" in commands
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt('6.0.0')
     async def test_acl_deluser(self, r_teardown):
         username = "redis-py-user"
         r = r_teardown(username)
@@ -111,12 +109,12 @@ class TestRedisCommands:
         assert await r.acl_setuser(username, enabled=False, reset=True)
         assert await r.acl_deluser(username) == 1
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt('6.0.0')
     async def test_acl_genpass(self, r: redis.Redis):
         password = await r.acl_genpass()
         assert isinstance(password, str)
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt('6.0.0')
     @skip_if_server_version_gte("7.0.0")
     async def test_acl_getuser_setuser(self, r_teardown):
         username = "redis-py-user"
@@ -223,7 +221,7 @@ class TestRedisCommands:
         )
         assert len((await r.acl_getuser(username))["passwords"]) == 1
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt('6.0.0')
     @skip_if_server_version_gte("7.0.0")
     async def test_acl_list(self, r_teardown):
         username = "redis-py-user"
@@ -233,7 +231,7 @@ class TestRedisCommands:
         users = await r.acl_list()
         assert f"user {username} off sanitize-payload &* -@all" in users
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt('6.0.0')
     @pytest.mark.onlynoncluster
     async def test_acl_log(self, r_teardown, create_redis):
         username = "redis-py-user"
@@ -270,7 +268,7 @@ class TestRedisCommands:
         assert_resp_response_in(r, "client-info", expected, expected.keys())
         assert await r.acl_log_reset()
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt('6.0.0')
     async def test_acl_setuser_categories_without_prefix_fails(self, r_teardown):
         username = "redis-py-user"
         r = r_teardown(username)
@@ -278,7 +276,7 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             await r.acl_setuser(username, categories=["list"])
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt('6.0.0')
     async def test_acl_setuser_commands_without_prefix_fails(self, r_teardown):
         username = "redis-py-user"
         r = r_teardown(username)
@@ -286,7 +284,7 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             await r.acl_setuser(username, commands=["get"])
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt('6.0.0')
     async def test_acl_setuser_add_passwords_and_nopass_fails(self, r_teardown):
         username = "redis-py-user"
         r = r_teardown(username)
@@ -294,13 +292,13 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             await r.acl_setuser(username, passwords="+mypass", nopass=True)
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt('6.0.0')
     async def test_acl_users(self, r: redis.Redis):
         users = await r.acl_users()
         assert isinstance(users, list)
         assert len(users) > 0
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt('6.0.0')
     async def test_acl_whoami(self, r: redis.Redis):
         username = await r.acl_whoami()
         assert isinstance(username, str)
@@ -998,7 +996,7 @@ class TestRedisCommands:
         assert await r.set("a", "1", xx=True, px=10000)
         assert 0 < await r.ttl("a") <= 10
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt('6.0.0')
     async def test_set_keepttl(self, r: redis.Redis):
         await r.set("a", "val")
         assert await r.set("a", "1", xx=True, px=10000)
@@ -1241,7 +1239,7 @@ class TestRedisCommands:
         _, keys = await r.scan(match="a")
         assert set(keys) == {b"a"}
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_server_version_lt('6.0.0')
     @pytest.mark.onlynoncluster
     async def test_scan_type(self, r: redis.Redis):
         await r.sadd("a-set", 1)
