@@ -5,16 +5,16 @@ import redis
 r = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
 # HIDE_END
 
-res = r.set("foo", "bar")
+res = r.set("bike:1", "Process 134")
 print(res)
 # >>> True
 # REMOVE_START
 assert res
 # REMOVE_END
 
-res = r.get("foo")
+res = r.get("bike:1")
 print(res)
-# >>> "bar"
+# >>> "Process 134"
 # REMOVE_START
-assert res == "bar"
+assert res == "Process 134"
 # REMOVE_END
