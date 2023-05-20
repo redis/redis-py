@@ -2580,7 +2580,9 @@ class TestRedisCommands:
         assert r.zrank("a", "a1") == 0
         assert r.zrank("a", "a2") == 1
         assert r.zrank("a", "a6") is None
-        # withscore
+
+    @skip_if_server_version_lt("7.2.0")
+    def test_zrankwithscore(self, r):
         r.zadd("b", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
         assert r.zrank("b", "a1", True) == [0, 1.0]
         assert r.zrank("b", "a2", True) == [1, 2.0]

@@ -4659,14 +4659,15 @@ class SortedSetCommands(CommandsProtocol):
     ) -> ResponseT:
         """
         Returns a 0-based value indicating the rank of ``value`` in sorted set
-        ``name``. If `withscore` is True, the score of the element is also returned.
+        ``name``.
+        If `withscore` is True, the score of the element is also returned.
 
         For more information see https://redis.io/commands/zrank
         """
+        pieces = [name, value]
         if withscore:
-            return self.execute_command("ZRANK", name, value, "WITHSCORE")
-        else:
-            return self.execute_command("ZRANK", name, value)
+            pieces.append("WITHSCORE")
+        return self.execute_command("ZRANK", *pieces)
 
     def zrem(self, name: KeyT, *values: FieldT) -> ResponseT:
         """
