@@ -1,9 +1,12 @@
 import binascii
 import datetime
 import re
+import threading
 import time
+from asyncio import CancelledError
 from string import ascii_letters
 from unittest import mock
+from unittest.mock import patch
 
 import pytest
 
@@ -694,6 +697,14 @@ class TestRedisCommands:
             r.client_no_evict()
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.2.0")
+    def test_client_no_touch(self, r):
+        assert r.client_no_touch("ON") == b"OK"
+        assert r.client_no_touch("OFF") == b"OK"
+        with pytest.raises(TypeError):
+            r.client_no_touch()
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("3.2.0")
     def test_client_reply(self, r, r_timeout):
         assert r_timeout.client_reply("ON") == b"OK"
@@ -861,6 +872,8 @@ class TestRedisCommands:
         # make sure other attributes are typed correctly
         assert isinstance(slowlog[0]["start_time"], int)
         assert isinstance(slowlog[0]["duration"], int)
+        assert isinstance(slowlog[0]["client_address"], bytes)
+        assert isinstance(slowlog[0]["client_name"], bytes)
 
         # Mock result if we didn't get slowlog complexity info.
         if "complexity" not in slowlog[0]:
@@ -4745,6 +4758,38 @@ class TestRedisCommands:
         r2 = redis.Redis(port=6380, decode_responses=False)
         res = r2.psync(r2.client_id(), 1)
         assert b"FULLRESYNC" in res
+
+    @pytest.mark.onlynoncluster
+    def test_interrupted_command(self, r: redis.Redis):
+        """
+        Regression test for issue #1128:  An Un-handled BaseException
+        will leave the socket with un-read response to a previous
+        command.
+        """
+
+        ok = False
+
+        def helper():
+            with pytest.raises(CancelledError):
+                # blocking pop
+                with patch.object(
+                    r.connection._parser, "read_response", side_effect=CancelledError
+                ):
+                    r.brpop(["nonexist"])
+            # if all is well, we can continue.
+            r.set("status", "down")  # should not hang
+            nonlocal ok
+            ok = True
+
+        thread = threading.Thread(target=helper)
+        thread.start()
+        thread.join(0.1)
+        try:
+            assert not thread.is_alive()
+            assert ok
+        finally:
+            # disconnect here so that fixture cleanup can proceed
+            r.connection.disconnect()
 
 
 @pytest.mark.onlynoncluster

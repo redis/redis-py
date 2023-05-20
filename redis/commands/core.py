@@ -761,6 +761,17 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT NO-EVICT", mode)
 
+    def client_no_touch(self, mode: str) -> Union[Awaitable[str], str]:
+        """
+        # The command controls whether commands sent by the client will alter
+        # the LRU/LFU of the keys they access.
+        # When turned on, the current client will not change LFU/LRU stats,
+        # unless it sends the TOUCH command.
+
+        For more information see https://redis.io/commands/client-no-touch
+        """
+        return self.execute_command("CLIENT NO-TOUCH", mode)
+
     def command(self, **kwargs):
         """
         Returns dict reply of details about all Redis commands.
@@ -3485,8 +3496,8 @@ class StreamCommands(CommandsProtocol):
             raise DataError("Only one of ```maxlen``` or ```minid``` may be specified")
 
         if maxlen is not None:
-            if not isinstance(maxlen, int) or maxlen < 1:
-                raise DataError("XADD maxlen must be a positive integer")
+            if not isinstance(maxlen, int) or maxlen < 0:
+                raise DataError("XADD maxlen must be non-negative integer")
             pieces.append(b"MAXLEN")
             if approximate:
                 pieces.append(b"~")
