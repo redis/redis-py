@@ -1611,9 +1611,7 @@ class PubSub:
 
         def try_read():
             if not block:
-                print("###################")
                 can_read = conn.can_read(timeout=timeout)
-                print(can_read)
                 if not can_read:
                     return None
             else:
@@ -1752,12 +1750,7 @@ class PubSub:
             args = list_or_args(args[0], args[1:])
         new_s_channels = dict.fromkeys(args)
         new_s_channels.update(kwargs)
-        try:
-            # cluster mode
-            ret_val = self.execute_command("SSUBSCRIBE", *new_s_channels.keys(), node=target_node)
-        except TypeError:
-            # standalone mode
-            ret_val = self.execute_command("SSUBSCRIBE", *new_s_channels.keys())
+        ret_val = self.execute_command("SSUBSCRIBE", *new_s_channels.keys())
         # update the s_channels dict AFTER we send the command. we don't want to
         # subscribe twice to these channels, once for the command and again
         # for the reconnection.
@@ -1783,12 +1776,7 @@ class PubSub:
         else:
             s_channels = self.shard_channels
         self.pending_unsubscribe_shard_channels.update(s_channels)
-        try:
-            # cluster mode
-            return self.execute_command("SUNSUBSCRIBE", *args, node=target_node)
-        except TypeError:
-            # standalone mode
-            return self.execute_command("SUNSUBSCRIBE", *args)
+        return self.execute_command("SUNSUBSCRIBE", *args)
 
     def listen(self):
         "Listen for messages on channels this client has been subscribed to"
@@ -1797,7 +1785,7 @@ class PubSub:
             if response is not None:
                 yield response
 
-    def get_message(self, ignore_subscribe_messages=False, timeout=0.0, node=None):
+    def get_message(self, ignore_subscribe_messages=False, timeout=0.0):
         """
         Get the next message if one is available, otherwise None.
 
@@ -1819,7 +1807,7 @@ class PubSub:
                 # so no messages are available
                 return None
 
-        response = self.parse_response(block=(timeout is None), timeout=timeout, node=node)
+        response = self.parse_response(block=(timeout is None), timeout=timeout)
         if response:
             return self.handle_message(response, ignore_subscribe_messages)
         return None

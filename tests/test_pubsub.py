@@ -25,8 +25,8 @@ def wait_for_message(pubsub, timeout=0.5, ignore_subscribe_messages=False, node=
     timeout = now + timeout
     while now < timeout:
         if node:
-            message = pubsub.get_message(
-                ignore_subscribe_messages=ignore_subscribe_messages, node=node
+            message = pubsub.get_sharded_message(
+                ignore_subscribe_messages=ignore_subscribe_messages, target_node=node
             )
         else:
             message = pubsub.get_message(
@@ -85,7 +85,7 @@ class TestPubSubSubscribeUnsubscribe:
     ):
         for key in keys:
             assert sub_func(key) is None
-        print("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+
         # should be a message for each channel/pattern we just subscribed to
         for i, key in enumerate(keys):
             assert wait_for_message(p) == make_message(sub_type, key, i + 1)
@@ -119,24 +119,27 @@ class TestPubSubSubscribeUnsubscribe:
         p = r.pubsub()
         keys = {
             "foo": r.get_node_from_key("foo"),
-            # "bar": r.get_node_from_key("bar"),
-            # "uni" + chr(4456) + "code": r.get_node_from_key("uni" + chr(4456) + "code"),
+            "bar": r.get_node_from_key("bar"),
+            "uni" + chr(4456) + "code": r.get_node_from_key("uni" + chr(4456) + "code"),
         }
-        for key, node in keys.items():
-            assert p.ssubscribe(key, target_node=node) is None
-        print("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
-        # should be a message for each channel/pattern we just subscribed to
-        for i, (key, node) in enumerate(keys.items()):
-            assert wait_for_message(p,node=node) == make_message("ssubscribe", key, i + 1)
 
-        for key, node in keys.items():
-            assert p.sunsubscribe(key, node) is None
+        for key in keys.keys():
+            assert p.ssubscribe(key) is None
+        # should be a message for each channel/pattern we just subscribed to
+        data = [1, 1, 2]
+        for i, (key, node) in enumerate(keys.items()):
+            assert wait_for_message(p, node=node) == make_message("ssubscribe", key, data[i])
+
+        for key in keys.keys():
+            assert p.sunsubscribe(key) is None
 
         # should be a message for each channel/pattern we just unsubscribed
         # from
-        for i, key in enumerate(keys.keys()):
-            i = len(keys) - 1 - i
-            assert wait_for_message(p) == make_message("sunsubscribe", key, i)
+        data = [0, 1, 0]
+        breakpoint()
+        for i, (key, node) in enumerate(keys.items()):
+            assert wait_for_message(p, node=node) == make_message("sunsubscribe", key, data[i])
+        breakpoint()
 
     def _test_resubscribe_on_reconnection(
         self, p, sub_type, unsub_type, sub_func, unsub_func, keys

@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from redis.backoff import default_backoff
 from redis.client import CaseInsensitiveDict, PubSub, Redis, parse_scan
 from redis.commands import READ_COMMANDS, RedisClusterCommands
+from redis.commands.helpers import list_or_args
 from redis.connection import ConnectionPool, DefaultParser, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
@@ -1625,6 +1626,8 @@ class ClusterPubSub(PubSub):
             else redis_cluster.get_redis_connection(self.node).connection_pool
         )
         self.cluster = redis_cluster
+        self.node_pubsub_mapping = {}
+        self._pubsubs_generator = self._pubsubs_generator()
         super().__init__(
             **kwargs, connection_pool=connection_pool, encoder=redis_cluster.encoder
         )
@@ -1678,25 +1681,15 @@ class ClusterPubSub(PubSub):
                 f"Node {host}:{port} doesn't exist in the cluster"
             )
 
-    def execute_command(self, *args, **kwargs):
+    def execute_command(self, *args, ):
         """
-        Execute a publish/subscribe command.
+        Execute a subscribe/unsubscribe command.
 
         Taken code from redis-py and tweak to make it work within a cluster.
         """
         # NOTE: don't parse the response in this function -- it could pull a
         # legitimate message off the stack if the connection is already
         # subscribed to one or more channels
-        node = kwargs.get("node")
-        if node is not None:
-            self.node = node
-            self.connection_pool = (
-                self.cluster.get_redis_connection(self.node).connection_pool
-            )
-            self.connection = self.connection_pool.get_connection(
-                "pubsub", self.shard_hint
-            )
-            self.connection.register_connect_callback(self.on_connect)
 
         if self.connection is None:
             if self.connection_pool is None:
@@ -1723,6 +1716,68 @@ class ClusterPubSub(PubSub):
         connection = self.connection
         self._execute(connection, connection.send_command, *args)
 
+    def _get_node_pubsub(self, node):
+        try:
+            return self.node_pubsub_mapping[node.name]
+        except KeyError:
+            pubsub = node.redis_connection.pubsub()
+            self.node_pubsub_mapping[node.name] = pubsub
+            return pubsub
+    
+    def _sharded_message_generator(self, ignore_subscribe_messages=False):
+        while True:
+            pubsub = next(self._pubsubs_generator)
+            message = pubsub.get_message(ignore_subscribe_messages=ignore_subscribe_messages)
+            if message is not None:
+                return message
+
+    def _pubsubs_generator(self):
+        while True:
+            for pubsub in self.node_pubsub_mapping.values():
+                yield pubsub
+        
+    def get_sharded_message(
+            self, ignore_subscribe_messages=False, timeout=0.0, target_node=None
+        ):
+        if target_node:
+            message = self.node_pubsub_mapping[target_node.name].get_message(
+                ignore_subscribe_messages=ignore_subscribe_messages, timeout=timeout
+            )
+        else:
+            message = self._sharded_message_generator(ignore_subscribe_messages=ignore_subscribe_messages)
+        if message is None:
+            return None
+        elif str_if_bytes(message["type"]) == "sunsubscribe":
+            self.shard_channels.pop(message["channel"], None)
+        if not self.channels and not self.patterns and not self.shard_channels:
+                # There are no subscriptions anymore, set subscribed_event flag
+                # to false
+                self.subscribed_event.clear()
+        return message
+
+    def ssubscribe(self, *args, **kwargs):
+        if args:
+            args = list_or_args(args[0], args[1:])
+        for s_channel in args:
+            node = self.cluster.get_node_from_key(s_channel)
+            pubsub = self._get_node_pubsub(node)
+            pubsub.ssubscribe(s_channel)
+            # self.subscribed = self.subscribed or self._get_node_pubsub(node).subscribed
+            self.shard_channels.update(pubsub.shard_channels)
+            if pubsub.subscribed and not self.subscribed:
+                self.subscribed_event.set()
+                self.health_check_response_counter = 0
+    
+    def sunsubscribe(self, *args):
+        if args:
+            args = list_or_args(args[0], args[1:])
+        else:
+            args = self.shard_channels
+
+        for s_channel in args:
+            node = self.cluster.get_node_from_key(s_channel)
+            self._get_node_pubsub(node).sunsubscribe(s_channel)
+
     def get_redis_connection(self):
         """
         Get the Redis connection of the pubsub connected node.
@@ -1730,14 +1785,6 @@ class ClusterPubSub(PubSub):
         if self.node is not None:
             return self.node.redis_connection
 
-    def parse_response(self, block=True, timeout=0, node=None):
-        if node is not None:
-            self.node = node
-            self.connection_pool = node.redis_connection.connection_pool
-            self.connection = self.connection_pool.get_connection(
-                "pubsub", self.shard_hint
-            )
-        return super().parse_response(block=block, timeout=timeout)
 
 class ClusterPipeline(RedisCluster):
     """

@@ -96,8 +96,6 @@ class SocketBuffer:
             timeout=timeout, raise_on_timeout=False
         )
         _bytes = bool(self.unread_bytes())
-        print("@@@@@@@@@@@@@@@@@@@@@@")
-        print(read, _bytes)
         return _bytes or read
 
     def read(self, length: int) -> bytes:
