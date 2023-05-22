@@ -163,7 +163,7 @@ class TestPubSubSubscribeUnsubscribe:
 
         # manually disconnect
         p.connection.disconnect()
-        # breakpoint()
+
         # calling get_message again reconnects and resubscribes
         # note, we may not re-subscribe to channels in exactly the same order
         # so we have to do some extra checks to make sure we got them all
@@ -322,6 +322,7 @@ class TestPubSubSubscribeUnsubscribe:
         # now we're finally unsubscribed
         assert p.subscribed is False
 
+    @skip_if_server_version_lt("7.0.0")
     def test_ignore_all_subscribe_messages(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
 
@@ -341,6 +342,7 @@ class TestPubSubSubscribeUnsubscribe:
             assert wait_for_message(p, func=get_func) is None
         assert p.subscribed is False
 
+    @skip_if_server_version_lt("7.0.0")
     def test_ignore_individual_subscribe_messages(self, r):
         p = r.pubsub()
 
