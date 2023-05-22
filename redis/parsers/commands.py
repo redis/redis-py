@@ -161,7 +161,7 @@ class CommandsParser:
             # format example:
             # SUBSCRIBE channel [channel ...]
             keys = list(args[1:])
-        elif command == "PUBLISH":
+        elif command in ["PUBLISH", "SPUBLISH"]:
             # format example:
             # PUBLISH channel message
             keys = [args[1]]

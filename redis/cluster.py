@@ -1763,10 +1763,15 @@ class ClusterPubSub(PubSub):
     def ssubscribe(self, *args, **kwargs):
         if args:
             args = list_or_args(args[0], args[1:])
-        for s_channel in args:
+        s_channels = dict.fromkeys(args)
+        s_channels.update(kwargs)
+        for s_channel, handler in s_channels.items():
             node = self.cluster.get_node_from_key(s_channel)
             pubsub = self._get_node_pubsub(node)
-            pubsub.ssubscribe(s_channel)
+            if handler:
+                pubsub.ssubscribe(**{s_channel: handler})
+            else:
+                pubsub.ssubscribe(s_channel)
             self.shard_channels.update(pubsub.shard_channels)
             self.pending_unsubscribe_shard_channels.difference_update(
                 self._normalize_keys({s_channel: None})
