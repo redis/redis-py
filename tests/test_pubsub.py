@@ -495,7 +495,9 @@ class TestPubSubMessages:
     def test_published_message_to_shard_channel_cluster(self, r):
         p = r.pubsub()
         p.ssubscribe("foo")
-        assert wait_for_message(p, func=p.get_sharded_message) == make_message("ssubscribe", "foo", 1)
+        assert wait_for_message(p, func=p.get_sharded_message) == make_message(
+            "ssubscribe", "foo", 1
+        )
         assert r.spublish("foo", "test message") == 1
 
         message = wait_for_message(p, func=p.get_sharded_message)
@@ -647,10 +649,14 @@ class TestPubSubAutoDecoding:
     def test_shard_channel_subscribe_unsubscribe(self, r):
         p = r.pubsub()
         p.ssubscribe(self.channel)
-        assert wait_for_message(p, func=p.get_sharded_message) == self.make_message("ssubscribe", self.channel, 1)
+        assert wait_for_message(p, func=p.get_sharded_message) == self.make_message(
+            "ssubscribe", self.channel, 1
+        )
 
         p.sunsubscribe(self.channel)
-        assert wait_for_message(p, func=p.get_sharded_message) == self.make_message("sunsubscribe", self.channel, 0)
+        assert wait_for_message(p, func=p.get_sharded_message) == self.make_message(
+            "sunsubscribe", self.channel, 0
+        )
 
     def test_channel_publish(self, r):
         p = r.pubsub()
@@ -675,7 +681,9 @@ class TestPubSubAutoDecoding:
     def test_shard_channel_publish(self, r):
         p = r.pubsub()
         p.ssubscribe(self.channel)
-        assert wait_for_message(p, func=p.get_sharded_message) == self.make_message("ssubscribe", self.channel, 1)
+        assert wait_for_message(p, func=p.get_sharded_message) == self.make_message(
+            "ssubscribe", self.channel, 1
+        )
         r.spublish(self.channel, self.data)
         assert wait_for_message(p, func=p.get_sharded_message) == self.make_message(
             "smessage", self.channel, self.data
@@ -736,7 +744,8 @@ class TestPubSubAutoDecoding:
         except AttributeError:
             # standalone mode
             p.connection.disconnect()
-        assert wait_for_message(p, func=p.get_sharded_message) is None  # should reconnect
+        # should reconnect
+        assert wait_for_message(p, func=p.get_sharded_message) is None
         new_data = self.data + "new data"
         r.spublish(self.channel, new_data)
         assert wait_for_message(p, func=p.get_sharded_message) is None
