@@ -49,6 +49,10 @@ class NoScriptError(ResponseError):
     pass
 
 
+class OutOfMemoryError(ResponseError):
+    pass
+
+
 class ExecAbortError(ResponseError):
     pass
 
