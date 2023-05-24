@@ -1599,7 +1599,7 @@ class PubSub:
             lambda error: self._disconnect_raise_connect(conn, error),
         )
 
-    def parse_response(self, block=True, timeout=0, **kwargs):
+    def parse_response(self, block=True, timeout=0):
         """Parse the response from a publish/subscribe command"""
         conn = self.connection
         if conn is None:
@@ -1612,8 +1612,7 @@ class PubSub:
 
         def try_read():
             if not block:
-                can_read = conn.can_read(timeout=timeout)
-                if not can_read:
+                if not conn.can_read(timeout=timeout):
                     return None
             else:
                 conn.connect()
@@ -1740,12 +1739,11 @@ class PubSub:
 
     def ssubscribe(self, *args, target_node=None, **kwargs):
         """
-        # TODO: update docstring
-        Subscribe to channels. Channels supplied as keyword arguments expect
-        a channel name as the key and a callable as the value. A channel's
-        callable will be invoked automatically when a message is received on
-        that channel rather than producing a message via ``listen()`` or
-        ``get_message()``.
+        Subscribes the client to the specified shard channels.
+        Channels supplied as keyword arguments expect a channel name as the key 
+        and a callable as the value. A channel's callable will be invoked automatically
+        when a message is received on that channel rather than producing a message via
+        ``listen()`` or ``get_sharded_message()``.
         """
         if args:
             args = list_or_args(args[0], args[1:])
@@ -1767,9 +1765,8 @@ class PubSub:
 
     def sunsubscribe(self, *args, target_node=None):
         """
-        # TODO: update docstring
-        Unsubscribe from the supplied channels. If empty, unsubscribe from
-        all channels
+        Unsubscribe from the supplied shard_channels. If empty, unsubscribe from
+        all shard_channels
         """
         if args:
             args = list_or_args(args[0], args[1:])
