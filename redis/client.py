@@ -1497,10 +1497,10 @@ class PubSub:
         self.health_check_response_counter = 0
         self.channels = {}
         self.pending_unsubscribe_channels = set()
-        self.patterns = {}
-        self.pending_unsubscribe_patterns = set()
         self.shard_channels = {}
         self.pending_unsubscribe_shard_channels = set()
+        self.patterns = {}
+        self.pending_unsubscribe_patterns = set()
         self.subscribed_event.clear()
 
     def close(self):
@@ -1515,19 +1515,20 @@ class PubSub:
         self.pending_unsubscribe_patterns.clear()
         self.pending_unsubscribe_shard_channels.clear()
         if self.channels:
-            channels = {}
-            for k, v in self.channels.items():
-                channels[self.encoder.decode(k, force=True)] = v
+            channels = {
+                self.encoder.decode(k, force=True): v for k, v in self.channels.items()
+            }
             self.subscribe(**channels)
         if self.patterns:
-            patterns = {}
-            for k, v in self.patterns.items():
-                patterns[self.encoder.decode(k, force=True)] = v
+            patterns = {
+                self.encoder.decode(k, force=True): v for k, v in self.patterns.items()
+            }
             self.psubscribe(**patterns)
         if self.shard_channels:
-            shard_channels = {}
-            for k, v in self.shard_channels.items():
-                shard_channels[self.encoder.decode(k, force=True)] = v
+            shard_channels = {
+                self.encoder.decode(k, force=True): v
+                for k, v in self.shard_channels.items()
+            }
             self.ssubscribe(**shard_channels)
 
     @property
