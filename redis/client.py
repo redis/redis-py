@@ -1740,7 +1740,7 @@ class PubSub:
     def ssubscribe(self, *args, target_node=None, **kwargs):
         """
         Subscribes the client to the specified shard channels.
-        Channels supplied as keyword arguments expect a channel name as the key 
+        Channels supplied as keyword arguments expect a channel name as the key
         and a callable as the value. A channel's callable will be invoked automatically
         when a message is received on that channel rather than producing a message via
         ``listen()`` or ``get_sharded_message()``.
