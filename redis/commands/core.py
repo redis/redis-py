@@ -5120,6 +5120,14 @@ class PubSubCommands(CommandsProtocol):
         """
         return self.execute_command("PUBSUB CHANNELS", pattern, **kwargs)
 
+    def pubsub_shardchannels(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
+        """
+        Return a list of shard_channels that have at least one subscriber
+
+        For more information see https://redis.io/commands/pubsub-shardchannels
+        """
+        return self.execute_command("PUBSUB SHARDCHANNELS", pattern, **kwargs)
+
     def pubsub_numpat(self, **kwargs) -> ResponseT:
         """
         Returns the number of subscriptions to patterns
@@ -5136,6 +5144,15 @@ class PubSubCommands(CommandsProtocol):
         For more information see https://redis.io/commands/pubsub-numsub
         """
         return self.execute_command("PUBSUB NUMSUB", *args, **kwargs)
+
+    def pubsub_shardnumsub(self, *args: ChannelT, **kwargs) -> ResponseT:
+        """
+        Return a list of (shard_channel, number of subscribers) tuples
+        for each channel given in ``*args``
+
+        For more information see https://redis.io/commands/pubsub-shardnumsub
+        """
+        return self.execute_command("PUBSUB SHARDNUMSUB", *args, **kwargs)
 
 
 AsyncPubSubCommands = PubSubCommands

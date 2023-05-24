@@ -781,6 +781,38 @@ class TestPubSubSubcommands:
         assert all([channel in r.pubsub_channels() for channel in expected])
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_pubsub_shardchannels(self, r):
+        p = r.pubsub()
+        p.ssubscribe("foo", "bar", "baz", "quux")
+        for i in range(4):
+            assert wait_for_message(p)["type"] == "ssubscribe"
+        expected = [b"bar", b"baz", b"foo", b"quux"]
+        assert all([channel in r.pubsub_shardchannels() for channel in expected])
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_pubsub_shardchannels_cluster(self, r):
+        channels = {
+            b"foo": r.get_node_from_key("foo"),
+            b"bar": r.get_node_from_key("bar"),
+            b"baz": r.get_node_from_key("baz"),
+            b"quux": r.get_node_from_key("quux"),
+        }
+        p = r.pubsub()
+        p.ssubscribe("foo", "bar", "baz", "quux")
+        for node in channels.values():
+            assert wait_for_message(p, node=node)["type"] == "ssubscribe"
+        for channel, node in channels.items():
+            assert channel in r.pubsub_shardchannels(target_nodes=node)
+        assert all(
+            [
+                channel in r.pubsub_shardchannels(target_nodes="all")
+                for channel in channels.keys()
+            ]
+        )
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.0")
     def test_pubsub_numsub(self, r):
         p1 = r.pubsub()
@@ -805,6 +837,32 @@ class TestPubSubSubcommands:
         for i in range(3):
             assert wait_for_message(p)["type"] == "psubscribe"
         assert r.pubsub_numpat() == 3
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_pubsub_shardnumsub(self, r):
+        channels = {
+            b"foo": r.get_node_from_key("foo"),
+            b"bar": r.get_node_from_key("bar"),
+            b"baz": r.get_node_from_key("baz"),
+        }
+        p1 = r.pubsub()
+        p1.ssubscribe(*channels.keys())
+        for node in channels.values():
+            assert wait_for_message(p1, node=node)["type"] == "ssubscribe"
+        p2 = r.pubsub()
+        p2.ssubscribe("bar", "baz")
+        for i in range(2):
+            assert (
+                wait_for_message(p2, func=p2.get_sharded_message)["type"]
+                == "ssubscribe"
+            )
+        p3 = r.pubsub()
+        p3.ssubscribe("baz")
+        assert wait_for_message(p3, node=channels[b"baz"])["type"] == "ssubscribe"
+
+        channels = [(b"foo", 1), (b"bar", 2), (b"baz", 3)]
+        assert r.pubsub_shardnumsub("foo", "bar", "baz", target_nodes="all") == channels
 
 
 class TestPubSubPings:

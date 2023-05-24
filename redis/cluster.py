@@ -223,7 +223,7 @@ class AbstractRedisCluster:
                 "PUBSUB CHANNELS",
                 "PUBSUB NUMPAT",
                 "PUBSUB NUMSUB",
-                "PING",
+                "PUBSUB SHARDCHANNELS" "PUBSUB SHARDNUMSUB" "PING",
                 "INFO",
                 "SHUTDOWN",
                 "KEYS",
@@ -347,11 +347,13 @@ class AbstractRedisCluster:
     }
 
     RESULT_CALLBACKS = dict_merge(
-        list_keys_to_dict(["PUBSUB NUMSUB"], parse_pubsub_numsub),
+        list_keys_to_dict(["PUBSUB NUMSUB", "PUBSUB SHARDNUMSUB"], parse_pubsub_numsub),
         list_keys_to_dict(
             ["PUBSUB NUMPAT"], lambda command, res: sum(list(res.values()))
         ),
-        list_keys_to_dict(["KEYS", "PUBSUB CHANNELS"], merge_result),
+        list_keys_to_dict(
+            ["KEYS", "PUBSUB CHANNELS", "PUBSUB SHARDCHANNELS"], merge_result
+        ),
         list_keys_to_dict(
             [
                 "PING",
@@ -1752,6 +1754,9 @@ class ClusterPubSub(PubSub):
             if message["channel"] in self.pending_unsubscribe_shard_channels:
                 self.pending_unsubscribe_shard_channels.remove(message["channel"])
                 self.shard_channels.pop(message["channel"], None)
+                node = self.cluster.get_node_from_key(message["channel"])
+                if self.node_pubsub_mapping[node.name].subscribed is False:
+                    self.node_pubsub_mapping.pop(node.name)
         if not self.channels and not self.patterns and not self.shard_channels:
             # There are no subscriptions anymore, set subscribed_event flag
             # to false

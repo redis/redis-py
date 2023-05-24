@@ -833,6 +833,7 @@ class AbstractRedis:
         "QUIT": bool_ok,
         "STRALGO": parse_stralgo,
         "PUBSUB NUMSUB": parse_pubsub_numsub,
+        "PUBSUB SHARDNUMSUB": parse_pubsub_numsub,
         "RANDOMKEY": lambda r: r and r or None,
         "RESET": str_if_bytes,
         "SCAN": parse_scan,

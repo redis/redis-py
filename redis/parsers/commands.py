@@ -155,7 +155,7 @@ class CommandsParser:
             # the second argument is a part of the command name, e.g.
             # ['PUBSUB', 'NUMSUB', 'foo'].
             pubsub_type = args[1].upper()
-            if pubsub_type in ["CHANNELS", "NUMSUB"]:
+            if pubsub_type in ["CHANNELS", "NUMSUB", "SHARDCHANNELS", "SHARDNUMSUB"]:
                 keys = args[2:]
         elif command in ["SUBSCRIBE", "PSUBSCRIBE", "UNSUBSCRIBE", "PUNSUBSCRIBE"]:
             # format example:
