@@ -40,6 +40,41 @@ async def test_json_get_jset(modclient: redis.Redis):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("2.6.0", "ReJSON")  # todo: update after the release
+async def test_json_merge(modclient: redis.Redis):
+    # Test with root path $
+    assert await modclient.json().set(
+        "person_data",
+        "$",
+        {"person1": {"personal_data": {"name": "John"}}},
+    )
+    assert await modclient.json().merge(
+        "person_data", "$", {"person1": {"personal_data": {"hobbies": "reading"}}}
+    )
+    assert await modclient.json().get("person_data") == {
+        "person1": {"personal_data": {"name": "John", "hobbies": "reading"}}
+    }
+
+    # Test with root path path $.person1.personal_data
+    assert await modclient.json().merge(
+        "person_data", "$.person1.personal_data", {"country": "Israel"}
+    )
+    assert await modclient.json().get("person_data") == {
+        "person1": {
+            "personal_data": {"name": "John", "hobbies": "reading", "country": "Israel"}
+        }
+    }
+
+    # Test with null value to delete a value
+    assert await modclient.json().merge(
+        "person_data", "$.person1.personal_data", {"name": None}
+    )
+    assert await modclient.json().get("person_data") == {
+        "person1": {"personal_data": {"country": "Israel", "hobbies": "reading"}}
+    }
+
+
+@pytest.mark.redismod
 async def test_nonascii_setgetdelete(modclient: redis.Redis):
     assert await modclient.json().set("notascii", Path.root_path(), "hyvää-élève")
     assert "hyvää-élève" == await modclient.json().get("notascii", no_escape=True)

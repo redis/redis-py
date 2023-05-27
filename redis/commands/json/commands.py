@@ -253,6 +253,28 @@ class JSONCommands:
             pieces.append("XX")
         return self.execute_command("JSON.SET", *pieces)
 
+    def merge(
+        self,
+        name: str,
+        path: str,
+        obj: JsonType,
+        decode_keys: Optional[bool] = False,
+    ) -> Optional[str]:
+        """
+        Sets or updates the JSON value at a path..
+
+        ``decode_keys`` If set to True, the keys of ``obj`` will be decoded
+        with utf-8.
+
+        For more information see `JSON.MERGE <https://redis.io/commands/json.merge>`_.
+        """
+        if decode_keys:
+            obj = decode_dict_keys(obj)
+
+        pieces = [name, str(path), self._encode(obj)]
+
+        return self.execute_command("JSON.MERGE", *pieces)
+
     def set_file(
         self,
         name: str,

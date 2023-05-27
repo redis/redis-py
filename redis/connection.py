@@ -158,12 +158,13 @@ class BaseParser:
         "NOPERM": NoPermissionError,
     }
 
-    def parse_error(self, response):
+    @classmethod
+    def parse_error(cls, response):
         "Parse an error response"
         error_code = response.split(" ")[0]
-        if error_code in self.EXCEPTION_CLASSES:
+        if error_code in cls.EXCEPTION_CLASSES:
             response = response[len(error_code) + 1 :]
-            exception_class = self.EXCEPTION_CLASSES[error_code]
+            exception_class = cls.EXCEPTION_CLASSES[error_code]
             if isinstance(exception_class, dict):
                 exception_class = exception_class.get(response, ResponseError)
             return exception_class(response)
@@ -778,20 +779,22 @@ class AbstractConnection:
     def disconnect(self, *args):
         "Disconnects from the Redis server"
         self._parser.on_disconnect()
-        if self._sock is None:
+
+        conn_sock = self._sock
+        self._sock = None
+        if conn_sock is None:
             return
 
         if os.getpid() == self.pid:
             try:
-                self._sock.shutdown(socket.SHUT_RDWR)
+                conn_sock.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
 
         try:
-            self._sock.close()
+            conn_sock.close()
         except OSError:
             pass
-        self._sock = None
 
     def _send_ping(self):
         """Send PING, expect PONG in return"""
@@ -831,7 +834,11 @@ class AbstractConnection:
                 errno = e.args[0]
                 errmsg = e.args[1]
             raise ConnectionError(f"Error {errno} while writing to socket. {errmsg}.")
-        except Exception:
+        except BaseException:
+            # BaseExceptions can be raised when a socket send operation is not
+            # finished, e.g. due to a timeout.  Ideally, a caller could then re-try
+            # to send un-sent data. However, the send_packed_command() API
+            # does not support it so there is no point in keeping the connection open.
             self.disconnect()
             raise
 
@@ -856,7 +863,9 @@ class AbstractConnection:
             self.disconnect()
             raise ConnectionError(f"Error while reading from {host_error}: {e.args}")
 
-    def read_response(self, disable_decoding=False):
+    def read_response(
+        self, disable_decoding=False, *, disconnect_on_error: bool = True
+    ):
         """Read the response from a previously sent command"""
 
         host_error = self._host_error()
@@ -864,15 +873,21 @@ class AbstractConnection:
         try:
             response = self._parser.read_response(disable_decoding=disable_decoding)
         except socket.timeout:
-            self.disconnect()
+            if disconnect_on_error:
+                self.disconnect()
             raise TimeoutError(f"Timeout reading from {host_error}")
         except OSError as e:
-            self.disconnect()
+            if disconnect_on_error:
+                self.disconnect()
             raise ConnectionError(
                 f"Error while reading from {host_error}" f" : {e.args}"
             )
-        except Exception:
-            self.disconnect()
+        except BaseException:
+            # Also by default close in case of BaseException.  A lot of code
+            # relies on this behaviour when doing Command/Response pairs.
+            # See #1128.
+            if disconnect_on_error:
+                self.disconnect()
             raise
 
         if self.health_check_interval:

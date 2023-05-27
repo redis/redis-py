@@ -136,14 +136,14 @@ class TestConnectionPool:
             assert connection.kwargs == connection_kwargs
 
     async def test_multiple_connections(self, master_host):
-        connection_kwargs = {"host": master_host}
+        connection_kwargs = {"host": master_host[0]}
         async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
             c1 = await pool.get_connection("_")
             c2 = await pool.get_connection("_")
             assert c1 != c2
 
     async def test_max_connections(self, master_host):
-        connection_kwargs = {"host": master_host}
+        connection_kwargs = {"host": master_host[0]}
         async with self.get_pool(
             max_connections=2, connection_kwargs=connection_kwargs
         ) as pool:
@@ -153,7 +153,7 @@ class TestConnectionPool:
                 await pool.get_connection("_")
 
     async def test_reuse_previously_released_connection(self, master_host):
-        connection_kwargs = {"host": master_host}
+        connection_kwargs = {"host": master_host[0]}
         async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
             c1 = await pool.get_connection("_")
             await pool.release(c1)
@@ -237,7 +237,7 @@ class TestBlockingConnectionPool:
 
     async def test_connection_pool_blocks_until_timeout(self, master_host):
         """When out of connections, block for timeout seconds, then raise"""
-        connection_kwargs = {"host": master_host}
+        connection_kwargs = {"host": master_host[0]}
         async with self.get_pool(
             max_connections=1, timeout=0.1, connection_kwargs=connection_kwargs
         ) as pool:
@@ -270,7 +270,7 @@ class TestBlockingConnectionPool:
             assert asyncio.get_running_loop().time() - start >= 0.1
 
     async def test_reuse_previously_released_connection(self, master_host):
-        connection_kwargs = {"host": master_host}
+        connection_kwargs = {"host": master_host[0]}
         async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
             c1 = await pool.get_connection("_")
             await pool.release(c1)
