@@ -56,7 +56,10 @@ class TestResponseCallbacks:
     "Tests for the response callback system"
 
     def test_response_callbacks(self, r):
-        assert r.response_callbacks == redis.Redis.RESPONSE_CALLBACKS
+        callbacks = redis.Redis.RESPONSE_CALLBACKS
+        if not is_resp2_connection(r):
+            callbacks.update(redis.Redis.RESP3_RESPONSE_CALLBACKS)
+        assert r.response_callbacks == callbacks
         assert id(r.response_callbacks) != id(redis.Redis.RESPONSE_CALLBACKS)
         r.set_response_callback("GET", lambda x: "static")
         r["a"] = "foo"
@@ -1129,7 +1132,10 @@ class TestRedisCommands:
         r.mset({"foo": "ohmytext", "bar": "mynewtext"})
         assert r.lcs("foo", "bar") == b"mytext"
         assert r.lcs("foo", "bar", len=True) == 6
-        result = [b"matches", [[[4, 7], [5, 8]]], b"len", 6]
+        if is_resp2_connection(r):
+            result = [b"matches", [[[4, 7], [5, 8]]], b"len", 6]
+        else:
+            result = {b"matches": [[[4, 7], [5, 8]]], b"len": 6}
         assert r.lcs("foo", "bar", idx=True, minmatchlen=3) == result
         with pytest.raises(redis.ResponseError):
             assert r.lcs("foo", "bar", len=True, idx=True)
@@ -2532,23 +2538,36 @@ class TestRedisCommands:
     @skip_if_server_version_lt("7.0.0")
     def test_zmpop(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        res = [b"a", [[b"a1", b"1"], [b"a2", b"2"]]]
+        if is_resp2_connection(r):
+            res = [b"a", [[b"a1", b"1"], [b"a2", b"2"]]]
+        else:
+            res = [b"a", [[b"a1", 1.0], [b"a2", 2.0]]]
         assert r.zmpop("2", ["b", "a"], min=True, count=2) == res
         with pytest.raises(redis.DataError):
             r.zmpop("2", ["b", "a"], count=2)
         r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
-        assert r.zmpop("2", ["b", "a"], max=True) == [b"b", [[b"b1", b"10"]]]
+        if is_resp2_connection(r):
+            res = [b"b", [[b"b1", b"10"]]]
+        else:
+            res = [b"b", [[b"b1", 10.0]]]
+        assert r.zmpop("2", ["b", "a"], max=True) == res
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
     def test_bzmpop(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        res = [b"a", [[b"a1", b"1"], [b"a2", b"2"]]]
+        if is_resp2_connection(r):
+            res = [b"a", [[b"a1", b"1"], [b"a2", b"2"]]]
+        else:
+            res = [b"a", [[b"a1", 1.0], [b"a2", 2.0]]]
         assert r.bzmpop(1, "2", ["b", "a"], min=True, count=2) == res
         with pytest.raises(redis.DataError):
             r.bzmpop(1, "2", ["b", "a"], count=2)
         r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
-        res = [b"b", [[b"b1", b"10"]]]
+        if is_resp2_connection(r):
+            res = [b"b", [[b"b1", b"10"]]]
+        else:
+            res = [b"b", [[b"b1", 10.0]]]
         assert r.bzmpop(0, "2", ["b", "a"], max=True) == res
         assert r.bzmpop(1, "2", ["foo", "bar"], max=True) is None
 
@@ -4025,7 +4044,7 @@ class TestRedisCommands:
         ms = message_id[: message_id.index(b"-")]
         assert ms == b"9999999999999999999"
 
-    @skip_if_server_version_lt("6.2.0")
+    @skip_if_server_version_lt("7.0.0")
     def test_xautoclaim(self, r):
         stream = "stream"
         group = "group"
@@ -4040,7 +4059,7 @@ class TestRedisCommands:
         # trying to claim a message that isn't already pending doesn't
         # do anything
         response = r.xautoclaim(stream, group, consumer2, min_idle_time=0)
-        assert response == [b"0-0", []]
+        assert response == [b"0-0", [], []]
 
         # read the group as consumer1 to initially claim the messages
         r.xreadgroup(group, consumer1, streams={stream: ">"})
@@ -4335,7 +4354,7 @@ class TestRedisCommands:
         if is_resp2_connection(r):
             assert m1 in info["entries"]
         else:
-            assert m1 in info["entries"][0]
+            assert m1 in info["entries"].keys()
         assert len(info["groups"]) == 1
 
     @skip_if_server_version_lt("5.0.0")
@@ -4874,10 +4893,16 @@ class TestRedisCommands:
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
     def test_command_getkeysandflags(self, r: redis.Redis):
-        res = [
-            [b"mylist1", [b"RW", b"access", b"delete"]],
-            [b"mylist2", [b"RW", b"insert"]],
-        ]
+        if is_resp2_connection(r):
+            res = [
+                [b"mylist1", [b"RW", b"access", b"delete"]],
+                [b"mylist2", [b"RW", b"insert"]],
+            ]
+        else:
+            res = [
+                [b"mylist1", {b"RW", b"access", b"delete"}],
+                [b"mylist2", {b"RW", b"insert"}],
+            ]
         assert res == r.command_getkeysandflags(
             "LMOVE", "mylist1", "mylist2", "left", "left"
         )

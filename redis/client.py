@@ -331,9 +331,15 @@ def parse_xinfo_stream(response, **options):
             data["last-entry"] = (last[0], pairs_to_dict(last[1]))
     else:
         data["entries"] = {_id: pairs_to_dict(entry) for _id, entry in data["entries"]}
-        data["groups"] = [
-            pairs_to_dict(group, decode_keys=True) for group in data["groups"]
-        ]
+        if isinstance(data["groups"][0], list):
+            data["groups"] = [
+                pairs_to_dict(group, decode_keys=True) for group in data["groups"]
+            ]
+        else:
+            data["groups"] = [
+                {str_if_bytes(k): v for k, v in group.items()}
+                for group in data["groups"]
+            ]
     return data
 
 

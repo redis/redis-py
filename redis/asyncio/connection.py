@@ -334,6 +334,7 @@ class Connection:
         """Initialize the connection, authenticate and select a database"""
         self._parser.on_connect(self)
 
+        auth_args = None
         # if credential provider or username and/or password are set, authenticate
         if self.credential_provider or (self.username or self.password):
             cred_provider = (
@@ -341,8 +342,21 @@ class Connection:
                 or UsernamePasswordCredentialProvider(self.username, self.password)
             )
             auth_args = cred_provider.get_credentials()
-            # avoid checking health here -- PING will fail if we try
-            # to check the health prior to the AUTH
+            # if resp version is specified and we have auth args,
+            # we need to send them via HELLO
+        if auth_args and self.protocol != 2:
+            if isinstance(self._parser, _AsyncRESP2Parser):
+                self.set_parser(_AsyncRESP3Parser)
+                self._parser.on_connect(self)
+            await self.send_command("HELLO", self.protocol, "AUTH", *auth_args)
+            response = await self.read_response()
+            if response.get(b"proto") != int(self.protocol) and response.get(
+                "proto"
+            ) != int(self.protocol):
+                raise ConnectionError("Invalid RESP version")
+        # avoid checking health here -- PING will fail if we try
+        # to check the health prior to the AUTH
+        elif auth_args:
             await self.send_command("AUTH", *auth_args, check_health=False)
 
             try:
@@ -359,7 +373,7 @@ class Connection:
                 raise AuthenticationError("Invalid Username or Password")
 
         # if resp version is specified, switch to it
-        if self.protocol != 2:
+        elif self.protocol != 2:
             if isinstance(self._parser, _AsyncRESP2Parser):
                 self.set_parser(_AsyncRESP3Parser)
                 self._parser.on_connect(self)

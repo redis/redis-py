@@ -202,7 +202,7 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
             response = await self._read(int(response))
         # verbatim string response
         elif byte == b"=":
-            response = await self._read(int(response))[4:]
+            response = (await self._read(int(response)))[4:]
         # array response
         elif byte == b"*":
             response = [

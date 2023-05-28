@@ -291,6 +291,8 @@ class AbstractConnection:
             if isinstance(self._parser, _RESP2Parser):
                 self.set_parser(_RESP3Parser)
                 self._parser.on_connect(self)
+            if len(auth_args) == 1:
+                auth_args = ["default", auth_args[0]]
             self.send_command("HELLO", self.protocol, "AUTH", *auth_args)
             response = self.read_response()
             if response.get(b"proto") != int(self.protocol) and response.get(
