@@ -11,7 +11,12 @@ from redis.asyncio.connection import Connection, UnixDomainSocketConnection
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
-from redis.parsers import _AsyncHiredisParser, _AsyncRESPBase, _AsyncRESP2Parser, _AsyncRESP3Parser
+from redis.parsers import (
+    _AsyncHiredisParser,
+    _AsyncRESP2Parser,
+    _AsyncRESP3Parser,
+    _AsyncRESPBase,
+)
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 

@@ -348,6 +348,8 @@ class Connection:
             if isinstance(self._parser, _AsyncRESP2Parser):
                 self.set_parser(_AsyncRESP3Parser)
                 self._parser.on_connect(self)
+            if len(auth_args) == 1:
+                auth_args = ["default", auth_args[0]]
             await self.send_command("HELLO", self.protocol, "AUTH", *auth_args)
             response = await self.read_response()
             if response.get(b"proto") != int(self.protocol) and response.get(

@@ -638,7 +638,10 @@ def parse_acl_getuser(response, **options):
                 list(map(str_if_bytes, selector)) for selector in data["selectors"]
             ]
         elif data["selectors"] != []:
-            data["selectors"] = [{str_if_bytes(k): str_if_bytes(v) for k, v in selector.items()} for selector in data["selectors"]]
+            data["selectors"] = [
+                {str_if_bytes(k): str_if_bytes(v) for k, v in selector.items()}
+                for selector in data["selectors"]
+            ]
 
     # split 'commands' into separate 'categories' and 'commands' lists
     commands, categories = [], []
