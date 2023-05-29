@@ -261,8 +261,8 @@ class JSONCommands:
         decode_keys: Optional[bool] = False,
     ) -> Optional[str]:
         """
-        Merges a given JSON value into matching paths. Consequently,
-        JSON values at matching paths are updated, deleted, or expanded with new children
+        Merges a given JSON value into matching paths. Consequently, JSON values
+        at matching paths are updated, deleted, or expanded with new children
 
         ``decode_keys`` If set to True, the keys of ``obj`` will be decoded
         with utf-8.
