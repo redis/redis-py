@@ -34,7 +34,6 @@ setup(
     python_requires=">=3.7",
     install_requires=[
         'importlib-metadata >= 1.0; python_version < "3.8"',
-        'typing-extensions; python_version<"3.8"',
         'async-timeout>=4.0.2; python_version<"3.11"',
     ],
     classifiers=[

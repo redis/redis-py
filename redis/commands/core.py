@@ -4288,7 +4288,7 @@ class SortedSetCommands(CommandsProtocol):
         """
         if timeout is None:
             timeout = 0
-        keys: list[EncodableT] = list_or_args(keys, None)
+        keys = list_or_args(keys, None)
         keys.append(timeout)
         return self.execute_command("BZPOPMIN", *keys)
 
