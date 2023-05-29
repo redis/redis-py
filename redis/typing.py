@@ -7,12 +7,11 @@ from typing import (
     Awaitable,
     Iterable,
     Mapping,
+    Protocol,
     Type,
     TypeVar,
     Union,
 )
-
-from redis.compat import Protocol
 
 if TYPE_CHECKING:
     from redis.asyncio.connection import ConnectionPool as AsyncConnectionPool

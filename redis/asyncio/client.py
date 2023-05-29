@@ -16,9 +16,11 @@ from typing import (
     MutableMapping,
     NoReturn,
     Optional,
+    Protocol,
     Set,
     Tuple,
     Type,
+    TypedDict,
     TypeVar,
     Union,
     cast,
@@ -45,7 +47,6 @@ from redis.commands import (
     AsyncSentinelCommands,
     list_or_args,
 )
-from redis.compat import Protocol, TypedDict
 from redis.credentials import CredentialProvider
 from redis.exceptions import (
     ConnectionError,

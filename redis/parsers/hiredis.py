@@ -8,7 +8,7 @@ if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
 else:
     from async_timeout import timeout as async_timeout
 
-from redis.compat import TypedDict
+from typing import TypedDict
 
 from ..exceptions import ConnectionError, InvalidResponse, RedisError
 from ..typing import EncodableT

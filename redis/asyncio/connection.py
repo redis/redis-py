@@ -30,10 +30,10 @@ if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
 else:
     from async_timeout import timeout as async_timeout
 
+from typing import Protocol, TypedDict
 
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.compat import Protocol, TypedDict
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
