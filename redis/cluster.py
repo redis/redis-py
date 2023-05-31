@@ -1738,7 +1738,9 @@ class ClusterPubSub(PubSub):
         try:
             return self.node_pubsub_mapping[node.name]
         except KeyError:
-            pubsub = node.redis_connection.pubsub()
+            pubsub = node.redis_connection.pubsub(
+                push_handler_func=self.push_handler_func
+            )
             self.node_pubsub_mapping[node.name] = pubsub
             return pubsub
 

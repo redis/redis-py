@@ -608,6 +608,18 @@ class TestPubSubRESP3Handler:
         assert wait_for_message(p) is None
         assert self.message == ["my handler", [b"message", b"foo", b"test message"]]
 
+    @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+    def test_push_handler_sharded_pubsub(self, r):
+        if is_resp2_connection(r):
+            return
+        p = r.pubsub(push_handler_func=self.my_handler)
+        p.ssubscribe("foo")
+        assert wait_for_message(p, func=p.get_sharded_message) is None
+        assert self.message == ["my handler", [b"ssubscribe", b"foo", 1]]
+        assert r.spublish("foo", "test message") == 1
+        assert wait_for_message(p, func=p.get_sharded_message) is None
+        assert self.message == ["my handler", [b"smessage", b"foo", b"test message"]]
+
 
 class TestPubSubAutoDecoding:
     "These tests only validate that we get unicode values back"
