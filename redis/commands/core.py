@@ -5103,6 +5103,15 @@ class PubSubCommands(CommandsProtocol):
         """
         return self.execute_command("PUBLISH", channel, message, **kwargs)
 
+    def spublish(self, shard_channel: ChannelT, message: EncodableT) -> ResponseT:
+        """
+        Posts a message to the given shard channel.
+        Returns the number of clients that received the message
+
+        For more information see https://redis.io/commands/spublish
+        """
+        return self.execute_command("SPUBLISH", shard_channel, message)
+
     def pubsub_channels(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
         """
         Return a list of channels that have at least one subscriber
@@ -5110,6 +5119,14 @@ class PubSubCommands(CommandsProtocol):
         For more information see https://redis.io/commands/pubsub-channels
         """
         return self.execute_command("PUBSUB CHANNELS", pattern, **kwargs)
+
+    def pubsub_shardchannels(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
+        """
+        Return a list of shard_channels that have at least one subscriber
+
+        For more information see https://redis.io/commands/pubsub-shardchannels
+        """
+        return self.execute_command("PUBSUB SHARDCHANNELS", pattern, **kwargs)
 
     def pubsub_numpat(self, **kwargs) -> ResponseT:
         """
@@ -5127,6 +5144,15 @@ class PubSubCommands(CommandsProtocol):
         For more information see https://redis.io/commands/pubsub-numsub
         """
         return self.execute_command("PUBSUB NUMSUB", *args, **kwargs)
+
+    def pubsub_shardnumsub(self, *args: ChannelT, **kwargs) -> ResponseT:
+        """
+        Return a list of (shard_channel, number of subscribers) tuples
+        for each channel given in ``*args``
+
+        For more information see https://redis.io/commands/pubsub-shardnumsub
+        """
+        return self.execute_command("PUBSUB SHARDNUMSUB", *args, **kwargs)
 
 
 AsyncPubSubCommands = PubSubCommands
