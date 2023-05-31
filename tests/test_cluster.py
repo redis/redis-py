@@ -39,6 +39,7 @@ from tests.test_pubsub import wait_for_message
 
 from .conftest import (
     _get_client,
+    assert_resp_response,
     is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_server_version_lt,
@@ -1750,49 +1751,42 @@ class TestClusterRedisCommands:
         # invalid aggregation
         with pytest.raises(DataError):
             r.zinter(["{foo}a", "{foo}b", "{foo}c"], aggregate="foo", withscores=True)
-        if is_resp2_connection(r):
-            # aggregate with SUM
-            assert r.zinter(["{foo}a", "{foo}b", "{foo}c"], withscores=True) == [
-                (b"a3", 8),
-                (b"a1", 9),
-            ]
-            # aggregate with MAX
-            assert r.zinter(
-                ["{foo}a", "{foo}b", "{foo}c"], aggregate="MAX", withscores=True
-            ) == [(b"a3", 5), (b"a1", 6)]
-            # aggregate with MIN
-            assert r.zinter(
-                ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN", withscores=True
-            ) == [(b"a1", 1), (b"a3", 1)]
-            # with weights
-            assert r.zinter(
-                {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True
-            ) == [(b"a3", 20), (b"a1", 23)]
-        else:
-            # aggregate with SUM
-            assert r.zinter(["{foo}a", "{foo}b", "{foo}c"], withscores=True) == [
-                [b"a3", 8],
-                [b"a1", 9],
-            ]
-            # aggregate with MAX
-            assert r.zinter(
-                ["{foo}a", "{foo}b", "{foo}c"], aggregate="MAX", withscores=True
-            ) == [[b"a3", 5], [b"a1", 6]]
-            # aggregate with MIN
-            assert r.zinter(
-                ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN", withscores=True
-            ) == [[b"a1", 1], [b"a3", 1]]
-            # with weights
-            assert r.zinter(
-                {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True
-            ) == [[b"a3", 2], [b"a1", 2]]
+        assert_resp_response(
+            r,
+            r.zinter(["{foo}a", "{foo}b", "{foo}c"], withscores=True),
+            [(b"a3", 8), (b"a1", 9)],
+            [[b"a3", 8], [b"a1", 9]],
+        )
+        assert_resp_response(
+            r,
+            r.zinter(["{foo}a", "{foo}b", "{foo}c"], withscores=True, aggregate="MAX"),
+            [(b"a3", 5), (b"a1", 6)],
+            [[b"a3", 5], [b"a1", 6]],
+        )
+        assert_resp_response(
+            r,
+            r.zinter(["{foo}a", "{foo}b", "{foo}c"], withscores=True, aggregate="MIN"),
+            [(b"a1", 1), (b"a3", 1)],
+            [[b"a1", 1], [b"a3", 1]],
+        )
+        assert_resp_response(
+            r,
+            r.zinter({"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True),
+            [(b"a3", 20.0), (b"a1", 23.0)],
+            [[b"a3", 20.0], [b"a1", 23.0]],
+        )
 
     def test_cluster_zinterstore_sum(self, r):
         r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
         r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zinterstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"]) == 2
-        assert r.zrange("{foo}d", 0, -1, withscores=True) == [(b"a3", 8), (b"a1", 9)]
+        assert_resp_response(
+            r,
+            r.zrange("{foo}d", 0, -1, withscores=True),
+            [(b"a3", 8), (b"a1", 9)],
+            [[b"a3", 8.0], [b"a1", 9.0]],
+        )
 
     def test_cluster_zinterstore_max(self, r):
         r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
@@ -1802,7 +1796,12 @@ class TestClusterRedisCommands:
             r.zinterstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="MAX")
             == 2
         )
-        assert r.zrange("{foo}d", 0, -1, withscores=True) == [(b"a3", 5), (b"a1", 6)]
+        assert_resp_response(
+            r,
+            r.zrange("{foo}d", 0, -1, withscores=True),
+            [(b"a3", 5), (b"a1", 6)],
+            [[b"a3", 5.0], [b"a1", 6.0]],
+        )
 
     def test_cluster_zinterstore_min(self, r):
         r.zadd("{foo}a", {"a1": 1, "a2": 2, "a3": 3})
@@ -1812,14 +1811,24 @@ class TestClusterRedisCommands:
             r.zinterstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN")
             == 2
         )
-        assert r.zrange("{foo}d", 0, -1, withscores=True) == [(b"a1", 1), (b"a3", 3)]
+        assert_resp_response(
+            r,
+            r.zrange("{foo}d", 0, -1, withscores=True),
+            [(b"a1", 1), (b"a3", 3)],
+            [[b"a1", 1.0], [b"a3", 3.0]],
+        )
 
     def test_cluster_zinterstore_with_weight(self, r):
         r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
         r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zinterstore("{foo}d", {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}) == 2
-        assert r.zrange("{foo}d", 0, -1, withscores=True) == [(b"a3", 20), (b"a1", 23)]
+        assert_resp_response(
+            r,
+            r.zrange("{foo}d", 0, -1, withscores=True),
+            [(b"a3", 20), (b"a1", 23)],
+            [[b"a3", 20.0], [b"a1", 23.0]],
+        )
 
     @skip_if_server_version_lt("4.9.0")
     def test_cluster_bzpopmax(self, r):
@@ -1852,7 +1861,12 @@ class TestClusterRedisCommands:
         assert r.zrange("{foo}b", 0, -1) == [b"a1", b"a2"]
         assert r.zrangestore("{foo}b", "{foo}a", 1, 2)
         assert r.zrange("{foo}b", 0, -1) == [b"a2", b"a3"]
-        assert r.zrange("{foo}b", 0, -1, withscores=True) == [(b"a2", 2), (b"a3", 3)]
+        assert_resp_response(
+            r,
+            r.zrange("{foo}b", 0, 1, withscores=True),
+            [(b"a2", 2), (b"a3", 3)],
+            [[b"a2", 2.0], [b"a3", 3.0]],
+        )
         # reversed order
         assert r.zrangestore("{foo}b", "{foo}a", 1, 2, desc=True)
         assert r.zrange("{foo}b", 0, -1) == [b"a1", b"a2"]
@@ -1874,39 +1888,45 @@ class TestClusterRedisCommands:
         r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
         # sum
         assert r.zunion(["{foo}a", "{foo}b", "{foo}c"]) == [b"a2", b"a4", b"a3", b"a1"]
-        assert r.zunion(["{foo}a", "{foo}b", "{foo}c"], withscores=True) == [
-            (b"a2", 3),
-            (b"a4", 4),
-            (b"a3", 8),
-            (b"a1", 9),
-        ]
+        assert_resp_response(
+            r,
+            r.zunion(["{foo}a", "{foo}b", "{foo}c"], withscores=True),
+            [(b"a2", 3), (b"a4", 4), (b"a3", 8), (b"a1", 9)],
+            [[b"a2", 3.0], [b"a4", 4.0], [b"a3", 8.0], [b"a1", 9.0]],
+        )
         # max
-        assert r.zunion(
-            ["{foo}a", "{foo}b", "{foo}c"], aggregate="MAX", withscores=True
-        ) == [(b"a2", 2), (b"a4", 4), (b"a3", 5), (b"a1", 6)]
+        assert_resp_response(
+            r,
+            r.zunion(["{foo}a", "{foo}b", "{foo}c"], aggregate="MAX", withscores=True),
+            [(b"a2", 2), (b"a4", 4), (b"a3", 5), (b"a1", 6)],
+            [[b"a2", 2.0], [b"a4", 4.0], [b"a3", 5.0], [b"a1", 6.0]],
+        )
         # min
-        assert r.zunion(
-            ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN", withscores=True
-        ) == [(b"a1", 1), (b"a2", 1), (b"a3", 1), (b"a4", 4)]
+        assert_resp_response(
+            r,
+            r.zunion(["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN", withscores=True),
+            [(b"a1", 1), (b"a2", 1), (b"a3", 1), (b"a4", 4)],
+            [[b"a1", 1.0], [b"a2", 1.0], [b"a3", 1.0], [b"a4", 4.0]],
+        )
         # with weight
-        assert r.zunion({"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True) == [
-            (b"a2", 5),
-            (b"a4", 12),
-            (b"a3", 20),
-            (b"a1", 23),
-        ]
+        assert_resp_response(
+            r,
+            r.zunion({"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True),
+            [(b"a2", 5), (b"a4", 12), (b"a3", 20), (b"a1", 23)],
+            [[b"a2", 5.0], [b"a4", 12.0], [b"a3", 20.0], [b"a1", 23.0]],
+        )
 
     def test_cluster_zunionstore_sum(self, r):
         r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
         r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zunionstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"]) == 4
-        assert r.zrange("{foo}d", 0, -1, withscores=True) == [
-            (b"a2", 3),
-            (b"a4", 4),
-            (b"a3", 8),
-            (b"a1", 9),
-        ]
+        assert_resp_response(
+            r,
+            r.zrange("{foo}d", 0, -1, withscores=True),
+            [(b"a2", 3), (b"a4", 4), (b"a3", 8), (b"a1", 9)],
+            [[b"a2", 3.0], [b"a4", 4.0], [b"a3", 8.0], [b"a1", 9.0]],
+        )
 
     def test_cluster_zunionstore_max(self, r):
         r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
@@ -1916,12 +1936,12 @@ class TestClusterRedisCommands:
             r.zunionstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="MAX")
             == 4
         )
-        assert r.zrange("{foo}d", 0, -1, withscores=True) == [
-            (b"a2", 2),
-            (b"a4", 4),
-            (b"a3", 5),
-            (b"a1", 6),
-        ]
+        assert_resp_response(
+            r,
+            r.zrange("{foo}d", 0, -1, withscores=True),
+            [(b"a2", 2), (b"a4", 4), (b"a3", 5), (b"a1", 6)],
+            [[b"a2", 2.0], [b"a4", 4.0], [b"a3", 5.0], [b"a1", 6.0]],
+        )
 
     def test_cluster_zunionstore_min(self, r):
         r.zadd("{foo}a", {"a1": 1, "a2": 2, "a3": 3})
@@ -1931,24 +1951,24 @@ class TestClusterRedisCommands:
             r.zunionstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN")
             == 4
         )
-        assert r.zrange("{foo}d", 0, -1, withscores=True) == [
-            (b"a1", 1),
-            (b"a2", 2),
-            (b"a3", 3),
-            (b"a4", 4),
-        ]
+        assert_resp_response(
+            r,
+            r.zrange("{foo}d", 0, -1, withscores=True),
+            [(b"a1", 1), (b"a2", 2), (b"a3", 3), (b"a4", 4)],
+            [[b"a1", 1.0], [b"a2", 2.0], [b"a3", 3.0], [b"a4", 4.0]],
+        )
 
     def test_cluster_zunionstore_with_weight(self, r):
         r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
         r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zunionstore("{foo}d", {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}) == 4
-        assert r.zrange("{foo}d", 0, -1, withscores=True) == [
-            (b"a2", 5),
-            (b"a4", 12),
-            (b"a3", 20),
-            (b"a1", 23),
-        ]
+        assert_resp_response(
+            r,
+            r.zrange("{foo}d", 0, -1, withscores=True),
+            [(b"a2", 5), (b"a4", 12), (b"a3", 20), (b"a1", 23)],
+            [[b"a2", 5.0], [b"a4", 12.0], [b"a3", 20.0], [b"a1", 23.0]],
+        )
 
     @skip_if_server_version_lt("2.8.9")
     def test_cluster_pfcount(self, r):
@@ -2970,7 +2990,12 @@ class TestReadOnlyPipeline:
 
         with r.pipeline() as readonly_pipe:
             readonly_pipe.get("foo71").zrange("foo88", 0, 5, withscores=True)
-            assert readonly_pipe.execute() == [b"a1", [(b"z1", 1.0), (b"z2", 4)]]
+            assert_resp_response(
+                r,
+                readonly_pipe.execute(),
+                [b"a1", [(b"z1", 1.0), (b"z2", 4)]],
+                [b"a1", [[b"z1", 1.0], [b"z2", 4.0]]],
+            )
 
     def test_moved_redirection_on_slave_with_default(self, r):
         """

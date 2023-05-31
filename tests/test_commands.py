@@ -70,6 +70,7 @@ class TestResponseCallbacks:
 
 
 class TestRedisCommands:
+    @pytest.mark.onlynoncluster
     @skip_if_redis_enterprise()
     def test_auth(self, r, request):
         # sending an AUTH command before setting a user/password on the
@@ -104,7 +105,6 @@ class TestRedisCommands:
                 # connection field is not set in Redis Cluster, but that's ok
                 # because the problem discussed above does not apply to Redis Cluster
                 pass
-
             r.auth(temp_pass)
             r.config_set("requirepass", "")
             r.acl_deluser(username)

@@ -2,7 +2,7 @@ import pytest
 
 from redis.exceptions import ResponseError
 
-from .conftest import skip_if_server_version_lt
+from .conftest import assert_resp_response, skip_if_server_version_lt
 
 engine = "lua"
 lib = "mylib"
@@ -64,12 +64,22 @@ class TestFunction:
                 [[b"name", b"myfunc", b"description", None, b"flags", [b"no-writes"]]],
             ]
         ]
-        assert r.function_list() == res
-        assert r.function_list(library="*lib") == res
-        assert (
-            r.function_list(withcode=True)[0][7]
-            == f"#!{engine} name={lib} \n {function}".encode()
+        resp3_res = [
+            {
+                b"library_name": b"mylib",
+                b"engine": b"LUA",
+                b"functions": [
+                    {b"name": b"myfunc", b"description": None, b"flags": {b"no-writes"}}
+                ],
+            }
+        ]
+        assert_resp_response(r, r.function_list(), res, resp3_res)
+        assert_resp_response(r, r.function_list(library="*lib"), res, resp3_res)
+        res[0].extend(
+            [b"library_code", f"#!{engine} name={lib} \n {function}".encode()]
         )
+        resp3_res[0][b"library_code"] = f"#!{engine} name={lib} \n {function}".encode()
+        assert_resp_response(r, r.function_list(withcode=True), res, resp3_res)
 
     @pytest.mark.onlycluster
     def test_function_list_on_cluster(self, r):

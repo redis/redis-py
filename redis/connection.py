@@ -276,6 +276,7 @@ class AbstractConnection:
     def on_connect(self):
         "Initialize the connection, authenticate and select a database"
         self._parser.on_connect(self)
+        parser = self._parser
 
         auth_args = None
         # if credential provider or username and/or password are set, authenticate
@@ -290,6 +291,8 @@ class AbstractConnection:
         if auth_args and self.protocol != 2:
             if isinstance(self._parser, _RESP2Parser):
                 self.set_parser(_RESP3Parser)
+                # update cluster exception classes
+                self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
                 self._parser.on_connect(self)
             if len(auth_args) == 1:
                 auth_args = ["default", auth_args[0]]
@@ -321,6 +324,8 @@ class AbstractConnection:
         elif self.protocol != 2:
             if isinstance(self._parser, _RESP2Parser):
                 self.set_parser(_RESP3Parser)
+                # update cluster exception classes
+                self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
                 self._parser.on_connect(self)
             self.send_command("HELLO", self.protocol)
             response = self.read_response()

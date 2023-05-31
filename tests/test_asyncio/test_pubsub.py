@@ -421,7 +421,7 @@ class TestPubSubMessages:
         )
         assert expect in info.exconly()
 
-
+@pytest.mark.onlynoncluster
 class TestPubSubRESP3Handler:
     def my_handler(self, message):
         self.message = ["my handler", message]
