@@ -609,6 +609,7 @@ class TestPubSubRESP3Handler:
         assert self.message == ["my handler", [b"message", b"foo", b"test message"]]
 
     @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+    @skip_if_server_version_lt("7.0.0")
     def test_push_handler_sharded_pubsub(self, r):
         if is_resp2_connection(r):
             return

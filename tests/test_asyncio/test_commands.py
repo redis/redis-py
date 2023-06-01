@@ -13,12 +13,13 @@ import redis
 from redis import exceptions
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, parse_info
 from tests.conftest import (
+    assert_resp_response,
+    assert_resp_response_in,
+    is_resp2_connection,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
 )
-
-from .conftest import assert_resp_response, assert_resp_response_in
 
 REDIS_6_VERSION = "5.9.0"
 
@@ -2913,16 +2914,16 @@ class TestRedisCommands:
         # xreadgroup with noack does not have any items in the PEL
         await r.xgroup_destroy(stream, group)
         await r.xgroup_create(stream, group, "0")
-        # res = r.xreadgroup(group, consumer, streams={stream: ">"}, noack=True)
-        # empty_res = r.xreadgroup(group, consumer, streams={stream: "0"})
-        # if is_resp2_connection(r):
-        #     assert len(res[0][1]) == 2
-        #     # now there should be nothing pending
-        #     assert len(empty_res[0][1]) == 0
-        # else:
-        #     assert len(res[strem_name][0]) == 2
-        #     # now there should be nothing pending
-        #     assert len(empty_res[strem_name][0]) == 0
+        res = await r.xreadgroup(group, consumer, streams={stream: ">"}, noack=True)
+        empty_res = await r.xreadgroup(group, consumer, streams={stream: "0"})
+        if is_resp2_connection(r):
+            assert len(res[0][1]) == 2
+            # now there should be nothing pending
+            assert len(empty_res[0][1]) == 0
+        else:
+            assert len(res[strem_name][0]) == 2
+            # now there should be nothing pending
+            assert len(empty_res[strem_name][0]) == 0
 
         await r.xgroup_destroy(stream, group)
         await r.xgroup_create(stream, group, "0")

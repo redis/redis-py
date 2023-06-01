@@ -40,7 +40,6 @@ from tests.test_pubsub import wait_for_message
 from .conftest import (
     _get_client,
     assert_resp_response,
-    is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
@@ -1726,10 +1725,13 @@ class TestClusterRedisCommands:
         r.zadd("{foo}a", {"a1": 1, "a2": 2, "a3": 3})
         r.zadd("{foo}b", {"a1": 1, "a2": 2})
         assert r.zdiff(["{foo}a", "{foo}b"]) == [b"a3"]
-        if is_resp2_connection(r):
-            assert r.zdiff(["{foo}a", "{foo}b"], withscores=True) == [b"a3", b"3"]
-        else:
-            assert r.zdiff(["{foo}a", "{foo}b"], withscores=True) == [[b"a3", 3.0]]
+        response = r.zdiff(["{foo}a", "{foo}b"], withscores=True)
+        assert_resp_response(
+            r,
+            response,
+            [b"a3", b"3"],
+            [[b"a3", 3.0]],
+        )
 
     @skip_if_server_version_lt("6.2.0")
     def test_cluster_zdiffstore(self, r):
@@ -1737,10 +1739,8 @@ class TestClusterRedisCommands:
         r.zadd("{foo}b", {"a1": 1, "a2": 2})
         assert r.zdiffstore("{foo}out", ["{foo}a", "{foo}b"])
         assert r.zrange("{foo}out", 0, -1) == [b"a3"]
-        if is_resp2_connection(r):
-            assert r.zrange("{foo}out", 0, -1, withscores=True) == [(b"a3", 3.0)]
-        else:
-            assert r.zrange("{foo}out", 0, -1, withscores=True) == [[b"a3", 3.0]]
+        response = r.zrange("{foo}out", 0, -1, withscores=True)
+        assert_resp_response(r, response, [(b"a3", 3.0)], [[b"a3", 3.0]])
 
     @skip_if_server_version_lt("6.2.0")
     def test_cluster_zinter(self, r):
