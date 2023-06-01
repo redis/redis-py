@@ -1642,10 +1642,10 @@ class ClusterPubSub(PubSub):
         self.node_pubsub_mapping = {}
         self._pubsubs_generator = self._pubsubs_generator()
         super().__init__(
-            **kwargs,
             connection_pool=connection_pool,
             encoder=redis_cluster.encoder,
             push_handler_func=push_handler_func,
+            **kwargs,
         )
 
     def set_pubsub_node(self, cluster, node=None, host=None, port=None):

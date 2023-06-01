@@ -671,7 +671,7 @@ class PubSub:
         if self.encoder is None:
             self.encoder = self.connection_pool.get_encoder()
         if self.encoder.decode_responses:
-            self.health_check_response: Iterable[Union[str, bytes]] = [
+            self.health_check_response = [
                 ["pong", self.HEALTH_CHECK_MESSAGE],
                 self.HEALTH_CHECK_MESSAGE,
             ]
