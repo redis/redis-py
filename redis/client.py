@@ -331,9 +331,15 @@ def parse_xinfo_stream(response, **options):
             data["last-entry"] = (last[0], pairs_to_dict(last[1]))
     else:
         data["entries"] = {_id: pairs_to_dict(entry) for _id, entry in data["entries"]}
-        data["groups"] = [
-            pairs_to_dict(group, decode_keys=True) for group in data["groups"]
-        ]
+        if isinstance(data["groups"][0], list):
+            data["groups"] = [
+                pairs_to_dict(group, decode_keys=True) for group in data["groups"]
+            ]
+        else:
+            data["groups"] = [
+                {str_if_bytes(k): v for k, v in group.items()}
+                for group in data["groups"]
+            ]
     return data
 
 
@@ -574,6 +580,27 @@ def parse_command(response, **options):
     return commands
 
 
+def parse_command_resp3(response, **options):
+    commands = {}
+    for command in response:
+        cmd_dict = {}
+        cmd_name = str_if_bytes(command[0])
+        cmd_dict["name"] = cmd_name
+        cmd_dict["arity"] = command[1]
+        cmd_dict["flags"] = {str_if_bytes(flag) for flag in command[2]}
+        cmd_dict["first_key_pos"] = command[3]
+        cmd_dict["last_key_pos"] = command[4]
+        cmd_dict["step_count"] = command[5]
+        cmd_dict["acl_categories"] = command[6]
+        if len(command) > 7:
+            cmd_dict["tips"] = command[7]
+            cmd_dict["key_specifications"] = command[8]
+            cmd_dict["subcommands"] = command[9]
+
+        commands[cmd_name] = cmd_dict
+    return commands
+
+
 def parse_pubsub_numsub(response, **options):
     return list(zip(response[0::2], response[1::2]))
 
@@ -606,17 +633,20 @@ def parse_acl_getuser(response, **options):
         if data["channels"] == [""]:
             data["channels"] = []
     if "selectors" in data:
-        data["selectors"] = [
-            list(map(str_if_bytes, selector)) for selector in data["selectors"]
-        ]
+        if data["selectors"] != [] and isinstance(data["selectors"][0], list):
+            data["selectors"] = [
+                list(map(str_if_bytes, selector)) for selector in data["selectors"]
+            ]
+        elif data["selectors"] != []:
+            data["selectors"] = [
+                {str_if_bytes(k): str_if_bytes(v) for k, v in selector.items()}
+                for selector in data["selectors"]
+            ]
 
     # split 'commands' into separate 'categories' and 'commands' lists
     commands, categories = [], []
     for command in data["commands"].split(" "):
-        if "@" in command:
-            categories.append(command)
-        else:
-            commands.append(command)
+        categories.append(command) if "@" in command else commands.append(command)
 
     data["commands"] = commands
     data["categories"] = categories
@@ -881,6 +911,7 @@ class AbstractRedis:
         if isinstance(r, list)
         else bool_ok(r),
         **string_keys_to_dict("XREAD XREADGROUP", parse_xread_resp3),
+        "COMMAND": parse_command_resp3,
         "STRALGO": lambda r, **options: {
             str_if_bytes(key): str_if_bytes(value) for key, value in r.items()
         }
@@ -1095,7 +1126,7 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
 
         self.response_callbacks = CaseInsensitiveDict(self.__class__.RESPONSE_CALLBACKS)
 
-        if self.connection_pool.connection_kwargs.get("protocol") == "3":
+        if self.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
             self.response_callbacks.update(self.__class__.RESP3_RESPONSE_CALLBACKS)
 
     def __repr__(self):
@@ -1426,8 +1457,8 @@ class PubSub:
     will be returned and it's safe to start listening again.
     """
 
-    PUBLISH_MESSAGE_TYPES = ("message", "pmessage")
-    UNSUBSCRIBE_MESSAGE_TYPES = ("unsubscribe", "punsubscribe")
+    PUBLISH_MESSAGE_TYPES = ("message", "pmessage", "smessage")
+    UNSUBSCRIBE_MESSAGE_TYPES = ("unsubscribe", "punsubscribe", "sunsubscribe")
     HEALTH_CHECK_MESSAGE = "redis-py-health-check"
 
     def __init__(
@@ -1479,9 +1510,11 @@ class PubSub:
             self.connection.clear_connect_callbacks()
             self.connection_pool.release(self.connection)
             self.connection = None
-        self.channels = {}
         self.health_check_response_counter = 0
+        self.channels = {}
         self.pending_unsubscribe_channels = set()
+        self.shard_channels = {}
+        self.pending_unsubscribe_shard_channels = set()
         self.patterns = {}
         self.pending_unsubscribe_patterns = set()
         self.subscribed_event.clear()
@@ -1496,16 +1529,23 @@ class PubSub:
         # before passing them to [p]subscribe.
         self.pending_unsubscribe_channels.clear()
         self.pending_unsubscribe_patterns.clear()
+        self.pending_unsubscribe_shard_channels.clear()
         if self.channels:
-            channels = {}
-            for k, v in self.channels.items():
-                channels[self.encoder.decode(k, force=True)] = v
+            channels = {
+                self.encoder.decode(k, force=True): v for k, v in self.channels.items()
+            }
             self.subscribe(**channels)
         if self.patterns:
-            patterns = {}
-            for k, v in self.patterns.items():
-                patterns[self.encoder.decode(k, force=True)] = v
+            patterns = {
+                self.encoder.decode(k, force=True): v for k, v in self.patterns.items()
+            }
             self.psubscribe(**patterns)
+        if self.shard_channels:
+            shard_channels = {
+                self.encoder.decode(k, force=True): v
+                for k, v in self.shard_channels.items()
+            }
+            self.ssubscribe(**shard_channels)
 
     @property
     def subscribed(self):
@@ -1714,6 +1754,45 @@ class PubSub:
         self.pending_unsubscribe_channels.update(channels)
         return self.execute_command("UNSUBSCRIBE", *args)
 
+    def ssubscribe(self, *args, target_node=None, **kwargs):
+        """
+        Subscribes the client to the specified shard channels.
+        Channels supplied as keyword arguments expect a channel name as the key
+        and a callable as the value. A channel's callable will be invoked automatically
+        when a message is received on that channel rather than producing a message via
+        ``listen()`` or ``get_sharded_message()``.
+        """
+        if args:
+            args = list_or_args(args[0], args[1:])
+        new_s_channels = dict.fromkeys(args)
+        new_s_channels.update(kwargs)
+        ret_val = self.execute_command("SSUBSCRIBE", *new_s_channels.keys())
+        # update the s_channels dict AFTER we send the command. we don't want to
+        # subscribe twice to these channels, once for the command and again
+        # for the reconnection.
+        new_s_channels = self._normalize_keys(new_s_channels)
+        self.shard_channels.update(new_s_channels)
+        if not self.subscribed:
+            # Set the subscribed_event flag to True
+            self.subscribed_event.set()
+            # Clear the health check counter
+            self.health_check_response_counter = 0
+        self.pending_unsubscribe_shard_channels.difference_update(new_s_channels)
+        return ret_val
+
+    def sunsubscribe(self, *args, target_node=None):
+        """
+        Unsubscribe from the supplied shard_channels. If empty, unsubscribe from
+        all shard_channels
+        """
+        if args:
+            args = list_or_args(args[0], args[1:])
+            s_channels = self._normalize_keys(dict.fromkeys(args))
+        else:
+            s_channels = self.shard_channels
+        self.pending_unsubscribe_shard_channels.update(s_channels)
+        return self.execute_command("SUNSUBSCRIBE", *args)
+
     def listen(self):
         "Listen for messages on channels this client has been subscribed to"
         while self.subscribed:
@@ -1747,6 +1826,8 @@ class PubSub:
         if response:
             return self.handle_message(response, ignore_subscribe_messages)
         return None
+
+    get_sharded_message = get_message
 
     def ping(self, message=None):
         """
@@ -1795,12 +1876,17 @@ class PubSub:
                 if pattern in self.pending_unsubscribe_patterns:
                     self.pending_unsubscribe_patterns.remove(pattern)
                     self.patterns.pop(pattern, None)
+            elif message_type == "sunsubscribe":
+                s_channel = response[1]
+                if s_channel in self.pending_unsubscribe_shard_channels:
+                    self.pending_unsubscribe_shard_channels.remove(s_channel)
+                    self.shard_channels.pop(s_channel, None)
             else:
                 channel = response[1]
                 if channel in self.pending_unsubscribe_channels:
                     self.pending_unsubscribe_channels.remove(channel)
                     self.channels.pop(channel, None)
-            if not self.channels and not self.patterns:
+            if not self.channels and not self.patterns and not self.shard_channels:
                 # There are no subscriptions anymore, set subscribed_event flag
                 # to false
                 self.subscribed_event.clear()
@@ -1809,6 +1895,8 @@ class PubSub:
             # if there's a message handler, invoke it
             if message_type == "pmessage":
                 handler = self.patterns.get(message["pattern"], None)
+            elif message_type == "smessage":
+                handler = self.shard_channels.get(message["channel"], None)
             else:
                 handler = self.channels.get(message["channel"], None)
             if handler:
@@ -1829,6 +1917,11 @@ class PubSub:
         for pattern, handler in self.patterns.items():
             if handler is None:
                 raise PubSubError(f"Pattern: '{pattern}' has no handler registered")
+        for s_channel, handler in self.shard_channels.items():
+            if handler is None:
+                raise PubSubError(
+                    f"Shard Channel: '{s_channel}' has no handler registered"
+                )
 
         thread = PubSubWorkerThread(
             self, sleep_time, daemon=daemon, exception_handler=exception_handler

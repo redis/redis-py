@@ -475,8 +475,31 @@ def wait_for_command(client, monitor, command, key=None):
 
 
 def is_resp2_connection(r):
-    if isinstance(r, redis.Redis):
+    if isinstance(r, redis.Redis) or isinstance(r, redis.asyncio.Redis):
         protocol = r.connection_pool.connection_kwargs.get("protocol")
-    elif isinstance(r, redis.RedisCluster):
+    elif isinstance(r, redis.cluster.AbstractRedisCluster):
         protocol = r.nodes_manager.connection_kwargs.get("protocol")
-    return protocol == "2" or protocol is None
+    return protocol in ["2", 2, None]
+
+
+def get_protocol_version(r):
+    if isinstance(r, redis.Redis) or isinstance(r, redis.asyncio.Redis):
+        return r.connection_pool.connection_kwargs.get("protocol")
+    elif isinstance(r, redis.cluster.AbstractRedisCluster):
+        return r.nodes_manager.connection_kwargs.get("protocol")
+
+
+def assert_resp_response(r, response, resp2_expected, resp3_expected):
+    protocol = get_protocol_version(r)
+    if protocol in [2, "2", None]:
+        assert response == resp2_expected
+    else:
+        assert response == resp3_expected
+
+
+def assert_resp_response_in(r, response, resp2_expected, resp3_expected):
+    protocol = get_protocol_version(r)
+    if protocol in [2, "2", None]:
+        assert response in resp2_expected
+    else:
+        assert response in resp3_expected
