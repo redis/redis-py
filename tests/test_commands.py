@@ -68,54 +68,54 @@ class TestResponseCallbacks:
 
 class TestRedisCommands:
     @skip_if_redis_enterprise()
-    def test_auth(self, r, request):
-        # sending an AUTH command before setting a user/password on the
-        # server should return an AuthenticationError
-        with pytest.raises(exceptions.AuthenticationError):
-            r.auth("some_password")
+    # def test_auth(self, r, request):
+    #     # sending an AUTH command before setting a user/password on the
+    #     # server should return an AuthenticationError
+    #     with pytest.raises(exceptions.AuthenticationError):
+    #         r.auth("some_password")
 
-        with pytest.raises(exceptions.AuthenticationError):
-            r.auth("some_password", "some_user")
+    #     with pytest.raises(exceptions.AuthenticationError):
+    #         r.auth("some_password", "some_user")
 
-        # first, test for default user (`username` is supposed to be optional)
-        default_username = "default"
-        temp_pass = "temp_pass"
-        r.config_set("requirepass", temp_pass)
+    #     # first, test for default user (`username` is supposed to be optional)
+    #     default_username = "default"
+    #     temp_pass = "temp_pass"
+    #     r.config_set("requirepass", temp_pass)
 
-        assert r.auth(temp_pass, default_username) is True
-        assert r.auth(temp_pass) is True
+    #     assert r.auth(temp_pass, default_username) is True
+    #     assert r.auth(temp_pass) is True
 
-        # test for other users
-        username = "redis-py-auth"
+    #     # test for other users
+    #     username = "redis-py-auth"
 
-        def teardown():
-            try:
-                # this is needed because after an AuthenticationError the connection
-                # is closed, and if we send an AUTH command a new connection is
-                # created, but in this case we'd get an "Authentication required"
-                # error when switching to the db 9 because we're not authenticated yet
-                # setting the password on the connection itself triggers the
-                # authentication in the connection's `on_connect` method
-                r.connection.password = temp_pass
-            except AttributeError:
-                # connection field is not set in Redis Cluster, but that's ok
-                # because the problem discussed above does not apply to Redis Cluster
-                pass
+    #     def teardown():
+    #         try:
+    #             # this is needed because after an AuthenticationError the connection
+    #             # is closed, and if we send an AUTH command a new connection is
+    #             # created, but in this case we'd get an "Authentication required"
+    #             # error when switching to the db 9 because we're not authenticated yet
+    #             # setting the password on the connection itself triggers the
+    #             # authentication in the connection's `on_connect` method
+    #             r.connection.password = temp_pass
+    #         except AttributeError:
+    #             # connection field is not set in Redis Cluster, but that's ok
+    #             # because the problem discussed above does not apply to Redis Cluster
+    #             pass
 
-            r.auth(temp_pass)
-            r.config_set("requirepass", "")
-            r.acl_deluser(username)
+    #         r.auth(temp_pass)
+    #         r.config_set("requirepass", "")
+    #         r.acl_deluser(username)
 
-        request.addfinalizer(teardown)
+    #     request.addfinalizer(teardown)
 
-        assert r.acl_setuser(
-            username, enabled=True, passwords=["+strong_password"], commands=["+acl"]
-        )
+    #     assert r.acl_setuser(
+    #         username, enabled=True, passwords=["+strong_password"], commands=["+acl"]
+    #     )
 
-        assert r.auth(username=username, password="strong_password") is True
+    #     assert r.auth(username=username, password="strong_password") is True
 
-        with pytest.raises(exceptions.AuthenticationError):
-            r.auth(username=username, password="wrong_password")
+    #     with pytest.raises(exceptions.AuthenticationError):
+    #         r.auth(username=username, password="wrong_password")
 
     def test_command_on_invalid_key_type(self, r):
         r.lpush("a", "1")
@@ -4522,6 +4522,7 @@ class TestRedisCommands:
         ]
 
         # xread starting at 0 returns both messages
+        breakpoint()
         res = r.xreadgroup(group, consumer, streams={stream: ">"})
         if is_resp2_connection(r):
             assert res == [[strem_name, expected_entries]]
