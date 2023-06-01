@@ -17,10 +17,9 @@ import redis.asyncio as redis
 from redis.exceptions import ConnectionError
 from redis.typing import EncodableT
 from redis.utils import HIREDIS_AVAILABLE
-from tests.conftest import skip_if_server_version_lt
+from tests.conftest import get_protocol_version, skip_if_server_version_lt
 
 from .compat import create_task, mock
-from .conftest import get_protocol_version
 
 
 def with_timeout(t):
@@ -422,6 +421,7 @@ class TestPubSubMessages:
         assert expect in info.exconly()
 
 
+@pytest.mark.onlynoncluster
 class TestPubSubRESP3Handler:
     def my_handler(self, message):
         self.message = ["my handler", message]

@@ -671,13 +671,13 @@ class PubSub:
         if self.encoder is None:
             self.encoder = self.connection_pool.get_encoder()
         if self.encoder.decode_responses:
-            self.health_check_response: Iterable[Union[str, bytes]] = [
-                "pong",
+            self.health_check_response = [
+                ["pong", self.HEALTH_CHECK_MESSAGE],
                 self.HEALTH_CHECK_MESSAGE,
             ]
         else:
             self.health_check_response = [
-                b"pong",
+                [b"pong", self.encoder.encode(self.HEALTH_CHECK_MESSAGE)],
                 self.encoder.encode(self.HEALTH_CHECK_MESSAGE),
             ]
         if self.push_handler_func is None:
@@ -807,7 +807,7 @@ class PubSub:
             conn, conn.read_response, timeout=read_timeout, push_request=True
         )
 
-        if conn.health_check_interval and response == self.health_check_response:
+        if conn.health_check_interval and response in self.health_check_response:
             # ignore the health check message as user might not expect it
             return None
         return response

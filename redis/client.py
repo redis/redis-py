@@ -331,9 +331,15 @@ def parse_xinfo_stream(response, **options):
             data["last-entry"] = (last[0], pairs_to_dict(last[1]))
     else:
         data["entries"] = {_id: pairs_to_dict(entry) for _id, entry in data["entries"]}
-        data["groups"] = [
-            pairs_to_dict(group, decode_keys=True) for group in data["groups"]
-        ]
+        if isinstance(data["groups"][0], list):
+            data["groups"] = [
+                pairs_to_dict(group, decode_keys=True) for group in data["groups"]
+            ]
+        else:
+            data["groups"] = [
+                {str_if_bytes(k): v for k, v in group.items()}
+                for group in data["groups"]
+            ]
     return data
 
 
@@ -581,14 +587,15 @@ def parse_command_resp3(response, **options):
         cmd_name = str_if_bytes(command[0])
         cmd_dict["name"] = cmd_name
         cmd_dict["arity"] = command[1]
-        cmd_dict["flags"] = command[2]
+        cmd_dict["flags"] = {str_if_bytes(flag) for flag in command[2]}
         cmd_dict["first_key_pos"] = command[3]
         cmd_dict["last_key_pos"] = command[4]
         cmd_dict["step_count"] = command[5]
         cmd_dict["acl_categories"] = command[6]
-        cmd_dict["tips"] = command[7]
-        cmd_dict["key_specifications"] = command[8]
-        cmd_dict["subcommands"] = command[9]
+        if len(command) > 7:
+            cmd_dict["tips"] = command[7]
+            cmd_dict["key_specifications"] = command[8]
+            cmd_dict["subcommands"] = command[9]
 
         commands[cmd_name] = cmd_dict
     return commands
@@ -626,17 +633,20 @@ def parse_acl_getuser(response, **options):
         if data["channels"] == [""]:
             data["channels"] = []
     if "selectors" in data:
-        data["selectors"] = [
-            list(map(str_if_bytes, selector)) for selector in data["selectors"]
-        ]
+        if data["selectors"] != [] and isinstance(data["selectors"][0], list):
+            data["selectors"] = [
+                list(map(str_if_bytes, selector)) for selector in data["selectors"]
+            ]
+        elif data["selectors"] != []:
+            data["selectors"] = [
+                {str_if_bytes(k): str_if_bytes(v) for k, v in selector.items()}
+                for selector in data["selectors"]
+            ]
 
     # split 'commands' into separate 'categories' and 'commands' lists
     commands, categories = [], []
     for command in data["commands"].split(" "):
-        if "@" in command:
-            categories.append(command)
-        else:
-            commands.append(command)
+        categories.append(command) if "@" in command else commands.append(command)
 
     data["commands"] = commands
     data["categories"] = categories

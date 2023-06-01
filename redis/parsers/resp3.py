@@ -69,9 +69,12 @@ class _RESP3Parser(_RESPBase):
         # bool value
         elif byte == b"#":
             return response == b"t"
-        # bulk response and verbatim strings
-        elif byte in (b"$", b"="):
+        # bulk response
+        elif byte == b"$":
             response = self._buffer.read(int(response))
+        # verbatim string response
+        elif byte == b"=":
+            response = self._buffer.read(int(response))[4:]
         # array response
         elif byte == b"*":
             response = [
@@ -195,9 +198,12 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
         # bool value
         elif byte == b"#":
             return response == b"t"
-        # bulk response and verbatim strings
-        elif byte in (b"$", b"="):
+        # bulk response
+        elif byte == b"$":
             response = await self._read(int(response))
+        # verbatim string response
+        elif byte == b"=":
+            response = (await self._read(int(response)))[4:]
         # array response
         elif byte == b"*":
             response = [

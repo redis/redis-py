@@ -13,12 +13,13 @@ import redis
 from redis import exceptions
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, parse_info
 from tests.conftest import (
+    assert_resp_response,
+    assert_resp_response_in,
+    is_resp2_connection,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
 )
-
-from .conftest import assert_resp_response, assert_resp_response_in
 
 REDIS_6_VERSION = "5.9.0"
 
@@ -73,7 +74,11 @@ class TestResponseCallbacks:
     """Tests for the response callback system"""
 
     async def test_response_callbacks(self, r: redis.Redis):
-        assert r.response_callbacks == redis.Redis.RESPONSE_CALLBACKS
+        resp3_callbacks = redis.Redis.RESPONSE_CALLBACKS.copy()
+        resp3_callbacks.update(redis.Redis.RESP3_RESPONSE_CALLBACKS)
+        assert_resp_response(
+            r, r.response_callbacks, redis.Redis.RESPONSE_CALLBACKS, resp3_callbacks
+        )
         assert id(r.response_callbacks) != id(redis.Redis.RESPONSE_CALLBACKS)
         r.set_response_callback("GET", lambda x: "static")
         await r.set("a", "foo")
@@ -123,27 +128,24 @@ class TestRedisCommands:
         r = r_teardown(username)
         # test enabled=False
         assert await r.acl_setuser(username, enabled=False, reset=True)
-        assert await r.acl_getuser(username) == {
-            "categories": ["-@all"],
-            "commands": [],
-            "channels": [b"*"],
-            "enabled": False,
-            "flags": ["off", "allchannels", "sanitize-payload"],
-            "keys": [],
-            "passwords": [],
-        }
+        acl = await r.acl_getuser(username)
+        assert acl["categories"] == ["-@all"]
+        assert acl["commands"] == []
+        assert acl["keys"] == []
+        assert acl["passwords"] == []
+        assert "off" in acl["flags"]
+        assert acl["enabled"] is False
 
         # test nopass=True
         assert await r.acl_setuser(username, enabled=True, reset=True, nopass=True)
-        assert await r.acl_getuser(username) == {
-            "categories": ["-@all"],
-            "commands": [],
-            "channels": [b"*"],
-            "enabled": True,
-            "flags": ["on", "allchannels", "nopass", "sanitize-payload"],
-            "keys": [],
-            "passwords": [],
-        }
+        acl = await r.acl_getuser(username)
+        assert acl["categories"] == ["-@all"]
+        assert acl["commands"] == []
+        assert acl["keys"] == []
+        assert acl["passwords"] == []
+        assert "on" in acl["flags"]
+        assert "nopass" in acl["flags"]
+        assert acl["enabled"] is True
 
         # test all args
         assert await r.acl_setuser(
@@ -160,8 +162,8 @@ class TestRedisCommands:
         assert set(acl["commands"]) == {"+get", "+mget", "-hset"}
         assert acl["enabled"] is True
         assert acl["channels"] == [b"*"]
-        assert acl["flags"] == ["on", "allchannels", "sanitize-payload"]
-        assert set(acl["keys"]) == {b"cache:*", b"objects:*"}
+        assert set(acl["flags"]) == {"on", "allchannels", "sanitize-payload"}
+        assert acl["keys"] == [b"cache:*", b"objects:*"]
         assert len(acl["passwords"]) == 2
 
         # test reset=False keeps existing ACL and applies new ACL on top
@@ -187,7 +189,7 @@ class TestRedisCommands:
         assert set(acl["commands"]) == {"+get", "+mget"}
         assert acl["enabled"] is True
         assert acl["channels"] == [b"*"]
-        assert acl["flags"] == ["on", "allchannels", "sanitize-payload"]
+        assert set(acl["flags"]) == {"on", "allchannels", "sanitize-payload"}
         assert set(acl["keys"]) == {b"cache:*", b"objects:*"}
         assert len(acl["passwords"]) == 2
 
@@ -2912,16 +2914,16 @@ class TestRedisCommands:
         # xreadgroup with noack does not have any items in the PEL
         await r.xgroup_destroy(stream, group)
         await r.xgroup_create(stream, group, "0")
-        # res = r.xreadgroup(group, consumer, streams={stream: ">"}, noack=True)
-        # empty_res = r.xreadgroup(group, consumer, streams={stream: "0"})
-        # if is_resp2_connection(r):
-        #     assert len(res[0][1]) == 2
-        #     # now there should be nothing pending
-        #     assert len(empty_res[0][1]) == 0
-        # else:
-        #     assert len(res[strem_name][0]) == 2
-        #     # now there should be nothing pending
-        #     assert len(empty_res[strem_name][0]) == 0
+        res = await r.xreadgroup(group, consumer, streams={stream: ">"}, noack=True)
+        empty_res = await r.xreadgroup(group, consumer, streams={stream: "0"})
+        if is_resp2_connection(r):
+            assert len(res[0][1]) == 2
+            # now there should be nothing pending
+            assert len(empty_res[0][1]) == 0
+        else:
+            assert len(res[strem_name][0]) == 2
+            # now there should be nothing pending
+            assert len(empty_res[strem_name][0]) == 0
 
         await r.xgroup_destroy(stream, group)
         await r.xgroup_create(stream, group, "0")

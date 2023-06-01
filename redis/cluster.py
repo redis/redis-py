@@ -33,6 +33,7 @@ from redis.lock import Lock
 from redis.parsers import CommandsParser, Encoder
 from redis.retry import Retry
 from redis.utils import (
+    HIREDIS_AVAILABLE,
     dict_merge,
     list_keys_to_dict,
     merge_result,
@@ -1608,7 +1609,15 @@ class ClusterPubSub(PubSub):
     https://redis-py-cluster.readthedocs.io/en/stable/pubsub.html
     """
 
-    def __init__(self, redis_cluster, node=None, host=None, port=None, **kwargs):
+    def __init__(
+        self,
+        redis_cluster,
+        node=None,
+        host=None,
+        port=None,
+        push_handler_func=None,
+        **kwargs,
+    ):
         """
         When a pubsub instance is created without specifying a node, a single
         node will be transparently chosen for the pubsub connection on the
@@ -1633,7 +1642,10 @@ class ClusterPubSub(PubSub):
         self.node_pubsub_mapping = {}
         self._pubsubs_generator = self._pubsubs_generator()
         super().__init__(
-            **kwargs, connection_pool=connection_pool, encoder=redis_cluster.encoder
+            connection_pool=connection_pool,
+            encoder=redis_cluster.encoder,
+            push_handler_func=push_handler_func,
+            **kwargs,
         )
 
     def set_pubsub_node(self, cluster, node=None, host=None, port=None):
@@ -1717,6 +1729,8 @@ class ClusterPubSub(PubSub):
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
+            if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
+                self.connection._parser.set_push_handler(self.push_handler_func)
         connection = self.connection
         self._execute(connection, connection.send_command, *args)
 
@@ -1724,7 +1738,9 @@ class ClusterPubSub(PubSub):
         try:
             return self.node_pubsub_mapping[node.name]
         except KeyError:
-            pubsub = node.redis_connection.pubsub()
+            pubsub = node.redis_connection.pubsub(
+                push_handler_func=self.push_handler_func
+            )
             self.node_pubsub_mapping[node.name] = pubsub
             return pubsub
 

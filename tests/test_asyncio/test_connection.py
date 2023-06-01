@@ -11,7 +11,12 @@ from redis.asyncio.connection import Connection, UnixDomainSocketConnection
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
-from redis.parsers import _AsyncHiredisParser, _AsyncRESP2Parser, _AsyncRESP3Parser
+from redis.parsers import (
+    _AsyncHiredisParser,
+    _AsyncRESP2Parser,
+    _AsyncRESP3Parser,
+    _AsyncRESPBase,
+)
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 
@@ -26,11 +31,11 @@ async def test_invalid_response(create_redis):
     raw = b"x"
     fake_stream = MockStream(raw + b"\r\n")
 
-    parser: _AsyncRESP2Parser = r.connection._parser
+    parser: _AsyncRESPBase = r.connection._parser
     with mock.patch.object(parser, "_stream", fake_stream):
         with pytest.raises(InvalidResponse) as cm:
             await parser.read_response()
-    if isinstance(parser, _AsyncRESP2Parser):
+    if isinstance(parser, _AsyncRESPBase):
         assert str(cm.value) == f"Protocol Error: {raw!r}"
     else:
         assert (
