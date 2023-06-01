@@ -475,7 +475,7 @@ def wait_for_command(client, monitor, command, key=None):
 
 
 def is_resp2_connection(r):
-    if isinstance(r, redis.Redis):
+    if isinstance(r, redis.Redis) or isinstance(r, redis.asyncio.Redis):
         protocol = r.connection_pool.connection_kwargs.get("protocol")
     elif isinstance(r, redis.cluster.AbstractRedisCluster):
         protocol = r.nodes_manager.connection_kwargs.get("protocol")
