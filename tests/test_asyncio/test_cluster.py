@@ -1624,7 +1624,7 @@ class TestClusterRedisCommands:
         assert await r.zdiffstore("{foo}out", ["{foo}a", "{foo}b"])
         assert await r.zrange("{foo}out", 0, -1) == [b"a3"]
         response = await r.zrange("{foo}out", 0, -1, withscores=True)
-        assert_resp_response(r, response, [(b"a3", b"3")], [[b"a3", 3.0]])
+        assert_resp_response(r, response, [(b"a3", 3.0)], [[b"a3", 3.0]])
 
     @skip_if_server_version_lt("6.2.0")
     async def test_cluster_zinter(self, r: RedisCluster) -> None:
@@ -1640,26 +1640,26 @@ class TestClusterRedisCommands:
         # aggregate with SUM
         response = await r.zinter(["{foo}a", "{foo}b", "{foo}c"], withscores=True)
         assert_resp_response(
-            r, response, [(b"a3", b"8"), (b"a1", b"9")], [[b"a3", 8.0], [b"a1", 9.0]]
+            r, response, [(b"a3", 8), (b"a1", 9)], [[b"a3", 8], [b"a1", 9]]
         )
         # aggregate with MAX
         response = await r.zinter(
             ["{foo}a", "{foo}b", "{foo}c"], aggregate="MAX", withscores=True
         )
         assert_resp_response(
-            r, response, [(b"a3", b"5"), (b"a1", b"6")], [[b"a3", 5.0], [b"a1", 6.0]]
+            r, response, [(b"a3", 5), (b"a1", 6)], [[b"a3", 5], [b"a1", 6]]
         )
         # aggregate with MIN
         response = await r.zinter(
             ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN", withscores=True
         )
         assert_resp_response(
-            r, response, [(b"a1", b"1"), (b"a3", b"1")], [[b"a1", 1.0], [b"a3", 1.0]]
+            r, response, [(b"a1", 1), (b"a3", 1)], [[b"a1", 1], [b"a3", 1]]
         )
         # with weights
         res = await r.zinter({"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True)
         assert_resp_response(
-            r, res, [(b"a3", b"20"), (b"a1", b"23")], [[b"a3", 20.0], [b"a1", 23.0]]
+            r, res, [(b"a3", 20), (b"a1", 23)], [[b"a3", 20], [b"a1", 23]]
         )
 
     async def test_cluster_zinterstore_sum(self, r: RedisCluster) -> None:
