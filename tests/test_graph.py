@@ -21,7 +21,7 @@ from redis.commands.graph.query_result import (
     QueryResult,
 )
 from redis.exceptions import ResponseError
-from tests.conftest import skip_if_redis_enterprise, _get_client
+from tests.conftest import _get_client, skip_if_redis_enterprise
 
 
 @pytest.fixture

@@ -12,11 +12,14 @@ services:
       - "REDIS_ARGS=--enable-debug-command yes --enable-module-command yes"
     profiles:
       - standalone
+      - sentinel
       - replica
       - all
 
   replica:
     image: redis/redis-stack-server:edge
+    depends_on:
+      - redis
     environment:
       - "REDIS_ARGS=--replicaof redis 6379"
     ports:
@@ -40,4 +43,61 @@ services:
       - "./dockers/cluster.redis.conf:/redis.conf:ro"
     profiles:
       - cluster
+      - all
+
+  stunnel:
+    image: redisfab/stunnel:latest
+    depends_on:
+      - redis
+    ports:
+      - 6666:6666
+    profiles:
+      - all
+      - standalone
+      - ssl
+    volumes:
+      - "./dockers/stunnel/conf:/etc/stunnel/conf.d:ro"
+      - "./dockers/stunnel/keys:/etc/stunnel/keys:ro"
+
+  sentinel:
+    image: redis/redis-stack-server:edge
+    depends_on:
+      - redis
+    environment:
+      - "REDIS_ARGS=--port 26379"
+    entrypoint: "/opt/redis-stack/bin/redis-sentinel /redis.conf --port 26379"
+    ports:
+      - 26379:26379
+    volumes:
+      - "./dockers/sentinel.conf:/redis.conf"
+    profiles:
+      - sentinel
+      - all
+
+  sentinel2:
+    image: redis/redis-stack-server:edge
+    depends_on:
+      - redis
+    environment:
+      - "REDIS_ARGS=--port 26380"
+    entrypoint: "/opt/redis-stack/bin/redis-sentinel /redis.conf --port 26380"
+    ports:
+      - 26380:26380
+    volumes:
+      - "./dockers/sentinel.conf:/redis.conf"
+    profiles:
+      - sentinel
+      - all
+
+  sentinel3:
+    image: redis/redis-stack-server:edge
+    depends_on:
+      - redis
+    entrypoint: "/opt/redis-stack/bin/redis-sentinel /redis.conf --port 26381"
+    ports:
+      - 26381:26381
+    volumes:
+      - "./dockers/sentinel.conf:/redis.conf"
+    profiles:
+      - sentinel
       - all

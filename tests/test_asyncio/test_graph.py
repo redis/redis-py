@@ -8,15 +8,15 @@ from tests.conftest import skip_if_redis_enterprise
 
 
 @pytest.mark.redismod
-async def test_bulk(modclient):
+async def test_bulk(r):
     with pytest.raises(NotImplementedError):
-        await modclient.graph().bulk()
-        await modclient.graph().bulk(foo="bar!")
+        await r.graph().bulk()
+        await r.graph().bulk(foo="bar!")
 
 
 @pytest.mark.redismod
-async def test_graph_creation(modclient: redis.Redis):
-    graph = modclient.graph()
+async def test_graph_creation(r: redis.Redis):
+    graph = r.graph()
 
     john = Node(
         label="person",
@@ -60,8 +60,8 @@ async def test_graph_creation(modclient: redis.Redis):
 
 
 @pytest.mark.redismod
-async def test_array_functions(modclient: redis.Redis):
-    graph = modclient.graph()
+async def test_array_functions(r: redis.Redis):
+    graph = r.graph()
 
     query = """CREATE (p:person{name:'a',age:32, array:[0,1,2]})"""
     await graph.query(query)
@@ -83,12 +83,12 @@ async def test_array_functions(modclient: redis.Redis):
 
 
 @pytest.mark.redismod
-async def test_path(modclient: redis.Redis):
+async def test_path(r: redis.Redis):
     node0 = Node(node_id=0, label="L1")
     node1 = Node(node_id=1, label="L1")
     edge01 = Edge(node0, "R1", node1, edge_id=0, properties={"value": 1})
 
-    graph = modclient.graph()
+    graph = r.graph()
     graph.add_node(node0)
     graph.add_node(node1)
     graph.add_edge(edge01)
@@ -103,20 +103,20 @@ async def test_path(modclient: redis.Redis):
 
 
 @pytest.mark.redismod
-async def test_param(modclient: redis.Redis):
+async def test_param(r: redis.Redis):
     params = [1, 2.3, "str", True, False, None, [0, 1, 2]]
     query = "RETURN $param"
     for param in params:
-        result = await modclient.graph().query(query, {"param": param})
+        result = await r.graph().query(query, {"param": param})
         expected_results = [[param]]
         assert expected_results == result.result_set
 
 
 @pytest.mark.redismod
-async def test_map(modclient: redis.Redis):
+async def test_map(r: redis.Redis):
     query = "RETURN {a:1, b:'str', c:NULL, d:[1,2,3], e:True, f:{x:1, y:2}}"
 
-    actual = (await modclient.graph().query(query)).result_set[0][0]
+    actual = (await r.graph().query(query)).result_set[0][0]
     expected = {
         "a": 1,
         "b": "str",
@@ -130,40 +130,40 @@ async def test_map(modclient: redis.Redis):
 
 
 @pytest.mark.redismod
-async def test_point(modclient: redis.Redis):
+async def test_point(r: redis.Redis):
     query = "RETURN point({latitude: 32.070794860, longitude: 34.820751118})"
     expected_lat = 32.070794860
     expected_lon = 34.820751118
-    actual = (await modclient.graph().query(query)).result_set[0][0]
+    actual = (await r.graph().query(query)).result_set[0][0]
     assert abs(actual["latitude"] - expected_lat) < 0.001
     assert abs(actual["longitude"] - expected_lon) < 0.001
 
     query = "RETURN point({latitude: 32, longitude: 34.0})"
     expected_lat = 32
     expected_lon = 34
-    actual = (await modclient.graph().query(query)).result_set[0][0]
+    actual = (await r.graph().query(query)).result_set[0][0]
     assert abs(actual["latitude"] - expected_lat) < 0.001
     assert abs(actual["longitude"] - expected_lon) < 0.001
 
 
 @pytest.mark.redismod
-async def test_index_response(modclient: redis.Redis):
-    result_set = await modclient.graph().query("CREATE INDEX ON :person(age)")
+async def test_index_response(r: redis.Redis):
+    result_set = await r.graph().query("CREATE INDEX ON :person(age)")
     assert 1 == result_set.indices_created
 
-    result_set = await modclient.graph().query("CREATE INDEX ON :person(age)")
+    result_set = await r.graph().query("CREATE INDEX ON :person(age)")
     assert 0 == result_set.indices_created
 
-    result_set = await modclient.graph().query("DROP INDEX ON :person(age)")
+    result_set = await r.graph().query("DROP INDEX ON :person(age)")
     assert 1 == result_set.indices_deleted
 
     with pytest.raises(ResponseError):
-        await modclient.graph().query("DROP INDEX ON :person(age)")
+        await r.graph().query("DROP INDEX ON :person(age)")
 
 
 @pytest.mark.redismod
-async def test_stringify_query_result(modclient: redis.Redis):
-    graph = modclient.graph()
+async def test_stringify_query_result(r: redis.Redis):
+    graph = r.graph()
 
     john = Node(
         alias="a",
@@ -216,14 +216,14 @@ async def test_stringify_query_result(modclient: redis.Redis):
 
 
 @pytest.mark.redismod
-async def test_optional_match(modclient: redis.Redis):
+async def test_optional_match(r: redis.Redis):
     # Build a graph of form (a)-[R]->(b)
     node0 = Node(node_id=0, label="L1", properties={"value": "a"})
     node1 = Node(node_id=1, label="L1", properties={"value": "b"})
 
     edge01 = Edge(node0, "R", node1, edge_id=0)
 
-    graph = modclient.graph()
+    graph = r.graph()
     graph.add_node(node0)
     graph.add_node(node1)
     graph.add_edge(edge01)
@@ -241,17 +241,17 @@ async def test_optional_match(modclient: redis.Redis):
 
 
 @pytest.mark.redismod
-async def test_cached_execution(modclient: redis.Redis):
-    await modclient.graph().query("CREATE ()")
+async def test_cached_execution(r: redis.Redis):
+    await r.graph().query("CREATE ()")
 
-    uncached_result = await modclient.graph().query(
+    uncached_result = await r.graph().query(
         "MATCH (n) RETURN n, $param", {"param": [0]}
     )
     assert uncached_result.cached_execution is False
 
     # loop to make sure the query is cached on each thread on server
     for x in range(0, 64):
-        cached_result = await modclient.graph().query(
+        cached_result = await r.graph().query(
             "MATCH (n) RETURN n, $param", {"param": [0]}
         )
         assert uncached_result.result_set == cached_result.result_set
@@ -261,50 +261,50 @@ async def test_cached_execution(modclient: redis.Redis):
 
 
 @pytest.mark.redismod
-async def test_slowlog(modclient: redis.Redis):
+async def test_slowlog(r: redis.Redis):
     create_query = """CREATE
     (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
     (:Rider {name:'Dani Pedrosa'})-[:rides]->(:Team {name:'Honda'}),
     (:Rider {name:'Andrea Dovizioso'})-[:rides]->(:Team {name:'Ducati'})"""
-    await modclient.graph().query(create_query)
+    await r.graph().query(create_query)
 
-    results = await modclient.graph().slowlog()
+    results = await r.graph().slowlog()
     assert results[0][1] == "GRAPH.QUERY"
     assert results[0][2] == create_query
 
 
 @pytest.mark.redismod
-async def test_query_timeout(modclient: redis.Redis):
+async def test_query_timeout(r: redis.Redis):
     # Build a sample graph with 1000 nodes.
-    await modclient.graph().query("UNWIND range(0,1000) as val CREATE ({v: val})")
+    await r.graph().query("UNWIND range(0,1000) as val CREATE ({v: val})")
     # Issue a long-running query with a 1-millisecond timeout.
     with pytest.raises(ResponseError):
-        await modclient.graph().query("MATCH (a), (b), (c), (d) RETURN *", timeout=1)
+        await r.graph().query("MATCH (a), (b), (c), (d) RETURN *", timeout=1)
         assert False is False
 
     with pytest.raises(Exception):
-        await modclient.graph().query("RETURN 1", timeout="str")
+        await r.graph().query("RETURN 1", timeout="str")
         assert False is False
 
 
 @pytest.mark.redismod
-async def test_read_only_query(modclient: redis.Redis):
+async def test_read_only_query(r: redis.Redis):
     with pytest.raises(Exception):
         # Issue a write query, specifying read-only true,
         # this call should fail.
-        await modclient.graph().query("CREATE (p:person {name:'a'})", read_only=True)
+        await r.graph().query("CREATE (p:person {name:'a'})", read_only=True)
         assert False is False
 
 
 @pytest.mark.redismod
-async def test_profile(modclient: redis.Redis):
+async def test_profile(r: redis.Redis):
     q = """UNWIND range(1, 3) AS x CREATE (p:Person {v:x})"""
-    profile = (await modclient.graph().profile(q)).result_set
+    profile = (await r.graph().profile(q)).result_set
     assert "Create | Records produced: 3" in profile
     assert "Unwind | Records produced: 3" in profile
 
     q = "MATCH (p:Person) WHERE p.v > 1 RETURN p"
-    profile = (await modclient.graph().profile(q)).result_set
+    profile = (await r.graph().profile(q)).result_set
     assert "Results | Records produced: 2" in profile
     assert "Project | Records produced: 2" in profile
     assert "Filter | Records produced: 2" in profile
@@ -313,16 +313,16 @@ async def test_profile(modclient: redis.Redis):
 
 @pytest.mark.redismod
 @skip_if_redis_enterprise()
-async def test_config(modclient: redis.Redis):
+async def test_config(r: redis.Redis):
     config_name = "RESULTSET_SIZE"
     config_value = 3
 
     # Set configuration
-    response = await modclient.graph().config(config_name, config_value, set=True)
+    response = await r.graph().config(config_name, config_value, set=True)
     assert response == "OK"
 
     # Make sure config been updated.
-    response = await modclient.graph().config(config_name, set=False)
+    response = await r.graph().config(config_name, set=False)
     expected_response = [config_name, config_value]
     assert response == expected_response
 
@@ -330,46 +330,46 @@ async def test_config(modclient: redis.Redis):
     config_value = 1 << 20  # 1MB
 
     # Set configuration
-    response = await modclient.graph().config(config_name, config_value, set=True)
+    response = await r.graph().config(config_name, config_value, set=True)
     assert response == "OK"
 
     # Make sure config been updated.
-    response = await modclient.graph().config(config_name, set=False)
+    response = await r.graph().config(config_name, set=False)
     expected_response = [config_name, config_value]
     assert response == expected_response
 
     # reset to default
-    await modclient.graph().config("QUERY_MEM_CAPACITY", 0, set=True)
-    await modclient.graph().config("RESULTSET_SIZE", -100, set=True)
+    await r.graph().config("QUERY_MEM_CAPACITY", 0, set=True)
+    await r.graph().config("RESULTSET_SIZE", -100, set=True)
 
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
-async def test_list_keys(modclient: redis.Redis):
-    result = await modclient.graph().list_keys()
+async def test_list_keys(r: redis.Redis):
+    result = await r.graph().list_keys()
     assert result == []
 
-    await modclient.graph("G").query("CREATE (n)")
-    result = await modclient.graph().list_keys()
+    await r.graph("G").query("CREATE (n)")
+    result = await r.graph().list_keys()
     assert result == ["G"]
 
-    await modclient.graph("X").query("CREATE (m)")
-    result = await modclient.graph().list_keys()
+    await r.graph("X").query("CREATE (m)")
+    result = await r.graph().list_keys()
     assert result == ["G", "X"]
 
-    await modclient.delete("G")
-    await modclient.rename("X", "Z")
-    result = await modclient.graph().list_keys()
+    await r.delete("G")
+    await r.rename("X", "Z")
+    result = await r.graph().list_keys()
     assert result == ["Z"]
 
-    await modclient.delete("Z")
-    result = await modclient.graph().list_keys()
+    await r.delete("Z")
+    result = await r.graph().list_keys()
     assert result == []
 
 
 @pytest.mark.redismod
-async def test_multi_label(modclient: redis.Redis):
-    redis_graph = modclient.graph("g")
+async def test_multi_label(r: redis.Redis):
+    redis_graph = r.graph("g")
 
     node = Node(label=["l", "ll"])
     redis_graph.add_node(node)
@@ -394,8 +394,8 @@ async def test_multi_label(modclient: redis.Redis):
 
 
 @pytest.mark.redismod
-async def test_execution_plan(modclient: redis.Redis):
-    redis_graph = modclient.graph("execution_plan")
+async def test_execution_plan(r: redis.Redis):
+    redis_graph = r.graph("execution_plan")
     create_query = """CREATE
     (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
     (:Rider {name:'Dani Pedrosa'})-[:rides]->(:Team {name:'Honda'}),
@@ -413,8 +413,8 @@ async def test_execution_plan(modclient: redis.Redis):
 
 
 @pytest.mark.redismod
-async def test_explain(modclient: redis.Redis):
-    redis_graph = modclient.graph("execution_plan")
+async def test_explain(r: redis.Redis):
+    redis_graph = r.graph("execution_plan")
     # graph creation / population
     create_query = """CREATE
 (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),

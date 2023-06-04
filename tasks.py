@@ -10,13 +10,10 @@ with open("tox.ini") as fp:
 
 @task
 def devenv(c):
-    """Builds a development environment: downloads, and starts all dockers
-    specified in the tox.ini file.
+    """Brings up the test environment, by wrapping docker compose.
     """
     clean(c)
-    cmd = "tox -e devenv"
-    for d in dockers:
-        cmd += f" --docker-dont-stop={d}"
+    cmd = "docker-compose --profile all up"
     run(cmd)
 
 
@@ -73,7 +70,7 @@ def clean(c):
         shutil.rmtree("build")
     if os.path.isdir("dist"):
         shutil.rmtree("dist")
-    run(f"docker rm -f {' '.join(dockers)}")
+    run(f"docker-compose --profile all rm -s -f")
 
 
 @task

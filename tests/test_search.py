@@ -24,7 +24,7 @@ from redis.commands.search.query import GeoFilter, NumericFilter, Query
 from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
 
-from .conftest import skip_if_redis_enterprise, skip_ifmodversion_lt, _get_client
+from .conftest import _get_client, skip_if_redis_enterprise, skip_ifmodversion_lt
 
 WILL_PLAY_TEXT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "testdata", "will_play_text.csv.bz2")

@@ -16,6 +16,7 @@ from redis.retry import Retry
 
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/0"
+default_protocol = "2"
 
 # default ssl client ignores verification for the purpose of testing
 default_redis_ssl_url = "rediss://localhost:6666"
@@ -71,13 +72,20 @@ class BooleanOptionalAction(argparse.Action):
 
 
 def pytest_addoption(parser):
+    
     parser.addoption(
         "--redis-url",
         default=default_redis_url,
         action="store",
         help="Redis connection string, defaults to `%(default)s`",
     )
-
+    
+    parser.addoption(
+        "--protocol",
+        default=default_protocol,
+        action="store",
+        help="Protocol version, defaults to `%(default)s`",
+    )
     parser.addoption(
         "--redis-ssl-url",
         default=default_redis_ssl_url,
@@ -269,6 +277,9 @@ def _get_client(
         redis_url = request.config.getoption("--redis-url")
     else:
         redis_url = from_url
+        
+    kwargs['protocol'] = request.config.getoption('--protocol')
+        
     cluster_mode = REDIS_INFO["cluster_enabled"]
     if not cluster_mode:
         url_options = parse_url(redis_url)
