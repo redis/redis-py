@@ -1,0 +1,43 @@
+---
+
+version: "3.8"
+
+services:
+
+  redis:
+    image: redis/redis-stack-server:edge
+    ports:
+      - 6379:6379
+    environment:
+      - "REDIS_ARGS=--enable-debug-command yes --enable-module-command yes"
+    profiles:
+      - standalone
+      - replica
+      - all
+
+  replica:
+    image: redis/redis-stack-server:edge
+    environment:
+      - "REDIS_ARGS=--replicaof redis 6379"
+    ports:
+      - 6380:6379
+    profiles:
+      - replica
+      - all
+
+  cluster:
+    build:
+      context: .
+      dockerfile: dockers/Dockerfile.cluster
+    ports:
+      - 16379:16379
+      - 16380:16380
+      - 16381:16381
+      - 16382:16382
+      - 16383:16383
+      - 16384:16384
+    volumes:
+      - "./dockers/cluster.redis.conf:/redis.conf:ro"
+    profiles:
+      - cluster
+      - all

@@ -10,9 +10,9 @@ from .conftest import skip_ifmodversion_lt
 
 
 @pytest.fixture
-def client(modclient):
-    modclient.flushdb()
-    return modclient
+def client(r):
+    r.flushdb()
+    return r
 
 
 @pytest.mark.redismod

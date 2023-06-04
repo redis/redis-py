@@ -14,15 +14,15 @@ def intlist(obj):
 
 
 @pytest.fixture
-def client(modclient):
-    assert isinstance(modclient.bf(), redis.commands.bf.BFBloom)
-    assert isinstance(modclient.cf(), redis.commands.bf.CFBloom)
-    assert isinstance(modclient.cms(), redis.commands.bf.CMSBloom)
-    assert isinstance(modclient.tdigest(), redis.commands.bf.TDigestBloom)
-    assert isinstance(modclient.topk(), redis.commands.bf.TOPKBloom)
+def client(r):
+    assert isinstance(r.bf(), redis.commands.bf.BFBloom)
+    assert isinstance(r.cf(), redis.commands.bf.CFBloom)
+    assert isinstance(r.cms(), redis.commands.bf.CMSBloom)
+    assert isinstance(r.tdigest(), redis.commands.bf.TDigestBloom)
+    assert isinstance(r.topk(), redis.commands.bf.TOPKBloom)
 
-    modclient.flushdb()
-    return modclient
+    r.flushdb()
+    return r
 
 
 @pytest.mark.redismod

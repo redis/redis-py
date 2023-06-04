@@ -16,8 +16,6 @@ from redis.retry import Retry
 
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/0"
-default_redismod_url = "redis://localhost:36379"
-default_redis_unstable_url = "redis://localhost:6378"
 
 # default ssl client ignores verification for the purpose of testing
 default_redis_ssl_url = "rediss://localhost:6666"
@@ -81,15 +79,6 @@ def pytest_addoption(parser):
     )
 
     parser.addoption(
-        "--redismod-url",
-        default=default_redismod_url,
-        action="store",
-        help="Connection string to redis server"
-        " with loaded modules,"
-        " defaults to `%(default)s`",
-    )
-
-    parser.addoption(
         "--redis-ssl-url",
         default=default_redis_ssl_url,
         action="store",
@@ -105,13 +94,6 @@ def pytest_addoption(parser):
         " defaults to `%(default)s`",
     )
 
-    parser.addoption(
-        "--redis-unstable-url",
-        default=default_redis_unstable_url,
-        action="store",
-        help="Redis unstable (latest version) connection string "
-        "defaults to %(default)s`",
-    )
     parser.addoption(
         "--uvloop", action=BooleanOptionalAction, help="Run tests with uvloop"
     )
@@ -152,10 +134,8 @@ def pytest_sessionstart(session):
     # store REDIS_INFO in config so that it is available from "condition strings"
     session.config.REDIS_INFO = REDIS_INFO
 
-    # module info, if the second redis is running
+    # module info
     try:
-        redismod_url = session.config.getoption("--redismod-url")
-        info = _get_info(redismod_url)
         REDIS_INFO["modules"] = info["modules"]
     except redis.exceptions.ConnectionError:
         pass
@@ -332,17 +312,6 @@ def cluster_teardown(client, flushdb):
     client.disconnect_connection_pools()
 
 
-# specifically set to the zero database, because creating
-# an index on db != 0 raises a ResponseError in redis
-@pytest.fixture()
-def modclient(request, **kwargs):
-    rmurl = request.config.getoption("--redismod-url")
-    with _get_client(
-        redis.Redis, request, from_url=rmurl, decode_responses=True, **kwargs
-    ) as client:
-        yield client
-
-
 @pytest.fixture()
 def r(request):
     with _get_client(redis.Redis, request) as client:
@@ -442,15 +411,6 @@ def master_host(request):
     url = request.config.getoption("--redis-url")
     parts = urlparse(url)
     yield parts.hostname, parts.port
-
-
-@pytest.fixture()
-def unstable_r(request):
-    url = request.config.getoption("--redis-unstable-url")
-    with _get_client(
-        redis.Redis, request, from_url=url, decode_responses=True
-    ) as client:
-        yield client
 
 
 def wait_for_command(client, monitor, command, key=None):

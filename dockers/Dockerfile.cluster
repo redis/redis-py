@@ -1,0 +1,29 @@
+FROM ubuntu:focal as builder
+ARG RESP3
+RUN apt update --fix-missing -qq
+RUN apt install -qqy build-essential git
+RUN git clone --depth 1 --quiet https://github.com/redis/redis
+RUN echo RESP is $RESP3
+RUN \
+if [ $RESP3 -eq 1 ]; then \
+perl -i -pe 's/c->resp = 2/c->resp = 3/' redis/src/networking.c; \
+fi
+
+WORKDIR redis
+RUN make -C src
+
+FROM redis/redis-stack-server:latest as rss
+
+FROM ubuntu:focal
+RUN apt update --fix-missing -qq
+RUN apt install -qqy libgomp1 libssl-dev
+COPY --from=builder redis/src/redis-server /usr/bin/redis-server
+COPY --from=builder redis/src/redis-sentinel /usr/bin/redis-sentinel
+COPY --from=builder redis/src/redis-cli /usr/bin/redis-cli
+RUN mkdir -p /usr/lib/redis/modules
+COPY --from=rss /opt/redis-stack/lib/*.so /usr/lib/redis/modules
+COPY dockers/create_cluster.sh /create_cluster.sh
+
+RUN chmod a+x /usr/bin/redis* /create_cluster.sh
+
+ENTRYPOINT [ "/create_cluster.sh"]

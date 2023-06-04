@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
+from redis import Redis
 from redis.commands.graph import Edge, Node, Path
 from redis.commands.graph.execution_plan import Operation
 from redis.commands.graph.query_result import (
@@ -20,13 +21,14 @@ from redis.commands.graph.query_result import (
     QueryResult,
 )
 from redis.exceptions import ResponseError
-from tests.conftest import skip_if_redis_enterprise
+from tests.conftest import skip_if_redis_enterprise, _get_client
 
 
 @pytest.fixture
-def client(modclient):
-    modclient.flushdb()
-    return modclient
+def client(request):
+    r = _get_client(Redis, request, decode_responses=True)
+    r.flushdb()
+    return r
 
 
 @pytest.mark.redismod

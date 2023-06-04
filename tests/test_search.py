@@ -24,7 +24,7 @@ from redis.commands.search.query import GeoFilter, NumericFilter, Query
 from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
 
-from .conftest import skip_if_redis_enterprise, skip_ifmodversion_lt
+from .conftest import skip_if_redis_enterprise, skip_ifmodversion_lt, _get_client
 
 WILL_PLAY_TEXT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "testdata", "will_play_text.csv.bz2")
@@ -98,9 +98,10 @@ def createIndex(client, num_docs=100, definition=None):
 
 
 @pytest.fixture
-def client(modclient):
-    modclient.flushdb()
-    return modclient
+def client(request):
+    r = _get_client(redis.Redis, request, decode_responses=True)
+    r.flushdb()
+    return r
 
 
 @pytest.mark.redismod
@@ -1413,21 +1414,21 @@ def test_profile_limited(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
-def test_profile_query_params(modclient: redis.Redis):
-    modclient.flushdb()
-    modclient.ft().create_index(
+def test_profile_query_params(client):
+    client.flushdb()
+    client.ft().create_index(
         (
             VectorField(
                 "v", "HNSW", {"TYPE": "FLOAT32", "DIM": 2, "DISTANCE_METRIC": "L2"}
             ),
         )
     )
-    modclient.hset("a", "v", "aaaaaaaa")
-    modclient.hset("b", "v", "aaaabaaa")
-    modclient.hset("c", "v", "aaaaabaa")
+    client.hset("a", "v", "aaaaaaaa")
+    client.hset("b", "v", "aaaabaaa")
+    client.hset("c", "v", "aaaaabaa")
     query = "*=>[KNN 2 @v $vec]"
     q = Query(query).return_field("__v_score").sort_by("__v_score", True).dialect(2)
-    res, det = modclient.ft().profile(q, query_params={"vec": "aaaaaaaa"})
+    res, det = client.ft().profile(q, query_params={"vec": "aaaaaaaa"})
     assert det["Iterators profile"]["Counter"] == 2.0
     assert det["Iterators profile"]["Type"] == "VECTOR"
     assert res.total == 2
@@ -1437,22 +1438,22 @@ def test_profile_query_params(modclient: redis.Redis):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
-def test_vector_field(modclient):
-    modclient.flushdb()
-    modclient.ft().create_index(
+def test_vector_field(r):
+    r.flushdb()
+    r.ft().create_index(
         (
             VectorField(
                 "v", "HNSW", {"TYPE": "FLOAT32", "DIM": 2, "DISTANCE_METRIC": "L2"}
             ),
         )
     )
-    modclient.hset("a", "v", "aaaaaaaa")
-    modclient.hset("b", "v", "aaaabaaa")
-    modclient.hset("c", "v", "aaaaabaa")
+    r.hset("a", "v", "aaaaaaaa")
+    r.hset("b", "v", "aaaabaaa")
+    r.hset("c", "v", "aaaaabaa")
 
     query = "*=>[KNN 2 @v $vec]"
     q = Query(query).return_field("__v_score").sort_by("__v_score", True).dialect(2)
-    res = modclient.ft().search(q, query_params={"vec": "aaaaaaaa"})
+    res = r.ft().search(q, query_params={"vec": "aaaaaaaa"})
 
     assert "a" == res.docs[0].id
     assert "0" == res.docs[0].__getattribute__("__v_score")
@@ -1460,31 +1461,31 @@ def test_vector_field(modclient):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
-def test_vector_field_error(modclient):
-    modclient.flushdb()
+def test_vector_field_error(r):
+    r.flushdb()
 
     # sortable tag
     with pytest.raises(Exception):
-        modclient.ft().create_index((VectorField("v", "HNSW", {}, sortable=True),))
+        r.ft().create_index((VectorField("v", "HNSW", {}, sortable=True),))
 
     # not supported algorithm
     with pytest.raises(Exception):
-        modclient.ft().create_index((VectorField("v", "SORT", {}),))
+        r.ft().create_index((VectorField("v", "SORT", {}),))
 
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
-def test_text_params(modclient):
-    modclient.flushdb()
-    modclient.ft().create_index((TextField("name"),))
+def test_text_params(r):
+    r.flushdb()
+    r.ft().create_index((TextField("name"),))
 
-    modclient.hset("doc1", mapping={"name": "Alice"})
-    modclient.hset("doc2", mapping={"name": "Bob"})
-    modclient.hset("doc3", mapping={"name": "Carol"})
+    r.hset("doc1", mapping={"name": "Alice"})
+    r.hset("doc2", mapping={"name": "Bob"})
+    r.hset("doc3", mapping={"name": "Carol"})
 
     params_dict = {"name1": "Alice", "name2": "Bob"}
     q = Query("@name:($name1 | $name2 )").dialect(2)
-    res = modclient.ft().search(q, query_params=params_dict)
+    res = r.ft().search(q, query_params=params_dict)
     assert 2 == res.total
     assert "doc1" == res.docs[0].id
     assert "doc2" == res.docs[1].id
@@ -1492,17 +1493,17 @@ def test_text_params(modclient):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
-def test_numeric_params(modclient):
-    modclient.flushdb()
-    modclient.ft().create_index((NumericField("numval"),))
+def test_numeric_params(r):
+    r.flushdb()
+    r.ft().create_index((NumericField("numval"),))
 
-    modclient.hset("doc1", mapping={"numval": 101})
-    modclient.hset("doc2", mapping={"numval": 102})
-    modclient.hset("doc3", mapping={"numval": 103})
+    r.hset("doc1", mapping={"numval": 101})
+    r.hset("doc2", mapping={"numval": 102})
+    r.hset("doc3", mapping={"numval": 103})
 
     params_dict = {"min": 101, "max": 102}
     q = Query("@numval:[$min $max]").dialect(2)
-    res = modclient.ft().search(q, query_params=params_dict)
+    res = r.ft().search(q, query_params=params_dict)
 
     assert 2 == res.total
     assert "doc1" == res.docs[0].id
@@ -1511,17 +1512,17 @@ def test_numeric_params(modclient):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
-def test_geo_params(modclient):
+def test_geo_params(client):
 
-    modclient.flushdb()
-    modclient.ft().create_index((GeoField("g")))
-    modclient.hset("doc1", mapping={"g": "29.69465, 34.95126"})
-    modclient.hset("doc2", mapping={"g": "29.69350, 34.94737"})
-    modclient.hset("doc3", mapping={"g": "29.68746, 34.94882"})
+    client.flushdb()
+    client.ft().create_index((GeoField("g")))
+    client.hset("doc1", mapping={"g": "29.69465, 34.95126"})
+    client.hset("doc2", mapping={"g": "29.69350, 34.94737"})
+    client.hset("doc3", mapping={"g": "29.68746, 34.94882"})
 
     params_dict = {"lat": "34.95126", "lon": "29.69465", "radius": 1000, "units": "km"}
     q = Query("@g:[$lon $lat $radius $units]").dialect(2)
-    res = modclient.ft().search(q, query_params=params_dict)
+    res = client.ft().search(q, query_params=params_dict)
     assert 3 == res.total
     assert "doc1" == res.docs[0].id
     assert "doc2" == res.docs[1].id
@@ -1549,18 +1550,18 @@ def test_search_commands_in_pipeline(client):
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.4.3", "search")
-def test_dialect_config(modclient: redis.Redis):
-    assert modclient.ft().config_get("DEFAULT_DIALECT") == {"DEFAULT_DIALECT": "1"}
-    assert modclient.ft().config_set("DEFAULT_DIALECT", 2)
-    assert modclient.ft().config_get("DEFAULT_DIALECT") == {"DEFAULT_DIALECT": "2"}
+def test_dialect_config(client):
+    assert client.ft().config_get("DEFAULT_DIALECT") == {"DEFAULT_DIALECT": "2"}
+    assert client.ft().config_set("DEFAULT_DIALECT", 1)
+    assert client.ft().config_get("DEFAULT_DIALECT") == {"DEFAULT_DIALECT": "1"}
     with pytest.raises(redis.ResponseError):
-        modclient.ft().config_set("DEFAULT_DIALECT", 0)
+        client.ft().config_set("DEFAULT_DIALECT", 0)
 
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
-def test_dialect(modclient: redis.Redis):
-    modclient.ft().create_index(
+def test_dialect(client):
+    client.ft().create_index(
         (
             TagField("title"),
             TextField("t1"),
@@ -1571,68 +1572,68 @@ def test_dialect(modclient: redis.Redis):
             ),
         )
     )
-    modclient.hset("h", "t1", "hello")
+    client.hset("h", "t1", "hello")
     with pytest.raises(redis.ResponseError) as err:
-        modclient.ft().explain(Query("(*)").dialect(1))
+        client.ft().explain(Query("(*)").dialect(1))
     assert "Syntax error" in str(err)
-    assert "WILDCARD" in modclient.ft().explain(Query("(*)").dialect(2))
+    assert "WILDCARD" in client.ft().explain(Query("(*)").dialect(2))
 
     with pytest.raises(redis.ResponseError) as err:
-        modclient.ft().explain(Query("$hello").dialect(1))
+        client.ft().explain(Query("$hello").dialect(1))
     assert "Syntax error" in str(err)
     q = Query("$hello").dialect(2)
     expected = "UNION {\n  hello\n  +hello(expanded)\n}\n"
-    assert expected in modclient.ft().explain(q, query_params={"hello": "hello"})
+    assert expected in client.ft().explain(q, query_params={"hello": "hello"})
 
     expected = "NUMERIC {0.000000 <= @num <= 10.000000}\n"
-    assert expected in modclient.ft().explain(Query("@title:(@num:[0 10])").dialect(1))
+    assert expected in client.ft().explain(Query("@title:(@num:[0 10])").dialect(1))
     with pytest.raises(redis.ResponseError) as err:
-        modclient.ft().explain(Query("@title:(@num:[0 10])").dialect(2))
+        client.ft().explain(Query("@title:(@num:[0 10])").dialect(2))
     assert "Syntax error" in str(err)
 
 
 @pytest.mark.redismod
-def test_expire_while_search(modclient: redis.Redis):
-    modclient.ft().create_index((TextField("txt"),))
-    modclient.hset("hset:1", "txt", "a")
-    modclient.hset("hset:2", "txt", "b")
-    modclient.hset("hset:3", "txt", "c")
-    assert 3 == modclient.ft().search(Query("*")).total
-    modclient.pexpire("hset:2", 300)
+def test_expire_while_search(r: redis.Redis):
+    r.ft().create_index((TextField("txt"),))
+    r.hset("hset:1", "txt", "a")
+    r.hset("hset:2", "txt", "b")
+    r.hset("hset:3", "txt", "c")
+    assert 3 == r.ft().search(Query("*")).total
+    r.pexpire("hset:2", 300)
     for _ in range(500):
-        modclient.ft().search(Query("*")).docs[1]
+        r.ft().search(Query("*")).docs[1]
     time.sleep(1)
-    assert 2 == modclient.ft().search(Query("*")).total
+    assert 2 == r.ft().search(Query("*")).total
 
 
 @pytest.mark.redismod
 @pytest.mark.experimental
-def test_withsuffixtrie(modclient: redis.Redis):
+def test_withsuffixtrie(client):
     # create index
-    assert modclient.ft().create_index((TextField("txt"),))
-    waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
-    info = modclient.ft().info()
+    assert client.ft().create_index((TextField("txt"),))
+    waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
+    info = client.ft().info()
     assert "WITHSUFFIXTRIE" not in info["attributes"][0]
-    assert modclient.ft().dropindex("idx")
+    assert client.ft().dropindex("idx")
 
     # create withsuffixtrie index (text fiels)
-    assert modclient.ft().create_index((TextField("t", withsuffixtrie=True)))
-    waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
-    info = modclient.ft().info()
+    assert client.ft().create_index((TextField("t", withsuffixtrie=True)))
+    waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
+    info = client.ft().info()
     assert "WITHSUFFIXTRIE" in info["attributes"][0]
-    assert modclient.ft().dropindex("idx")
+    assert client.ft().dropindex("idx")
 
     # create withsuffixtrie index (tag field)
-    assert modclient.ft().create_index((TagField("t", withsuffixtrie=True)))
-    waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
-    info = modclient.ft().info()
+    assert client.ft().create_index((TagField("t", withsuffixtrie=True)))
+    waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
+    info = client.ft().info()
     assert "WITHSUFFIXTRIE" in info["attributes"][0]
 
 
 @pytest.mark.redismod
-def test_query_timeout(modclient: redis.Redis):
+def test_query_timeout(r: redis.Redis):
     q1 = Query("foo").timeout(5000)
     assert q1.get_args() == ["foo", "TIMEOUT", 5000, "LIMIT", 0, 10]
     q2 = Query("foo").timeout("not_a_number")
     with pytest.raises(redis.ResponseError):
-        modclient.ft().search(q2)
+        r.ft().search(q2)
