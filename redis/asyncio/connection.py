@@ -183,12 +183,6 @@ class BaseParser:
         self._read_size = socket_read_size
         self._connected = False
 
-    def __del__(self):
-        try:
-            self.on_disconnect()
-        except Exception:
-            pass
-
     @classmethod
     def parse_error(cls, response: str) -> ResponseError:
         """Parse an error response"""
@@ -571,18 +565,6 @@ class Connection:
         if self.client_name:
             pieces.append(("client_name", self.client_name))
         return pieces
-
-    def __del__(self):
-        try:
-            if self.is_connected:
-                loop = asyncio.get_running_loop()
-                coro = self.disconnect()
-                if loop.is_running():
-                    loop.create_task(coro)
-                else:
-                    loop.run_until_complete(coro)
-        except Exception:
-            pass
 
     @property
     def is_connected(self):
