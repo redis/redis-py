@@ -131,6 +131,7 @@ class AskError(ResponseError):
     pertain to this hash slot, but only if the key in question exists,
     otherwise the query is forwarded using a -ASK redirection to the node that
     is target of the migration.
+
     src node: MIGRATING to dst node
         get > ASK error
         ask dst node > ASKING command
