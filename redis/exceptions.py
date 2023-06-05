@@ -50,6 +50,11 @@ class NoScriptError(ResponseError):
 
 
 class OutOfMemoryError(ResponseError):
+    """
+    Indicates the database is full. Can only occur when either:
+      * Redis maxmemory-policy=noeviction
+      * Redis maxmemory-policy=volatile* and there are no evictable keys
+    """
     pass
 
 
