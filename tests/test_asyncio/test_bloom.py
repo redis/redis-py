@@ -389,9 +389,7 @@ async def test_tdigest_min_and_max(r: redis.Redis):
 async def test_tdigest_quantile(r: redis.Redis):
     assert await r.tdigest().create("tDigest", 500)
     # insert data-points into sketch
-    assert await r.tdigest().add(
-        "tDigest", list([x * 0.01 for x in range(1, 10000)])
-    )
+    assert await r.tdigest().add("tDigest", list([x * 0.01 for x in range(1, 10000)]))
     # assert min min/max have same result as quantile 0 and 1
     assert (
         await r.tdigest().max("tDigest")

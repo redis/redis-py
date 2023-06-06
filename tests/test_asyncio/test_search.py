@@ -150,11 +150,7 @@ async def test_client(r: redis.Redis):
         await r.ft().search(Query("henry").no_content().limit_fields("play"))
     ).total
     both_total = (
-        await (
-            r.ft().search(
-                Query("henry").no_content().limit_fields("play", "txt")
-            )
-        )
+        await (r.ft().search(Query("henry").no_content().limit_fields("play", "txt")))
     ).total
     assert 129 == txt_total
     assert 494 == play_total
@@ -178,13 +174,8 @@ async def test_client(r: redis.Redis):
 
     # test slop and in order
     assert 193 == (await r.ft().search(Query("henry king"))).total
-    assert (
-        3 == (await r.ft().search(Query("henry king").slop(0).in_order())).total
-    )
-    assert (
-        52
-        == (await r.ft().search(Query("king henry").slop(0).in_order())).total
-    )
+    assert 3 == (await r.ft().search(Query("henry king").slop(0).in_order())).total
+    assert 52 == (await r.ft().search(Query("king henry").slop(0).in_order())).total
     assert 53 == (await r.ft().search(Query("henry king").slop(0))).total
     assert 167 == (await r.ft().search(Query("henry king").slop(100))).total
 
@@ -240,18 +231,12 @@ async def test_stopwords(r: redis.Redis):
 @pytest.mark.redismod
 async def test_filters(r: redis.Redis):
     await (
-        r.ft().create_index(
-            (TextField("txt"), NumericField("num"), GeoField("loc"))
-        )
+        r.ft().create_index((TextField("txt"), NumericField("num"), GeoField("loc")))
     )
     await (
-        r.hset(
-            "doc1", mapping={"txt": "foo bar", "num": 3.141, "loc": "-0.441,51.458"}
-        )
+        r.hset("doc1", mapping={"txt": "foo bar", "num": 3.141, "loc": "-0.441,51.458"})
     )
-    await (
-        r.hset("doc2", mapping={"txt": "foo baz", "num": 2, "loc": "-0.1,51.2"})
-    )
+    await (r.hset("doc2", mapping={"txt": "foo baz", "num": 2, "loc": "-0.1,51.2"}))
 
     await waitForIndex(r, "idx")
     # Test numerical filter
@@ -285,11 +270,7 @@ async def test_filters(r: redis.Redis):
 
 @pytest.mark.redismod
 async def test_sort_by(r: redis.Redis):
-    await (
-        r.ft().create_index(
-            (TextField("txt"), NumericField("num", sortable=True))
-        )
-    )
+    await (r.ft().create_index((TextField("txt"), NumericField("num", sortable=True))))
     await r.hset("doc1", mapping={"txt": "foo bar", "num": 1})
     await r.hset("doc2", mapping={"txt": "foo baz", "num": 2})
     await r.hset("doc3", mapping={"txt": "foo qux", "num": 3})
@@ -331,9 +312,7 @@ async def test_drop_index(r: redis.Redis):
 @pytest.mark.redismod
 async def test_example(r: redis.Redis):
     # Creating the index definition and schema
-    await (
-        r.ft().create_index((TextField("title", weight=5.0), TextField("body")))
-    )
+    await (r.ft().create_index((TextField("title", weight=5.0), TextField("body"))))
 
     # Indexing a document
     await r.hset(
@@ -393,9 +372,7 @@ async def test_auto_complete(r: redis.Redis):
     await r.ft().sugadd("ac", Suggestion("pay2", payload="pl2"))
     await r.ft().sugadd("ac", Suggestion("pay3", payload="pl3"))
 
-    sugs = await (
-        r.ft().sugget("ac", "pay", with_payloads=True, with_scores=True)
-    )
+    sugs = await (r.ft().sugget("ac", "pay", with_payloads=True, with_scores=True))
     assert 3 == len(sugs)
     for sug in sugs:
         assert sug.payload
@@ -459,9 +436,7 @@ async def test_no_index(r: redis.Redis):
 
 @pytest.mark.redismod
 async def test_explain(r: redis.Redis):
-    await (
-        r.ft().create_index((TextField("f1"), TextField("f2"), TextField("f3")))
-    )
+    await (r.ft().create_index((TextField("f1"), TextField("f2"), TextField("f3"))))
     res = await r.ft().explain("@f3:f3_val @f2:f2_val @f1:f1_val")
     assert res
 
@@ -740,9 +715,7 @@ async def test_scorer(r: redis.Redis):
     assert 1.0 == res.docs[0].score
     res = await r.ft().search(Query("quick").scorer("TFIDF").with_scores())
     assert 1.0 == res.docs[0].score
-    res = await (
-        r.ft().search(Query("quick").scorer("TFIDF.DOCNORM").with_scores())
-    )
+    res = await (r.ft().search(Query("quick").scorer("TFIDF.DOCNORM").with_scores()))
     assert 0.1111111111111111 == res.docs[0].score
     res = await r.ft().search(Query("quick").scorer("BM25").with_scores())
     assert 0.17699114465425977 == res.docs[0].score

@@ -90,9 +90,7 @@ async def test_add_duplicate_policy(r: redis.Redis):
     # Test for duplicate policy BLOCK
     assert 1 == await r.ts().add("time-serie-add-ooo-block", 1, 5.0)
     with pytest.raises(Exception):
-        await r.ts().add(
-            "time-serie-add-ooo-block", 1, 5.0, duplicate_policy="block"
-        )
+        await r.ts().add("time-serie-add-ooo-block", 1, 5.0, duplicate_policy="block")
 
     # Test for duplicate policy LAST
     assert 1 == await r.ts().add("time-serie-add-ooo-last", 1, 5.0)
@@ -130,9 +128,7 @@ async def test_add_duplicate_policy(r: redis.Redis):
 @pytest.mark.redismod
 async def test_madd(r: redis.Redis):
     await r.ts().create("a")
-    assert [1, 2, 3] == await r.ts().madd(
-        [("a", 1, 5), ("a", 2, 10), ("a", 3, 15)]
-    )
+    assert [1, 2, 3] == await r.ts().madd([("a", 1, 5), ("a", 2, 10), ("a", 3, 15)])
 
 
 @pytest.mark.redismod
@@ -210,9 +206,7 @@ async def test_range(r: redis.Redis):
     assert 200 == len(await r.ts().range(1, 0, 500))
     # last sample isn't returned
     assert 20 == len(
-        await r.ts().range(
-            1, 0, 500, aggregation_type="avg", bucket_size_msec=10
-        )
+        await r.ts().range(1, 0, 500, aggregation_type="avg", bucket_size_msec=10)
     )
     assert 10 == len(await r.ts().range(1, 0, 500, count=10))
 
@@ -256,9 +250,7 @@ async def test_rev_range(r: redis.Redis):
     assert 200 == len(await r.ts().range(1, 0, 500))
     # first sample isn't returned
     assert 20 == len(
-        await r.ts().revrange(
-            1, 0, 500, aggregation_type="avg", bucket_size_msec=10
-        )
+        await r.ts().revrange(1, 0, 500, aggregation_type="avg", bucket_size_msec=10)
     )
     assert 10 == len(await r.ts().revrange(1, 0, 500, count=10))
     assert 2 == len(
@@ -283,9 +275,7 @@ async def test_rev_range(r: redis.Redis):
 @pytest.mark.onlynoncluster
 async def testMultiRange(r: redis.Redis):
     await r.ts().create(1, labels={"Test": "This", "team": "ny"})
-    await r.ts().create(
-        2, labels={"Test": "This", "Taste": "That", "team": "sf"}
-    )
+    await r.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
     for i in range(100):
         await r.ts().add(1, i, i % 7)
         await r.ts().add(2, i, i % 11)
@@ -316,17 +306,13 @@ async def testMultiRange(r: redis.Redis):
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 async def test_multi_range_advanced(r: redis.Redis):
     await r.ts().create(1, labels={"Test": "This", "team": "ny"})
-    await r.ts().create(
-        2, labels={"Test": "This", "Taste": "That", "team": "sf"}
-    )
+    await r.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
     for i in range(100):
         await r.ts().add(1, i, i % 7)
         await r.ts().add(2, i, i % 11)
 
     # test with selected labels
-    res = await r.ts().mrange(
-        0, 200, filters=["Test=This"], select_labels=["team"]
-    )
+    res = await r.ts().mrange(0, 200, filters=["Test=This"], select_labels=["team"])
     assert {"team": "ny"} == res[0]["1"][0]
     assert {"team": "sf"} == res[1]["2"][0]
 
@@ -342,17 +328,11 @@ async def test_multi_range_advanced(r: redis.Redis):
     assert [(15, 1.0), (16, 2.0)] == res[0]["1"][1]
 
     # test groupby
-    res = await r.ts().mrange(
-        0, 3, filters=["Test=This"], groupby="Test", reduce="sum"
-    )
+    res = await r.ts().mrange(0, 3, filters=["Test=This"], groupby="Test", reduce="sum")
     assert [(0, 0.0), (1, 2.0), (2, 4.0), (3, 6.0)] == res[0]["Test=This"][1]
-    res = await r.ts().mrange(
-        0, 3, filters=["Test=This"], groupby="Test", reduce="max"
-    )
+    res = await r.ts().mrange(0, 3, filters=["Test=This"], groupby="Test", reduce="max")
     assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[0]["Test=This"][1]
-    res = await r.ts().mrange(
-        0, 3, filters=["Test=This"], groupby="team", reduce="min"
-    )
+    res = await r.ts().mrange(0, 3, filters=["Test=This"], groupby="team", reduce="min")
     assert 2 == len(res)
     assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[0]["team=ny"][1]
     assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[1]["team=sf"][1]
@@ -383,9 +363,7 @@ async def test_multi_range_advanced(r: redis.Redis):
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 async def test_multi_reverse_range(r: redis.Redis):
     await r.ts().create(1, labels={"Test": "This", "team": "ny"})
-    await r.ts().create(
-        2, labels={"Test": "This", "Taste": "That", "team": "sf"}
-    )
+    await r.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
     for i in range(100):
         await r.ts().add(1, i, i % 7)
         await r.ts().add(2, i, i % 11)
@@ -407,15 +385,11 @@ async def test_multi_reverse_range(r: redis.Redis):
     assert {} == res[0]["1"][0]
 
     # test withlabels
-    res = await r.ts().mrevrange(
-        0, 200, filters=["Test=This"], with_labels=True
-    )
+    res = await r.ts().mrevrange(0, 200, filters=["Test=This"], with_labels=True)
     assert {"Test": "This", "team": "ny"} == res[0]["1"][0]
 
     # test with selected labels
-    res = await r.ts().mrevrange(
-        0, 200, filters=["Test=This"], select_labels=["team"]
-    )
+    res = await r.ts().mrevrange(0, 200, filters=["Test=This"], select_labels=["team"])
     assert {"team": "ny"} == res[0]["1"][0]
     assert {"team": "sf"} == res[1]["2"][0]
 
@@ -502,9 +476,7 @@ async def test_mget(r: redis.Redis):
 
 @pytest.mark.redismod
 async def test_info(r: redis.Redis):
-    await r.ts().create(
-        1, retention_msecs=5, labels={"currentLabel": "currentData"}
-    )
+    await r.ts().create(1, retention_msecs=5, labels={"currentLabel": "currentData"})
     info = await r.ts().info(1)
     assert 5 == info.retention_msecs
     assert info.labels["currentLabel"] == "currentData"
@@ -513,9 +485,7 @@ async def test_info(r: redis.Redis):
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
 async def testInfoDuplicatePolicy(r: redis.Redis):
-    await r.ts().create(
-        1, retention_msecs=5, labels={"currentLabel": "currentData"}
-    )
+    await r.ts().create(1, retention_msecs=5, labels={"currentLabel": "currentData"})
     info = await r.ts().info(1)
     assert info.duplicate_policy is None
 

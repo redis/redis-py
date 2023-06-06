@@ -418,9 +418,7 @@ async def test_json_mget_dollar(r: redis.Redis):
 async def test_numby_commands_dollar(r: redis.Redis):
 
     # Test NUMINCRBY
-    await r.json().set(
-        "doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]}
-    )
+    await r.json().set("doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]})
     # Test multi
     assert await r.json().numincrby("doc1", "$..a", 2) == [None, 4, 7.0, None]
 
@@ -433,9 +431,7 @@ async def test_numby_commands_dollar(r: redis.Redis):
     assert await r.json().numincrby("doc1", "$.b[1].a", 3.5) == [15.0]
 
     # Test NUMMULTBY
-    await r.json().set(
-        "doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]}
-    )
+    await r.json().set("doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]})
 
     # test list
     with pytest.deprecated_call():
@@ -456,15 +452,11 @@ async def test_numby_commands_dollar(r: redis.Redis):
         await r.json().nummultby("non_existing_doc", "$..a", 2)
 
     # Test legacy NUMINCRBY
-    await r.json().set(
-        "doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]}
-    )
+    await r.json().set("doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]})
     await r.json().numincrby("doc1", ".b[0].a", 3) == 5
 
     # Test legacy NUMMULTBY
-    await r.json().set(
-        "doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]}
-    )
+    await r.json().set("doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]})
 
     with pytest.deprecated_call():
         await r.json().nummultby("doc1", ".b[0].a", 3) == 6

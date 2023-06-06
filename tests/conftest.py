@@ -72,14 +72,14 @@ class BooleanOptionalAction(argparse.Action):
 
 
 def pytest_addoption(parser):
-    
+
     parser.addoption(
         "--redis-url",
         default=default_redis_url,
         action="store",
         help="Redis connection string, defaults to `%(default)s`",
     )
-    
+
     parser.addoption(
         "--protocol",
         default=default_protocol,
@@ -277,9 +277,9 @@ def _get_client(
         redis_url = request.config.getoption("--redis-url")
     else:
         redis_url = from_url
-        
-    kwargs['protocol'] = request.config.getoption('--protocol')
-        
+
+    kwargs["protocol"] = request.config.getoption("--protocol")
+
     cluster_mode = REDIS_INFO["cluster_enabled"]
     if not cluster_mode:
         url_options = parse_url(redis_url)

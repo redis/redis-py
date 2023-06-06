@@ -74,7 +74,7 @@ async def create_redis(request):
         **kwargs,
     ):
         protocol = request.config.getoption("--protocol")
-        kwargs['protocol'] = protocol
+        kwargs["protocol"] = protocol
         cluster_mode = REDIS_INFO["cluster_enabled"]
         if not cluster_mode:
             single = kwargs.pop("single_connection_client", False) or single_connection
@@ -119,11 +119,6 @@ async def create_redis(request):
 
     for teardown in teardown_clients:
         await teardown()
-
-
-@pytest_asyncio.fixture()
-async def r(create_redis):
-    return await create_redis()
 
 
 @pytest_asyncio.fixture()
