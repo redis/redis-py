@@ -70,7 +70,7 @@ def clean(c):
         shutil.rmtree("build")
     if os.path.isdir("dist"):
         shutil.rmtree("dist")
-    run(f"docker-compose --profile all rm -s -f")
+    run("docker-compose --profile all rm -s -f")
 
 
 @task
