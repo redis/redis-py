@@ -6,7 +6,7 @@ isort==5.10.1
 mock==4.0.3
 packaging>=20.4
 pytest==7.2.0
-pytest-timeout==2.0.1
+pytest-timeout==2.1.0
 pytest-asyncio>=0.20.2
 tox==3.27.1
 invoke==1.7.3

@@ -325,7 +325,7 @@ class TestRedisCommands:
         assert_resp_response(
             r,
             acl["selectors"],
-            ["commands", "-@all +set", "keys", "%W~app*", "channels", ""],
+            [["commands", "-@all +set", "keys", "%W~app*", "channels", ""]],
             [{"commands": "-@all +set", "keys": "%W~app*", "channels": ""}],
         )
 

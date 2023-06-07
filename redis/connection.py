@@ -42,6 +42,8 @@ SYM_DOLLAR = b"$"
 SYM_CRLF = b"\r\n"
 SYM_EMPTY = b""
 
+DEFAULT_RESP_VERSION = 2
+
 SENTINEL = object()
 
 DefaultParser: Type[Union[_RESP2Parser, _RESP3Parser, _HiredisParser]]
@@ -189,7 +191,17 @@ class AbstractConnection:
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
-        self.protocol = protocol
+        try:
+            p = int(protocol)
+        except TypeError:
+            p = DEFAULT_RESP_VERSION
+        except ValueError:
+            raise ConnectionError("protocol must be an integer")
+        finally:
+            if p < 2 or p > 3:
+                raise ConnectionError("protocol must be either 2 or 3")
+                # p = DEFAULT_RESP_VERSION
+            self.protocol = p
         self._command_packer = self._construct_command_packer(command_packer)
 
     def __repr__(self):
@@ -286,9 +298,10 @@ class AbstractConnection:
                 or UsernamePasswordCredentialProvider(self.username, self.password)
             )
             auth_args = cred_provider.get_credentials()
+
         # if resp version is specified and we have auth args,
         # we need to send them via HELLO
-        if auth_args and self.protocol != 2:
+        if auth_args and self.protocol != DEFAULT_RESP_VERSION:
             if isinstance(self._parser, _RESP2Parser):
                 self.set_parser(_RESP3Parser)
                 # update cluster exception classes
@@ -298,10 +311,10 @@ class AbstractConnection:
                 auth_args = ["default", auth_args[0]]
             self.send_command("HELLO", self.protocol, "AUTH", *auth_args)
             response = self.read_response()
-            if response.get(b"proto") != int(self.protocol) and response.get(
-                "proto"
-            ) != int(self.protocol):
-                raise ConnectionError("Invalid RESP version")
+            # if response.get(b"proto") != self.protocol and response.get(
+            #     "proto"
+            # ) != self.protocol:
+            #     raise ConnectionError("Invalid RESP version")
         elif auth_args:
             # avoid checking health here -- PING will fail if we try
             # to check the health prior to the AUTH
@@ -321,7 +334,7 @@ class AbstractConnection:
                 raise AuthenticationError("Invalid Username or Password")
 
         # if resp version is specified, switch to it
-        elif self.protocol != 2:
+        elif self.protocol != DEFAULT_RESP_VERSION:
             if isinstance(self._parser, _RESP2Parser):
                 self.set_parser(_RESP3Parser)
                 # update cluster exception classes
@@ -329,9 +342,10 @@ class AbstractConnection:
                 self._parser.on_connect(self)
             self.send_command("HELLO", self.protocol)
             response = self.read_response()
-            if response.get(b"proto") != int(self.protocol) and response.get(
-                "proto"
-            ) != int(self.protocol):
+            if (
+                response.get(b"proto") != self.protocol
+                and response.get("proto") != self.protocol
+            ):
                 raise ConnectionError("Invalid RESP version")
 
         # if a client_name is given, set it
@@ -433,7 +447,7 @@ class AbstractConnection:
         host_error = self._host_error()
 
         try:
-            if self.protocol == "3" and not HIREDIS_AVAILABLE:
+            if self.protocol == 3 and not HIREDIS_AVAILABLE:
                 response = self._parser.read_response(
                     disable_decoding=disable_decoding, push_request=push_request
                 )
