@@ -73,8 +73,6 @@ async def create_redis(request):
         flushdb=True,
         **kwargs,
     ):
-        protocol = request.config.getoption("--protocol")
-        kwargs["protocol"] = protocol
         cluster_mode = REDIS_INFO["cluster_enabled"]
         if not cluster_mode:
             single = kwargs.pop("single_connection_client", False) or single_connection
@@ -122,13 +120,18 @@ async def create_redis(request):
 
 
 @pytest_asyncio.fixture()
+async def r(create_redis):
+    return await create_redis()
+
+
+@pytest_asyncio.fixture()
 async def r2(create_redis):
     """A second client for tests that need multiple"""
     return await create_redis()
 
 
 @pytest_asyncio.fixture()
-async def r(request, create_redis):
+async def modclient(request, create_redis):
     return await create_redis(
         url=request.config.getoption("--redis-url"), decode_responses=True
     )
