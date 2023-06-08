@@ -48,6 +48,39 @@ def test_json_get_jset(client):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("2.6.0", "ReJSON")  # todo: update after the release
+def test_json_merge(client):
+    # Test with root path $
+    assert client.json().set(
+        "person_data",
+        "$",
+        {"person1": {"personal_data": {"name": "John"}}},
+    )
+    assert client.json().merge(
+        "person_data", "$", {"person1": {"personal_data": {"hobbies": "reading"}}}
+    )
+    assert client.json().get("person_data") == {
+        "person1": {"personal_data": {"name": "John", "hobbies": "reading"}}
+    }
+
+    # Test with root path path $.person1.personal_data
+    assert client.json().merge(
+        "person_data", "$.person1.personal_data", {"country": "Israel"}
+    )
+    assert client.json().get("person_data") == {
+        "person1": {
+            "personal_data": {"name": "John", "hobbies": "reading", "country": "Israel"}
+        }
+    }
+
+    # Test with null value to delete a value
+    assert client.json().merge("person_data", "$.person1.personal_data", {"name": None})
+    assert client.json().get("person_data") == {
+        "person1": {"personal_data": {"country": "Israel", "hobbies": "reading"}}
+    }
+
+
+@pytest.mark.redismod
 def test_nonascii_setgetdelete(client):
     assert client.json().set("notascii", Path.root_path(), "hyvää-élève")
     assert "hyvää-élève" == client.json().get("notascii", no_escape=True)
