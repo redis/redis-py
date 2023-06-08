@@ -5,7 +5,9 @@ import sys
 from typing import Optional
 from unittest.mock import patch
 
-if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
+# the functionality is available in 3.11.x but has a major issue before
+# 3.11.3. See https://github.com/redis/redis-py/issues/2633
+if sys.version_info >= (3, 11, 3):
     from asyncio import timeout as async_timeout
 else:
     from async_timeout import timeout as async_timeout
@@ -971,6 +973,9 @@ class TestBaseException:
         # the timeout on the read should not cause disconnect
         assert pubsub.connection.is_connected
 
+    @pytest.mark.skipif(
+        sys.version_info < (3, 8), reason="requires python 3.8 or higher"
+    )
     async def test_base_exception(self, r: redis.Redis):
         """
         Manually trigger a BaseException inside the parser's .read_response method
