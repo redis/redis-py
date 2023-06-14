@@ -433,7 +433,7 @@ class AbstractConnection:
         host_error = self._host_error()
 
         try:
-            if self.protocol == "3" and not HIREDIS_AVAILABLE:
+            if self.protocol in ["3", 3] and not HIREDIS_AVAILABLE:
                 response = self._parser.read_response(
                     disable_decoding=disable_decoding, push_request=push_request
                 )
