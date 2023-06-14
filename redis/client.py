@@ -726,7 +726,7 @@ def parse_set_result(response, **options):
 
 class AbstractRedis:
     RESPONSE_CALLBACKS = {
-        **string_keys_to_dict("EXPIRE EXPIREAT PEXPIRE PEXPIREAT", bool),
+        **string_keys_to_dict("EXPIRE EXPIREAT PEXPIRE PEXPIREAT AUTH", bool),
         **string_keys_to_dict("EXISTS", int),
         **string_keys_to_dict("INCRBYFLOAT HINCRBYFLOAT", float),
         **string_keys_to_dict("READONLY", bool_ok),
@@ -785,17 +785,42 @@ class AbstractRedis:
         **string_keys_to_dict("XREAD XREADGROUP", parse_xread),
         "COMMAND GETKEYS": lambda r: list(map(str_if_bytes, r)),
         **string_keys_to_dict("SORT", sort_return_tuples),
+        "PING": lambda r: str_if_bytes(r) == "PONG",
+        "ACL SETUSER": bool_ok,
+        "PUBSUB NUMSUB": parse_pubsub_numsub,
+        "SCRIPT FLUSH": bool_ok,
+        "SCRIPT LOAD": str_if_bytes,
+        "ACL GETUSER": parse_acl_getuser,
+        "CONFIG SET": bool_ok,
+        **string_keys_to_dict("XREVRANGE XRANGE", parse_stream_list),
+        "XCLAIM": parse_xclaim,
+
     }
 
     RESP2_RESPONSE_CALLBACKS = {
+        "CONFIG GET": parse_config_get,
+        **string_keys_to_dict(
+            "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
+        ),
+        **string_keys_to_dict(
+            "ZPOPMAX ZPOPMIN ZINTER ZDIFF ZUNION ZRANGE ZRANGEBYSCORE "
+            "ZREVRANGE ZREVRANGEBYSCORE",
+            zset_score_pairs,
+        ),
+        **string_keys_to_dict("ZSCORE ZINCRBY", float_or_none),
+        "ZADD": parse_zadd,
+        "ZMSCORE": parse_zmscore,
+        "HGETALL": lambda r: r and pairs_to_dict(r) or {},
+        "MEMORY STATS": parse_memory_stats,
+        "MODULE LIST": lambda r: [pairs_to_dict(m) for m in r],
+
         # **string_keys_to_dict(
-        #     "AUTH COPY "
+        #     "COPY "
         #     "HEXISTS HMSET MOVE MSETNX PERSIST "
         #     "PSETEX RENAMENX SISMEMBER SMOVE SETEX SETNX",
         #     bool,
         # ),
         # **string_keys_to_dict(
-        #     "BITCOUNT BITPOS DECRBY DEL EXISTS GEOADD GETBIT HDEL HLEN "
         #     "HSTRLEN INCRBY LINSERT LLEN LPUSHX PFADD PFCOUNT RPUSHX SADD "
         #     "SCARD SDIFFSTORE SETBIT SETRANGE SINTERSTORE SREM STRLEN "
         #     "SUNIONSTORE UNLINK XACK XDEL XLEN XTRIM ZCARD ZLEXCOUNT ZREM "
@@ -803,68 +828,39 @@ class AbstractRedis:
         #     int,
         # ),
         # **string_keys_to_dict(
-        #     # these return OK, or int if redis-server is >=1.3.4
-        #     "LPUSH RPUSH",
-        #     lambda r: isinstance(r, int) and r or str_if_bytes(r) == "OK",
-        # ),
-        # **string_keys_to_dict("ZSCORE ZINCRBY", float_or_none),
-        # **string_keys_to_dict(
         #     "FLUSHALL FLUSHDB LSET LTRIM MSET PFMERGE ASKING READWRITE "
         #     "RENAME SAVE SELECT SHUTDOWN SLAVEOF SWAPDB WATCH UNWATCH ",
         #     bool_ok,
         # ),
-        # **string_keys_to_dict(
-        #     "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
-        # ),
-        # **string_keys_to_dict(
-        #     "ZPOPMAX ZPOPMIN ZINTER ZDIFF ZUNION ZRANGE ZRANGEBYSCORE "
-        #     "ZREVRANGE ZREVRANGEBYSCORE",
-        #     zset_score_pairs,
-        # ),
         # **string_keys_to_dict("ZRANK ZREVRANK", int_or_none),
-        # **string_keys_to_dict("XREVRANGE XRANGE", parse_stream_list),
         # **string_keys_to_dict("BGREWRITEAOF BGSAVE", lambda r: True),
-        # "ACL DELUSER": int,
-        # "ACL GETUSER": parse_acl_getuser,
         # "ACL HELP": lambda r: list(map(str_if_bytes, r)),
         # "ACL LIST": lambda r: list(map(str_if_bytes, r)),
         # "ACL LOAD": bool_ok,
         # "ACL SAVE": bool_ok,
-        # "ACL SETUSER": bool_ok,
         # "ACL USERS": lambda r: list(map(str_if_bytes, r)),
         # "CLIENT UNBLOCK": lambda r: r and int(r) == 1 or False,
         # "CLIENT PAUSE": bool_ok,
-        # "CLIENT GETREDIR": int,
         # "CLUSTER ADDSLOTSRANGE": bool_ok,
         # "CLUSTER DELSLOTSRANGE": bool_ok,
         # "CLUSTER GETKEYSINSLOT": lambda r: list(map(str_if_bytes, r)),
         # "CLUSTER REPLICAS": parse_cluster_nodes,
         # "CLUSTER SET-CONFIG-EPOCH": bool_ok,
-        # "COMMAND COUNT": int,
-        # "CONFIG GET": parse_config_get,
         # "CONFIG RESETSTAT": bool_ok,
-        # "CONFIG SET": bool_ok,
         # "DEBUG OBJECT": parse_debug_object,
         # "FUNCTION DELETE": bool_ok,
         # "FUNCTION FLUSH": bool_ok,
         # "FUNCTION RESTORE": bool_ok,
-        # "HGETALL": lambda r: r and pairs_to_dict(r) or {},
         # "MEMORY PURGE": bool_ok,
-        # "MEMORY STATS": parse_memory_stats,
         # "MEMORY USAGE": int_or_none,
         # "MODULE LOAD": parse_module_result,
         # "MODULE UNLOAD": parse_module_result,
-        # "MODULE LIST": lambda r: [pairs_to_dict(m) for m in r],
         # "OBJECT": parse_object,
-        # "PING": lambda r: str_if_bytes(r) == "PONG",
         # "QUIT": bool_ok,
         # "STRALGO": parse_stralgo,
-        # "PUBSUB NUMSUB": parse_pubsub_numsub,
         # "RANDOMKEY": lambda r: r and r or None,
         # "SCRIPT EXISTS": lambda r: list(map(bool, r)),
-        # "SCRIPT FLUSH": bool_ok,
         # "SCRIPT KILL": bool_ok,
-        # "SCRIPT LOAD": str_if_bytes,
         # "SENTINEL CKQUORUM": bool_ok,
         # "SENTINEL FAILOVER": bool_ok,
         # "SENTINEL FLUSHCONFIG": bool_ok,
@@ -877,17 +873,12 @@ class AbstractRedis:
         # "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels,
         # "SENTINEL SET": bool_ok,
         # "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels,
-        # "SLOWLOG LEN": int,
         # "SLOWLOG RESET": bool_ok,
-        # "XCLAIM": parse_xclaim,
         # "XGROUP CREATE": bool_ok,
-        # "XGROUP DELCONSUMER": int,
         # "XGROUP DESTROY": bool,
         # "XGROUP SETID": bool_ok,
         # "XINFO CONSUMERS": parse_list_of_dicts,
-        # "XINFO GROUPS": parse_list_of_dicts,
-        # "ZADD": parse_zadd,
-        # "ZMSCORE": parse_zmscore,
+        "XINFO GROUPS": parse_list_of_dicts,
     }
 
     RESP3_RESPONSE_CALLBACKS = {
@@ -1128,6 +1119,8 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
 
         if self.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
             self.response_callbacks.update(self.__class__.RESP3_RESPONSE_CALLBACKS)
+        else:
+            self.response_callbacks.update(self.__class__.RESP2_RESPONSE_CALLBACKS)
 
     def __repr__(self):
         return f"{type(self).__name__}<{repr(self.connection_pool)}>"

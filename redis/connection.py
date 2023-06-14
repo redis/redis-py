@@ -288,7 +288,7 @@ class AbstractConnection:
             auth_args = cred_provider.get_credentials()
         # if resp version is specified and we have auth args,
         # we need to send them via HELLO
-        if auth_args and self.protocol != 2:
+        if auth_args and self.protocol not in [2, "2"]:
             if isinstance(self._parser, _RESP2Parser):
                 self.set_parser(_RESP3Parser)
                 # update cluster exception classes
@@ -321,7 +321,7 @@ class AbstractConnection:
                 raise AuthenticationError("Invalid Username or Password")
 
         # if resp version is specified, switch to it
-        elif self.protocol != 2:
+        elif self.protocol not in [2, "2"]:
             if isinstance(self._parser, _RESP2Parser):
                 self.set_parser(_RESP3Parser)
                 # update cluster exception classes

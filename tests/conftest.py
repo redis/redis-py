@@ -16,7 +16,7 @@ from redis.retry import Retry
 
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/0"
-default_redismod_url = "redis://localhost:36379"
+default_redismod_url = "redis://localhost:6379"
 default_redis_unstable_url = "redis://localhost:6378"
 
 # default ssl client ignores verification for the purpose of testing

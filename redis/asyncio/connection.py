@@ -379,7 +379,7 @@ class Connection:
                 raise AuthenticationError("Invalid Username or Password")
 
         # if resp version is specified, switch to it
-        elif self.protocol != 2:
+        elif self.protocol not in [2, "2"]:
             if isinstance(self._parser, _AsyncRESP2Parser):
                 self.set_parser(_AsyncRESP3Parser)
                 # update cluster exception classes
