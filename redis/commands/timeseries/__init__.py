@@ -1,4 +1,5 @@
 import redis
+from redis.client import bool_ok
 
 from ..helpers import parse_to_list
 from .commands import (
@@ -33,26 +34,36 @@ class TimeSeries(TimeSeriesCommands):
         """Create a new RedisTimeSeries client."""
         # Set the module commands' callbacks
         self.MODULE_CALLBACKS = {
-            CREATE_CMD: redis.client.bool_ok,
-            ALTER_CMD: redis.client.bool_ok,
-            CREATERULE_CMD: redis.client.bool_ok,
+            CREATE_CMD: bool_ok,
+            ALTER_CMD: bool_ok,
+            CREATERULE_CMD: bool_ok,
+            DELETERULE_CMD: bool_ok,
+        }
+
+        RESP2_MODULE_CALLBACKS = {
             DEL_CMD: int,
-            DELETERULE_CMD: redis.client.bool_ok,
+            GET_CMD: parse_get,
+            QUERYINDEX_CMD: parse_to_list,
             RANGE_CMD: parse_range,
             REVRANGE_CMD: parse_range,
+            MGET_CMD: parse_m_get,
             MRANGE_CMD: parse_m_range,
             MREVRANGE_CMD: parse_m_range,
-            GET_CMD: parse_get,
-            MGET_CMD: parse_m_get,
             INFO_CMD: TSInfo,
-            QUERYINDEX_CMD: parse_to_list,
+
         }
+        RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.execute_command = client.execute_command
 
-        for key, value in self.MODULE_CALLBACKS.items():
-            self.client.set_response_callback(key, value)
+        if self.client.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
+            self.MODULE_CALLBACKS.update(RESP3_MODULE_CALLBACKS)
+        else:
+            self.MODULE_CALLBACKS.update(RESP2_MODULE_CALLBACKS)
+
+        for k, v in self.MODULE_CALLBACKS.items():
+            self.client.set_response_callback(k, v)
 
     def pipeline(self, transaction=True, shard_hint=None):
         """Creates a pipeline for the TimeSeries module, that can be used
