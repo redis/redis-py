@@ -1,3 +1,4 @@
+    * Fix incorrect redis.asyncio.Cluster type hint for `retry_on_error`
     * Fix #2749, remove unnecessary __del__ logic to close connections.
     * Fix #2754, adding a missing argument to SentinelManagedConnection
     * Fix `xadd` command to accept non-negative `maxlen` including 0
