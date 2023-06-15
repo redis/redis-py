@@ -54,6 +54,8 @@ class OutOfMemoryError(ResponseError):
     Indicates the database is full. Can only occur when either:
       * Redis maxmemory-policy=noeviction
       * Redis maxmemory-policy=volatile* and there are no evictable keys
+
+    For more information see `Memory optimization in Redis <https://redis.io/docs/management/optimization/memory-optimization/#memory-allocation>`_. # noqa  
     """
     pass
 
