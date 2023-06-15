@@ -50,7 +50,6 @@ class TimeSeries(TimeSeriesCommands):
             MRANGE_CMD: parse_m_range,
             MREVRANGE_CMD: parse_m_range,
             INFO_CMD: TSInfo,
-
         }
         RESP3_MODULE_CALLBACKS = {}
 

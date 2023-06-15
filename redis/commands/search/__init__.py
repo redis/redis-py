@@ -2,12 +2,12 @@ import redis
 
 from ...asyncio.client import Pipeline as AsyncioPipeline
 from .commands import (
-    INFO_CMD,
-    SEARCH_CMD,
     AGGREGATE_CMD,
-    PROFILE_CMD,
-    SPELLCHECK_CMD,
     CONFIG_CMD,
+    INFO_CMD,
+    PROFILE_CMD,
+    SEARCH_CMD,
+    SPELLCHECK_CMD,
     SYNDUMP_CMD,
     AsyncSearchCommands,
     SearchCommands,

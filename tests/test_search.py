@@ -24,7 +24,12 @@ from redis.commands.search.query import GeoFilter, NumericFilter, Query
 from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
 
-from .conftest import assert_resp_response, skip_if_redis_enterprise, skip_ifmodversion_lt, is_resp2_connection
+from .conftest import (
+    assert_resp_response,
+    is_resp2_connection,
+    skip_if_redis_enterprise,
+    skip_ifmodversion_lt,
+)
 
 WILL_PLAY_TEXT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "testdata", "will_play_text.csv.bz2")
@@ -49,7 +54,7 @@ def waitForIndex(env, idx, timeout=None):
                 if int(res["indexing"]) == 0:
                     break
             except ValueError:
-                break 
+                break
 
         time.sleep(delay)
         if timeout is not None:
@@ -235,20 +240,21 @@ def test_client(client):
 
         # test verbatim vs no verbatim
         total = client.ft().search(Query("kings").no_content())["total_results"]
-        vtotal = client.ft().search(Query("kings").no_content().verbatim())["total_results"]
+        vtotal = client.ft().search(Query("kings").no_content().verbatim())[
+            "total_results"
+        ]
         assert total > vtotal
 
         # test in fields
-        txt_total = (
-            client.ft().search(Query("henry").no_content().limit_fields("txt"))["total_results"]
-        )
-        play_total = (
-            client.ft().search(Query("henry").no_content().limit_fields("play"))["total_results"]
-        )
-        both_total = (
-            client.ft()
-            .search(Query("henry").no_content().limit_fields("play", "txt"))["total_results"]
-        )
+        txt_total = client.ft().search(Query("henry").no_content().limit_fields("txt"))[
+            "total_results"
+        ]
+        play_total = client.ft().search(
+            Query("henry").no_content().limit_fields("play")
+        )["total_results"]
+        both_total = client.ft().search(
+            Query("henry").no_content().limit_fields("play", "txt")
+        )["total_results"]
         assert 129 == txt_total
         assert 494 == play_total
         assert 494 == both_total
@@ -271,8 +277,18 @@ def test_client(client):
 
         # test slop and in order
         assert 193 == client.ft().search(Query("henry king"))["total_results"]
-        assert 3 == client.ft().search(Query("henry king").slop(0).in_order())["total_results"]
-        assert 52 == client.ft().search(Query("king henry").slop(0).in_order())["total_results"]
+        assert (
+            3
+            == client.ft().search(Query("henry king").slop(0).in_order())[
+                "total_results"
+            ]
+        )
+        assert (
+            52
+            == client.ft().search(Query("king henry").slop(0).in_order())[
+                "total_results"
+            ]
+        )
         assert 53 == client.ft().search(Query("henry king").slop(0))["total_results"]
         assert 167 == client.ft().search(Query("henry king").slop(100))["total_results"]
 
@@ -383,7 +399,6 @@ def test_filters(client):
         res = [res2["results"][0]["id"], res2["results"][1]["id"]]
         res.sort()
         assert ["doc1", "doc2"] == res
-
 
 
 @pytest.mark.redismod
@@ -804,7 +819,7 @@ def test_spell_check(client):
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
 
     if is_resp2_connection(client):
-    
+
         # test spellcheck
         res = client.ft().spellcheck("impornant")
         assert "important" == res["impornant"][0]["suggestion"]
@@ -842,7 +857,7 @@ def test_spell_check(client):
 
         # test spellcheck with Levenshtein distance
         res = client.ft().spellcheck("vlis")
-        assert res == {'vlis': []}
+        assert res == {"vlis": []}
         res = client.ft().spellcheck("vlis", distance=2)
         assert "valid" in res["vlis"][0].keys()
 
@@ -1036,7 +1051,9 @@ def test_aggregations_groupby(client):
     )
 
     if is_resp2_connection(client):
-        req = aggregations.AggregateRequest("redis").group_by("@parent", reducers.count())
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.count()
+        )
 
         res = client.ft().aggregate(req).rows[0]
         assert res[1] == "redis"
@@ -1132,7 +1149,9 @@ def test_aggregations_groupby(client):
         assert len(res[3]) == 2
         assert res[3][0] in ["RediSearch", "RedisAI", "RedisJson"]
     else:
-        req = aggregations.AggregateRequest("redis").group_by("@parent", reducers.count())
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.count()
+        )
 
         res = client.ft().aggregate(req)["results"][0]
         assert res["fields"]["parent"] == "redis"
@@ -1200,7 +1219,7 @@ def test_aggregations_groupby(client):
 
         res = client.ft().aggregate(req)["results"][0]
         assert res["fields"]["parent"] == "redis"
-        assert res["fields"]["__generated_aliasquantilerandom_num,0.5"] == "8"  # median of 3,8,10
+        assert res["fields"]["__generated_aliasquantilerandom_num,0.5"] == "8"
 
         req = aggregations.AggregateRequest("redis").group_by(
             "@parent", reducers.tolist("@title")
@@ -1208,9 +1227,11 @@ def test_aggregations_groupby(client):
 
         res = client.ft().aggregate(req)["results"][0]
         assert res["fields"]["parent"] == "redis"
-        assert set(
-            res["fields"]["__generated_aliastolisttitle"]
-        ) == {"RediSearch", "RedisAI", "RedisJson"}
+        assert set(res["fields"]["__generated_aliastolisttitle"]) == {
+            "RediSearch",
+            "RedisAI",
+            "RedisJson",
+        }
 
         req = aggregations.AggregateRequest("redis").group_by(
             "@parent", reducers.first_value("@title").alias("first")
@@ -1228,6 +1249,7 @@ def test_aggregations_groupby(client):
         assert "random" in res["fields"].keys()
         assert len(res["fields"]["random"]) == 2
         assert res["fields"]["random"][0] in ["RediSearch", "RedisAI", "RedisJson"]
+
 
 @pytest.mark.redismod
 def test_aggregations_sort_by_and_limit(client):
@@ -1353,8 +1375,10 @@ def test_aggregations_apply(client):
         assert res_set == set(["6373878785249699840", "6373878758592700416"])
     else:
         res_set = set(
-            [res["results"][0]["fields"]["CreatedDateTimeUTC"],
-             res["results"][1]["fields"]["CreatedDateTimeUTC"]],
+            [
+                res["results"][0]["fields"]["CreatedDateTimeUTC"],
+                res["results"][1]["fields"]["CreatedDateTimeUTC"],
+            ],
         )
         assert res_set == set(["6373878785249699840", "6373878758592700416"])
 
@@ -1851,7 +1875,6 @@ def test_json_with_jsonpath(client):
         assert res["results"][0]["fields"]["name"] == "RediSearch"
 
 
-
 # @pytest.mark.redismod
 # @pytest.mark.onlynoncluster
 # @skip_if_redis_enterprise()
@@ -2065,9 +2088,11 @@ def test_search_commands_in_pipeline(client):
         assert "doc1" == res[3]["results"][0]["id"]
         assert "doc2" == res[3]["results"][1]["id"]
         assert res[3]["results"][0]["payload"] is None
-        assert res[3]["results"][0]["fields"] == res[3]["results"][1]["fields"] == {
-            "txt": "foo bar"
-        }
+        assert (
+            res[3]["results"][0]["fields"]
+            == res[3]["results"][1]["fields"]
+            == {"txt": "foo bar"}
+        )
 
 
 @pytest.mark.redismod
@@ -2178,6 +2203,7 @@ def test_withsuffixtrie(modclient: redis.Redis):
         waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
         info = modclient.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]["flags"]
+
 
 @pytest.mark.redismod
 def test_query_timeout(modclient: redis.Redis):

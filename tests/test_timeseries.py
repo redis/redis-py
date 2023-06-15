@@ -259,10 +259,8 @@ def test_range_advanced(client):
     res = client.ts().range(
         1, 0, 10, aggregation_type="count", bucket_size_msec=10, align=5
     )
-    assert_resp_response(client, res, [(0, 5.0), (5, 6.0)], [[0, 5.0], [5, 6.0]]) 
-    res = client.ts().range(
-        1, 0, 10, aggregation_type="twa", bucket_size_msec=10
-    )
+    assert_resp_response(client, res, [(0, 5.0), (5, 6.0)], [[0, 5.0], [5, 6.0]])
+    res = client.ts().range(1, 0, 10, aggregation_type="twa", bucket_size_msec=10)
     assert_resp_response(client, res, [(0, 2.55), (10, 3.0)], [[0, 2.55], [10, 3.0]])
 
 
@@ -283,13 +281,9 @@ def test_range_latest(client: redis.Redis):
         [(1, 1.0), (2, 3.0), (11, 7.0), (13, 1.0)],
         [[1, 1.0], [2, 3.0], [11, 7.0], [13, 1.0]],
     )
-    assert_resp_response(
-        client, timeseries.range("t2", 0, 10), [(0, 4.0)], [[0, 4.0]]
-    )
+    assert_resp_response(client, timeseries.range("t2", 0, 10), [(0, 4.0)], [[0, 4.0]])
     res = timeseries.range("t2", 0, 10, latest=True)
-    assert_resp_response(
-        client, res, [(0, 4.0), (10, 8.0)], [[0, 4.0], [10, 8.0]]
-    )
+    assert_resp_response(client, res, [(0, 4.0), (10, 8.0)], [[0, 4.0], [10, 8.0]])
     assert_resp_response(
         client, timeseries.range("t2", 0, 9, latest=True), [(0, 4.0)], [[0, 4.0]]
     )
@@ -354,10 +348,22 @@ def test_range_empty(client: redis.Redis):
         if math.isnan(res[i][1]):
             res[i] = (res[i][0], None)
     resp2_expected = [
-        (10, 4.0), (20, None), (30, None), (40, None), (50, 3.0), (60, None), (70, 5.0)
+        (10, 4.0),
+        (20, None),
+        (30, None),
+        (40, None),
+        (50, 3.0),
+        (60, None),
+        (70, 5.0),
     ]
     resp3_expected = [
-        [10, 4.0], (20, None), (30, None), (40, None), [50, 3.0], (60, None), [70, 5.0]
+        [10, 4.0],
+        (20, None),
+        (30, None),
+        (40, None),
+        [50, 3.0],
+        (60, None),
+        [70, 5.0],
     ]
     assert_resp_response(client, res, resp2_expected, resp3_expected)
 
@@ -404,9 +410,7 @@ def test_rev_range(client):
     )
     assert_resp_response(
         client,
-        client.ts().revrange(
-            1, 0, 10, aggregation_type="twa", bucket_size_msec=10
-        ),
+        client.ts().revrange(1, 0, 10, aggregation_type="twa", bucket_size_msec=10),
         [(10, 3.0), (0, 2.55)],
         [[10, 3.0], [0, 2.55]],
     )
@@ -452,7 +456,13 @@ def test_revrange_bucket_timestamp(client: redis.Redis):
     assert_resp_response(
         client,
         timeseries.range(
-            "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10, bucket_timestamp="+"
+            "t1",
+            0,
+            100,
+            align=0,
+            aggregation_type="max",
+            bucket_size_msec=10,
+            bucket_timestamp="+",
         ),
         [(20, 4.0), (60, 3.0), (80, 5.0)],
         [[20, 4.0], [60, 3.0], [80, 5.0]],
@@ -484,10 +494,22 @@ def test_revrange_empty(client: redis.Redis):
         if math.isnan(res[i][1]):
             res[i] = (res[i][0], None)
     resp2_expected = [
-        (70, 5.0), (60, None), (50, 3.0), (40, None), (30, None), (20, None), (10, 4.0)
+        (70, 5.0),
+        (60, None),
+        (50, 3.0),
+        (40, None),
+        (30, None),
+        (20, None),
+        (10, 4.0),
     ]
     resp3_expected = [
-        [70, 5.0], (60, None), [50, 3.0], (40, None), (30, None), (20, None), [10, 4.0]
+        [70, 5.0],
+        (60, None),
+        [50, 3.0],
+        (40, None),
+        (30, None),
+        (20, None),
+        [10, 4.0],
     ]
     assert_resp_response(client, res, resp2_expected, resp3_expected)
 
@@ -569,11 +591,17 @@ def test_multi_range_advanced(client):
         assert [(15, 1.0), (16, 2.0)] == res[0]["1"][1]
 
         # test groupby
-        res = client.ts().mrange(0, 3, filters=["Test=This"], groupby="Test", reduce="sum")
+        res = client.ts().mrange(
+            0, 3, filters=["Test=This"], groupby="Test", reduce="sum"
+        )
         assert [(0, 0.0), (1, 2.0), (2, 4.0), (3, 6.0)] == res[0]["Test=This"][1]
-        res = client.ts().mrange(0, 3, filters=["Test=This"], groupby="Test", reduce="max")
+        res = client.ts().mrange(
+            0, 3, filters=["Test=This"], groupby="Test", reduce="max"
+        )
         assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[0]["Test=This"][1]
-        res = client.ts().mrange(0, 3, filters=["Test=This"], groupby="team", reduce="min")
+        res = client.ts().mrange(
+            0, 3, filters=["Test=This"], groupby="team", reduce="min"
+        )
         assert 2 == len(res)
         assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[0]["team=ny"][1]
         assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[1]["team=sf"][1]
@@ -613,11 +641,17 @@ def test_multi_range_advanced(client):
         assert [[15, 1.0], [16, 2.0]] == res["1"][2]
 
         # test groupby
-        res = client.ts().mrange(0, 3, filters=["Test=This"], groupby="Test", reduce="sum")
+        res = client.ts().mrange(
+            0, 3, filters=["Test=This"], groupby="Test", reduce="sum"
+        )
         assert [[0, 0.0], [1, 2.0], [2, 4.0], [3, 6.0]] == res["Test=This"][3]
-        res = client.ts().mrange(0, 3, filters=["Test=This"], groupby="Test", reduce="max")
+        res = client.ts().mrange(
+            0, 3, filters=["Test=This"], groupby="Test", reduce="max"
+        )
         assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["Test=This"][3]
-        res = client.ts().mrange(0, 3, filters=["Test=This"], groupby="team", reduce="min")
+        res = client.ts().mrange(
+            0, 3, filters=["Test=This"], groupby="team", reduce="min"
+        )
         assert 2 == len(res)
         assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=ny"][3]
         assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=sf"][3]
@@ -667,9 +701,9 @@ def test_mrange_latest(client: redis.Redis):
         client.ts().mrange(0, 10, filters=["is_compaction=true"], latest=True),
         [{"t2": [{}, [(0, 4.0), (10, 8.0)]]}, {"t4": [{}, [(0, 4.0), (10, 8.0)]]}],
         {
-            't2': [{}, {'aggregators': []}, [[0, 4.0], [10, 8.0]]],
-            't4': [{}, {'aggregators': []}, [[0, 4.0], [10, 8.0]]],
-        }
+            "t2": [{}, {"aggregators": []}, [[0, 4.0], [10, 8.0]]],
+            "t4": [{}, {"aggregators": []}, [[0, 4.0], [10, 8.0]]],
+        },
     )
 
 
@@ -816,8 +850,8 @@ def test_mrevrange_latest(client: redis.Redis):
         client.ts().mrevrange(0, 10, filters=["is_compaction=true"], latest=True),
         [{"t2": [{}, [(10, 8.0), (0, 4.0)]]}, {"t4": [{}, [(10, 8.0), (0, 4.0)]]}],
         {
-            't2': [{}, {'aggregators': []}, [[10, 8.0], [0, 4.0]]],
-            't4': [{}, {'aggregators': []}, [[10, 8.0], [0, 4.0]]]
+            "t2": [{}, {"aggregators": []}, [[10, 8.0], [0, 4.0]]],
+            "t4": [{}, {"aggregators": []}, [[10, 8.0], [0, 4.0]]],
         },
     )
 
@@ -845,7 +879,9 @@ def test_get_latest(client: redis.Redis):
     timeseries.add("t1", 11, 7)
     timeseries.add("t1", 13, 1)
     assert_resp_response(client, timeseries.get("t2"), (0, 4.0), [0, 4.0])
-    assert_resp_response(client, timeseries.get("t2", latest=True), (10, 8.0), [10, 8.0])
+    assert_resp_response(
+        client, timeseries.get("t2", latest=True), (10, 8.0), [10, 8.0]
+    )
 
 
 @pytest.mark.redismod
@@ -897,9 +933,9 @@ def test_mget_latest(client: redis.Redis):
     timeseries.add("t1", 11, 7)
     timeseries.add("t1", 13, 1)
     res = timeseries.mget(filters=["is_compaction=true"])
-    assert_resp_response(client, res, [{"t2": [{}, 0, 4.0]}], {'t2': [{}, [0, 4.0]]})
+    assert_resp_response(client, res, [{"t2": [{}, 0, 4.0]}], {"t2": [{}, [0, 4.0]]})
     res = timeseries.mget(filters=["is_compaction=true"], latest=True)
-    assert_resp_response(client, res, [{"t2": [{}, 10, 8.0]}], {'t2': [{}, [10, 8.0]]})
+    assert_resp_response(client, res, [{"t2": [{}, 10, 8.0]}], {"t2": [{}, [10, 8.0]]})
 
 
 @pytest.mark.redismod

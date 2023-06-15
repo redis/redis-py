@@ -99,7 +99,7 @@ class SearchCommands:
             )
 
         return result, parse_to_dict(res[1])
-    
+
     def _parse_spellcheck(self, res, **kwargs):
         corrections = {}
         if res == 0:
@@ -136,7 +136,7 @@ class SearchCommands:
             ]
 
         return corrections
-    
+
     def _parse_config_get(self, res, **kwargs):
         return {kvs[0]: kvs[1] for kvs in res} if res else {}
 
@@ -501,7 +501,9 @@ class SearchCommands:
         if isinstance(res, Pipeline):
             return res
 
-        return self._parse_results(SEARCH_CMD, res, query=query, duration=(time.time() - st) * 1000.0)
+        return self._parse_results(
+            SEARCH_CMD, res, query=query, duration=(time.time() - st) * 1000.0
+        )
 
     def explain(
         self,
@@ -546,7 +548,9 @@ class SearchCommands:
         cmd += self.get_params_args(query_params)
 
         raw = self.execute_command(*cmd)
-        return self._parse_results(AGGREGATE_CMD, raw, query=query, has_cursor=has_cursor)
+        return self._parse_results(
+            AGGREGATE_CMD, raw, query=query, has_cursor=has_cursor
+        )
 
     def _get_aggregate_result(self, raw, query, has_cursor):
         if has_cursor:
@@ -604,7 +608,9 @@ class SearchCommands:
 
         res = self.execute_command(*cmd)
 
-        return self._parse_results(PROFILE_CMD, res, query=query, duration=(time.time() - st) * 1000.0)
+        return self._parse_results(
+            PROFILE_CMD, res, query=query, duration=(time.time() - st) * 1000.0
+        )
 
     def spellcheck(self, query, distance=None, include=None, exclude=None):
         """
