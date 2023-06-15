@@ -301,7 +301,7 @@ class AbstractConnection:
 
         # if resp version is specified and we have auth args,
         # we need to send them via HELLO
-        if auth_args and self.protocol != DEFAULT_RESP_VERSION:
+        if auth_args and self.protocol not in [2, "2"]:
             if isinstance(self._parser, _RESP2Parser):
                 self.set_parser(_RESP3Parser)
                 # update cluster exception classes
@@ -334,7 +334,7 @@ class AbstractConnection:
                 raise AuthenticationError("Invalid Username or Password")
 
         # if resp version is specified, switch to it
-        elif self.protocol != DEFAULT_RESP_VERSION:
+        elif self.protocol not in [2, "2"]:
             if isinstance(self._parser, _RESP2Parser):
                 self.set_parser(_RESP3Parser)
                 # update cluster exception classes
@@ -447,7 +447,7 @@ class AbstractConnection:
         host_error = self._host_error()
 
         try:
-            if self.protocol == 3 and not HIREDIS_AVAILABLE:
+            if self.protocol in ["3", 3] and not HIREDIS_AVAILABLE:
                 response = self._parser.read_response(
                     disable_decoding=disable_decoding, push_request=push_request
                 )

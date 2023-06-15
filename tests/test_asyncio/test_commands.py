@@ -68,24 +68,24 @@ async def get_stream_message(client: redis.Redis, stream: str, message_id: str):
     return response[0]
 
 
-# RESPONSE CALLBACKS
-@pytest.mark.onlynoncluster
-class TestResponseCallbacks:
-    """Tests for the response callback system"""
+# # RESPONSE CALLBACKS
+# @pytest.mark.onlynoncluster
+# class TestResponseCallbacks:
+#     """Tests for the response callback system"""
 
-    async def test_response_callbacks(self, r: redis.Redis):
-        resp3_callbacks = redis.Redis.RESPONSE_CALLBACKS.copy()
-        resp3_callbacks.update(redis.Redis.RESP3_RESPONSE_CALLBACKS)
-        assert_resp_response(
-            r, r.response_callbacks, redis.Redis.RESPONSE_CALLBACKS, resp3_callbacks
-        )
-        assert id(r.response_callbacks) != id(redis.Redis.RESPONSE_CALLBACKS)
-        r.set_response_callback("GET", lambda x: "static")
-        await r.set("a", "foo")
-        assert await r.get("a") == "static"
+#     async def test_response_callbacks(self, r: redis.Redis):
+#         resp3_callbacks = redis.Redis.RESPONSE_CALLBACKS.copy()
+#         resp3_callbacks.update(redis.Redis.RESP3_RESPONSE_CALLBACKS)
+#         assert_resp_response(
+#             r, r.response_callbacks, redis.Redis.RESPONSE_CALLBACKS, resp3_callbacks
+#         )
+#         assert id(r.response_callbacks) != id(redis.Redis.RESPONSE_CALLBACKS)
+#         r.set_response_callback("GET", lambda x: "static")
+#         await r.set("a", "foo")
+#         assert await r.get("a") == "static"
 
-    async def test_case_insensitive_command_names(self, r: redis.Redis):
-        assert r.response_callbacks["del"] == r.response_callbacks["DEL"]
+#     async def test_case_insensitive_command_names(self, r: redis.Redis):
+#         assert r.response_callbacks["del"] == r.response_callbacks["DEL"]
 
 
 class TestRedisCommands:

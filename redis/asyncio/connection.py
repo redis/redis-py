@@ -388,7 +388,7 @@ class Connection:
                 raise AuthenticationError("Invalid Username or Password")
 
         # if resp version is specified, switch to it
-        elif self.protocol != 2:
+        elif self.protocol not in [2, "2"]:
             if isinstance(self._parser, _AsyncRESP2Parser):
                 self.set_parser(_AsyncRESP3Parser)
                 # update cluster exception classes
@@ -523,7 +523,7 @@ class Connection:
         try:
             if (
                 read_timeout is not None
-                and self.protocol == "3"
+                and self.protocol in ["3", 3]
                 and not HIREDIS_AVAILABLE
             ):
                 async with async_timeout(read_timeout):
@@ -535,7 +535,7 @@ class Connection:
                     response = await self._parser.read_response(
                         disable_decoding=disable_decoding
                     )
-            elif self.protocol == "3" and not HIREDIS_AVAILABLE:
+            elif self.protocol in ["3", 3] and not HIREDIS_AVAILABLE:
                 response = await self._parser.read_response(
                     disable_decoding=disable_decoding, push_request=push_request
                 )
