@@ -895,8 +895,7 @@ class AsyncSearchCommands(SearchCommands):
         """
 
         res = await self.execute_command(INFO_CMD, self.index_name)
-        it = map(to_string, res)
-        return dict(zip(it, it))
+        return self._parse_results(INFO_CMD, res)
 
     async def search(
         self,
@@ -921,12 +920,8 @@ class AsyncSearchCommands(SearchCommands):
         if isinstance(res, Pipeline):
             return res
 
-        return Result(
-            res,
-            not query._no_content,
-            duration=(time.time() - st) * 1000.0,
-            has_payload=query._with_payloads,
-            with_scores=query._with_scores,
+        return self._parse_results(
+            SEARCH_CMD, res, query=query, duration=(time.time() - st) * 1000.0
         )
 
     async def aggregate(
@@ -957,7 +952,9 @@ class AsyncSearchCommands(SearchCommands):
         cmd += self.get_params_args(query_params)
 
         raw = await self.execute_command(*cmd)
-        return self._get_aggregate_result(raw, query, has_cursor)
+        return self._parse_results(
+            AGGREGATE_CMD, raw, query=query, has_cursor=has_cursor
+        )
 
     async def spellcheck(self, query, distance=None, include=None, exclude=None):
         """
@@ -983,28 +980,9 @@ class AsyncSearchCommands(SearchCommands):
         if exclude:
             cmd.extend(["TERMS", "EXCLUDE", exclude])
 
-        raw = await self.execute_command(*cmd)
+        res = await self.execute_command(*cmd)
 
-        corrections = {}
-        if raw == 0:
-            return corrections
-
-        for _correction in raw:
-            if isinstance(_correction, int) and _correction == 0:
-                continue
-
-            if len(_correction) != 3:
-                continue
-            if not _correction[2]:
-                continue
-            if not _correction[2][0]:
-                continue
-
-            corrections[_correction[1]] = [
-                {"score": _item[0], "suggestion": _item[1]} for _item in _correction[2]
-            ]
-
-        return corrections
+        return self._parse_results(SPELLCHECK_CMD, res)
 
     async def config_set(self, option, value):
         """Set runtime configuration option.
@@ -1031,11 +1009,8 @@ class AsyncSearchCommands(SearchCommands):
         """  # noqa
         cmd = [CONFIG_CMD, "GET", option]
         res = {}
-        raw = await self.execute_command(*cmd)
-        if raw:
-            for kvs in raw:
-                res[kvs[0]] = kvs[1]
-        return res
+        res = await self.execute_command(*cmd)
+        return self._parse_results(CONFIG_CMD, res)
 
     async def load_document(self, id):
         """

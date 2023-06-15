@@ -3,7 +3,7 @@ import pytest
 import redis.asyncio as redis
 from redis import exceptions
 from redis.commands.json.path import Path
-from tests.conftest import skip_ifmodversion_lt
+from tests.conftest import assert_resp_response, skip_ifmodversion_lt
 
 
 @pytest.mark.redismod
@@ -17,7 +17,7 @@ async def test_json_setbinarykey(modclient: redis.Redis):
 @pytest.mark.redismod
 async def test_json_setgetdeleteforget(modclient: redis.Redis):
     assert await modclient.json().set("foo", Path.root_path(), "bar")
-    assert await modclient.json().get("foo") == "bar"
+    assert_resp_response(modclient, await modclient.json().get("foo"), "bar", [["bar"]])
     assert await modclient.json().get("baz") is None
     assert await modclient.json().delete("foo") == 1
     assert await modclient.json().forget("foo") == 0  # second delete
@@ -27,13 +27,13 @@ async def test_json_setgetdeleteforget(modclient: redis.Redis):
 @pytest.mark.redismod
 async def test_jsonget(modclient: redis.Redis):
     await modclient.json().set("foo", Path.root_path(), "bar")
-    assert await modclient.json().get("foo") == "bar"
+    assert_resp_response(modclient, await modclient.json().get("foo"), "bar", [["bar"]])
 
 
 @pytest.mark.redismod
 async def test_json_get_jset(modclient: redis.Redis):
     assert await modclient.json().set("foo", Path.root_path(), "bar")
-    assert "bar" == await modclient.json().get("foo")
+    assert_resp_response(modclient, await modclient.json().get("foo"), "bar", [["bar"]])
     assert await modclient.json().get("baz") is None
     assert 1 == await modclient.json().delete("foo")
     assert await modclient.exists("foo") == 0
@@ -42,7 +42,10 @@ async def test_json_get_jset(modclient: redis.Redis):
 @pytest.mark.redismod
 async def test_nonascii_setgetdelete(modclient: redis.Redis):
     assert await modclient.json().set("notascii", Path.root_path(), "hyvää-élève")
-    assert "hyvää-élève" == await modclient.json().get("notascii", no_escape=True)
+    res = "hyvää-élève"
+    assert_resp_response(
+        modclient, await modclient.json().get("notascii", no_escape=True), res, [[res]]
+    )
     assert 1 == await modclient.json().delete("notascii")
     assert await modclient.exists("notascii") == 0
 
@@ -79,22 +82,37 @@ async def test_mgetshouldsucceed(modclient: redis.Redis):
 async def test_clear(modclient: redis.Redis):
     await modclient.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
     assert 1 == await modclient.json().clear("arr", Path.root_path())
-    assert [] == await modclient.json().get("arr")
+    assert_resp_response(modclient, await modclient.json().get("arr"), [], [[[]]])
 
 
 @pytest.mark.redismod
 async def test_type(modclient: redis.Redis):
     await modclient.json().set("1", Path.root_path(), 1)
-    assert "integer" == await modclient.json().type("1", Path.root_path())
-    assert "integer" == await modclient.json().type("1")
+    assert_resp_response(
+        modclient,
+        await modclient.json().type("1", Path.root_path()),
+        "integer",
+        ["integer"],
+    )
+    assert_resp_response(
+        modclient, await modclient.json().type("1"), "integer", ["integer"]
+    )
 
 
 @pytest.mark.redismod
 async def test_numincrby(modclient):
     await modclient.json().set("num", Path.root_path(), 1)
-    assert 2 == await modclient.json().numincrby("num", Path.root_path(), 1)
-    assert 2.5 == await modclient.json().numincrby("num", Path.root_path(), 0.5)
-    assert 1.25 == await modclient.json().numincrby("num", Path.root_path(), -1.25)
+    assert_resp_response(
+        modclient, await modclient.json().numincrby("num", Path.root_path(), 1), 2, [2]
+    )
+    res = await modclient.json().numincrby("num", Path.root_path(), 0.5)
+    assert_resp_response(
+        modclient, res, 2.5, [2.5]
+    )
+    res = await modclient.json().numincrby("num", Path.root_path(), -1.25)
+    assert_resp_response(
+        modclient, res, 1.25, [1.25]
+    )
 
 
 @pytest.mark.redismod
@@ -102,9 +120,18 @@ async def test_nummultby(modclient: redis.Redis):
     await modclient.json().set("num", Path.root_path(), 1)
 
     with pytest.deprecated_call():
-        assert 2 == await modclient.json().nummultby("num", Path.root_path(), 2)
-        assert 5 == await modclient.json().nummultby("num", Path.root_path(), 2.5)
-        assert 2.5 == await modclient.json().nummultby("num", Path.root_path(), 0.5)
+        res = await modclient.json().nummultby("num", Path.root_path(), 2)
+        assert_resp_response(
+            modclient, res, 2, [2]
+        )
+        res = await modclient.json().nummultby("num", Path.root_path(), 2.5)
+        assert_resp_response(
+            modclient, res, 5, [5]
+        )
+        res = await modclient.json().nummultby("num", Path.root_path(), 0.5)
+        assert_resp_response(
+            modclient, res, 2.5, [2.5]
+        )
 
 
 @pytest.mark.redismod
@@ -123,7 +150,10 @@ async def test_toggle(modclient: redis.Redis):
 async def test_strappend(modclient: redis.Redis):
     await modclient.json().set("jsonkey", Path.root_path(), "foo")
     assert 6 == await modclient.json().strappend("jsonkey", "bar")
-    assert "foobar" == await modclient.json().get("jsonkey", Path.root_path())
+    res = await modclient.json().get("jsonkey", Path.root_path())
+    assert_resp_response(
+        modclient, res, "foobar", [["foobar"]]
+    )
 
 
 @pytest.mark.redismod
@@ -159,13 +189,15 @@ async def test_arrindex(modclient: redis.Redis):
 @pytest.mark.redismod
 async def test_arrinsert(modclient: redis.Redis):
     await modclient.json().set("arr", Path.root_path(), [0, 4])
-    assert 5 - -await modclient.json().arrinsert("arr", Path.root_path(), 1, *[1, 2, 3])
-    assert [0, 1, 2, 3, 4] == await modclient.json().get("arr")
+    assert 5 == await modclient.json().arrinsert("arr", Path.root_path(), 1, *[1, 2, 3])
+    res = [0, 1, 2, 3, 4]
+    assert_resp_response(modclient, await modclient.json().get("arr"), res, [[res]])
 
     # test prepends
     await modclient.json().set("val2", Path.root_path(), [5, 6, 7, 8, 9])
     await modclient.json().arrinsert("val2", Path.root_path(), 0, ["some", "thing"])
-    assert await modclient.json().get("val2") == [["some", "thing"], 5, 6, 7, 8, 9]
+    res = [["some", "thing"], 5, 6, 7, 8, 9]
+    assert_resp_response(modclient, await modclient.json().get("val2"), res, [[res]])
 
 
 @pytest.mark.redismod
@@ -183,7 +215,7 @@ async def test_arrpop(modclient: redis.Redis):
     assert 3 == await modclient.json().arrpop("arr", Path.root_path(), -1)
     assert 2 == await modclient.json().arrpop("arr", Path.root_path())
     assert 0 == await modclient.json().arrpop("arr", Path.root_path(), 0)
-    assert [1] == await modclient.json().get("arr")
+    assert_resp_response(modclient, await modclient.json().get("arr"), [1], [[[1]]])
 
     # test out of bounds
     await modclient.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
@@ -198,7 +230,8 @@ async def test_arrpop(modclient: redis.Redis):
 async def test_arrtrim(modclient: redis.Redis):
     await modclient.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
     assert 3 == await modclient.json().arrtrim("arr", Path.root_path(), 1, 3)
-    assert [1, 2, 3] == await modclient.json().get("arr")
+    res = await modclient.json().get("arr")
+    assert_resp_response(modclient, res, [1, 2, 3], [[[1, 2, 3]]])
 
     # <0 test, should be 0 equivalent
     await modclient.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
@@ -284,13 +317,15 @@ async def test_json_delete_with_dollar(modclient: redis.Redis):
     assert await modclient.json().set("doc1", "$", doc1)
     assert await modclient.json().delete("doc1", "$..a") == 2
     r = await modclient.json().get("doc1", "$")
-    assert r == [{"nested": {"b": 3}}]
+    res = [{"nested": {"b": 3}}]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
 
     doc2 = {"a": {"a": 2, "b": 3}, "b": ["a", "b"], "nested": {"b": [True, "a", "b"]}}
     assert await modclient.json().set("doc2", "$", doc2)
     assert await modclient.json().delete("doc2", "$..a") == 1
     res = await modclient.json().get("doc2", "$")
-    assert res == [{"nested": {"b": [True, "a", "b"]}, "b": ["a", "b"]}]
+    res = [{"nested": {"b": [True, "a", "b"]}, "b": ["a", "b"]}]
+    assert_resp_response(modclient, await modclient.json().get("doc2", "$"), res, [res])
 
     doc3 = [
         {
@@ -322,7 +357,7 @@ async def test_json_delete_with_dollar(modclient: redis.Redis):
         ]
     ]
     res = await modclient.json().get("doc3", "$")
-    assert res == doc3val
+    assert_resp_response(modclient, res, doc3val, [doc3val])
 
     # Test async default path
     assert await modclient.json().delete("doc3") == 1
@@ -336,14 +371,14 @@ async def test_json_forget_with_dollar(modclient: redis.Redis):
     doc1 = {"a": 1, "nested": {"a": 2, "b": 3}}
     assert await modclient.json().set("doc1", "$", doc1)
     assert await modclient.json().forget("doc1", "$..a") == 2
-    r = await modclient.json().get("doc1", "$")
-    assert r == [{"nested": {"b": 3}}]
+    res = [{"nested": {"b": 3}}]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
 
     doc2 = {"a": {"a": 2, "b": 3}, "b": ["a", "b"], "nested": {"b": [True, "a", "b"]}}
     assert await modclient.json().set("doc2", "$", doc2)
     assert await modclient.json().forget("doc2", "$..a") == 1
-    res = await modclient.json().get("doc2", "$")
-    assert res == [{"nested": {"b": [True, "a", "b"]}, "b": ["a", "b"]}]
+    res = [{"nested": {"b": [True, "a", "b"]}, "b": ["a", "b"]}]
+    assert_resp_response(modclient, await modclient.json().get("doc2", "$"), res, [res])
 
     doc3 = [
         {
@@ -375,7 +410,7 @@ async def test_json_forget_with_dollar(modclient: redis.Redis):
         ]
     ]
     res = await modclient.json().get("doc3", "$")
-    assert res == doc3val
+    assert_resp_response(modclient, res, doc3val, [doc3val])
 
     # Test async default path
     assert await modclient.json().forget("doc3") == 1
@@ -398,8 +433,14 @@ async def test_json_mget_dollar(modclient: redis.Redis):
         {"a": 4, "b": 5, "nested": {"a": 6}, "c": None, "nested2": {"a": [None]}},
     )
     # Compare also to single JSON.GET
-    assert await modclient.json().get("doc1", "$..a") == [1, 3, None]
-    assert await modclient.json().get("doc2", "$..a") == [4, 6, [None]]
+    res = [1, 3, None]
+    assert_resp_response(
+        modclient, await modclient.json().get("doc1", "$..a"), res, [res]
+    )
+    res = [4, 6, [None]]
+    assert_resp_response(
+        modclient, await modclient.json().get("doc2", "$..a"), res, [res]
+    )
 
     # Test mget with single path
     await modclient.json().mget("doc1", "$..a") == [1, 3, None]
@@ -479,15 +520,14 @@ async def test_strappend_dollar(modclient: redis.Redis):
     # Test multi
     await modclient.json().strappend("doc1", "bar", "$..a") == [6, 8, None]
 
-    await modclient.json().get("doc1", "$") == [
-        {"a": "foobar", "nested1": {"a": "hellobar"}, "nested2": {"a": 31}}
-    ]
+    res = [{"a": "foobar", "nested1": {"a": "hellobar"}, "nested2": {"a": 31}}]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
+
     # Test single
     await modclient.json().strappend("doc1", "baz", "$.nested1.a") == [11]
 
-    await modclient.json().get("doc1", "$") == [
-        {"a": "foobar", "nested1": {"a": "hellobarbaz"}, "nested2": {"a": 31}}
-    ]
+    res = [{"a": "foobar", "nested1": {"a": "hellobarbaz"}, "nested2": {"a": 31}}]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
@@ -495,9 +535,8 @@ async def test_strappend_dollar(modclient: redis.Redis):
 
     # Test multi
     await modclient.json().strappend("doc1", "bar", ".*.a") == 8
-    await modclient.json().get("doc1", "$") == [
-        {"a": "foo", "nested1": {"a": "hellobar"}, "nested2": {"a": 31}}
-    ]
+    res = [{"a": "foobar", "nested1": {"a": "hellobarbazbar"}, "nested2": {"a": 31}}]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
 
     # Test missing path
     with pytest.raises(exceptions.ResponseError):
@@ -539,23 +578,25 @@ async def test_arrappend_dollar(modclient: redis.Redis):
     )
     # Test multi
     await modclient.json().arrappend("doc1", "$..a", "bar", "racuda") == [3, 5, None]
-    assert await modclient.json().get("doc1", "$") == [
+    res = [
         {
             "a": ["foo", "bar", "racuda"],
             "nested1": {"a": ["hello", None, "world", "bar", "racuda"]},
             "nested2": {"a": 31},
         }
     ]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
 
     # Test single
     assert await modclient.json().arrappend("doc1", "$.nested1.a", "baz") == [6]
-    assert await modclient.json().get("doc1", "$") == [
+    res = [
         {
             "a": ["foo", "bar", "racuda"],
             "nested1": {"a": ["hello", None, "world", "bar", "racuda", "baz"]},
             "nested2": {"a": 31},
         }
     ]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
@@ -574,22 +615,24 @@ async def test_arrappend_dollar(modclient: redis.Redis):
     # Test multi (all paths are updated, but return result of last path)
     assert await modclient.json().arrappend("doc1", "..a", "bar", "racuda") == 5
 
-    assert await modclient.json().get("doc1", "$") == [
+    res = [
         {
             "a": ["foo", "bar", "racuda"],
             "nested1": {"a": ["hello", None, "world", "bar", "racuda"]},
             "nested2": {"a": 31},
         }
     ]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
     # Test single
     assert await modclient.json().arrappend("doc1", ".nested1.a", "baz") == 6
-    assert await modclient.json().get("doc1", "$") == [
+    res = [
         {
             "a": ["foo", "bar", "racuda"],
             "nested1": {"a": ["hello", None, "world", "bar", "racuda", "baz"]},
             "nested2": {"a": 31},
         }
     ]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
@@ -611,22 +654,24 @@ async def test_arrinsert_dollar(modclient: redis.Redis):
     res = await modclient.json().arrinsert("doc1", "$..a", "1", "bar", "racuda")
     assert res == [3, 5, None]
 
-    assert await modclient.json().get("doc1", "$") == [
+    res = [
         {
             "a": ["foo", "bar", "racuda"],
             "nested1": {"a": ["hello", "bar", "racuda", None, "world"]},
             "nested2": {"a": 31},
         }
     ]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
     # Test single
     assert await modclient.json().arrinsert("doc1", "$.nested1.a", -2, "baz") == [6]
-    assert await modclient.json().get("doc1", "$") == [
+    res = [
         {
             "a": ["foo", "bar", "racuda"],
             "nested1": {"a": ["hello", "bar", "racuda", "baz", None, "world"]},
             "nested2": {"a": 31},
         }
     ]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
@@ -692,12 +737,11 @@ async def test_arrpop_dollar(modclient: redis.Redis):
         },
     )
 
-    # # # Test multi
+    # Test multi
     assert await modclient.json().arrpop("doc1", "$..a", 1) == ['"foo"', None, None]
 
-    assert await modclient.json().get("doc1", "$") == [
-        {"a": [], "nested1": {"a": ["hello", "world"]}, "nested2": {"a": 31}}
-    ]
+    res = [{"a": [], "nested1": {"a": ["hello", "world"]}, "nested2": {"a": 31}}]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
@@ -715,9 +759,8 @@ async def test_arrpop_dollar(modclient: redis.Redis):
     )
     # Test multi (all paths are updated, but return result of last path)
     await modclient.json().arrpop("doc1", "..a", "1") is None
-    assert await modclient.json().get("doc1", "$") == [
-        {"a": [], "nested1": {"a": ["hello", "world"]}, "nested2": {"a": 31}}
-    ]
+    res = [{"a": [], "nested1": {"a": ["hello", "world"]}, "nested2": {"a": 31}}]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
 
     # # Test missing key
     with pytest.raises(exceptions.ResponseError):
@@ -738,19 +781,16 @@ async def test_arrtrim_dollar(modclient: redis.Redis):
     )
     # Test multi
     assert await modclient.json().arrtrim("doc1", "$..a", "1", -1) == [0, 2, None]
-    assert await modclient.json().get("doc1", "$") == [
-        {"a": [], "nested1": {"a": [None, "world"]}, "nested2": {"a": 31}}
-    ]
+    res = [{"a": [], "nested1": {"a": [None, "world"]}, "nested2": {"a": 31}}]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
 
     assert await modclient.json().arrtrim("doc1", "$..a", "1", "1") == [0, 1, None]
-    assert await modclient.json().get("doc1", "$") == [
-        {"a": [], "nested1": {"a": ["world"]}, "nested2": {"a": 31}}
-    ]
+    res = [{"a": [], "nested1": {"a": ["world"]}, "nested2": {"a": 31}}]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
     # Test single
     assert await modclient.json().arrtrim("doc1", "$.nested1.a", 1, 0) == [0]
-    assert await modclient.json().get("doc1", "$") == [
-        {"a": [], "nested1": {"a": []}, "nested2": {"a": 31}}
-    ]
+    res = [{"a": [], "nested1": {"a": []}, "nested2": {"a": 31}}]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
@@ -772,9 +812,8 @@ async def test_arrtrim_dollar(modclient: redis.Redis):
 
     # Test single
     assert await modclient.json().arrtrim("doc1", ".nested1.a", "1", "1") == 1
-    assert await modclient.json().get("doc1", "$") == [
-        {"a": [], "nested1": {"a": ["world"]}, "nested2": {"a": 31}}
-    ]
+    res = [{"a": [], "nested1": {"a": ["world"]}, "nested2": {"a": 31}}]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
@@ -872,13 +911,20 @@ async def test_type_dollar(modclient: redis.Redis):
     jdata, jtypes = load_types_data("a")
     await modclient.json().set("doc1", "$", jdata)
     # Test multi
-    assert await modclient.json().type("doc1", "$..a") == jtypes
+    assert_resp_response(
+        modclient, await modclient.json().type("doc1", "$..a"), jtypes, [jtypes]
+    )
 
     # Test single
-    assert await modclient.json().type("doc1", "$.nested2.a") == [jtypes[1]]
+    res = await modclient.json().type("doc1", "$.nested2.a")
+    assert_resp_response(
+        modclient, res, [jtypes[1]], [[jtypes[1]]]
+    )
 
     # Test missing key
-    assert await modclient.json().type("non_existing_doc", "..a") is None
+    assert_resp_response(
+        modclient, await modclient.json().type("non_existing_doc", "..a"), None, [None]
+    )
 
 
 @pytest.mark.redismod
@@ -898,9 +944,10 @@ async def test_clear_dollar(modclient: redis.Redis):
     # Test multi
     assert await modclient.json().clear("doc1", "$..a") == 3
 
-    assert await modclient.json().get("doc1", "$") == [
+    res = [
         {"nested1": {"a": {}}, "a": [], "nested2": {"a": "claro"}, "nested3": {"a": {}}}
     ]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
 
     # Test single
     await modclient.json().set(
@@ -914,7 +961,7 @@ async def test_clear_dollar(modclient: redis.Redis):
         },
     )
     assert await modclient.json().clear("doc1", "$.nested1.a") == 1
-    assert await modclient.json().get("doc1", "$") == [
+    res = [
         {
             "nested1": {"a": {}},
             "a": ["foo"],
@@ -922,10 +969,13 @@ async def test_clear_dollar(modclient: redis.Redis):
             "nested3": {"a": {"baz": 50}},
         }
     ]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
 
     # Test missing path (async defaults to root)
     assert await modclient.json().clear("doc1") == 1
-    assert await modclient.json().get("doc1", "$") == [{}]
+    assert_resp_response(
+        modclient, await modclient.json().get("doc1", "$"), [{}], [[{}]]
+    )
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
@@ -946,7 +996,7 @@ async def test_toggle_dollar(modclient: redis.Redis):
     )
     # Test multi
     assert await modclient.json().toggle("doc1", "$..a") == [None, 1, None, 0]
-    assert await modclient.json().get("doc1", "$") == [
+    res = [
         {
             "a": ["foo"],
             "nested1": {"a": True},
@@ -954,6 +1004,7 @@ async def test_toggle_dollar(modclient: redis.Redis):
             "nested3": {"a": False},
         }
     ]
+    assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):

@@ -5,7 +5,7 @@ import pytest
 import redis.asyncio as redis
 from redis.exceptions import ModuleError, RedisError
 from redis.utils import HIREDIS_AVAILABLE
-from tests.conftest import skip_ifmodversion_lt
+from tests.conftest import assert_resp_response, is_resp2_connection, skip_ifmodversion_lt
 
 
 def intlist(obj):
@@ -45,7 +45,6 @@ async def test_tdigest_create(modclient: redis.Redis):
     assert await modclient.tdigest().create("tDigest", 100)
 
 
-# region Test Bloom Filter
 @pytest.mark.redismod
 async def test_bf_add(modclient: redis.Redis):
     assert await modclient.bf().create("bloom", 0.01, 1000)
@@ -70,9 +69,24 @@ async def test_bf_insert(modclient: redis.Redis):
     assert 0 == await modclient.bf().exists("bloom", "noexist")
     assert [1, 0] == intlist(await modclient.bf().mexists("bloom", "foo", "noexist"))
     info = await modclient.bf().info("bloom")
-    assert 2 == info.insertedNum
-    assert 1000 == info.capacity
-    assert 1 == info.filterNum
+    assert_resp_response(
+        modclient,
+        2,
+        info.get("insertedNum"),
+        info.get("Number of items inserted"),
+    )
+    assert_resp_response(
+        modclient,
+        1000,
+        info.get("capacity"),
+        info.get("Capacity"),
+    )
+    assert_resp_response(
+        modclient,
+        1,
+        info.get("filterNum"),
+        info.get("Number of filters"),
+    )
 
 
 @pytest.mark.redismod
@@ -133,11 +147,21 @@ async def test_bf_info(modclient: redis.Redis):
     # Store a filter
     await modclient.bf().create("nonscaling", "0.0001", "1000", noScale=True)
     info = await modclient.bf().info("nonscaling")
-    assert info.expansionRate is None
+    assert_resp_response(
+        modclient,
+        None,
+        info.get("expansionRate"),
+        info.get("Expansion rate"),
+    )
 
     await modclient.bf().create("expanding", "0.0001", "1000", expansion=expansion)
     info = await modclient.bf().info("expanding")
-    assert info.expansionRate == 4
+    assert_resp_response(
+        modclient,
+        4,
+        info.get("expansionRate"),
+        info.get("Expansion rate"),
+    )
 
     try:
         # noScale mean no expansion
@@ -164,7 +188,6 @@ async def test_bf_card(modclient: redis.Redis):
         await modclient.bf().card("setKey")
 
 
-# region Test Cuckoo Filter
 @pytest.mark.redismod
 async def test_cf_add_and_insert(modclient: redis.Redis):
     assert await modclient.cf().create("cuckoo", 1000)
@@ -180,9 +203,15 @@ async def test_cf_add_and_insert(modclient: redis.Redis):
     assert [1] == await modclient.cf().insert("empty1", ["foo"], capacity=1000)
     assert [1] == await modclient.cf().insertnx("empty2", ["bar"], capacity=1000)
     info = await modclient.cf().info("captest")
-    assert 5 == info.insertedNum
-    assert 0 == info.deletedNum
-    assert 1 == info.filterNum
+    assert_resp_response(
+        modclient, 5, info.get("insertedNum"), info.get("Number of items inserted")
+    )
+    assert_resp_response(
+        modclient, 0, info.get("deletedNum"), info.get("Number of items deleted")
+    )
+    assert_resp_response(
+        modclient, 1, info.get("filterNum"), info.get("Number of filters")
+    )
 
 
 @pytest.mark.redismod
@@ -197,7 +226,6 @@ async def test_cf_exists_and_del(modclient: redis.Redis):
     assert 0 == await modclient.cf().count("cuckoo", "filter")
 
 
-# region Test Count-Min Sketch
 @pytest.mark.redismod
 async def test_cms(modclient: redis.Redis):
     assert await modclient.cms().initbydim("dim", 1000, 5)
@@ -208,9 +236,10 @@ async def test_cms(modclient: redis.Redis):
     assert [10, 15] == await modclient.cms().incrby("dim", ["foo", "bar"], [5, 15])
     assert [10, 15] == await modclient.cms().query("dim", "foo", "bar")
     info = await modclient.cms().info("dim")
-    assert 1000 == info.width
-    assert 5 == info.depth
-    assert 25 == info.count
+    assert info["width"]
+    assert 1000 == info["width"]
+    assert 5 == info["depth"]
+    assert 25 == info["count"]
 
 
 @pytest.mark.redismod
@@ -231,10 +260,6 @@ async def test_cms_merge(modclient: redis.Redis):
     assert [16, 15, 21] == await modclient.cms().query("C", "foo", "bar", "baz")
 
 
-# endregion
-
-
-# region Test Top-K
 @pytest.mark.redismod
 async def test_topk(modclient: redis.Redis):
     # test list with empty buckets
@@ -310,10 +335,10 @@ async def test_topk(modclient: redis.Redis):
     res = await modclient.topk().list("topklist", withcount=True)
     assert ["A", 4, "B", 3, "E", 3] == res
     info = await modclient.topk().info("topklist")
-    assert 3 == info.k
-    assert 50 == info.width
-    assert 3 == info.depth
-    assert 0.9 == round(float(info.decay), 1)
+    assert 3 == info["k"]
+    assert 50 == info["width"]
+    assert 3 == info["depth"]
+    assert 0.9 == round(float(info["decay"]), 1)
 
 
 @pytest.mark.redismod
@@ -331,7 +356,6 @@ async def test_topk_incrby(modclient: redis.Redis):
         )
 
 
-# region Test T-Digest
 @pytest.mark.redismod
 @pytest.mark.experimental
 async def test_tdigest_reset(modclient: redis.Redis):
@@ -343,7 +367,10 @@ async def test_tdigest_reset(modclient: redis.Redis):
 
     assert await modclient.tdigest().reset("tDigest")
     # assert we have 0 unmerged nodes
-    assert 0 == (await modclient.tdigest().info("tDigest")).unmerged_nodes
+    info = await modclient.tdigest().info("tDigest")
+    assert_resp_response(
+        modclient, 0, info.get("unmerged_nodes"), info.get("Unmerged nodes")
+    )
 
 
 @pytest.mark.redismod
@@ -358,8 +385,10 @@ async def test_tdigest_merge(modclient: redis.Redis):
     assert await modclient.tdigest().merge("to-tDigest", 1, "from-tDigest")
     # we should now have 110 weight on to-histogram
     info = await modclient.tdigest().info("to-tDigest")
-    total_weight_to = float(info.merged_weight) + float(info.unmerged_weight)
-    assert 20.0 == total_weight_to
+    if is_resp2_connection(modclient):
+        assert 20 == float(info["merged_weight"]) + float(info["unmerged_weight"])
+    else:
+        assert 20 == float(info["Merged weight"]) + float(info["Unmerged weight"])
     # test override
     assert await modclient.tdigest().create("from-override", 10)
     assert await modclient.tdigest().create("from-override-2", 10)
