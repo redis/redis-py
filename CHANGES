@@ -1,4 +1,4 @@
-    * Fix dead weakref in sentinel conn (#2767)
+    * Fix dead weakref in sentinel connection causing ReferenceError (#2767)
     * Fix #2749, remove unnecessary __del__ logic to close connections.
     * Fix #2754, adding a missing argument to SentinelManagedConnection
     * Fix `xadd` command to accept non-negative `maxlen` including 0
