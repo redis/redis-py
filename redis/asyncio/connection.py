@@ -355,10 +355,9 @@ class Connection:
                 auth_args = ["default", auth_args[0]]
             await self.send_command("HELLO", self.protocol, "AUTH", *auth_args)
             response = await self.read_response()
-            if response.get(b"proto") not in [2, "2"] and response.get("proto") not in [
-                2,
-                "2",
-            ]:
+            if response.get(b"proto") != int(self.protocol) and response.get(
+                "proto"
+            ) != int(self.protocol):
                 raise ConnectionError("Invalid RESP version")
         # avoid checking health here -- PING will fail if we try
         # to check the health prior to the AUTH
@@ -514,7 +513,7 @@ class Connection:
         try:
             if (
                 read_timeout is not None
-                and self.protocol == "3"
+                and self.protocol in ["3", 3]
                 and not HIREDIS_AVAILABLE
             ):
                 async with async_timeout(read_timeout):
@@ -526,7 +525,7 @@ class Connection:
                     response = await self._parser.read_response(
                         disable_decoding=disable_decoding
                     )
-            elif self.protocol == "3" and not HIREDIS_AVAILABLE:
+            elif self.protocol in ["3", 3] and not HIREDIS_AVAILABLE:
                 response = await self._parser.read_response(
                     disable_decoding=disable_decoding, push_request=push_request
                 )

@@ -85,7 +85,7 @@ class TestResponseCallbacks:
         assert await r.get("a") == "static"
 
     async def test_case_insensitive_command_names(self, r: redis.Redis):
-        assert r.response_callbacks["del"] == r.response_callbacks["DEL"]
+        assert r.response_callbacks["ping"] == r.response_callbacks["PING"]
 
 
 class TestRedisCommands:
@@ -2718,7 +2718,7 @@ class TestRedisCommands:
         ]
         assert await r.xinfo_groups(stream) == expected
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.2.0")
     async def test_xinfo_consumers(self, r: redis.Redis):
         stream = "stream"
         group = "group"
@@ -2734,8 +2734,8 @@ class TestRedisCommands:
         info = await r.xinfo_consumers(stream, group)
         assert len(info) == 2
         expected = [
-            {"name": consumer1.encode(), "pending": 1},
-            {"name": consumer2.encode(), "pending": 2},
+            {"name": consumer1.encode(), "pending": 1, "inactive": 2},
+            {"name": consumer2.encode(), "pending": 2, "inactive": 2},
         ]
 
         # we can't determine the idle time, so just make sure it's an int
