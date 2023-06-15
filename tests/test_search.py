@@ -728,33 +728,61 @@ def test_spell_check(client):
     client.hset("doc2", mapping={"f1": "very important", "f2": "lorem ipsum"})
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
 
-    # test spellcheck
-    res = client.ft().spellcheck("impornant")
-    assert "important" == res["impornant"][0]["suggestion"]
+    if is_resp2_connection(client):
+    
+        # test spellcheck
+        res = client.ft().spellcheck("impornant")
+        assert "important" == res["impornant"][0]["suggestion"]
 
-    res = client.ft().spellcheck("contnt")
-    assert "content" == res["contnt"][0]["suggestion"]
+        res = client.ft().spellcheck("contnt")
+        assert "content" == res["contnt"][0]["suggestion"]
 
-    # test spellcheck with Levenshtein distance
-    res = client.ft().spellcheck("vlis")
-    assert res == {}
-    res = client.ft().spellcheck("vlis", distance=2)
-    assert "valid" == res["vlis"][0]["suggestion"]
+        # test spellcheck with Levenshtein distance
+        res = client.ft().spellcheck("vlis")
+        assert res == {}
+        res = client.ft().spellcheck("vlis", distance=2)
+        assert "valid" == res["vlis"][0]["suggestion"]
 
-    # test spellcheck include
-    client.ft().dict_add("dict", "lore", "lorem", "lorm")
-    res = client.ft().spellcheck("lorm", include="dict")
-    assert len(res["lorm"]) == 3
-    assert (
-        res["lorm"][0]["suggestion"],
-        res["lorm"][1]["suggestion"],
-        res["lorm"][2]["suggestion"],
-    ) == ("lorem", "lore", "lorm")
-    assert (res["lorm"][0]["score"], res["lorm"][1]["score"]) == ("0.5", "0")
+        # test spellcheck include
+        client.ft().dict_add("dict", "lore", "lorem", "lorm")
+        res = client.ft().spellcheck("lorm", include="dict")
+        assert len(res["lorm"]) == 3
+        assert (
+            res["lorm"][0]["suggestion"],
+            res["lorm"][1]["suggestion"],
+            res["lorm"][2]["suggestion"],
+        ) == ("lorem", "lore", "lorm")
+        assert (res["lorm"][0]["score"], res["lorm"][1]["score"]) == ("0.5", "0")
 
-    # test spellcheck exclude
-    res = client.ft().spellcheck("lorm", exclude="dict")
-    assert res == {}
+        # test spellcheck exclude
+        res = client.ft().spellcheck("lorm", exclude="dict")
+        assert res == {}
+    else:
+        # test spellcheck
+        res = client.ft().spellcheck("impornant")
+        assert "important" in res["impornant"][0].keys()
+
+        res = client.ft().spellcheck("contnt")
+        assert "content" in res["contnt"][0].keys()
+
+        # test spellcheck with Levenshtein distance
+        res = client.ft().spellcheck("vlis")
+        assert res == {'vlis': []}
+        res = client.ft().spellcheck("vlis", distance=2)
+        assert "valid" in res["vlis"][0].keys()
+
+        # test spellcheck include
+        client.ft().dict_add("dict", "lore", "lorem", "lorm")
+        res = client.ft().spellcheck("lorm", include="dict")
+        assert len(res["lorm"]) == 3
+        assert "lorem" in res["lorm"][0].keys()
+        assert "lore" in res["lorm"][1].keys()
+        assert "lorm" in res["lorm"][2].keys()
+        assert (res["lorm"][0]["lorem"], res["lorm"][1]["lore"]) == (0.5, 0)
+
+        # test spellcheck exclude
+        res = client.ft().spellcheck("lorm", exclude="dict")
+        assert res == {}
 
 
 @pytest.mark.redismod
@@ -932,102 +960,199 @@ def test_aggregations_groupby(client):
         },
     )
 
-    req = aggregations.AggregateRequest("redis").group_by("@parent", reducers.count())
+    if is_resp2_connection(client):
+        req = aggregations.AggregateRequest("redis").group_by("@parent", reducers.count())
 
-    res = client.ft().aggregate(req).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "3"
+        res = client.ft().aggregate(req).rows[0]
+        assert res[1] == "redis"
+        assert res[3] == "3"
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.count_distinct("@title")
-    )
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.count_distinct("@title")
+        )
 
-    res = client.ft().aggregate(req).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "3"
+        res = client.ft().aggregate(req).rows[0]
+        assert res[1] == "redis"
+        assert res[3] == "3"
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.count_distinctish("@title")
-    )
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.count_distinctish("@title")
+        )
 
-    res = client.ft().aggregate(req).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "3"
+        res = client.ft().aggregate(req).rows[0]
+        assert res[1] == "redis"
+        assert res[3] == "3"
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.sum("@random_num")
-    )
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.sum("@random_num")
+        )
 
-    res = client.ft().aggregate(req).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "21"  # 10+8+3
+        res = client.ft().aggregate(req).rows[0]
+        assert res[1] == "redis"
+        assert res[3] == "21"  # 10+8+3
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.min("@random_num")
-    )
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.min("@random_num")
+        )
 
-    res = client.ft().aggregate(req).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "3"  # min(10,8,3)
+        res = client.ft().aggregate(req).rows[0]
+        assert res[1] == "redis"
+        assert res[3] == "3"  # min(10,8,3)
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.max("@random_num")
-    )
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.max("@random_num")
+        )
 
-    res = client.ft().aggregate(req).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "10"  # max(10,8,3)
+        res = client.ft().aggregate(req).rows[0]
+        assert res[1] == "redis"
+        assert res[3] == "10"  # max(10,8,3)
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.avg("@random_num")
-    )
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.avg("@random_num")
+        )
 
-    res = client.ft().aggregate(req).rows[0]
-    assert res[1] == "redis"
-    index = res.index("__generated_aliasavgrandom_num")
-    assert res[index + 1] == "7"  # (10+3+8)/3
+        res = client.ft().aggregate(req).rows[0]
+        assert res[1] == "redis"
+        index = res.index("__generated_aliasavgrandom_num")
+        assert res[index + 1] == "7"  # (10+3+8)/3
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.stddev("random_num")
-    )
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.stddev("random_num")
+        )
 
-    res = client.ft().aggregate(req).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "3.60555127546"
+        res = client.ft().aggregate(req).rows[0]
+        assert res[1] == "redis"
+        assert res[3] == "3.60555127546"
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.quantile("@random_num", 0.5)
-    )
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.quantile("@random_num", 0.5)
+        )
 
-    res = client.ft().aggregate(req).rows[0]
-    assert res[1] == "redis"
-    assert res[3] == "8"  # median of 3,8,10
+        res = client.ft().aggregate(req).rows[0]
+        assert res[1] == "redis"
+        assert res[3] == "8"  # median of 3,8,10
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.tolist("@title")
-    )
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.tolist("@title")
+        )
 
-    res = client.ft().aggregate(req).rows[0]
-    assert res[1] == "redis"
-    assert set(res[3]) == {"RediSearch", "RedisAI", "RedisJson"}
+        res = client.ft().aggregate(req).rows[0]
+        assert res[1] == "redis"
+        assert set(res[3]) == {"RediSearch", "RedisAI", "RedisJson"}
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.first_value("@title").alias("first")
-    )
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.first_value("@title").alias("first")
+        )
 
-    res = client.ft().aggregate(req).rows[0]
-    assert res == ["parent", "redis", "first", "RediSearch"]
+        res = client.ft().aggregate(req).rows[0]
+        assert res == ["parent", "redis", "first", "RediSearch"]
 
-    req = aggregations.AggregateRequest("redis").group_by(
-        "@parent", reducers.random_sample("@title", 2).alias("random")
-    )
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.random_sample("@title", 2).alias("random")
+        )
 
-    res = client.ft().aggregate(req).rows[0]
-    assert res[1] == "redis"
-    assert res[2] == "random"
-    assert len(res[3]) == 2
-    assert res[3][0] in ["RediSearch", "RedisAI", "RedisJson"]
+        res = client.ft().aggregate(req).rows[0]
+        assert res[1] == "redis"
+        assert res[2] == "random"
+        assert len(res[3]) == 2
+        assert res[3][0] in ["RediSearch", "RedisAI", "RedisJson"]
+    else:
+        req = aggregations.AggregateRequest("redis").group_by("@parent", reducers.count())
 
+        res = client.ft().aggregate(req)["results"][0]
+        assert res["fields"]["parent"] == "redis"
+        assert res["fields"]["__generated_aliascount"] == "3"
+
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.count_distinct("@title")
+        )
+
+        res = client.ft().aggregate(req)["results"][0]
+        assert res["fields"]["parent"] == "redis"
+        assert res["fields"]["__generated_aliascount_distincttitle"] == "3"
+
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.count_distinctish("@title")
+        )
+
+        res = client.ft().aggregate(req)["results"][0]
+        assert res["fields"]["parent"] == "redis"
+        assert res["fields"]["__generated_aliascount_distinctishtitle"] == "3"
+
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.sum("@random_num")
+        )
+
+        res = client.ft().aggregate(req)["results"][0]
+        assert res["fields"]["parent"] == "redis"
+        assert res["fields"]["__generated_aliassumrandom_num"] == "21"  # 10+8+3
+
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.min("@random_num")
+        )
+
+        res = client.ft().aggregate(req)["results"][0]
+        assert res["fields"]["parent"] == "redis"
+        assert res["fields"]["__generated_aliasminrandom_num"] == "3"  # min(10,8,3)
+
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.max("@random_num")
+        )
+
+        res = client.ft().aggregate(req)["results"][0]
+        assert res["fields"]["parent"] == "redis"
+        assert res["fields"]["__generated_aliasmaxrandom_num"] == "10"  # max(10,8,3)
+
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.avg("@random_num")
+        )
+
+        res = client.ft().aggregate(req)["results"][0]
+        assert res["fields"]["parent"] == "redis"
+        assert res["fields"]["__generated_aliasavgrandom_num"] == "7"  # (10+3+8)/3
+
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.stddev("random_num")
+        )
+
+        res = client.ft().aggregate(req)["results"][0]
+        assert res["fields"]["parent"] == "redis"
+        assert res["fields"]["__generated_aliasstddevrandom_num"] == "3.60555127546"
+
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.quantile("@random_num", 0.5)
+        )
+
+        res = client.ft().aggregate(req)["results"][0]
+        assert res["fields"]["parent"] == "redis"
+        assert res["fields"]["__generated_aliasquantilerandom_num,0.5"] == "8"  # median of 3,8,10
+
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.tolist("@title")
+        )
+
+        res = client.ft().aggregate(req)["results"][0]
+        assert res["fields"]["parent"] == "redis"
+        assert set(
+            res["fields"]["__generated_aliastolisttitle"]
+        ) == {"RediSearch", "RedisAI", "RedisJson"}
+
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.first_value("@title").alias("first")
+        )
+
+        res = client.ft().aggregate(req)["results"][0]
+        assert res["fields"] == {"parent": "redis", "first": "RediSearch"}
+
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.random_sample("@title", 2).alias("random")
+        )
+
+        res = client.ft().aggregate(req)["results"][0]
+        assert res["fields"]["parent"] == "redis"
+        assert "random" in res["fields"].keys()
+        assert len(res["fields"]["random"]) == 2
+        assert res["fields"]["random"][0] in ["RediSearch", "RedisAI", "RedisJson"]
 
 @pytest.mark.redismod
 def test_aggregations_sort_by_and_limit(client):
@@ -1036,30 +1161,56 @@ def test_aggregations_sort_by_and_limit(client):
     client.ft().client.hset("doc1", mapping={"t1": "a", "t2": "b"})
     client.ft().client.hset("doc2", mapping={"t1": "b", "t2": "a"})
 
-    # test sort_by using SortDirection
-    req = aggregations.AggregateRequest("*").sort_by(
-        aggregations.Asc("@t2"), aggregations.Desc("@t1")
-    )
-    res = client.ft().aggregate(req)
-    assert res.rows[0] == ["t2", "a", "t1", "b"]
-    assert res.rows[1] == ["t2", "b", "t1", "a"]
+    if is_resp2_connection(client):
+        # test sort_by using SortDirection
+        req = aggregations.AggregateRequest("*").sort_by(
+            aggregations.Asc("@t2"), aggregations.Desc("@t1")
+        )
+        res = client.ft().aggregate(req)
+        assert res.rows[0] == ["t2", "a", "t1", "b"]
+        assert res.rows[1] == ["t2", "b", "t1", "a"]
 
-    # test sort_by without SortDirection
-    req = aggregations.AggregateRequest("*").sort_by("@t1")
-    res = client.ft().aggregate(req)
-    assert res.rows[0] == ["t1", "a"]
-    assert res.rows[1] == ["t1", "b"]
+        # test sort_by without SortDirection
+        req = aggregations.AggregateRequest("*").sort_by("@t1")
+        res = client.ft().aggregate(req)
+        assert res.rows[0] == ["t1", "a"]
+        assert res.rows[1] == ["t1", "b"]
 
-    # test sort_by with max
-    req = aggregations.AggregateRequest("*").sort_by("@t1", max=1)
-    res = client.ft().aggregate(req)
-    assert len(res.rows) == 1
+        # test sort_by with max
+        req = aggregations.AggregateRequest("*").sort_by("@t1", max=1)
+        res = client.ft().aggregate(req)
+        assert len(res.rows) == 1
 
-    # test limit
-    req = aggregations.AggregateRequest("*").sort_by("@t1").limit(1, 1)
-    res = client.ft().aggregate(req)
-    assert len(res.rows) == 1
-    assert res.rows[0] == ["t1", "b"]
+        # test limit
+        req = aggregations.AggregateRequest("*").sort_by("@t1").limit(1, 1)
+        res = client.ft().aggregate(req)
+        assert len(res.rows) == 1
+        assert res.rows[0] == ["t1", "b"]
+    else:
+        # test sort_by using SortDirection
+        req = aggregations.AggregateRequest("*").sort_by(
+            aggregations.Asc("@t2"), aggregations.Desc("@t1")
+        )
+        res = client.ft().aggregate(req)["results"]
+        assert res[0]["fields"] == {"t2": "a", "t1": "b"}
+        assert res[1]["fields"] == {"t2": "b", "t1": "a"}
+
+        # test sort_by without SortDirection
+        req = aggregations.AggregateRequest("*").sort_by("@t1")
+        res = client.ft().aggregate(req)["results"]
+        assert res[0]["fields"] == {"t1": "a"}
+        assert res[1]["fields"] == {"t1": "b"}
+
+        # test sort_by with max
+        req = aggregations.AggregateRequest("*").sort_by("@t1", max=1)
+        res = client.ft().aggregate(req)
+        assert len(res["results"]) == 1
+
+        # test limit
+        req = aggregations.AggregateRequest("*").sort_by("@t1").limit(1, 1)
+        res = client.ft().aggregate(req)
+        assert len(res["results"]) == 1
+        assert res["results"][0]["fields"] == {"t1": "b"}
 
 
 @pytest.mark.redismod
@@ -1068,20 +1219,36 @@ def test_aggregations_load(client):
 
     client.ft().client.hset("doc1", mapping={"t1": "hello", "t2": "world"})
 
-    # load t1
-    req = aggregations.AggregateRequest("*").load("t1")
-    res = client.ft().aggregate(req)
-    assert res.rows[0] == ["t1", "hello"]
+    if is_resp2_connection(client):
+        # load t1
+        req = aggregations.AggregateRequest("*").load("t1")
+        res = client.ft().aggregate(req)
+        assert res.rows[0] == ["t1", "hello"]
 
-    # load t2
-    req = aggregations.AggregateRequest("*").load("t2")
-    res = client.ft().aggregate(req)
-    assert res.rows[0] == ["t2", "world"]
+        # load t2
+        req = aggregations.AggregateRequest("*").load("t2")
+        res = client.ft().aggregate(req)
+        assert res.rows[0] == ["t2", "world"]
 
-    # load all
-    req = aggregations.AggregateRequest("*").load()
-    res = client.ft().aggregate(req)
-    assert res.rows[0] == ["t1", "hello", "t2", "world"]
+        # load all
+        req = aggregations.AggregateRequest("*").load()
+        res = client.ft().aggregate(req)
+        assert res.rows[0] == ["t1", "hello", "t2", "world"]
+    else:
+        # load t1
+        req = aggregations.AggregateRequest("*").load("t1")
+        res = client.ft().aggregate(req)
+        assert res["results"][0]["fields"] == {"t1": "hello"}
+
+        # load t2
+        req = aggregations.AggregateRequest("*").load("t2")
+        res = client.ft().aggregate(req)
+        assert res["results"][0]["fields"] == {"t2": "world"}
+
+        # load all
+        req = aggregations.AggregateRequest("*").load()
+        res = client.ft().aggregate(req)
+        assert res["results"][0]["fields"] == {"t1": "hello", "t2": "world"}
 
 
 @pytest.mark.redismod
@@ -1106,8 +1273,15 @@ def test_aggregations_apply(client):
         CreatedDateTimeUTC="@CreatedDateTimeUTC * 10"
     )
     res = client.ft().aggregate(req)
-    res_set = set([res.rows[0][1], res.rows[1][1]])
-    assert res_set == set(["6373878785249699840", "6373878758592700416"])
+    if is_resp2_connection(client):
+        res_set = set([res.rows[0][1], res.rows[1][1]])
+        assert res_set == set(["6373878785249699840", "6373878758592700416"])
+    else:
+        res_set = set(
+            [res["results"][0]["fields"]["CreatedDateTimeUTC"],
+             res["results"][1]["fields"]["CreatedDateTimeUTC"]],
+        )
+        assert res_set == set(["6373878785249699840", "6373878758592700416"])
 
 
 @pytest.mark.redismod
@@ -1126,19 +1300,34 @@ def test_aggregations_filter(client):
             .dialect(dialect)
         )
         res = client.ft().aggregate(req)
-        assert len(res.rows) == 1
-        assert res.rows[0] == ["name", "foo", "age", "19"]
+        if is_resp2_connection(client):
+            assert len(res.rows) == 1
+            assert res.rows[0] == ["name", "foo", "age", "19"]
 
-        req = (
-            aggregations.AggregateRequest("*")
-            .filter("@age > 15")
-            .sort_by("@age")
-            .dialect(dialect)
-        )
-        res = client.ft().aggregate(req)
-        assert len(res.rows) == 2
-        assert res.rows[0] == ["age", "19"]
-        assert res.rows[1] == ["age", "25"]
+            req = (
+                aggregations.AggregateRequest("*")
+                .filter("@age > 15")
+                .sort_by("@age")
+                .dialect(dialect)
+            )
+            res = client.ft().aggregate(req)
+            assert len(res.rows) == 2
+            assert res.rows[0] == ["age", "19"]
+            assert res.rows[1] == ["age", "25"]
+        else:
+            assert len(res["results"]) == 1
+            assert res["results"][0]["fields"] == {"name": "foo", "age": "19"}
+
+            req = (
+                aggregations.AggregateRequest("*")
+                .filter("@age > 15")
+                .sort_by("@age")
+                .dialect(dialect)
+            )
+            res = client.ft().aggregate(req)
+            assert len(res["results"]) == 2
+            assert res["results"][0]["fields"] == {"age": "19"}
+            assert res["results"][1]["fields"] == {"age": "25"}
 
 
 @pytest.mark.redismod
@@ -1303,8 +1492,7 @@ def test_create_client_definition_json(client):
         assert res.total == 1
     else:
         assert res["results"][0]["id"] == "king:1"
-        # assert res["results"][0]["payload"] is None
-        # assert res["results"][0]["json"] == '{"name":"henry"}'
+        assert res["results"][0]["fields"]["$"] == '{"name":"henry"}'
         assert res["total_results"] == 1
 
 
@@ -1685,8 +1873,12 @@ def test_vector_field(modclient):
     q = Query(query).return_field("__v_score").sort_by("__v_score", True).dialect(2)
     res = modclient.ft().search(q, query_params={"vec": "aaaaaaaa"})
 
-    assert "a" == res.docs[0].id
-    assert "0" == res.docs[0].__getattribute__("__v_score")
+    if is_resp2_connection(modclient):
+        assert "a" == res.docs[0].id
+        assert "0" == res.docs[0].__getattribute__("__v_score")
+    else:
+        assert "a" == res["results"][0]["id"]
+        assert "0" == res["results"][0]["fields"]["__v_score"]
 
 
 @pytest.mark.redismod
@@ -1716,9 +1908,14 @@ def test_text_params(modclient):
     params_dict = {"name1": "Alice", "name2": "Bob"}
     q = Query("@name:($name1 | $name2 )").dialect(2)
     res = modclient.ft().search(q, query_params=params_dict)
-    assert 2 == res.total
-    assert "doc1" == res.docs[0].id
-    assert "doc2" == res.docs[1].id
+    if is_resp2_connection(modclient):
+        assert 2 == res.total
+        assert "doc1" == res.docs[0].id
+        assert "doc2" == res.docs[1].id
+    else:
+        assert 2 == res["total_results"]
+        assert "doc1" == res["results"][0]["id"]
+        assert "doc2" == res["results"][1]["id"]
 
 
 @pytest.mark.redismod
@@ -1735,9 +1932,14 @@ def test_numeric_params(modclient):
     q = Query("@numval:[$min $max]").dialect(2)
     res = modclient.ft().search(q, query_params=params_dict)
 
-    assert 2 == res.total
-    assert "doc1" == res.docs[0].id
-    assert "doc2" == res.docs[1].id
+    if is_resp2_connection(modclient):
+        assert 2 == res.total
+        assert "doc1" == res.docs[0].id
+        assert "doc2" == res.docs[1].id
+    else:
+        assert 2 == res["total_results"]
+        assert "doc1" == res["results"][0]["id"]
+        assert "doc2" == res["results"][1]["id"]
 
 
 @pytest.mark.redismod
@@ -1753,10 +1955,16 @@ def test_geo_params(modclient):
     params_dict = {"lat": "34.95126", "lon": "29.69465", "radius": 1000, "units": "km"}
     q = Query("@g:[$lon $lat $radius $units]").dialect(2)
     res = modclient.ft().search(q, query_params=params_dict)
-    assert 3 == res.total
-    assert "doc1" == res.docs[0].id
-    assert "doc2" == res.docs[1].id
-    assert "doc3" == res.docs[2].id
+    if is_resp2_connection(modclient):
+        assert 3 == res.total
+        assert "doc1" == res.docs[0].id
+        assert "doc2" == res.docs[1].id
+        assert "doc3" == res.docs[2].id
+    else:
+        assert 3 == res["total_results"]
+        assert "doc1" == res["results"][0]["id"]
+        assert "doc2" == res["results"][1]["id"]
+        assert "doc3" == res["results"][2]["id"]
 
 
 @pytest.mark.redismod
@@ -1769,12 +1977,22 @@ def test_search_commands_in_pipeline(client):
     q = Query("foo bar").with_payloads()
     p.search(q)
     res = p.execute()
-    assert res[:3] == ["OK", True, True]
-    assert 2 == res[3][0]
-    assert "doc1" == res[3][1]
-    assert "doc2" == res[3][4]
-    assert res[3][5] is None
-    assert res[3][3] == res[3][6] == ["txt", "foo bar"]
+    if is_resp2_connection(client):
+        assert res[:3] == ["OK", True, True]
+        assert 2 == res[3][0]
+        assert "doc1" == res[3][1]
+        assert "doc2" == res[3][4]
+        assert res[3][5] is None
+        assert res[3][3] == res[3][6] == ["txt", "foo bar"]
+    else:
+        assert res[:3] == ["OK", True, True]
+        assert 2 == res[3]["total_results"]
+        assert "doc1" == res[3]["results"][0]["id"]
+        assert "doc2" == res[3]["results"][1]["id"]
+        assert res[3]["results"][0]["payload"] is None
+        assert res[3]["results"][0]["fields"] == res[3]["results"][1]["fields"] == {
+            "txt": "foo bar"
+        }
 
 
 @pytest.mark.redismod
@@ -1829,12 +2047,20 @@ def test_expire_while_search(modclient: redis.Redis):
     modclient.hset("hset:1", "txt", "a")
     modclient.hset("hset:2", "txt", "b")
     modclient.hset("hset:3", "txt", "c")
-    assert 3 == modclient.ft().search(Query("*")).total
-    modclient.pexpire("hset:2", 300)
-    for _ in range(500):
-        modclient.ft().search(Query("*")).docs[1]
-    time.sleep(1)
-    assert 2 == modclient.ft().search(Query("*")).total
+    if is_resp2_connection(modclient):
+        assert 3 == modclient.ft().search(Query("*")).total
+        modclient.pexpire("hset:2", 300)
+        for _ in range(500):
+            modclient.ft().search(Query("*")).docs[1]
+        time.sleep(1)
+        assert 2 == modclient.ft().search(Query("*")).total
+    else:
+        assert 3 == modclient.ft().search(Query("*"))["total_results"]
+        modclient.pexpire("hset:2", 300)
+        for _ in range(500):
+            modclient.ft().search(Query("*"))["results"][1]
+        time.sleep(1)
+        assert 2 == modclient.ft().search(Query("*"))["total_results"]
 
 
 @pytest.mark.redismod
@@ -1843,23 +2069,40 @@ def test_withsuffixtrie(modclient: redis.Redis):
     # create index
     assert modclient.ft().create_index((TextField("txt"),))
     waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
-    info = modclient.ft().info()
-    assert "WITHSUFFIXTRIE" not in info["attributes"][0]
-    assert modclient.ft().dropindex("idx")
+    if is_resp2_connection(modclient):
+        info = modclient.ft().info()
+        assert "WITHSUFFIXTRIE" not in info["attributes"][0]
+        assert modclient.ft().dropindex("idx")
 
-    # create withsuffixtrie index (text fiels)
-    assert modclient.ft().create_index((TextField("t", withsuffixtrie=True)))
-    waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
-    info = modclient.ft().info()
-    assert "WITHSUFFIXTRIE" in info["attributes"][0]
-    assert modclient.ft().dropindex("idx")
+        # create withsuffixtrie index (text fiels)
+        assert modclient.ft().create_index((TextField("t", withsuffixtrie=True)))
+        waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
+        info = modclient.ft().info()
+        assert "WITHSUFFIXTRIE" in info["attributes"][0]
+        assert modclient.ft().dropindex("idx")
 
-    # create withsuffixtrie index (tag field)
-    assert modclient.ft().create_index((TagField("t", withsuffixtrie=True)))
-    waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
-    info = modclient.ft().info()
-    assert "WITHSUFFIXTRIE" in info["attributes"][0]
+        # create withsuffixtrie index (tag field)
+        assert modclient.ft().create_index((TagField("t", withsuffixtrie=True)))
+        waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
+        info = modclient.ft().info()
+        assert "WITHSUFFIXTRIE" in info["attributes"][0]
+    else:
+        info = modclient.ft().info()
+        assert "WITHSUFFIXTRIE" not in info["attributes"][0]["flags"]
+        assert modclient.ft().dropindex("idx")
 
+        # create withsuffixtrie index (text fiels)
+        assert modclient.ft().create_index((TextField("t", withsuffixtrie=True)))
+        waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
+        info = modclient.ft().info()
+        assert "WITHSUFFIXTRIE" in info["attributes"][0]["flags"]
+        assert modclient.ft().dropindex("idx")
+
+        # create withsuffixtrie index (tag field)
+        assert modclient.ft().create_index((TagField("t", withsuffixtrie=True)))
+        waitForIndex(modclient, getattr(modclient.ft(), "index_name", "idx"))
+        info = modclient.ft().info()
+        assert "WITHSUFFIXTRIE" in info["attributes"][0]["flags"]
 
 @pytest.mark.redismod
 def test_query_timeout(modclient: redis.Redis):
