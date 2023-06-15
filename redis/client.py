@@ -794,7 +794,6 @@ class AbstractRedis:
         "CONFIG SET": bool_ok,
         **string_keys_to_dict("XREVRANGE XRANGE", parse_stream_list),
         "XCLAIM": parse_xclaim,
-
     }
 
     RESP2_RESPONSE_CALLBACKS = {
@@ -813,7 +812,6 @@ class AbstractRedis:
         "HGETALL": lambda r: r and pairs_to_dict(r) or {},
         "MEMORY STATS": parse_memory_stats,
         "MODULE LIST": lambda r: [pairs_to_dict(m) for m in r],
-
         # **string_keys_to_dict(
         #     "COPY "
         #     "HEXISTS HMSET MOVE MSETNX PERSIST "
