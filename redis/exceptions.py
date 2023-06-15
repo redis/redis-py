@@ -57,7 +57,7 @@ class OutOfMemoryError(ResponseError):
 
     For more information see `Memory optimization in Redis <https://redis.io/docs/management/optimization/memory-optimization/#memory-allocation>`_. # noqa  
     """
-    
+
     pass
 
 
