@@ -68,7 +68,7 @@ class TestResponseCallbacks:
         assert r["a"] == "static"
 
     def test_case_insensitive_command_names(self, r):
-        assert r.response_callbacks["del"] == r.response_callbacks["DEL"]
+        assert r.response_callbacks["ping"] == r.response_callbacks["PING"]
 
 
 class TestRedisCommands:
@@ -152,9 +152,8 @@ class TestRedisCommands:
 
         r.acl_setuser(username, keys=["*"], commands=["+set"])
         assert r.acl_dryrun(username, "set", "key", "value") == b"OK"
-        assert r.acl_dryrun(username, "get", "key").startswith(
-            b"This user has no permissions to run the"
-        )
+        no_permissions_message = b"user has no permissions to run the"
+        assert no_permissions_message in r.acl_dryrun(username, "get", "key")
 
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
@@ -232,12 +231,12 @@ class TestRedisCommands:
             enabled=True,
             reset=True,
             passwords=["+pass1", "+pass2"],
-            categories=["+set", "+@hash", "-geo"],
+            categories=["+set", "+@hash", "-@geo"],
             commands=["+get", "+mget", "-hset"],
             keys=["cache:*", "objects:*"],
         )
         acl = r.acl_getuser(username)
-        assert set(acl["categories"]) == {"-@all", "+@set", "+@hash"}
+        assert set(acl["categories"]) == {"-@all", "+@set", "+@hash", "-@geo"}
         assert set(acl["commands"]) == {"+get", "+mget", "-hset"}
         assert acl["enabled"] is True
         assert "on" in acl["flags"]
@@ -315,7 +314,7 @@ class TestRedisCommands:
             selectors=[("+set", "%W~app*")],
         )
         acl = r.acl_getuser(username)
-        assert set(acl["categories"]) == {"-@all", "+@set", "+@hash"}
+        assert set(acl["categories"]) == {"-@all", "+@set", "+@hash", "-@geo"}
         assert set(acl["commands"]) == {"+get", "+mget", "-hset"}
         assert acl["enabled"] is True
         assert "on" in acl["flags"]
@@ -325,7 +324,7 @@ class TestRedisCommands:
         assert_resp_response(
             r,
             acl["selectors"],
-            ["commands", "-@all +set", "keys", "%W~app*", "channels", ""],
+            [["commands", "-@all +set", "keys", "%W~app*", "channels", ""]],
             [{"commands": "-@all +set", "keys": "%W~app*", "channels": ""}],
         )
 
@@ -4214,7 +4213,7 @@ class TestRedisCommands:
         ]
         assert r.xinfo_groups(stream) == expected
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.2.0")
     def test_xinfo_consumers(self, r):
         stream = "stream"
         group = "group"
@@ -4230,8 +4229,8 @@ class TestRedisCommands:
         info = r.xinfo_consumers(stream, group)
         assert len(info) == 2
         expected = [
-            {"name": consumer1.encode(), "pending": 1},
-            {"name": consumer2.encode(), "pending": 2},
+            {"name": consumer1.encode(), "pending": 1, "inactive": 2},
+            {"name": consumer2.encode(), "pending": 2, "inactive": 2},
         ]
 
         # we can't determine the idle time, so just make sure it's an int

@@ -355,10 +355,9 @@ class Connection:
                 auth_args = ["default", auth_args[0]]
             await self.send_command("HELLO", self.protocol, "AUTH", *auth_args)
             response = await self.read_response()
-            if response.get(b"proto") not in [2, "2"] and response.get("proto") not in [
-                2,
-                "2",
-            ]:
+            if response.get(b"proto") != int(self.protocol) and response.get(
+                "proto"
+            ) != int(self.protocol):
                 raise ConnectionError("Invalid RESP version")
         # avoid checking health here -- PING will fail if we try
         # to check the health prior to the AUTH
@@ -379,7 +378,7 @@ class Connection:
                 raise AuthenticationError("Invalid Username or Password")
 
         # if resp version is specified, switch to it
-        elif self.protocol != 2:
+        elif self.protocol not in [2, "2"]:
             if isinstance(self._parser, _AsyncRESP2Parser):
                 self.set_parser(_AsyncRESP3Parser)
                 # update cluster exception classes
