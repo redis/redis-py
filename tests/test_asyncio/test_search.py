@@ -149,7 +149,9 @@ async def test_client(modclient: redis.Redis):
 
         # test verbatim vs no verbatim
         total = (await modclient.ft().search(Query("kings").no_content())).total
-        vtotal = (await modclient.ft().search(Query("kings").no_content().verbatim())).total
+        vtotal = (
+            await modclient.ft().search(Query("kings").no_content().verbatim())
+        ).total
         assert total > vtotal
 
         # test in fields
@@ -157,7 +159,9 @@ async def test_client(modclient: redis.Redis):
             await modclient.ft().search(Query("henry").no_content().limit_fields("txt"))
         ).total
         play_total = (
-            await modclient.ft().search(Query("henry").no_content().limit_fields("play"))
+            await modclient.ft().search(
+                Query("henry").no_content().limit_fields("play")
+            )
         ).total
         both_total = (
             await (
@@ -189,11 +193,16 @@ async def test_client(modclient: redis.Redis):
         # test slop and in order
         assert 193 == (await modclient.ft().search(Query("henry king"))).total
         assert (
-            3 == (await modclient.ft().search(Query("henry king").slop(0).in_order())).total
+            3
+            == (
+                await modclient.ft().search(Query("henry king").slop(0).in_order())
+            ).total
         )
         assert (
             52
-            == (await modclient.ft().search(Query("king henry").slop(0).in_order())).total
+            == (
+                await modclient.ft().search(Query("king henry").slop(0).in_order())
+            ).total
         )
         assert 53 == (await modclient.ft().search(Query("henry king").slop(0))).total
         assert 167 == (await modclient.ft().search(Query("henry king").slop(100))).total
@@ -230,24 +239,28 @@ async def test_client(modclient: redis.Redis):
             assert "fields" not in doc.keys()
 
         # test verbatim vs no verbatim
-        total = (await modclient.ft().search(
-            Query("kings").no_content()
-        ))["total_results"]
+        total = (await modclient.ft().search(Query("kings").no_content()))[
+            "total_results"
+        ]
         vtotal = (await modclient.ft().search(Query("kings").no_content().verbatim()))[
             "total_results"
         ]
         assert total > vtotal
 
         # test in fields
-        txt_total = (await modclient.ft().search(
-            Query("henry").no_content().limit_fields("txt")
-        ))["total_results"]
-        play_total = (await modclient.ft().search(
-            Query("henry").no_content().limit_fields("play")
-        ))["total_results"]
-        both_total = (await modclient.ft().search(
-            Query("henry").no_content().limit_fields("play", "txt")
-        ))["total_results"]
+        txt_total = (
+            await modclient.ft().search(Query("henry").no_content().limit_fields("txt"))
+        )["total_results"]
+        play_total = (
+            await modclient.ft().search(
+                Query("henry").no_content().limit_fields("play")
+            )
+        )["total_results"]
+        both_total = (
+            await modclient.ft().search(
+                Query("henry").no_content().limit_fields("play", "txt")
+            )
+        )["total_results"]
         assert 129 == txt_total
         assert 494 == play_total
         assert 494 == both_total
@@ -271,9 +284,9 @@ async def test_client(modclient: redis.Redis):
         assert set(ids) == set(subset)
 
         # test slop and in order
-        assert 193 == (
-            await modclient.ft().search(Query("henry king"))
-        )["total_results"]
+        assert (
+            193 == (await modclient.ft().search(Query("henry king")))["total_results"]
+        )
         assert (
             3
             == (await modclient.ft().search(Query("henry king").slop(0).in_order()))[
@@ -286,12 +299,18 @@ async def test_client(modclient: redis.Redis):
                 "total_results"
             ]
         )
-        assert 53 == (await modclient.ft().search(
-            Query("henry king").slop(0)
-        ))["total_results"]
-        assert 167 == (await modclient.ft().search(
-            Query("henry king").slop(100)
-        ))["total_results"]
+        assert (
+            53
+            == (await modclient.ft().search(Query("henry king").slop(0)))[
+                "total_results"
+            ]
+        )
+        assert (
+            167
+            == (await modclient.ft().search(Query("henry king").slop(100)))[
+                "total_results"
+            ]
+        )
 
         # test delete document
         await modclient.hset("doc-5ghs2", mapping={"play": "Death of a Salesman"})
@@ -350,7 +369,6 @@ async def test_stopwords(modclient: redis.Redis):
         assert 1 == res2["total_results"]
 
 
-
 @pytest.mark.redismod
 async def test_filters(modclient: redis.Redis):
     await (
@@ -406,7 +424,7 @@ async def test_filters(modclient: redis.Redis):
         assert 1 == res1["total_results"]
         assert 2 == res2["total_results"]
         assert "doc1" == res1["results"][0]["id"]
-    
+
         # Sort results, after RDB reload order may change
         res = [res2["results"][0]["id"], res2["results"][1]["id"]]
         res.sort()
@@ -1025,9 +1043,7 @@ async def test_scorer(modclient: redis.Redis):
             Query("quick").scorer("TFIDF.DOCNORM").with_scores()
         )
         assert 0.1111111111111111 == res["results"][0]["score"]
-        res = await modclient.ft().search(
-            Query("quick").scorer("BM25").with_scores()
-        )
+        res = await modclient.ft().search(Query("quick").scorer("BM25").with_scores())
         assert 0.17699114465425977 == res["results"][0]["score"]
         res = await modclient.ft().search(Query("quick").scorer("DISMAX").with_scores())
         assert 2.0 == res["results"][0]["score"]
@@ -1232,7 +1248,9 @@ async def test_aggregations_groupby(modclient: redis.Redis):
 
             req = (
                 aggregations.AggregateRequest("redis")
-                .group_by("@parent", reducers.random_sample("@title", 2).alias("random"))
+                .group_by(
+                    "@parent", reducers.random_sample("@title", 2).alias("random")
+                )
                 .dialect(dialect)
             )
 
@@ -1300,7 +1318,7 @@ async def test_aggregations_groupby(modclient: redis.Redis):
 
             res = (await modclient.ft().aggregate(req))["results"][0]
             assert res["fields"]["parent"] == "redis"
-            assert res["fields"]["__generated_aliasmaxrandom_num"] == "10"  # max(10,8,3)
+            assert res["fields"]["__generated_aliasmaxrandom_num"] == "10"
 
             req = (
                 aggregations.AggregateRequest("redis")
@@ -1357,7 +1375,9 @@ async def test_aggregations_groupby(modclient: redis.Redis):
 
             req = (
                 aggregations.AggregateRequest("redis")
-                .group_by("@parent", reducers.random_sample("@title", 2).alias("random"))
+                .group_by(
+                    "@parent", reducers.random_sample("@title", 2).alias("random")
+                )
                 .dialect(dialect)
             )
 

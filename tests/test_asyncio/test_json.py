@@ -106,13 +106,9 @@ async def test_numincrby(modclient):
         modclient, await modclient.json().numincrby("num", Path.root_path(), 1), 2, [2]
     )
     res = await modclient.json().numincrby("num", Path.root_path(), 0.5)
-    assert_resp_response(
-        modclient, res, 2.5, [2.5]
-    )
+    assert_resp_response(modclient, res, 2.5, [2.5])
     res = await modclient.json().numincrby("num", Path.root_path(), -1.25)
-    assert_resp_response(
-        modclient, res, 1.25, [1.25]
-    )
+    assert_resp_response(modclient, res, 1.25, [1.25])
 
 
 @pytest.mark.redismod
@@ -121,17 +117,11 @@ async def test_nummultby(modclient: redis.Redis):
 
     with pytest.deprecated_call():
         res = await modclient.json().nummultby("num", Path.root_path(), 2)
-        assert_resp_response(
-            modclient, res, 2, [2]
-        )
+        assert_resp_response(modclient, res, 2, [2])
         res = await modclient.json().nummultby("num", Path.root_path(), 2.5)
-        assert_resp_response(
-            modclient, res, 5, [5]
-        )
+        assert_resp_response(modclient, res, 5, [5])
         res = await modclient.json().nummultby("num", Path.root_path(), 0.5)
-        assert_resp_response(
-            modclient, res, 2.5, [2.5]
-        )
+        assert_resp_response(modclient, res, 2.5, [2.5])
 
 
 @pytest.mark.redismod
@@ -151,9 +141,7 @@ async def test_strappend(modclient: redis.Redis):
     await modclient.json().set("jsonkey", Path.root_path(), "foo")
     assert 6 == await modclient.json().strappend("jsonkey", "bar")
     res = await modclient.json().get("jsonkey", Path.root_path())
-    assert_resp_response(
-        modclient, res, "foobar", [["foobar"]]
-    )
+    assert_resp_response(modclient, res, "foobar", [["foobar"]])
 
 
 @pytest.mark.redismod
@@ -316,7 +304,6 @@ async def test_json_delete_with_dollar(modclient: redis.Redis):
     doc1 = {"a": 1, "nested": {"a": 2, "b": 3}}
     assert await modclient.json().set("doc1", "$", doc1)
     assert await modclient.json().delete("doc1", "$..a") == 2
-    r = await modclient.json().get("doc1", "$")
     res = [{"nested": {"b": 3}}]
     assert_resp_response(modclient, await modclient.json().get("doc1", "$"), res, [res])
 
@@ -917,9 +904,7 @@ async def test_type_dollar(modclient: redis.Redis):
 
     # Test single
     res = await modclient.json().type("doc1", "$.nested2.a")
-    assert_resp_response(
-        modclient, res, [jtypes[1]], [[jtypes[1]]]
-    )
+    assert_resp_response(modclient, res, [jtypes[1]], [[jtypes[1]]])
 
     # Test missing key
     assert_resp_response(

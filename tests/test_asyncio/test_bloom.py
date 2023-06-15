@@ -5,7 +5,11 @@ import pytest
 import redis.asyncio as redis
 from redis.exceptions import ModuleError, RedisError
 from redis.utils import HIREDIS_AVAILABLE
-from tests.conftest import assert_resp_response, is_resp2_connection, skip_ifmodversion_lt
+from tests.conftest import (
+    assert_resp_response,
+    is_resp2_connection,
+    skip_ifmodversion_lt,
+)
 
 
 def intlist(obj):

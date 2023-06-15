@@ -4,7 +4,11 @@ from time import sleep
 import pytest
 
 import redis.asyncio as redis
-from tests.conftest import assert_resp_response, is_resp2_connection, skip_ifmodversion_lt
+from tests.conftest import (
+    assert_resp_response,
+    is_resp2_connection,
+    skip_ifmodversion_lt,
+)
 
 
 @pytest.mark.redismod
@@ -219,7 +223,9 @@ async def test_del_range(modclient: redis.Redis):
         await modclient.ts().add(1, i, i % 7)
     assert 22 == await modclient.ts().delete(1, 0, 21)
     assert [] == await modclient.ts().range(1, 0, 21)
-    assert_resp_response(modclient, await modclient.ts().range(1, 22, 22), [(22, 1.0)], [[22, 1.0]])
+    assert_resp_response(
+        modclient, await modclient.ts().range(1, 22, 22), [(22, 1.0)], [[22, 1.0]]
+    )
 
 
 @pytest.mark.redismod
@@ -264,7 +270,9 @@ async def test_range_advanced(modclient: redis.Redis):
         1, 0, 10, aggregation_type="count", bucket_size_msec=10, align=5
     )
     assert_resp_response(modclient, res, [(0, 5.0), (5, 6.0)], [[0, 5.0], [5, 6.0]])
-    res = await modclient.ts().range(1, 0, 10, aggregation_type="twa", bucket_size_msec=10)
+    res = await modclient.ts().range(
+        1, 0, 10, aggregation_type="twa", bucket_size_msec=10
+    )
     assert_resp_response(modclient, res, [(0, 2.55), (10, 3.0)], [[0, 2.55], [10, 3.0]])
 
 
@@ -341,7 +349,9 @@ async def test_multi_range(modclient: redis.Redis):
 
         # test withlabels
         assert {} == res[0]["1"][0]
-        res = await modclient.ts().mrange(0, 200, filters=["Test=This"], with_labels=True)
+        res = await modclient.ts().mrange(
+            0, 200, filters=["Test=This"], with_labels=True
+        )
         assert {"Test": "This", "team": "ny"} == res[0]["1"][0]
     else:
         assert 100 == len(res["1"][2])
@@ -359,7 +369,9 @@ async def test_multi_range(modclient: redis.Redis):
 
         # test withlabels
         assert {} == res["1"][0]
-        res = await modclient.ts().mrange(0, 200, filters=["Test=This"], with_labels=True)
+        res = await modclient.ts().mrange(
+            0, 200, filters=["Test=This"], with_labels=True
+        )
         assert {"Test": "This", "team": "ny"} == res["1"][0]
 
 
