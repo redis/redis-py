@@ -59,7 +59,9 @@ class TestResponseCallbacks:
 
     def test_response_callbacks(self, r):
         callbacks = redis.Redis.RESPONSE_CALLBACKS
-        if not is_resp2_connection(r):
+        if is_resp2_connection(r):
+            callbacks.update(redis.Redis.RESP2_RESPONSE_CALLBACKS)
+        else:
             callbacks.update(redis.Redis.RESP3_RESPONSE_CALLBACKS)
         assert r.response_callbacks == callbacks
         assert id(r.response_callbacks) != id(redis.Redis.RESPONSE_CALLBACKS)
