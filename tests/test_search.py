@@ -137,84 +137,159 @@ def test_client(client):
     assert num_docs == int(info["num_docs"])
 
     res = client.ft().search("henry iv")
-    assert isinstance(res, Result)
-    assert 225 == res.total
-    assert 10 == len(res.docs)
-    assert res.duration > 0
+    if is_resp2_connection(client):
+        assert isinstance(res, Result)
+        assert 225 == res.total
+        assert 10 == len(res.docs)
+        assert res.duration > 0
 
-    for doc in res.docs:
-        assert doc.id
-        assert doc["id"]
-        assert doc.play == "Henry IV"
-        assert doc["play"] == "Henry IV"
+        for doc in res.docs:
+            assert doc.id
+            assert doc["id"]
+            assert doc.play == "Henry IV"
+            assert doc["play"] == "Henry IV"
+            assert len(doc.txt) > 0
+
+        # test no content
+        res = client.ft().search(Query("king").no_content())
+        assert 194 == res.total
+        assert 10 == len(res.docs)
+        for doc in res.docs:
+            assert "txt" not in doc.__dict__
+            assert "play" not in doc.__dict__
+
+        # test verbatim vs no verbatim
+        total = client.ft().search(Query("kings").no_content()).total
+        vtotal = client.ft().search(Query("kings").no_content().verbatim()).total
+        assert total > vtotal
+
+        # test in fields
+        txt_total = (
+            client.ft().search(Query("henry").no_content().limit_fields("txt")).total
+        )
+        play_total = (
+            client.ft().search(Query("henry").no_content().limit_fields("play")).total
+        )
+        both_total = (
+            client.ft()
+            .search(Query("henry").no_content().limit_fields("play", "txt"))
+            .total
+        )
+        assert 129 == txt_total
+        assert 494 == play_total
+        assert 494 == both_total
+
+        # test load_document
+        doc = client.ft().load_document("henry vi part 3:62")
+        assert doc is not None
+        assert "henry vi part 3:62" == doc.id
+        assert doc.play == "Henry VI Part 3"
         assert len(doc.txt) > 0
 
-    # test no content
-    res = client.ft().search(Query("king").no_content())
-    assert 194 == res.total
-    assert 10 == len(res.docs)
-    for doc in res.docs:
-        assert "txt" not in doc.__dict__
-        assert "play" not in doc.__dict__
+        # test in-keys
+        ids = [x.id for x in client.ft().search(Query("henry")).docs]
+        assert 10 == len(ids)
+        subset = ids[:5]
+        docs = client.ft().search(Query("henry").limit_ids(*subset))
+        assert len(subset) == docs.total
+        ids = [x.id for x in docs.docs]
+        assert set(ids) == set(subset)
 
-    # test verbatim vs no verbatim
-    total = client.ft().search(Query("kings").no_content()).total
-    vtotal = client.ft().search(Query("kings").no_content().verbatim()).total
-    assert total > vtotal
+        # test slop and in order
+        assert 193 == client.ft().search(Query("henry king")).total
+        assert 3 == client.ft().search(Query("henry king").slop(0).in_order()).total
+        assert 52 == client.ft().search(Query("king henry").slop(0).in_order()).total
+        assert 53 == client.ft().search(Query("henry king").slop(0)).total
+        assert 167 == client.ft().search(Query("henry king").slop(100)).total
 
-    # test in fields
-    txt_total = (
-        client.ft().search(Query("henry").no_content().limit_fields("txt")).total
-    )
-    play_total = (
-        client.ft().search(Query("henry").no_content().limit_fields("play")).total
-    )
-    both_total = (
-        client.ft()
-        .search(Query("henry").no_content().limit_fields("play", "txt"))
-        .total
-    )
-    assert 129 == txt_total
-    assert 494 == play_total
-    assert 494 == both_total
+        # test delete document
+        client.hset("doc-5ghs2", mapping={"play": "Death of a Salesman"})
+        res = client.ft().search(Query("death of a salesman"))
+        assert 1 == res.total
 
-    # test load_document
-    doc = client.ft().load_document("henry vi part 3:62")
-    assert doc is not None
-    assert "henry vi part 3:62" == doc.id
-    assert doc.play == "Henry VI Part 3"
-    assert len(doc.txt) > 0
+        assert 1 == client.ft().delete_document("doc-5ghs2")
+        res = client.ft().search(Query("death of a salesman"))
+        assert 0 == res.total
+        assert 0 == client.ft().delete_document("doc-5ghs2")
 
-    # test in-keys
-    ids = [x.id for x in client.ft().search(Query("henry")).docs]
-    assert 10 == len(ids)
-    subset = ids[:5]
-    docs = client.ft().search(Query("henry").limit_ids(*subset))
-    assert len(subset) == docs.total
-    ids = [x.id for x in docs.docs]
-    assert set(ids) == set(subset)
+        client.hset("doc-5ghs2", mapping={"play": "Death of a Salesman"})
+        res = client.ft().search(Query("death of a salesman"))
+        assert 1 == res.total
+        client.ft().delete_document("doc-5ghs2")
+    else:
+        assert isinstance(res, dict)
+        assert 225 == res["total_results"]
+        assert 10 == len(res["results"])
 
-    # test slop and in order
-    assert 193 == client.ft().search(Query("henry king")).total
-    assert 3 == client.ft().search(Query("henry king").slop(0).in_order()).total
-    assert 52 == client.ft().search(Query("king henry").slop(0).in_order()).total
-    assert 53 == client.ft().search(Query("henry king").slop(0)).total
-    assert 167 == client.ft().search(Query("henry king").slop(100)).total
+        for doc in res["results"]:
+            assert doc["id"]
+            assert doc["fields"]["play"] == "Henry IV"
+            assert len(doc["fields"]["txt"]) > 0
 
-    # test delete document
-    client.hset("doc-5ghs2", mapping={"play": "Death of a Salesman"})
-    res = client.ft().search(Query("death of a salesman"))
-    assert 1 == res.total
+        # test no content
+        res = client.ft().search(Query("king").no_content())
+        assert 194 == res["total_results"]
+        assert 10 == len(res["results"])
+        for doc in res["results"]:
+            assert "fields" not in doc.keys()
 
-    assert 1 == client.ft().delete_document("doc-5ghs2")
-    res = client.ft().search(Query("death of a salesman"))
-    assert 0 == res.total
-    assert 0 == client.ft().delete_document("doc-5ghs2")
+        # test verbatim vs no verbatim
+        total = client.ft().search(Query("kings").no_content())["total_results"]
+        vtotal = client.ft().search(Query("kings").no_content().verbatim())["total_results"]
+        assert total > vtotal
 
-    client.hset("doc-5ghs2", mapping={"play": "Death of a Salesman"})
-    res = client.ft().search(Query("death of a salesman"))
-    assert 1 == res.total
-    client.ft().delete_document("doc-5ghs2")
+        # test in fields
+        txt_total = (
+            client.ft().search(Query("henry").no_content().limit_fields("txt"))["total_results"]
+        )
+        play_total = (
+            client.ft().search(Query("henry").no_content().limit_fields("play"))["total_results"]
+        )
+        both_total = (
+            client.ft()
+            .search(Query("henry").no_content().limit_fields("play", "txt"))["total_results"]
+        )
+        assert 129 == txt_total
+        assert 494 == play_total
+        assert 494 == both_total
+
+        # test load_document
+        doc = client.ft().load_document("henry vi part 3:62")
+        assert doc is not None
+        assert "henry vi part 3:62" == doc.id
+        assert doc.play == "Henry VI Part 3"
+        assert len(doc.txt) > 0
+
+        # test in-keys
+        ids = [x["id"] for x in client.ft().search(Query("henry"))["results"]]
+        assert 10 == len(ids)
+        subset = ids[:5]
+        docs = client.ft().search(Query("henry").limit_ids(*subset))
+        assert len(subset) == docs["total_results"]
+        ids = [x["id"] for x in docs["results"]]
+        assert set(ids) == set(subset)
+
+        # test slop and in order
+        assert 193 == client.ft().search(Query("henry king"))["total_results"]
+        assert 3 == client.ft().search(Query("henry king").slop(0).in_order())["total_results"]
+        assert 52 == client.ft().search(Query("king henry").slop(0).in_order())["total_results"]
+        assert 53 == client.ft().search(Query("henry king").slop(0))["total_results"]
+        assert 167 == client.ft().search(Query("henry king").slop(100))["total_results"]
+
+        # test delete document
+        client.hset("doc-5ghs2", mapping={"play": "Death of a Salesman"})
+        res = client.ft().search(Query("death of a salesman"))
+        assert 1 == res["total_results"]
+
+        assert 1 == client.ft().delete_document("doc-5ghs2")
+        res = client.ft().search(Query("death of a salesman"))
+        assert 0 == res["total_results"]
+        assert 0 == client.ft().delete_document("doc-5ghs2")
+
+        client.hset("doc-5ghs2", mapping={"play": "Death of a Salesman"})
+        res = client.ft().search(Query("death of a salesman"))
+        assert 1 == res["total_results"]
+        client.ft().delete_document("doc-5ghs2")
 
 
 @pytest.mark.redismod

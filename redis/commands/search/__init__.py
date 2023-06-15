@@ -8,7 +8,6 @@ from .commands import (
     PROFILE_CMD,
     SPELLCHECK_CMD,
     CONFIG_CMD,
-    SUGGET_COMMAND,
     SYNDUMP_CMD,
     AsyncSearchCommands,
     SearchCommands,
@@ -108,7 +107,6 @@ class Search(SearchCommands):
             PROFILE_CMD: self._parse_profile,
             SPELLCHECK_CMD: self._parse_spellcheck,
             CONFIG_CMD: self._parse_config_get,
-            SUGGET_COMMAND: self._parse_sugget,
             SYNDUMP_CMD: self._parse_syndump,
         }
 

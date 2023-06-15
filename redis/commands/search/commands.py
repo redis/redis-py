@@ -140,14 +140,6 @@ class SearchCommands:
     def _parse_config_get(self, res, **kwargs):
         return {kvs[0]: kvs[1] for kvs in res} if res else {}
 
-    def _parse_sugget(self, res, **kwargs):
-        results = []
-        if not res:
-            return results
-
-        parser = SuggestionParser(kwargs["with_scores"], kwargs["with_payloads"], res)
-        return [s for s in parser]
-
     def _parse_syndump(self, res, **kwargs):
         return {res[i]: res[i + 1] for i in range(0, len(res), 2)}
 
@@ -843,7 +835,12 @@ class SearchCommands:
             args.append(WITHPAYLOADS)
 
         res = self.execute_command(*args)
-        return self._parse_results(SUGGET_COMMAND, res, with_scores=with_scores, with_payloads=with_payloads)
+        results = []
+        if not res:
+            return results
+
+        parser = SuggestionParser(with_scores, with_payloads, res)
+        return [s for s in parser]
 
     def synupdate(self, groupid, skipinitial=False, *terms):
         """
