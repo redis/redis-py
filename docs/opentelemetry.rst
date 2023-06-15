@@ -4,7 +4,7 @@ Integrating OpenTelemetry
 What is OpenTelemetry?
 ----------------------
 
-`OpenTelemetry <https://opentelemetry.io>`_ is an open-source observability framework for traces, metrics, and logs.
+`OpenTelemetry <https://opentelemetry.io>`_ is an open-source observability framework for traces, metrics, and logs. It is a merger of OpenCensus and OpenTracing projects hosted by Cloud Native Computing Foundation.
 
 OpenTelemetry allows developers to collect and export telemetry data in a vendor agnostic way. With OpenTelemetry, you can instrument your application once and then add or change vendors without changing the instrumentation, for example, here is a list of `popular DataDog competitors <https://uptrace.dev/get/compare/datadog-competitors.html>`_ that support OpenTelemetry.
 
@@ -97,7 +97,7 @@ See `OpenTelemetry Python Tracing API <https://uptrace.dev/opentelemetry/python-
 Uptrace
 -------
 
-Uptrace is an `open-source APM <https://uptrace.dev/get/open-source-apm.html>`_ that supports distributed tracing, metrics, and logs. You can use it to monitor applications and set up automatic alerts to receive notifications via email, Slack, Telegram, and more.
+Uptrace is an `open source APM <https://uptrace.dev/get/open-source-apm.html>`_ that supports distributed tracing, metrics, and logs. You can use it to monitor applications and set up automatic alerts to receive notifications via email, Slack, Telegram, and more.
 
 You can use Uptrace to monitor redis-py using this `GitHub example <https://github.com/redis/redis-py/tree/master/docs/examples/opentelemetry>`_ as a starting point.
 
@@ -111,9 +111,9 @@ Monitoring Redis Server performance
 
 In addition to monitoring redis-py client, you can also monitor Redis Server performance using OpenTelemetry Collector Agent.
 
-OpenTelemetry Collector is a proxy/middleman between your application and a `distributed tracing tool <https://uptrace.dev/get/compare/distributed-tracing-tools.html>`_ such as Uptrace or Jaeger. Collector receives telemetry data, processes it, and then exports the data to APM tools that can store it permanently.
+OpenTelemetry Collector is a proxy/middleman between your application and a `distributed tracing tool <https://uptrace.dev/blog/distributed-tracing-tools.html>`_ such as Uptrace or Jaeger. Collector receives telemetry data, processes it, and then exports the data to APM tools that can store it permanently.
 
-For example, you can use the Redis receiver provided by Otel Collector to `monitor Redis performance <https://uptrace.dev/opentelemetry/redis-monitoring.html>`_:
+For example, you can use the `OpenTelemetry Redis receiver <https://uptrace.dev/get/monitor/opentelemetry-redis.html>` provided by Otel Collector to monitor Redis performance:
 
 .. image:: images/opentelemetry/redis-metrics.png
   :alt: Redis metrics
@@ -123,55 +123,50 @@ See introduction to `OpenTelemetry Collector <https://uptrace.dev/opentelemetry/
 Alerting and notifications
 --------------------------
 
-Uptrace also allows you to monitor `OpenTelemetry metrics <https://uptrace.dev/opentelemetry/metrics.html>`_ using alerting rules. For example, the following rule uses the group by node expression to create an alert whenever an individual Redis shard is down:
+Uptrace also allows you to monitor `OpenTelemetry metrics <https://uptrace.dev/opentelemetry/metrics.html>`_ using alerting rules. For example, the following monitor uses the group by node expression to create an alert whenever an individual Redis shard is down:
 
 .. code-block:: python
 
-   # /etc/uptrace/uptrace.yml
-
-   alerting:
-     rules:
-       - name: Redis shard is down
-         metrics:
-           - redis_up as $redis_up
-         query:
-           - group by cluster # monitor each cluster,
-           - group by bdb # each database,
-           - group by node # and each shard
-           - $redis_up == 0
-         # shard should be down for 5 minutes to trigger an alert
-         for: 5m
+   monitors:
+     - name: Redis shard is down
+       metrics:
+         - redis_up as $redis_up
+       query:
+         - group by cluster # monitor each cluster,
+         - group by bdb # each database,
+         - group by node # and each shard
+         - $redis_up
+       min_allowed_value: 1
+       # shard should be down for 5 minutes to trigger an alert
+       for_duration: 5m
 
 You can also create queries with more complex expressions. For example, the following rule creates an alert when the keyspace hit rate is lower than 75%:
 
 .. code-block:: python
 
-   # /etc/uptrace/uptrace.yml
-
-   alerting:
-     rules:
-       - name: Redis read hit rate < 75%
-         metrics:
-           - redis_keyspace_read_hits as $hits
-           - redis_keyspace_read_misses as $misses
-         query:
-           - group by cluster
-           - group by bdb
-           - group by node
-           - $hits / ($hits + $misses) < 0.75
-         for: 5m
+   monitors:
+     - name: Redis read hit rate < 75%
+       metrics:
+         - redis_keyspace_read_hits as $hits
+         - redis_keyspace_read_misses as $misses
+       query:
+         - group by cluster
+         - group by bdb
+         - group by node
+         - $hits / ($hits + $misses) as hit_rate
+       min_allowed_value: 0.75
+       for_duration: 5m
 
 See `Alerting and Notifications <https://uptrace.dev/get/alerting.html>`_ for details.
 
 What's next?
 ------------
 
-Next, you can learn how to configure `uptrace-python <https://uptrace.dev/get/uptrace-python.html>`_ to export spans, metrics, and logs to Uptrace.
+Next, you can learn how to configure `uptrace-python <https://uptrace.dev/get/opentelemetry-python.html>`_ to export spans, metrics, and logs to Uptrace.
 
 You may also be interested in the following guides:
 
-- `OpenTelemetry Django <https://uptrace.dev/opentelemetry/instrumentations/python-django.html>`_
-- `OpenTelemetry Flask <https://uptrace.dev/opentelemetry/instrumentations/python-flask.html>`_
-- `OpenTelemetry FastAPI <https://uptrace.dev/opentelemetry/instrumentations/python-fastapi.html>`_
-- `OpenTelemetry SQLAlchemy <https://uptrace.dev/opentelemetry/instrumentations/python-sqlalchemy.html>`_
-- `OpenTelemetry instrumentations <https://uptrace.dev/opentelemetry/instrumentations/>`_
+- `OpenTelemetry Django <https://uptrace.dev/get/instrument/opentelemetry-django.html>`_
+- `OpenTelemetry Flask <https://uptrace.dev/get/instrument/instrument/opentelemetry-flask.html>`_
+- `OpenTelemetry FastAPI <https://uptrace.dev/get/instrument/opentelemetry-fastapi.html>`_
+- `OpenTelemetry SQLAlchemy <https://uptrace.dev/get/instrument/opentelemetry-sqlalchemy.html>`_
