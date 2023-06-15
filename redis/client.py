@@ -877,7 +877,7 @@ class AbstractRedis:
         # "XGROUP CREATE": bool_ok,
         # "XGROUP DESTROY": bool,
         # "XGROUP SETID": bool_ok,
-        # "XINFO CONSUMERS": parse_list_of_dicts,
+        "XINFO CONSUMERS": parse_list_of_dicts,
         "XINFO GROUPS": parse_list_of_dicts,
     }
 
