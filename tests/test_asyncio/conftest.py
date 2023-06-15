@@ -71,18 +71,21 @@ async def create_redis(request):
         url: str = request.config.getoption("--redis-url"),
         cls=redis.Redis,
         flushdb=True,
+        protocol=request.config.getoption("--protocol"),
         **kwargs,
     ):
+
         cluster_mode = REDIS_INFO["cluster_enabled"]
         if not cluster_mode:
             single = kwargs.pop("single_connection_client", False) or single_connection
             parser_class = kwargs.pop("parser_class", None) or parser_cls
             url_options = parse_url(url)
+            url_options["protocol"] = protocol
             url_options.update(kwargs)
             pool = redis.ConnectionPool(parser_class=parser_class, **url_options)
             client = cls(connection_pool=pool)
         else:
-            client = redis.RedisCluster.from_url(url, **kwargs)
+            client = redis.RedisCluster.from_url(url, protocol=protocol, **kwargs)
             await client.initialize()
             single = False
         if single:
