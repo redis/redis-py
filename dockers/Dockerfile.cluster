@@ -1,6 +1,7 @@
 FROM redis/redis-stack-server:latest as rss
-COPY dockers/create_cluster.sh /create_cluster.sh
 
-RUN chmod a+x /usr/bin/redis* /create_cluster.sh
+COPY dockers/create_cluster.sh /create_cluster.sh
+RUN ls -R /opt/redis-stack
+RUN chmod a+x /create_cluster.sh
 
 ENTRYPOINT [ "/create_cluster.sh"]

@@ -6,6 +6,7 @@ services:
 
   redis:
     image: redis/redis-stack-server:edge
+    container_name: redis-standalone
     ports:
       - 6379:6379
     environment:
@@ -18,6 +19,7 @@ services:
 
   replica:
     image: redis/redis-stack-server:edge
+    container_name: redis-replica
     depends_on:
       - redis
     environment:
@@ -29,6 +31,7 @@ services:
       - all
 
   cluster:
+    container_name: redis-cluster
     build:
       context: .
       dockerfile: dockers/Dockerfile.cluster
@@ -61,6 +64,7 @@ services:
 
   sentinel:
     image: redis/redis-stack-server:edge
+    container_name: redis-sentinel
     depends_on:
       - redis
     environment:
@@ -76,6 +80,7 @@ services:
 
   sentinel2:
     image: redis/redis-stack-server:edge
+    container_name: redis-sentinel2
     depends_on:
       - redis
     environment:
@@ -91,6 +96,7 @@ services:
 
   sentinel3:
     image: redis/redis-stack-server:edge
+    container_name: redis-sentinel3
     depends_on:
       - redis
     entrypoint: "/opt/redis-stack/bin/redis-sentinel /redis.conf --port 26381"
