@@ -812,6 +812,8 @@ class AbstractRedis:
         "HGETALL": lambda r: r and pairs_to_dict(r) or {},
         "MEMORY STATS": parse_memory_stats,
         "MODULE LIST": lambda r: [pairs_to_dict(m) for m in r],
+        "STRALGO": parse_stralgo,
+        "ACL LIST": lambda r: list(map(str_if_bytes, r)),
         # **string_keys_to_dict(
         #     "COPY "
         #     "HEXISTS HMSET MOVE MSETNX PERSIST "
@@ -833,7 +835,6 @@ class AbstractRedis:
         # **string_keys_to_dict("ZRANK ZREVRANK", int_or_none),
         # **string_keys_to_dict("BGREWRITEAOF BGSAVE", lambda r: True),
         # "ACL HELP": lambda r: list(map(str_if_bytes, r)),
-        # "ACL LIST": lambda r: list(map(str_if_bytes, r)),
         # "ACL LOAD": bool_ok,
         # "ACL SAVE": bool_ok,
         # "ACL USERS": lambda r: list(map(str_if_bytes, r)),
@@ -855,7 +856,6 @@ class AbstractRedis:
         # "MODULE UNLOAD": parse_module_result,
         # "OBJECT": parse_object,
         # "QUIT": bool_ok,
-        # "STRALGO": parse_stralgo,
         # "RANDOMKEY": lambda r: r and r or None,
         # "SCRIPT EXISTS": lambda r: list(map(bool, r)),
         # "SCRIPT KILL": bool_ok,

@@ -74,11 +74,12 @@ class TestResponseCallbacks:
     """Tests for the response callback system"""
 
     async def test_response_callbacks(self, r: redis.Redis):
-        resp3_callbacks = redis.Redis.RESPONSE_CALLBACKS.copy()
-        resp3_callbacks.update(redis.Redis.RESP3_RESPONSE_CALLBACKS)
-        assert_resp_response(
-            r, r.response_callbacks, redis.Redis.RESPONSE_CALLBACKS, resp3_callbacks
-        )
+        callbacks = redis.Redis.RESPONSE_CALLBACKS
+        if is_resp2_connection(r):
+            callbacks.update(redis.Redis.RESP2_RESPONSE_CALLBACKS)
+        else:
+            callbacks.update(redis.Redis.RESP3_RESPONSE_CALLBACKS)
+        assert r.response_callbacks == callbacks
         assert id(r.response_callbacks) != id(redis.Redis.RESPONSE_CALLBACKS)
         r.set_response_callback("GET", lambda x: "static")
         await r.set("a", "foo")
