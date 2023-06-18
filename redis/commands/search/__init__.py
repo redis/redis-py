@@ -1,7 +1,17 @@
 import redis
 
 from ...asyncio.client import Pipeline as AsyncioPipeline
-from .commands import AsyncSearchCommands, SearchCommands
+from .commands import (
+    AGGREGATE_CMD,
+    CONFIG_CMD,
+    INFO_CMD,
+    PROFILE_CMD,
+    SEARCH_CMD,
+    SPELLCHECK_CMD,
+    SYNDUMP_CMD,
+    AsyncSearchCommands,
+    SearchCommands,
+)
 
 
 class Search(SearchCommands):
@@ -90,6 +100,15 @@ class Search(SearchCommands):
         self.index_name = index_name
         self.execute_command = client.execute_command
         self._pipeline = client.pipeline
+        self.RESP2_MODULE_CALLBACKS = {
+            INFO_CMD: self._parse_info,
+            SEARCH_CMD: self._parse_search,
+            AGGREGATE_CMD: self._parse_aggregate,
+            PROFILE_CMD: self._parse_profile,
+            SPELLCHECK_CMD: self._parse_spellcheck,
+            CONFIG_CMD: self._parse_config_get,
+            SYNDUMP_CMD: self._parse_syndump,
+        }
 
     def pipeline(self, transaction=True, shard_hint=None):
         """Creates a pipeline for the SEARCH module, that can be used for executing
