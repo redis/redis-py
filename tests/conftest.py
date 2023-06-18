@@ -278,8 +278,8 @@ def _get_client(
         redis_url = request.config.getoption("--redis-url")
     else:
         redis_url = from_url
-
-    kwargs["protocol"] = request.config.getoption("--protocol")
+    if "protocol" not in redis_url:
+        kwargs["protocol"] = request.config.getoption("--protocol")
 
     cluster_mode = REDIS_INFO["cluster_enabled"]
     if not cluster_mode:
@@ -327,6 +327,12 @@ def cluster_teardown(client, flushdb):
 @pytest.fixture()
 def r(request):
     with _get_client(redis.Redis, request) as client:
+        yield client
+
+
+@pytest.fixture()
+def decoded_r(request):
+    with _get_client(redis.Redis, request, decode_responses=True) as client:
         yield client
 
 

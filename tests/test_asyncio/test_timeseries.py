@@ -211,9 +211,9 @@ async def test_create_and_delete_rule(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
-async def test_del_range(r: redis.Redis):
+async def test_del_range(decoded_r: redis.Redis):
     try:
-        await r.ts().delete("test", 0, 100)
+        await decoded_r.ts().delete("test", 0, 100)
     except Exception as e:
         assert e.__str__() != ""
 
@@ -243,13 +243,13 @@ async def test_range(r: redis.Redis):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
-async def test_range_advanced(r: redis.Redis):
+async def test_range_advanced(decoded_r: redis.Redis):
     for i in range(100):
-        await r.ts().add(1, i, i % 7)
-        await r.ts().add(1, i + 200, i % 7)
+        await decoded_r.ts().add(1, i, i % 7)
+        await decoded_r.ts().add(1, i + 200, i % 7)
 
     assert 2 == len(
-        await r.ts().range(
+        await decoded_r.ts().range(
             1,
             0,
             500,
@@ -274,20 +274,20 @@ async def test_range_advanced(r: redis.Redis):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
-async def test_rev_range(r: redis.Redis):
+async def test_rev_range(decoded_r: redis.Redis):
     for i in range(100):
-        await r.ts().add(1, i, i % 7)
-    assert 100 == len(await r.ts().range(1, 0, 200))
+        await decoded_r.ts().add(1, i, i % 7)
+    assert 100 == len(await decoded_r.ts().range(1, 0, 200))
     for i in range(100):
-        await r.ts().add(1, i + 200, i % 7)
-    assert 200 == len(await r.ts().range(1, 0, 500))
+        await decoded_r.ts().add(1, i + 200, i % 7)
+    assert 200 == len(await decoded_r.ts().range(1, 0, 500))
     # first sample isn't returned
     assert 20 == len(
-        await r.ts().revrange(1, 0, 500, aggregation_type="avg", bucket_size_msec=10)
+        await decoded_r.ts().revrange(1, 0, 500, aggregation_type="avg", bucket_size_msec=10)
     )
-    assert 10 == len(await r.ts().revrange(1, 0, 500, count=10))
+    assert 10 == len(await decoded_r.ts().revrange(1, 0, 500, count=10))
     assert 2 == len(
-        await r.ts().revrange(
+        await decoded_r.ts().revrange(
             1,
             0,
             500,
@@ -372,12 +372,12 @@ async def test_multi_range(decoded_r: redis.Redis):
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("99.99.99", "timeseries")
-async def test_multi_range_advanced(r: redis.Redis):
-    await r.ts().create(1, labels={"Test": "This", "team": "ny"})
-    await r.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
+async def test_multi_range_advanced(decoded_r: redis.Redis):
+    await decoded_r.ts().create(1, labels={"Test": "This", "team": "ny"})
+    await decoded_r.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
     for i in range(100):
-        await r.ts().add(1, i, i % 7)
-        await r.ts().add(2, i, i % 11)
+        await decoded_r.ts().add(1, i, i % 7)
+        await decoded_r.ts().add(2, i, i % 11)
 
     # test with selected labels
     res = await decoded_r.ts().mrange(
@@ -488,14 +488,14 @@ async def test_multi_range_advanced(r: redis.Redis):
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("99.99.99", "timeseries")
-async def test_multi_reverse_range(r: redis.Redis):
-    await r.ts().create(1, labels={"Test": "This", "team": "ny"})
-    await r.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
+async def test_multi_reverse_range(decoded_r: redis.Redis):
+    await decoded_r.ts().create(1, labels={"Test": "This", "team": "ny"})
+    await decoded_r.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
     for i in range(100):
-        await r.ts().add(1, i, i % 7)
-        await r.ts().add(2, i, i % 11)
+        await decoded_r.ts().add(1, i, i % 7)
+        await decoded_r.ts().add(2, i, i % 11)
 
-    res = await r.ts().mrange(0, 200, filters=["Test=This"])
+    res = await decoded_r.ts().mrange(0, 200, filters=["Test=This"])
     assert 2 == len(res)
     if is_resp2_connection(decoded_r):
         assert 100 == len(res[0]["1"][1])

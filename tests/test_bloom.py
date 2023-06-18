@@ -14,15 +14,15 @@ def intlist(obj):
 
 
 @pytest.fixture
-def client(r):
-    assert isinstance(r.bf(), redis.commands.bf.BFBloom)
-    assert isinstance(r.cf(), redis.commands.bf.CFBloom)
-    assert isinstance(r.cms(), redis.commands.bf.CMSBloom)
-    assert isinstance(r.tdigest(), redis.commands.bf.TDigestBloom)
-    assert isinstance(r.topk(), redis.commands.bf.TOPKBloom)
+def client(decoded_r):
+    assert isinstance(decoded_r.bf(), redis.commands.bf.BFBloom)
+    assert isinstance(decoded_r.cf(), redis.commands.bf.CFBloom)
+    assert isinstance(decoded_r.cms(), redis.commands.bf.CMSBloom)
+    assert isinstance(decoded_r.tdigest(), redis.commands.bf.TDigestBloom)
+    assert isinstance(decoded_r.topk(), redis.commands.bf.TOPKBloom)
 
-    r.flushdb()
-    return r
+    decoded_r.flushdb()
+    return decoded_r
 
 
 @pytest.mark.redismod

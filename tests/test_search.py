@@ -1954,24 +1954,24 @@ def test_profile_query_params(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
-def test_vector_field(r):
-    r.flushdb()
-    r.ft().create_index(
+def test_vector_field(client):
+    client.flushdb()
+    client.ft().create_index(
         (
             VectorField(
                 "v", "HNSW", {"TYPE": "FLOAT32", "DIM": 2, "DISTANCE_METRIC": "L2"}
             ),
         )
     )
-    r.hset("a", "v", "aaaaaaaa")
-    r.hset("b", "v", "aaaabaaa")
-    r.hset("c", "v", "aaaaabaa")
+    client.hset("a", "v", "aaaaaaaa")
+    client.hset("b", "v", "aaaabaaa")
+    client.hset("c", "v", "aaaaabaa")
 
     query = "*=>[KNN 2 @v $vec]"
     q = Query(query).return_field("__v_score").sort_by("__v_score", True).dialect(2)
-    res = r.ft().search(q, query_params={"vec": "aaaaaaaa"})
+    res = client.ft().search(q, query_params={"vec": "aaaaaaaa"})
 
-    if is_resp2_connection(r):
+    if is_resp2_connection(client):
         assert "a" == res.docs[0].id
         assert "0" == res.docs[0].__getattribute__("__v_score")
     else:
@@ -1995,18 +1995,18 @@ def test_vector_field_error(r):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
-def test_text_params(r):
-    r.flushdb()
-    r.ft().create_index((TextField("name"),))
+def test_text_params(client):
+    client.flushdb()
+    client.ft().create_index((TextField("name"),))
 
-    r.hset("doc1", mapping={"name": "Alice"})
-    r.hset("doc2", mapping={"name": "Bob"})
-    r.hset("doc3", mapping={"name": "Carol"})
+    client.hset("doc1", mapping={"name": "Alice"})
+    client.hset("doc2", mapping={"name": "Bob"})
+    client.hset("doc3", mapping={"name": "Carol"})
 
     params_dict = {"name1": "Alice", "name2": "Bob"}
     q = Query("@name:($name1 | $name2 )").dialect(2)
-    res = r.ft().search(q, query_params=params_dict)
-    if is_resp2_connection(r):
+    res = client.ft().search(q, query_params=params_dict)
+    if is_resp2_connection(client):
         assert 2 == res.total
         assert "doc1" == res.docs[0].id
         assert "doc2" == res.docs[1].id
@@ -2018,19 +2018,19 @@ def test_text_params(r):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
-def test_numeric_params(r):
-    r.flushdb()
-    r.ft().create_index((NumericField("numval"),))
+def test_numeric_params(client):
+    client.flushdb()
+    client.ft().create_index((NumericField("numval"),))
 
-    r.hset("doc1", mapping={"numval": 101})
-    r.hset("doc2", mapping={"numval": 102})
-    r.hset("doc3", mapping={"numval": 103})
+    client.hset("doc1", mapping={"numval": 101})
+    client.hset("doc2", mapping={"numval": 102})
+    client.hset("doc3", mapping={"numval": 103})
 
     params_dict = {"min": 101, "max": 102}
     q = Query("@numval:[$min $max]").dialect(2)
-    res = r.ft().search(q, query_params=params_dict)
+    res = client.ft().search(q, query_params=params_dict)
 
-    if is_resp2_connection(r):
+    if is_resp2_connection(client):
         assert 2 == res.total
         assert "doc1" == res.docs[0].id
         assert "doc2" == res.docs[1].id
@@ -2140,25 +2140,25 @@ def test_dialect(client):
 
 
 @pytest.mark.redismod
-def test_expire_while_search(r: redis.Redis):
-    r.ft().create_index((TextField("txt"),))
-    r.hset("hset:1", "txt", "a")
-    r.hset("hset:2", "txt", "b")
-    r.hset("hset:3", "txt", "c")
-    if is_resp2_connection(r):
-        assert 3 == r.ft().search(Query("*")).total
-        r.pexpire("hset:2", 300)
+def test_expire_while_search(client: redis.Redis):
+    client.ft().create_index((TextField("txt"),))
+    client.hset("hset:1", "txt", "a")
+    client.hset("hset:2", "txt", "b")
+    client.hset("hset:3", "txt", "c")
+    if is_resp2_connection(client):
+        assert 3 == client.ft().search(Query("*")).total
+        client.pexpire("hset:2", 300)
         for _ in range(500):
-            r.ft().search(Query("*")).docs[1]
+            client.ft().search(Query("*")).docs[1]
         time.sleep(1)
-        assert 2 == r.ft().search(Query("*")).total
+        assert 2 == client.ft().search(Query("*")).total
     else:
-        assert 3 == r.ft().search(Query("*"))["total_results"]
-        r.pexpire("hset:2", 300)
+        assert 3 == client.ft().search(Query("*"))["total_results"]
+        client.pexpire("hset:2", 300)
         for _ in range(500):
-            r.ft().search(Query("*"))["results"][1]
+            client.ft().search(Query("*"))["results"][1]
         time.sleep(1)
-        assert 2 == r.ft().search(Query("*"))["total_results"]
+        assert 2 == client.ft().search(Query("*"))["total_results"]
 
 
 @pytest.mark.redismod

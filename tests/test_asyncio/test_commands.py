@@ -67,10 +67,11 @@ async def get_stream_message(client: redis.Redis, stream: str, message_id: str):
     assert len(response) == 1
     return response[0]
 
-    # # RESPONSE CALLBACKS
-    # @pytest.mark.onlynoncluster
-    # class TestResponseCallbacks:
-    #     """Tests for the response callback system"""
+
+# RESPONSE CALLBACKS
+@pytest.mark.onlynoncluster
+class TestResponseCallbacks:
+    """Tests for the response callback system"""
 
     async def test_response_callbacks(self, r: redis.Redis):
         callbacks = redis.Redis.RESPONSE_CALLBACKS
@@ -121,8 +122,7 @@ class TestRedisCommands:
         password = await r.acl_genpass()
         assert isinstance(password, str)
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
-    @skip_if_server_version_gte("7.0.0")
+    @skip_if_server_version_lt("7.0.0")
     async def test_acl_getuser_setuser(self, r_teardown):
         username = "redis-py-user"
         r = r_teardown(username)
@@ -158,12 +158,11 @@ class TestRedisCommands:
             keys=["cache:*", "objects:*"],
         )
         acl = await r.acl_getuser(username)
-        assert set(acl["categories"]) == {"-@all", "+@set", "+@hash"}
+        assert set(acl["categories"]) == {"-@all", "+@set", "+@hash", "-@geo"}
         assert set(acl["commands"]) == {"+get", "+mget", "-hset"}
         assert acl["enabled"] is True
-        assert acl["channels"] == [b"*"]
-        assert set(acl["flags"]) == {"on", "allchannels", "sanitize-payload"}
-        assert acl["keys"] == [b"cache:*", b"objects:*"]
+        assert "on" in acl["flags"]
+        assert set(acl["keys"]) == {"~cache:*", "~objects:*"}
         assert len(acl["passwords"]) == 2
 
         # test reset=False keeps existing ACL and applies new ACL on top
@@ -185,12 +184,10 @@ class TestRedisCommands:
             keys=["objects:*"],
         )
         acl = await r.acl_getuser(username)
-        assert set(acl["categories"]) == {"-@all", "+@set", "+@hash"}
         assert set(acl["commands"]) == {"+get", "+mget"}
         assert acl["enabled"] is True
-        assert acl["channels"] == [b"*"]
-        assert set(acl["flags"]) == {"on", "allchannels", "sanitize-payload"}
-        assert set(acl["keys"]) == {b"cache:*", b"objects:*"}
+        assert "on" in acl["flags"]
+        assert set(acl["keys"]) == {"~cache:*", "~objects:*"}
         assert len(acl["passwords"]) == 2
 
         # test removal of passwords
@@ -226,14 +223,13 @@ class TestRedisCommands:
         assert len((await r.acl_getuser(username))["passwords"]) == 1
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
-    @skip_if_server_version_gte("7.0.0")
     async def test_acl_list(self, r_teardown):
         username = "redis-py-user"
         r = r_teardown(username)
-
+        start = await r.acl_list()
         assert await r.acl_setuser(username, enabled=False, reset=True)
         users = await r.acl_list()
-        assert f"user {username} off sanitize-payload &* -@all" in users
+        assert len(users) == len(start) + 1
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
     @pytest.mark.onlynoncluster

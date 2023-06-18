@@ -51,10 +51,11 @@ def get_stream_message(client, stream, message_id):
     assert len(response) == 1
     return response[0]
 
-    # # RESPONSE CALLBACKS
-    # @pytest.mark.onlynoncluster
-    # class TestResponseCallbacks:
-    #     "Tests for the response callback system"
+
+# RESPONSE CALLBACKS
+@pytest.mark.onlynoncluster
+class TestResponseCallbacks:
+    "Tests for the response callback system"
 
     def test_response_callbacks(self, r):
         callbacks = redis.Redis.RESPONSE_CALLBACKS
@@ -238,7 +239,7 @@ class TestRedisCommands:
             keys=["cache:*", "objects:*"],
         )
         acl = r.acl_getuser(username)
-        assert set(acl["categories"]) == {"+@hash", "+@set", "-@all"}
+        assert set(acl["categories"]) == {"+@hash", "+@set", "-@all", "-@geo"}
         assert set(acl["commands"]) == {"+get", "+mget", "-hset"}
         assert acl["enabled"] is True
         assert "on" in acl["flags"]
@@ -315,7 +316,7 @@ class TestRedisCommands:
             selectors=[("+set", "%W~app*")],
         )
         acl = r.acl_getuser(username)
-        assert set(acl["categories"]) == {"+@hash", "+@set", "-@all"}
+        assert set(acl["categories"]) == {"+@hash", "+@set", "-@all", "-@geo"}
         assert set(acl["commands"]) == {"+get", "+mget", "-hset"}
         assert acl["enabled"] is True
         assert "on" in acl["flags"]

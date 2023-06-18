@@ -729,7 +729,7 @@ class AbstractRedis:
         **string_keys_to_dict("EXPIRE EXPIREAT PEXPIRE PEXPIREAT AUTH", bool),
         **string_keys_to_dict("EXISTS", int),
         **string_keys_to_dict("INCRBYFLOAT HINCRBYFLOAT", float),
-        **string_keys_to_dict("READONLY", bool_ok),
+        **string_keys_to_dict("READONLY MSET", bool_ok),
         "CLUSTER DELSLOTS": bool_ok,
         "CLUSTER ADDSLOTS": bool_ok,
         "COMMAND": parse_command,
@@ -794,6 +794,9 @@ class AbstractRedis:
         "CONFIG SET": bool_ok,
         **string_keys_to_dict("XREVRANGE XRANGE", parse_stream_list),
         "XCLAIM": parse_xclaim,
+        "CLUSTER SET-CONFIG-EPOCH": bool_ok,
+        "CLUSTER REPLICAS": parse_cluster_nodes,
+        "ACL LIST": lambda r: list(map(str_if_bytes, r)),
     }
 
     RESP2_RESPONSE_CALLBACKS = {
@@ -801,6 +804,7 @@ class AbstractRedis:
         **string_keys_to_dict(
             "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
         ),
+        **string_keys_to_dict("READWRITE", bool_ok),
         **string_keys_to_dict(
             "ZPOPMAX ZPOPMIN ZINTER ZDIFF ZUNION ZRANGE ZRANGEBYSCORE "
             "ZREVRANGE ZREVRANGEBYSCORE",
@@ -813,7 +817,6 @@ class AbstractRedis:
         "MEMORY STATS": parse_memory_stats,
         "MODULE LIST": lambda r: [pairs_to_dict(m) for m in r],
         "STRALGO": parse_stralgo,
-        "ACL LIST": lambda r: list(map(str_if_bytes, r)),
         # **string_keys_to_dict(
         #     "COPY "
         #     "HEXISTS HMSET MOVE MSETNX PERSIST "
@@ -828,7 +831,7 @@ class AbstractRedis:
         #     int,
         # ),
         # **string_keys_to_dict(
-        #     "FLUSHALL FLUSHDB LSET LTRIM MSET PFMERGE ASKING READWRITE "
+        #     "FLUSHALL FLUSHDB LSET LTRIM PFMERGE ASKING "
         #     "RENAME SAVE SELECT SHUTDOWN SLAVEOF SWAPDB WATCH UNWATCH ",
         #     bool_ok,
         # ),
@@ -843,8 +846,6 @@ class AbstractRedis:
         # "CLUSTER ADDSLOTSRANGE": bool_ok,
         # "CLUSTER DELSLOTSRANGE": bool_ok,
         # "CLUSTER GETKEYSINSLOT": lambda r: list(map(str_if_bytes, r)),
-        # "CLUSTER REPLICAS": parse_cluster_nodes,
-        # "CLUSTER SET-CONFIG-EPOCH": bool_ok,
         # "CONFIG RESETSTAT": bool_ok,
         # "DEBUG OBJECT": parse_debug_object,
         # "FUNCTION DELETE": bool_ok,

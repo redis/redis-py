@@ -10,9 +10,9 @@ from .conftest import assert_resp_response, is_resp2_connection, skip_ifmodversi
 
 
 @pytest.fixture
-def client(r):
-    r.flushdb()
-    return r
+def client(decoded_r):
+    decoded_r.flushdb()
+    return decoded_r
 
 
 @pytest.mark.redismod
