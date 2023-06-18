@@ -1,11 +1,11 @@
+# https://github.com/pyinvoke/invoke/issues/833
+import inspect
 import os
 import shutil
 
 from invoke import run, task
 
-# https://github.com/pyinvoke/invoke/issues/833
-import inspect
-if not hasattr(inspect, 'getargspec'):
+if not hasattr(inspect, "getargspec"):
     inspect.getargspec = inspect.getfullargspec
 
 with open("tox.ini") as fp:

@@ -201,7 +201,9 @@ async def test_cf_add_and_insert(decoded_r: redis.Redis):
     assert_resp_response(
         decoded_r, 0, info.get("deletedNum"), info.get("Number of items deleted")
     )
-    assert_resp_response(decoded_r, 1, info.get("filterNum"), info.get("Number of filters"))
+    assert_resp_response(
+        decoded_r, 1, info.get("filterNum"), info.get("Number of filters")
+    )
 
 
 @pytest.mark.redismod
@@ -358,7 +360,9 @@ async def test_tdigest_reset(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().reset("tDigest")
     # assert we have 0 unmerged nodes
     info = await decoded_r.tdigest().info("tDigest")
-    assert_resp_response(decoded_r, 0, info.get("unmerged_nodes"), info.get("Unmerged nodes"))
+    assert_resp_response(
+        decoded_r, 0, info.get("unmerged_nodes"), info.get("Unmerged nodes")
+    )
 
 
 @pytest.mark.redismod
@@ -406,7 +410,9 @@ async def test_tdigest_min_and_max(decoded_r: redis.Redis):
 async def test_tdigest_quantile(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("tDigest", 500)
     # insert data-points into sketch
-    assert await decoded_r.tdigest().add("tDigest", list([x * 0.01 for x in range(1, 10000)]))
+    assert await decoded_r.tdigest().add(
+        "tDigest", list([x * 0.01 for x in range(1, 10000)])
+    )
     # assert min min/max have same result as quantile 0 and 1
     assert (
         await decoded_r.tdigest().max("tDigest")

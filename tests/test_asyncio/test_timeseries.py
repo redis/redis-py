@@ -283,7 +283,9 @@ async def test_rev_range(decoded_r: redis.Redis):
     assert 200 == len(await decoded_r.ts().range(1, 0, 500))
     # first sample isn't returned
     assert 20 == len(
-        await decoded_r.ts().revrange(1, 0, 500, aggregation_type="avg", bucket_size_msec=10)
+        await decoded_r.ts().revrange(
+            1, 0, 500, aggregation_type="avg", bucket_size_msec=10
+        )
     )
     assert 10 == len(await decoded_r.ts().revrange(1, 0, 500, count=10))
     assert 2 == len(
@@ -374,7 +376,9 @@ async def test_multi_range(decoded_r: redis.Redis):
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 async def test_multi_range_advanced(decoded_r: redis.Redis):
     await decoded_r.ts().create(1, labels={"Test": "This", "team": "ny"})
-    await decoded_r.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
+    await decoded_r.ts().create(
+        2, labels={"Test": "This", "Taste": "That", "team": "sf"}
+    )
     for i in range(100):
         await decoded_r.ts().add(1, i, i % 7)
         await decoded_r.ts().add(2, i, i % 11)
@@ -490,7 +494,9 @@ async def test_multi_range_advanced(decoded_r: redis.Redis):
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 async def test_multi_reverse_range(decoded_r: redis.Redis):
     await decoded_r.ts().create(1, labels={"Test": "This", "team": "ny"})
-    await decoded_r.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
+    await decoded_r.ts().create(
+        2, labels={"Test": "This", "Taste": "That", "team": "sf"}
+    )
     for i in range(100):
         await decoded_r.ts().add(1, i, i % 7)
         await decoded_r.ts().add(2, i, i % 11)
