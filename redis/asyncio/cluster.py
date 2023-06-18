@@ -321,6 +321,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         kwargs["response_callbacks"] = self.__class__.RESPONSE_CALLBACKS.copy()
         if kwargs.get("protocol") in ["3", 3]:
             kwargs["response_callbacks"].update(self.__class__.RESP3_RESPONSE_CALLBACKS)
+        else:
+            kwargs["response_callbacks"].update(self.__class__.RESP2_RESPONSE_CALLBACKS)
         self.connection_kwargs = kwargs
 
         if startup_nodes:

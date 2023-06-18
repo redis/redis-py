@@ -67,25 +67,25 @@ async def get_stream_message(client: redis.Redis, stream: str, message_id: str):
     assert len(response) == 1
     return response[0]
 
+    # # RESPONSE CALLBACKS
+    # @pytest.mark.onlynoncluster
+    # class TestResponseCallbacks:
+    #     """Tests for the response callback system"""
 
-# # RESPONSE CALLBACKS
-# @pytest.mark.onlynoncluster
-# class TestResponseCallbacks:
-#     """Tests for the response callback system"""
+    async def test_response_callbacks(self, r: redis.Redis):
+        callbacks = redis.Redis.RESPONSE_CALLBACKS
+        if is_resp2_connection(r):
+            callbacks.update(redis.Redis.RESP2_RESPONSE_CALLBACKS)
+        else:
+            callbacks.update(redis.Redis.RESP3_RESPONSE_CALLBACKS)
+        assert r.response_callbacks == callbacks
+        assert id(r.response_callbacks) != id(redis.Redis.RESPONSE_CALLBACKS)
+        r.set_response_callback("GET", lambda x: "static")
+        await r.set("a", "foo")
+        assert await r.get("a") == "static"
 
-#     async def test_response_callbacks(self, r: redis.Redis):
-#         resp3_callbacks = redis.Redis.RESPONSE_CALLBACKS.copy()
-#         resp3_callbacks.update(redis.Redis.RESP3_RESPONSE_CALLBACKS)
-#         assert_resp_response(
-#             r, r.response_callbacks, redis.Redis.RESPONSE_CALLBACKS, resp3_callbacks
-#         )
-#         assert id(r.response_callbacks) != id(redis.Redis.RESPONSE_CALLBACKS)
-#         r.set_response_callback("GET", lambda x: "static")
-#         await r.set("a", "foo")
-#         assert await r.get("a") == "static"
-
-#     async def test_case_insensitive_command_names(self, r: redis.Redis):
-#         assert r.response_callbacks["del"] == r.response_callbacks["DEL"]
+    async def test_case_insensitive_command_names(self, r: redis.Redis):
+        assert r.response_callbacks["ping"] == r.response_callbacks["PING"]
 
 
 class TestRedisCommands:
@@ -2718,7 +2718,7 @@ class TestRedisCommands:
         ]
         assert await r.xinfo_groups(stream) == expected
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.2.0")
     async def test_xinfo_consumers(self, r: redis.Redis):
         stream = "stream"
         group = "group"
@@ -2734,8 +2734,8 @@ class TestRedisCommands:
         info = await r.xinfo_consumers(stream, group)
         assert len(info) == 2
         expected = [
-            {"name": consumer1.encode(), "pending": 1},
-            {"name": consumer2.encode(), "pending": 2},
+            {"name": consumer1.encode(), "pending": 1, "inactive": 2},
+            {"name": consumer2.encode(), "pending": 2, "inactive": 2},
         ]
 
         # we can't determine the idle time, so just make sure it's an int

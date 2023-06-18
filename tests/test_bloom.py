@@ -6,7 +6,7 @@ import redis.commands.bf
 from redis.exceptions import ModuleError, RedisError
 from redis.utils import HIREDIS_AVAILABLE
 
-from .conftest import skip_ifmodversion_lt
+from .conftest import assert_resp_response, is_resp2_connection, skip_ifmodversion_lt
 
 
 def intlist(obj):
@@ -61,7 +61,6 @@ def test_tdigest_create(client):
     assert client.tdigest().create("tDigest", 100)
 
 
-# region Test Bloom Filter
 @pytest.mark.redismod
 def test_bf_add(client):
     assert client.bf().create("bloom", 0.01, 1000)
@@ -86,9 +85,24 @@ def test_bf_insert(client):
     assert 0 == client.bf().exists("bloom", "noexist")
     assert [1, 0] == intlist(client.bf().mexists("bloom", "foo", "noexist"))
     info = client.bf().info("bloom")
-    assert 2 == info.insertedNum
-    assert 1000 == info.capacity
-    assert 1 == info.filterNum
+    assert_resp_response(
+        client,
+        2,
+        info.get("insertedNum"),
+        info.get("Number of items inserted"),
+    )
+    assert_resp_response(
+        client,
+        1000,
+        info.get("capacity"),
+        info.get("Capacity"),
+    )
+    assert_resp_response(
+        client,
+        1,
+        info.get("filterNum"),
+        info.get("Number of filters"),
+    )
 
 
 @pytest.mark.redismod
@@ -149,11 +163,21 @@ def test_bf_info(client):
     # Store a filter
     client.bf().create("nonscaling", "0.0001", "1000", noScale=True)
     info = client.bf().info("nonscaling")
-    assert info.expansionRate is None
+    assert_resp_response(
+        client,
+        None,
+        info.get("expansionRate"),
+        info.get("Expansion rate"),
+    )
 
     client.bf().create("expanding", "0.0001", "1000", expansion=expansion)
     info = client.bf().info("expanding")
-    assert info.expansionRate == 4
+    assert_resp_response(
+        client,
+        4,
+        info.get("expansionRate"),
+        info.get("Expansion rate"),
+    )
 
     try:
         # noScale mean no expansion
@@ -180,7 +204,6 @@ def test_bf_card(client):
         client.bf().card("setKey")
 
 
-# region Test Cuckoo Filter
 @pytest.mark.redismod
 def test_cf_add_and_insert(client):
     assert client.cf().create("cuckoo", 1000)
@@ -196,9 +219,15 @@ def test_cf_add_and_insert(client):
     assert [1] == client.cf().insert("empty1", ["foo"], capacity=1000)
     assert [1] == client.cf().insertnx("empty2", ["bar"], capacity=1000)
     info = client.cf().info("captest")
-    assert 5 == info.insertedNum
-    assert 0 == info.deletedNum
-    assert 1 == info.filterNum
+    assert_resp_response(
+        client, 5, info.get("insertedNum"), info.get("Number of items inserted")
+    )
+    assert_resp_response(
+        client, 0, info.get("deletedNum"), info.get("Number of items deleted")
+    )
+    assert_resp_response(
+        client, 1, info.get("filterNum"), info.get("Number of filters")
+    )
 
 
 @pytest.mark.redismod
@@ -214,7 +243,6 @@ def test_cf_exists_and_del(client):
     assert 0 == client.cf().count("cuckoo", "filter")
 
 
-# region Test Count-Min Sketch
 @pytest.mark.redismod
 def test_cms(client):
     assert client.cms().initbydim("dim", 1000, 5)
@@ -225,9 +253,10 @@ def test_cms(client):
     assert [10, 15] == client.cms().incrby("dim", ["foo", "bar"], [5, 15])
     assert [10, 15] == client.cms().query("dim", "foo", "bar")
     info = client.cms().info("dim")
-    assert 1000 == info.width
-    assert 5 == info.depth
-    assert 25 == info.count
+    assert info["width"]
+    assert 1000 == info["width"]
+    assert 5 == info["depth"]
+    assert 25 == info["count"]
 
 
 @pytest.mark.redismod
@@ -248,10 +277,6 @@ def test_cms_merge(client):
     assert [16, 15, 21] == client.cms().query("C", "foo", "bar", "baz")
 
 
-# endregion
-
-
-# region Test Top-K
 @pytest.mark.redismod
 def test_topk(client):
     # test list with empty buckets
@@ -326,10 +351,10 @@ def test_topk(client):
     assert ["A", "B", "E"] == client.topk().list("topklist")
     assert ["A", 4, "B", 3, "E", 3] == client.topk().list("topklist", withcount=True)
     info = client.topk().info("topklist")
-    assert 3 == info.k
-    assert 50 == info.width
-    assert 3 == info.depth
-    assert 0.9 == round(float(info.decay), 1)
+    assert 3 == info["k"]
+    assert 50 == info["width"]
+    assert 3 == info["depth"]
+    assert 0.9 == round(float(info["decay"]), 1)
 
 
 @pytest.mark.redismod
@@ -346,7 +371,6 @@ def test_topk_incrby(client):
         )
 
 
-# region Test T-Digest
 @pytest.mark.redismod
 @pytest.mark.experimental
 def test_tdigest_reset(client):
@@ -357,8 +381,11 @@ def test_tdigest_reset(client):
     assert client.tdigest().add("tDigest", list(range(10)))
 
     assert client.tdigest().reset("tDigest")
-    # assert we have 0 unmerged nodes
-    assert 0 == client.tdigest().info("tDigest").unmerged_nodes
+    # assert we have 0 unmerged
+    info = client.tdigest().info("tDigest")
+    assert_resp_response(
+        client, 0, info.get("unmerged_nodes"), info.get("Unmerged nodes")
+    )
 
 
 @pytest.mark.redismod
@@ -373,8 +400,10 @@ def test_tdigest_merge(client):
     assert client.tdigest().merge("to-tDigest", 1, "from-tDigest")
     # we should now have 110 weight on to-histogram
     info = client.tdigest().info("to-tDigest")
-    total_weight_to = float(info.merged_weight) + float(info.unmerged_weight)
-    assert 20 == total_weight_to
+    if is_resp2_connection(client):
+        assert 20 == float(info["merged_weight"]) + float(info["unmerged_weight"])
+    else:
+        assert 20 == float(info["Merged weight"]) + float(info["Unmerged weight"])
     # test override
     assert client.tdigest().create("from-override", 10)
     assert client.tdigest().create("from-override-2", 10)

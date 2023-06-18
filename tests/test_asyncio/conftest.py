@@ -134,10 +134,8 @@ async def r2(create_redis):
 
 
 @pytest_asyncio.fixture()
-async def modclient(request, create_redis):
-    return await create_redis(
-        url=request.config.getoption("--redis-url"), decode_responses=True
-    )
+async def decoded_r(create_redis):
+    return await create_redis(decode_responses=True)
 
 
 def _gen_cluster_mock_resp(r, response):

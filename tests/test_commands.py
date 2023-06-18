@@ -51,24 +51,25 @@ def get_stream_message(client, stream, message_id):
     assert len(response) == 1
     return response[0]
 
+    # # RESPONSE CALLBACKS
+    # @pytest.mark.onlynoncluster
+    # class TestResponseCallbacks:
+    #     "Tests for the response callback system"
 
-# # RESPONSE CALLBACKS
-# @pytest.mark.onlynoncluster
-# class TestResponseCallbacks:
-#     "Tests for the response callback system"
+    def test_response_callbacks(self, r):
+        callbacks = redis.Redis.RESPONSE_CALLBACKS
+        if is_resp2_connection(r):
+            callbacks.update(redis.Redis.RESP2_RESPONSE_CALLBACKS)
+        else:
+            callbacks.update(redis.Redis.RESP3_RESPONSE_CALLBACKS)
+        assert r.response_callbacks == callbacks
+        assert id(r.response_callbacks) != id(redis.Redis.RESPONSE_CALLBACKS)
+        r.set_response_callback("GET", lambda x: "static")
+        r["a"] = "foo"
+        assert r["a"] == "static"
 
-#     def test_response_callbacks(self, r):
-#         callbacks = redis.Redis.RESPONSE_CALLBACKS
-#         if not is_resp2_connection(r):
-#             callbacks.update(redis.Redis.RESP3_RESPONSE_CALLBACKS)
-#         assert r.response_callbacks == callbacks
-#         assert id(r.response_callbacks) != id(redis.Redis.RESPONSE_CALLBACKS)
-#         r.set_response_callback("GET", lambda x: "static")
-#         r["a"] = "foo"
-#         assert r["a"] == "static"
-
-#     def test_case_insensitive_command_names(self, r):
-#         assert r.response_callbacks["ping"] == r.response_callbacks["PING"]
+    def test_case_insensitive_command_names(self, r):
+        assert r.response_callbacks["ping"] == r.response_callbacks["PING"]
 
 
 class TestRedisCommands:
@@ -237,7 +238,7 @@ class TestRedisCommands:
             keys=["cache:*", "objects:*"],
         )
         acl = r.acl_getuser(username)
-        assert set(acl["categories"]) == {"+@set", "+@hash", "-@all"}
+        assert set(acl["categories"]) == {"+@hash", "+@set", "-@all"}
         assert set(acl["commands"]) == {"+get", "+mget", "-hset"}
         assert acl["enabled"] is True
         assert "on" in acl["flags"]
@@ -314,6 +315,7 @@ class TestRedisCommands:
             selectors=[("+set", "%W~app*")],
         )
         acl = r.acl_getuser(username)
+        assert set(acl["categories"]) == {"+@hash", "+@set", "-@all"}
         assert set(acl["commands"]) == {"+get", "+mget", "-hset"}
         assert acl["enabled"] is True
         assert "on" in acl["flags"]
@@ -4913,6 +4915,7 @@ class TestRedisCommands:
     @skip_if_redis_enterprise()
     def test_sync(self, r):
         r.flushdb()
+        time.sleep(1)
         r2 = redis.Redis(port=6380, decode_responses=False)
         res = r2.sync()
         assert b"REDIS" in res

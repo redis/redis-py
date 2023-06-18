@@ -257,6 +257,8 @@ class Redis(
 
         if self.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
             self.response_callbacks.update(self.__class__.RESP3_RESPONSE_CALLBACKS)
+        else:
+            self.response_callbacks.update(self.__class__.RESP2_RESPONSE_CALLBACKS)
 
         # If using a single connection client, we need to lock creation-of and use-of
         # the client in order to avoid race conditions such as using asyncio.gather

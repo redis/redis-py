@@ -364,10 +364,9 @@ class Connection:
                 auth_args = ["default", auth_args[0]]
             await self.send_command("HELLO", self.protocol, "AUTH", *auth_args)
             response = await self.read_response()
-            if response.get(b"proto") not in [2, "2"] and response.get("proto") not in [
-                2,
-                "2",
-            ]:
+            if response.get(b"proto") != int(self.protocol) and response.get(
+                "proto"
+            ) != int(self.protocol):
                 raise ConnectionError("Invalid RESP version")
         # avoid checking health here -- PING will fail if we try
         # to check the health prior to the AUTH

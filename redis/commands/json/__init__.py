@@ -32,32 +32,49 @@ class JSON(JSONCommands):
         """
         # Set the module commands' callbacks
         self.MODULE_CALLBACKS = {
-            "JSON.CLEAR": int,
-            "JSON.DEL": int,
-            "JSON.FORGET": int,
-            "JSON.GET": self._decode,
+            "JSON.ARRPOP": self._decode,
             "JSON.MGET": bulk_of_jsons(self._decode),
             "JSON.SET": lambda r: r and nativestr(r) == "OK",
-            "JSON.NUMINCRBY": self._decode,
-            "JSON.NUMMULTBY": self._decode,
+            "JSON.DEBUG": self._decode,
             "JSON.TOGGLE": self._decode,
-            "JSON.STRAPPEND": self._decode,
-            "JSON.STRLEN": self._decode,
+            "JSON.RESP": self._decode,
+        }
+
+        RESP2_MODULE_CALLBACKS = {
+            "JSON.ARRTRIM": self._decode,
+            "JSON.OBJLEN": self._decode,
             "JSON.ARRAPPEND": self._decode,
             "JSON.ARRINDEX": self._decode,
             "JSON.ARRINSERT": self._decode,
+            "JSON.TOGGLE": self._decode,
+            "JSON.STRAPPEND": self._decode,
+            "JSON.STRLEN": self._decode,
             "JSON.ARRLEN": self._decode,
-            "JSON.ARRPOP": self._decode,
-            "JSON.ARRTRIM": self._decode,
-            "JSON.OBJLEN": self._decode,
+            "JSON.CLEAR": int,
+            "JSON.DEL": int,
+            "JSON.FORGET": int,
+            "JSON.NUMINCRBY": self._decode,
+            "JSON.NUMMULTBY": self._decode,
             "JSON.OBJKEYS": self._decode,
-            "JSON.RESP": self._decode,
-            "JSON.DEBUG": self._decode,
+            "JSON.GET": self._decode,
+        }
+
+        RESP3_MODULE_CALLBACKS = {
+            "JSON.GET": lambda response: [
+                [self._decode(r) for r in res] for res in response
+            ]
+            if response
+            else response
         }
 
         self.client = client
         self.execute_command = client.execute_command
         self.MODULE_VERSION = version
+
+        if self.client.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
+            self.MODULE_CALLBACKS.update(RESP3_MODULE_CALLBACKS)
+        else:
+            self.MODULE_CALLBACKS.update(RESP2_MODULE_CALLBACKS)
 
         for key, value in self.MODULE_CALLBACKS.items():
             self.client.set_response_callback(key, value)
