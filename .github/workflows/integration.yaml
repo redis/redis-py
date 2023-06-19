@@ -73,8 +73,12 @@ jobs:
          run: |
            pip install -U setuptools wheel
            pip install -r dev_requirements.txt
+           if [ "${{matrix.connection-type}}" == "hiredis" ]; then
+            pip install hiredis
+           fi
            invoke devenv
-           tox -e ${{matrix.test-type}}-${{matrix.connection-type}}
+           invoke ${{matrix.test-type}}_tests
+           invoke ${{matrix.test-type}}_tests --uvloop
 
        - uses: actions/upload-artifact@v2
          if: success() || failure()
@@ -109,7 +113,6 @@ jobs:
         python-version: ['3.7', '3.11']
         test-type: ['standalone', 'cluster']
         connection-type: ['hiredis', 'plain']
-        async-type: ['uvloop', 'asyncio']
         protocol: ['3']
     env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
@@ -124,8 +127,12 @@ jobs:
         run: |
           pip install -U setuptools wheel
           pip install -r dev_requirements.txt
+          if [ "${{matrix.connection-type}}" == "hiredis" ]; then
+            pip install hiredis
+          fi
           invoke devenv
-          tox -e ${{matrix.test-type}}-${{matrix.async-type}}-${{matrix.connection-type}}-resp${{matrix.protocol}}
+          invoke ${{matrix.test-type}}_tests
+          invoke ${{matrix.test-type}}_tests --uvloop
 
    build_and_test_package:
     name: Validate building and installing the package

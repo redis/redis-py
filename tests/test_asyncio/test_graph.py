@@ -1,5 +1,4 @@
 import pytest
-
 import redis.asyncio as redis
 from redis.commands.graph import Edge, Node, Path
 from redis.commands.graph.execution_plan import Operation

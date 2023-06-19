@@ -6,7 +6,6 @@ from time import sleep
 from unittest.mock import DEFAULT, Mock, call, patch
 
 import pytest
-
 from redis import Redis
 from redis.backoff import ExponentialBackoff, NoBackoff, default_backoff
 from redis.cluster import (

@@ -8,10 +8,6 @@ from invoke import run, task
 if not hasattr(inspect, "getargspec"):
     inspect.getargspec = inspect.getfullargspec
 
-with open("tox.ini") as fp:
-    lines = fp.read().split("\n")
-    dockers = [line.split("=")[1].strip() for line in lines if line.find("name") != -1]
-
 
 @task
 def devenv(c):
@@ -24,47 +20,60 @@ def devenv(c):
 @task
 def build_docs(c):
     """Generates the sphinx documentation."""
-    run("tox -e docs")
+    run("pip install -r docs/requirements.txt")
+    run("make html")
 
 
 @task
 def linters(c):
     """Run code linters"""
-    run("tox -e linters")
+    run("flake8 tests redis")
+    run("black --target-version py37 --check --diff tests redis")
+    run("isort --check-only --diff tests redis")
+    run("vulture redis whitelist.py --min-confidence 80")
+    run("flynt --fail-on-change --dry-run tests redis")
 
 
 @task
 def all_tests(c):
-    """Run all linters, and tests in redis-py. This assumes you have all
-    the python versions specified in the tox.ini file.
-    """
+    """Run all linters, and tests in redis-py."""
     linters(c)
     tests(c)
 
 
 @task
-def tests(c):
+def tests(c, uvloop=False, protocol=2):
     """Run the redis-py test suite against the current python,
     with and without hiredis.
     """
     print("Starting Redis tests")
-    run("tox -e '{standalone,cluster}'-'{plain,hiredis}'")
+    standalone_tests(c, uvloop=uvloop, protocol=protocol)
+    cluster_tests(c, uvloop=uvloop, protocol=protocol)
 
 
 @task
-def standalone_tests(c):
-    """Run all Redis tests against the current python,
-    with and without hiredis."""
-    print("Starting Redis tests")
-    run("tox -e standalone-'{plain,hiredis,ocsp}'")
+def standalone_tests(c, uvloop=False, protocol=2):
+    if uvloop:
+        run(
+            f"pytest --protocol={protocol} --cov=./ --cov-report=xml:coverage_redis.xml -W always -m 'not onlycluster' --uvloop --junit-xml=standalone-uvloop-results.xml"
+        )
+    else:
+        run(
+            f"pytest --protocol={protocol} --cov=./ --cov-report=xml:coverage_redis.xml -W always -m 'not onlycluster' --junit-xml=standalone-results.xml"
+        )
 
 
 @task
-def cluster_tests(c):
-    """Run all Redis Cluster tests against the current python,
-    with and without hiredis."""
-    print("Starting RedisCluster tests")
-    run("tox -e cluster-'{plain,hiredis}'")
+def cluster_tests(c, uvloop=False, protocol=2):
+    cluster_url = "redis://localhost:16379/0"
+    if uvloop:
+        run(
+            f"pytest --protocol={protocol} --cov=./ --cov-report=xml:coverage_cluster.xml -W always -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --junit-xml=cluster-uvloop-results.xml --uvloop"
+        )
+    else:
+        run(
+            f"pytest --protocol={protocol} --cov=./ --cov-report=xml:coverage_clusteclient.xml -W always -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --junit-xml=cluster-results.xml"
+        )
 
 
 @task

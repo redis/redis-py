@@ -6,9 +6,8 @@ from unittest.mock import Mock
 from urllib.parse import urlparse
 
 import pytest
-from packaging.version import Version
-
 import redis
+from packaging.version import Version
 from redis.backoff import NoBackoff
 from redis.connection import parse_url
 from redis.exceptions import RedisClusterException

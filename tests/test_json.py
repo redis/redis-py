@@ -1,5 +1,4 @@
 import pytest
-
 import redis
 from redis import Redis, exceptions
 from redis.commands.json.decoders import decode_list, unstring

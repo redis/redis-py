@@ -1,5 +1,4 @@
 import pytest
-
 import redis.asyncio as redis
 from redis import exceptions
 from redis.commands.json.path import Path

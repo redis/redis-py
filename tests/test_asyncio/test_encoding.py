@@ -1,6 +1,5 @@
 import pytest
 import pytest_asyncio
-
 import redis.asyncio as redis
 from redis.exceptions import DataError
 

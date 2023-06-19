@@ -8,7 +8,6 @@ from string import ascii_letters
 
 import pytest
 import pytest_asyncio
-
 import redis
 from redis import exceptions
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, parse_info

@@ -1,6 +1,5 @@
 import pytest
 import pytest_asyncio
-
 from redis import exceptions
 from tests.conftest import skip_if_server_version_lt
 

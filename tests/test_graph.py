@@ -1,7 +1,6 @@
 from unittest.mock import patch
 
 import pytest
-
 from redis import Redis
 from redis.commands.graph import Edge, Node, Path
 from redis.commands.graph.execution_plan import Operation

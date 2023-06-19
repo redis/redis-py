@@ -2,7 +2,6 @@ import time
 from time import sleep
 
 import pytest
-
 import redis.asyncio as redis
 from tests.conftest import (
     assert_resp_response,

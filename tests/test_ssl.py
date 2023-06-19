@@ -4,7 +4,6 @@ import ssl
 from urllib.parse import urlparse
 
 import pytest
-
 import redis
 from redis.exceptions import ConnectionError, RedisError
 

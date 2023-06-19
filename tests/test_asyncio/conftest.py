@@ -5,9 +5,8 @@ from urllib.parse import urlparse
 
 import pytest
 import pytest_asyncio
-from packaging.version import Version
-
 import redis.asyncio as redis
+from packaging.version import Version
 from redis.asyncio.client import Monitor
 from redis.asyncio.connection import parse_url
 from redis.asyncio.retry import Retry

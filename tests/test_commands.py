@@ -6,7 +6,6 @@ from string import ascii_letters
 from unittest import mock
 
 import pytest
-
 import redis
 from redis import exceptions
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, parse_info

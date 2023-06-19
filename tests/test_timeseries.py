@@ -3,7 +3,6 @@ import time
 from time import sleep
 
 import pytest
-
 import redis
 
 from .conftest import assert_resp_response, is_resp2_connection, skip_ifmodversion_lt

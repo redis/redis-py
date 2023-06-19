@@ -5,7 +5,6 @@ from threading import Thread
 from unittest import mock
 
 import pytest
-
 import redis
 from redis.connection import to_bool
 from redis.utils import SSL_AVAILABLE

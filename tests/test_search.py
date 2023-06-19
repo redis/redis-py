@@ -5,7 +5,6 @@ import time
 from io import TextIOWrapper
 
 import pytest
-
 import redis
 import redis.commands.search
 import redis.commands.search.aggregation as aggregations

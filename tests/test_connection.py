@@ -4,7 +4,6 @@ from unittest import mock
 from unittest.mock import patch
 
 import pytest
-
 import redis
 from redis.backoff import NoBackoff
 from redis.connection import Connection, SSLConnection, UnixDomainSocketConnection

@@ -1,7 +1,6 @@
 from math import inf
 
 import pytest
-
 import redis.asyncio as redis
 from redis.exceptions import ModuleError, RedisError
 from redis.utils import HIREDIS_AVAILABLE
