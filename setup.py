@@ -8,7 +8,7 @@ setup(
     long_description_content_type="text/markdown",
     keywords=["Redis", "key-value store", "database"],
     license="MIT",
-    version="4.5.4",
+    version="4.5.5",
     packages=find_packages(
         include=[
             "redis",
@@ -34,7 +34,7 @@ setup(
     install_requires=[
         'importlib-metadata >= 1.0; python_version < "3.8"',
         'typing-extensions; python_version<"3.8"',
-        'async-timeout>=4.0.2; python_version<="3.11.2"',
+        'async-timeout>=4.0.2; python_full_version<="3.11.2"',
     ],
     classifiers=[
         "Development Status :: 5 - Production/Stable",

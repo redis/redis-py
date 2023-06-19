@@ -1,7 +1,6 @@
 import random
 from contextlib import asynccontextmanager as _asynccontextmanager
 from typing import Union
-from urllib.parse import urlparse
 
 import pytest
 import pytest_asyncio
@@ -207,13 +206,6 @@ async def mock_cluster_resp_slaves(create_redis, **kwargs):
         "1447836789290 3 connected']"
     )
     return _gen_cluster_mock_resp(r, response)
-
-
-@pytest_asyncio.fixture(scope="session")
-def master_host(request):
-    url = request.config.getoption("--redis-url")
-    parts = urlparse(url)
-    return parts.hostname
 
 
 async def wait_for_command(
