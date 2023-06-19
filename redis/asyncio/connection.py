@@ -182,12 +182,6 @@ class BaseParser:
         self._read_size = socket_read_size
         self._connected = False
 
-    def __del__(self):
-        try:
-            self.on_disconnect()
-        except Exception:
-            pass
-
     @classmethod
     def parse_error(cls, response: str) -> ResponseError:
         """Parse an error response"""
@@ -555,18 +549,6 @@ class AbstractConnection:
     def repr_pieces(self):
         pass
 
-    def __del__(self):
-        try:
-            if self.is_connected:
-                loop = asyncio.get_running_loop()
-                coro = self.disconnect()
-                if loop.is_running():
-                    loop.create_task(coro)
-                else:
-                    loop.run_until_complete(coro)
-        except Exception:
-            pass
-
     @property
     def is_connected(self):
         return self._reader is not None and self._writer is not None
@@ -755,7 +737,11 @@ class AbstractConnection:
             raise ConnectionError(
                 f"Error {err_no} while writing to socket. {errmsg}."
             ) from e
-        except Exception:
+        except BaseException:
+            # BaseExceptions can be raised when a socket send operation is not
+            # finished, e.g. due to a timeout.  Ideally, a caller could then re-try
+            # to send un-sent data. However, the send_packed_command() API
+            # does not support it so there is no point in keeping the connection open.
             await self.disconnect(nowait=True)
             raise
 
@@ -778,6 +764,8 @@ class AbstractConnection:
         self,
         disable_decoding: bool = False,
         timeout: Optional[float] = None,
+        *,
+        disconnect_on_error: bool = True,
     ):
         """Read the response from a previously sent command"""
         read_timeout = timeout if timeout is not None else self.socket_timeout
@@ -794,20 +782,22 @@ class AbstractConnection:
                 )
         except asyncio.TimeoutError:
             if timeout is not None:
-                # user requested timeout, return None
+                # user requested timeout, return None. Operation can be retried
                 return None
             # it was a self.socket_timeout error.
-            await self.disconnect(nowait=True)
+            if disconnect_on_error:
+                await self.disconnect(nowait=True)
             raise TimeoutError(f"Timeout reading from {host_error}")
         except OSError as e:
-            await self.disconnect(nowait=True)
+            if disconnect_on_error:
+                await self.disconnect(nowait=True)
             raise ConnectionError(f"Error while reading from {host_error} : {e.args}")
-        except asyncio.CancelledError:
-            # need this check for 3.7, where CancelledError
-            # is subclass of Exception, not BaseException
-            raise
-        except Exception:
-            await self.disconnect(nowait=True)
+        except BaseException:
+            # Also by default close in case of BaseException.  A lot of code
+            # relies on this behaviour when doing Command/Response pairs.
+            # See #1128.
+            if disconnect_on_error:
+                await self.disconnect(nowait=True)
             raise
 
         if self.health_check_interval:

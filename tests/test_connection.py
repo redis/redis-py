@@ -160,7 +160,7 @@ def test_connection_parse_response_resume(r: redis.Redis, parser_class):
         conn._parser._sock = mock_socket
     for i in range(100):
         try:
-            response = conn.read_response()
+            response = conn.read_response(disconnect_on_error=False)
             break
         except MockSocket.TestError:
             pass
@@ -205,3 +205,11 @@ def test_pack_command(Class):
 
     actual = Class().pack_command(*cmd)[0]
     assert actual == expected, f"actual = {actual}, expected = {expected}"
+
+
+@pytest.mark.onlynoncluster
+def test_create_single_connection_client_from_url():
+    client = redis.Redis.from_url(
+        "redis://localhost:6379/0?", single_connection_client=True
+    )
+    assert client.connection is not None
