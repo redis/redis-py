@@ -72,6 +72,7 @@ jobs:
        - name: run tests
          run: |
            pip install -U setuptools wheel
+           pip install -r requirements.txt
            pip install -r dev_requirements.txt
            if [ "${{matrix.connection-type}}" == "hiredis" ]; then
             pip install hiredis
