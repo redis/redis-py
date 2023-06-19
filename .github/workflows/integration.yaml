@@ -109,10 +109,11 @@ jobs:
         python-version: ['3.7', '3.11']
         test-type: ['standalone', 'cluster']
         connection-type: ['hiredis', 'plain']
+        async-type: ['uvloop', 'asyncio']
         protocol: ['3']
     env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: RESP3 [${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}]
+    name: RESP3 [${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.async-type}}-${{matrix.connection-type}}]
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
@@ -124,7 +125,7 @@ jobs:
           pip install -U setuptools wheel
           pip install -r dev_requirements.txt
           invoke devenv
-          tox -e ${{matrix.test-type}}-${{matrix.connection-type}}-resp${{matrix.protocol}}
+          tox -e ${{matrix.test-type}}-${{matrix.async-type}}-${{matrix.connection-type}}-resp${{matrix.protocol}}
 
    build_and_test_package:
     name: Validate building and installing the package
