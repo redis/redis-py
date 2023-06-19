@@ -1,3 +1,5 @@
+    * Fix #2768, Fix KeyError: 'first-entry' in parse_xinfo_stream.
+    * Fix #2749, remove unnecessary __del__ logic to close connections.
     * Fix #2754, adding a missing argument to SentinelManagedConnection
     * Fix `xadd` command to accept non-negative `maxlen` including 0
     * Revert #2104, #2673, add `disconnect_on_error` option to `read_response()` (issues #2506, #2624)

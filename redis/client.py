@@ -320,7 +320,7 @@ def parse_xautoclaim(response, **options):
 def parse_xinfo_stream(response, **options):
     data = pairs_to_dict(response, decode_keys=True)
     if not options.get("full", False):
-        first = data["first-entry"]
+        first = data.get("first-entry")
         if first is not None:
             data["first-entry"] = (first[0], pairs_to_dict(first[1]))
         last = data["last-entry"]
