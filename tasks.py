@@ -53,6 +53,7 @@ def tests(c, uvloop=False, protocol=2):
 
 @task
 def standalone_tests(c, uvloop=False, protocol=2):
+    """Run tests against a standalone redis instance"""
     if uvloop:
         run(
             f"pytest --protocol={protocol} --cov=./ --cov-report=xml:coverage_redis.xml -W always -m 'not onlycluster' --uvloop --junit-xml=standalone-uvloop-results.xml"
@@ -65,6 +66,7 @@ def standalone_tests(c, uvloop=False, protocol=2):
 
 @task
 def cluster_tests(c, uvloop=False, protocol=2):
+    """Run tests against a redis cluster"""
     cluster_url = "redis://localhost:16379/0"
     if uvloop:
         run(

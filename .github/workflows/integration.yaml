@@ -77,8 +77,8 @@ jobs:
             pip install hiredis
            fi
            invoke devenv
-           invoke ${{matrix.test-type}}_tests
-           invoke ${{matrix.test-type}}_tests --uvloop
+           invoke ${{matrix.test-type}}-tests
+           invoke ${{matrix.test-type}}-tests --uvloop
 
        - uses: actions/upload-artifact@v2
          if: success() || failure()
@@ -131,8 +131,8 @@ jobs:
             pip install hiredis
           fi
           invoke devenv
-          invoke ${{matrix.test-type}}_tests
-          invoke ${{matrix.test-type}}_tests --uvloop
+          invoke ${{matrix.test-type}}-tests
+          invoke ${{matrix.test-type}}-tests --uvloop
 
    build_and_test_package:
     name: Validate building and installing the package
