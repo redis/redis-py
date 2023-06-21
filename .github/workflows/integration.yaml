@@ -78,6 +78,7 @@ jobs:
             pip install hiredis
            fi
            invoke devenv
+           sleep 3 # time to settle
            invoke ${{matrix.test-type}}-tests
            invoke ${{matrix.test-type}}-tests --uvloop
 
@@ -133,6 +134,7 @@ jobs:
             pip install hiredis
           fi
           invoke devenv
+          sleep 3 # time to settle
           invoke ${{matrix.test-type}}-tests
           invoke ${{matrix.test-type}}-tests --uvloop
 
