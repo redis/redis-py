@@ -227,15 +227,15 @@ async def test_client(decoded_r: redis.Redis):
 
         for doc in res["results"]:
             assert doc["id"]
-            assert doc["fields"]["play"] == "Henry IV"
-            assert len(doc["fields"]["txt"]) > 0
+            assert doc["extra_attributes"]["play"] == "Henry IV"
+            assert len(doc["extra_attributes"]["txt"]) > 0
 
         # test no content
         res = await decoded_r.ft().search(Query("king").no_content())
         assert 194 == res["total_results"]
         assert 10 == len(res["results"])
         for doc in res["results"]:
-            assert "fields" not in doc.keys()
+            assert "extra_attributes" not in doc.keys()
 
         # test verbatim vs no verbatim
         total = (await decoded_r.ft().search(Query("kings").no_content()))[
@@ -679,19 +679,19 @@ async def test_summarize(decoded_r: redis.Redis):
         )
     else:
         doc = sorted((await decoded_r.ft().search(q))["results"])[0]
-        assert "<b>Henry</b> IV" == doc["fields"]["play"]
+        assert "<b>Henry</b> IV" == doc["extra_attributes"]["play"]
         assert (
             "ACT I SCENE I. London. The palace. Enter <b>KING</b> <b>HENRY</b>, LORD JOHN OF LANCASTER, the EARL of WESTMORELAND, SIR... "  # noqa
-            == doc["fields"]["txt"]
+            == doc["extra_attributes"]["txt"]
         )
 
         q = Query("king henry").paging(0, 1).summarize().highlight()
 
         doc = sorted((await decoded_r.ft().search(q))["results"])[0]
-        assert "<b>Henry</b> ... " == doc["fields"]["play"]
+        assert "<b>Henry</b> ... " == doc["extra_attributes"]["play"]
         assert (
             "ACT I SCENE I. London. The palace. Enter <b>KING</b> <b>HENRY</b>, LORD JOHN OF LANCASTER, the EARL of WESTMORELAND, SIR... "  # noqa
-            == doc["fields"]["txt"]
+            == doc["extra_attributes"]["txt"]
         )
 
 
@@ -810,34 +810,53 @@ async def test_alias_basic(decoded_r: redis.Redis):
         _ = (await alias_client2.search("*")).docs[0]
 
 
-# @pytest.mark.redismod
-# async def test_tags(decoded_r: redis.Redis):
-#     await decoded_r.ft().create_index((TextField("txt"), TagField("tags")))
-#     tags = "foo,foo bar,hello;world"
-#     tags2 = "soba,ramen"
+@pytest.mark.redismod
+async def test_tags(decoded_r: redis.Redis):
+    await decoded_r.ft().create_index((TextField("txt"), TagField("tags")))
+    tags = "foo,foo bar,hello;world"
+    tags2 = "soba,ramen"
 
-#     await decoded_r.hset("doc1", mapping={"txt": "fooz barz", "tags": tags})
-#     await decoded_r.hset("doc2", mapping={"txt": "noodles", "tags": tags2})
-#     await waitForIndex(decoded_r, "idx")
+    await decoded_r.hset("doc1", mapping={"txt": "fooz barz", "tags": tags})
+    await decoded_r.hset("doc2", mapping={"txt": "noodles", "tags": tags2})
+    await waitForIndex(decoded_r, "idx")
 
-#     q = Query("@tags:{foo}")
-#     res = await decoded_r.ft().search(q)
-#     assert 1 == res.total
+    q = Query("@tags:{foo}")
+    if is_resp2_connection(decoded_r):
+        res = await decoded_r.ft().search(q)
+        assert 1 == res.total
 
-#     q = Query("@tags:{foo bar}")
-#     res = await decoded_r.ft().search(q)
-#     assert 1 == res.total
+        q = Query("@tags:{foo bar}")
+        res = await decoded_r.ft().search(q)
+        assert 1 == res.total
 
-#     q = Query("@tags:{foo\\ bar}")
-#     res = await decoded_r.ft().search(q)
-#     assert 1 == res.total
+        q = Query("@tags:{foo\\ bar}")
+        res = await decoded_r.ft().search(q)
+        assert 1 == res.total
 
-#     q = Query("@tags:{hello\\;world}")
-#     res = await decoded_r.ft().search(q)
-#     assert 1 == res.total
+        q = Query("@tags:{hello\\;world}")
+        res = await decoded_r.ft().search(q)
+        assert 1 == res.total
 
-#     q2 = await decoded_r.ft().tagvals("tags")
-#     assert (tags.split(",") + tags2.split(",")).sort() == q2.sort()
+        q2 = await decoded_r.ft().tagvals("tags")
+        assert (tags.split(",") + tags2.split(",")).sort() == q2.sort()
+    else:
+        res = await decoded_r.ft().search(q)
+        assert 1 == res["total_results"]
+
+        q = Query("@tags:{foo bar}")
+        res = await decoded_r.ft().search(q)
+        assert 1 == res["total_results"]
+
+        q = Query("@tags:{foo\\ bar}")
+        res = await decoded_r.ft().search(q)
+        assert 1 == res["total_results"]
+
+        q = Query("@tags:{hello\\;world}")
+        res = await decoded_r.ft().search(q)
+        assert 1 == res["total_results"]
+
+        q2 = await decoded_r.ft().tagvals("tags")
+        assert set(tags.split(",") + tags2.split(",")) == q2
 
 
 @pytest.mark.redismod
@@ -922,29 +941,32 @@ async def test_spell_check(decoded_r: redis.Redis):
     else:
         # test spellcheck
         res = await decoded_r.ft().spellcheck("impornant")
-        assert "important" in res["impornant"][0].keys()
+        assert "important" in res["results"]["impornant"][0].keys()
 
         res = await decoded_r.ft().spellcheck("contnt")
-        assert "content" in res["contnt"][0].keys()
+        assert "content" in res["results"]["contnt"][0].keys()
 
         # test spellcheck with Levenshtein distance
         res = await decoded_r.ft().spellcheck("vlis")
-        assert res == {"vlis": []}
+        assert res == {"results": {"vlis": []}}
         res = await decoded_r.ft().spellcheck("vlis", distance=2)
-        assert "valid" in res["vlis"][0].keys()
+        assert "valid" in res["results"]["vlis"][0].keys()
 
         # test spellcheck include
         await decoded_r.ft().dict_add("dict", "lore", "lorem", "lorm")
         res = await decoded_r.ft().spellcheck("lorm", include="dict")
-        assert len(res["lorm"]) == 3
-        assert "lorem" in res["lorm"][0].keys()
-        assert "lore" in res["lorm"][1].keys()
-        assert "lorm" in res["lorm"][2].keys()
-        assert (res["lorm"][0]["lorem"], res["lorm"][1]["lore"]) == (0.5, 0)
+        assert len(res["results"]["lorm"]) == 3
+        assert "lorem" in res["results"]["lorm"][0].keys()
+        assert "lore" in res["results"]["lorm"][1].keys()
+        assert "lorm" in res["results"]["lorm"][2].keys()
+        assert (
+            res["results"]["lorm"][0]["lorem"],
+            res["results"]["lorm"][1]["lore"],
+        ) == (0.5, 0)
 
         # test spellcheck exclude
         res = await decoded_r.ft().spellcheck("lorm", exclude="dict")
-        assert res == {}
+        assert res == {"results": {}}
 
 
 @pytest.mark.redismod
@@ -978,7 +1000,7 @@ async def test_phonetic_matcher(decoded_r: redis.Redis):
         assert "Jon" == res.docs[0].name
     else:
         assert 1 == res["total_results"]
-        assert "Jon" == res["results"][0]["fields"]["name"]
+        assert "Jon" == res["results"][0]["extra_attributes"]["name"]
 
     # Drop and create index with phonetic matcher
     await decoded_r.flushdb()
@@ -993,7 +1015,9 @@ async def test_phonetic_matcher(decoded_r: redis.Redis):
         assert ["John", "Jon"] == sorted(d.name for d in res.docs)
     else:
         assert 2 == res["total_results"]
-        assert ["John", "Jon"] == sorted(d["fields"]["name"] for d in res["results"])
+        assert ["John", "Jon"] == sorted(
+            d["extra_attributes"]["name"] for d in res["results"]
+        )
 
 
 @pytest.mark.redismod
@@ -1266,8 +1290,8 @@ async def test_aggregations_groupby(decoded_r: redis.Redis):
             )
 
             res = (await decoded_r.ft().aggregate(req))["results"][0]
-            assert res["fields"]["parent"] == "redis"
-            assert res["fields"]["__generated_aliascount"] == "3"
+            assert res["extra_attributes"]["parent"] == "redis"
+            assert res["extra_attributes"]["__generated_aliascount"] == "3"
 
             req = (
                 aggregations.AggregateRequest("redis")
@@ -1276,8 +1300,10 @@ async def test_aggregations_groupby(decoded_r: redis.Redis):
             )
 
             res = (await decoded_r.ft().aggregate(req))["results"][0]
-            assert res["fields"]["parent"] == "redis"
-            assert res["fields"]["__generated_aliascount_distincttitle"] == "3"
+            assert res["extra_attributes"]["parent"] == "redis"
+            assert (
+                res["extra_attributes"]["__generated_aliascount_distincttitle"] == "3"
+            )
 
             req = (
                 aggregations.AggregateRequest("redis")
@@ -1286,8 +1312,11 @@ async def test_aggregations_groupby(decoded_r: redis.Redis):
             )
 
             res = (await decoded_r.ft().aggregate(req))["results"][0]
-            assert res["fields"]["parent"] == "redis"
-            assert res["fields"]["__generated_aliascount_distinctishtitle"] == "3"
+            assert res["extra_attributes"]["parent"] == "redis"
+            assert (
+                res["extra_attributes"]["__generated_aliascount_distinctishtitle"]
+                == "3"
+            )
 
             req = (
                 aggregations.AggregateRequest("redis")
@@ -1296,8 +1325,8 @@ async def test_aggregations_groupby(decoded_r: redis.Redis):
             )
 
             res = (await decoded_r.ft().aggregate(req))["results"][0]
-            assert res["fields"]["parent"] == "redis"
-            assert res["fields"]["__generated_aliassumrandom_num"] == "21"  # 10+8+3
+            assert res["extra_attributes"]["parent"] == "redis"
+            assert res["extra_attributes"]["__generated_aliassumrandom_num"] == "21"
 
             req = (
                 aggregations.AggregateRequest("redis")
@@ -1306,8 +1335,8 @@ async def test_aggregations_groupby(decoded_r: redis.Redis):
             )
 
             res = (await decoded_r.ft().aggregate(req))["results"][0]
-            assert res["fields"]["parent"] == "redis"
-            assert res["fields"]["__generated_aliasminrandom_num"] == "3"  # min(10,8,3)
+            assert res["extra_attributes"]["parent"] == "redis"
+            assert res["extra_attributes"]["__generated_aliasminrandom_num"] == "3"
 
             req = (
                 aggregations.AggregateRequest("redis")
@@ -1316,8 +1345,8 @@ async def test_aggregations_groupby(decoded_r: redis.Redis):
             )
 
             res = (await decoded_r.ft().aggregate(req))["results"][0]
-            assert res["fields"]["parent"] == "redis"
-            assert res["fields"]["__generated_aliasmaxrandom_num"] == "10"
+            assert res["extra_attributes"]["parent"] == "redis"
+            assert res["extra_attributes"]["__generated_aliasmaxrandom_num"] == "10"
 
             req = (
                 aggregations.AggregateRequest("redis")
@@ -1326,8 +1355,8 @@ async def test_aggregations_groupby(decoded_r: redis.Redis):
             )
 
             res = (await decoded_r.ft().aggregate(req))["results"][0]
-            assert res["fields"]["parent"] == "redis"
-            assert res["fields"]["__generated_aliasavgrandom_num"] == "7"  # (10+3+8)/3
+            assert res["extra_attributes"]["parent"] == "redis"
+            assert res["extra_attributes"]["__generated_aliasavgrandom_num"] == "7"
 
             req = (
                 aggregations.AggregateRequest("redis")
@@ -1336,8 +1365,11 @@ async def test_aggregations_groupby(decoded_r: redis.Redis):
             )
 
             res = (await decoded_r.ft().aggregate(req))["results"][0]
-            assert res["fields"]["parent"] == "redis"
-            assert res["fields"]["__generated_aliasstddevrandom_num"] == "3.60555127546"
+            assert res["extra_attributes"]["parent"] == "redis"
+            assert (
+                res["extra_attributes"]["__generated_aliasstddevrandom_num"]
+                == "3.60555127546"
+            )
 
             req = (
                 aggregations.AggregateRequest("redis")
@@ -1346,8 +1378,11 @@ async def test_aggregations_groupby(decoded_r: redis.Redis):
             )
 
             res = (await decoded_r.ft().aggregate(req))["results"][0]
-            assert res["fields"]["parent"] == "redis"
-            assert res["fields"]["__generated_aliasquantilerandom_num,0.5"] == "8"
+            assert res["extra_attributes"]["parent"] == "redis"
+            assert (
+                res["extra_attributes"]["__generated_aliasquantilerandom_num,0.5"]
+                == "8"
+            )
 
             req = (
                 aggregations.AggregateRequest("redis")
@@ -1356,8 +1391,8 @@ async def test_aggregations_groupby(decoded_r: redis.Redis):
             )
 
             res = (await decoded_r.ft().aggregate(req))["results"][0]
-            assert res["fields"]["parent"] == "redis"
-            assert set(res["fields"]["__generated_aliastolisttitle"]) == {
+            assert res["extra_attributes"]["parent"] == "redis"
+            assert set(res["extra_attributes"]["__generated_aliastolisttitle"]) == {
                 "RediSearch",
                 "RedisAI",
                 "RedisJson",
@@ -1370,7 +1405,7 @@ async def test_aggregations_groupby(decoded_r: redis.Redis):
             )
 
             res = (await decoded_r.ft().aggregate(req))["results"][0]
-            assert res["fields"] == {"parent": "redis", "first": "RediSearch"}
+            assert res["extra_attributes"] == {"parent": "redis", "first": "RediSearch"}
 
             req = (
                 aggregations.AggregateRequest("redis")
@@ -1381,10 +1416,14 @@ async def test_aggregations_groupby(decoded_r: redis.Redis):
             )
 
             res = (await decoded_r.ft().aggregate(req))["results"][0]
-            assert res["fields"]["parent"] == "redis"
-            assert "random" in res["fields"].keys()
-            assert len(res["fields"]["random"]) == 2
-            assert res["fields"]["random"][0] in ["RediSearch", "RedisAI", "RedisJson"]
+            assert res["extra_attributes"]["parent"] == "redis"
+            assert "random" in res["extra_attributes"].keys()
+            assert len(res["extra_attributes"]["random"]) == 2
+            assert res["extra_attributes"]["random"][0] in [
+                "RediSearch",
+                "RedisAI",
+                "RedisJson",
+            ]
 
 
 @pytest.mark.redismod
@@ -1425,14 +1464,14 @@ async def test_aggregations_sort_by_and_limit(decoded_r: redis.Redis):
             aggregations.Asc("@t2"), aggregations.Desc("@t1")
         )
         res = (await decoded_r.ft().aggregate(req))["results"]
-        assert res[0]["fields"] == {"t2": "a", "t1": "b"}
-        assert res[1]["fields"] == {"t2": "b", "t1": "a"}
+        assert res[0]["extra_attributes"] == {"t2": "a", "t1": "b"}
+        assert res[1]["extra_attributes"] == {"t2": "b", "t1": "a"}
 
         # test sort_by without SortDirection
         req = aggregations.AggregateRequest("*").sort_by("@t1")
         res = (await decoded_r.ft().aggregate(req))["results"]
-        assert res[0]["fields"] == {"t1": "a"}
-        assert res[1]["fields"] == {"t1": "b"}
+        assert res[0]["extra_attributes"] == {"t1": "a"}
+        assert res[1]["extra_attributes"] == {"t1": "b"}
 
         # test sort_by with max
         req = aggregations.AggregateRequest("*").sort_by("@t1", max=1)
@@ -1443,7 +1482,7 @@ async def test_aggregations_sort_by_and_limit(decoded_r: redis.Redis):
         req = aggregations.AggregateRequest("*").sort_by("@t1").limit(1, 1)
         res = await decoded_r.ft().aggregate(req)
         assert len(res["results"]) == 1
-        assert res["results"][0]["fields"] == {"t1": "b"}
+        assert res["results"][0]["extra_attributes"] == {"t1": "b"}
 
 
 @pytest.mark.redismod
@@ -1512,8 +1551,8 @@ async def test_search_commands_in_pipeline(decoded_r: redis.Redis):
         assert "doc2" == res[3]["results"][1]["id"]
         assert res[3]["results"][0]["payload"] is None
         assert (
-            res[3]["results"][0]["fields"]
-            == res[3]["results"][1]["fields"]
+            res[3]["results"][0]["extra_attributes"]
+            == res[3]["results"][1]["extra_attributes"]
             == {"txt": "foo bar"}
         )
 
