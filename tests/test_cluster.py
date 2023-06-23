@@ -4,6 +4,7 @@ import select
 import socket
 import socketserver
 import threading
+import uuid
 import warnings
 from queue import LifoQueue, Queue
 from time import sleep
@@ -12,7 +13,12 @@ from unittest.mock import DEFAULT, Mock, call, patch
 import pytest
 
 from redis import Redis
-from redis.backoff import ExponentialBackoff, NoBackoff, default_backoff
+from redis.backoff import (
+    ConstantBackoff,
+    ExponentialBackoff,
+    NoBackoff,
+    default_backoff,
+)
 from redis.cluster import (
     PRIMARY,
     REDIS_CLUSTER_HASH_SLOTS,
@@ -35,6 +41,7 @@ from redis.exceptions import (
     RedisClusterException,
     RedisError,
     ResponseError,
+    SlotNotCoveredError,
     TimeoutError,
 )
 from redis.retry import Retry
@@ -788,45 +795,6 @@ class TestRedisClusterObj:
                 else:
                     raise e
 
-    def test_timeout_error_topology_refresh_reuse_connections(self, r):
-        """
-        By mucking TIMEOUT errors, we'll force the cluster topology to be reinitialized,
-        and then ensure that only the impacted connection is replaced
-        """
-        node = r.get_node_from_key("key")
-        r.set("key", "value")
-        node_conn_origin = {}
-        for n in r.get_nodes():
-            node_conn_origin[n.name] = n.redis_connection
-        real_func = r.get_redis_connection(node).parse_response
-
-        class counter:
-            def __init__(self, val=0):
-                self.val = int(val)
-
-        count = counter(0)
-        with patch.object(Redis, "parse_response") as parse_response:
-
-            def moved_redirect_effect(connection, *args, **options):
-                # raise a timeout for 5 times so we'll need to reinitialize the topology
-                if count.val == 4:
-                    parse_response.side_effect = real_func
-                count.val += 1
-                raise TimeoutError()
-
-            parse_response.side_effect = moved_redirect_effect
-            assert r.get("key") == b"value"
-            for node_name, conn in node_conn_origin.items():
-                if node_name == node.name:
-                    # The old redis connection of the timed out node should have been
-                    # deleted and replaced
-                    assert conn != r.get_redis_connection(node)
-                else:
-                    # other nodes' redis connection should have been reused during the
-                    # topology refresh
-                    cur_node = r.get_node(node_name=node_name)
-                    assert conn == r.get_redis_connection(cur_node)
-
     def test_cluster_get_set_retry_object(self, request):
         retry = Retry(NoBackoff(), 2)
         r = _get_client(RedisCluster, request, retry=retry)
@@ -938,6 +906,45 @@ class TestRedisClusterObj:
         # verify that the proxies were indeed used
         n_used = sum((1 if p.n_connections else 0) for p in proxies)
         assert n_used > 1
+
+    @pytest.mark.parametrize("error", [ConnectionError, TimeoutError])
+    def test_additional_backoff_redis_cluster(self, error):
+        with patch.object(ConstantBackoff, "compute") as compute:
+
+            def _compute(target_node, *args, **kwargs):
+                return 1
+
+            compute.side_effect = _compute
+            with patch.object(RedisCluster, "_execute_command") as execute_command:
+
+                def raise_error(target_node, *args, **kwargs):
+                    execute_command.failed_calls += 1
+                    raise error("mocked error")
+
+                execute_command.side_effect = raise_error
+
+                rc = get_mocked_redis_client(
+                    host=default_host,
+                    port=default_port,
+                    retry=Retry(ConstantBackoff(1), 3),
+                )
+
+                with pytest.raises(error):
+                    rc.get("bar")
+                assert compute.call_count == rc.cluster_error_retry_attempts
+
+    @pytest.mark.parametrize("reinitialize_steps", [2, 10, 99])
+    def test_recover_slot_not_covered_error(self, request, reinitialize_steps):
+        rc = _get_client(RedisCluster, request, reinitialize_steps=reinitialize_steps)
+        key = uuid.uuid4().hex
+
+        rc.nodes_manager.slots_cache[rc.keyslot(key)] = []
+
+        for _ in range(0, reinitialize_steps):
+            with pytest.raises(SlotNotCoveredError):
+                rc.get(key)
+
+        rc.get(key)
 
 
 @pytest.mark.onlycluster

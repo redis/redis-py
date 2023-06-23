@@ -591,7 +591,8 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             self.retry = retry
             kwargs.update({"retry": self.retry})
         else:
-            kwargs.update({"retry": Retry(default_backoff(), 0)})
+            self.retry = Retry(default_backoff(), 0)
+            kwargs["retry"] = self.retry
 
         self.encoder = Encoder(
             kwargs.get("encoding", "utf-8"),
@@ -775,6 +776,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             read_from_replicas=self.read_from_replicas,
             reinitialize_steps=self.reinitialize_steps,
             lock=self._lock,
+            retry=self.retry,
         )
 
     def lock(
@@ -858,41 +860,49 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
     def _determine_nodes(self, *args, **kwargs) -> List["ClusterNode"]:
         # Determine which nodes should be executed the command on.
         # Returns a list of target nodes.
-        command = args[0].upper()
-        if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
-            command = f"{args[0]} {args[1]}".upper()
+        try:
+            command = args[0].upper()
+            if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
+                command = f"{args[0]} {args[1]}".upper()
 
-        nodes_flag = kwargs.pop("nodes_flag", None)
-        if nodes_flag is not None:
-            # nodes flag passed by the user
-            command_flag = nodes_flag
-        else:
-            # get the nodes group for this command if it was predefined
-            command_flag = self.command_flags.get(command)
-        if command_flag == self.__class__.RANDOM:
-            # return a random node
-            return [self.get_random_node()]
-        elif command_flag == self.__class__.PRIMARIES:
-            # return all primaries
-            return self.get_primaries()
-        elif command_flag == self.__class__.REPLICAS:
-            # return all replicas
-            return self.get_replicas()
-        elif command_flag == self.__class__.ALL_NODES:
-            # return all nodes
-            return self.get_nodes()
-        elif command_flag == self.__class__.DEFAULT_NODE:
-            # return the cluster's default node
-            return [self.nodes_manager.default_node]
-        elif command in self.__class__.SEARCH_COMMANDS[0]:
-            return [self.nodes_manager.default_node]
-        else:
-            # get the node that holds the key's slot
-            slot = self.determine_slot(*args)
-            node = self.nodes_manager.get_node_from_slot(
-                slot, self.read_from_replicas and command in READ_COMMANDS
-            )
-            return [node]
+            nodes_flag = kwargs.pop("nodes_flag", None)
+            if nodes_flag is not None:
+                # nodes flag passed by the user
+                command_flag = nodes_flag
+            else:
+                # get the nodes group for this command if it was predefined
+                command_flag = self.command_flags.get(command)
+            if command_flag == self.__class__.RANDOM:
+                # return a random node
+                return [self.get_random_node()]
+            elif command_flag == self.__class__.PRIMARIES:
+                # return all primaries
+                return self.get_primaries()
+            elif command_flag == self.__class__.REPLICAS:
+                # return all replicas
+                return self.get_replicas()
+            elif command_flag == self.__class__.ALL_NODES:
+                # return all nodes
+                return self.get_nodes()
+            elif command_flag == self.__class__.DEFAULT_NODE:
+                # return the cluster's default node
+                return [self.nodes_manager.default_node]
+            elif command in self.__class__.SEARCH_COMMANDS[0]:
+                return [self.nodes_manager.default_node]
+            else:
+                # get the node that holds the key's slot
+                slot = self.determine_slot(*args)
+                node = self.nodes_manager.get_node_from_slot(
+                    slot, self.read_from_replicas and command in READ_COMMANDS
+                )
+                return [node]
+        except SlotNotCoveredError as e:
+            self.reinitialize_counter += 1
+            if self._should_reinitialized():
+                self.nodes_manager.initialize()
+                # Reset the counter
+                self.reinitialize_counter = 0
+            raise e
 
     def _should_reinitialized(self):
         # To reinitialize the cluster on every MOVED error,
@@ -1084,6 +1094,12 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     # The nodes and slots cache were reinitialized.
                     # Try again with the new cluster setup.
                     retry_attempts -= 1
+                    if self.retry and isinstance(e, self.retry._supported_errors):
+                        backoff = self.retry._backoff.compute(
+                            self.cluster_error_retry_attempts - retry_attempts
+                        )
+                        if backoff > 0:
+                            time.sleep(backoff)
                     continue
                 else:
                     # raise the exception
@@ -1143,8 +1159,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 # Remove the failed node from the startup nodes before we try
                 # to reinitialize the cluster
                 self.nodes_manager.startup_nodes.pop(target_node.name, None)
-                # Reset the cluster node's connection
-                target_node.redis_connection = None
                 self.nodes_manager.initialize()
                 raise e
             except MovedError as e:
@@ -1164,6 +1178,13 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 else:
                     self.nodes_manager.update_moved_exception(e)
                 moved = True
+            except SlotNotCoveredError as e:
+                self.reinitialize_counter += 1
+                if self._should_reinitialized():
+                    self.nodes_manager.initialize()
+                    # Reset the counter
+                    self.reinitialize_counter = 0
+                raise e
             except TryAgainError:
                 if ttl < self.RedisClusterRequestTTL / 2:
                     time.sleep(0.05)
@@ -1397,7 +1418,10 @@ class NodesManager:
             # randomly choose one of the replicas
             node_idx = random.randint(1, len(self.slots_cache[slot]) - 1)
 
-        return self.slots_cache[slot][node_idx]
+        try:
+            return self.slots_cache[slot][node_idx]
+        except IndexError:
+            return self.slots_cache[slot][0]
 
     def get_nodes_by_server_type(self, server_type):
         """
@@ -1774,6 +1798,7 @@ class ClusterPipeline(RedisCluster):
         cluster_error_retry_attempts: int = 3,
         reinitialize_steps: int = 5,
         lock=None,
+        retry: Optional["Retry"] = None,
         **kwargs,
     ):
         """ """
@@ -1799,6 +1824,7 @@ class ClusterPipeline(RedisCluster):
         if lock is None:
             lock = threading.Lock()
         self._lock = lock
+        self.retry = retry
 
     def __repr__(self):
         """ """
@@ -1931,8 +1957,9 @@ class ClusterPipeline(RedisCluster):
                     stack,
                     raise_on_error=raise_on_error,
                     allow_redirections=allow_redirections,
+                    attempts_count=self.cluster_error_retry_attempts - retry_attempts,
                 )
-            except (ClusterDownError, ConnectionError) as e:
+            except (ClusterDownError, ConnectionError, TimeoutError) as e:
                 if retry_attempts > 0:
                     # Try again with the new cluster setup. All other errors
                     # should be raised.
@@ -1942,7 +1969,7 @@ class ClusterPipeline(RedisCluster):
                     raise e
 
     def _send_cluster_commands(
-        self, stack, raise_on_error=True, allow_redirections=True
+        self, stack, raise_on_error=True, allow_redirections=True, attempts_count=0
     ):
         """
         Send a bunch of cluster commands to the redis cluster.
@@ -1997,9 +2024,11 @@ class ClusterPipeline(RedisCluster):
                     redis_node = self.get_redis_connection(node)
                     try:
                         connection = get_connection(redis_node, c.args)
-                    except ConnectionError:
-                        # Connection retries are being handled in the node's
-                        # Retry object. Reinitialize the node -> slot table.
+                    except (ConnectionError, TimeoutError) as e:
+                        if self.retry and isinstance(e, self.retry._supported_errors):
+                            backoff = self.retry._backoff.compute(attempts_count)
+                            if backoff > 0:
+                                time.sleep(backoff)
                         self.nodes_manager.initialize()
                         if is_default_node:
                             self.replace_default_node()
