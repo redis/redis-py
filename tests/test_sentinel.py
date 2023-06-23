@@ -99,6 +99,15 @@ def test_discover_master_error(sentinel):
 
 
 @pytest.mark.onlynoncluster
+def test_dead_pool(sentinel):
+    master = sentinel.master_for("mymaster", db=9)
+    conn = master.connection_pool.get_connection("_")
+    conn.disconnect()
+    del master
+    conn.connect()
+
+
+@pytest.mark.onlynoncluster
 def test_discover_master_sentinel_down(cluster, sentinel, master_ip):
     # Put first sentinel 'foo' down
     cluster.nodes_down.add(("foo", 26379))
