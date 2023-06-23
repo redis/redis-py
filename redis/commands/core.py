@@ -1345,10 +1345,10 @@ class ManagementCommands(CommandsProtocol):
         self, num_local: int, num_replicas: int, timeout: int, **kwargs
     ) -> ResponseT:
         """
-        This command block until the next fsync on AOF file
-        for the specified `num_replicas` or if the "number of replicas" parameter is 0,
-        blocks until the next fsync on AOF file for the current Redis instance.
-        If AOF persistence is not enabled, the command returns an error.
+        This command blocks the current client until all previous write
+        commands by that client are acknowledged as having been fsynced
+        to the AOF of the local Redis and/or at least the specified number
+        of replicas.
 
         For more information see https://redis.io/commands/waitaof
         """
