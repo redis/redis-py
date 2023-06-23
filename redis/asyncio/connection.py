@@ -49,6 +49,7 @@ from redis.exceptions import (
     ModuleError,
     NoPermissionError,
     NoScriptError,
+    OutOfMemoryError,
     ReadOnlyError,
     RedisError,
     ResponseError,
@@ -174,6 +175,7 @@ class BaseParser:
         "READONLY": ReadOnlyError,
         "NOAUTH": AuthenticationError,
         "NOPERM": NoPermissionError,
+        "OOM": OutOfMemoryError,
     }
 
     def __init__(self, socket_read_size: int):

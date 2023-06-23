@@ -1,7 +1,6 @@
 import asyncio
 import binascii
 import datetime
-import os
 import warnings
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, Union
 from urllib.parse import urlparse
@@ -36,6 +35,7 @@ from tests.conftest import (
     skip_unless_arch_bits,
 )
 
+from ..ssl_utils import get_ssl_filename
 from .compat import mock
 
 pytestmark = pytest.mark.onlycluster
@@ -2744,17 +2744,8 @@ class TestSSL:
     appropriate port.
     """
 
-    ROOT = os.path.join(os.path.dirname(__file__), "../..")
-    CERT_DIR = os.path.abspath(os.path.join(ROOT, "docker", "stunnel", "keys"))
-    if not os.path.isdir(CERT_DIR):  # github actions package validation case
-        CERT_DIR = os.path.abspath(
-            os.path.join(ROOT, "..", "docker", "stunnel", "keys")
-        )
-        if not os.path.isdir(CERT_DIR):
-            raise IOError(f"No SSL certificates found. They should be in {CERT_DIR}")
-
-    SERVER_CERT = os.path.join(CERT_DIR, "server-cert.pem")
-    SERVER_KEY = os.path.join(CERT_DIR, "server-key.pem")
+    SERVER_CERT = get_ssl_filename("server-cert.pem")
+    SERVER_KEY = get_ssl_filename("server-key.pem")
 
     @pytest_asyncio.fixture()
     def create_client(self, request: FixtureRequest) -> Callable[..., RedisCluster]:
