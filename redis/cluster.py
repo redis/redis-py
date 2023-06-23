@@ -237,6 +237,7 @@ class AbstractRedisCluster:
                 "SLOWLOG LEN",
                 "SLOWLOG RESET",
                 "WAIT",
+                "WAITAOF",
                 "SAVE",
                 "MEMORY PURGE",
                 "MEMORY MALLOC-STATS",
