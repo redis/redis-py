@@ -1095,7 +1095,7 @@ class UnixDomainSocketConnection(AbstractConnection):
         await self.on_connect()
 
     def _host_error(self) -> str:
-        return self.host
+        return self.path
 
     def _error_message(self, exception: BaseException) -> str:
         # args for socket.error can either be (errno, "message")
