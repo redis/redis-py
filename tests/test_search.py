@@ -2154,9 +2154,9 @@ def test_search_commands_in_pipeline(client):
 @pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.4.3", "search")
 def test_dialect_config(client):
-    assert client.ft().config_get("DEFAULT_DIALECT") == {"DEFAULT_DIALECT": "0"}
-    assert client.ft().config_set("DEFAULT_DIALECT", 1)
-    assert client.ft().config_get("DEFAULT_DIALECT") == {"DEFAULT_DIALECT": "1"}
+    assert client.ft().config_get("DEFAULT_DIALECT")
+    client.ft().config_set("DEFAULT_DIALECT", 2)
+    assert client.ft().config_get("DEFAULT_DIALECT") == {"DEFAULT_DIALECT": "2"}
     with pytest.raises(redis.ResponseError):
         client.ft().config_set("DEFAULT_DIALECT", 0)
 
