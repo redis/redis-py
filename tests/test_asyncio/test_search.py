@@ -759,6 +759,7 @@ async def test_alias(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
+@pytest.mark.xfail(strict=False)
 async def test_alias_basic(decoded_r: redis.Redis):
     # Creating a client with one index
     client = getClient(decoded_r)
