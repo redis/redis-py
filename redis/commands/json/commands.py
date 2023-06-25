@@ -258,7 +258,7 @@ class JSONCommands:
         Set the JSON value at key ``name`` under the ``path`` to ``obj``
         for one or more keys.
 
-        ``items`` accepts a list of additional key/path/value to set.
+        ``triplets`` is a list of one or more triplets of key, path, value.
 
         For the purpose of using this within a pipeline, this command is also
         aliased to JSON.MSET.
