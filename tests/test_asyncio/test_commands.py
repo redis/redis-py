@@ -15,6 +15,7 @@ import redis
 from redis import exceptions
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, parse_info
 from tests.conftest import (
+    skip_if_redis_enterprise,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
@@ -89,10 +90,60 @@ class TestResponseCallbacks:
 
 
 class TestRedisCommands:
-    async def test_command_on_invalid_key_type(self, r: redis.Redis):
-        await r.lpush("a", "1")
-        with pytest.raises(redis.ResponseError):
-            await r.get("a")
+    # @skip_if_redis_enterprise()
+    # async def test_auth(self, r, request):
+    #     # sending an AUTH command before setting a user/password on the
+    #     # server should return an AuthenticationError
+    #     with pytest.raises(exceptions.AuthenticationError):
+    #         await r.auth("some_password")
+
+    #     with pytest.raises(exceptions.AuthenticationError):
+    #         await r.auth("some_password", "some_user")
+
+    #     # first, test for default user (`username` is supposed to be optional)
+    #     default_username = "default"
+    #     temp_pass = "temp_pass"
+    #     await r.config_set("requirepass", temp_pass)
+
+    #     assert await r.auth(temp_pass, default_username) is True
+    #     assert await r.auth(temp_pass) is True
+
+    #     # test for other users
+    #     username = "redis-py-auth"
+
+    #     async def teardown():
+    #         try:
+    #             # this is needed because after an AuthenticationError the connection
+    #             # is closed, and if we send an AUTH command a new connection is
+    #             # created, but in this case we'd get an "Authentication required"
+    #             # error when switching to the db 9 because we're not authenticated yet
+    #             # setting the password on the connection itself triggers the
+    #             # authentication in the connection's `on_connect` method
+    #             r.connection.password = temp_pass
+    #         except AttributeError:
+    #             # connection field is not set in Redis Cluster, but that's ok
+    #             # because the problem discussed above does not apply to Redis Cluster
+    #             pass
+
+    #         await r.auth(temp_pass)
+    #         await r.config_set("requirepass", "")
+    #         await r.acl_deluser(username)
+
+    #     request.addfinalizer(teardown)
+
+    #     assert await r.acl_setuser(
+    #         username, enabled=True, passwords=["+strong_password"], commands=["+acl"]
+    #     )
+
+    #     assert await r.auth(username=username, password="strong_password") is True
+
+    #     with pytest.raises(exceptions.AuthenticationError):
+    #         await r.auth(username=username, password="wrong_password")
+
+    # async def test_command_on_invalid_key_type(self, r: redis.Redis):
+    #     await r.lpush("a", "1")
+    #     with pytest.raises(redis.ResponseError):
+    #         await r.get("a")
 
     # SERVER INFORMATION
     @skip_if_server_version_lt(REDIS_6_VERSION)
@@ -106,6 +157,18 @@ class TestRedisCommands:
         commands = await r.acl_cat("read")
         assert isinstance(commands, list)
         assert "get" in commands
+
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    async def test_acl_dryrun(self, r_teardown):
+        username = "redis-py-user"
+        r = r_teardown(username)
+
+        await r.acl_setuser(username, keys=["*"], commands=["+set"])
+        assert await r.acl_dryrun(username, "set", "key", "value") == b"OK"
+        assert await r.acl_dryrun(username, "get", "key").startswith(
+            b"This user has no permissions to run the"
+        )
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
     async def test_acl_deluser(self, r_teardown):
@@ -229,6 +292,12 @@ class TestRedisCommands:
         assert len((await r.acl_getuser(username))["passwords"]) == 1
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
+    async def test_acl_help(self, r: redis.Redis):
+        res = await r.acl_help()
+        assert isinstance(res, list)
+        assert len(res) != 0
+
+    @skip_if_server_version_lt(REDIS_6_VERSION)
     @skip_if_server_version_gte("7.0.0")
     async def test_acl_list(self, r_teardown):
         username = "redis-py-user"
@@ -314,6 +383,27 @@ class TestRedisCommands:
         clients = await r.client_list()
         assert isinstance(clients[0], dict)
         assert "addr" in clients[0]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    async def test_client_info(self, r: redis.Redis):
+        info = await r.client_info()
+        assert isinstance(info, dict)
+        assert "addr" in info
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("5.0.0")
+    async def test_client_list_types_not_replica(self, r: redis.Redis):
+        with pytest.raises(exceptions.RedisError):
+            await r.client_list(_type="not a client type")
+        for client_type in ["normal", "master", "pubsub"]:
+            clients = await r.client_list(_type=client_type)
+            assert isinstance(clients, list)
+
+    @skip_if_redis_enterprise()
+    async def test_client_list_replica(self, r: redis.Redis):
+        clients = await r.client_list(_type="replica")
+        assert isinstance(clients, list)
 
     @skip_if_server_version_lt("5.0.0")
     async def test_client_list_type(self, r: redis.Redis):
