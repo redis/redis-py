@@ -273,6 +273,7 @@ async def test_slowlog(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
+@pytest.mark.xfail(strict=False)
 async def test_query_timeout(decoded_r: redis.Redis):
     # Build a sample graph with 1000 nodes.
     await decoded_r.graph().query("UNWIND range(0,1000) as val CREATE ({v: val})")

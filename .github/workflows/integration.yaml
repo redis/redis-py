@@ -78,7 +78,7 @@ jobs:
             pip install hiredis
            fi
            invoke devenv
-           sleep 3 # time to settle
+           sleep 5 # time to settle
            invoke ${{matrix.test-type}}-tests
 
        - uses: actions/upload-artifact@v2
@@ -117,7 +117,7 @@ jobs:
         protocol: ['3']
     env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: RESP3 [${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.async-type}}-${{matrix.connection-type}}]
+    name: RESP3 [${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}]
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
@@ -133,7 +133,7 @@ jobs:
             pip install hiredis
           fi
           invoke devenv
-          sleep 3 # time to settle
+          sleep 5 # time to settle
           invoke ${{matrix.test-type}}-tests
           invoke ${{matrix.test-type}}-tests --uvloop
 
