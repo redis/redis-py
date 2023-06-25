@@ -1,6 +1,6 @@
 import os
 from json import JSONDecodeError, loads
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from redis.exceptions import DataError
 from redis.utils import deprecated_function
@@ -253,7 +253,7 @@ class JSONCommands:
             pieces.append("XX")
         return self.execute_command("JSON.SET", *pieces)
 
-    def mset(self, name: str, path: str, obj: JsonType, *items) -> Optional[str]:
+    def mset(self, triplets: List[Tuple[str, str, JsonType]]) -> Optional[str]:
         """
         Set the JSON value at key ``name`` under the ``path`` to ``obj``
         for one or more keys.
@@ -265,12 +265,9 @@ class JSONCommands:
 
         For more information see `JSON.MSET <https://redis.io/commands/json.mset>`_.
         """
-
-        pieces = [name, path, self._encode(obj)]
-
-        for key, path, value in zip(*[iter(items)] * 3):
-            pieces.extend([key, path, self._encode(value)])
-
+        pieces = []
+        for triplet in triplets:
+            pieces.extend([triplet[0], str(triplet[1]), self._encode(triplet[2])])
         return self.execute_command("JSON.MSET", *pieces)
 
     def merge(

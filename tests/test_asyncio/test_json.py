@@ -112,7 +112,9 @@ async def test_mgetshouldsucceed(modclient: redis.Redis):
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.6.0", "ReJSON")  # todo: update after the release
 async def test_mset(modclient: redis.Redis):
-    await modclient.json().mset("1", Path.root_path(), 1, "2", Path.root_path(), 2)
+    await modclient.json().mset(
+        [("1", Path.root_path(), 1), ("2", Path.root_path(), 2)]
+    )
 
     assert await modclient.json().mget(["1"], Path.root_path()) == [1]
     assert await modclient.json().mget(["1", "2"], Path.root_path()) == [1, 2]
