@@ -266,7 +266,7 @@ class TestBlockingConnectionPool:
 
             start = asyncio.get_running_loop().time()
             await asyncio.gather(target(), pool.get_connection("_"))
-            assert asyncio.get_running_loop().time() - start >= 0.1
+            assert asyncio.get_running_loop().time() - start >= 0.25
 
     async def test_reuse_previously_released_connection(self, master_host):
         connection_kwargs = {"host": master_host}

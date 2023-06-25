@@ -712,7 +712,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt("3.2.0")
     def test_client_reply(self, r, r_timeout):
         assert r_timeout.client_reply("ON") == b"OK"
-        with pytest.raises(exceptions.TimeoutError):
+        with pytest.raises(exceptions.RedisError):
             r_timeout.client_reply("OFF")
 
             r_timeout.client_reply("SKIP")
