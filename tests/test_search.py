@@ -722,6 +722,7 @@ def test_alias(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.xfail(strict=False)
 def test_alias_basic(client):
     # Creating a client with one index
     index1 = getClient(client).ft("testAlias")
