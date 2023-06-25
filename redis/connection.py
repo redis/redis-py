@@ -28,6 +28,7 @@ from redis.exceptions import (
     ModuleError,
     NoPermissionError,
     NoScriptError,
+    OutOfMemoryError,
     ReadOnlyError,
     RedisError,
     ResponseError,
@@ -149,6 +150,7 @@ class BaseParser:
             MODULE_UNLOAD_NOT_POSSIBLE_ERROR: ModuleError,
             **NO_AUTH_SET_ERROR,
         },
+        "OOM": OutOfMemoryError,
         "WRONGPASS": AuthenticationError,
         "EXECABORT": ExecAbortError,
         "LOADING": BusyLoadingError,
@@ -592,6 +594,8 @@ class AbstractConnection:
         self,
         db=0,
         password=None,
+        socket_timeout=None,
+        socket_connect_timeout=None,
         retry_on_timeout=False,
         retry_on_error=SENTINEL,
         encoding="utf-8",
@@ -627,6 +631,10 @@ class AbstractConnection:
         self.credential_provider = credential_provider
         self.password = password
         self.username = username
+        self.socket_timeout = socket_timeout
+        if socket_connect_timeout is None:
+            socket_connect_timeout = socket_timeout
+        self.socket_connect_timeout = socket_connect_timeout
         self.retry_on_timeout = retry_on_timeout
         if retry_on_error is SENTINEL:
             retry_on_error = []
@@ -834,7 +842,11 @@ class AbstractConnection:
                 errno = e.args[0]
                 errmsg = e.args[1]
             raise ConnectionError(f"Error {errno} while writing to socket. {errmsg}.")
-        except Exception:
+        except BaseException:
+            # BaseExceptions can be raised when a socket send operation is not
+            # finished, e.g. due to a timeout.  Ideally, a caller could then re-try
+            # to send un-sent data. However, the send_packed_command() API
+            # does not support it so there is no point in keeping the connection open.
             self.disconnect()
             raise
 
@@ -859,7 +871,9 @@ class AbstractConnection:
             self.disconnect()
             raise ConnectionError(f"Error while reading from {host_error}: {e.args}")
 
-    def read_response(self, disable_decoding=False):
+    def read_response(
+        self, disable_decoding=False, *, disconnect_on_error: bool = True
+    ):
         """Read the response from a previously sent command"""
 
         host_error = self._host_error()
@@ -867,15 +881,21 @@ class AbstractConnection:
         try:
             response = self._parser.read_response(disable_decoding=disable_decoding)
         except socket.timeout:
-            self.disconnect()
+            if disconnect_on_error:
+                self.disconnect()
             raise TimeoutError(f"Timeout reading from {host_error}")
         except OSError as e:
-            self.disconnect()
+            if disconnect_on_error:
+                self.disconnect()
             raise ConnectionError(
                 f"Error while reading from {host_error}" f" : {e.args}"
             )
-        except Exception:
-            self.disconnect()
+        except BaseException:
+            # Also by default close in case of BaseException.  A lot of code
+            # relies on this behaviour when doing Command/Response pairs.
+            # See #1128.
+            if disconnect_on_error:
+                self.disconnect()
             raise
 
         if self.health_check_interval:
@@ -927,8 +947,6 @@ class Connection(AbstractConnection):
         self,
         host="localhost",
         port=6379,
-        socket_timeout=None,
-        socket_connect_timeout=None,
         socket_keepalive=False,
         socket_keepalive_options=None,
         socket_type=0,
@@ -936,8 +954,6 @@ class Connection(AbstractConnection):
     ):
         self.host = host
         self.port = int(port)
-        self.socket_timeout = socket_timeout
-        self.socket_connect_timeout = socket_connect_timeout or socket_timeout
         self.socket_keepalive = socket_keepalive
         self.socket_keepalive_options = socket_keepalive_options or {}
         self.socket_type = socket_type
@@ -1158,9 +1174,8 @@ class SSLConnection(Connection):
 class UnixDomainSocketConnection(AbstractConnection):
     "Manages UDS communication to and from a Redis server"
 
-    def __init__(self, path="", socket_timeout=None, **kwargs):
+    def __init__(self, path="", **kwargs):
         self.path = path
-        self.socket_timeout = socket_timeout
         super().__init__(**kwargs)
 
     def repr_pieces(self):
@@ -1172,8 +1187,9 @@ class UnixDomainSocketConnection(AbstractConnection):
     def _connect(self):
         "Create a Unix domain socket connection"
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(self.socket_timeout)
+        sock.settimeout(self.socket_connect_timeout)
         sock.connect(self.path)
+        sock.settimeout(self.socket_timeout)
         return sock
 
     def _host_error(self):

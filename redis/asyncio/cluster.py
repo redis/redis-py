@@ -249,7 +249,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
         socket_timeout: Optional[float] = None,
         retry: Optional["Retry"] = None,
-        retry_on_error: Optional[List[Exception]] = None,
+        retry_on_error: Optional[List[Type[Exception]]] = None,
         # SSL related kwargs
         ssl: bool = False,
         ssl_ca_certs: Optional[str] = None,
@@ -1016,32 +1016,11 @@ class ClusterNode:
         await connection.send_packed_command(connection.pack_command(*args), False)
 
         # Read response
-        return await asyncio.shield(
-            self._parse_and_release(connection, args[0], **kwargs)
-        )
-
-    async def _parse_and_release(self, connection, *args, **kwargs):
         try:
-            return await self.parse_response(connection, *args, **kwargs)
-        except asyncio.CancelledError:
-            # should not be possible
-            await connection.disconnect(nowait=True)
-            raise
+            return await self.parse_response(connection, args[0], **kwargs)
         finally:
+            # Release connection
             self._free.append(connection)
-
-    async def _try_parse_response(self, cmd, connection, ret):
-        try:
-            cmd.result = await asyncio.shield(
-                self.parse_response(connection, cmd.args[0], **cmd.kwargs)
-            )
-        except asyncio.CancelledError:
-            await connection.disconnect(nowait=True)
-            raise
-        except Exception as e:
-            cmd.result = e
-            ret = True
-        return ret
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
@@ -1055,7 +1034,13 @@ class ClusterNode:
         # Read responses
         ret = False
         for cmd in commands:
-            ret = await asyncio.shield(self._try_parse_response(cmd, connection, ret))
+            try:
+                cmd.result = await self.parse_response(
+                    connection, cmd.args[0], **cmd.kwargs
+                )
+            except Exception as e:
+                cmd.result = e
+                ret = True
 
         # Release connection
         self._free.append(connection)

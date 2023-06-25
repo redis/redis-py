@@ -113,6 +113,13 @@ def parse_cluster_shards(resp, **options):
     return shards
 
 
+def parse_cluster_myshardid(resp, **options):
+    """
+    Parse CLUSTER MYSHARDID response.
+    """
+    return resp.decode("utf-8")
+
+
 PRIMARY = "primary"
 REPLICA = "replica"
 SLOT_ID = "slot-id"
@@ -230,6 +237,7 @@ class AbstractRedisCluster:
                 "SLOWLOG LEN",
                 "SLOWLOG RESET",
                 "WAIT",
+                "WAITAOF",
                 "SAVE",
                 "MEMORY PURGE",
                 "MEMORY MALLOC-STATS",
@@ -341,6 +349,7 @@ class AbstractRedisCluster:
     CLUSTER_COMMANDS_RESPONSE_CALLBACKS = {
         "CLUSTER SLOTS": parse_cluster_slots,
         "CLUSTER SHARDS": parse_cluster_shards,
+        "CLUSTER MYSHARDID": parse_cluster_myshardid,
     }
 
     RESULT_CALLBACKS = dict_merge(

@@ -1,7 +1,6 @@
 import asyncio
 import binascii
 import datetime
-import os
 import warnings
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, Union
 from urllib.parse import urlparse
@@ -36,6 +35,7 @@ from tests.conftest import (
     skip_unless_arch_bits,
 )
 
+from ..ssl_utils import get_ssl_filename
 from .compat import mock
 
 pytestmark = pytest.mark.onlycluster
@@ -100,18 +100,6 @@ class NodeProxy:
                 break
             writer.write(data)
             await writer.drain()
-
-
-@pytest.fixture
-def redis_addr(request):
-    redis_url = request.config.getoption("--redis-url")
-    scheme, netloc = urlparse(redis_url)[:2]
-    assert scheme == "redis"
-    if ":" in netloc:
-        host, port = netloc.split(":")
-        return host, int(port)
-    else:
-        return netloc, 6379
 
 
 @pytest_asyncio.fixture()
@@ -874,7 +862,7 @@ class TestRedisClusterObj:
         # Rollback to the old default node
         r.replace_default_node(curr_default_node)
 
-    async def test_address_remap(self, create_redis, redis_addr):
+    async def test_address_remap(self, create_redis, master_host):
         """Test that we can create a rediscluster object with
         a host-port remapper and map connections through proxy objects
         """
@@ -882,7 +870,8 @@ class TestRedisClusterObj:
         # we remap the first n nodes
         offset = 1000
         n = 6
-        ports = [redis_addr[1] + i for i in range(n)]
+        hostname, master_port = master_host
+        ports = [master_port + i for i in range(n)]
 
         def address_remap(address):
             # remap first three nodes to our local proxy
@@ -895,8 +884,7 @@ class TestRedisClusterObj:
 
         # create the proxies
         proxies = [
-            NodeProxy(("127.0.0.1", port + offset), (redis_addr[0], port))
-            for port in ports
+            NodeProxy(("127.0.0.1", port + offset), (hostname, port)) for port in ports
         ]
         await asyncio.gather(*[p.start() for p in proxies])
         try:
@@ -1017,6 +1005,13 @@ class TestClusterRedisCommands:
         node = r.get_random_node()
         myid = await r.cluster_myid(node)
         assert len(myid) == 40
+
+    @skip_if_server_version_lt("7.2.0")
+    @skip_if_redis_enterprise()
+    async def test_cluster_myshardid(self, r: RedisCluster) -> None:
+        node = r.get_random_node()
+        myshardid = await r.cluster_myshardid(node)
+        assert len(myshardid) == 40
 
     @skip_if_redis_enterprise()
     async def test_cluster_slots(self, r: RedisCluster) -> None:
@@ -2749,17 +2744,8 @@ class TestSSL:
     appropriate port.
     """
 
-    ROOT = os.path.join(os.path.dirname(__file__), "../..")
-    CERT_DIR = os.path.abspath(os.path.join(ROOT, "docker", "stunnel", "keys"))
-    if not os.path.isdir(CERT_DIR):  # github actions package validation case
-        CERT_DIR = os.path.abspath(
-            os.path.join(ROOT, "..", "docker", "stunnel", "keys")
-        )
-        if not os.path.isdir(CERT_DIR):
-            raise IOError(f"No SSL certificates found. They should be in {CERT_DIR}")
-
-    SERVER_CERT = os.path.join(CERT_DIR, "server-cert.pem")
-    SERVER_KEY = os.path.join(CERT_DIR, "server-key.pem")
+    SERVER_CERT = get_ssl_filename("server-cert.pem")
+    SERVER_KEY = get_ssl_filename("server-key.pem")
 
     @pytest_asyncio.fixture()
     def create_client(self, request: FixtureRequest) -> Callable[..., RedisCluster]:

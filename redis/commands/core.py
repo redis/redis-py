@@ -761,6 +761,17 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT NO-EVICT", mode)
 
+    def client_no_touch(self, mode: str) -> Union[Awaitable[str], str]:
+        """
+        # The command controls whether commands sent by the client will alter
+        # the LRU/LFU of the keys they access.
+        # When turned on, the current client will not change LFU/LRU stats,
+        # unless it sends the TOUCH command.
+
+        For more information see https://redis.io/commands/client-no-touch
+        """
+        return self.execute_command("CLIENT NO-TOUCH", mode)
+
     def command(self, **kwargs):
         """
         Returns dict reply of details about all Redis commands.
@@ -1329,6 +1340,21 @@ class ManagementCommands(CommandsProtocol):
         For more information see https://redis.io/commands/wait
         """
         return self.execute_command("WAIT", num_replicas, timeout, **kwargs)
+
+    def waitaof(
+        self, num_local: int, num_replicas: int, timeout: int, **kwargs
+    ) -> ResponseT:
+        """
+        This command blocks the current client until all previous write
+        commands by that client are acknowledged as having been fsynced
+        to the AOF of the local Redis and/or at least the specified number
+        of replicas.
+
+        For more information see https://redis.io/commands/waitaof
+        """
+        return self.execute_command(
+            "WAITAOF", num_local, num_replicas, timeout, **kwargs
+        )
 
     def hello(self):
         """
@@ -3485,8 +3511,8 @@ class StreamCommands(CommandsProtocol):
             raise DataError("Only one of ```maxlen``` or ```minid``` may be specified")
 
         if maxlen is not None:
-            if not isinstance(maxlen, int) or maxlen < 1:
-                raise DataError("XADD maxlen must be a positive integer")
+            if not isinstance(maxlen, int) or maxlen < 0:
+                raise DataError("XADD maxlen must be non-negative integer")
             pieces.append(b"MAXLEN")
             if approximate:
                 pieces.append(b"~")
@@ -4643,13 +4669,22 @@ class SortedSetCommands(CommandsProtocol):
         options = {"withscores": withscores, "score_cast_func": score_cast_func}
         return self.execute_command(*pieces, **options)
 
-    def zrank(self, name: KeyT, value: EncodableT) -> ResponseT:
+    def zrank(
+        self,
+        name: KeyT,
+        value: EncodableT,
+        withscore: bool = False,
+    ) -> ResponseT:
         """
         Returns a 0-based value indicating the rank of ``value`` in sorted set
-        ``name``
+        ``name``.
+        The optional WITHSCORE argument supplements the command's
+        reply with the score of the element returned.
 
         For more information see https://redis.io/commands/zrank
         """
+        if withscore:
+            return self.execute_command("ZRANK", name, value, "WITHSCORE")
         return self.execute_command("ZRANK", name, value)
 
     def zrem(self, name: KeyT, *values: FieldT) -> ResponseT:

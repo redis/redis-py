@@ -441,7 +441,7 @@ def mock_cluster_resp_slaves(request, **kwargs):
 def master_host(request):
     url = request.config.getoption("--redis-url")
     parts = urlparse(url)
-    yield parts.hostname, parts.port
+    return parts.hostname, (parts.port or 6379)
 
 
 @pytest.fixture()
