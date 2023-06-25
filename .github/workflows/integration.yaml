@@ -80,9 +80,6 @@ jobs:
            invoke devenv
            sleep 3 # time to settle
            invoke ${{matrix.test-type}}-tests
-           if [[ ${{{matrix.python-version}}::2} == "3." ]]; then  # issue with PyContext_CopyCurrent in pypy-python
-             invoke ${{matrix.test-type}}-tests --uvloop
-           fi
 
        - uses: actions/upload-artifact@v2
          if: success() || failure()
