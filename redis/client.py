@@ -2080,7 +2080,7 @@ class Pipeline(Redis):
     def _disconnect_raise_reset(self, conn, error):
         """
         Close the connection, raise an exception if we were watching,
-        and raise an exception if retry_on_timeout is not set,
+        and raise an exception if TimeoutError is not part of retry_on_error,
         or the error is not a TimeoutError
         """
         conn.disconnect()
@@ -2091,11 +2091,13 @@ class Pipeline(Redis):
             raise WatchError(
                 "A ConnectionError occurred on while watching one or more keys"
             )
-        # if retry_on_timeout is not set, or the error is not
-        # a TimeoutError, raise it
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
+        # if TimeoutError is not part of retry_on_error, or the error
+        # is not a TimeoutError, raise it
+        if not (
+            TimeoutError in conn.retry_on_error and isinstance(error, TimeoutError)
+        ):
             self.reset()
-            raise
+            raise error
 
     def execute(self, raise_on_error=True):
         """Execute all the commands in the current pipeline"""
