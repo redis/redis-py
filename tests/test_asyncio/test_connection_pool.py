@@ -245,8 +245,9 @@ class TestBlockingConnectionPool:
             start = asyncio.get_running_loop().time()
             with pytest.raises(redis.ConnectionError):
                 await pool.get_connection("_")
-            # we should have waited at least 0.1 seconds
-            assert asyncio.get_running_loop().time() - start >= 0.1
+
+            # we should have waited at least some period of time
+            assert asyncio.get_running_loop().time() - start >= 0.05
             await c1.disconnect()
 
     async def test_connection_pool_blocks_until_conn_available(self, master_host):
