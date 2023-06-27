@@ -8,7 +8,6 @@ from unittest import mock
 from unittest.mock import patch
 
 import pytest
-
 import redis
 from redis.exceptions import ConnectionError
 from redis.utils import HIREDIS_AVAILABLE

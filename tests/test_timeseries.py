@@ -3,16 +3,15 @@ import time
 from time import sleep
 
 import pytest
-
 import redis
 
 from .conftest import assert_resp_response, is_resp2_connection, skip_ifmodversion_lt
 
 
 @pytest.fixture
-def client(modclient):
-    modclient.flushdb()
-    return modclient
+def client(decoded_r):
+    decoded_r.flushdb()
+    return decoded_r
 
 
 @pytest.mark.redismod

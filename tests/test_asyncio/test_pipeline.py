@@ -1,5 +1,4 @@
 import pytest
-
 import redis
 from tests.conftest import skip_if_server_version_lt
 

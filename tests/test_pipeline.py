@@ -1,5 +1,4 @@
 import pytest
-
 import redis
 
 from .conftest import skip_if_server_version_lt, wait_for_command

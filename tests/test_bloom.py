@@ -1,7 +1,6 @@
 from math import inf
 
 import pytest
-
 import redis.commands.bf
 from redis.exceptions import ModuleError, RedisError
 from redis.utils import HIREDIS_AVAILABLE
@@ -14,15 +13,15 @@ def intlist(obj):
 
 
 @pytest.fixture
-def client(modclient):
-    assert isinstance(modclient.bf(), redis.commands.bf.BFBloom)
-    assert isinstance(modclient.cf(), redis.commands.bf.CFBloom)
-    assert isinstance(modclient.cms(), redis.commands.bf.CMSBloom)
-    assert isinstance(modclient.tdigest(), redis.commands.bf.TDigestBloom)
-    assert isinstance(modclient.topk(), redis.commands.bf.TOPKBloom)
+def client(decoded_r):
+    assert isinstance(decoded_r.bf(), redis.commands.bf.BFBloom)
+    assert isinstance(decoded_r.cf(), redis.commands.bf.CFBloom)
+    assert isinstance(decoded_r.cms(), redis.commands.bf.CMSBloom)
+    assert isinstance(decoded_r.tdigest(), redis.commands.bf.TDigestBloom)
+    assert isinstance(decoded_r.topk(), redis.commands.bf.TOPKBloom)
 
-    modclient.flushdb()
-    return modclient
+    decoded_r.flushdb()
+    return decoded_r
 
 
 @pytest.mark.redismod
