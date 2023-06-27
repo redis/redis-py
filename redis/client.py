@@ -817,7 +817,7 @@ class AbstractRedis:
         # **string_keys_to_dict(
         #     "COPY "
         #     "HEXISTS HMSET MOVE MSETNX PERSIST "
-        #     "PSETEX RENAMENX SISMEMBER SMOVE SETEX SETNX",
+        #     "PSETEX RENAMENX SMOVE SETEX SETNX",
         #     bool,
         # ),
         # **string_keys_to_dict(
