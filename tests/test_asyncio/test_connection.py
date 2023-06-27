@@ -4,7 +4,6 @@ import types
 from unittest.mock import patch
 
 import pytest
-
 import redis
 from redis.asyncio import Redis
 from redis.asyncio.connection import Connection, UnixDomainSocketConnection
@@ -112,22 +111,22 @@ async def test_single_connection():
 @skip_if_server_version_lt("4.0.0")
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
-async def test_loading_external_modules(modclient):
+async def test_loading_external_modules(r):
     def inner():
         pass
 
-    modclient.load_external_module("myfuncname", inner)
-    assert getattr(modclient, "myfuncname") == inner
-    assert isinstance(getattr(modclient, "myfuncname"), types.FunctionType)
+    r.load_external_module("myfuncname", inner)
+    assert getattr(r, "myfuncname") == inner
+    assert isinstance(getattr(r, "myfuncname"), types.FunctionType)
 
     # and call it
     from redis.commands import RedisModuleCommands
 
     j = RedisModuleCommands.json
-    modclient.load_external_module("sometestfuncname", j)
+    r.load_external_module("sometestfuncname", j)
 
     # d = {'hello': 'world!'}
-    # mod = j(modclient)
+    # mod = j(r)
     # mod.set("fookey", ".", d)
     # assert mod.get('fookey') == d
 

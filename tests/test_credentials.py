@@ -4,7 +4,6 @@ import string
 from typing import Optional, Tuple, Union
 
 import pytest
-
 import redis
 from redis import AuthenticationError, DataError, ResponseError
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider

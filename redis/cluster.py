@@ -251,7 +251,6 @@ class AbstractRedisCluster:
                 "CLIENT INFO",
                 "CLIENT KILL",
                 "READONLY",
-                "READWRITE",
                 "CLUSTER INFO",
                 "CLUSTER MEET",
                 "CLUSTER NODES",

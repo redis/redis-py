@@ -5,9 +5,8 @@ from urllib.parse import urlparse
 
 import pytest
 import pytest_asyncio
-from packaging.version import Version
-
 import redis.asyncio as redis
+from packaging.version import Version
 from redis.asyncio.client import Monitor
 from redis.asyncio.connection import parse_url
 from redis.asyncio.retry import Retry
@@ -71,8 +70,12 @@ async def create_redis(request):
         url: str = request.config.getoption("--redis-url"),
         cls=redis.Redis,
         flushdb=True,
+        protocol=request.config.getoption("--protocol"),
         **kwargs,
     ):
+        if "protocol" not in url:
+            kwargs["protocol"] = request.config.getoption("--protocol")
+
         cluster_mode = REDIS_INFO["cluster_enabled"]
         if not cluster_mode:
             single = kwargs.pop("single_connection_client", False) or single_connection
@@ -131,10 +134,8 @@ async def r2(create_redis):
 
 
 @pytest_asyncio.fixture()
-async def modclient(request, create_redis):
-    return await create_redis(
-        url=request.config.getoption("--redismod-url"), decode_responses=True
-    )
+async def decoded_r(create_redis):
+    return await create_redis(decode_responses=True)
 
 
 def _gen_cluster_mock_resp(r, response):

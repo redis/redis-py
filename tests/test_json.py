@@ -1,17 +1,17 @@
 import pytest
-
 import redis
-from redis import exceptions
+from redis import Redis, exceptions
 from redis.commands.json.decoders import decode_list, unstring
 from redis.commands.json.path import Path
 
-from .conftest import assert_resp_response, skip_ifmodversion_lt
+from .conftest import _get_client, assert_resp_response, skip_ifmodversion_lt
 
 
 @pytest.fixture
-def client(modclient):
-    modclient.flushdb()
-    return modclient
+def client(request):
+    r = _get_client(Redis, request, decode_responses=True)
+    r.flushdb()
+    return r
 
 
 @pytest.mark.redismod

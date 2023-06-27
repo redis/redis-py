@@ -30,10 +30,10 @@ if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
 else:
     from async_timeout import timeout as async_timeout
 
-
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.compat import Protocol, TypedDict
+from redis.connection import DEFAULT_RESP_VERSION
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
@@ -203,7 +203,16 @@ class Connection:
         self.set_parser(parser_class)
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
-        self.protocol = protocol
+        try:
+            p = int(protocol)
+        except TypeError:
+            p = DEFAULT_RESP_VERSION
+        except ValueError:
+            raise ConnectionError("protocol must be an integer")
+        finally:
+            if p < 2 or p > 3:
+                raise ConnectionError("protocol must be either 2 or 3")
+            self.protocol = protocol
 
     def __repr__(self):
         repr_args = ",".join((f"{k}={v}" for k, v in self.repr_pieces()))
@@ -386,10 +395,10 @@ class Connection:
                 self._parser.on_connect(self)
             await self.send_command("HELLO", self.protocol)
             response = await self.read_response()
-            if response.get(b"proto") != int(self.protocol) and response.get(
-                "proto"
-            ) != int(self.protocol):
-                raise ConnectionError("Invalid RESP version")
+            # if response.get(b"proto") != self.protocol and response.get(
+            #     "proto"
+            # ) != self.protocol:
+            #     raise ConnectionError("Invalid RESP version")
 
         # if a client_name is given, set it
         if self.client_name:

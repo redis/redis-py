@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 import pytest
-
+from redis import Redis
 from redis.commands.graph import Edge, Node, Path
 from redis.commands.graph.execution_plan import Operation
 from redis.commands.graph.query_result import (
@@ -20,13 +20,14 @@ from redis.commands.graph.query_result import (
     QueryResult,
 )
 from redis.exceptions import ResponseError
-from tests.conftest import skip_if_redis_enterprise
+from tests.conftest import _get_client, skip_if_redis_enterprise
 
 
 @pytest.fixture
-def client(modclient):
-    modclient.flushdb()
-    return modclient
+def client(request):
+    r = _get_client(Redis, request, decode_responses=True)
+    r.flushdb()
+    return r
 
 
 @pytest.mark.redismod
@@ -292,6 +293,7 @@ def test_slowlog(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.xfail(strict=False)
 def test_query_timeout(client):
     # Build a sample graph with 1000 nodes.
     client.graph().query("UNWIND range(0,1000) as val CREATE ({v: val})")

@@ -4,7 +4,6 @@ import ssl
 from urllib.parse import urlparse
 
 import pytest
-
 import redis
 from redis.exceptions import ConnectionError, RedisError
 
@@ -20,10 +19,10 @@ class TestSSL:
     """
 
     ROOT = os.path.join(os.path.dirname(__file__), "..")
-    CERT_DIR = os.path.abspath(os.path.join(ROOT, "docker", "stunnel", "keys"))
+    CERT_DIR = os.path.abspath(os.path.join(ROOT, "dockers", "stunnel", "keys"))
     if not os.path.isdir(CERT_DIR):  # github actions package validation case
         CERT_DIR = os.path.abspath(
-            os.path.join(ROOT, "..", "docker", "stunnel", "keys")
+            os.path.join(ROOT, "..", "dockers", "stunnel", "keys")
         )
         if not os.path.isdir(CERT_DIR):
             raise IOError(f"No SSL certificates found. They should be in {CERT_DIR}")

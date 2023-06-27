@@ -12,7 +12,6 @@ else:
 
 import pytest
 import pytest_asyncio
-
 import redis.asyncio as redis
 from redis.exceptions import ConnectionError
 from redis.typing import EncodableT
