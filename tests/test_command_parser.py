@@ -20,6 +20,23 @@ class TestCommandsParser:
         assert commands_parser.get_keys(r, *args2) == ["foo"]
         assert commands_parser.get_keys(r, *args3) == ["foo", "bar", "foobar"]
 
+    def test_step_count_as_zero_not_failing(self, r):
+        commands_parser = CommandsParser(r)
+        # Intentionally updating first_key_pos = 1
+        tmp_get = {
+            "get": {
+                "name": "get",
+                "arity": 2,
+                "flags": ["readonly", "fast"],
+                "first_key_pos": 1,
+                "last_key_pos": 0,
+                "step_count": 0,
+            }
+        }
+        commands_parser.commands.update(tmp_get)
+        args1 = ["GET", "foo"]
+        assert commands_parser.get_keys(r, *args1) == []
+
     @pytest.mark.filterwarnings("ignore:ResponseError")
     @skip_if_redis_enterprise()
     def test_get_moveable_keys(self, r):
