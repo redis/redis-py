@@ -249,7 +249,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
         socket_timeout: Optional[float] = None,
         retry: Optional["Retry"] = None,
-        retry_on_error: Optional[List[Exception]] = None,
+        retry_on_error: Optional[List[Type[Exception]]] = None,
         # SSL related kwargs
         ssl: bool = False,
         ssl_ca_certs: Optional[str] = None,

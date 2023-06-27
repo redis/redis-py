@@ -461,6 +461,20 @@ class TestRedisCommands:
         with pytest.raises(TypeError):
             await r.client_no_touch()
 
+    @skip_if_server_version_lt("7.2.0")
+    @pytest.mark.onlycluster
+    async def test_waitaof(self, r):
+        # must return a list of 2 elements
+        assert len(await r.waitaof(0, 0, 0)) == 2
+        assert len(await r.waitaof(1, 0, 0)) == 2
+        assert len(await r.waitaof(1, 0, 1000)) == 2
+
+        # value is out of range, value must between 0 and 1
+        with pytest.raises(exceptions.ResponseError):
+            await r.waitaof(2, 0, 0)
+        with pytest.raises(exceptions.ResponseError):
+            await r.waitaof(-1, 0, 0)
+
     async def test_config_get(self, r: redis.Redis):
         data = await r.config_get()
         assert "maxmemory" in data

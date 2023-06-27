@@ -704,6 +704,20 @@ class TestRedisCommands:
         with pytest.raises(TypeError):
             r.client_no_touch()
 
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.2.0")
+    def test_waitaof(self, r):
+        # must return a list of 2 elements
+        assert len(r.waitaof(0, 0, 0)) == 2
+        assert len(r.waitaof(1, 0, 0)) == 2
+        assert len(r.waitaof(1, 0, 1000)) == 2
+
+        # value is out of range, value must between 0 and 1
+        with pytest.raises(exceptions.ResponseError):
+            r.waitaof(2, 0, 0)
+        with pytest.raises(exceptions.ResponseError):
+            r.waitaof(-1, 0, 0)
+
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("3.2.0")
     def test_client_reply(self, r, r_timeout):

@@ -78,6 +78,54 @@ class SentinelManagedSSLConnection(SentinelManagedConnection, SSLConnection):
     pass
 
 
+class SentinelConnectionPoolProxy:
+    def __init__(
+        self,
+        connection_pool,
+        is_master,
+        check_connection,
+        service_name,
+        sentinel_manager,
+    ):
+        self.connection_pool_ref = weakref.ref(connection_pool)
+        self.is_master = is_master
+        self.check_connection = check_connection
+        self.service_name = service_name
+        self.sentinel_manager = sentinel_manager
+        self.reset()
+
+    def reset(self):
+        self.master_address = None
+        self.slave_rr_counter = None
+
+    def get_master_address(self):
+        master_address = self.sentinel_manager.discover_master(self.service_name)
+        if self.is_master and self.master_address != master_address:
+            self.master_address = master_address
+            # disconnect any idle connections so that they reconnect
+            # to the new master the next time that they are used.
+            connection_pool = self.connection_pool_ref()
+            if connection_pool is not None:
+                connection_pool.disconnect(inuse_connections=False)
+        return master_address
+
+    def rotate_slaves(self):
+        slaves = self.sentinel_manager.discover_slaves(self.service_name)
+        if slaves:
+            if self.slave_rr_counter is None:
+                self.slave_rr_counter = random.randint(0, len(slaves) - 1)
+            for _ in range(len(slaves)):
+                self.slave_rr_counter = (self.slave_rr_counter + 1) % len(slaves)
+                slave = slaves[self.slave_rr_counter]
+                yield slave
+        # Fallback to the master connection
+        try:
+            yield self.get_master_address()
+        except MasterNotFoundError:
+            pass
+        raise SlaveNotFoundError(f"No slave found for {self.service_name!r}")
+
+
 class SentinelConnectionPool(ConnectionPool):
     """
     Sentinel backed connection pool.
@@ -95,8 +143,15 @@ class SentinelConnectionPool(ConnectionPool):
         )
         self.is_master = kwargs.pop("is_master", True)
         self.check_connection = kwargs.pop("check_connection", False)
+        self.proxy = SentinelConnectionPoolProxy(
+            connection_pool=self,
+            is_master=self.is_master,
+            check_connection=self.check_connection,
+            service_name=service_name,
+            sentinel_manager=sentinel_manager,
+        )
         super().__init__(**kwargs)
-        self.connection_kwargs["connection_pool"] = weakref.proxy(self)
+        self.connection_kwargs["connection_pool"] = self.proxy
         self.service_name = service_name
         self.sentinel_manager = sentinel_manager
 
@@ -106,8 +161,11 @@ class SentinelConnectionPool(ConnectionPool):
 
     def reset(self):
         super().reset()
-        self.master_address = None
-        self.slave_rr_counter = None
+        self.proxy.reset()
+
+    @property
+    def master_address(self):
+        return self.proxy.master_address
 
     def owns_connection(self, connection):
         check = not self.is_master or (
@@ -117,31 +175,11 @@ class SentinelConnectionPool(ConnectionPool):
         return check and parent.owns_connection(connection)
 
     def get_master_address(self):
-        master_address = self.sentinel_manager.discover_master(self.service_name)
-        if self.is_master:
-            if self.master_address != master_address:
-                self.master_address = master_address
-                # disconnect any idle connections so that they reconnect
-                # to the new master the next time that they are used.
-                self.disconnect(inuse_connections=False)
-        return master_address
+        return self.proxy.get_master_address()
 
     def rotate_slaves(self):
         "Round-robin slave balancer"
-        slaves = self.sentinel_manager.discover_slaves(self.service_name)
-        if slaves:
-            if self.slave_rr_counter is None:
-                self.slave_rr_counter = random.randint(0, len(slaves) - 1)
-            for _ in range(len(slaves)):
-                self.slave_rr_counter = (self.slave_rr_counter + 1) % len(slaves)
-                slave = slaves[self.slave_rr_counter]
-                yield slave
-        # Fallback to the master connection
-        try:
-            yield self.get_master_address()
-        except MasterNotFoundError:
-            pass
-        raise SlaveNotFoundError(f"No slave found for {self.service_name!r}")
+        return self.proxy.rotate_slaves()
 
 
 class Sentinel(SentinelCommands):
