@@ -88,9 +88,10 @@ class CommandsParser:
                 and command["last_key_pos"] == 0
             ):
                 is_subcmd = False
-                if "subcommands" in command:
+                subcommands = command.get("subcommands")
+                if subcommands:
                     subcmd_name = f"{cmd_name}|{args[1].lower()}"
-                    for subcmd in command["subcommands"]:
+                    for subcmd in subcommands:
                         if str_if_bytes(subcmd[0]) == subcmd_name:
                             command = self.parse_subcommand(subcmd)
                             is_subcmd = True
