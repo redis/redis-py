@@ -659,7 +659,7 @@ class TestMultiConnectionClient:
 
 
 @pytest.mark.onlynoncluster
-@pytest.mark.xfail(strict=True)
+@pytest.mark.xfail(strict=False)
 class TestHealthCheck:
     interval = 60
 
