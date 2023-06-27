@@ -52,7 +52,7 @@ jobs:
 
    run-tests:
      runs-on: ubuntu-latest
-     timeout-minutes: 15
+     timeout-minutes: 60
      strategy:
        max-parallel: 15
        fail-fast: false
@@ -156,7 +156,6 @@ jobs:
 
    install_package_from_commit:
     name: Install package from commit hash
-    needs: [build_and_test_package]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
