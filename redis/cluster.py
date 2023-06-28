@@ -2026,6 +2026,8 @@ class ClusterPipeline(RedisCluster):
                     try:
                         connection = get_connection(redis_node, c.args)
                     except (ConnectionError, TimeoutError) as e:
+                        for n in nodes.values():
+                            n.connection_pool.release(n.connection)
                         if self.retry and isinstance(e, self.retry._supported_errors):
                             backoff = self.retry._backoff.compute(attempts_count)
                             if backoff > 0:
