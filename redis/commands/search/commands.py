@@ -372,7 +372,7 @@ class SearchCommands:
         return dict(zip(it, it))
 
     def get_params_args(
-        self, query_params: Union[Dict[str, Union[str, int, float]], None]
+        self, query_params: Union[Dict[str, Union[str, int, float, bytes]], None]
     ):
         if query_params is None:
             return []
@@ -385,7 +385,7 @@ class SearchCommands:
                 args.append(value)
         return args
 
-    def _mk_query_args(self, query, query_params: Dict[str, Union[str, int, float]]):
+    def _mk_query_args(self, query, query_params: Union[Dict[str, Union[str, int, float, bytes]], None]):
         args = [self.index_name]
 
         if isinstance(query, str):
@@ -402,7 +402,7 @@ class SearchCommands:
     def search(
         self,
         query: Union[str, Query],
-        query_params: Dict[str, Union[str, int, float]] = None,
+        query_params: Union[Dict[str, Union[str, int, float, bytes]], None] = None,
     ):
         """
         Search the index for a given query, and return a result of documents
