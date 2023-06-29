@@ -23,8 +23,9 @@ res3 = r.hget("bike:1", "price")
 print(res3)  # '4972'
 
 res4 = r.hgetall("bike:1")
-print(res4)  
-#  {'model': 'Deimos', 'brand': 'Ergonom', 'type': 'Enduro bikes', 'price': '4972'}
+print(
+    res4
+)  #  {'model': 'Deimos', 'brand': 'Ergonom', 'type': 'Enduro bikes', 'price': '4972'}
 
 # STEP_END
 
