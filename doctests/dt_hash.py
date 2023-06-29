@@ -4,7 +4,7 @@ import redis
 
 r = redis.Redis(decode_responses=True)
 # HIDE_END
-# STEP_START set_get_getall
+# STEP_START set_get_all
 res1 = r.hset(
     "bike:1",
     mapping={
@@ -23,9 +23,9 @@ res3 = r.hget("bike:1", "price")
 print(res3)  # '4972'
 
 res4 = r.hgetall("bike:1")
-print(
-    res4
-)  #  {'model': 'Deimos', 'brand': 'Ergonom', 'type': 'Enduro bikes', 'price': '4972'}
+print(res4)  
+#  {'model': 'Deimos', 'brand': 'Ergonom', 'type': 'Enduro bikes', 'price': '4972'}
+
 # STEP_END
 
 # REMOVE_START
@@ -62,7 +62,7 @@ assert res7 == 4972
 # REMOVE_END
 
 
-# STEP_START incryby_get_mget
+# STEP_START incrby_get_mget
 res11 = r.hincrby("bike:1:stats", "rides", 1)
 print(res11)  # 1
 res12 = r.hincrby("bike:1:stats", "rides", 1)
