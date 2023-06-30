@@ -1981,6 +1981,14 @@ class TestClusterRedisCommands:
         r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
         r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+
+        failed_keys = ["{foo1}a", "{foo}b", "{foo}c"]
+        with pytest.raises(
+            RedisClusterException,
+            match="ZUNION - all keys must map to the same key slot",
+        ):
+            r.zunion(failed_keys)
+
         # sum
         assert r.zunion(["{foo}a", "{foo}b", "{foo}c"]) == [b"a2", b"a4", b"a3", b"a1"]
         assert r.zunion(["{foo}a", "{foo}b", "{foo}c"], withscores=True) == [
@@ -2009,6 +2017,23 @@ class TestClusterRedisCommands:
         r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
         r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+
+        result_key = "{foo}d"
+        failed_keys = ["{foo1}a", "{foo}b", "{foo}c"]
+        with pytest.raises(
+            RedisClusterException,
+            match="ZUNIONSTORE - all keys must map to the same key slot",
+        ):
+            r.zunionstore(result_key, failed_keys)
+
+        result_key = "{foo1}d"
+        failed_keys = ["{foo}a", "{foo}b"]
+        with pytest.raises(
+            RedisClusterException,
+            match="ZUNIONSTORE - all keys must map to the same key slot",
+        ):
+            r.zunionstore(result_key, failed_keys)
+
         assert r.zunionstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"]) == 4
         assert r.zrange("{foo}d", 0, -1, withscores=True) == [
             (b"a2", 3),
