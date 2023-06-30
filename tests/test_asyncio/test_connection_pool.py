@@ -606,9 +606,17 @@ class TestConnection:
     @skip_if_server_version_lt("2.8.8")
     @skip_if_redis_enterprise()
     async def test_read_only_error(self, r):
-        """READONLY errors get turned in ReadOnlyError exceptions"""
+        """READONLY errors get turned into ReadOnlyError exceptions"""
         with pytest.raises(redis.ReadOnlyError):
             await r.execute_command("DEBUG", "ERROR", "READONLY blah blah")
+
+    @skip_if_redis_enterprise()
+    async def test_oom_error(self, r):
+        """OOM errors get turned into OutOfMemoryError exceptions"""
+        with pytest.raises(redis.OutOfMemoryError):
+            # note: don't use the DEBUG OOM command since it's not the same
+            # as the db being full
+            await r.execute_command("DEBUG", "ERROR", "OOM blah blah")
 
     def test_connect_from_url_tcp(self):
         connection = redis.Redis.from_url("redis://localhost")

@@ -704,6 +704,20 @@ class TestRedisCommands:
         with pytest.raises(TypeError):
             r.client_no_touch()
 
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.2.0")
+    def test_waitaof(self, r):
+        # must return a list of 2 elements
+        assert len(r.waitaof(0, 0, 0)) == 2
+        assert len(r.waitaof(1, 0, 0)) == 2
+        assert len(r.waitaof(1, 0, 1000)) == 2
+
+        # value is out of range, value must between 0 and 1
+        with pytest.raises(exceptions.ResponseError):
+            r.waitaof(2, 0, 0)
+        with pytest.raises(exceptions.ResponseError):
+            r.waitaof(-1, 0, 0)
+
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("3.2.0")
     def test_client_reply(self, r, r_timeout):
@@ -2580,6 +2594,15 @@ class TestRedisCommands:
         assert r.zrank("a", "a1") == 0
         assert r.zrank("a", "a2") == 1
         assert r.zrank("a", "a6") is None
+
+    @skip_if_server_version_lt("7.2.0")
+    def test_zrank_withscore(self, r: redis.Redis):
+        r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
+        assert r.zrank("a", "a1") == 0
+        assert r.rank("a", "a2") == 1
+        assert r.zrank("a", "a6") is None
+        assert r.zrank("a", "a3", withscore=True) == [2, "3"]
+        assert r.zrank("a", "a6", withscore=True) is None
 
     def test_zrem(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})

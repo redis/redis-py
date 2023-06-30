@@ -49,6 +49,18 @@ class NoScriptError(ResponseError):
     pass
 
 
+class OutOfMemoryError(ResponseError):
+    """
+    Indicates the database is full. Can only occur when either:
+      * Redis maxmemory-policy=noeviction
+      * Redis maxmemory-policy=volatile* and there are no evictable keys
+
+    For more information see `Memory optimization in Redis <https://redis.io/docs/management/optimization/memory-optimization/#memory-allocation>`_. # noqa
+    """
+
+    pass
+
+
 class ExecAbortError(ResponseError):
     pass
 
@@ -131,6 +143,7 @@ class AskError(ResponseError):
     pertain to this hash slot, but only if the key in question exists,
     otherwise the query is forwarded using a -ASK redirection to the node that
     is target of the migration.
+
     src node: MIGRATING to dst node
         get > ASK error
         ask dst node > ASKING command
