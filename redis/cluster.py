@@ -957,7 +957,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         # redis server to parse the keys. Besides, there is a bug in redis<7.0
         # where `self._get_command_keys()` fails anyway. So, we special case
         # EVAL/EVALSHA.
-        if command in ("EVAL", "EVALSHA"):
+        if command in ("EVAL", "EVALSHA", "EVAL_RO", "EVALSHA_RO"):
             # command syntax: EVAL "script body" num_keys ...
             if len(args) <= 2:
                 raise RedisClusterException(f"Invalid args in command: {args}")
