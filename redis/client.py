@@ -323,7 +323,7 @@ def parse_xinfo_stream(response, **options):
     else:
         data = {str_if_bytes(k): v for k, v in response.items()}
     if not options.get("full", False):
-        first = data["first-entry"]
+        first = data.get("first-entry")
         if first is not None:
             data["first-entry"] = (first[0], pairs_to_dict(first[1]))
         last = data["last-entry"]
@@ -435,9 +435,13 @@ def parse_slowlog_get(response, **options):
         # an O(N) complexity) instead of the command.
         if isinstance(item[3], list):
             result["command"] = space.join(item[3])
+            result["client_address"] = item[4]
+            result["client_name"] = item[5]
         else:
             result["complexity"] = item[3]
             result["command"] = space.join(item[4])
+            result["client_address"] = item[5]
+            result["client_name"] = item[6]
         return result
 
     return [parse_item(item) for item in response]
@@ -533,10 +537,13 @@ def parse_geosearch_generic(response, **options):
     Parse the response of 'GEOSEARCH', GEORADIUS' and 'GEORADIUSBYMEMBER'
     commands according to 'withdist', 'withhash' and 'withcoord' labels.
     """
-    if options["store"] or options["store_dist"]:
-        # `store` and `store_dist` cant be combined
-        # with other command arguments.
-        # relevant to 'GEORADIUS' and 'GEORADIUSBYMEMBER'
+    try:
+        if options["store"] or options["store_dist"]:
+            # `store` and `store_dist` cant be combined
+            # with other command arguments.
+            # relevant to 'GEORADIUS' and 'GEORADIUSBYMEMBER'
+            return response
+    except KeyError:  # it means the command was sent via execute_command
         return response
 
     if type(response) != list:
@@ -976,8 +983,12 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         arguments always win.
 
         """
+        single_connection_client = kwargs.pop("single_connection_client", False)
         connection_pool = ConnectionPool.from_url(url, **kwargs)
-        return cls(connection_pool=connection_pool)
+        return cls(
+            connection_pool=connection_pool,
+            single_connection_client=single_connection_client,
+        )
 
     def __init__(
         self,
@@ -1625,7 +1636,7 @@ class PubSub:
                     return None
             else:
                 conn.connect()
-            return conn.read_response(push_request=True)
+            return conn.read_response(disconnect_on_error=False, push_request=True)
 
         response = self._execute(conn, try_read)
 

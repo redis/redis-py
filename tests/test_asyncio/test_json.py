@@ -50,6 +50,41 @@ async def test_nonascii_setgetdelete(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("2.6.0", "ReJSON")
+async def test_json_merge(decoded_r: redis.Redis):
+    # Test with root path $
+    assert await decoded_r.json().set(
+        "person_data",
+        "$",
+        {"person1": {"personal_data": {"name": "John"}}},
+    )
+    assert await decoded_r.json().merge(
+        "person_data", "$", {"person1": {"personal_data": {"hobbies": "reading"}}}
+    )
+    assert await decoded_r.json().get("person_data") == {
+        "person1": {"personal_data": {"name": "John", "hobbies": "reading"}}
+    }
+
+    # Test with root path path $.person1.personal_data
+    assert await decoded_r.json().merge(
+        "person_data", "$.person1.personal_data", {"country": "Israel"}
+    )
+    assert await decoded_r.json().get("person_data") == {
+        "person1": {
+            "personal_data": {"name": "John", "hobbies": "reading", "country": "Israel"}
+        }
+    }
+
+    # Test with null value to delete a value
+    assert await decoded_r.json().merge(
+        "person_data", "$.person1.personal_data", {"name": None}
+    )
+    assert await decoded_r.json().get("person_data") == {
+        "person1": {"personal_data": {"country": "Israel", "hobbies": "reading"}}
+    }
+
+
+@pytest.mark.redismod
 async def test_jsonsetexistentialmodifiersshouldsucceed(decoded_r: redis.Redis):
     obj = {"foo": "bar"}
     assert await decoded_r.json().set("obj", Path.root_path(), obj)
@@ -74,6 +109,17 @@ async def test_mgetshouldsucceed(decoded_r: redis.Redis):
     assert await decoded_r.json().mget(["1"], Path.root_path()) == [1]
 
     assert await decoded_r.json().mget([1, 2], Path.root_path()) == [1, 2]
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.6.0", "ReJSON")
+async def test_mset(decoded_r: redis.Redis):
+    await decoded_r.json().mset(
+        [("1", Path.root_path(), 1), ("2", Path.root_path(), 2)]
+    )
+
+    assert await decoded_r.json().mget(["1"], Path.root_path()) == [1]
+    assert await decoded_r.json().mget(["1", "2"], Path.root_path()) == [1, 2]
 
 
 @pytest.mark.redismod

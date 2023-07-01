@@ -58,7 +58,7 @@ class CommandsProtocol(Protocol):
         ...
 
 
-class ClusterCommandsProtocol(CommandsProtocol):
+class ClusterCommandsProtocol(CommandsProtocol, Protocol):
     encoder: "Encoder"
 
     def execute_command(self, *args, **options) -> Union[Any, Awaitable]:
