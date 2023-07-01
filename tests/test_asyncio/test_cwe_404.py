@@ -182,7 +182,7 @@ async def test_standalone_pipeline(delay, master_host):
 async def test_cluster(master_host):
 
     delay = 0.1
-    cluster_port = 6372
+    cluster_port = 16379
     remap_base = 7372
     n_nodes = 6
     hostname, _ = master_host
