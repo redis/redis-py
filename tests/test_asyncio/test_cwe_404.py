@@ -2,7 +2,6 @@ import asyncio
 import contextlib
 
 import pytest
-
 from redis.asyncio import Redis
 from redis.asyncio.cluster import RedisCluster
 from redis.asyncio.connection import async_timeout

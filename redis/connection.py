@@ -454,12 +454,12 @@ class AbstractConnection:
             raise ConnectionError(f"Error while reading from {host_error}: {e.args}")
 
     def read_response(
-            self,
-            disable_decoding=False,
-            *,
-            disconnect_on_error=True,
-            push_request=False,
-        ):
+        self,
+        disable_decoding=False,
+        *,
+        disconnect_on_error=True,
+        push_request=False,
+    ):
         """Read the response from a previously sent command"""
 
         host_error = self._host_error()
