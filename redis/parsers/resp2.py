@@ -10,11 +10,12 @@ class _RESP2Parser(_RESPBase):
     """RESP2 protocol implementation"""
 
     def read_response(self, disable_decoding=False):
-        pos = self._buffer.get_pos()
+        pos = self._buffer.get_pos() if self._buffer else None
         try:
             result = self._read_response(disable_decoding=disable_decoding)
         except BaseException:
-            self._buffer.rewind(pos)
+            if self._buffer:
+                self._buffer.rewind(pos)
             raise
         else:
             self._buffer.purge()

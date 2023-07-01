@@ -20,13 +20,14 @@ class _RESP3Parser(_RESPBase):
         return response
 
     def read_response(self, disable_decoding=False, push_request=False):
-        pos = self._buffer.get_pos()
+        pos = self._buffer.get_pos() if self._buffer else None
         try:
             result = self._read_response(
                 disable_decoding=disable_decoding, push_request=push_request
             )
         except BaseException:
-            self._buffer.rewind(pos)
+            if self._buffer:
+                self._buffer.rewind(pos)
             raise
         else:
             self._buffer.purge()
