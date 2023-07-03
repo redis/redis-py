@@ -44,7 +44,7 @@ These are the commands for interacting with the `RedisBloom module <https://redi
     import redis
     r = redis.Redis()
     r.topk().reserve("mytopk", 3, 50, 4, 0.9)
-    r.topk().info("mytopk)
+    r.topk().info("mytopk")
 
 .. automodule:: redis.commands.bf.commands
     :members: BFCommands, CFCommands, CMSCommands, TOPKCommands
@@ -119,7 +119,11 @@ below, an index named *my_index* is being created. When an index name is not spe
 
     r = redis.Redis()
     index_name = "my_index"
-    r.ft(index_name).create_index(TextField("play", weight=5.0), TextField("ball"))
+    schema = (
+        TextField("play", weight=5.0),
+        TextField("ball"),
+    )
+    r.ft(index_name).create_index(schema)
     print(r.ft(index_name).info())
 
 
@@ -140,7 +144,7 @@ These are the commands for interacting with the `RedisTimeSeries module <https:/
 
     import redis
     r = redis.Redis()
-    r.ts().create(2, retension_msecs=5000)
+    r.ts().create(2, retention_msecs=5000)
 
 .. automodule:: redis.commands.timeseries.commands
     :members: TimeSeriesCommands
