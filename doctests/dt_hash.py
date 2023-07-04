@@ -17,15 +17,18 @@ res1 = r.hset(
 print(res1)  # 4
 
 res2 = r.hget("bike:1", "model")
-print(res2)  # 'Deimos'
+print(res2)
+# >>> 'Deimos'
 
 res3 = r.hget("bike:1", "price")
-print(res3)  # '4972'
+print(res3)  
+# >>> '4972'
 
 res4 = r.hgetall("bike:1")
 print(
     res4
-)  #  {'model': 'Deimos', 'brand': 'Ergonom', 'type': 'Enduro bikes', 'price': '4972'}
+)  
+# >>> {'model': 'Deimos', 'brand': 'Ergonom', 'type': 'Enduro bikes', 'price': '4972'}
 
 # STEP_END
 
