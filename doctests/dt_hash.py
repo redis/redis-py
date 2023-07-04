@@ -14,7 +14,7 @@ res1 = r.hset(
         "price": 4972,
     },
 )
-print(res1)  
+print(res1)
 # >>> 4
 
 res2 = r.hget("bike:1", "model")
@@ -22,11 +22,11 @@ print(res2)
 # >>> 'Deimos'
 
 res3 = r.hget("bike:1", "price")
-print(res3)  
+print(res3)
 # >>> '4972'
 
 res4 = r.hgetall("bike:1")
-print(res4)  
+print(res4)
 # >>> {'model': 'Deimos', 'brand': 'Ergonom', 'type': 'Enduro bikes', 'price': '4972'}
 
 # STEP_END
@@ -45,7 +45,7 @@ assert res4 == {
 
 # STEP_START hmget
 res5 = r.hmget("bike:1", ["model", "price"])
-print(res5)  
+print(res5)
 # >>> ['Deimos', '4972']
 # STEP_END
 
@@ -55,10 +55,10 @@ assert res5 == ["Deimos", "4972"]
 
 # STEP_START hincrby
 res6 = r.hincrby("bike:1", "price", 100)
-print(res6)  
+print(res6)
 # >>> 5072
 res7 = r.hincrby("bike:1", "price", -100)
-print(res7)  
+print(res7)
 # >>> 4972
 # STEP_END
 
@@ -70,25 +70,25 @@ assert res7 == 4972
 
 # STEP_START incrby_get_mget
 res11 = r.hincrby("bike:1:stats", "rides", 1)
-print(res11)  
+print(res11)
 # >>> 1
 res12 = r.hincrby("bike:1:stats", "rides", 1)
-print(res12)  
+print(res12)
 # >>> 2
 res13 = r.hincrby("bike:1:stats", "rides", 1)
-print(res13)  
+print(res13)
 # >>> 3
 res14 = r.hincrby("bike:1:stats", "crashes", 1)
-print(res14)  
+print(res14)
 # >>> 1
 res15 = r.hincrby("bike:1:stats", "owners", 1)
-print(res15)  
+print(res15)
 # >>> 1
 res16 = r.hget("bike:1:stats", "rides")
-print(res16)  
+print(res16)
 # >>> 3
 res17 = r.hmget("bike:1:stats", ["crashes", "owners"])
-print(res17)  
+print(res17)
 # >>> ['1', '1']
 # STEP_END
 
