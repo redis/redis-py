@@ -16,8 +16,8 @@ Examples are standalone python scripts, committed to the *doctests* directory. T
 ```requirements.txt``` and ```dev_requirements.txt``` from this repository have been installed, as per below.
 
 ```bash
-pip install requirements.txt
-pip install dev_requirements.txt
+pip install -r requirements.txt
+pip install -r dev_requirements.txt
 ```
 
 Note - the CI process, runs the basic ```black``` and ```isort``` linters against the examples. Assuming 
