@@ -940,7 +940,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         # redis server to parse the keys. Besides, there is a bug in redis<7.0
         # where `self._get_command_keys()` fails anyway. So, we special case
         # EVAL/EVALSHA.
-        if command in ("EVAL", "EVALSHA"):
+        if command in ("EVAL", "EVALSHA", "EVAL_RO", "EVALSHA_RO"):
             # command syntax: EVAL "script body" num_keys ...
             if len(args) <= 2:
                 raise RedisClusterException(f"Invalid args in command: {args}")
@@ -951,6 +951,14 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             if len(eval_keys) == 0:
                 return random.randrange(0, REDIS_CLUSTER_HASH_SLOTS)
             keys = eval_keys
+        elif command == "ZUNIONSTORE":
+            # https://github.com/redis/redis/pull/12380
+            # command syntax: ZUNIONSTORE destination numkeys key [key ...]
+            #   [WEIGHTS weight [weight ...]] [AGGREGATE <SUM | MIN | MAX>]
+            if len(args) <= 3:
+                raise RedisClusterException(f"Invalid args in ZUNIONSTORE: {args}")
+            num_actual_keys = args[2]
+            keys = (args[1],) + args[3 : 3 + num_actual_keys]
         else:
             keys = self._get_command_keys(*args)
             if keys is None or len(keys) == 0:

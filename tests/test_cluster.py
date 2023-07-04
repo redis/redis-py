@@ -1882,10 +1882,30 @@ class TestClusterRedisCommands:
         ]
 
     def test_cluster_zunionstore_sum(self, r):
+        assert r.zunionstore("{foo}d", ["{foo}" + str(i) for i in range(0, 256)]) == 0
+
         r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
         r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+
+        result_key = "{foo}d"
+        failed_keys = ["{foo1}a", "{foo}b", "{foo}c"]
+        with pytest.raises(
+            RedisClusterException,
+            match="ZUNIONSTORE - all keys must map to the same key slot",
+        ):
+            r.zunionstore(result_key, failed_keys)
+
+        result_key = "{foo1}d"
+        failed_keys = ["{foo}a", "{foo}b"]
+        with pytest.raises(
+            RedisClusterException,
+            match="ZUNIONSTORE - all keys must map to the same key slot",
+        ):
+            r.zunionstore(result_key, failed_keys)
+
         assert r.zunionstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"]) == 4
+        assert r.zunionstore("{foo}e", ["{foo}a"]) == 3
         assert r.zrange("{foo}d", 0, -1, withscores=True) == [
             (b"a2", 3),
             (b"a4", 4),
