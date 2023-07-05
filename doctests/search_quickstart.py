@@ -183,7 +183,7 @@ bicycles = [
     },
 ]
 
-# STEP_START define_index
+# STEP_START create_index
 schema = (
     TextField("$.brand", as_name="brand"),
     TextField("$.model", as_name="model"),
