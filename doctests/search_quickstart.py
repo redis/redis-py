@@ -191,8 +191,7 @@ schema = (
     NumericField("$.price", as_name="price"),
     TagField("$.condition", as_name="condition"),
 )
-# STEP_END
-# STEP_START create_index
+
 index = r.ft("idx:bicycle")
 index.create_index(
     schema,
