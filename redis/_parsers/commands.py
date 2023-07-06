@@ -82,16 +82,20 @@ class CommandsParser:
                     )
 
         command = self.commands.get(cmd_name)
-        if "movablekeys" in command["flags"]:
+        keys_not_specified = (
+            command["step_count"] == 0
+            and command["first_key_pos"] == 0
+            and command["last_key_pos"] == 0
+        )
+        if keys_not_specified and "movablekeys" in command["flags"]:
+            # Run COMMAND GETKEYS only if it's a movablekeys command without keys
+            # specified. Otherwise, use the specified keys.
             keys = self._get_moveable_keys(redis_conn, *args)
+            print(keys)
         elif "pubsub" in command["flags"] or command["name"] == "pubsub":
             keys = self._get_pubsub_keys(*args)
         else:
-            if (
-                command["step_count"] == 0
-                and command["first_key_pos"] == 0
-                and command["last_key_pos"] == 0
-            ):
+            if keys_not_specified:
                 is_subcmd = False
                 if "subcommands" in command:
                     subcmd_name = f"{cmd_name}|{args[1].lower()}"
@@ -110,6 +114,10 @@ class CommandsParser:
                 range(command["first_key_pos"], last_key_pos + 1, command["step_count"])
             )
             keys = [args[pos] for pos in keys_pos]
+            if len(keys) == 1 and keys[0] == "":
+                # If we got a single key which is an empty string,
+                # try to get the keys from the server
+                keys = self._get_moveable_keys(redis_conn, *args)
 
         return keys
 

@@ -37,9 +37,12 @@ class TestCommandsParser:
             "second",
         ]
         args2 = ["XREAD", "COUNT", 2, b"STREAMS", "mystream", "writers", 0, 0]
+        # ZUNIONSTORE Has a specified key in arg index 1
         args3 = ["ZUNIONSTORE", "out", 2, "zset1", "zset2", "WEIGHTS", 2, 3]
+        # GEORADIUS Has a specified key in arg index 1
         args4 = ["GEORADIUS", "Sicily", 15, 37, 200, "km", "WITHCOORD", b"STORE", "out"]
         args5 = ["MEMORY USAGE", "foo"]
+        # MIGRATE Has a specified key in arg index 3 which can be empty
         args6 = [
             "MIGRATE",
             "192.168.1.34",
@@ -69,14 +72,14 @@ class TestCommandsParser:
         assert_resp_response(
             r,
             sorted(commands_parser.get_keys(r, *args3)),
-            ["out", "zset1", "zset2"],
-            [b"out", b"zset1", b"zset2"],
+            ["out"],
+            [b"out"],
         )
         assert_resp_response(
             r,
             sorted(commands_parser.get_keys(r, *args4)),
-            ["Sicily", "out"],
-            [b"Sicily", b"out"],
+            ["Sicily"],
+            [b"Sicily"],
         )
         assert sorted(commands_parser.get_keys(r, *args5)) in [["foo"], [b"foo"]]
         assert_resp_response(
