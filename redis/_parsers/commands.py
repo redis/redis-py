@@ -91,7 +91,6 @@ class CommandsParser:
             # Run COMMAND GETKEYS only if it's a movablekeys command without keys
             # specified. Otherwise, use the specified keys.
             keys = self._get_moveable_keys(redis_conn, *args)
-            print(keys)
         elif "pubsub" in command["flags"] or command["name"] == "pubsub":
             keys = self._get_pubsub_keys(*args)
         else:
