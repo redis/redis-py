@@ -15,4 +15,5 @@ pytest-cov>=4.0.0
 vulture>=2.3.0
 ujson>=4.2.0
 wheel>=0.30.0
+urllib3<2
 uvloop
