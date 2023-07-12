@@ -197,6 +197,19 @@ def parse_sentinel_master(response):
     return parse_sentinel_state(map(str_if_bytes, response))
 
 
+def parse_sentinel_state_resp3(response):
+    result = {}
+    for key in response:
+        try:
+            value = SENTINEL_STATE_TYPES[key](str_if_bytes(response[key]))
+            result[str_if_bytes(key)] = value
+        except Exception:
+            result[str_if_bytes(key)] = response[str_if_bytes(key)]
+    flags = set(result["flags"].split(","))
+    result["flags"] = flags
+    return result
+
+
 def parse_sentinel_masters(response):
     result = {}
     for item in response:
@@ -205,8 +218,16 @@ def parse_sentinel_masters(response):
     return result
 
 
+def parse_sentinel_masters_resp3(response):
+    return [parse_sentinel_state(master) for master in response]
+
+
 def parse_sentinel_slaves_and_sentinels(response):
     return [parse_sentinel_state(map(str_if_bytes, item)) for item in response]
+
+
+def parse_sentinel_slaves_and_sentinels_resp3(response):
+    return [parse_sentinel_state_resp3(item) for item in response]
 
 
 def parse_sentinel_get_master(response):
@@ -836,15 +857,15 @@ class AbstractRedis:
         "MEMORY STATS": parse_memory_stats,
         "MODULE LIST": lambda r: [pairs_to_dict(m) for m in r],
         "RESET": str_if_bytes,
+        "SENTINEL MASTER": parse_sentinel_master,
+        "SENTINEL MASTERS": parse_sentinel_masters,
+        "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels,
+        "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels,
         "STRALGO": parse_stralgo,
         "XINFO CONSUMERS": parse_list_of_dicts,
         "XINFO GROUPS": parse_list_of_dicts,
         "ZADD": parse_zadd,
         "ZMSCORE": parse_zmscore,
-        # "SENTINEL MASTER": parse_sentinel_master,
-        # "SENTINEL MASTERS": parse_sentinel_masters,
-        # "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels,
-        # "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels,
     }
 
     RESP3_RESPONSE_CALLBACKS = {
@@ -872,6 +893,10 @@ class AbstractRedis:
         "MEMORY STATS": lambda r: {
             str_if_bytes(key): value for key, value in r.items()
         },
+        "SENTINEL MASTER": parse_sentinel_state_resp3,
+        "SENTINEL MASTERS": parse_sentinel_masters_resp3,
+        "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels_resp3,
+        "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels_resp3,
         "STRALGO": lambda r, **options: {
             str_if_bytes(key): str_if_bytes(value) for key, value in r.items()
         }
