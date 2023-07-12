@@ -371,7 +371,7 @@ def mock_cluster_resp_ok(request, **kwargs):
 @pytest.fixture()
 def mock_cluster_resp_int(request, **kwargs):
     r = _get_client(redis.Redis, request, **kwargs)
-    return _gen_cluster_mock_resp(r, "2")
+    return _gen_cluster_mock_resp(r, 2)
 
 
 @pytest.fixture()

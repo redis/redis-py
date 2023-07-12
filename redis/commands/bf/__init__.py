@@ -130,8 +130,8 @@ class TOPKBloom(TOPKCommands, AbstractBloom):
         RESP2_MODULE_CALLBACKS = {
             TOPK_ADD: parse_to_list,
             TOPK_INCRBY: parse_to_list,
-            TOPK_LIST: parse_to_list,
             TOPK_INFO: TopKInfo,
+            TOPK_LIST: parse_to_list,
         }
         RESP3_MODULE_CALLBACKS = {}
 
@@ -198,11 +198,11 @@ class TDigestBloom(TDigestCommands, AbstractBloom):
             TDIGEST_BYRANK: parse_to_list,
             TDIGEST_BYREVRANK: parse_to_list,
             TDIGEST_CDF: parse_to_list,
-            TDIGEST_QUANTILE: parse_to_list,
+            TDIGEST_INFO: TDigestInfo,
             TDIGEST_MIN: float,
             TDIGEST_MAX: float,
             TDIGEST_TRIMMED_MEAN: float,
-            TDIGEST_INFO: TDigestInfo,
+            TDIGEST_QUANTILE: parse_to_list,
         }
         RESP3_MODULE_CALLBACKS = {}
 

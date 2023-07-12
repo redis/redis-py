@@ -12,6 +12,7 @@ from time import time
 from typing import Optional, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
+from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from .exceptions import (
@@ -24,7 +25,6 @@ from .exceptions import (
     ResponseError,
     TimeoutError,
 )
-from .parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .retry import Retry
 from .utils import (
     CRYPTOGRAPHY_AVAILABLE,

@@ -11,6 +11,7 @@ from unittest.mock import DEFAULT, Mock, call, patch
 
 import pytest
 from redis import Redis
+from redis._parsers import CommandsParser
 from redis.backoff import ExponentialBackoff, NoBackoff, default_backoff
 from redis.cluster import (
     PRIMARY,
@@ -35,7 +36,6 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
-from redis.parsers import CommandsParser
 from redis.retry import Retry
 from redis.utils import str_if_bytes
 from tests.test_pubsub import wait_for_message
@@ -1000,7 +1000,7 @@ class TestClusterRedisCommands:
         node = r.get_random_node()
         r.client_setname("redis_py_test", target_nodes=node)
         client_name = r.client_getname(target_nodes=node)
-        assert client_name == "redis_py_test"
+        assert_resp_response(r, client_name, "redis_py_test", b"redis_py_test")
 
     def test_exists(self, r):
         d = {"a": b"1", "b": b"2", "c": b"3", "d": b"4"}
@@ -1595,7 +1595,7 @@ class TestClusterRedisCommands:
         node = r.get_primaries()[0]
         res = r.client_trackinginfo(target_nodes=node)
         assert len(res) > 2
-        assert "prefixes" in res
+        assert "prefixes" in res or b"prefixes" in res
 
     @skip_if_server_version_lt("2.9.50")
     def test_client_pause(self, r):
@@ -1757,24 +1757,68 @@ class TestClusterRedisCommands:
     def test_cluster_blpop(self, r):
         r.rpush("{foo}a", "1", "2")
         r.rpush("{foo}b", "3", "4")
-        assert r.blpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}b", b"3")
-        assert r.blpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}b", b"4")
-        assert r.blpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}a", b"1")
-        assert r.blpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}a", b"2")
+        assert_resp_response(
+            r,
+            r.blpop(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}b", b"3"),
+            [b"{foo}b", b"3"],
+        )
+        assert_resp_response(
+            r,
+            r.blpop(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}b", b"4"),
+            [b"{foo}b", b"4"],
+        )
+        assert_resp_response(
+            r,
+            r.blpop(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}a", b"1"),
+            [b"{foo}a", b"1"],
+        )
+        assert_resp_response(
+            r,
+            r.blpop(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}a", b"2"),
+            [b"{foo}a", b"2"],
+        )
         assert r.blpop(["{foo}b", "{foo}a"], timeout=1) is None
         r.rpush("{foo}c", "1")
-        assert r.blpop("{foo}c", timeout=1) == (b"{foo}c", b"1")
+        assert_resp_response(
+            r, r.blpop("{foo}c", timeout=1), (b"{foo}c", b"1"), [b"{foo}c", b"1"]
+        )
 
     def test_cluster_brpop(self, r):
         r.rpush("{foo}a", "1", "2")
         r.rpush("{foo}b", "3", "4")
-        assert r.brpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}b", b"4")
-        assert r.brpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}b", b"3")
-        assert r.brpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}a", b"2")
-        assert r.brpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}a", b"1")
+        assert_resp_response(
+            r,
+            r.brpop(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}b", b"4"),
+            [b"{foo}b", b"4"],
+        )
+        assert_resp_response(
+            r,
+            r.brpop(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}b", b"3"),
+            [b"{foo}b", b"3"],
+        )
+        assert_resp_response(
+            r,
+            r.brpop(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}a", b"2"),
+            [b"{foo}a", b"2"],
+        )
+        assert_resp_response(
+            r,
+            r.brpop(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}a", b"1"),
+            [b"{foo}a", b"1"],
+        )
         assert r.brpop(["{foo}b", "{foo}a"], timeout=1) is None
         r.rpush("{foo}c", "1")
-        assert r.brpop("{foo}c", timeout=1) == (b"{foo}c", b"1")
+        assert_resp_response(
+            r, r.brpop("{foo}c", timeout=1), (b"{foo}c", b"1"), [b"{foo}c", b"1"]
+        )
 
     def test_cluster_brpoplpush(self, r):
         r.rpush("{foo}a", "1", "2")
@@ -1956,25 +2000,75 @@ class TestClusterRedisCommands:
     def test_cluster_bzpopmax(self, r):
         r.zadd("{foo}a", {"a1": 1, "a2": 2})
         r.zadd("{foo}b", {"b1": 10, "b2": 20})
-        assert r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}b", b"b2", 20)
-        assert r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}b", b"b1", 10)
-        assert r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}a", b"a2", 2)
-        assert r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}a", b"a1", 1)
+        assert_resp_response(
+            r,
+            r.bzpopmax(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}b", b"b2", 20),
+            [b"{foo}b", b"b2", 20],
+        )
+        assert_resp_response(
+            r,
+            r.bzpopmax(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}b", b"b1", 10),
+            [b"{foo}b", b"b1", 10],
+        )
+        assert_resp_response(
+            r,
+            r.bzpopmax(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}a", b"a2", 2),
+            [b"{foo}a", b"a2", 2],
+        )
+        assert_resp_response(
+            r,
+            r.bzpopmax(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}a", b"a1", 1),
+            [b"{foo}a", b"a1", 1],
+        )
         assert r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) is None
         r.zadd("{foo}c", {"c1": 100})
-        assert r.bzpopmax("{foo}c", timeout=1) == (b"{foo}c", b"c1", 100)
+        assert_resp_response(
+            r,
+            r.bzpopmax("{foo}c", timeout=1),
+            (b"{foo}c", b"c1", 100),
+            [b"{foo}c", b"c1", 100],
+        )
 
     @skip_if_server_version_lt("4.9.0")
     def test_cluster_bzpopmin(self, r):
         r.zadd("{foo}a", {"a1": 1, "a2": 2})
         r.zadd("{foo}b", {"b1": 10, "b2": 20})
-        assert r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}b", b"b1", 10)
-        assert r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}b", b"b2", 20)
-        assert r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}a", b"a1", 1)
-        assert r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}a", b"a2", 2)
+        assert_resp_response(
+            r,
+            r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}b", b"b1", 10),
+            [b"b", b"b1", 10],
+        )
+        assert_resp_response(
+            r,
+            r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}b", b"b2", 20),
+            [b"b", b"b2", 20],
+        )
+        assert_resp_response(
+            r,
+            r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}a", b"a1", 1),
+            [b"a", b"a1", 1],
+        )
+        assert_resp_response(
+            r,
+            r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}a", b"a2", 2),
+            [b"a", b"a2", 2],
+        )
         assert r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) is None
         r.zadd("{foo}c", {"c1": 100})
-        assert r.bzpopmin("{foo}c", timeout=1) == (b"{foo}c", b"c1", 100)
+        assert_resp_response(
+            r,
+            r.bzpopmin("{foo}c", timeout=1),
+            (b"{foo}c", b"c1", 100),
+            [b"{foo}c", b"c1", 100],
+        )
 
     @skip_if_server_version_lt("6.2.0")
     def test_cluster_zrangestore(self, r):

@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import pytest
 import pytest_asyncio
 from _pytest.fixtures import FixtureRequest
+from redis._parsers import AsyncCommandsParser
 from redis.asyncio.cluster import ClusterNode, NodesManager, RedisCluster
 from redis.asyncio.connection import Connection, SSLConnection, async_timeout
 from redis.asyncio.retry import Retry
@@ -26,7 +27,6 @@ from redis.exceptions import (
     RedisError,
     ResponseError,
 )
-from redis.parsers import AsyncCommandsParser
 from redis.utils import str_if_bytes
 from tests.conftest import (
     assert_resp_response,
@@ -964,7 +964,7 @@ class TestClusterRedisCommands:
         node = r.get_random_node()
         await r.client_setname("redis_py_test", target_nodes=node)
         client_name = await r.client_getname(target_nodes=node)
-        assert client_name == "redis_py_test"
+        assert_resp_response(r, client_name, "redis_py_test", b"redis_py_test")
 
     async def test_exists(self, r: RedisCluster) -> None:
         d = {"a": b"1", "b": b"2", "c": b"3", "d": b"4"}
@@ -1443,7 +1443,7 @@ class TestClusterRedisCommands:
         node = r.get_primaries()[0]
         res = await r.client_trackinginfo(target_nodes=node)
         assert len(res) > 2
-        assert "prefixes" in res
+        assert "prefixes" in res or b"prefixes" in res
 
     @skip_if_server_version_lt("2.9.50")
     async def test_client_pause(self, r: RedisCluster) -> None:
@@ -1609,24 +1609,68 @@ class TestClusterRedisCommands:
     async def test_cluster_blpop(self, r: RedisCluster) -> None:
         await r.rpush("{foo}a", "1", "2")
         await r.rpush("{foo}b", "3", "4")
-        assert await r.blpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}b", b"3")
-        assert await r.blpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}b", b"4")
-        assert await r.blpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}a", b"1")
-        assert await r.blpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}a", b"2")
+        assert_resp_response(
+            r,
+            await r.blpop(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}b", b"3"),
+            [b"{foo}b", b"3"],
+        )
+        assert_resp_response(
+            r,
+            await r.blpop(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}b", b"4"),
+            [b"{foo}b", b"4"],
+        )
+        assert_resp_response(
+            r,
+            await r.blpop(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}a", b"1"),
+            [b"{foo}a", b"1"],
+        )
+        assert_resp_response(
+            r,
+            await r.blpop(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}a", b"2"),
+            [b"{foo}a", b"2"],
+        )
         assert await r.blpop(["{foo}b", "{foo}a"], timeout=1) is None
         await r.rpush("{foo}c", "1")
-        assert await r.blpop("{foo}c", timeout=1) == (b"{foo}c", b"1")
+        assert_resp_response(
+            r, await r.blpop("{foo}c", timeout=1), (b"{foo}c", b"1"), [b"{foo}c", b"1"]
+        )
 
     async def test_cluster_brpop(self, r: RedisCluster) -> None:
         await r.rpush("{foo}a", "1", "2")
         await r.rpush("{foo}b", "3", "4")
-        assert await r.brpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}b", b"4")
-        assert await r.brpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}b", b"3")
-        assert await r.brpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}a", b"2")
-        assert await r.brpop(["{foo}b", "{foo}a"], timeout=1) == (b"{foo}a", b"1")
+        assert_resp_response(
+            r,
+            await r.brpop(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}b", b"4"),
+            [b"{foo}b", b"4"],
+        )
+        assert_resp_response(
+            r,
+            await r.brpop(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}b", b"3"),
+            [b"{foo}b", b"3"],
+        )
+        assert_resp_response(
+            r,
+            await r.brpop(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}a", b"2"),
+            [b"{foo}a", b"2"],
+        )
+        assert_resp_response(
+            r,
+            await r.brpop(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}a", b"1"),
+            [b"{foo}a", b"1"],
+        )
         assert await r.brpop(["{foo}b", "{foo}a"], timeout=1) is None
         await r.rpush("{foo}c", "1")
-        assert await r.brpop("{foo}c", timeout=1) == (b"{foo}c", b"1")
+        assert_resp_response(
+            r, await r.brpop("{foo}c", timeout=1), (b"{foo}c", b"1"), [b"{foo}c", b"1"]
+        )
 
     async def test_cluster_brpoplpush(self, r: RedisCluster) -> None:
         await r.rpush("{foo}a", "1", "2")
@@ -1811,57 +1855,75 @@ class TestClusterRedisCommands:
     async def test_cluster_bzpopmax(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 2})
         await r.zadd("{foo}b", {"b1": 10, "b2": 20})
-        assert await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) == (
-            b"{foo}b",
-            b"b2",
-            20,
+        assert_resp_response(
+            r,
+            await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}b", b"b2", 20),
+            [b"{foo}b", b"b2", 20],
         )
-        assert await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) == (
-            b"{foo}b",
-            b"b1",
-            10,
+        assert_resp_response(
+            r,
+            await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}b", b"b1", 10),
+            [b"{foo}b", b"b1", 10],
         )
-        assert await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) == (
-            b"{foo}a",
-            b"a2",
-            2,
+        assert_resp_response(
+            r,
+            await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}a", b"a2", 2),
+            [b"{foo}a", b"a2", 2],
         )
-        assert await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) == (
-            b"{foo}a",
-            b"a1",
-            1,
+        assert_resp_response(
+            r,
+            await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}a", b"a1", 1),
+            [b"{foo}a", b"a1", 1],
         )
         assert await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) is None
         await r.zadd("{foo}c", {"c1": 100})
-        assert await r.bzpopmax("{foo}c", timeout=1) == (b"{foo}c", b"c1", 100)
+        assert_resp_response(
+            r,
+            await r.bzpopmax("{foo}c", timeout=1),
+            (b"{foo}c", b"c1", 100),
+            [b"{foo}c", b"c1", 100],
+        )
 
     @skip_if_server_version_lt("4.9.0")
     async def test_cluster_bzpopmin(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 2})
         await r.zadd("{foo}b", {"b1": 10, "b2": 20})
-        assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) == (
-            b"{foo}b",
-            b"b1",
-            10,
+        assert_resp_response(
+            r,
+            await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}b", b"b1", 10),
+            [b"b", b"b1", 10],
         )
-        assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) == (
-            b"{foo}b",
-            b"b2",
-            20,
+        assert_resp_response(
+            r,
+            await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}b", b"b2", 20),
+            [b"b", b"b2", 20],
         )
-        assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) == (
-            b"{foo}a",
-            b"a1",
-            1,
+        assert_resp_response(
+            r,
+            await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}a", b"a1", 1),
+            [b"a", b"a1", 1],
         )
-        assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) == (
-            b"{foo}a",
-            b"a2",
-            2,
+        assert_resp_response(
+            r,
+            await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
+            (b"{foo}a", b"a2", 2),
+            [b"a", b"a2", 2],
         )
         assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) is None
         await r.zadd("{foo}c", {"c1": 100})
-        assert await r.bzpopmin("{foo}c", timeout=1) == (b"{foo}c", b"c1", 100)
+        assert_resp_response(
+            r,
+            await r.bzpopmin("{foo}c", timeout=1),
+            (b"{foo}c", b"c1", 100),
+            [b"{foo}c", b"c1", 100],
+        )
 
     @skip_if_server_version_lt("6.2.0")
     async def test_cluster_zrangestore(self, r: RedisCluster) -> None:

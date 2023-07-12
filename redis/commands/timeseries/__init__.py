@@ -34,8 +34,8 @@ class TimeSeries(TimeSeriesCommands):
         """Create a new RedisTimeSeries client."""
         # Set the module commands' callbacks
         self.MODULE_CALLBACKS = {
-            CREATE_CMD: bool_ok,
             ALTER_CMD: bool_ok,
+            CREATE_CMD: bool_ok,
             CREATERULE_CMD: bool_ok,
             DELETERULE_CMD: bool_ok,
         }
@@ -43,13 +43,13 @@ class TimeSeries(TimeSeriesCommands):
         RESP2_MODULE_CALLBACKS = {
             DEL_CMD: int,
             GET_CMD: parse_get,
-            QUERYINDEX_CMD: parse_to_list,
-            RANGE_CMD: parse_range,
-            REVRANGE_CMD: parse_range,
+            INFO_CMD: TSInfo,
             MGET_CMD: parse_m_get,
             MRANGE_CMD: parse_m_range,
             MREVRANGE_CMD: parse_m_range,
-            INFO_CMD: TSInfo,
+            RANGE_CMD: parse_range,
+            REVRANGE_CMD: parse_range,
+            QUERYINDEX_CMD: parse_to_list,
         }
         RESP3_MODULE_CALLBACKS = {}
 

@@ -33,32 +33,32 @@ class JSON(JSONCommands):
         # Set the module commands' callbacks
         self.MODULE_CALLBACKS = {
             "JSON.ARRPOP": self._decode,
-            "JSON.MGET": bulk_of_jsons(self._decode),
-            "JSON.SET": lambda r: r and nativestr(r) == "OK",
             "JSON.DEBUG": self._decode,
-            "JSON.MSET": lambda r: r and nativestr(r) == "OK",
             "JSON.MERGE": lambda r: r and nativestr(r) == "OK",
-            "JSON.TOGGLE": self._decode,
+            "JSON.MGET": bulk_of_jsons(self._decode),
+            "JSON.MSET": lambda r: r and nativestr(r) == "OK",
             "JSON.RESP": self._decode,
+            "JSON.SET": lambda r: r and nativestr(r) == "OK",
+            "JSON.TOGGLE": self._decode,
         }
 
         RESP2_MODULE_CALLBACKS = {
-            "JSON.ARRTRIM": self._decode,
-            "JSON.OBJLEN": self._decode,
             "JSON.ARRAPPEND": self._decode,
             "JSON.ARRINDEX": self._decode,
             "JSON.ARRINSERT": self._decode,
-            "JSON.TOGGLE": self._decode,
-            "JSON.STRAPPEND": self._decode,
-            "JSON.STRLEN": self._decode,
             "JSON.ARRLEN": self._decode,
+            "JSON.ARRTRIM": self._decode,
             "JSON.CLEAR": int,
             "JSON.DEL": int,
             "JSON.FORGET": int,
+            "JSON.GET": self._decode,
             "JSON.NUMINCRBY": self._decode,
             "JSON.NUMMULTBY": self._decode,
             "JSON.OBJKEYS": self._decode,
-            "JSON.GET": self._decode,
+            "JSON.STRAPPEND": self._decode,
+            "JSON.OBJLEN": self._decode,
+            "JSON.STRLEN": self._decode,
+            "JSON.TOGGLE": self._decode,
         }
 
         RESP3_MODULE_CALLBACKS = {

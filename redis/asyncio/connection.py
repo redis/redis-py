@@ -51,7 +51,7 @@ from redis.exceptions import (
 from redis.typing import EncodableT
 from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 
-from ..parsers import (
+from .._parsers import (
     BaseParser,
     Encoder,
     _AsyncHiredisParser,

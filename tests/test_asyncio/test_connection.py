@@ -5,17 +5,17 @@ from unittest.mock import patch
 
 import pytest
 import redis
-from redis.asyncio import Redis
-from redis.asyncio.connection import Connection, UnixDomainSocketConnection
-from redis.asyncio.retry import Retry
-from redis.backoff import NoBackoff
-from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
-from redis.parsers import (
+from redis._parsers import (
     _AsyncHiredisParser,
     _AsyncRESP2Parser,
     _AsyncRESP3Parser,
     _AsyncRESPBase,
 )
+from redis.asyncio import Redis
+from redis.asyncio.connection import Connection, UnixDomainSocketConnection
+from redis.asyncio.retry import Retry
+from redis.backoff import NoBackoff
+from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 

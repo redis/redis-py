@@ -106,13 +106,13 @@ class TestRedisCommands:
     async def test_acl_cat_no_category(self, r: redis.Redis):
         categories = await r.acl_cat()
         assert isinstance(categories, list)
-        assert "read" in categories
+        assert "read" in categories or b"read" in categories
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
     async def test_acl_cat_with_category(self, r: redis.Redis):
         commands = await r.acl_cat("read")
         assert isinstance(commands, list)
-        assert "get" in commands
+        assert "get" in commands or b"get" in commands
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
     async def test_acl_deluser(self, r_teardown):
@@ -126,7 +126,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt(REDIS_6_VERSION)
     async def test_acl_genpass(self, r: redis.Redis):
         password = await r.acl_genpass()
-        assert isinstance(password, str)
+        assert isinstance(password, (str, bytes))
 
     @skip_if_server_version_lt("7.0.0")
     async def test_acl_getuser_setuser(self, r_teardown):
@@ -307,7 +307,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt(REDIS_6_VERSION)
     async def test_acl_whoami(self, r: redis.Redis):
         username = await r.acl_whoami()
-        assert isinstance(username, str)
+        assert isinstance(username, (str, bytes))
 
     @pytest.mark.onlynoncluster
     async def test_client_list(self, r: redis.Redis):
@@ -345,7 +345,9 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     async def test_client_setname(self, r: redis.Redis):
         assert await r.client_setname("redis_py_test")
-        assert await r.client_getname() == "redis_py_test"
+        assert_resp_response(
+            r, await r.client_getname(), "redis_py_test", b"redis_py_test"
+        )
 
     @skip_if_server_version_lt("2.6.9")
     @pytest.mark.onlynoncluster
@@ -1093,25 +1095,45 @@ class TestRedisCommands:
     async def test_blpop(self, r: redis.Redis):
         await r.rpush("a", "1", "2")
         await r.rpush("b", "3", "4")
-        assert await r.blpop(["b", "a"], timeout=1) == (b"b", b"3")
-        assert await r.blpop(["b", "a"], timeout=1) == (b"b", b"4")
-        assert await r.blpop(["b", "a"], timeout=1) == (b"a", b"1")
-        assert await r.blpop(["b", "a"], timeout=1) == (b"a", b"2")
+        assert_resp_response(
+            r, await r.blpop(["b", "a"], timeout=1), (b"b", b"3"), [b"b", b"3"]
+        )
+        assert_resp_response(
+            r, await r.blpop(["b", "a"], timeout=1), (b"b", b"4"), [b"b", b"4"]
+        )
+        assert_resp_response(
+            r, await r.blpop(["b", "a"], timeout=1), (b"a", b"1"), [b"a", b"1"]
+        )
+        assert_resp_response(
+            r, await r.blpop(["b", "a"], timeout=1), (b"a", b"2"), [b"a", b"2"]
+        )
         assert await r.blpop(["b", "a"], timeout=1) is None
         await r.rpush("c", "1")
-        assert await r.blpop("c", timeout=1) == (b"c", b"1")
+        assert_resp_response(
+            r, await r.blpop("c", timeout=1), (b"c", b"1"), [b"c", b"1"]
+        )
 
     @pytest.mark.onlynoncluster
     async def test_brpop(self, r: redis.Redis):
         await r.rpush("a", "1", "2")
         await r.rpush("b", "3", "4")
-        assert await r.brpop(["b", "a"], timeout=1) == (b"b", b"4")
-        assert await r.brpop(["b", "a"], timeout=1) == (b"b", b"3")
-        assert await r.brpop(["b", "a"], timeout=1) == (b"a", b"2")
-        assert await r.brpop(["b", "a"], timeout=1) == (b"a", b"1")
+        assert_resp_response(
+            r, await r.brpop(["b", "a"], timeout=1), (b"b", b"4"), [b"b", b"4"]
+        )
+        assert_resp_response(
+            r, await r.brpop(["b", "a"], timeout=1), (b"b", b"3"), [b"b", b"3"]
+        )
+        assert_resp_response(
+            r, await r.brpop(["b", "a"], timeout=1), (b"a", b"2"), [b"a", b"2"]
+        )
+        assert_resp_response(
+            r, await r.brpop(["b", "a"], timeout=1), (b"a", b"1"), [b"a", b"1"]
+        )
         assert await r.brpop(["b", "a"], timeout=1) is None
         await r.rpush("c", "1")
-        assert await r.brpop("c", timeout=1) == (b"c", b"1")
+        assert_resp_response(
+            r, await r.brpop("c", timeout=1), (b"c", b"1"), [b"c", b"1"]
+        )
 
     @pytest.mark.onlynoncluster
     async def test_brpoplpush(self, r: redis.Redis):
@@ -1626,26 +1648,70 @@ class TestRedisCommands:
     async def test_bzpopmax(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2})
         await r.zadd("b", {"b1": 10, "b2": 20})
-        assert await r.bzpopmax(["b", "a"], timeout=1) == (b"b", b"b2", 20)
-        assert await r.bzpopmax(["b", "a"], timeout=1) == (b"b", b"b1", 10)
-        assert await r.bzpopmax(["b", "a"], timeout=1) == (b"a", b"a2", 2)
-        assert await r.bzpopmax(["b", "a"], timeout=1) == (b"a", b"a1", 1)
+        assert_resp_response(
+            r,
+            await r.bzpopmax(["b", "a"], timeout=1),
+            (b"b", b"b2", 20),
+            [b"b", b"b2", 20],
+        )
+        assert_resp_response(
+            r,
+            await r.bzpopmax(["b", "a"], timeout=1),
+            (b"b", b"b1", 10),
+            [b"b", b"b1", 10],
+        )
+        assert_resp_response(
+            r,
+            await r.bzpopmax(["b", "a"], timeout=1),
+            (b"a", b"a2", 2),
+            [b"a", b"a2", 2],
+        )
+        assert_resp_response(
+            r,
+            await r.bzpopmax(["b", "a"], timeout=1),
+            (b"a", b"a1", 1),
+            [b"a", b"a1", 1],
+        )
         assert await r.bzpopmax(["b", "a"], timeout=1) is None
         await r.zadd("c", {"c1": 100})
-        assert await r.bzpopmax("c", timeout=1) == (b"c", b"c1", 100)
+        assert_resp_response(
+            r, await r.bzpopmax("c", timeout=1), (b"c", b"c1", 100), [b"c", b"c1", 100]
+        )
 
     @skip_if_server_version_lt("4.9.0")
     @pytest.mark.onlynoncluster
     async def test_bzpopmin(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2})
         await r.zadd("b", {"b1": 10, "b2": 20})
-        assert await r.bzpopmin(["b", "a"], timeout=1) == (b"b", b"b1", 10)
-        assert await r.bzpopmin(["b", "a"], timeout=1) == (b"b", b"b2", 20)
-        assert await r.bzpopmin(["b", "a"], timeout=1) == (b"a", b"a1", 1)
-        assert await r.bzpopmin(["b", "a"], timeout=1) == (b"a", b"a2", 2)
+        assert_resp_response(
+            r,
+            await r.bzpopmin(["b", "a"], timeout=1),
+            (b"b", b"b1", 10),
+            [b"b", b"b1", 10],
+        )
+        assert_resp_response(
+            r,
+            await r.bzpopmin(["b", "a"], timeout=1),
+            (b"b", b"b2", 20),
+            [b"b", b"b2", 20],
+        )
+        assert_resp_response(
+            r,
+            await r.bzpopmin(["b", "a"], timeout=1),
+            (b"a", b"a1", 1),
+            [b"a", b"a1", 1],
+        )
+        assert_resp_response(
+            r,
+            await r.bzpopmin(["b", "a"], timeout=1),
+            (b"a", b"a2", 2),
+            [b"a", b"a2", 2],
+        )
         assert await r.bzpopmin(["b", "a"], timeout=1) is None
         await r.zadd("c", {"c1": 100})
-        assert await r.bzpopmin("c", timeout=1) == (b"c", b"c1", 100)
+        assert_resp_response(
+            r, await r.bzpopmin("c", timeout=1), (b"c", b"c1", 100), [b"c", b"c1", 100]
+        )
 
     async def test_zrange(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
@@ -2332,11 +2398,12 @@ class TestRedisCommands:
         )
 
         await r.geoadd("barcelona", values)
-        assert await r.geohash("barcelona", "place1", "place2", "place3") == [
-            "sp3e9yg3kd0",
-            "sp3e9cbc3t0",
-            None,
-        ]
+        assert_resp_response(
+            r,
+            await r.geohash("barcelona", "place1", "place2", "place3"),
+            ["sp3e9yg3kd0", "sp3e9cbc3t0", None],
+            [b"sp3e9yg3kd0", b"sp3e9cbc3t0", None],
+        )
 
     @skip_if_server_version_lt("3.2.0")
     async def test_geopos(self, r: redis.Redis):
@@ -2348,10 +2415,18 @@ class TestRedisCommands:
 
         await r.geoadd("barcelona", values)
         # redis uses 52 bits precision, hereby small errors may be introduced.
-        assert await r.geopos("barcelona", "place1", "place2") == [
-            (2.19093829393386841, 41.43379028184083523),
-            (2.18737632036209106, 41.40634178640635099),
-        ]
+        assert_resp_response(
+            r,
+            await r.geopos("barcelona", "place1", "place2"),
+            [
+                (2.19093829393386841, 41.43379028184083523),
+                (2.18737632036209106, 41.40634178640635099),
+            ],
+            [
+                [2.19093829393386841, 41.43379028184083523],
+                [2.18737632036209106, 41.40634178640635099],
+            ],
+        )
 
     @skip_if_server_version_lt("4.0.0")
     async def test_geopos_no_value(self, r: redis.Redis):

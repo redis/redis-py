@@ -6,6 +6,7 @@ import time
 from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from redis._parsers import CommandsParser, Encoder
 from redis.backoff import default_backoff
 from redis.client import CaseInsensitiveDict, PubSub, Redis, parse_scan
 from redis.commands import READ_COMMANDS, RedisClusterCommands
@@ -30,7 +31,6 @@ from redis.exceptions import (
     TryAgainError,
 )
 from redis.lock import Lock
-from redis.parsers import CommandsParser, Encoder
 from redis.retry import Retry
 from redis.utils import (
     HIREDIS_AVAILABLE,
