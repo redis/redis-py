@@ -37,7 +37,6 @@ from redis.client import (
     NEVER_DECODE,
     AbstractRedis,
     CaseInsensitiveDict,
-    bool_ok,
 )
 from redis.commands import (
     AsyncCoreCommands,
@@ -56,6 +55,7 @@ from redis.exceptions import (
     TimeoutError,
     WatchError,
 )
+from redis._parsers.helpers import _RedisCallbacks, _RedisCallbacksRESP2, _RedisCallbacksRESP3, bool_ok
 from redis.typing import ChannelT, EncodableT, KeyT
 from redis.utils import HIREDIS_AVAILABLE, _set_info_logger, safe_str, str_if_bytes
 
@@ -257,12 +257,12 @@ class Redis(
         self.single_connection_client = single_connection_client
         self.connection: Optional[Connection] = None
 
-        self.response_callbacks = CaseInsensitiveDict(self.__class__.RESPONSE_CALLBACKS)
+        self.response_callbacks = CaseInsensitiveDict(_RedisCallbacks)
 
         if self.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
-            self.response_callbacks.update(self.__class__.RESP3_RESPONSE_CALLBACKS)
+            self.response_callbacks.update(_RedisCallbacksRESP3)
         else:
-            self.response_callbacks.update(self.__class__.RESP2_RESPONSE_CALLBACKS)
+            self.response_callbacks.update(_RedisCallbacksRESP2)
 
         # If using a single connection client, we need to lock creation-of and use-of
         # the client in order to avoid race conditions such as using asyncio.gather

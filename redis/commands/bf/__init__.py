@@ -1,4 +1,4 @@
-from redis.client import bool_ok
+from redis._parsers.helpers import bool_ok
 
 from ..helpers import parse_to_list
 from .commands import *  # noqa

@@ -11,7 +11,8 @@ from unittest.mock import patch
 import pytest
 import redis
 from redis import exceptions
-from redis.client import EMPTY_RESPONSE, NEVER_DECODE, parse_info
+from redis.client import EMPTY_RESPONSE, NEVER_DECODE
+from redis._parsers.helpers import _RedisCallbacks, _RedisCallbacksRESP2, _RedisCallbacksRESP3, parse_info
 
 from .conftest import (
     _get_client,
@@ -60,13 +61,13 @@ class TestResponseCallbacks:
     "Tests for the response callback system"
 
     def test_response_callbacks(self, r):
-        callbacks = redis.Redis.RESPONSE_CALLBACKS
+        callbacks = _RedisCallbacks
         if is_resp2_connection(r):
-            callbacks.update(redis.Redis.RESP2_RESPONSE_CALLBACKS)
+            callbacks.update(_RedisCallbacksRESP2)
         else:
-            callbacks.update(redis.Redis.RESP3_RESPONSE_CALLBACKS)
+            callbacks.update(_RedisCallbacksRESP3)
         assert r.response_callbacks == callbacks
-        assert id(r.response_callbacks) != id(redis.Redis.RESPONSE_CALLBACKS)
+        assert id(r.response_callbacks) != id(_RedisCallbacks)
         r.set_response_callback("GET", lambda x: "static")
         r["a"] = "foo"
         assert r["a"] == "static"

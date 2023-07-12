@@ -12,7 +12,8 @@ import pytest
 import pytest_asyncio
 import redis
 from redis import exceptions
-from redis.client import EMPTY_RESPONSE, NEVER_DECODE, parse_info
+from redis.client import EMPTY_RESPONSE, NEVER_DECODE
+from redis._parsers.helpers import _RedisCallbacks, _RedisCallbacksRESP2, _RedisCallbacksRESP3, parse_info
 from tests.conftest import (
     assert_resp_response,
     assert_resp_response_in,
@@ -80,13 +81,13 @@ class TestResponseCallbacks:
     """Tests for the response callback system"""
 
     async def test_response_callbacks(self, r: redis.Redis):
-        callbacks = redis.Redis.RESPONSE_CALLBACKS
+        callbacks = _RedisCallbacks
         if is_resp2_connection(r):
-            callbacks.update(redis.Redis.RESP2_RESPONSE_CALLBACKS)
+            callbacks.update(_RedisCallbacksRESP2)
         else:
-            callbacks.update(redis.Redis.RESP3_RESPONSE_CALLBACKS)
+            callbacks.update(_RedisCallbacksRESP3)
         assert r.response_callbacks == callbacks
-        assert id(r.response_callbacks) != id(redis.Redis.RESPONSE_CALLBACKS)
+        assert id(r.response_callbacks) != id(_RedisCallbacks)
         r.set_response_callback("GET", lambda x: "static")
         await r.set("a", "foo")
         assert await r.get("a") == "static"
