@@ -12,6 +12,7 @@ setup(
     packages=find_packages(
         include=[
             "redis",
+            "redis._parsers",
             "redis.asyncio",
             "redis.commands",
             "redis.commands.bf",

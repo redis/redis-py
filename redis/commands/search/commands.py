@@ -67,7 +67,7 @@ class SearchCommands:
         if self.client.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
             return res
         else:
-            return self.RESP2_MODULE_CALLBACKS[cmd](res, **kwargs)
+            return self._RESP2_MODULE_CALLBACKS[cmd](res, **kwargs)
 
     def _parse_info(self, res, **kwargs):
         it = map(to_string, res)

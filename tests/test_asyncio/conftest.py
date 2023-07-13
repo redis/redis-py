@@ -6,11 +6,11 @@ import pytest
 import pytest_asyncio
 import redis.asyncio as redis
 from packaging.version import Version
+from redis._parsers import _AsyncHiredisParser, _AsyncRESP2Parser
 from redis.asyncio.client import Monitor
 from redis.asyncio.connection import parse_url
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.parsers import _AsyncHiredisParser, _AsyncRESP2Parser
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import REDIS_INFO
 
@@ -154,7 +154,7 @@ async def mock_cluster_resp_ok(create_redis, **kwargs):
 @pytest_asyncio.fixture()
 async def mock_cluster_resp_int(create_redis, **kwargs):
     r = await create_redis(**kwargs)
-    return _gen_cluster_mock_resp(r, "2")
+    return _gen_cluster_mock_resp(r, 2)
 
 
 @pytest_asyncio.fixture()

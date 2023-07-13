@@ -18,6 +18,12 @@ from typing import (
     Union,
 )
 
+from redis._parsers import AsyncCommandsParser, Encoder
+from redis._parsers.helpers import (
+    _RedisCallbacks,
+    _RedisCallbacksRESP2,
+    _RedisCallbacksRESP3,
+)
 from redis.asyncio.client import ResponseCallbackT
 from redis.asyncio.connection import Connection, DefaultParser, SSLConnection, parse_url
 from redis.asyncio.lock import Lock
@@ -55,7 +61,6 @@ from redis.exceptions import (
     TimeoutError,
     TryAgainError,
 )
-from redis.parsers import AsyncCommandsParser, Encoder
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import dict_merge, safe_str, str_if_bytes
 
@@ -327,11 +332,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             self.retry.update_supported_errors(retry_on_error)
             kwargs.update({"retry": self.retry})
 
-        kwargs["response_callbacks"] = self.__class__.RESPONSE_CALLBACKS.copy()
+        kwargs["response_callbacks"] = _RedisCallbacks.copy()
         if kwargs.get("protocol") in ["3", 3]:
-            kwargs["response_callbacks"].update(self.__class__.RESP3_RESPONSE_CALLBACKS)
+            kwargs["response_callbacks"].update(_RedisCallbacksRESP3)
         else:
-            kwargs["response_callbacks"].update(self.__class__.RESP2_RESPONSE_CALLBACKS)
+            kwargs["response_callbacks"].update(_RedisCallbacksRESP2)
         self.connection_kwargs = kwargs
 
         if startup_nodes:

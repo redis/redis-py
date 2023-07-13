@@ -15,9 +15,9 @@ from typing import (
 from redis.compat import Protocol
 
 if TYPE_CHECKING:
+    from redis._parsers import Encoder
     from redis.asyncio.connection import ConnectionPool as AsyncConnectionPool
     from redis.connection import ConnectionPool
-    from redis.parsers import Encoder
 
 
 Number = Union[int, float]

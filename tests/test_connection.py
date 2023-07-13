@@ -5,10 +5,10 @@ from unittest.mock import patch
 
 import pytest
 import redis
+from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis.backoff import NoBackoff
 from redis.connection import Connection, SSLConnection, UnixDomainSocketConnection
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
-from redis.parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
 
