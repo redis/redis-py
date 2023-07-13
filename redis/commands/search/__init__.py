@@ -174,7 +174,7 @@ class AsyncSearch(Search, AsyncSearchCommands):
         """
         p = AsyncPipeline(
             connection_pool=self.client.connection_pool,
-            response_callbacks=self.MODULE_CALLBACKS,
+            response_callbacks=self._MODULE_CALLBACKS,
             transaction=transaction,
             shard_hint=shard_hint,
         )
