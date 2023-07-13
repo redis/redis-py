@@ -1,5 +1,4 @@
 import copy
-import datetime
 import re
 import threading
 import time
@@ -7,6 +6,12 @@ import warnings
 from itertools import chain
 from typing import Optional
 
+from redis._parsers.helpers import (
+    _RedisCallbacks,
+    _RedisCallbacksRESP2,
+    _RedisCallbacksRESP3,
+    bool_ok,
+)
 from redis.commands import (
     CoreCommands,
     RedisModuleCommands,
@@ -27,7 +32,6 @@ from redis.exceptions import (
 from redis.lock import Lock
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE, _set_info_logger, safe_str, str_if_bytes
-from redis._parsers.helpers import _RedisCallbacks, _RedisCallbacksRESP2, _RedisCallbacksRESP3, bool_ok
 
 SYM_EMPTY = b""
 EMPTY_RESPONSE = "EMPTY_RESPONSE"

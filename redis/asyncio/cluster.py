@@ -19,6 +19,11 @@ from typing import (
 )
 
 from redis._parsers import AsyncCommandsParser, Encoder
+from redis._parsers.helpers import (
+    _RedisCallbacks,
+    _RedisCallbacksRESP2,
+    _RedisCallbacksRESP3,
+)
 from redis.asyncio.client import ResponseCallbackT
 from redis.asyncio.connection import Connection, DefaultParser, SSLConnection, parse_url
 from redis.asyncio.lock import Lock
@@ -56,7 +61,6 @@ from redis.exceptions import (
     TimeoutError,
     TryAgainError,
 )
-from redis._parsers.helpers import _RedisCallbacks, _RedisCallbacksRESP2, _RedisCallbacksRESP3
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import dict_merge, safe_str, str_if_bytes
 

@@ -1,5 +1,6 @@
-from redis.utils import str_if_bytes
 import datetime
+
+from redis.utils import str_if_bytes
 
 
 def timestamp_to_datetime(response):
@@ -818,8 +819,7 @@ _RedisCallbacksRESP3 = {
     ),
     **string_keys_to_dict("XREAD XREADGROUP", parse_xread_resp3),
     "ACL LOG": lambda r: [
-        {str_if_bytes(key): str_if_bytes(value) for key, value in x.items()}
-        for x in r
+        {str_if_bytes(key): str_if_bytes(value) for key, value in x.items()} for x in r
     ]
     if isinstance(r, list)
     else bool_ok(r),
@@ -832,9 +832,7 @@ _RedisCallbacksRESP3 = {
         else None
         for key, value in r.items()
     },
-    "MEMORY STATS": lambda r: {
-        str_if_bytes(key): value for key, value in r.items()
-    },
+    "MEMORY STATS": lambda r: {str_if_bytes(key): value for key, value in r.items()},
     "SENTINEL MASTER": parse_sentinel_state_resp3,
     "SENTINEL MASTERS": parse_sentinel_masters_resp3,
     "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels_resp3,
