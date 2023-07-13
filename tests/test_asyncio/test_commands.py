@@ -12,8 +12,13 @@ import pytest
 import pytest_asyncio
 import redis
 from redis import exceptions
+from redis._parsers.helpers import (
+    _RedisCallbacks,
+    _RedisCallbacksRESP2,
+    _RedisCallbacksRESP3,
+    parse_info,
+)
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
-from redis._parsers.helpers import _RedisCallbacks, _RedisCallbacksRESP2, _RedisCallbacksRESP3, parse_info
 from tests.conftest import (
     assert_resp_response,
     assert_resp_response_in,

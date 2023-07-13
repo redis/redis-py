@@ -11,8 +11,13 @@ from unittest.mock import patch
 import pytest
 import redis
 from redis import exceptions
+from redis._parsers.helpers import (
+    _RedisCallbacks,
+    _RedisCallbacksRESP2,
+    _RedisCallbacksRESP3,
+    parse_info,
+)
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
-from redis._parsers.helpers import _RedisCallbacks, _RedisCallbacksRESP2, _RedisCallbacksRESP3, parse_info
 
 from .conftest import (
     _get_client,
