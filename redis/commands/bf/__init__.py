@@ -91,7 +91,7 @@ class CMSBloom(CMSCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
-        MODULE_CALLBACKS = {
+        _MODULE_CALLBACKS = {
             CMS_INITBYDIM: bool_ok,
             CMS_INITBYPROB: bool_ok,
             # CMS_INCRBY: spaceHolder,
@@ -99,21 +99,21 @@ class CMSBloom(CMSCommands, AbstractBloom):
             CMS_MERGE: bool_ok,
         }
 
-        RESP2_MODULE_CALLBACKS = {
+        _RESP2_MODULE_CALLBACKS = {
             CMS_INFO: CMSInfo,
         }
-        RESP3_MODULE_CALLBACKS = {}
+        _RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.commandmixin = CMSCommands
         self.execute_command = client.execute_command
 
         if self.client.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
-            MODULE_CALLBACKS.update(RESP3_MODULE_CALLBACKS)
+            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
         else:
-            MODULE_CALLBACKS.update(RESP2_MODULE_CALLBACKS)
+            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
 
-        for k, v in MODULE_CALLBACKS.items():
+        for k, v in _MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)
 
 
@@ -121,30 +121,30 @@ class TOPKBloom(TOPKCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
-        MODULE_CALLBACKS = {
+        _MODULE_CALLBACKS = {
             TOPK_RESERVE: bool_ok,
             # TOPK_QUERY: spaceHolder,
             # TOPK_COUNT: spaceHolder,
         }
 
-        RESP2_MODULE_CALLBACKS = {
+        _RESP2_MODULE_CALLBACKS = {
             TOPK_ADD: parse_to_list,
             TOPK_INCRBY: parse_to_list,
             TOPK_INFO: TopKInfo,
             TOPK_LIST: parse_to_list,
         }
-        RESP3_MODULE_CALLBACKS = {}
+        _RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.commandmixin = TOPKCommands
         self.execute_command = client.execute_command
 
         if self.client.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
-            MODULE_CALLBACKS.update(RESP3_MODULE_CALLBACKS)
+            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
         else:
-            MODULE_CALLBACKS.update(RESP2_MODULE_CALLBACKS)
+            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
 
-        for k, v in MODULE_CALLBACKS.items():
+        for k, v in _MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)
 
 
@@ -152,7 +152,7 @@ class CFBloom(CFCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
-        MODULE_CALLBACKS = {
+        _MODULE_CALLBACKS = {
             CF_RESERVE: bool_ok,
             # CF_ADD: spaceHolder,
             # CF_ADDNX: spaceHolder,
@@ -165,21 +165,21 @@ class CFBloom(CFCommands, AbstractBloom):
             # CF_LOADCHUNK: spaceHolder,
         }
 
-        RESP2_MODULE_CALLBACKS = {
+        _RESP2_MODULE_CALLBACKS = {
             CF_INFO: CFInfo,
         }
-        RESP3_MODULE_CALLBACKS = {}
+        _RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.commandmixin = CFCommands
         self.execute_command = client.execute_command
 
         if self.client.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
-            MODULE_CALLBACKS.update(RESP3_MODULE_CALLBACKS)
+            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
         else:
-            MODULE_CALLBACKS.update(RESP2_MODULE_CALLBACKS)
+            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
 
-        for k, v in MODULE_CALLBACKS.items():
+        for k, v in _MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)
 
 
@@ -187,14 +187,14 @@ class TDigestBloom(TDigestCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
-        MODULE_CALLBACKS = {
+        _MODULE_CALLBACKS = {
             TDIGEST_CREATE: bool_ok,
             # TDIGEST_RESET: bool_ok,
             # TDIGEST_ADD: spaceHolder,
             # TDIGEST_MERGE: spaceHolder,
         }
 
-        RESP2_MODULE_CALLBACKS = {
+        _RESP2_MODULE_CALLBACKS = {
             TDIGEST_BYRANK: parse_to_list,
             TDIGEST_BYREVRANK: parse_to_list,
             TDIGEST_CDF: parse_to_list,
@@ -204,18 +204,18 @@ class TDigestBloom(TDigestCommands, AbstractBloom):
             TDIGEST_TRIMMED_MEAN: float,
             TDIGEST_QUANTILE: parse_to_list,
         }
-        RESP3_MODULE_CALLBACKS = {}
+        _RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.commandmixin = TDigestCommands
         self.execute_command = client.execute_command
 
         if self.client.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
-            MODULE_CALLBACKS.update(RESP3_MODULE_CALLBACKS)
+            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
         else:
-            MODULE_CALLBACKS.update(RESP2_MODULE_CALLBACKS)
+            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
 
-        for k, v in MODULE_CALLBACKS.items():
+        for k, v in _MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)
 
 
@@ -223,7 +223,7 @@ class BFBloom(BFCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
-        MODULE_CALLBACKS = {
+        _MODULE_CALLBACKS = {
             BF_RESERVE: bool_ok,
             # BF_ADD: spaceHolder,
             # BF_MADD: spaceHolder,
@@ -235,19 +235,19 @@ class BFBloom(BFCommands, AbstractBloom):
             # BF_CARD: spaceHolder,
         }
 
-        RESP2_MODULE_CALLBACKS = {
+        _RESP2_MODULE_CALLBACKS = {
             BF_INFO: BFInfo,
         }
-        RESP3_MODULE_CALLBACKS = {}
+        _RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.commandmixin = BFCommands
         self.execute_command = client.execute_command
 
         if self.client.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
-            MODULE_CALLBACKS.update(RESP3_MODULE_CALLBACKS)
+            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
         else:
-            MODULE_CALLBACKS.update(RESP2_MODULE_CALLBACKS)
+            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
 
-        for k, v in MODULE_CALLBACKS.items():
+        for k, v in _MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)

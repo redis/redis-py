@@ -95,12 +95,12 @@ class Search(SearchCommands):
 
         If conn is not None, we employ an already existing redis connection
         """
-        self.MODULE_CALLBACKS = {}
+        self._MODULE_CALLBACKS = {}
         self.client = client
         self.index_name = index_name
         self.execute_command = client.execute_command
         self._pipeline = client.pipeline
-        self.RESP2_MODULE_CALLBACKS = {
+        self._RESP2_MODULE_CALLBACKS = {
             INFO_CMD: self._parse_info,
             SEARCH_CMD: self._parse_search,
             AGGREGATE_CMD: self._parse_aggregate,
@@ -116,7 +116,7 @@ class Search(SearchCommands):
         """
         p = Pipeline(
             connection_pool=self.client.connection_pool,
-            response_callbacks=self.MODULE_CALLBACKS,
+            response_callbacks=self._MODULE_CALLBACKS,
             transaction=transaction,
             shard_hint=shard_hint,
         )

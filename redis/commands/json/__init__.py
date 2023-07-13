@@ -31,7 +31,7 @@ class JSON(JSONCommands):
         :type json.JSONEncoder: An instance of json.JSONEncoder
         """
         # Set the module commands' callbacks
-        self.MODULE_CALLBACKS = {
+        self._MODULE_CALLBACKS = {
             "JSON.ARRPOP": self._decode,
             "JSON.DEBUG": self._decode,
             "JSON.MERGE": lambda r: r and nativestr(r) == "OK",
@@ -42,7 +42,7 @@ class JSON(JSONCommands):
             "JSON.TOGGLE": self._decode,
         }
 
-        RESP2_MODULE_CALLBACKS = {
+        _RESP2_MODULE_CALLBACKS = {
             "JSON.ARRAPPEND": self._decode,
             "JSON.ARRINDEX": self._decode,
             "JSON.ARRINSERT": self._decode,
@@ -61,7 +61,7 @@ class JSON(JSONCommands):
             "JSON.TOGGLE": self._decode,
         }
 
-        RESP3_MODULE_CALLBACKS = {
+        _RESP3_MODULE_CALLBACKS = {
             "JSON.GET": lambda response: [
                 [self._decode(r) for r in res] for res in response
             ]
@@ -74,11 +74,11 @@ class JSON(JSONCommands):
         self.MODULE_VERSION = version
 
         if self.client.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
-            self.MODULE_CALLBACKS.update(RESP3_MODULE_CALLBACKS)
+            self._MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
         else:
-            self.MODULE_CALLBACKS.update(RESP2_MODULE_CALLBACKS)
+            self._MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
 
-        for key, value in self.MODULE_CALLBACKS.items():
+        for key, value in self._MODULE_CALLBACKS.items():
             self.client.set_response_callback(key, value)
 
         self.__encoder__ = encoder
@@ -134,7 +134,7 @@ class JSON(JSONCommands):
         else:
             p = Pipeline(
                 connection_pool=self.client.connection_pool,
-                response_callbacks=self.MODULE_CALLBACKS,
+                response_callbacks=self._MODULE_CALLBACKS,
                 transaction=transaction,
                 shard_hint=shard_hint,
             )

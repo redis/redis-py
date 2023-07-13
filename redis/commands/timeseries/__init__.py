@@ -33,14 +33,14 @@ class TimeSeries(TimeSeriesCommands):
     def __init__(self, client=None, **kwargs):
         """Create a new RedisTimeSeries client."""
         # Set the module commands' callbacks
-        self.MODULE_CALLBACKS = {
+        self._MODULE_CALLBACKS = {
             ALTER_CMD: bool_ok,
             CREATE_CMD: bool_ok,
             CREATERULE_CMD: bool_ok,
             DELETERULE_CMD: bool_ok,
         }
 
-        RESP2_MODULE_CALLBACKS = {
+        _RESP2_MODULE_CALLBACKS = {
             DEL_CMD: int,
             GET_CMD: parse_get,
             INFO_CMD: TSInfo,
@@ -51,17 +51,17 @@ class TimeSeries(TimeSeriesCommands):
             REVRANGE_CMD: parse_range,
             QUERYINDEX_CMD: parse_to_list,
         }
-        RESP3_MODULE_CALLBACKS = {}
+        _RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.execute_command = client.execute_command
 
         if self.client.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
-            self.MODULE_CALLBACKS.update(RESP3_MODULE_CALLBACKS)
+            self._MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
         else:
-            self.MODULE_CALLBACKS.update(RESP2_MODULE_CALLBACKS)
+            self._MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
 
-        for k, v in self.MODULE_CALLBACKS.items():
+        for k, v in self._MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)
 
     def pipeline(self, transaction=True, shard_hint=None):
@@ -93,7 +93,7 @@ class TimeSeries(TimeSeriesCommands):
         else:
             p = Pipeline(
                 connection_pool=self.client.connection_pool,
-                response_callbacks=self.MODULE_CALLBACKS,
+                response_callbacks=self._MODULE_CALLBACKS,
                 transaction=transaction,
                 shard_hint=shard_hint,
             )
