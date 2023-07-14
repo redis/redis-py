@@ -38,6 +38,8 @@ class JSON(JSONCommands):
             "JSON.GET": self._decode,
             "JSON.MGET": bulk_of_jsons(self._decode),
             "JSON.SET": lambda r: r and nativestr(r) == "OK",
+            "JSON.MSET": lambda r: r and nativestr(r) == "OK",
+            "JSON.MERGE": lambda r: r and nativestr(r) == "OK",
             "JSON.NUMINCRBY": self._decode,
             "JSON.NUMMULTBY": self._decode,
             "JSON.TOGGLE": self._decode,

@@ -19,6 +19,7 @@ from redis.exceptions import (
     ConnectionError,
     DataError,
     InvalidResponse,
+    OutOfMemoryError,
     PubSubError,
     ReadOnlyError,
     RedisError,
@@ -56,7 +57,7 @@ except metadata.PackageNotFoundError:
 try:
     VERSION = tuple(map(int_or_str, __version__.split(".")))
 except AttributeError:
-    VERSION = tuple(99, 99, 99)
+    VERSION = tuple([99, 99, 99])
 
 __all__ = [
     "AuthenticationError",
@@ -72,6 +73,7 @@ __all__ = [
     "from_url",
     "default_backoff",
     "InvalidResponse",
+    "OutOfMemoryError",
     "PubSubError",
     "ReadOnlyError",
     "Redis",

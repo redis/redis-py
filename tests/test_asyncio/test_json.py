@@ -40,6 +40,41 @@ async def test_json_get_jset(modclient: redis.Redis):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("2.6.0", "ReJSON")  # todo: update after the release
+async def test_json_merge(modclient: redis.Redis):
+    # Test with root path $
+    assert await modclient.json().set(
+        "person_data",
+        "$",
+        {"person1": {"personal_data": {"name": "John"}}},
+    )
+    assert await modclient.json().merge(
+        "person_data", "$", {"person1": {"personal_data": {"hobbies": "reading"}}}
+    )
+    assert await modclient.json().get("person_data") == {
+        "person1": {"personal_data": {"name": "John", "hobbies": "reading"}}
+    }
+
+    # Test with root path path $.person1.personal_data
+    assert await modclient.json().merge(
+        "person_data", "$.person1.personal_data", {"country": "Israel"}
+    )
+    assert await modclient.json().get("person_data") == {
+        "person1": {
+            "personal_data": {"name": "John", "hobbies": "reading", "country": "Israel"}
+        }
+    }
+
+    # Test with null value to delete a value
+    assert await modclient.json().merge(
+        "person_data", "$.person1.personal_data", {"name": None}
+    )
+    assert await modclient.json().get("person_data") == {
+        "person1": {"personal_data": {"country": "Israel", "hobbies": "reading"}}
+    }
+
+
+@pytest.mark.redismod
 async def test_nonascii_setgetdelete(modclient: redis.Redis):
     assert await modclient.json().set("notascii", Path.root_path(), "hyvää-élève")
     assert "hyvää-élève" == await modclient.json().get("notascii", no_escape=True)
@@ -72,6 +107,17 @@ async def test_mgetshouldsucceed(modclient: redis.Redis):
     assert await modclient.json().mget(["1"], Path.root_path()) == [1]
 
     assert await modclient.json().mget([1, 2], Path.root_path()) == [1, 2]
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.6.0", "ReJSON")  # todo: update after the release
+async def test_mset(modclient: redis.Redis):
+    await modclient.json().mset(
+        [("1", Path.root_path(), 1), ("2", Path.root_path(), 2)]
+    )
+
+    assert await modclient.json().mget(["1"], Path.root_path()) == [1]
+    assert await modclient.json().mget(["1", "2"], Path.root_path()) == [1, 2]
 
 
 @pytest.mark.redismod
@@ -145,9 +191,15 @@ async def test_arrappend(modclient: redis.Redis):
 
 @pytest.mark.redismod
 async def test_arrindex(modclient: redis.Redis):
-    await modclient.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
-    assert 1 == await modclient.json().arrindex("arr", Path.root_path(), 1)
-    assert -1 == await modclient.json().arrindex("arr", Path.root_path(), 1, 2)
+    r_path = Path.root_path()
+    await modclient.json().set("arr", r_path, [0, 1, 2, 3, 4])
+    assert 1 == await modclient.json().arrindex("arr", r_path, 1)
+    assert -1 == await modclient.json().arrindex("arr", r_path, 1, 2)
+    assert 4 == await modclient.json().arrindex("arr", r_path, 4)
+    assert 4 == await modclient.json().arrindex("arr", r_path, 4, start=0)
+    assert 4 == await modclient.json().arrindex("arr", r_path, 4, start=0, stop=5000)
+    assert -1 == await modclient.json().arrindex("arr", r_path, 4, start=0, stop=-1)
+    assert -1 == await modclient.json().arrindex("arr", r_path, 4, start=1, stop=3)
 
 
 @pytest.mark.redismod

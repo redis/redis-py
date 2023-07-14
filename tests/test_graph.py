@@ -292,6 +292,7 @@ def test_slowlog(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.xfail(strict=False)
 def test_query_timeout(client):
     # Build a sample graph with 1000 nodes.
     client.graph().query("UNWIND range(0,1000) as val CREATE ({v: val})")

@@ -761,6 +761,17 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT NO-EVICT", mode)
 
+    def client_no_touch(self, mode: str) -> Union[Awaitable[str], str]:
+        """
+        # The command controls whether commands sent by the client will alter
+        # the LRU/LFU of the keys they access.
+        # When turned on, the current client will not change LFU/LRU stats,
+        # unless it sends the TOUCH command.
+
+        For more information see https://redis.io/commands/client-no-touch
+        """
+        return self.execute_command("CLIENT NO-TOUCH", mode)
+
     def command(self, **kwargs):
         """
         Returns dict reply of details about all Redis commands.
@@ -1329,6 +1340,21 @@ class ManagementCommands(CommandsProtocol):
         For more information see https://redis.io/commands/wait
         """
         return self.execute_command("WAIT", num_replicas, timeout, **kwargs)
+
+    def waitaof(
+        self, num_local: int, num_replicas: int, timeout: int, **kwargs
+    ) -> ResponseT:
+        """
+        This command blocks the current client until all previous write
+        commands by that client are acknowledged as having been fsynced
+        to the AOF of the local Redis and/or at least the specified number
+        of replicas.
+
+        For more information see https://redis.io/commands/waitaof
+        """
+        return self.execute_command(
+            "WAITAOF", num_local, num_replicas, timeout, **kwargs
+        )
 
     def hello(self):
         """
@@ -2667,7 +2693,11 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LLEN", name)
 
-    def lpop(self, name: str, count: Optional[int] = None) -> Union[str, List, None]:
+    def lpop(
+        self,
+        name: str,
+        count: Optional[int] = None,
+    ) -> Union[Awaitable[Union[str, List, None]], Union[str, List, None]]:
         """
         Removes and returns the first elements of the list ``name``.
 
@@ -2744,7 +2774,11 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LTRIM", name, start, end)
 
-    def rpop(self, name: str, count: Optional[int] = None) -> Union[str, List, None]:
+    def rpop(
+        self,
+        name: str,
+        count: Optional[int] = None,
+    ) -> Union[Awaitable[Union[str, List, None]], Union[str, List, None]]:
         """
         Removes and returns the last elements of the list ``name``.
 
@@ -3349,10 +3383,15 @@ class SetCommands(CommandsProtocol):
 
     def smismember(
         self, name: str, values: List, *args: List
-    ) -> Union[Awaitable[List[bool]], List[bool]]:
+    ) -> Union[
+        Awaitable[List[Union[Literal[0], Literal[1]]]],
+        List[Union[Literal[0], Literal[1]]],
+    ]:
         """
         Return whether each value in ``values`` is a member of the set ``name``
-        as a list of ``bool`` in the order of ``values``
+        as a list of ``int`` in the order of ``values``:
+        - 1 if the value is a member of the set.
+        - 0 if the value is not a member of the set or if key does not exist.
 
         For more information see https://redis.io/commands/smismember
         """
@@ -3472,8 +3511,8 @@ class StreamCommands(CommandsProtocol):
             raise DataError("Only one of ```maxlen``` or ```minid``` may be specified")
 
         if maxlen is not None:
-            if not isinstance(maxlen, int) or maxlen < 1:
-                raise DataError("XADD maxlen must be a positive integer")
+            if not isinstance(maxlen, int) or maxlen < 0:
+                raise DataError("XADD maxlen must be non-negative integer")
             pieces.append(b"MAXLEN")
             if approximate:
                 pieces.append(b"~")
@@ -3551,7 +3590,7 @@ class StreamCommands(CommandsProtocol):
         groupname: GroupT,
         consumername: ConsumerT,
         min_idle_time: int,
-        message_ids: [List[StreamIdT], Tuple[StreamIdT]],
+        message_ids: Union[List[StreamIdT], Tuple[StreamIdT]],
         idle: Union[int, None] = None,
         time: Union[int, None] = None,
         retrycount: Union[int, None] = None,
@@ -4630,13 +4669,22 @@ class SortedSetCommands(CommandsProtocol):
         options = {"withscores": withscores, "score_cast_func": score_cast_func}
         return self.execute_command(*pieces, **options)
 
-    def zrank(self, name: KeyT, value: EncodableT) -> ResponseT:
+    def zrank(
+        self,
+        name: KeyT,
+        value: EncodableT,
+        withscore: bool = False,
+    ) -> ResponseT:
         """
         Returns a 0-based value indicating the rank of ``value`` in sorted set
-        ``name``
+        ``name``.
+        The optional WITHSCORE argument supplements the command's
+        reply with the score of the element returned.
 
         For more information see https://redis.io/commands/zrank
         """
+        if withscore:
+            return self.execute_command("ZRANK", name, value, "WITHSCORE")
         return self.execute_command("ZRANK", name, value)
 
     def zrem(self, name: KeyT, *values: FieldT) -> ResponseT:
@@ -4680,13 +4728,22 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZREMRANGEBYSCORE", name, min, max)
 
-    def zrevrank(self, name: KeyT, value: EncodableT) -> ResponseT:
+    def zrevrank(
+        self,
+        name: KeyT,
+        value: EncodableT,
+        withscore: bool = False,
+    ) -> ResponseT:
         """
         Returns a 0-based value indicating the descending rank of
-        ``value`` in sorted set ``name``
+        ``value`` in sorted set ``name``.
+        The optional ``withscore`` argument supplements the command's
+        reply with the score of the element returned.
 
         For more information see https://redis.io/commands/zrevrank
         """
+        if withscore:
+            return self.execute_command("ZREVRANK", name, value, "WITHSCORE")
         return self.execute_command("ZREVRANK", name, value)
 
     def zscore(self, name: KeyT, value: EncodableT) -> ResponseT:

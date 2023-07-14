@@ -7,8 +7,10 @@ try:
 
     # Only support Hiredis >= 1.0:
     HIREDIS_AVAILABLE = not hiredis.__version__.startswith("0.")
+    HIREDIS_PACK_AVAILABLE = hasattr(hiredis, "pack_command")
 except ImportError:
     HIREDIS_AVAILABLE = False
+    HIREDIS_PACK_AVAILABLE = False
 
 try:
     import cryptography  # noqa

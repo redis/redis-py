@@ -139,8 +139,12 @@ class Redis(
         arguments always win.
 
         """
+        single_connection_client = kwargs.pop("single_connection_client", False)
         connection_pool = ConnectionPool.from_url(url, **kwargs)
-        return cls(connection_pool=connection_pool)
+        return cls(
+            connection_pool=connection_pool,
+            single_connection_client=single_connection_client,
+        )
 
     def __init__(
         self,
@@ -253,6 +257,11 @@ class Redis(
 
         self.response_callbacks = CaseInsensitiveDict(self.__class__.RESPONSE_CALLBACKS)
 
+        # If using a single connection client, we need to lock creation-of and use-of
+        # the client in order to avoid race conditions such as using asyncio.gather
+        # on a set of redis commands
+        self._single_conn_lock = asyncio.Lock()
+
     def __repr__(self):
         return f"{self.__class__.__name__}<{self.connection_pool!r}>"
 
@@ -260,8 +269,10 @@ class Redis(
         return self.initialize().__await__()
 
     async def initialize(self: _RedisT) -> _RedisT:
-        if self.single_connection_client and self.connection is None:
-            self.connection = await self.connection_pool.get_connection("_")
+        if self.single_connection_client:
+            async with self._single_conn_lock:
+                if self.connection is None:
+                    self.connection = await self.connection_pool.get_connection("_")
         return self
 
     def set_response_callback(self, command: str, callback: ResponseCallbackT):
@@ -448,7 +459,7 @@ class Redis(
     _DEL_MESSAGE = "Unclosed Redis client"
 
     def __del__(self, _warnings: Any = warnings) -> None:
-        if self.connection is not None:
+        if hasattr(self, "connection") and (self.connection is not None):
             _warnings.warn(
                 f"Unclosed client session {self!r}", ResourceWarning, source=self
             )
@@ -501,6 +512,8 @@ class Redis(
         command_name = args[0]
         conn = self.connection or await pool.get_connection(command_name, **options)
 
+        if self.single_connection_client:
+            await self._single_conn_lock.acquire()
         try:
             return await conn.retry.call_with_retry(
                 lambda: self._send_command_parse_response(
@@ -509,6 +522,8 @@ class Redis(
                 lambda error: self._disconnect_raise(conn, error),
             )
         finally:
+            if self.single_connection_client:
+                self._single_conn_lock.release()
             if not self.connection:
                 await pool.release(conn)
 
@@ -691,6 +706,11 @@ class PubSub:
             self.pending_unsubscribe_patterns = set()
 
     def close(self) -> Awaitable[NoReturn]:
+        # In case a connection property does not yet exist
+        # (due to a crash earlier in the Redis() constructor), return
+        # immediately as there is nothing to clean-up.
+        if not hasattr(self, "connection"):
+            return
         return self.reset()
 
     async def on_connect(self, connection: Connection):
@@ -781,7 +801,9 @@ class PubSub:
             await conn.connect()
 
         read_timeout = None if block else timeout
-        response = await self._execute(conn, conn.read_response, timeout=read_timeout)
+        response = await self._execute(
+            conn, conn.read_response, timeout=read_timeout, disconnect_on_error=False
+        )
 
         if conn.health_check_interval and response == self.health_check_response:
             # ignore the health check message as user might not expect it
