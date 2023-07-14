@@ -19,13 +19,13 @@ assert res2 == "Deimos"
 
 # STEP_START setnx_xx
 res3 = r.set("bike:1", "bike", nx=True)
-print(res3)  # False
+print(res3)  # None
 res4 = r.set("bike:1", "bike", xx=True)
 print(res4)  # True
 # STEP_END
 
 # REMOVE_START
-assert res3 == False
+assert res3 == None
 assert res4 == True
 # REMOVE_END
 
