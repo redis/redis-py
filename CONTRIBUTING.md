@@ -179,6 +179,6 @@ you would like and how it should work.
 ## Code review process
 
 The core team regularly looks at pull requests. We will provide
-feedback as as soon as possible. After receiving our feedback, please respond
+feedback as soon as possible. After receiving our feedback, please respond
 within two weeks. After that time, we may close your PR if it isn't
 showing any activity.
