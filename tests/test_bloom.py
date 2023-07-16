@@ -372,7 +372,7 @@ def test_tdigest_reset(client):
     )
 
 
-@pytest.mark.experimental
+@pytest.mark.onlynoncluster
 def test_tdigest_merge(client):
     assert client.tdigest().create("to-tDigest", 10)
     assert client.tdigest().create("from-tDigest", 10)

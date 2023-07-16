@@ -34,6 +34,7 @@ class JSON(JSONCommands):
         self._MODULE_CALLBACKS = {
             "JSON.ARRPOP": self._decode,
             "JSON.DEBUG": self._decode,
+            "JSON.GET": self._decode,
             "JSON.MERGE": lambda r: r and nativestr(r) == "OK",
             "JSON.MGET": bulk_of_jsons(self._decode),
             "JSON.MSET": lambda r: r and nativestr(r) == "OK",
@@ -61,13 +62,7 @@ class JSON(JSONCommands):
             "JSON.TOGGLE": self._decode,
         }
 
-        _RESP3_MODULE_CALLBACKS = {
-            "JSON.GET": lambda response: [
-                [self._decode(r) for r in res] for res in response
-            ]
-            if response
-            else response
-        }
+        _RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.execute_command = client.execute_command

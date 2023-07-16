@@ -251,6 +251,7 @@ def test_range_advanced(client):
     assert_resp_response(client, res, [(0, 2.55), (10, 3.0)], [[0, 2.55], [10, 3.0]])
 
 
+@pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("1.8.0", "timeseries")
 def test_range_latest(client: redis.Redis):
     timeseries = client.ts()
@@ -399,6 +400,7 @@ def test_rev_range(client):
     )
 
 
+@pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("1.8.0", "timeseries")
 def test_revrange_latest(client: redis.Redis):
     timeseries = client.ts()
