@@ -2,7 +2,7 @@ from json import JSONDecodeError, JSONDecoder, JSONEncoder
 
 import redis
 
-from ..helpers import nativestr
+from ..helpers import get_protocol_version, nativestr
 from .commands import JSONCommands
 from .decoders import bulk_of_jsons, decode_list
 
@@ -73,7 +73,7 @@ class JSON(JSONCommands):
         self.execute_command = client.execute_command
         self.MODULE_VERSION = version
 
-        if self.client.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
+        if get_protocol_version(self.client) in ["3", 3]:
             self._MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
         else:
             self._MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)

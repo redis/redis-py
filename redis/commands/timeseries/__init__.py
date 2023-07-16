@@ -1,7 +1,7 @@
 import redis
 from redis._parsers.helpers import bool_ok
 
-from ..helpers import parse_to_list
+from ..helpers import get_protocol_version, parse_to_list
 from .commands import (
     ALTER_CMD,
     CREATE_CMD,
@@ -56,7 +56,7 @@ class TimeSeries(TimeSeriesCommands):
         self.client = client
         self.execute_command = client.execute_command
 
-        if self.client.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
+        if get_protocol_version(self.client) in ["3", 3]:
             self._MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
         else:
             self._MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
