@@ -39,8 +39,6 @@ class JSON(JSONCommands):
             "JSON.MSET": lambda r: r and nativestr(r) == "OK",
             "JSON.RESP": self._decode,
             "JSON.SET": lambda r: r and nativestr(r) == "OK",
-            "JSON.MSET": lambda r: r and nativestr(r) == "OK",
-            "JSON.MERGE": lambda r: r and nativestr(r) == "OK",
             "JSON.TOGGLE": self._decode,
         }
 
