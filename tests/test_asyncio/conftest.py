@@ -4,18 +4,14 @@ from typing import Union
 
 import pytest
 import pytest_asyncio
-from packaging.version import Version
-
 import redis.asyncio as redis
+from packaging.version import Version
+from redis._parsers import _AsyncHiredisParser, _AsyncRESP2Parser
 from redis.asyncio.client import Monitor
-from redis.asyncio.connection import (
-    HIREDIS_AVAILABLE,
-    HiredisParser,
-    PythonParser,
-    parse_url,
-)
+from redis.asyncio.connection import parse_url
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
+from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import REDIS_INFO
 
 from .compat import mock
@@ -31,14 +27,14 @@ async def _get_info(redis_url):
 @pytest_asyncio.fixture(
     params=[
         pytest.param(
-            (True, PythonParser),
+            (True, _AsyncRESP2Parser),
             marks=pytest.mark.skipif(
                 'config.REDIS_INFO["cluster_enabled"]', reason="cluster mode enabled"
             ),
         ),
-        (False, PythonParser),
+        (False, _AsyncRESP2Parser),
         pytest.param(
-            (True, HiredisParser),
+            (True, _AsyncHiredisParser),
             marks=[
                 pytest.mark.skipif(
                     'config.REDIS_INFO["cluster_enabled"]',
@@ -50,7 +46,7 @@ async def _get_info(redis_url):
             ],
         ),
         pytest.param(
-            (False, HiredisParser),
+            (False, _AsyncHiredisParser),
             marks=pytest.mark.skipif(
                 not HIREDIS_AVAILABLE, reason="hiredis is not installed"
             ),
@@ -73,8 +69,12 @@ async def create_redis(request):
         url: str = request.config.getoption("--redis-url"),
         cls=redis.Redis,
         flushdb=True,
+        protocol=request.config.getoption("--protocol"),
         **kwargs,
     ):
+        if "protocol" not in url:
+            kwargs["protocol"] = request.config.getoption("--protocol")
+
         cluster_mode = REDIS_INFO["cluster_enabled"]
         if not cluster_mode:
             single = kwargs.pop("single_connection_client", False) or single_connection
@@ -133,10 +133,8 @@ async def r2(create_redis):
 
 
 @pytest_asyncio.fixture()
-async def modclient(request, create_redis):
-    return await create_redis(
-        url=request.config.getoption("--redismod-url"), decode_responses=True
-    )
+async def decoded_r(create_redis):
+    return await create_redis(decode_responses=True)
 
 
 def _gen_cluster_mock_resp(r, response):
@@ -156,7 +154,7 @@ async def mock_cluster_resp_ok(create_redis, **kwargs):
 @pytest_asyncio.fixture()
 async def mock_cluster_resp_int(create_redis, **kwargs):
     r = await create_redis(**kwargs)
-    return _gen_cluster_mock_resp(r, "2")
+    return _gen_cluster_mock_resp(r, 2)
 
 
 @pytest_asyncio.fixture()

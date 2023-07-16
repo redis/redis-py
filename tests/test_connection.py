@@ -4,16 +4,10 @@ from unittest import mock
 from unittest.mock import patch
 
 import pytest
-
 import redis
+from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis.backoff import NoBackoff
-from redis.connection import (
-    Connection,
-    HiredisParser,
-    PythonParser,
-    SSLConnection,
-    UnixDomainSocketConnection,
-)
+from redis.connection import Connection, SSLConnection, UnixDomainSocketConnection
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
@@ -35,22 +29,22 @@ def test_invalid_response(r):
 
 @skip_if_server_version_lt("4.0.0")
 @pytest.mark.redismod
-def test_loading_external_modules(modclient):
+def test_loading_external_modules(r):
     def inner():
         pass
 
-    modclient.load_external_module("myfuncname", inner)
-    assert getattr(modclient, "myfuncname") == inner
-    assert isinstance(getattr(modclient, "myfuncname"), types.FunctionType)
+    r.load_external_module("myfuncname", inner)
+    assert getattr(r, "myfuncname") == inner
+    assert isinstance(getattr(r, "myfuncname"), types.FunctionType)
 
     # and call it
     from redis.commands import RedisModuleCommands
 
     j = RedisModuleCommands.json
-    modclient.load_external_module("sometestfuncname", j)
+    r.load_external_module("sometestfuncname", j)
 
     # d = {'hello': 'world!'}
-    # mod = j(modclient)
+    # mod = j(r)
     # mod.set("fookey", ".", d)
     # assert mod.get('fookey') == d
 
@@ -134,7 +128,9 @@ class TestConnection:
 
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize(
-    "parser_class", [PythonParser, HiredisParser], ids=["PythonParser", "HiredisParser"]
+    "parser_class",
+    [_RESP2Parser, _RESP3Parser, _HiredisParser],
+    ids=["RESP2Parser", "RESP3Parser", "HiredisParser"],
 )
 def test_connection_parse_response_resume(r: redis.Redis, parser_class):
     """
@@ -142,7 +138,7 @@ def test_connection_parse_response_resume(r: redis.Redis, parser_class):
     be that PythonParser or HiredisParser,
     can be interrupted at IO time and then resume parsing.
     """
-    if parser_class is HiredisParser and not HIREDIS_AVAILABLE:
+    if parser_class is _HiredisParser and not HIREDIS_AVAILABLE:
         pytest.skip("Hiredis not available)")
     args = dict(r.connection_pool.connection_kwargs)
     args["parser_class"] = parser_class
@@ -154,7 +150,7 @@ def test_connection_parse_response_resume(r: redis.Redis, parser_class):
     )
     mock_socket = MockSocket(message, interrupt_every=2)
 
-    if isinstance(conn._parser, PythonParser):
+    if isinstance(conn._parser, _RESP2Parser) or isinstance(conn._parser, _RESP3Parser):
         conn._parser._buffer._sock = mock_socket
     else:
         conn._parser._sock = mock_socket

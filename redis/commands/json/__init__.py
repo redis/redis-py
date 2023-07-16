@@ -31,37 +31,56 @@ class JSON(JSONCommands):
         :type json.JSONEncoder: An instance of json.JSONEncoder
         """
         # Set the module commands' callbacks
-        self.MODULE_CALLBACKS = {
-            "JSON.CLEAR": int,
-            "JSON.DEL": int,
-            "JSON.FORGET": int,
-            "JSON.GET": self._decode,
+        self._MODULE_CALLBACKS = {
+            "JSON.ARRPOP": self._decode,
+            "JSON.DEBUG": self._decode,
+            "JSON.MERGE": lambda r: r and nativestr(r) == "OK",
             "JSON.MGET": bulk_of_jsons(self._decode),
+            "JSON.MSET": lambda r: r and nativestr(r) == "OK",
+            "JSON.RESP": self._decode,
             "JSON.SET": lambda r: r and nativestr(r) == "OK",
             "JSON.MSET": lambda r: r and nativestr(r) == "OK",
             "JSON.MERGE": lambda r: r and nativestr(r) == "OK",
-            "JSON.NUMINCRBY": self._decode,
-            "JSON.NUMMULTBY": self._decode,
             "JSON.TOGGLE": self._decode,
-            "JSON.STRAPPEND": self._decode,
-            "JSON.STRLEN": self._decode,
+        }
+
+        _RESP2_MODULE_CALLBACKS = {
             "JSON.ARRAPPEND": self._decode,
             "JSON.ARRINDEX": self._decode,
             "JSON.ARRINSERT": self._decode,
             "JSON.ARRLEN": self._decode,
-            "JSON.ARRPOP": self._decode,
             "JSON.ARRTRIM": self._decode,
-            "JSON.OBJLEN": self._decode,
+            "JSON.CLEAR": int,
+            "JSON.DEL": int,
+            "JSON.FORGET": int,
+            "JSON.GET": self._decode,
+            "JSON.NUMINCRBY": self._decode,
+            "JSON.NUMMULTBY": self._decode,
             "JSON.OBJKEYS": self._decode,
-            "JSON.RESP": self._decode,
-            "JSON.DEBUG": self._decode,
+            "JSON.STRAPPEND": self._decode,
+            "JSON.OBJLEN": self._decode,
+            "JSON.STRLEN": self._decode,
+            "JSON.TOGGLE": self._decode,
+        }
+
+        _RESP3_MODULE_CALLBACKS = {
+            "JSON.GET": lambda response: [
+                [self._decode(r) for r in res] for res in response
+            ]
+            if response
+            else response
         }
 
         self.client = client
         self.execute_command = client.execute_command
         self.MODULE_VERSION = version
 
-        for key, value in self.MODULE_CALLBACKS.items():
+        if self.client.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
+            self._MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
+        else:
+            self._MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
+
+        for key, value in self._MODULE_CALLBACKS.items():
             self.client.set_response_callback(key, value)
 
         self.__encoder__ = encoder
@@ -117,7 +136,7 @@ class JSON(JSONCommands):
         else:
             p = Pipeline(
                 connection_pool=self.client.connection_pool,
-                response_callbacks=self.MODULE_CALLBACKS,
+                response_callbacks=self._MODULE_CALLBACKS,
                 transaction=transaction,
                 shard_hint=shard_hint,
             )

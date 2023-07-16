@@ -6,7 +6,6 @@ import ssl
 import threading
 
 import pytest
-
 from redis.connection import Connection, SSLConnection, UnixDomainSocketConnection
 
 from .ssl_utils import get_ssl_filename

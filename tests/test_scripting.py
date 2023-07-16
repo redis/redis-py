@@ -1,5 +1,4 @@
 import pytest
-
 import redis
 from redis import exceptions
 from redis.commands.core import Script

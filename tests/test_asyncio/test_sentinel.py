@@ -2,7 +2,6 @@ import socket
 
 import pytest
 import pytest_asyncio
-
 import redis.asyncio.sentinel
 from redis import exceptions
 from redis.asyncio.sentinel import (
