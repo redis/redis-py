@@ -16,6 +16,10 @@ on:
   schedule:
     - cron: '0 1 * * *' # nightly build
 
+concurrency:
+  group: ${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read  #  to fetch code (actions/checkout)
 
@@ -48,7 +52,7 @@ jobs:
 
    run-tests:
      runs-on: ubuntu-latest
-     timeout-minutes: 30
+     timeout-minutes: 60
      strategy:
        max-parallel: 15
        fail-fast: false
@@ -68,32 +72,77 @@ jobs:
        - name: run tests
          run: |
            pip install -U setuptools wheel
+           pip install -r requirements.txt
            pip install -r dev_requirements.txt
-           tox -e ${{matrix.test-type}}-${{matrix.connection-type}}
+           if [ "${{matrix.connection-type}}" == "hiredis" ]; then
+            pip install hiredis
+           fi
+           invoke devenv
+           sleep 5 # time to settle
+           invoke ${{matrix.test-type}}-tests
+
        - uses: actions/upload-artifact@v2
          if: success() || failure()
          with:
-           name: pytest-results-${{matrix.test-type}}
+           name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}
            path: '${{matrix.test-type}}*results.xml'
+
        - name: Upload codecov coverage
          uses: codecov/codecov-action@v3
+         if: ${{matrix.python-version == '3.11'}}
          with:
            fail_ci_if_error: false
-      #  - name: View Test Results
-      #    uses: dorny/test-reporter@v1
-      #    if: success() || failure()
-      #    with:
-      #      name: Test Results ${{matrix.python-version}} ${{matrix.test-type}}-${{matrix.connection-type}}
-      #      path: '${{matrix.test-type}}*results.xml'
-      #      reporter: java-junit
-      #      list-suites: failed
-      #      list-tests: failed
-      #      max-annotations: 10
+
+       - name: View Test Results
+         uses: dorny/test-reporter@v1
+         if: success() || failure()
+         continue-on-error: true
+         with:
+           name: Test Results ${{matrix.python-version}} ${{matrix.test-type}}-${{matrix.connection-type}}
+           path: '*.xml'
+           reporter: java-junit
+           list-suites: all
+           list-tests: all
+           max-annotations: 10
+           fail-on-error: 'false'
+
+   resp3_tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.7', '3.11']
+        test-type: ['standalone', 'cluster']
+        connection-type: ['hiredis', 'plain']
+        protocol: ['3']
+    env:
+       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    name: RESP3 [${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+      - name: run tests
+        run: |
+          pip install -U setuptools wheel
+          pip install -r requirements.txt
+          pip install -r dev_requirements.txt
+          if [ "${{matrix.connection-type}}" == "hiredis" ]; then
+            pip install hiredis
+          fi
+          invoke devenv
+          sleep 5 # time to settle
+          invoke ${{matrix.test-type}}-tests
+          invoke ${{matrix.test-type}}-tests --uvloop
 
    build_and_test_package:
     name: Validate building and installing the package
     runs-on: ubuntu-latest
+    needs: [run-tests]
     strategy:
+      fail-fast: false
       matrix:
         extension: ['tar.gz', 'whl']
     steps:

@@ -2,7 +2,6 @@ import contextlib
 import multiprocessing
 
 import pytest
-
 import redis
 from redis.connection import Connection, ConnectionPool
 from redis.exceptions import ConnectionError

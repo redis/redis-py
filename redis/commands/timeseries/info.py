@@ -80,3 +80,12 @@ class TSInfo:
             self.duplicate_policy = response["duplicatePolicy"]
             if type(self.duplicate_policy) == bytes:
                 self.duplicate_policy = self.duplicate_policy.decode()
+
+    def get(self, item):
+        try:
+            return self.__getitem__(item)
+        except AttributeError:
+            return None
+
+    def __getitem__(self, item):
+        return getattr(self, item)

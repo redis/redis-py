@@ -1,7 +1,6 @@
 import socket
 
 import pytest
-
 import redis.sentinel
 from redis import exceptions
 from redis.sentinel import (

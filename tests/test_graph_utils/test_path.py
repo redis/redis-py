@@ -1,5 +1,4 @@
 import pytest
-
 from redis.commands.graph import edge, node, path
 
 
