@@ -4,16 +4,15 @@ import types
 from unittest.mock import patch
 
 import pytest
-
 import redis
-from redis.asyncio import Redis
-from redis.asyncio.connection import (
-    BaseParser,
-    Connection,
-    HiredisParser,
-    PythonParser,
-    UnixDomainSocketConnection,
+from redis._parsers import (
+    _AsyncHiredisParser,
+    _AsyncRESP2Parser,
+    _AsyncRESP3Parser,
+    _AsyncRESPBase,
 )
+from redis.asyncio import Redis
+from redis.asyncio.connection import Connection, UnixDomainSocketConnection
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
@@ -31,11 +30,11 @@ async def test_invalid_response(create_redis):
     raw = b"x"
     fake_stream = MockStream(raw + b"\r\n")
 
-    parser: BaseParser = r.connection._parser
+    parser: _AsyncRESPBase = r.connection._parser
     with mock.patch.object(parser, "_stream", fake_stream):
         with pytest.raises(InvalidResponse) as cm:
             await parser.read_response()
-    if isinstance(parser, PythonParser):
+    if isinstance(parser, _AsyncRESPBase):
         assert str(cm.value) == f"Protocol Error: {raw!r}"
     else:
         assert (
@@ -91,22 +90,22 @@ async def test_single_connection():
 @skip_if_server_version_lt("4.0.0")
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
-async def test_loading_external_modules(modclient):
+async def test_loading_external_modules(r):
     def inner():
         pass
 
-    modclient.load_external_module("myfuncname", inner)
-    assert getattr(modclient, "myfuncname") == inner
-    assert isinstance(getattr(modclient, "myfuncname"), types.FunctionType)
+    r.load_external_module("myfuncname", inner)
+    assert getattr(r, "myfuncname") == inner
+    assert isinstance(getattr(r, "myfuncname"), types.FunctionType)
 
     # and call it
     from redis.commands import RedisModuleCommands
 
     j = RedisModuleCommands.json
-    modclient.load_external_module("sometestfuncname", j)
+    r.load_external_module("sometestfuncname", j)
 
     # d = {'hello': 'world!'}
-    # mod = j(modclient)
+    # mod = j(r)
     # mod.set("fookey", ".", d)
     # assert mod.get('fookey') == d
 
@@ -197,7 +196,9 @@ async def test_connection_parse_response_resume(r: redis.Redis):
 
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize(
-    "parser_class", [PythonParser, HiredisParser], ids=["PythonParser", "HiredisParser"]
+    "parser_class",
+    [_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisParser],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser", "AsyncHiredisParser"],
 )
 async def test_connection_disconect_race(parser_class):
     """
@@ -211,7 +212,7 @@ async def test_connection_disconect_race(parser_class):
     This test verifies that a read in progress can finish even
     if the `disconnect()` method is called.
     """
-    if parser_class == HiredisParser and not HIREDIS_AVAILABLE:
+    if parser_class == _AsyncHiredisParser and not HIREDIS_AVAILABLE:
         pytest.skip("Hiredis not available")
 
     args = {}

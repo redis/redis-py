@@ -1,5 +1,4 @@
 import pytest
-
 import redis
 from redis.connection import Connection
 from redis.utils import HIREDIS_PACK_AVAILABLE

@@ -1,5 +1,4 @@
 import pytest
-
 from tests.conftest import skip_if_redis_enterprise, skip_ifnot_redis_enterprise
 
 from .conftest import wait_for_command

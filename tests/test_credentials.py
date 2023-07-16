@@ -4,7 +4,6 @@ import string
 from typing import Optional, Tuple, Union
 
 import pytest
-
 import redis
 from redis import AuthenticationError, DataError, ResponseError
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
@@ -198,6 +197,12 @@ class TestCredentialsProvider:
         password = "origin_password"
         new_username = "new_username"
         new_password = "new_password"
+
+        def teardown():
+            r.acl_deluser(new_username)
+
+        request.addfinalizer(teardown)
+
         init_acl_user(r, request, username, password)
         r2 = _get_client(
             redis.Redis, request, flushdb=False, username=username, password=password

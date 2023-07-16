@@ -1,7 +1,6 @@
 import time
 
 import pytest
-
 from redis.client import Redis
 from redis.exceptions import LockError, LockNotOwnedError
 from redis.lock import Lock
