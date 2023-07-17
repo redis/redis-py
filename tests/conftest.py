@@ -220,7 +220,6 @@ def skip_unless_arch_bits(arch_bits: int) -> _TestDecorator:
 def skip_ifmodversion_lt(min_version: str, module_name: str):
     try:
         modules = REDIS_INFO["modules"]
-        breakpoint()
     except KeyError:
         return pytest.mark.skipif(True, reason="Redis server does not have modules")
     if modules == []:
