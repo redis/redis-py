@@ -43,7 +43,7 @@ def test_json_get_jset(client):
     assert client.exists("foo") == 0
 
 
-@skip_ifmodversion_lt("2.6.0", "ReJSON")  # todo: update after the release
+@skip_ifmodversion_lt("2.06.00", "ReJSON")  # todo: update after the release
 def test_json_merge(client):
     # Test with root path $
     assert client.json().set(
@@ -110,7 +110,7 @@ def test_mgetshouldsucceed(client):
     assert client.json().mget([1, 2], Path.root_path()) == [1, 2]
 
 
-@skip_ifmodversion_lt("2.6.0", "ReJSON")  # todo: update after the release
+@skip_ifmodversion_lt("2.06.00", "ReJSON")  # todo: update after the release
 def test_mset(client):
     client.json().mset([("1", Path.root_path(), 1), ("2", Path.root_path(), 2)])
 
