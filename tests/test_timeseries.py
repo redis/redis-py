@@ -843,6 +843,7 @@ def test_get(client):
     assert 4 == client.ts().get(name)[1]
 
 
+@pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("1.8.0", "timeseries")
 def test_get_latest(client: redis.Redis):
     timeseries = client.ts()
