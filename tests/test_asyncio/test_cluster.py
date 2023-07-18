@@ -1065,11 +1065,14 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
-    async def test_cluster_delslotsrange(self, r: RedisCluster):
+    async def test_cluster_delslotsrange(self):
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        mock_all_nodes_resp(r, "OK")
         node = r.get_random_node()
-        mock_node_resp(node, "OK")
         await r.cluster_addslots(node, 1, 2, 3, 4, 5)
         assert await r.cluster_delslotsrange(1, 5)
+        assert node._free.pop().read_response.called
+        await r.close()
 
     @skip_if_redis_enterprise()
     async def test_cluster_failover(self, r: RedisCluster) -> None:
