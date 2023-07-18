@@ -1,4 +1,4 @@
-FROM redis/redis-stack-server:latest as rss
+FROM redis/redis-stack-server:edge as rss
 
 COPY dockers/create_cluster.sh /create_cluster.sh
 RUN ls -R /opt/redis-stack
