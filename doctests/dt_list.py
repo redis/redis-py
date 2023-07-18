@@ -219,18 +219,19 @@ assert res32 == ("bikes:repairs", "bike:2")
 assert res33 == ("bikes:repairs", "bike:1")
 assert res34 == None
 r.delete("bikes:repairs")
+r.delete("new_bikes")
 # REMOVE_END
 
 # STEP_START rule_1
 res35 = r.delete("new_bikes")
-print(res35)  # >>> 1
+print(res35)  # >>> 0
 
 res36 = r.lpush("new_bikes", "bike:1", "bike:2", "bike:3")
 print(res36)  # >>> 3
 # STEP_END
 
 # REMOVE_START
-assert res35 == 1
+assert res35 == 0
 assert res36 == 3
 r.delete("new_bikes")
 # REMOVE_END
