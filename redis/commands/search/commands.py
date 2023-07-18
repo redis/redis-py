@@ -385,7 +385,10 @@ class SearchCommands:
                 args.append(value)
         return args
 
-    def _mk_query_args(self, query, query_params: Union[Dict[str, Union[str, int, float, bytes]], None]):
+    def _mk_query_args(
+        self, 
+        query,
+        query_params: Union[Dict[str, Union[str, int, float, bytes]], None]):
         args = [self.index_name]
 
         if isinstance(query, str):
