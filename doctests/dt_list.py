@@ -302,3 +302,23 @@ assert res45 == 0
 assert res46 == 0
 assert res47 == None
 # REMOVE_END
+
+# STEP_START ltrim.1
+res48 = r.lpush(
+    "bikes:repairs", "bike:1", "bike:2", "bike:3", "bike:4", "bike:5"
+)
+print(res48)  # >>> 5
+
+res49 = r.ltrim("bikes:repairs", 0, 2)
+print(res49)  # >>> True
+
+res50 = r.lrange("bikes:repairs", 0, -1)
+print(res50)  # >>> ['bike:5', 'bike:4', 'bike:3']
+# STEP_END
+
+# REMOVE_START
+assert res48 == 5
+assert res49 == True
+assert res50 == ["bike:5", "bike:4", "bike:3"]
+r.delete("bikes:repairs")
+# REMOVE_END
