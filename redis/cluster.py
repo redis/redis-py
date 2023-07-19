@@ -223,6 +223,7 @@ class AbstractRedisCluster:
                 "ACL WHOAMI",
                 "AUTH",
                 "CLIENT LIST",
+                "CLIENT SETINFO",
                 "CLIENT SETNAME",
                 "CLIENT GETNAME",
                 "CONFIG SET",

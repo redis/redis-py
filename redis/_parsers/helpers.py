@@ -629,7 +629,7 @@ def parse_client_info(value):
     "key1=value1 key2=value2 key3=value3"
     """
     client_info = {}
-    infos = str_if_bytes(value).split(" ")
+    infos = str_if_bytes(value[:-1]).split(" ")
     for info in infos:
         key, value = info.split("=")
         client_info[key] = value
@@ -700,6 +700,7 @@ _RedisCallbacks = {
     "CLIENT KILL": parse_client_kill,
     "CLIENT LIST": parse_client_list,
     "CLIENT PAUSE": bool_ok,
+    "CLIENT SETINFO": bool_ok,
     "CLIENT SETNAME": bool_ok,
     "CLIENT UNBLOCK": bool,
     "CLUSTER ADDSLOTS": bool_ok,
