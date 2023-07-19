@@ -1,4 +1,5 @@
 import asyncio
+import platform
 import socket
 import types
 from unittest.mock import Mock, patch
@@ -307,6 +308,8 @@ async def test_connection_socket_cleanup(request, from_url):
     """Verify that connections are cleaned up when they
     are garbage collected
     """
+    if platform.python_implementation() != "CPython":
+        pytest.skip("only works on CPython")
     url: str = request.config.getoption("--redis-url")
     url_args = parse_url(url)
 
