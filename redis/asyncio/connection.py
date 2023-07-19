@@ -383,12 +383,16 @@ class AbstractConnection:
     def _close_socket(self):
         """Close the socket directly.  Used during garbage collection to
         make sure the underlying socket is released.  This does not happen
-        reliably when the stream is garbage collected.
+        reliably when the stream is garbage collected.  This is a safety
+        precaution, correct use of the library should ensure that
+        sockets are disconnected properly.
         """
-        if self._writer:
+        # some test classes don't even have this
+        writer = getattr(self, "_writer", None)
+        if writer:
             if os.getpid() == self.pid:
                 try:
-                    self._writer.close()
+                    writer.close()
                 except RuntimeError:
                     # This may fail if the event loop is already closed,
                     # even though this is not an async call.  In this
