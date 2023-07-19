@@ -207,6 +207,9 @@ class AbstractConnection:
         repr_args = ",".join((f"{k}={v}" for k, v in self.repr_pieces()))
         return f"{self.__class__.__name__}<{repr_args}>"
 
+    def __del__(self):
+        self._close_socket()
+
     @abstractmethod
     def repr_pieces(self):
         pass
@@ -376,6 +379,22 @@ class AbstractConnection:
             raise TimeoutError(
                 f"Timed out closing connection after {self.socket_connect_timeout}"
             ) from None
+
+    def _close_socket(self):
+        """Close the socket directly.  Used during garbage collection to
+        make sure the underlying socket is released.  This does not happen
+        reliably when the stream is garbage collected.
+        """
+        if self._writer:
+            if os.getpid() == self.pid:
+                try:
+                    self._writer.close()
+                except RuntimeError:
+                    # This may fail if the event loop is already closed,
+                    # even though this is not an async call.  In this
+                    # case, just ignore the error, since it is during
+                    # exit anyway.
+                    pass
 
     async def _send_ping(self):
         """Send PING, expect PONG in return"""
