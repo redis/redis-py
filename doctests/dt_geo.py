@@ -24,7 +24,13 @@ assert res3 == 1
 # REMOVE_END
 
 # STEP_START geosearch
-res4 = r.geosearch("bikes:rentable", longitude=-122.27652, latitude=37.805186, radius=5, unit="km")
+res4 = r.geosearch(
+    "bikes:rentable",
+    longitude=-122.27652,
+    latitude=37.805186,
+    radius=5,
+    unit="km",
+)
 print(res4) # >>> ['station:1', 'station:2', 'station:3']
 # STEP_END
 
