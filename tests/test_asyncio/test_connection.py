@@ -1,7 +1,7 @@
 import asyncio
 import socket
 import types
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 import redis
@@ -12,7 +12,12 @@ from redis._parsers import (
     _AsyncRESPBase,
 )
 from redis.asyncio import Redis
-from redis.asyncio.connection import Connection, UnixDomainSocketConnection
+from redis.asyncio.connection import (
+    AbstractConnection,
+    Connection,
+    UnixDomainSocketConnection,
+    parse_url,
+)
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
@@ -278,3 +283,45 @@ async def test_connection_disconect_race(parser_class):
 def test_create_single_connection_client_from_url():
     client = Redis.from_url("redis://localhost:6379/0?", single_connection_client=True)
     assert client.single_connection_client is True
+
+
+@pytest.mark.parametrize("from_url", (True, False))
+async def test_pool_auto_close(request, from_url):
+    """Verify that basic Redis instances have auto_close_connection_pool set to True"""
+
+    url: str = request.config.getoption("--redis-url")
+    url_args = parse_url(url)
+
+    async def get_redis_connection():
+        if from_url:
+            return Redis.from_url(url)
+        return Redis(**url_args)
+
+    r1 = await get_redis_connection()
+    assert r1.auto_close_connection_pool is True
+
+
+@pytest.mark.parametrize("from_url", (True, False))
+async def test_connection_socket_cleanup(request, from_url):
+    """Verify that connections are cleaned up when they
+    are garbage collected
+    """
+    url: str = request.config.getoption("--redis-url")
+    url_args = parse_url(url)
+
+    async def get_redis_connection():
+        if from_url:
+            return Redis.from_url(url)
+        return Redis(**url_args)
+
+    async def do_something(redis):
+        await redis.incr("counter")
+        await redis.close()
+
+    mock = Mock()
+    with patch.object(AbstractConnection, "_close_socket", mock):
+        r1 = await get_redis_connection()
+        await do_something(r1)
+        r1 = None
+
+    assert mock.call_count == 1
