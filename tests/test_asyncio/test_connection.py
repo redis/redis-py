@@ -301,6 +301,7 @@ async def test_pool_auto_close(request, from_url):
     assert r1.auto_close_connection_pool is True
 
 
+@pytest.mark.onlynoncluster
 @pytest.mark.parametrize("from_url", (True, False))
 async def test_connection_socket_cleanup(request, from_url):
     """Verify that connections are cleaned up when they
