@@ -31,9 +31,9 @@ res4 = r.geosearch(
     radius=5,
     unit="km",
 )
-print(res4) # >>> ['station:1', 'station:2', 'station:3']
+print(res4)  # >>> ['station:1', 'station:2', 'station:3']
 # STEP_END
 
 # REMOVE_START
-assert res4 == ['station:1', 'station:2', 'station:3']
+assert res4 == ["station:1", "station:2", "station:3"]
 # REMOVE_END
