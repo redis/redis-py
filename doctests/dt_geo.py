@@ -1,6 +1,7 @@
 # EXAMPLE: geo_tutorial
 # HIDE_START
 import redis
+
 r = redis.Redis(decode_responses=True)
 # HIDE_END
 # REMOVE_START
