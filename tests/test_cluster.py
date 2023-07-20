@@ -23,6 +23,7 @@ from redis.cluster import (
     REPLICA,
     ClusterNode,
     LoadBalancer,
+    NodeCommands,
     NodesManager,
     RedisCluster,
     get_node_name,
@@ -2653,6 +2654,28 @@ class TestClusterPipeline:
     """
     Tests for the ClusterPipeline class
     """
+
+    @pytest.mark.parametrize("function", ["write", "read"])
+    def test_connection_release_with_unexpected_error_in_node_commands(
+        self, r, function
+    ):
+        """
+        Test that connection is released to the pool, even with an unexpected error
+        """
+        with patch.object(NodeCommands, function) as m:
+
+            def raise_error():
+                raise Exception("unexpected error")
+
+            m.side_effect = raise_error
+
+            with pytest.raises(Exception, match="unexpected error"):
+                r.pipeline().get("a").execute()
+
+        for cluster_node in r.nodes_manager.nodes_cache.values():
+            connection_pool = cluster_node.redis_connection.connection_pool
+            num_of_conns = len(connection_pool._available_connections)
+            assert num_of_conns == connection_pool._created_connections
 
     def test_blocked_methods(self, r):
         """
