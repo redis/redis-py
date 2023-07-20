@@ -1,11 +1,12 @@
 # EXAMPLE: list_tutorial
 # HIDE_START
 import redis
-
 r = redis.Redis(decode_responses=True)
+# HIDE_END
+# REMOVE_START
 r.delete("bikes:repairs")
 r.delete("bikes:finished")
-# HIDE_END
+# REMOVE_END
 
 # STEP_START queue
 res1 = r.lpush("bikes:repairs", "bike:1")
