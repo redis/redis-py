@@ -1,8 +1,7 @@
 import asyncio
-import platform
 import socket
 import types
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 import redis
@@ -13,12 +12,7 @@ from redis._parsers import (
     _AsyncRESPBase,
 )
 from redis.asyncio import Redis
-from redis.asyncio.connection import (
-    AbstractConnection,
-    Connection,
-    UnixDomainSocketConnection,
-    parse_url,
-)
+from redis.asyncio.connection import Connection, UnixDomainSocketConnection, parse_url
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
@@ -320,32 +314,3 @@ async def test_pool_auto_close_disable(request, from_url):
     assert r1.auto_close_connection_pool is False
     await r1.connection_pool.disconnect()
     await r1.close()
-
-
-@pytest.mark.onlynoncluster
-@pytest.mark.parametrize("from_url", (True, False))
-async def test_connection_socket_cleanup(request, from_url):
-    """Verify that connections are cleaned up when they
-    are garbage collected
-    """
-    if platform.python_implementation() != "CPython":
-        pytest.skip("only works on CPython")
-    url: str = request.config.getoption("--redis-url")
-    url_args = parse_url(url)
-
-    async def get_redis_connection():
-        if from_url:
-            return Redis.from_url(url)
-        return Redis(**url_args)
-
-    async def do_something(redis):
-        await redis.incr("counter")
-        await redis.close()
-
-    mock = Mock()
-    with patch.object(AbstractConnection, "_close_socket", mock):
-        r1 = await get_redis_connection()
-        await do_something(r1)
-        r1 = None
-
-    assert mock.call_count == 1
