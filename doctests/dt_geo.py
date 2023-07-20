@@ -1,10 +1,11 @@
 # EXAMPLE: geo_tutorial
 # HIDE_START
 import redis
-
 r = redis.Redis(decode_responses=True)
-r.delete("bikes:rentable")
 # HIDE_END
+# REMOVE_START
+r.delete("bikes:rentable")
+# REMOVE_END
 
 # STEP_START geoadd
 res1 = r.geoadd("bikes:rentable", [-122.27652, 37.805186, "station:1"])
