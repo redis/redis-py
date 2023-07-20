@@ -300,6 +300,26 @@ async def test_pool_auto_close(request, from_url):
 
     r1 = await get_redis_connection()
     assert r1.auto_close_connection_pool is True
+    await r1.close()
+
+
+@pytest.mark.parametrize("from_url", (True, False))
+async def test_pool_auto_close_disable(request, from_url):
+    """Verify that auto_close_connection_pool can be disabled"""
+
+    url: str = request.config.getoption("--redis-url")
+    url_args = parse_url(url)
+
+    async def get_redis_connection():
+        if from_url:
+            return Redis.from_url(url, auto_close_connection_pool=False)
+        url_args["auto_close_connection_pool"] = False
+        return Redis(**url_args)
+
+    r1 = await get_redis_connection()
+    assert r1.auto_close_connection_pool is False
+    await r1.connection_pool.disconnect()
+    await r1.close()
 
 
 @pytest.mark.onlynoncluster

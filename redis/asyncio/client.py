@@ -145,12 +145,13 @@ class Redis(
 
         """
         single_connection_client = kwargs.pop("single_connection_client", False)
+        auto_close_connection_pool = kwargs.pop("auto_close_connection_pool", True)
         connection_pool = ConnectionPool.from_url(url, **kwargs)
         redis = cls(
             connection_pool=connection_pool,
             single_connection_client=single_connection_client,
         )
-        redis.auto_close_connection_pool = True
+        redis.auto_close_connection_pool = auto_close_connection_pool
         return redis
 
     def __init__(
