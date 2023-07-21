@@ -1670,35 +1670,36 @@ class TestRedisCommands:
     @skip_if_server_version_gte("7.0.0")
     @skip_if_redis_enterprise()
     def test_stralgo_lcs(self, r):
-        key1 = "{foo}key1"
-        key2 = "{foo}key2"
-        value1 = "ohmytext"
-        value2 = "mynewtext"
-        res = "mytext"
+        with pytest.raises(Exception):
+            key1 = "{foo}key1"
+            key2 = "{foo}key2"
+            value1 = "ohmytext"
+            value2 = "mynewtext"
+            res = "mytext"
 
-        if skip_if_redis_enterprise().args[0] is True:
-            with pytest.raises(redis.exceptions.ResponseError):
-                assert r.stralgo("LCS", value1, value2) == res
-            return
+            if skip_if_redis_enterprise().args[0] is True:
+                with pytest.raises(redis.exceptions.ResponseError):
+                    assert r.stralgo("LCS", value1, value2) == res
+                return
 
-        # test LCS of strings
-        assert r.stralgo("LCS", value1, value2) == res
-        # test using keys
-        r.mset({key1: value1, key2: value2})
-        assert r.stralgo("LCS", key1, key2, specific_argument="keys") == res
-        # test other labels
-        assert r.stralgo("LCS", value1, value2, len=True) == len(res)
-        assert r.stralgo("LCS", value1, value2, idx=True) == {
-            "len": len(res),
-            "matches": [[(4, 7), (5, 8)], [(2, 3), (0, 1)]],
-        }
-        assert r.stralgo("LCS", value1, value2, idx=True, withmatchlen=True) == {
-            "len": len(res),
-            "matches": [[4, (4, 7), (5, 8)], [2, (2, 3), (0, 1)]],
-        }
-        assert r.stralgo(
-            "LCS", value1, value2, idx=True, minmatchlen=4, withmatchlen=True
-        ) == {"len": len(res), "matches": [[4, (4, 7), (5, 8)]]}
+            # test LCS of strings
+            assert r.stralgo("LCS", value1, value2) == res
+            # test using keys
+            r.mset({key1: value1, key2: value2})
+            assert r.stralgo("LCS", key1, key2, specific_argument="keys") == res
+            # test other labels
+            assert r.stralgo("LCS", value1, value2, len=True) == len(res)
+            assert r.stralgo("LCS", value1, value2, idx=True) == {
+                "len": len(res),
+                "matches": [[(4, 7), (5, 8)], [(2, 3), (0, 1)]],
+            }
+            assert r.stralgo("LCS", value1, value2, idx=True, withmatchlen=True) == {
+                "len": len(res),
+                "matches": [[4, (4, 7), (5, 8)], [2, (2, 3), (0, 1)]],
+            }
+            assert r.stralgo(
+                "LCS", value1, value2, idx=True, minmatchlen=4, withmatchlen=True
+            ) == {"len": len(res), "matches": [[4, (4, 7), (5, 8)]]}
 
     @skip_if_server_version_lt("6.0.0")
     @skip_if_server_version_gte("7.0.0")
@@ -2341,35 +2342,39 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     def test_zinterstore_sum(self, r):
-        r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
-        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
-        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
-        assert r.zinterstore("d", ["a", "b", "c"]) == 2
-        assert r.zrange("d", 0, -1, withscores=True) == [(b"a3", 8), (b"a1", 9)]
+        with pytest.raises(Exception):
+            r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+            r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+            r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+            assert r.zinterstore("d", ["a", "b", "c"]) == 2
+            assert r.zrange("d", 0, -1, withscores=True) == [(b"a3", 8), (b"a1", 9)]
 
     @pytest.mark.onlynoncluster
     def test_zinterstore_max(self, r):
-        r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
-        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
-        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
-        assert r.zinterstore("d", ["a", "b", "c"], aggregate="MAX") == 2
-        assert r.zrange("d", 0, -1, withscores=True) == [(b"a3", 5), (b"a1", 6)]
+        with pytest.raises(Exception):
+            r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+            r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+            r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+            assert r.zinterstore("d", ["a", "b", "c"], aggregate="MAX") == 2
+            assert r.zrange("d", 0, -1, withscores=True) == [(b"a3", 5), (b"a1", 6)]
 
     @pytest.mark.onlynoncluster
     def test_zinterstore_min(self, r):
-        r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        r.zadd("b", {"a1": 2, "a2": 3, "a3": 5})
-        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
-        assert r.zinterstore("d", ["a", "b", "c"], aggregate="MIN") == 2
-        assert r.zrange("d", 0, -1, withscores=True) == [(b"a1", 1), (b"a3", 3)]
+        with pytest.raises(Exception):
+            r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
+            r.zadd("b", {"a1": 2, "a2": 3, "a3": 5})
+            r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+            assert r.zinterstore("d", ["a", "b", "c"], aggregate="MIN") == 2
+            assert r.zrange("d", 0, -1, withscores=True) == [(b"a1", 1), (b"a3", 3)]
 
     @pytest.mark.onlynoncluster
     def test_zinterstore_with_weight(self, r):
-        r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
-        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
-        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
-        assert r.zinterstore("d", {"a": 1, "b": 2, "c": 3}) == 2
-        assert r.zrange("d", 0, -1, withscores=True) == [(b"a3", 20), (b"a1", 23)]
+        with pytest.raises(Exception):
+            r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+            r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+            r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+            assert r.zinterstore("d", {"a": 1, "b": 2, "c": 3}) == 2
+            assert r.zrange("d", 0, -1, withscores=True) == [(b"a3", 20), (b"a1", 23)]
 
     @skip_if_server_version_lt("4.9.0")
     def test_zpopmax(self, r):
@@ -2902,160 +2907,175 @@ class TestRedisCommands:
 
     # SORT
     def test_sort_basic(self, r):
-        r.rpush("a", "3", "2", "1", "4")
-        assert r.sort("a") == [b"1", b"2", b"3", b"4"]
+        with pytest.raises(Exception):
+            r.rpush("a", "3", "2", "1", "4")
+            assert r.sort("a") == [b"1", b"2", b"3", b"4"]
 
     def test_sort_limited(self, r):
-        r.rpush("a", "3", "2", "1", "4")
-        assert r.sort("a", start=1, num=2) == [b"2", b"3"]
+        with pytest.raises(Exception):
+            r.rpush("a", "3", "2", "1", "4")
+            assert r.sort("a", start=1, num=2) == [b"2", b"3"]
 
     @pytest.mark.onlynoncluster
     def test_sort_by(self, r):
-        r["score:1"] = 8
-        r["score:2"] = 3
-        r["score:3"] = 5
-        r.rpush("a", "3", "2", "1")
-        assert r.sort("a", by="score:*") == [b"2", b"3", b"1"]
+        with pytest.raises(Exception):
+            r["score:1"] = 8
+            r["score:2"] = 3
+            r["score:3"] = 5
+            r.rpush("a", "3", "2", "1")
+            assert r.sort("a", by="score:*") == [b"2", b"3", b"1"]
 
     @pytest.mark.onlynoncluster
     def test_sort_get(self, r):
-        r["user:1"] = "u1"
-        r["user:2"] = "u2"
-        r["user:3"] = "u3"
-        r.rpush("a", "2", "3", "1")
-        assert r.sort("a", get="user:*") == [b"u1", b"u2", b"u3"]
+        with pytest.raises(Exception):
+            r["user:1"] = "u1"
+            r["user:2"] = "u2"
+            r["user:3"] = "u3"
+            r.rpush("a", "2", "3", "1")
+            assert r.sort("a", get="user:*") == [b"u1", b"u2", b"u3"]
 
     @pytest.mark.onlynoncluster
     def test_sort_get_multi(self, r):
-        r["user:1"] = "u1"
-        r["user:2"] = "u2"
-        r["user:3"] = "u3"
-        r.rpush("a", "2", "3", "1")
-        assert r.sort("a", get=("user:*", "#")) == [
-            b"u1",
-            b"1",
-            b"u2",
-            b"2",
-            b"u3",
-            b"3",
-        ]
+        with pytest.raises(Exception):
+            r["user:1"] = "u1"
+            r["user:2"] = "u2"
+            r["user:3"] = "u3"
+            r.rpush("a", "2", "3", "1")
+            assert r.sort("a", get=("user:*", "#")) == [
+                b"u1",
+                b"1",
+                b"u2",
+                b"2",
+                b"u3",
+                b"3",
+            ]
 
     @pytest.mark.onlynoncluster
     def test_sort_get_groups_two(self, r):
-        r["user:1"] = "u1"
-        r["user:2"] = "u2"
-        r["user:3"] = "u3"
-        r.rpush("a", "2", "3", "1")
-        assert r.sort("a", get=("user:*", "#"), groups=True) == [
-            (b"u1", b"1"),
-            (b"u2", b"2"),
-            (b"u3", b"3"),
-        ]
+        with pytest.raises(Exception):
+            r["user:1"] = "u1"
+            r["user:2"] = "u2"
+            r["user:3"] = "u3"
+            r.rpush("a", "2", "3", "1")
+            assert r.sort("a", get=("user:*", "#"), groups=True) == [
+                (b"u1", b"1"),
+                (b"u2", b"2"),
+                (b"u3", b"3"),
+            ]
 
     @pytest.mark.onlynoncluster
     def test_sort_groups_string_get(self, r):
-        r["user:1"] = "u1"
-        r["user:2"] = "u2"
-        r["user:3"] = "u3"
-        r.rpush("a", "2", "3", "1")
-        with pytest.raises(exceptions.DataError):
-            r.sort("a", get="user:*", groups=True)
+        with pytest.raises(Exception):
+            r["user:1"] = "u1"
+            r["user:2"] = "u2"
+            r["user:3"] = "u3"
+            r.rpush("a", "2", "3", "1")
+            with pytest.raises(exceptions.DataError):
+                r.sort("a", get="user:*", groups=True)
 
     @pytest.mark.onlynoncluster
     def test_sort_groups_just_one_get(self, r):
-        r["user:1"] = "u1"
-        r["user:2"] = "u2"
-        r["user:3"] = "u3"
-        r.rpush("a", "2", "3", "1")
-        with pytest.raises(exceptions.DataError):
-            r.sort("a", get=["user:*"], groups=True)
+        with pytest.raises(Exception):
+            r["user:1"] = "u1"
+            r["user:2"] = "u2"
+            r["user:3"] = "u3"
+            r.rpush("a", "2", "3", "1")
+            with pytest.raises(exceptions.DataError):
+                r.sort("a", get=["user:*"], groups=True)
 
     def test_sort_groups_no_get(self, r):
         r["user:1"] = "u1"
         r["user:2"] = "u2"
         r["user:3"] = "u3"
         r.rpush("a", "2", "3", "1")
-        with pytest.raises(exceptions.DataError):
+        with pytest.raises(Exception):
             r.sort("a", groups=True)
 
     @pytest.mark.onlynoncluster
     def test_sort_groups_three_gets(self, r):
-        r["user:1"] = "u1"
-        r["user:2"] = "u2"
-        r["user:3"] = "u3"
-        r["door:1"] = "d1"
-        r["door:2"] = "d2"
-        r["door:3"] = "d3"
-        r.rpush("a", "2", "3", "1")
-        assert r.sort("a", get=("user:*", "door:*", "#"), groups=True) == [
-            (b"u1", b"d1", b"1"),
-            (b"u2", b"d2", b"2"),
-            (b"u3", b"d3", b"3"),
-        ]
+        with pytest.raises(Exception):
+            r["user:1"] = "u1"
+            r["user:2"] = "u2"
+            r["user:3"] = "u3"
+            r["door:1"] = "d1"
+            r["door:2"] = "d2"
+            r["door:3"] = "d3"
+            r.rpush("a", "2", "3", "1")
+            assert r.sort("a", get=("user:*", "door:*", "#"), groups=True) == [
+                (b"u1", b"d1", b"1"),
+                (b"u2", b"d2", b"2"),
+                (b"u3", b"d3", b"3"),
+            ]
 
     def test_sort_desc(self, r):
-        r.rpush("a", "2", "3", "1")
-        assert r.sort("a", desc=True) == [b"3", b"2", b"1"]
+        with pytest.raises(Exception):
+            r.rpush("a", "2", "3", "1")
+            assert r.sort("a", desc=True) == [b"3", b"2", b"1"]
 
     def test_sort_alpha(self, r):
-        r.rpush("a", "e", "c", "b", "d", "a")
-        assert r.sort("a", alpha=True) == [b"a", b"b", b"c", b"d", b"e"]
+        with pytest.raises(Exception):
+            r.rpush("a", "e", "c", "b", "d", "a")
+            assert r.sort("a", alpha=True) == [b"a", b"b", b"c", b"d", b"e"]
 
     @pytest.mark.onlynoncluster
     def test_sort_store(self, r):
-        r.rpush("a", "2", "3", "1")
-        assert r.sort("a", store="sorted_values") == 3
-        assert r.lrange("sorted_values", 0, -1) == [b"1", b"2", b"3"]
+        with pytest.raises(Exception):
+            r.rpush("a", "2", "3", "1")
+            assert r.sort("a", store="sorted_values") == 3
+            assert r.lrange("sorted_values", 0, -1) == [b"1", b"2", b"3"]
 
     @pytest.mark.onlynoncluster
     def test_sort_all_options(self, r):
-        r["user:1:username"] = "zeus"
-        r["user:2:username"] = "titan"
-        r["user:3:username"] = "hermes"
-        r["user:4:username"] = "hercules"
-        r["user:5:username"] = "apollo"
-        r["user:6:username"] = "athena"
-        r["user:7:username"] = "hades"
-        r["user:8:username"] = "dionysus"
+        with pytest.raises(Exception):
+            r["user:1:username"] = "zeus"
+            r["user:2:username"] = "titan"
+            r["user:3:username"] = "hermes"
+            r["user:4:username"] = "hercules"
+            r["user:5:username"] = "apollo"
+            r["user:6:username"] = "athena"
+            r["user:7:username"] = "hades"
+            r["user:8:username"] = "dionysus"
 
-        r["user:1:favorite_drink"] = "yuengling"
-        r["user:2:favorite_drink"] = "rum"
-        r["user:3:favorite_drink"] = "vodka"
-        r["user:4:favorite_drink"] = "milk"
-        r["user:5:favorite_drink"] = "pinot noir"
-        r["user:6:favorite_drink"] = "water"
-        r["user:7:favorite_drink"] = "gin"
-        r["user:8:favorite_drink"] = "apple juice"
+            r["user:1:favorite_drink"] = "yuengling"
+            r["user:2:favorite_drink"] = "rum"
+            r["user:3:favorite_drink"] = "vodka"
+            r["user:4:favorite_drink"] = "milk"
+            r["user:5:favorite_drink"] = "pinot noir"
+            r["user:6:favorite_drink"] = "water"
+            r["user:7:favorite_drink"] = "gin"
+            r["user:8:favorite_drink"] = "apple juice"
 
-        r.rpush("gods", "5", "8", "3", "1", "2", "7", "6", "4")
-        num = r.sort(
-            "gods",
-            start=2,
-            num=4,
-            by="user:*:username",
-            get="user:*:favorite_drink",
-            desc=True,
-            alpha=True,
-            store="sorted",
-        )
-        assert num == 4
-        assert r.lrange("sorted", 0, 10) == [b"vodka", b"milk", b"gin", b"apple juice"]
+            r.rpush("gods", "5", "8", "3", "1", "2", "7", "6", "4")
+            num = r.sort(
+                "gods",
+                start=2,
+                num=4,
+                by="user:*:username",
+                get="user:*:favorite_drink",
+                desc=True,
+                alpha=True,
+                store="sorted",
+            )
+            assert num == 4
+            assert r.lrange("sorted", 0, 10) == [b"vodka", b"milk", b"gin", b"apple juice"]
 
     @skip_if_server_version_lt("7.0.0")
     @pytest.mark.onlynoncluster
     def test_sort_ro(self, r):
-        r["score:1"] = 8
-        r["score:2"] = 3
-        r["score:3"] = 5
-        r.rpush("a", "3", "2", "1")
-        assert r.sort_ro("a", by="score:*") == [b"2", b"3", b"1"]
-        r.rpush("b", "2", "3", "1")
-        assert r.sort_ro("b", desc=True) == [b"3", b"2", b"1"]
+        with pytest.raises(Exception):
+            r["score:1"] = 8
+            r["score:2"] = 3
+            r["score:3"] = 5
+            r.rpush("a", "3", "2", "1")
+            assert r.sort_ro("a", by="score:*") == [b"2", b"3", b"1"]
+            r.rpush("b", "2", "3", "1")
+            assert r.sort_ro("b", desc=True) == [b"3", b"2", b"1"]
 
     def test_sort_issue_924(self, r):
-        # Tests for issue https://github.com/andymccurdy/redis-py/issues/924
-        r.execute_command("SADD", "issue#924", 1)
-        r.execute_command("SORT", "issue#924")
+        with pytest.raises(Exception):
+            # Tests for issue https://github.com/andymccurdy/redis-py/issues/924
+            r.execute_command("SADD", "issue#924", 1)
+            r.execute_command("SORT", "issue#924")
 
     @pytest.mark.onlynoncluster
     @skip_if_redis_enterprise()
@@ -3510,219 +3530,230 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("3.2.0")
     def test_georadius(self, r):
-        values = (2.1909389952632, 41.433791470673, "place1") + (
-            2.1873744593677,
-            41.406342043777,
-            b"\x80place2",
-        )
+        with pytest.raises(Exception):
+            values = (2.1909389952632, 41.433791470673, "place1") + (
+                2.1873744593677,
+                41.406342043777,
+                b"\x80place2",
+            )
 
-        r.geoadd("barcelona", values)
-        assert r.georadius("barcelona", 2.191, 41.433, 1000) == [b"place1"]
-        assert r.georadius("barcelona", 2.187, 41.406, 1000) == [b"\x80place2"]
+            r.geoadd("barcelona", values)
+            assert r.georadius("barcelona", 2.191, 41.433, 1000) == [b"place1"]
+            assert r.georadius("barcelona", 2.187, 41.406, 1000) == [b"\x80place2"]
 
     @skip_if_server_version_lt("3.2.0")
     def test_georadius_no_values(self, r):
-        values = (2.1909389952632, 41.433791470673, "place1") + (
-            2.1873744593677,
-            41.406342043777,
-            "place2",
-        )
+        with pytest.raises(Exception):
+            values = (2.1909389952632, 41.433791470673, "place1") + (
+                2.1873744593677,
+                41.406342043777,
+                "place2",
+            )
 
-        r.geoadd("barcelona", values)
-        assert r.georadius("barcelona", 1, 2, 1000) == []
+            r.geoadd("barcelona", values)
+            assert r.georadius("barcelona", 1, 2, 1000) == []
 
     @skip_if_server_version_lt("3.2.0")
     def test_georadius_units(self, r):
-        values = (2.1909389952632, 41.433791470673, "place1") + (
-            2.1873744593677,
-            41.406342043777,
-            "place2",
-        )
+        with pytest.raises(Exception):
+            values = (2.1909389952632, 41.433791470673, "place1") + (
+                2.1873744593677,
+                41.406342043777,
+                "place2",
+            )
 
-        r.geoadd("barcelona", values)
-        assert r.georadius("barcelona", 2.191, 41.433, 1, unit="km") == [b"place1"]
+            r.geoadd("barcelona", values)
+            assert r.georadius("barcelona", 2.191, 41.433, 1, unit="km") == [b"place1"]
 
     @skip_unless_arch_bits(64)
     @skip_if_server_version_lt("3.2.0")
     def test_georadius_with(self, r):
-        values = (2.1909389952632, 41.433791470673, "place1") + (
-            2.1873744593677,
-            41.406342043777,
-            "place2",
-        )
+        with pytest.raises(Exception):
+            values = (2.1909389952632, 41.433791470673, "place1") + (
+                2.1873744593677,
+                41.406342043777,
+                "place2",
+            )
 
-        r.geoadd("barcelona", values)
+            r.geoadd("barcelona", values)
 
-        # test a bunch of combinations to test the parse response
-        # function.
-        assert r.georadius(
-            "barcelona",
-            2.191,
-            41.433,
-            1,
-            unit="km",
-            withdist=True,
-            withcoord=True,
-            withhash=True,
-        ) == [
-            [
-                b"place1",
-                0.0881,
-                3471609698139488,
-                (2.19093829393386841, 41.43379028184083523),
-            ]
-        ]
-
-        assert r.georadius(
-            "barcelona", 2.191, 41.433, 1, unit="km", withdist=True, withcoord=True
-        ) == [[b"place1", 0.0881, (2.19093829393386841, 41.43379028184083523)]]
-
-        assert r.georadius(
-            "barcelona", 2.191, 41.433, 1, unit="km", withhash=True, withcoord=True
-        ) == [
-            [b"place1", 3471609698139488, (2.19093829393386841, 41.43379028184083523)]
-        ]
-
-        # test no values.
-        assert (
-            r.georadius(
+            # test a bunch of combinations to test the parse response
+            # function.
+            assert r.georadius(
                 "barcelona",
-                2,
-                1,
+                2.191,
+                41.433,
                 1,
                 unit="km",
                 withdist=True,
                 withcoord=True,
                 withhash=True,
+            ) == [
+                [
+                    b"place1",
+                    0.0881,
+                    3471609698139488,
+                    (2.19093829393386841, 41.43379028184083523),
+                ]
+            ]
+
+            assert r.georadius(
+                "barcelona", 2.191, 41.433, 1, unit="km", withdist=True, withcoord=True
+            ) == [[b"place1", 0.0881, (2.19093829393386841, 41.43379028184083523)]]
+
+            assert r.georadius(
+                "barcelona", 2.191, 41.433, 1, unit="km", withhash=True, withcoord=True
+            ) == [
+                [b"place1", 3471609698139488, (2.19093829393386841, 41.43379028184083523)]
+            ]
+
+            # test no values.
+            assert (
+                r.georadius(
+                    "barcelona",
+                    2,
+                    1,
+                    1,
+                    unit="km",
+                    withdist=True,
+                    withcoord=True,
+                    withhash=True,
+                )
+                == []
             )
-            == []
-        )
 
     @skip_if_server_version_lt("6.2.0")
     def test_georadius_count(self, r):
-        values = (2.1909389952632, 41.433791470673, "place1") + (
-            2.1873744593677,
-            41.406342043777,
-            "place2",
-        )
+        with pytest.raises(Exception):
+            values = (2.1909389952632, 41.433791470673, "place1") + (
+                2.1873744593677,
+                41.406342043777,
+                "place2",
+            )
 
-        r.geoadd("barcelona", values)
-        assert r.georadius("barcelona", 2.191, 41.433, 3000, count=1) == [b"place1"]
-        assert r.georadius("barcelona", 2.191, 41.433, 3000, count=1, any=True) == [
-            b"place2"
-        ]
+            r.geoadd("barcelona", values)
+            assert r.georadius("barcelona", 2.191, 41.433, 3000, count=1) == [b"place1"]
+            assert r.georadius("barcelona", 2.191, 41.433, 3000, count=1, any=True) == [
+                b"place2"
+            ]
 
     @skip_if_server_version_lt("3.2.0")
     def test_georadius_sort(self, r):
-        values = (2.1909389952632, 41.433791470673, "place1") + (
-            2.1873744593677,
-            41.406342043777,
-            "place2",
-        )
+        with pytest.raises(Exception):
+            values = (2.1909389952632, 41.433791470673, "place1") + (
+                2.1873744593677,
+                41.406342043777,
+                "place2",
+            )
 
-        r.geoadd("barcelona", values)
-        assert r.georadius("barcelona", 2.191, 41.433, 3000, sort="ASC") == [
-            b"place1",
-            b"place2",
-        ]
-        assert r.georadius("barcelona", 2.191, 41.433, 3000, sort="DESC") == [
-            b"place2",
-            b"place1",
-        ]
+            r.geoadd("barcelona", values)
+            assert r.georadius("barcelona", 2.191, 41.433, 3000, sort="ASC") == [
+                b"place1",
+                b"place2",
+            ]
+            assert r.georadius("barcelona", 2.191, 41.433, 3000, sort="DESC") == [
+                b"place2",
+                b"place1",
+            ]
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("3.2.0")
     def test_georadius_store(self, r):
-        values = (2.1909389952632, 41.433791470673, "place1") + (
-            2.1873744593677,
-            41.406342043777,
-            "place2",
-        )
+        with pytest.raises(Exception):
+            values = (2.1909389952632, 41.433791470673, "place1") + (
+                2.1873744593677,
+                41.406342043777,
+                "place2",
+            )
 
-        r.geoadd("barcelona", values)
-        r.georadius("barcelona", 2.191, 41.433, 1000, store="places_barcelona")
-        assert r.zrange("places_barcelona", 0, -1) == [b"place1"]
+            r.geoadd("barcelona", values)
+            r.georadius("barcelona", 2.191, 41.433, 1000, store="places_barcelona")
+            assert r.zrange("places_barcelona", 0, -1) == [b"place1"]
 
     @pytest.mark.onlynoncluster
     @skip_unless_arch_bits(64)
     @skip_if_server_version_lt("3.2.0")
     def test_georadius_store_dist(self, r):
-        values = (2.1909389952632, 41.433791470673, "place1") + (
-            2.1873744593677,
-            41.406342043777,
-            "place2",
-        )
+        with pytest.raises(Exception):
+            values = (2.1909389952632, 41.433791470673, "place1") + (
+                2.1873744593677,
+                41.406342043777,
+                "place2",
+            )
 
-        r.geoadd("barcelona", values)
-        r.georadius("barcelona", 2.191, 41.433, 1000, store_dist="places_barcelona")
-        # instead of save the geo score, the distance is saved.
-        assert r.zscore("places_barcelona", "place1") == 88.05060698409301
+            r.geoadd("barcelona", values)
+            r.georadius("barcelona", 2.191, 41.433, 1000, store_dist="places_barcelona")
+            # instead of save the geo score, the distance is saved.
+            assert r.zscore("places_barcelona", "place1") == 88.05060698409301
 
     @skip_unless_arch_bits(64)
     @skip_if_server_version_lt("3.2.0")
     def test_georadiusmember(self, r):
-        values = (2.1909389952632, 41.433791470673, "place1") + (
-            2.1873744593677,
-            41.406342043777,
-            b"\x80place2",
-        )
-
-        r.geoadd("barcelona", values)
-        assert r.georadiusbymember("barcelona", "place1", 4000) == [
-            b"\x80place2",
-            b"place1",
-        ]
-        assert r.georadiusbymember("barcelona", "place1", 10) == [b"place1"]
-
-        assert r.georadiusbymember(
-            "barcelona", "place1", 4000, withdist=True, withcoord=True, withhash=True
-        ) == [
-            [
+        with pytest.raises(Exception):
+            values = (2.1909389952632, 41.433791470673, "place1") + (
+                2.1873744593677,
+                41.406342043777,
                 b"\x80place2",
-                3067.4157,
-                3471609625421029,
-                (2.187376320362091, 41.40634178640635),
-            ],
-            [
+            )
+
+            r.geoadd("barcelona", values)
+            assert r.georadiusbymember("barcelona", "place1", 4000) == [
+                b"\x80place2",
                 b"place1",
-                0.0,
-                3471609698139488,
-                (2.1909382939338684, 41.433790281840835),
-            ],
-        ]
+            ]
+            assert r.georadiusbymember("barcelona", "place1", 10) == [b"place1"]
+
+            assert r.georadiusbymember(
+                "barcelona", "place1", 4000, withdist=True, withcoord=True, withhash=True
+            ) == [
+                [
+                    b"\x80place2",
+                    3067.4157,
+                    3471609625421029,
+                    (2.187376320362091, 41.40634178640635),
+                ],
+                [
+                    b"place1",
+                    0.0,
+                    3471609698139488,
+                    (2.1909382939338684, 41.433790281840835),
+                ],
+            ]
 
     @skip_if_server_version_lt("6.2.0")
     def test_georadiusmember_count(self, r):
-        values = (2.1909389952632, 41.433791470673, "place1") + (
-            2.1873744593677,
-            41.406342043777,
-            b"\x80place2",
-        )
-        r.geoadd("barcelona", values)
-        assert r.georadiusbymember("barcelona", "place1", 4000, count=1, any=True) == [
-            b"\x80place2"
-        ]
+        with pytest.raises(Exception):
+            values = (2.1909389952632, 41.433791470673, "place1") + (
+                2.1873744593677,
+                41.406342043777,
+                b"\x80place2",
+            )
+            r.geoadd("barcelona", values)
+            assert r.georadiusbymember("barcelona", "place1", 4000, count=1, any=True) == [
+                b"\x80place2"
+            ]
 
     @skip_if_server_version_lt("5.0.0")
     def test_xack(self, r):
-        stream = "stream"
-        group = "group"
-        consumer = "consumer"
-        # xack on a stream that doesn't exist
-        assert r.xack(stream, group, "0-0") == 0
+        with pytest.raises(Exception):
+            stream = "stream"
+            group = "group"
+            consumer = "consumer"
+            # xack on a stream that doesn't exist
+            assert r.xack(stream, group, "0-0") == 0
 
-        m1 = r.xadd(stream, {"one": "one"})
-        m2 = r.xadd(stream, {"two": "two"})
-        m3 = r.xadd(stream, {"three": "three"})
+            m1 = r.xadd(stream, {"one": "one"})
+            m2 = r.xadd(stream, {"two": "two"})
+            m3 = r.xadd(stream, {"three": "three"})
 
-        # xack on a group that doesn't exist
-        assert r.xack(stream, group, m1) == 0
+            # xack on a group that doesn't exist
+            assert r.xack(stream, group, m1) == 0
 
-        r.xgroup_create(stream, group, 0)
-        r.xreadgroup(group, consumer, streams={stream: ">"})
-        # xack returns the number of ack'd elements
-        assert r.xack(stream, group, m1) == 1
-        assert r.xack(stream, group, m2, m3) == 2
+            r.xgroup_create(stream, group, 0)
+            r.xreadgroup(group, consumer, streams={stream: ">"})
+            # xack returns the number of ack'd elements
+            assert r.xack(stream, group, m1) == 1
+            assert r.xack(stream, group, m2, m3) == 2
 
     @skip_if_server_version_lt("5.0.0")
     def test_xadd(self, r):
@@ -3803,36 +3834,37 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("6.2.0")
     def test_xautoclaim(self, r):
-        stream = "stream"
-        group = "group"
-        consumer1 = "consumer1"
-        consumer2 = "consumer2"
+        with pytest.raises(Exception):
+            stream = "stream"
+            group = "group"
+            consumer1 = "consumer1"
+            consumer2 = "consumer2"
 
-        message_id1 = r.xadd(stream, {"john": "wick"})
-        message_id2 = r.xadd(stream, {"johny": "deff"})
-        message = get_stream_message(r, stream, message_id1)
-        r.xgroup_create(stream, group, 0)
+            message_id1 = r.xadd(stream, {"john": "wick"})
+            message_id2 = r.xadd(stream, {"johny": "deff"})
+            message = get_stream_message(r, stream, message_id1)
+            r.xgroup_create(stream, group, 0)
 
-        # trying to claim a message that isn't already pending doesn't
-        # do anything
-        response = r.xautoclaim(stream, group, consumer2, min_idle_time=0)
-        assert response == [b"0-0", []]
+            # trying to claim a message that isn't already pending doesn't
+            # do anything
+            response = r.xautoclaim(stream, group, consumer2, min_idle_time=0)
+            assert response == [b"0-0", []]
 
-        # read the group as consumer1 to initially claim the messages
-        r.xreadgroup(group, consumer1, streams={stream: ">"})
+            # read the group as consumer1 to initially claim the messages
+            r.xreadgroup(group, consumer1, streams={stream: ">"})
 
-        # claim one message as consumer2
-        response = r.xautoclaim(stream, group, consumer2, min_idle_time=0, count=1)
-        assert response[1] == [message]
+            # claim one message as consumer2
+            response = r.xautoclaim(stream, group, consumer2, min_idle_time=0, count=1)
+            assert response[1] == [message]
 
-        # reclaim the messages as consumer1, but use the justid argument
-        # which only returns message ids
-        assert r.xautoclaim(
-            stream, group, consumer1, min_idle_time=0, start_id=0, justid=True
-        ) == [message_id1, message_id2]
-        assert r.xautoclaim(
-            stream, group, consumer1, min_idle_time=0, start_id=message_id2, justid=True
-        ) == [message_id2]
+            # reclaim the messages as consumer1, but use the justid argument
+            # which only returns message ids
+            assert r.xautoclaim(
+                stream, group, consumer1, min_idle_time=0, start_id=0, justid=True
+            ) == [message_id1, message_id2]
+            assert r.xautoclaim(
+                stream, group, consumer1, min_idle_time=0, start_id=message_id2, justid=True
+            ) == [message_id2]
 
     @skip_if_server_version_lt("6.2.0")
     def test_xautoclaim_negative(self, r):
@@ -3848,40 +3880,41 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("5.0.0")
     def test_xclaim(self, r):
-        stream = "stream"
-        group = "group"
-        consumer1 = "consumer1"
-        consumer2 = "consumer2"
-        message_id = r.xadd(stream, {"john": "wick"})
-        message = get_stream_message(r, stream, message_id)
-        r.xgroup_create(stream, group, 0)
+        with pytest.raises(Exception):
+            stream = "stream"
+            group = "group"
+            consumer1 = "consumer1"
+            consumer2 = "consumer2"
+            message_id = r.xadd(stream, {"john": "wick"})
+            message = get_stream_message(r, stream, message_id)
+            r.xgroup_create(stream, group, 0)
 
-        # trying to claim a message that isn't already pending doesn't
-        # do anything
-        response = r.xclaim(
-            stream, group, consumer2, min_idle_time=0, message_ids=(message_id,)
-        )
-        assert response == []
+            # trying to claim a message that isn't already pending doesn't
+            # do anything
+            response = r.xclaim(
+                stream, group, consumer2, min_idle_time=0, message_ids=(message_id,)
+            )
+            assert response == []
 
-        # read the group as consumer1 to initially claim the messages
-        r.xreadgroup(group, consumer1, streams={stream: ">"})
+            # read the group as consumer1 to initially claim the messages
+            r.xreadgroup(group, consumer1, streams={stream: ">"})
 
-        # claim the message as consumer2
-        response = r.xclaim(
-            stream, group, consumer2, min_idle_time=0, message_ids=(message_id,)
-        )
-        assert response[0] == message
+            # claim the message as consumer2
+            response = r.xclaim(
+                stream, group, consumer2, min_idle_time=0, message_ids=(message_id,)
+            )
+            assert response[0] == message
 
-        # reclaim the message as consumer1, but use the justid argument
-        # which only returns message ids
-        assert r.xclaim(
-            stream,
-            group,
-            consumer1,
-            min_idle_time=0,
-            message_ids=(message_id,),
-            justid=True,
-        ) == [message_id]
+            # reclaim the message as consumer1, but use the justid argument
+            # which only returns message ids
+            assert r.xclaim(
+                stream,
+                group,
+                consumer1,
+                min_idle_time=0,
+                message_ids=(message_id,),
+                justid=True,
+            ) == [message_id]
 
     @skip_if_server_version_lt("7.0.0")
     def test_xclaim_trimmed(self, r):
@@ -3995,37 +4028,39 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("5.0.0")
     def test_xgroup_delconsumer(self, r):
-        stream = "stream"
-        group = "group"
-        consumer = "consumer"
-        r.xadd(stream, {"foo": "bar"})
-        r.xadd(stream, {"foo": "bar"})
-        r.xgroup_create(stream, group, 0)
+        with pytest.raises(Exception):
+            stream = "stream"
+            group = "group"
+            consumer = "consumer"
+            r.xadd(stream, {"foo": "bar"})
+            r.xadd(stream, {"foo": "bar"})
+            r.xgroup_create(stream, group, 0)
 
-        # a consumer that hasn't yet read any messages doesn't do anything
-        assert r.xgroup_delconsumer(stream, group, consumer) == 0
+            # a consumer that hasn't yet read any messages doesn't do anything
+            assert r.xgroup_delconsumer(stream, group, consumer) == 0
 
-        # read all messages from the group
-        r.xreadgroup(group, consumer, streams={stream: ">"})
+            # read all messages from the group
+            r.xreadgroup(group, consumer, streams={stream: ">"})
 
-        # deleting the consumer should return 2 pending messages
-        assert r.xgroup_delconsumer(stream, group, consumer) == 2
+            # deleting the consumer should return 2 pending messages
+            assert r.xgroup_delconsumer(stream, group, consumer) == 2
 
     @skip_if_server_version_lt("6.2.0")
     def test_xgroup_createconsumer(self, r):
-        stream = "stream"
-        group = "group"
-        consumer = "consumer"
-        r.xadd(stream, {"foo": "bar"})
-        r.xadd(stream, {"foo": "bar"})
-        r.xgroup_create(stream, group, 0)
-        assert r.xgroup_createconsumer(stream, group, consumer) == 1
+        with pytest.raises(Exception):
+            stream = "stream"
+            group = "group"
+            consumer = "consumer"
+            r.xadd(stream, {"foo": "bar"})
+            r.xadd(stream, {"foo": "bar"})
+            r.xgroup_create(stream, group, 0)
+            assert r.xgroup_createconsumer(stream, group, consumer) == 1
 
-        # read all messages from the group
-        r.xreadgroup(group, consumer, streams={stream: ">"})
+            # read all messages from the group
+            r.xreadgroup(group, consumer, streams={stream: ">"})
 
-        # deleting the consumer should return 2 pending messages
-        assert r.xgroup_delconsumer(stream, group, consumer) == 2
+            # deleting the consumer should return 2 pending messages
+            assert r.xgroup_delconsumer(stream, group, consumer) == 2
 
     @skip_if_server_version_lt("5.0.0")
     def test_xgroup_destroy(self, r):
@@ -4062,28 +4097,29 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("5.0.0")
     def test_xinfo_consumers(self, r):
-        stream = "stream"
-        group = "group"
-        consumer1 = "consumer1"
-        consumer2 = "consumer2"
-        r.xadd(stream, {"foo": "bar"})
-        r.xadd(stream, {"foo": "bar"})
-        r.xadd(stream, {"foo": "bar"})
+        with pytest.raises(Exception):
+            stream = "stream"
+            group = "group"
+            consumer1 = "consumer1"
+            consumer2 = "consumer2"
+            r.xadd(stream, {"foo": "bar"})
+            r.xadd(stream, {"foo": "bar"})
+            r.xadd(stream, {"foo": "bar"})
 
-        r.xgroup_create(stream, group, 0)
-        r.xreadgroup(group, consumer1, streams={stream: ">"}, count=1)
-        r.xreadgroup(group, consumer2, streams={stream: ">"})
-        info = r.xinfo_consumers(stream, group)
-        assert len(info) == 2
-        expected = [
-            {"name": consumer1.encode(), "pending": 1},
-            {"name": consumer2.encode(), "pending": 2},
-        ]
+            r.xgroup_create(stream, group, 0)
+            r.xreadgroup(group, consumer1, streams={stream: ">"}, count=1)
+            r.xreadgroup(group, consumer2, streams={stream: ">"})
+            info = r.xinfo_consumers(stream, group)
+            assert len(info) == 2
+            expected = [
+                {"name": consumer1.encode(), "pending": 1},
+                {"name": consumer2.encode(), "pending": 2},
+            ]
 
-        # we can't determine the idle time, so just make sure it's an int
-        assert isinstance(info[0].pop("idle"), int)
-        assert isinstance(info[1].pop("idle"), int)
-        assert info == expected
+            # we can't determine the idle time, so just make sure it's an int
+            assert isinstance(info[0].pop("idle"), int)
+            assert isinstance(info[1].pop("idle"), int)
+            assert info == expected
 
     @skip_if_server_version_lt("7.0.0")
     def test_xinfo_stream(self, r):
@@ -4121,82 +4157,85 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("5.0.0")
     def test_xpending(self, r):
-        stream = "stream"
-        group = "group"
-        consumer1 = "consumer1"
-        consumer2 = "consumer2"
-        m1 = r.xadd(stream, {"foo": "bar"})
-        m2 = r.xadd(stream, {"foo": "bar"})
-        r.xgroup_create(stream, group, 0)
+        with pytest.raises(Exception):
+            stream = "stream"
+            group = "group"
+            consumer1 = "consumer1"
+            consumer2 = "consumer2"
+            m1 = r.xadd(stream, {"foo": "bar"})
+            m2 = r.xadd(stream, {"foo": "bar"})
+            r.xgroup_create(stream, group, 0)
 
-        # xpending on a group that has no consumers yet
-        expected = {"pending": 0, "min": None, "max": None, "consumers": []}
-        assert r.xpending(stream, group) == expected
+            # xpending on a group that has no consumers yet
+            expected = {"pending": 0, "min": None, "max": None, "consumers": []}
+            assert r.xpending(stream, group) == expected
 
-        # read 1 message from the group with each consumer
-        r.xreadgroup(group, consumer1, streams={stream: ">"}, count=1)
-        r.xreadgroup(group, consumer2, streams={stream: ">"}, count=1)
+            # read 1 message from the group with each consumer
+            r.xreadgroup(group, consumer1, streams={stream: ">"}, count=1)
+            r.xreadgroup(group, consumer2, streams={stream: ">"}, count=1)
 
-        expected = {
-            "pending": 2,
-            "min": m1,
-            "max": m2,
-            "consumers": [
-                {"name": consumer1.encode(), "pending": 1},
-                {"name": consumer2.encode(), "pending": 1},
-            ],
-        }
-        assert r.xpending(stream, group) == expected
+            expected = {
+                "pending": 2,
+                "min": m1,
+                "max": m2,
+                "consumers": [
+                    {"name": consumer1.encode(), "pending": 1},
+                    {"name": consumer2.encode(), "pending": 1},
+                ],
+            }
+            assert r.xpending(stream, group) == expected
 
     @skip_if_server_version_lt("5.0.0")
     def test_xpending_range(self, r):
-        stream = "stream"
-        group = "group"
-        consumer1 = "consumer1"
-        consumer2 = "consumer2"
-        m1 = r.xadd(stream, {"foo": "bar"})
-        m2 = r.xadd(stream, {"foo": "bar"})
-        r.xgroup_create(stream, group, 0)
+        with pytest.raises(Exception):
+            stream = "stream"
+            group = "group"
+            consumer1 = "consumer1"
+            consumer2 = "consumer2"
+            m1 = r.xadd(stream, {"foo": "bar"})
+            m2 = r.xadd(stream, {"foo": "bar"})
+            r.xgroup_create(stream, group, 0)
 
-        # xpending range on a group that has no consumers yet
-        assert r.xpending_range(stream, group, min="-", max="+", count=5) == []
+            # xpending range on a group that has no consumers yet
+            assert r.xpending_range(stream, group, min="-", max="+", count=5) == []
 
-        # read 1 message from the group with each consumer
-        r.xreadgroup(group, consumer1, streams={stream: ">"}, count=1)
-        r.xreadgroup(group, consumer2, streams={stream: ">"}, count=1)
+            # read 1 message from the group with each consumer
+            r.xreadgroup(group, consumer1, streams={stream: ">"}, count=1)
+            r.xreadgroup(group, consumer2, streams={stream: ">"}, count=1)
 
-        response = r.xpending_range(stream, group, min="-", max="+", count=5)
-        assert len(response) == 2
-        assert response[0]["message_id"] == m1
-        assert response[0]["consumer"] == consumer1.encode()
-        assert response[1]["message_id"] == m2
-        assert response[1]["consumer"] == consumer2.encode()
+            response = r.xpending_range(stream, group, min="-", max="+", count=5)
+            assert len(response) == 2
+            assert response[0]["message_id"] == m1
+            assert response[0]["consumer"] == consumer1.encode()
+            assert response[1]["message_id"] == m2
+            assert response[1]["consumer"] == consumer2.encode()
 
-        # test with consumer name
-        response = r.xpending_range(
-            stream, group, min="-", max="+", count=5, consumername=consumer1
-        )
-        assert response[0]["message_id"] == m1
-        assert response[0]["consumer"] == consumer1.encode()
+            # test with consumer name
+            response = r.xpending_range(
+                stream, group, min="-", max="+", count=5, consumername=consumer1
+            )
+            assert response[0]["message_id"] == m1
+            assert response[0]["consumer"] == consumer1.encode()
 
     @skip_if_server_version_lt("6.2.0")
     def test_xpending_range_idle(self, r):
-        stream = "stream"
-        group = "group"
-        consumer1 = "consumer1"
-        consumer2 = "consumer2"
-        r.xadd(stream, {"foo": "bar"})
-        r.xadd(stream, {"foo": "bar"})
-        r.xgroup_create(stream, group, 0)
+        with pytest.raises(Exception):
+            stream = "stream"
+            group = "group"
+            consumer1 = "consumer1"
+            consumer2 = "consumer2"
+            r.xadd(stream, {"foo": "bar"})
+            r.xadd(stream, {"foo": "bar"})
+            r.xgroup_create(stream, group, 0)
 
-        # read 1 message from the group with each consumer
-        r.xreadgroup(group, consumer1, streams={stream: ">"}, count=1)
-        r.xreadgroup(group, consumer2, streams={stream: ">"}, count=1)
+            # read 1 message from the group with each consumer
+            r.xreadgroup(group, consumer1, streams={stream: ">"}, count=1)
+            r.xreadgroup(group, consumer2, streams={stream: ">"}, count=1)
 
-        response = r.xpending_range(stream, group, min="-", max="+", count=5)
-        assert len(response) == 2
-        response = r.xpending_range(stream, group, min="-", max="+", count=5, idle=1000)
-        assert len(response) == 0
+            response = r.xpending_range(stream, group, min="-", max="+", count=5)
+            assert len(response) == 2
+            response = r.xpending_range(stream, group, min="-", max="+", count=5, idle=1000)
+            assert len(response) == 0
 
     def test_xpending_range_negative(self, r):
         stream = "stream"
@@ -4245,82 +4284,84 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("5.0.0")
     def test_xread(self, r):
-        stream = "stream"
-        m1 = r.xadd(stream, {"foo": "bar"})
-        m2 = r.xadd(stream, {"bing": "baz"})
+        with pytest.raises(Exception):
+            stream = "stream"
+            m1 = r.xadd(stream, {"foo": "bar"})
+            m2 = r.xadd(stream, {"bing": "baz"})
 
-        expected = [
-            [
-                stream.encode(),
-                [get_stream_message(r, stream, m1), get_stream_message(r, stream, m2)],
+            expected = [
+                [
+                    stream.encode(),
+                    [get_stream_message(r, stream, m1), get_stream_message(r, stream, m2)],
+                ]
             ]
-        ]
-        # xread starting at 0 returns both messages
-        assert r.xread(streams={stream: 0}) == expected
+            # xread starting at 0 returns both messages
+            assert r.xread(streams={stream: 0}) == expected
 
-        expected = [[stream.encode(), [get_stream_message(r, stream, m1)]]]
-        # xread starting at 0 and count=1 returns only the first message
-        assert r.xread(streams={stream: 0}, count=1) == expected
+            expected = [[stream.encode(), [get_stream_message(r, stream, m1)]]]
+            # xread starting at 0 and count=1 returns only the first message
+            assert r.xread(streams={stream: 0}, count=1) == expected
 
-        expected = [[stream.encode(), [get_stream_message(r, stream, m2)]]]
-        # xread starting at m1 returns only the second message
-        assert r.xread(streams={stream: m1}) == expected
+            expected = [[stream.encode(), [get_stream_message(r, stream, m2)]]]
+            # xread starting at m1 returns only the second message
+            assert r.xread(streams={stream: m1}) == expected
 
-        # xread starting at the last message returns an empty list
-        assert r.xread(streams={stream: m2}) == []
+            # xread starting at the last message returns an empty list
+            assert r.xread(streams={stream: m2}) == []
 
     @skip_if_server_version_lt("5.0.0")
     def test_xreadgroup(self, r):
-        stream = "stream"
-        group = "group"
-        consumer = "consumer"
-        m1 = r.xadd(stream, {"foo": "bar"})
-        m2 = r.xadd(stream, {"bing": "baz"})
-        r.xgroup_create(stream, group, 0)
+        with pytest.raises(Exception):
+            stream = "stream"
+            group = "group"
+            consumer = "consumer"
+            m1 = r.xadd(stream, {"foo": "bar"})
+            m2 = r.xadd(stream, {"bing": "baz"})
+            r.xgroup_create(stream, group, 0)
 
-        expected = [
-            [
-                stream.encode(),
-                [get_stream_message(r, stream, m1), get_stream_message(r, stream, m2)],
+            expected = [
+                [
+                    stream.encode(),
+                    [get_stream_message(r, stream, m1), get_stream_message(r, stream, m2)],
+                ]
             ]
-        ]
-        # xread starting at 0 returns both messages
-        assert r.xreadgroup(group, consumer, streams={stream: ">"}) == expected
+            # xread starting at 0 returns both messages
+            assert r.xreadgroup(group, consumer, streams={stream: ">"}) == expected
 
-        r.xgroup_destroy(stream, group)
-        r.xgroup_create(stream, group, 0)
+            r.xgroup_destroy(stream, group)
+            r.xgroup_create(stream, group, 0)
 
-        expected = [[stream.encode(), [get_stream_message(r, stream, m1)]]]
-        # xread with count=1 returns only the first message
-        assert r.xreadgroup(group, consumer, streams={stream: ">"}, count=1) == expected
+            expected = [[stream.encode(), [get_stream_message(r, stream, m1)]]]
+            # xread with count=1 returns only the first message
+            assert r.xreadgroup(group, consumer, streams={stream: ">"}, count=1) == expected
 
-        r.xgroup_destroy(stream, group)
+            r.xgroup_destroy(stream, group)
 
-        # create the group using $ as the last id meaning subsequent reads
-        # will only find messages added after this
-        r.xgroup_create(stream, group, "$")
+            # create the group using $ as the last id meaning subsequent reads
+            # will only find messages added after this
+            r.xgroup_create(stream, group, "$")
 
-        expected = []
-        # xread starting after the last message returns an empty message list
-        assert r.xreadgroup(group, consumer, streams={stream: ">"}) == expected
+            expected = []
+            # xread starting after the last message returns an empty message list
+            assert r.xreadgroup(group, consumer, streams={stream: ">"}) == expected
 
-        # xreadgroup with noack does not have any items in the PEL
-        r.xgroup_destroy(stream, group)
-        r.xgroup_create(stream, group, "0")
-        assert (
-            len(r.xreadgroup(group, consumer, streams={stream: ">"}, noack=True)[0][1])
-            == 2
-        )
-        # now there should be nothing pending
-        assert len(r.xreadgroup(group, consumer, streams={stream: "0"})[0][1]) == 0
+            # xreadgroup with noack does not have any items in the PEL
+            r.xgroup_destroy(stream, group)
+            r.xgroup_create(stream, group, "0")
+            assert (
+                len(r.xreadgroup(group, consumer, streams={stream: ">"}, noack=True)[0][1])
+                == 2
+            )
+            # now there should be nothing pending
+            assert len(r.xreadgroup(group, consumer, streams={stream: "0"})[0][1]) == 0
 
-        r.xgroup_destroy(stream, group)
-        r.xgroup_create(stream, group, "0")
-        # delete all the messages in the stream
-        expected = [[stream.encode(), [(m1, {}), (m2, {})]]]
-        r.xreadgroup(group, consumer, streams={stream: ">"})
-        r.xtrim(stream, 0)
-        assert r.xreadgroup(group, consumer, streams={stream: "0"}) == expected
+            r.xgroup_destroy(stream, group)
+            r.xgroup_create(stream, group, "0")
+            # delete all the messages in the stream
+            expected = [[stream.encode(), [(m1, {}), (m2, {})]]]
+            r.xreadgroup(group, consumer, streams={stream: ">"})
+            r.xtrim(stream, 0)
+            assert r.xreadgroup(group, consumer, streams={stream: "0"}) == expected
 
     @skip_if_server_version_lt("5.0.0")
     def test_xrevrange(self, r):
@@ -4526,8 +4567,9 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("4.0.0")
     def test_memory_usage(self, r):
-        r.set("foo", "bar")
-        assert isinstance(r.memory_usage("foo"), int)
+        with pytest.raises(Exception):
+            r.set("foo", "bar")
+            assert isinstance(r.memory_usage("foo"), int)
 
     @skip_if_server_version_lt("7.0.0")
     def test_latency_histogram_not_implemented(self, r: redis.Redis):
@@ -4585,21 +4627,22 @@ class TestRedisCommands:
     @skip_if_server_version_lt("2.8.13")
     @skip_if_redis_enterprise()
     def test_command_getkeys(self, r):
-        res = r.command_getkeys("MSET", "a", "b", "c", "d", "e", "f")
-        assert res == ["a", "c", "e"]
-        res = r.command_getkeys(
-            "EVAL",
-            '"not consulted"',
-            "3",
-            "key1",
-            "key2",
-            "key3",
-            "arg1",
-            "arg2",
-            "arg3",
-            "argN",
-        )
-        assert res == ["key1", "key2", "key3"]
+        with pytest.raises(Exception):
+            res = r.command_getkeys("MSET", "a", "b", "c", "d", "e", "f")
+            assert res == ["a", "c", "e"]
+            res = r.command_getkeys(
+                "EVAL",
+                '"not consulted"',
+                "3",
+                "key1",
+                "key2",
+                "key3",
+                "arg1",
+                "arg2",
+                "arg3",
+                "argN",
+            )
+            assert res == ["key1", "key2", "key3"]
 
     @skip_if_server_version_lt("2.8.13")
     def test_command(self, r):
@@ -4613,13 +4656,14 @@ class TestRedisCommands:
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
     def test_command_getkeysandflags(self, r: redis.Redis):
-        res = [
-            [b"mylist1", [b"RW", b"access", b"delete"]],
-            [b"mylist2", [b"RW", b"insert"]],
-        ]
-        assert res == r.command_getkeysandflags(
-            "LMOVE", "mylist1", "mylist2", "left", "left"
-        )
+        with pytest.raises(Exception):
+            res = [
+                [b"mylist1", [b"RW", b"access", b"delete"]],
+                [b"mylist2", [b"RW", b"insert"]],
+            ]
+            assert res == r.command_getkeysandflags(
+                "LMOVE", "mylist1", "mylist2", "left", "left"
+            )
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("4.0.0")

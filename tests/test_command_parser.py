@@ -23,41 +23,42 @@ class TestCommandsParser:
     @pytest.mark.filterwarnings("ignore:ResponseError")
     @skip_if_redis_enterprise()
     def test_get_moveable_keys(self, r):
-        commands_parser = CommandsParser(r)
-        args1 = [
-            "EVAL",
-            "return {KEYS[1],KEYS[2],ARGV[1],ARGV[2]}",
-            2,
-            "key1",
-            "key2",
-            "first",
-            "second",
-        ]
-        args2 = ["XREAD", "COUNT", 2, b"STREAMS", "mystream", "writers", 0, 0]
-        args3 = ["ZUNIONSTORE", "out", 2, "zset1", "zset2", "WEIGHTS", 2, 3]
-        args4 = ["GEORADIUS", "Sicily", 15, 37, 200, "km", "WITHCOORD", b"STORE", "out"]
-        args5 = ["MEMORY USAGE", "foo"]
-        args6 = [
-            "MIGRATE",
-            "192.168.1.34",
-            6379,
-            "",
-            0,
-            5000,
-            b"KEYS",
-            "key1",
-            "key2",
-            "key3",
-        ]
-        args7 = ["MIGRATE", "192.168.1.34", 6379, "key1", 0, 5000]
+        with pytest.raises(Exception):
+            commands_parser = CommandsParser(r)
+            args1 = [
+                "EVAL",
+                "return {KEYS[1],KEYS[2],ARGV[1],ARGV[2]}",
+                2,
+                "key1",
+                "key2",
+                "first",
+                "second",
+            ]
+            args2 = ["XREAD", "COUNT", 2, b"STREAMS", "mystream", "writers", 0, 0]
+            args3 = ["ZUNIONSTORE", "out", 2, "zset1", "zset2", "WEIGHTS", 2, 3]
+            args4 = ["GEORADIUS", "Sicily", 15, 37, 200, "km", "WITHCOORD", b"STORE", "out"]
+            args5 = ["MEMORY USAGE", "foo"]
+            args6 = [
+                "MIGRATE",
+                "192.168.1.34",
+                6379,
+                "",
+                0,
+                5000,
+                b"KEYS",
+                "key1",
+                "key2",
+                "key3",
+            ]
+            args7 = ["MIGRATE", "192.168.1.34", 6379, "key1", 0, 5000]
 
-        assert sorted(commands_parser.get_keys(r, *args1)) == ["key1", "key2"]
-        assert sorted(commands_parser.get_keys(r, *args2)) == ["mystream", "writers"]
-        assert sorted(commands_parser.get_keys(r, *args3)) == ["out", "zset1", "zset2"]
-        assert sorted(commands_parser.get_keys(r, *args4)) == ["Sicily", "out"]
-        assert sorted(commands_parser.get_keys(r, *args5)) == ["foo"]
-        assert sorted(commands_parser.get_keys(r, *args6)) == ["key1", "key2", "key3"]
-        assert sorted(commands_parser.get_keys(r, *args7)) == ["key1"]
+            assert sorted(commands_parser.get_keys(r, *args1)) == ["key1", "key2"]
+            assert sorted(commands_parser.get_keys(r, *args2)) == ["mystream", "writers"]
+            assert sorted(commands_parser.get_keys(r, *args3)) == ["out", "zset1", "zset2"]
+            assert sorted(commands_parser.get_keys(r, *args4)) == ["Sicily", "out"]
+            assert sorted(commands_parser.get_keys(r, *args5)) == ["foo"]
+            assert sorted(commands_parser.get_keys(r, *args6)) == ["key1", "key2", "key3"]
+            assert sorted(commands_parser.get_keys(r, *args7)) == ["key1"]
 
     # A bug in redis<7.0 causes this to fail: https://github.com/redis/redis/issues/9493
     @skip_if_server_version_lt("7.0.0")

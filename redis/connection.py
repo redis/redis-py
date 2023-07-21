@@ -878,6 +878,14 @@ class Connection:
         elif b" " in args[0]:
             args = tuple(args[0].split()) + args[1:]
 
+        # `COMMAND GETKEYS` can crash redis server entirely under certain conditions.
+        # So we have decided to make sure that `COMMAND GETKEYS` is never sent to the
+        # server. If you need to send `COMMAND GETKEYS` to the server, please reach out
+        # to Doogie and Zach to discuss the use case.
+        # ref: https://github.com/redis/redis/pull/12380
+        if len(args) > 1 and args[0].lower() == b'command' and args[1].lower().startswith(b'getkeys'):
+            raise Exception(f'Redis command "{args[0].decode()} {args[1].decode()}" is not supported')
+
         buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
 
         buffer_cutoff = self._buffer_cutoff
