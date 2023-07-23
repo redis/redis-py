@@ -1791,6 +1791,16 @@ class TestRedisCommands:
         assert r.substr("a", 3, 5) == b"345"
         assert r.substr("a", 3, -2) == b"345678"
 
+    def generate_lib_code(lib_name):
+        return f"#!js api_version=1.0 name={lib_name}\n redis.registerFunction('foo', lambda: 'bar')"
+
+    @skip_if_server_version_lt("7.2.0")
+    def test_tfunction_load_delete(self, r):
+        lib_name = "test_lib"
+        lib_code = self.generate_lib_code(lib_name)
+        assert r.tfunction_load(lib_code)
+        assert r.tfunction_delete(lib_name)
+
     def test_ttl(self, r):
         r["a"] = "1"
         assert r.expire("a", 10)

@@ -2454,6 +2454,28 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("SUBSTR", name, start, end)
 
+    def tfunction_load(self, lib_code: str, replace: bool = False, config: str = None) -> ResponseT:
+        """
+        Load a new library to RedisGears.
+
+        For more information see https://redis.io/commands/tfunction-load/ #TODO: check link when it will be available
+        """
+        pieces: list[EncodableT] = ["LOAD"]
+        if replace:
+            pieces.append("REPLACE")
+        if config is not None:
+            pieces.extend(["CONFIG", config])
+        pieces.append(lib_code)
+        return self.execute_command("TFUNCTION", pieces)
+
+    def tfunction_delete(self, lib_name: str) -> ResponseT:
+        """
+        delete a library from RedisGears.
+
+        For more information see https://redis.io/commands/tfunction-delete/ #TODO: check link when it will be available
+        """
+        return self.execute_command("TFUNCTION", "DELETE", lib_name)
+
     def touch(self, *args: KeyT) -> ResponseT:
         """
         Alters the last access time of a key(s) ``*args``. A key is ignored
