@@ -2454,11 +2454,14 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("SUBSTR", name, start, end)
 
-    def tfunction_load(self, lib_code: str, replace: bool = False, config: str = None) -> ResponseT:
+    def tfunction_load(self, lib_code: str,
+                       replace: bool = False,
+                       config: str = None) -> ResponseT:
         """
         Load a new library to RedisGears.
 
-        For more information see https://redis.io/commands/tfunction-load/ #TODO: check link when it will be available
+        For more information see https://redis.io/commands/tfunction-load/
+        # TODO: check link when it will be available
         """
         pieces: list[EncodableT] = ["LOAD"]
         if replace:
@@ -2472,7 +2475,8 @@ class BasicKeyCommands(CommandsProtocol):
         """
         delete a library from RedisGears.
 
-        For more information see https://redis.io/commands/tfunction-delete/ #TODO: check link when it will be available
+        For more information see https://redis.io/commands/tfunction-delete/
+        # TODO: check link when it will be available
         """
         return self.execute_command("TFUNCTION", "DELETE", lib_name)
 
