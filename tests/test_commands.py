@@ -1792,12 +1792,9 @@ class TestRedisCommands:
         assert r.substr("a", 3, -2) == b"345678"
 
     def generate_lib_code(lib_name):
-        return (
-            f"#!js api_version=1.0 name={lib_name}\n"
-            "redis.registerFunction('foo', lambda: 'bar')"
-        )
+        return f"""#!js api_version=1.0 name={lib_name}\n redis.registerFunction('foo', ()=>{{return 'bar'}})"""  # noqa
 
-    @skip_if_server_version_lt("7.2.0")
+    @skip_if_server_version_lt("7.1.140")
     def test_tfunction_load_delete(self, r):
         lib_name = "test_lib"
         lib_code = self.generate_lib_code(lib_name)
