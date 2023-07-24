@@ -2454,9 +2454,9 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("SUBSTR", name, start, end)
 
-    def tfunction_load(self, lib_code: str,
-                       replace: bool = False,
-                       config: str = None) -> ResponseT:
+    def tfunction_load(
+        self, lib_code: str, replace: bool = False, config: str = None
+    ) -> ResponseT:
         """
         Load a new library to RedisGears.
 
