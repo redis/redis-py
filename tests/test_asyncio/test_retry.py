@@ -1,5 +1,4 @@
 import pytest
-
 from redis.asyncio import Redis
 from redis.asyncio.connection import Connection, UnixDomainSocketConnection
 from redis.asyncio.retry import Retry

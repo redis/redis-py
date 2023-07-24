@@ -1,3 +1,4 @@
+import logging
 from contextlib import contextmanager
 from functools import wraps
 from typing import Any, Dict, Mapping, Union
@@ -11,6 +12,13 @@ try:
 except ImportError:
     HIREDIS_AVAILABLE = False
     HIREDIS_PACK_AVAILABLE = False
+
+try:
+    import ssl  # noqa
+
+    SSL_AVAILABLE = True
+except ImportError:
+    SSL_AVAILABLE = False
 
 try:
     import cryptography  # noqa
@@ -110,3 +118,16 @@ def deprecated_function(reason="", version="", name=None):
         return wrapper
 
     return decorator
+
+
+def _set_info_logger():
+    """
+    Set up a logger that log info logs to stdout.
+    (This is used by the default push response handler)
+    """
+    if "push_response" not in logging.root.manager.loggerDict.keys():
+        logger = logging.getLogger("push_response")
+        logger.setLevel(logging.INFO)
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.INFO)
+        logger.addHandler(handler)

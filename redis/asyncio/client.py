@@ -24,6 +24,12 @@ from typing import (
     cast,
 )
 
+from redis._parsers.helpers import (
+    _RedisCallbacks,
+    _RedisCallbacksRESP2,
+    _RedisCallbacksRESP3,
+    bool_ok,
+)
 from redis.asyncio.connection import (
     Connection,
     ConnectionPool,
@@ -37,7 +43,6 @@ from redis.client import (
     NEVER_DECODE,
     AbstractRedis,
     CaseInsensitiveDict,
-    bool_ok,
 )
 from redis.commands import (
     AsyncCoreCommands,
@@ -57,7 +62,7 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.typing import ChannelT, EncodableT, KeyT
-from redis.utils import safe_str, str_if_bytes
+from redis.utils import HIREDIS_AVAILABLE, _set_info_logger, safe_str, str_if_bytes
 
 PubSubHandler = Callable[[Dict[str, str]], Awaitable[None]]
 _KeyT = TypeVar("_KeyT", bound=KeyT)
@@ -180,6 +185,7 @@ class Redis(
         auto_close_connection_pool: bool = True,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
+        protocol: Optional[int] = 2,
     ):
         """
         Initialize a new Redis client.
@@ -217,6 +223,7 @@ class Redis(
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
                 "redis_connect_func": redis_connect_func,
+                "protocol": protocol,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -255,7 +262,12 @@ class Redis(
         self.single_connection_client = single_connection_client
         self.connection: Optional[Connection] = None
 
-        self.response_callbacks = CaseInsensitiveDict(self.__class__.RESPONSE_CALLBACKS)
+        self.response_callbacks = CaseInsensitiveDict(_RedisCallbacks)
+
+        if self.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
+            self.response_callbacks.update(_RedisCallbacksRESP3)
+        else:
+            self.response_callbacks.update(_RedisCallbacksRESP2)
 
         # If using a single connection client, we need to lock creation-of and use-of
         # the client in order to avoid race conditions such as using asyncio.gather
@@ -657,6 +669,7 @@ class PubSub:
         shard_hint: Optional[str] = None,
         ignore_subscribe_messages: bool = False,
         encoder=None,
+        push_handler_func: Optional[Callable] = None,
     ):
         self.connection_pool = connection_pool
         self.shard_hint = shard_hint
@@ -665,18 +678,21 @@ class PubSub:
         # we need to know the encoding options for this connection in order
         # to lookup channel and pattern names for callback handlers.
         self.encoder = encoder
+        self.push_handler_func = push_handler_func
         if self.encoder is None:
             self.encoder = self.connection_pool.get_encoder()
         if self.encoder.decode_responses:
-            self.health_check_response: Iterable[Union[str, bytes]] = [
-                "pong",
+            self.health_check_response = [
+                ["pong", self.HEALTH_CHECK_MESSAGE],
                 self.HEALTH_CHECK_MESSAGE,
             ]
         else:
             self.health_check_response = [
-                b"pong",
+                [b"pong", self.encoder.encode(self.HEALTH_CHECK_MESSAGE)],
                 self.encoder.encode(self.HEALTH_CHECK_MESSAGE),
             ]
+        if self.push_handler_func is None:
+            _set_info_logger()
         self.channels = {}
         self.pending_unsubscribe_channels = set()
         self.patterns = {}
@@ -761,6 +777,8 @@ class PubSub:
             self.connection.register_connect_callback(self.on_connect)
         else:
             await self.connection.connect()
+        if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
+            self.connection._parser.set_push_handler(self.push_handler_func)
 
     async def _disconnect_raise_connect(self, conn, error):
         """
@@ -802,10 +820,14 @@ class PubSub:
 
         read_timeout = None if block else timeout
         response = await self._execute(
-            conn, conn.read_response, timeout=read_timeout, disconnect_on_error=False
+            conn,
+            conn.read_response,
+            timeout=read_timeout,
+            disconnect_on_error=False,
+            push_request=True,
         )
 
-        if conn.health_check_interval and response == self.health_check_response:
+        if conn.health_check_interval and response in self.health_check_response:
             # ignore the health check message as user might not expect it
             return None
         return response
@@ -933,8 +955,8 @@ class PubSub:
         """
         Ping the Redis server
         """
-        message = "" if message is None else message
-        return self.execute_command("PING", message)
+        args = ["PING", message] if message is not None else ["PING"]
+        return self.execute_command(*args)
 
     async def handle_message(self, response, ignore_subscribe_messages=False):
         """
@@ -942,6 +964,10 @@ class PubSub:
         with a message handler, the handler is invoked instead of a parsed
         message being returned.
         """
+        if response is None:
+            return None
+        if isinstance(response, bytes):
+            response = [b"pong", response] if response != b"PONG" else [b"pong", b""]
         message_type = str_if_bytes(response[0])
         if message_type == "pmessage":
             message = {

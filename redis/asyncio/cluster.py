@@ -18,16 +18,15 @@ from typing import (
     Union,
 )
 
-from redis.asyncio.client import ResponseCallbackT
-from redis.asyncio.connection import (
-    Connection,
-    DefaultParser,
-    Encoder,
-    SSLConnection,
-    parse_url,
+from redis._parsers import AsyncCommandsParser, Encoder
+from redis._parsers.helpers import (
+    _RedisCallbacks,
+    _RedisCallbacksRESP2,
+    _RedisCallbacksRESP3,
 )
+from redis.asyncio.client import ResponseCallbackT
+from redis.asyncio.connection import Connection, DefaultParser, SSLConnection, parse_url
 from redis.asyncio.lock import Lock
-from redis.asyncio.parser import CommandsParser
 from redis.asyncio.retry import Retry
 from redis.backoff import default_backoff
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis
@@ -258,6 +257,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_certfile: Optional[str] = None,
         ssl_check_hostname: bool = False,
         ssl_keyfile: Optional[str] = None,
+        protocol: Optional[int] = 2,
         address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
     ) -> None:
         if db:
@@ -299,6 +299,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_keepalive_options": socket_keepalive_options,
             "socket_timeout": socket_timeout,
             "retry": retry,
+            "protocol": protocol,
         }
 
         if ssl:
@@ -331,7 +332,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             self.retry.update_supported_errors(retry_on_error)
             kwargs.update({"retry": self.retry})
 
-        kwargs["response_callbacks"] = self.__class__.RESPONSE_CALLBACKS.copy()
+        kwargs["response_callbacks"] = _RedisCallbacks.copy()
+        if kwargs.get("protocol") in ["3", 3]:
+            kwargs["response_callbacks"].update(_RedisCallbacksRESP3)
+        else:
+            kwargs["response_callbacks"].update(_RedisCallbacksRESP2)
         self.connection_kwargs = kwargs
 
         if startup_nodes:
@@ -358,7 +363,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self.cluster_error_retry_attempts = cluster_error_retry_attempts
         self.connection_error_retry_attempts = connection_error_retry_attempts
         self.reinitialize_counter = 0
-        self.commands_parser = CommandsParser()
+        self.commands_parser = AsyncCommandsParser()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.response_callbacks = kwargs["response_callbacks"]

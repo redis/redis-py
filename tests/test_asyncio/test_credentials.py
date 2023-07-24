@@ -5,7 +5,6 @@ from typing import Optional, Tuple, Union
 
 import pytest
 import pytest_asyncio
-
 import redis
 from redis import AuthenticationError, DataError, ResponseError
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider

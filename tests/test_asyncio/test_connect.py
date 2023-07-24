@@ -5,7 +5,6 @@ import socket
 import ssl
 
 import pytest
-
 from redis.asyncio.connection import (
     Connection,
     SSLConnection,
