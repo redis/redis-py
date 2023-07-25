@@ -1801,6 +1801,36 @@ class TestRedisCommands:
         assert r.tfunction_load(lib_code)
         assert r.tfunction_delete(lib_name)
 
+    @skip_if_server_version_lt("7.1.140")
+    def test_tfunction_list(self, r):
+
+        assert r.tfunction_load(self.generate_lib_code("lib1"))
+        assert r.tfunction_load(self.generate_lib_code("lib2"))
+        assert r.tfunction_load(self.generate_lib_code("lib3"))
+
+        # test error thrown when verbose > 4
+        with pytest.raises(redis.exceptions.ResponseError):
+            assert r.tfunction_list(verbose=8)
+
+        functions = r.tfunction_list(verbose=1)
+        assert len(functions) == 3
+
+        expected_names = ["lib1", "lib2", "lib3"]
+        actual_names = [f["name"] for f in functions]
+
+        assert sorted(expected_names) == sorted(actual_names)
+        assert r.tfunction_delete("lib1")
+        assert r.tfunction_delete("lib2")
+        assert r.tfunction_delete("lib3")
+
+    @skip_if_server_version_lt("7.1.140")
+    def test_tfcall(self, r):
+        assert r.tfunction_load(self.generate_lib_code("lib1"))
+        assert r.tfcall("lib1", "foo", _async=False) == b"bar"
+        assert r.tfcall("lib1", "foo", _async=True) == b"bar"
+
+        assert r.tfunction_delete("lib1")
+
     def test_ttl(self, r):
         r["a"] = "1"
         assert r.expire("a", 10)
