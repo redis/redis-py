@@ -2460,6 +2460,14 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Load a new library to RedisGears.
 
+       ``lib_code`` - the library code.
+       ``config`` - a string representation of a JSON object
+        that will be provided to the library on load time,
+        for more information refer to
+        https://github.com/RedisGears/RedisGears/blob/master/docs/function_advance_topics.md#library-configuration
+        ``replace`` - an optional argument, instructs RedisGears to replace the
+        function if its already exists
+
         For more information see https://redis.io/commands/tfunction-load/
         # TODO: check link when it will be available
         """
@@ -2473,12 +2481,68 @@ class BasicKeyCommands(CommandsProtocol):
 
     def tfunction_delete(self, lib_name: str) -> ResponseT:
         """
-        delete a library from RedisGears.
+        Delete a library from RedisGears.
+
+        ``lib_name`` the library name to delete.
 
         For more information see https://redis.io/commands/tfunction-delete/
         # TODO: check link when it will be available
         """
         return self.execute_command("TFUNCTION DELETE", lib_name)
+
+    def tfunction_list(
+        self, with_code: bool = False, verbose: int = 0, lib_name: str = None
+    ) -> ResponseT:
+        """
+        List the functions with additional information about each function.
+
+        ``with_code`` Show libraries code.
+        ``verbose`` output verbosity level, higher number will increase verbosity level
+        ``lib_name`` specifying a library name (can be used multiple times to show multiple libraries in a single command) # noqa
+
+        For more information see https://redis.io/commands/tfunction-list/
+        # TODO: check link when it will be available
+        """
+        pices: list[EncodableT] = []
+        if with_code:
+            pices.append("WITHCODE")
+        if verbose > 0 and verbose < 4:
+            pices.append('v' * verbose)
+        elif verbose != 0:  # verbose == 0 is the default so no need to throw an error
+            raise DataError("verbose can be 1, 2 or 3")
+        if lib_name is not None:
+            pices.append("LIBRARY")
+            pices.append(lib_name)
+
+        return self.execute_command("TFUNCTION LIST", *pices)
+
+    def tfcall(
+        self, lib_name: str,
+        func_name: str,
+        keys: KeysT = None,
+        *args: List,
+        _async: bool = False
+    ) -> ResponseT:
+        """
+        Trigger a sync or async (Coroutine) function.
+
+        ``lib_name`` - the library name contains the function.
+        ``func_name`` - the function name to run.
+        ``keys`` - the keys that will be touched by the function.
+        ``args`` - Additional argument to pass to the function.
+        ``_async`` - If True, Invoke an async function (Coroutine.
+
+        For more information see https://redis.io/commands/tfcall/
+        # TODO: check link when it will be available
+        """
+        pieces: list[EncodableT] = [f"{lib_name}.{func_name}"]
+        if keys is not None:
+            pieces.extend(keys)
+        if args is not None:
+            pieces.extend(args)
+        if _async:
+            return self.execute_command("TFCALLASYNC", *pieces)
+        return self.execute_command("TFCALL", *pieces)
 
     def touch(self, *args: KeyT) -> ResponseT:
         """
