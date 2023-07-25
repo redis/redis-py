@@ -2463,13 +2463,13 @@ class BasicKeyCommands(CommandsProtocol):
         For more information see https://redis.io/commands/tfunction-load/
         # TODO: check link when it will be available
         """
-        pieces: list[EncodableT] = ["LOAD"]
+        pieces: list[EncodableT] = []
         if replace:
             pieces.append("REPLACE")
         if config is not None:
             pieces.extend(["CONFIG", config])
         pieces.append(lib_code)
-        return self.execute_command("TFUNCTION", pieces)
+        return self.execute_command("TFUNCTION LOAD", *pieces)
 
     def tfunction_delete(self, lib_name: str) -> ResponseT:
         """
@@ -2478,7 +2478,7 @@ class BasicKeyCommands(CommandsProtocol):
         For more information see https://redis.io/commands/tfunction-delete/
         # TODO: check link when it will be available
         """
-        return self.execute_command("TFUNCTION", "DELETE", lib_name)
+        return self.execute_command("TFUNCTION DELETE", lib_name)
 
     def touch(self, *args: KeyT) -> ResponseT:
         """
