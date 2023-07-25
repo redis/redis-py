@@ -7,7 +7,53 @@ if TYPE_CHECKING:
     from redis.asyncio.cluster import ClusterNode
 
 
-class CommandsParser:
+class AbstractCommandsParser:
+    def _get_pubsub_keys(self, *args):
+        """
+        Get the keys from pubsub command.
+        Although PubSub commands have predetermined key locations, they are not
+        supported in the 'COMMAND's output, so the key positions are hardcoded
+        in this method
+        """
+        if len(args) < 2:
+            # The command has no keys in it
+            return None
+        args = [str_if_bytes(arg) for arg in args]
+        command = args[0].upper()
+        keys = None
+        if command == "PUBSUB":
+            # the second argument is a part of the command name, e.g.
+            # ['PUBSUB', 'NUMSUB', 'foo'].
+            pubsub_type = args[1].upper()
+            if pubsub_type in ["CHANNELS", "NUMSUB", "SHARDCHANNELS", "SHARDNUMSUB"]:
+                keys = args[2:]
+        elif command in ["SUBSCRIBE", "PSUBSCRIBE", "UNSUBSCRIBE", "PUNSUBSCRIBE"]:
+            # format example:
+            # SUBSCRIBE channel [channel ...]
+            keys = list(args[1:])
+        elif command in ["PUBLISH", "SPUBLISH"]:
+            # format example:
+            # PUBLISH channel message
+            keys = [args[1]]
+        return keys
+
+    def parse_subcommand(self, command, **options):
+        cmd_dict = {}
+        cmd_name = str_if_bytes(command[0])
+        cmd_dict["name"] = cmd_name
+        cmd_dict["arity"] = int(command[1])
+        cmd_dict["flags"] = [str_if_bytes(flag) for flag in command[2]]
+        cmd_dict["first_key_pos"] = command[3]
+        cmd_dict["last_key_pos"] = command[4]
+        cmd_dict["step_count"] = command[5]
+        if len(command) > 7:
+            cmd_dict["tips"] = command[7]
+            cmd_dict["key_specifications"] = command[8]
+            cmd_dict["subcommands"] = command[9]
+        return cmd_dict
+
+
+class CommandsParser(AbstractCommandsParser):
     """
     Parses Redis commands to get command keys.
     COMMAND output is used to determine key locations.
@@ -29,21 +75,6 @@ class CommandsParser:
         for cmd in uppercase_commands:
             commands[cmd.lower()] = commands.pop(cmd)
         self.commands = commands
-
-    def parse_subcommand(self, command, **options):
-        cmd_dict = {}
-        cmd_name = str_if_bytes(command[0])
-        cmd_dict["name"] = cmd_name
-        cmd_dict["arity"] = int(command[1])
-        cmd_dict["flags"] = [str_if_bytes(flag) for flag in command[2]]
-        cmd_dict["first_key_pos"] = command[3]
-        cmd_dict["last_key_pos"] = command[4]
-        cmd_dict["step_count"] = command[5]
-        if len(command) > 7:
-            cmd_dict["tips"] = command[7]
-            cmd_dict["key_specifications"] = command[8]
-            cmd_dict["subcommands"] = command[9]
-        return cmd_dict
 
     # As soon as this PR is merged into Redis, we should reimplement
     # our logic to use COMMAND INFO changes to determine the key positions
@@ -138,37 +169,8 @@ class CommandsParser:
                 raise e
         return keys
 
-    def _get_pubsub_keys(self, *args):
-        """
-        Get the keys from pubsub command.
-        Although PubSub commands have predetermined key locations, they are not
-        supported in the 'COMMAND's output, so the key positions are hardcoded
-        in this method
-        """
-        if len(args) < 2:
-            # The command has no keys in it
-            return None
-        args = [str_if_bytes(arg) for arg in args]
-        command = args[0].upper()
-        keys = None
-        if command == "PUBSUB":
-            # the second argument is a part of the command name, e.g.
-            # ['PUBSUB', 'NUMSUB', 'foo'].
-            pubsub_type = args[1].upper()
-            if pubsub_type in ["CHANNELS", "NUMSUB", "SHARDCHANNELS", "SHARDNUMSUB"]:
-                keys = args[2:]
-        elif command in ["SUBSCRIBE", "PSUBSCRIBE", "UNSUBSCRIBE", "PUNSUBSCRIBE"]:
-            # format example:
-            # SUBSCRIBE channel [channel ...]
-            keys = list(args[1:])
-        elif command in ["PUBLISH", "SPUBLISH"]:
-            # format example:
-            # PUBLISH channel message
-            keys = [args[1]]
-        return keys
 
-
-class AsyncCommandsParser:
+class AsyncCommandsParser(AbstractCommandsParser):
     """
     Parses Redis commands to get command keys.
 
@@ -194,52 +196,75 @@ class AsyncCommandsParser:
             self.node = node
 
         commands = await self.node.execute_command("COMMAND")
-        for cmd, command in commands.items():
-            if "movablekeys" in command["flags"]:
-                commands[cmd] = -1
-            elif command["first_key_pos"] == 0 and command["last_key_pos"] == 0:
-                commands[cmd] = 0
-            elif command["first_key_pos"] == 1 and command["last_key_pos"] == 1:
-                commands[cmd] = 1
-        self.commands = {cmd.upper(): command for cmd, command in commands.items()}
+        self.commands = {cmd.lower(): command for cmd, command in commands.items()}
 
     # As soon as this PR is merged into Redis, we should reimplement
     # our logic to use COMMAND INFO changes to determine the key positions
     # https://github.com/redis/redis/pull/8324
     async def get_keys(self, *args: Any) -> Optional[Tuple[str, ...]]:
+        """
+        Get the keys from the passed command.
+
+        NOTE: Due to a bug in redis<7.0, this function does not work properly
+        for EVAL or EVALSHA when the `numkeys` arg is 0.
+         - issue: https://github.com/redis/redis/issues/9493
+         - fix: https://github.com/redis/redis/pull/9733
+
+        So, don't use this function with EVAL or EVALSHA.
+        """
         if len(args) < 2:
             # The command has no keys in it
             return None
 
-        try:
-            command = self.commands[args[0]]
-        except KeyError:
-            # try to split the command name and to take only the main command
+        cmd_name = args[0].lower()
+        if cmd_name not in self.commands:
+            # try to split the command name and to take only the main command,
             # e.g. 'memory' for 'memory usage'
-            args = args[0].split() + list(args[1:])
-            cmd_name = args[0].upper()
-            if cmd_name not in self.commands:
+            cmd_name_split = cmd_name.split()
+            cmd_name = cmd_name_split[0]
+            if cmd_name in self.commands:
+                # save the splitted command to args
+                args = cmd_name_split + list(args[1:])
+            else:
                 # We'll try to reinitialize the commands cache, if the engine
                 # version has changed, the commands may not be current
                 await self.initialize()
                 if cmd_name not in self.commands:
                     raise RedisError(
-                        f"{cmd_name} command doesn't exist in Redis commands"
+                        f"{cmd_name.upper()} command doesn't exist in Redis commands"
                     )
 
-            command = self.commands[cmd_name]
+        command = self.commands.get(cmd_name)
+        if "movablekeys" in command["flags"]:
+            keys = await self._get_moveable_keys(*args)
+        elif "pubsub" in command["flags"] or command["name"] == "pubsub":
+            keys = self._get_pubsub_keys(*args)
+        else:
+            if (
+                command["step_count"] == 0
+                and command["first_key_pos"] == 0
+                and command["last_key_pos"] == 0
+            ):
+                is_subcmd = False
+                if "subcommands" in command:
+                    subcmd_name = f"{cmd_name}|{args[1].lower()}"
+                    for subcmd in command["subcommands"]:
+                        if str_if_bytes(subcmd[0]) == subcmd_name:
+                            command = self.parse_subcommand(subcmd)
+                            is_subcmd = True
 
-        if command == 1:
-            return (args[1],)
-        if command == 0:
-            return None
-        if command == -1:
-            return await self._get_moveable_keys(*args)
+                # The command doesn't have keys in it
+                if not is_subcmd:
+                    return None
+            last_key_pos = command["last_key_pos"]
+            if last_key_pos < 0:
+                last_key_pos = len(args) - abs(last_key_pos)
+            keys_pos = list(
+                range(command["first_key_pos"], last_key_pos + 1, command["step_count"])
+            )
+            keys = [args[pos] for pos in keys_pos]
 
-        last_key_pos = command["last_key_pos"]
-        if last_key_pos < 0:
-            last_key_pos = len(args) + last_key_pos
-        return args[command["first_key_pos"] : last_key_pos + 1 : command["step_count"]]
+        return keys
 
     async def _get_moveable_keys(self, *args: Any) -> Optional[Tuple[str, ...]]:
         try:

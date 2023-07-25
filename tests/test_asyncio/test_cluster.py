@@ -30,7 +30,9 @@ from redis.exceptions import (
 from redis.utils import str_if_bytes
 from tests.conftest import (
     assert_resp_response,
+    is_resp2_connection,
     skip_if_redis_enterprise,
+    skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
 )
@@ -157,7 +159,7 @@ async def get_mocked_redis_client(*args, **kwargs) -> RedisCluster:
 
             def cmd_init_mock(self, r: ClusterNode) -> None:
                 self.commands = {
-                    "GET": {
+                    "get": {
                         "name": "get",
                         "arity": 2,
                         "flags": ["readonly", "fast"],
@@ -607,7 +609,7 @@ class TestRedisClusterObj:
 
                         def cmd_init_mock(self, r: ClusterNode) -> None:
                             self.commands = {
-                                "GET": {
+                                "get": {
                                     "name": "get",
                                     "arity": 2,
                                     "flags": ["readonly", "fast"],
@@ -818,6 +820,8 @@ class TestRedisClusterObj:
             assert all(await r.cluster_delslots(missing_slot))
             with pytest.raises(ClusterDownError):
                 await r.exists("foo")
+        except ResponseError as e:
+            assert "CLUSTERDOWN" in str(e)
         finally:
             try:
                 # Add back the missing slot
@@ -1258,11 +1262,18 @@ class TestClusterRedisCommands:
     async def test_cluster_links(self, r: RedisCluster):
         node = r.get_random_node()
         res = await r.cluster_links(node)
-        links_to = sum(x.count("to") for x in res)
-        links_for = sum(x.count("from") for x in res)
-        assert links_to == links_for
-        for i in range(0, len(res) - 1, 2):
-            assert res[i][3] == res[i + 1][3]
+        if is_resp2_connection(r):
+            links_to = sum(x.count(b"to") for x in res)
+            links_for = sum(x.count(b"from") for x in res)
+            assert links_to == links_for
+            for i in range(0, len(res) - 1, 2):
+                assert res[i][3] == res[i + 1][3]
+        else:
+            links_to = len(list(filter(lambda x: x[b"direction"] == b"to", res)))
+            links_for = len(list(filter(lambda x: x[b"direction"] == b"from", res)))
+            assert links_to == links_for
+            for i in range(0, len(res) - 1, 2):
+                assert res[i][b"node"] == res[i + 1][b"node"]
 
     @skip_if_redis_enterprise()
     async def test_readonly(self) -> None:
@@ -1899,25 +1910,25 @@ class TestClusterRedisCommands:
             r,
             await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
             (b"{foo}b", b"b1", 10),
-            [b"b", b"b1", 10],
+            [b"{foo}b", b"b1", 10],
         )
         assert_resp_response(
             r,
             await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
             (b"{foo}b", b"b2", 20),
-            [b"b", b"b2", 20],
+            [b"{foo}b", b"b2", 20],
         )
         assert_resp_response(
             r,
             await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
             (b"{foo}a", b"a1", 1),
-            [b"a", b"a1", 1],
+            [b"{foo}a", b"a1", 1],
         )
         assert_resp_response(
             r,
             await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
             (b"{foo}a", b"a2", 2),
-            [b"a", b"a2", 2],
+            [b"{foo}a", b"a2", 2],
         )
         assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) is None
         await r.zadd("{foo}c", {"c1": 100})
@@ -2747,6 +2758,7 @@ class TestClusterPipeline:
             assert ask_node._free.pop().read_response.await_count
             assert res == ["MOCK_OK"]
 
+    @skip_if_server_version_gte("7.0.0")
     async def test_moved_redirection_on_slave_with_default(
         self, r: RedisCluster
     ) -> None:

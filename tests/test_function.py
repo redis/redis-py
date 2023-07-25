@@ -93,17 +93,28 @@ class TestFunction:
                 [[b"name", b"myfunc", b"description", None, b"flags", [b"no-writes"]]],
             ]
         ]
+        resp3_function_list = [
+            {
+                b"library_name": b"mylib",
+                b"engine": b"LUA",
+                b"functions": [
+                    {b"name": b"myfunc", b"description": None, b"flags": {b"no-writes"}}
+                ],
+            }
+        ]
         primaries = r.get_primaries()
         res = {}
+        resp3_res = {}
         for node in primaries:
             res[node.name] = function_list
-        assert r.function_list() == res
-        assert r.function_list(library="*lib") == res
+            resp3_res[node.name] = resp3_function_list
+        assert_resp_response(r, r.function_list(), res, resp3_res)
+        assert_resp_response(r, r.function_list(library="*lib"), res, resp3_res)
         node = primaries[0].name
-        assert (
-            r.function_list(withcode=True)[node][0][7]
-            == f"#!{engine} name={lib} \n {function}".encode()
-        )
+        code = f"#!{engine} name={lib} \n {function}".encode()
+        res[node][0].extend([b"library_code", code])
+        resp3_res[node][0][b"library_code"] = code
+        assert_resp_response(r, r.function_list(withcode=True), res, resp3_res)
 
     def test_fcall(self, r):
         r.function_load(f"#!{engine} name={lib} \n {set_function}")
