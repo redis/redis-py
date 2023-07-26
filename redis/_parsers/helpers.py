@@ -733,6 +733,7 @@ _RedisCallbacks = {
     "MODULE UNLOAD": bool,
     "PING": lambda r: str_if_bytes(r) == "PONG",
     "PUBSUB NUMSUB": parse_pubsub_numsub,
+    "PUBSUB SHARDNUMSUB": parse_pubsub_numsub,
     "QUIT": bool_ok,
     "SET": parse_set_result,
     "SCAN": parse_scan,
