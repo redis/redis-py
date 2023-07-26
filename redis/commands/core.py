@@ -2537,7 +2537,10 @@ class BasicKeyCommands(CommandsProtocol):
         """
         pieces: list[EncodableT] = [f"{lib_name}.{func_name}"]
         if keys is not None:
+            pieces.append(len(keys))
             pieces.extend(keys)
+        else:
+            pieces.append(0)
         if args is not None:
             pieces.extend(args)
         if _async:

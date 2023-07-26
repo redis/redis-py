@@ -1794,29 +1794,36 @@ class TestRedisCommands:
     def generate_lib_code(self, lib_name):
         return f"""#!js api_version=1.0 name={lib_name}\n redis.registerFunction('foo', ()=>{{return 'bar'}})"""  # noqa
 
+    def try_delete_libs(self, r, *lib_names):
+        for lib_name in lib_names:
+            try:
+                r.tfunction_delete(lib_name)
+            except redis.exceptions.ResponseError:
+                pass
+
     @skip_if_server_version_lt("7.1.140")
     def test_tfunction_load_delete(self, r):
-        lib_name = "test_lib"
-        lib_code = self.generate_lib_code(lib_name)
+        self.try_delete_libs(r, "lib1")
+        lib_code = self.generate_lib_code("lib1")
         assert r.tfunction_load(lib_code)
-        assert r.tfunction_delete(lib_name)
+        assert r.tfunction_delete("lib1")
 
     @skip_if_server_version_lt("7.1.140")
     def test_tfunction_list(self, r):
-
+        self.try_delete_libs(r, "lib1", "lib2", "lib3")
         assert r.tfunction_load(self.generate_lib_code("lib1"))
         assert r.tfunction_load(self.generate_lib_code("lib2"))
         assert r.tfunction_load(self.generate_lib_code("lib3"))
 
         # test error thrown when verbose > 4
-        with pytest.raises(redis.exceptions.ResponseError):
+        with pytest.raises(redis.exceptions.DataError):
             assert r.tfunction_list(verbose=8)
 
         functions = r.tfunction_list(verbose=1)
         assert len(functions) == 3
 
-        expected_names = ["lib1", "lib2", "lib3"]
-        actual_names = [f["name"] for f in functions]
+        expected_names = [b'lib1', b'lib2', b'lib3']
+        actual_names = [functions[0][13], functions[1][13], functions[2][13]]
 
         assert sorted(expected_names) == sorted(actual_names)
         assert r.tfunction_delete("lib1")
@@ -1825,8 +1832,9 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("7.1.140")
     def test_tfcall(self, r):
+        self.try_delete_libs(r, "lib1")
         assert r.tfunction_load(self.generate_lib_code("lib1"))
-        assert r.tfcall("lib1", "foo", _async=False) == b"bar"
+        assert r.tfcall("lib1", "foo") == b"bar"
         assert r.tfcall("lib1", "foo", _async=True) == b"bar"
 
         assert r.tfunction_delete("lib1")
