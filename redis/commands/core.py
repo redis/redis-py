@@ -2507,7 +2507,7 @@ class BasicKeyCommands(CommandsProtocol):
         if with_code:
             pices.append("WITHCODE")
         if verbose > 0 and verbose < 4:
-            pices.append('v' * verbose)
+            pices.append("v" * verbose)
         elif verbose != 0:  # verbose == 0 is the default so no need to throw an error
             raise DataError("verbose can be 1, 2 or 3")
         if lib_name is not None:
@@ -2517,11 +2517,12 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("TFUNCTION LIST", *pices)
 
     def tfcall(
-        self, lib_name: str,
+        self,
+        lib_name: str,
         func_name: str,
         keys: KeysT = None,
         *args: List,
-        _async: bool = False
+        _async: bool = False,
     ) -> ResponseT:
         """
         Trigger a sync or async (Coroutine) function.
