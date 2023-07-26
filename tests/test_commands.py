@@ -396,7 +396,7 @@ class TestRedisCommands:
             user_client.hset("cache:0", "hkey", "hval")
 
         assert isinstance(r.acl_log(), list)
-        assert len(r.acl_log()) == 2
+        assert len(r.acl_log()) == 3
         assert len(r.acl_log(count=1)) == 1
         assert isinstance(r.acl_log()[0], dict)
         expected = r.acl_log(count=1)[0]

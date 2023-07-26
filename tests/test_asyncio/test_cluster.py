@@ -2280,7 +2280,7 @@ class TestClusterRedisCommands:
             await user_client.hset("{cache}:0", "hkey", "hval")
 
         assert isinstance(await r.acl_log(target_nodes=node), list)
-        assert len(await r.acl_log(target_nodes=node)) == 2
+        assert len(await r.acl_log(target_nodes=node)) == 3
         assert len(await r.acl_log(count=1, target_nodes=node)) == 1
         assert isinstance((await r.acl_log(target_nodes=node))[0], dict)
         assert "client-info" in (await r.acl_log(count=1, target_nodes=node))[0]

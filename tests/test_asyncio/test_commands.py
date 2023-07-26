@@ -273,7 +273,7 @@ class TestRedisCommands:
             await user_client.hset("cache:0", "hkey", "hval")
 
         assert isinstance(await r.acl_log(), list)
-        assert len(await r.acl_log()) == 2
+        assert len(await r.acl_log()) == 3
         assert len(await r.acl_log(count=1)) == 1
         assert isinstance((await r.acl_log())[0], dict)
         expected = (await r.acl_log(count=1))[0]
