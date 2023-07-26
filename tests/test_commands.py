@@ -1822,7 +1822,7 @@ class TestRedisCommands:
         functions = r.tfunction_list(verbose=1)
         assert len(functions) == 3
 
-        expected_names = [b'lib1', b'lib2', b'lib3']
+        expected_names = [b"lib1", b"lib2", b"lib3"]
         actual_names = [functions[0][13], functions[1][13], functions[2][13]]
 
         assert sorted(expected_names) == sorted(actual_names)
