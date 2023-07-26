@@ -43,6 +43,7 @@ from tests.test_pubsub import wait_for_message
 from .conftest import (
     _get_client,
     assert_resp_response,
+    is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
@@ -775,6 +776,8 @@ class TestRedisClusterObj:
             assert all(r.cluster_delslots(missing_slot))
             with pytest.raises(ClusterDownError):
                 r.exists("foo")
+        except ResponseError as e:
+            assert "CLUSTERDOWN" in str(e)
         finally:
             try:
                 # Add back the missing slot
@@ -1157,8 +1160,15 @@ class TestClusterRedisCommands:
             b"health",
         ]
         for x in cluster_shards:
-            assert list(x.keys()) == ["slots", "nodes"]
-            for node in x["nodes"]:
+            assert_resp_response(
+                r, list(x.keys()), ["slots", "nodes"], [b"slots", b"nodes"]
+            )
+            try:
+                x["nodes"]
+                key = "nodes"
+            except KeyError:
+                key = b"nodes"
+            for node in x[key]:
                 for attribute in node.keys():
                     assert attribute in attributes
 
@@ -1415,11 +1425,18 @@ class TestClusterRedisCommands:
     def test_cluster_links(self, r):
         node = r.get_random_node()
         res = r.cluster_links(node)
-        links_to = sum(x.count("to") for x in res)
-        links_for = sum(x.count("from") for x in res)
-        assert links_to == links_for
-        for i in range(0, len(res) - 1, 2):
-            assert res[i][3] == res[i + 1][3]
+        if is_resp2_connection(r):
+            links_to = sum(x.count(b"to") for x in res)
+            links_for = sum(x.count(b"from") for x in res)
+            assert links_to == links_for
+            for i in range(0, len(res) - 1, 2):
+                assert res[i][3] == res[i + 1][3]
+        else:
+            links_to = len(list(filter(lambda x: x[b"direction"] == b"to", res)))
+            links_for = len(list(filter(lambda x: x[b"direction"] == b"from", res)))
+            assert links_to == links_for
+            for i in range(0, len(res) - 1, 2):
+                assert res[i][b"node"] == res[i + 1][b"node"]
 
     def test_cluster_flshslots_not_implemented(self, r):
         with pytest.raises(NotImplementedError):
@@ -2041,25 +2058,25 @@ class TestClusterRedisCommands:
             r,
             r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
             (b"{foo}b", b"b1", 10),
-            [b"b", b"b1", 10],
+            [b"{foo}b", b"b1", 10],
         )
         assert_resp_response(
             r,
             r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
             (b"{foo}b", b"b2", 20),
-            [b"b", b"b2", 20],
+            [b"{foo}b", b"b2", 20],
         )
         assert_resp_response(
             r,
             r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
             (b"{foo}a", b"a1", 1),
-            [b"a", b"a1", 1],
+            [b"{foo}a", b"a1", 1],
         )
         assert_resp_response(
             r,
             r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
             (b"{foo}a", b"a2", 2),
-            [b"a", b"a2", 2],
+            [b"{foo}a", b"a2", 2],
         )
         assert r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) is None
         r.zadd("{foo}c", {"c1": 100})
