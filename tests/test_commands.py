@@ -1798,7 +1798,7 @@ class TestRedisCommands:
         for lib_name in lib_names:
             try:
                 r.tfunction_delete(lib_name)
-            except redis.exceptions:
+            except Exception:
                 pass
 
     @skip_if_server_version_lt("7.1.140")
