@@ -2460,8 +2460,8 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Load a new library to RedisGears.
 
-       ``lib_code`` - the library code.
-       ``config`` - a string representation of a JSON object
+        ``lib_code`` - the library code.
+        ``config`` - a string representation of a JSON object
         that will be provided to the library on load time,
         for more information refer to
         https://github.com/RedisGears/RedisGears/blob/master/docs/function_advance_topics.md#library-configuration
