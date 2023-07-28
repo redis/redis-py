@@ -104,7 +104,13 @@ class Redis(
     response_callbacks: MutableMapping[Union[str, bytes], ResponseCallbackT]
 
     @classmethod
-    def from_url(cls, url: str, **kwargs):
+    def from_url(
+        cls,
+        url: str,
+        single_connection_client: bool = False,
+        auto_close_connection_pool: bool = True,
+        **kwargs,
+    ):
         """
         Return a Redis client object configured from the given URL
 
@@ -144,8 +150,6 @@ class Redis(
         arguments always win.
 
         """
-        single_connection_client = kwargs.pop("single_connection_client", False)
-        auto_close_connection_pool = kwargs.pop("auto_close_connection_pool", True)
         connection_pool = ConnectionPool.from_url(url, **kwargs)
         redis = cls(
             connection_pool=connection_pool,
