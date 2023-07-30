@@ -652,18 +652,15 @@ class TestPubSubReconnect:
                 nonlocal interrupt
                 await pubsub.subscribe("foo")
                 while True:
-                    # print("loop")
                     try:
                         try:
                             await pubsub.connect()
                             await loop_step()
-                            # print("succ")
                         except redis.ConnectionError:
                             await asyncio.sleep(0.1)
                     except asyncio.CancelledError:
                         # we use a cancel to interrupt the "listen"
                         # when we perform a disconnect
-                        # print("cancel", interrupt)
                         if interrupt:
                             interrupt = False
                         else:
@@ -896,7 +893,6 @@ class TestPubSubAutoReconnect:
                 try:
                     if self.state == 4:
                         break
-                    # print("state a ", self.state)
                     got_msg = await self.get_message()
                     assert got_msg
                     if self.state in (1, 2):
@@ -914,7 +910,6 @@ class TestPubSubAutoReconnect:
     async def loop_step_get_message(self):
         # get a single message via get_message
         message = await self.pubsub.get_message(timeout=0.1)
-        # print(message)
         if message is not None:
             await self.messages.put(message)
             return True
