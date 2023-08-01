@@ -2494,7 +2494,7 @@ class BasicKeyCommands(CommandsProtocol):
         self,
         with_code: bool = False,
         verbose: int = 0,
-        lib_name: Union[str, None] = None
+        lib_name: Union[str, None] = None,
     ) -> ResponseT:
         """
         List the functions with additional information about each function.
