@@ -110,7 +110,8 @@ def test_mgetshouldsucceed(client):
     assert client.json().mget([1, 2], Path.root_path()) == [1, 2]
 
 
-@skip_ifmodversion_lt("2.06.00", "ReJSON")  # todo: update after the release
+@pytest.mark.onlynoncluster
+@skip_ifmodversion_lt("2.06.00", "ReJSON")
 def test_mset(client):
     client.json().mset([("1", Path.root_path(), 1), ("2", Path.root_path(), 2)])
 
