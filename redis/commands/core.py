@@ -2455,7 +2455,7 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("SUBSTR", name, start, end)
 
     def tfunction_load(
-        self, lib_code: str, replace: bool = False, config: str = None
+        self, lib_code: str, replace: bool = False, config: Union[str, None] = None
     ) -> ResponseT:
         """
         Load a new library to RedisGears.
@@ -2471,7 +2471,7 @@ class BasicKeyCommands(CommandsProtocol):
         For more information see https://redis.io/commands/tfunction-load/
         # TODO: check link when it will be available
         """
-        pieces: list[EncodableT] = []
+        pieces = []
         if replace:
             pieces.append("REPLACE")
         if config is not None:
@@ -2491,7 +2491,10 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("TFUNCTION DELETE", lib_name)
 
     def tfunction_list(
-        self, with_code: bool = False, verbose: int = 0, lib_name: str = None
+        self,
+        with_code: bool = False,
+        verbose: int = 0,
+        lib_name: Union[str, None] = None
     ) -> ResponseT:
         """
         List the functions with additional information about each function.
@@ -2501,28 +2504,27 @@ class BasicKeyCommands(CommandsProtocol):
         ``lib_name`` specifying a library name (can be used multiple times to show multiple libraries in a single command) # noqa
 
         For more information see https://redis.io/commands/tfunction-list/
-        # TODO: check link when it will be available
         """
-        pices: list[EncodableT] = []
+        pieces = []
         if with_code:
-            pices.append("WITHCODE")
-        if verbose > 0 and verbose < 4:
-            pices.append("v" * verbose)
-        elif verbose != 0:  # verbose == 0 is the default so no need to throw an error
+            pieces.append("WITHCODE")
+        if verbose >= 1 and verbose <= 3:
+            pieces.append("v" * verbose)
+        else:
             raise DataError("verbose can be 1, 2 or 3")
         if lib_name is not None:
-            pices.append("LIBRARY")
-            pices.append(lib_name)
+            pieces.append("LIBRARY")
+            pieces.append(lib_name)
 
-        return self.execute_command("TFUNCTION LIST", *pices)
+        return self.execute_command("TFUNCTION LIST", *pieces)
 
     def tfcall(
         self,
         lib_name: str,
         func_name: str,
         keys: KeysT = None,
-        *args: List,
         _async: bool = False,
+        *args: List,
     ) -> ResponseT:
         """
         Trigger a sync or async (Coroutine) function.
@@ -2530,13 +2532,12 @@ class BasicKeyCommands(CommandsProtocol):
         ``lib_name`` - the library name contains the function.
         ``func_name`` - the function name to run.
         ``keys`` - the keys that will be touched by the function.
-        ``args`` - Additional argument to pass to the function.
         ``_async`` - If True, Invoke an async function (Coroutine.
+        ``args`` - Additional argument to pass to the function.
 
         For more information see https://redis.io/commands/tfcall/
-        # TODO: check link when it will be available
         """
-        pieces: list[EncodableT] = [f"{lib_name}.{func_name}"]
+        pieces = [f"{lib_name}.{func_name}"]
         if keys is not None:
             pieces.append(len(keys))
             pieces.extend(keys)
