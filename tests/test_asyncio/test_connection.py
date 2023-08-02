@@ -254,9 +254,8 @@ async def test_connection_disconect_race(parser_class, connect_args):
     async def do_read():
         return await conn.read_response()
 
-    reader = mock.AsyncMock()
-    writer = mock.AsyncMock()
-    writer.transport = mock.Mock()
+    reader = mock.Mock(spec=asyncio.StreamReader)
+    writer = mock.Mock(spec=asyncio.StreamWriter)
     writer.transport.get_extra_info.side_effect = None
 
     # for HiredisParser
