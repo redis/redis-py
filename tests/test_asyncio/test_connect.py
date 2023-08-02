@@ -62,6 +62,7 @@ async def test_tcp_ssl_connect(tcp_address):
         socket_timeout=10,
     )
     await _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
+    await conn.disconnect()
 
 
 async def _assert_connect(conn, server_address, certfile=None, keyfile=None):
