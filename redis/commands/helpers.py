@@ -159,7 +159,7 @@ def stringify_param_value(value):
         return str(value)
 
 
-def get_protocol_version(client: redis.Redis) -> Union[int, str, None]:
+def get_protocol_version(client):
     if isinstance(client, redis.Redis) or isinstance(client, redis.asyncio.Redis):
         return client.connection_pool.connection_kwargs.get("protocol")
     elif isinstance(client, redis.cluster.AbstractRedisCluster):
