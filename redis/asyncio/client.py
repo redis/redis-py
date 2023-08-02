@@ -227,7 +227,6 @@ class Redis(
         lib_version: Optional[str] = get_lib_version(),
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
-        # deprecated. create a pool and use connection_pool instead
         auto_close_connection_pool: Optional[bool] = None,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
@@ -241,7 +240,9 @@ class Redis(
         To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
         """
         kwargs: Dict[str, Any]
-
+        # auto_close_connection_pool only has an effect if connection_pool is
+        # None. It is assumed that if connection_pool is not None, the user
+        # wants to manage the connection pool themselves.
         if auto_close_connection_pool is not None:
             warnings.warn(
                 DeprecationWarning(
