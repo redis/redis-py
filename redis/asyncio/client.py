@@ -531,13 +531,18 @@ class Redis(
 
     _DEL_MESSAGE = "Unclosed Redis client"
 
-    def __del__(self, _warnings: Any = warnings) -> None:
+    # passing _warnings and _grl as argument default since they may be gone
+    # by the time __del__ is called at shutdown
+    def __del__(
+        self, _warn: Any = warnings.warn, _grl: Any = asyncio.get_running_loop
+    ) -> None:
         if hasattr(self, "connection") and (self.connection is not None):
-            _warnings.warn(
-                f"Unclosed client session {self!r}", ResourceWarning, source=self
-            )
-            context = {"client": self, "message": self._DEL_MESSAGE}
-            asyncio.get_running_loop().call_exception_handler(context)
+            _warn(f"Unclosed client session {self!r}", ResourceWarning, source=self)
+            try:
+                context = {"client": self, "message": self._DEL_MESSAGE}
+                _grl().call_exception_handler(context)
+            except RuntimeError:
+                pass
 
     async def aclose(self, close_connection_pool: Optional[bool] = None) -> None:
         """
