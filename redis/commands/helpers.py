@@ -1,7 +1,7 @@
 import copy
 import random
 import string
-from typing import List, Tuple, Union
+from typing import List, Tuple
 
 import redis
 from redis.typing import KeysT, KeyT
