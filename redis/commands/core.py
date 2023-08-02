@@ -515,7 +515,8 @@ class ManagementCommands(CommandsProtocol):
         self, _type: Union[str, None] = None, client_id: List[EncodableT] = [], **kwargs
     ) -> ResponseT:
         """
-        Returns a list of currently connected clients.  If type of client specified, only that type will be returned.
+        Returns a list of currently connected clients.
+        If type of client specified, only that type will be returned.
 
         :param _type: optional. one of the client types (normal, master,
          replica, pubsub)
