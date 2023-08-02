@@ -31,11 +31,13 @@ jobs:
            python-version: 3.9
            cache: 'pip'
        - name: install deps
-         run: apt-get install -y pandoc make
+         run: |
+           sudo apt-get update -yqq
+           sudo apt-get install -yqq pandoc make
        - name: run code linters
          run: |
            pip install -r requirements.txt -r dev_requirements.txt -r /docs/requirements.txt
-           invoke builds-docs
+           invoke build-docs
 
        - name: upload docs
          uses: actions/upload-artifact@v3
