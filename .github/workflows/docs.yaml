@@ -38,7 +38,7 @@ jobs:
            invoke builds-docs
 
        - name: upload docs
-         uses: actions/upload-artifacts@v3
+         uses: actions/upload-artifact@v3
          with:
            name: redis-py-docs
            path: |
