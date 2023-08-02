@@ -45,7 +45,8 @@ The table below higlights version compatibility of the most-recent library versi
 | Library version | Supported redis versions |
 |-----------------|-------------------|
 | 3.5.3 | <= 6.2 Family of releases |
-| >= 4.1.0 | Version 5.0 to current |
+| >= 4.5.0 | Version 5.0 to 7.0 |
+| >= 5.0.0 | Versiond 5.0 to current |
 
 
 ## Usage
@@ -62,6 +63,15 @@ b'bar'
 ```
 
 The above code connects to localhost on port 6379, sets a value in Redis, and retrieves it. All responses are returned as bytes in Python, to receive decoded strings, set *decode_responses=True*.  For this, and more connection options, see [these examples](https://redis.readthedocs.io/en/stable/examples.html).
+
+
+#### RESP3 Support
+To enable support for RESP3, ensure you have at least version 5.0 of the client, and change your connection object to include *protocol=3*
+
+``` python
+>>> import redis
+>>> r = redis.Redis(host='localhost', port=6379, db=0, protocol=3)
+```
 
 ### Connection Pools
 
