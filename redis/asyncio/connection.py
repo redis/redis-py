@@ -217,10 +217,15 @@ class AbstractConnection:
         return self._reader is not None and self._writer is not None
 
     def register_connect_callback(self, callback):
-        self._connect_callbacks.append(weakref.WeakMethod(callback))
+        wm = weakref.WeakMethod(callback)
+        if wm not in self._connect_callbacks:
+            self._connect_callbacks.append(wm)
 
-    def clear_connect_callbacks(self):
-        self._connect_callbacks = []
+    def deregister_connect_callback(self, callback):
+        try:
+            self._connect_callbacks.remove(weakref.WeakMethod(callback))
+        except ValueError:
+            pass
 
     def set_parser(self, parser_class: Type[BaseParser]) -> None:
         """
@@ -263,6 +268,8 @@ class AbstractConnection:
 
         # run any user callbacks. right now the only internal callback
         # is for pubsub channel/pattern resubscription
+        # first, remove any dead weakrefs
+        self._connect_callbacks = [ref for ref in self._connect_callbacks if ref()]
         for ref in self._connect_callbacks:
             callback = ref()
             task = callback(self)

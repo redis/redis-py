@@ -791,7 +791,7 @@ class PubSub:
         async with self._lock:
             if self.connection:
                 await self.connection.disconnect()
-                self.connection.clear_connect_callbacks()
+                self.connection.deregister_connect_callback(self.on_connect)
                 await self.connection_pool.release(self.connection)
                 self.connection = None
             self.channels = {}
