@@ -1,3 +1,4 @@
+    * Fix #2831, add auto_close_connection_pool=True arg to asyncio.Redis.from_url()
     * Fix incorrect redis.asyncio.Cluster type hint for `retry_on_error`
     * Fix dead weakref in sentinel connection causing ReferenceError (#2767)
     * Fix #2768, Fix KeyError: 'first-entry' in parse_xinfo_stream.

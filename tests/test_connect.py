@@ -61,6 +61,8 @@ def test_tcp_ssl_connect(tcp_address):
 
 def _assert_connect(conn, server_address, certfile=None, keyfile=None):
     if isinstance(server_address, str):
+        if not _RedisUDSServer:
+            pytest.skip("Unix domain sockets are not supported on this platform")
         server = _RedisUDSServer(server_address, _RedisRequestHandler)
     else:
         server = _RedisTCPServer(
@@ -113,24 +115,29 @@ class _RedisTCPServer(socketserver.TCPServer):
         return connstream, fromaddr
 
 
-class _RedisUDSServer(socketserver.UnixStreamServer):
-    def __init__(self, *args, **kw) -> None:
-        self._ready_event = threading.Event()
-        self._stop_requested = False
-        super().__init__(*args, **kw)
+if hasattr(socket, "UnixStreamServer"):
 
-    def service_actions(self):
-        self._ready_event.set()
+    class _RedisUDSServer(socketserver.UnixStreamServer):
+        def __init__(self, *args, **kw) -> None:
+            self._ready_event = threading.Event()
+            self._stop_requested = False
+            super().__init__(*args, **kw)
 
-    def wait_online(self):
-        self._ready_event.wait()
+        def service_actions(self):
+            self._ready_event.set()
 
-    def stop(self):
-        self._stop_requested = True
-        self.shutdown()
+        def wait_online(self):
+            self._ready_event.wait()
 
-    def is_serving(self):
-        return not self._stop_requested
+        def stop(self):
+            self._stop_requested = True
+            self.shutdown()
+
+        def is_serving(self):
+            return not self._stop_requested
+
+else:
+    _RedisUDSServer = None
 
 
 class _RedisRequestHandler(socketserver.StreamRequestHandler):
