@@ -101,6 +101,8 @@ def parse_cluster_shards(resp, **options):
     """
     Parse CLUSTER SHARDS response.
     """
+    if isinstance(resp[0], dict):
+        return resp
     shards = []
     for x in resp:
         shard = {"slots": [], "nodes": []}
