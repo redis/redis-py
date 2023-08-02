@@ -1,7 +1,7 @@
 import copy
 import random
 import string
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
 import redis
 from redis.typing import KeysT, KeyT
@@ -159,7 +159,7 @@ def stringify_param_value(value):
         return str(value)
 
 
-def get_protocol_version(client):
+def get_protocol_version(client: redis.Redis) -> Union[int, str, None]:
     if isinstance(client, redis.Redis) or isinstance(client, redis.asyncio.Redis):
         return client.connection_pool.connection_kwargs.get("protocol")
     elif isinstance(client, redis.cluster.AbstractRedisCluster):
