@@ -2469,7 +2469,6 @@ class BasicKeyCommands(CommandsProtocol):
         function if its already exists
 
         For more information see https://redis.io/commands/tfunction-load/
-        # TODO: check link when it will be available
         """
         pieces = []
         if replace:
@@ -2486,7 +2485,6 @@ class BasicKeyCommands(CommandsProtocol):
         ``lib_name`` the library name to delete.
 
         For more information see https://redis.io/commands/tfunction-delete/
-        # TODO: check link when it will be available
         """
         return self.execute_command("TFUNCTION DELETE", lib_name)
 
@@ -6028,6 +6026,12 @@ class ClusterCommands(CommandsProtocol):
         For more information see https://redis.io/commands/readonly
         """
         return self.execute_command("READONLY", **kwargs)
+
+    def gears_refresh_cluster(self, **kwargs) -> ResponseT:
+        """
+        On an OSS cluster, before executing any gears function, you must call this command. # noqa
+        """
+        return self.execute_command("REDISGEARS_2.REFRESHCLUSTER", **kwargs)
 
 
 AsyncClusterCommands = ClusterCommands
