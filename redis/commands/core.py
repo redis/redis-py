@@ -517,6 +517,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Returns a list of currently connected clients.
         If type of client specified, only that type will be returned.
+
         :param _type: optional. one of the client types (normal, master,
          replica, pubsub)
         :param client_id: optional. a list of client ids
@@ -559,16 +560,17 @@ class ManagementCommands(CommandsProtocol):
     ) -> ResponseT:
         """
         Enable and disable redis server replies.
+
         ``reply`` Must be ON OFF or SKIP,
-            ON - The default most with server replies to commands
-            OFF - Disable server responses to commands
-            SKIP - Skip the response of the immediately following command.
+        ON - The default most with server replies to commands
+        OFF - Disable server responses to commands
+        SKIP - Skip the response of the immediately following command.
 
         Note: When setting OFF or SKIP replies, you will need a client object
         with a timeout specified in seconds, and will need to catch the
         TimeoutError.
-              The test_client_reply unit test illustrates this, and
-              conftest.py has a client with a timeout.
+        The test_client_reply unit test illustrates this, and
+        conftest.py has a client with a timeout.
 
         See https://redis.io/commands/client-reply
         """
@@ -724,19 +726,21 @@ class ManagementCommands(CommandsProtocol):
 
     def client_pause(self, timeout: int, all: bool = True, **kwargs) -> ResponseT:
         """
-        Suspend all the Redis clients for the specified amount of time
-        :param timeout: milliseconds to pause clients
+        Suspend all the Redis clients for the specified amount of time.
+
 
         For more information see https://redis.io/commands/client-pause
+
+        :param timeout: milliseconds to pause clients
         :param all: If true (default) all client commands are blocked.
-             otherwise, clients are only blocked if they attempt to execute
-             a write command.
-             For the WRITE mode, some commands have special behavior:
-                 EVAL/EVALSHA: Will block client for all scripts.
-                 PUBLISH: Will block client.
-                 PFCOUNT: Will block client.
-                 WAIT: Acknowledgments will be delayed, so this command will
-                 appear blocked.
+        otherwise, clients are only blocked if they attempt to execute
+        a write command.
+        For the WRITE mode, some commands have special behavior:
+        EVAL/EVALSHA: Will block client for all scripts.
+        PUBLISH: Will block client.
+        PFCOUNT: Will block client.
+        WAIT: Acknowledgments will be delayed, so this command will
+        appear blocked.
         """
         args = ["CLIENT PAUSE", str(timeout)]
         if not isinstance(timeout, int):
@@ -1215,9 +1219,11 @@ class ManagementCommands(CommandsProtocol):
     def replicaof(self, *args, **kwargs) -> ResponseT:
         """
         Update the replication settings of a redis replica, on the fly.
+
         Examples of valid arguments include:
-            NO ONE (set no replication)
-            host port (set to the host and port of a redis server)
+
+        NO ONE (set no replication)
+        host port (set to the host and port of a redis server)
 
         For more information see  https://redis.io/commands/replicaof
         """
@@ -3696,27 +3702,37 @@ class StreamCommands(CommandsProtocol):
     ) -> ResponseT:
         """
         Changes the ownership of a pending message.
+
         name: name of the stream.
+
         groupname: name of the consumer group.
+
         consumername: name of a consumer that claims the message.
+
         min_idle_time: filter messages that were idle less than this amount of
         milliseconds
-        message_ids: non-empty list or tuple of message IDs to claim
-        idle: optional. Set the idle time (last time it was delivered) of the
-         message in ms
-        time: optional integer. This is the same as idle but instead of a
-         relative amount of milliseconds, it sets the idle time to a specific
-         Unix time (in milliseconds).
-        retrycount: optional integer. set the retry counter to the specified
-         value. This counter is incremented every time a message is delivered
-         again.
-        force: optional boolean, false by default. Creates the pending message
-         entry in the PEL even if certain specified IDs are not already in the
-         PEL assigned to a different client.
-        justid: optional boolean, false by default. Return just an array of IDs
-         of messages successfully claimed, without returning the actual message
 
-         For more information see https://redis.io/commands/xclaim
+        message_ids: non-empty list or tuple of message IDs to claim
+
+        idle: optional. Set the idle time (last time it was delivered) of the
+        message in ms
+
+        time: optional integer. This is the same as idle but instead of a
+        relative amount of milliseconds, it sets the idle time to a specific
+        Unix time (in milliseconds).
+
+        retrycount: optional integer. set the retry counter to the specified
+        value. This counter is incremented every time a message is delivered
+        again.
+
+        force: optional boolean, false by default. Creates the pending message
+        entry in the PEL even if certain specified IDs are not already in the
+        PEL assigned to a different client.
+
+        justid: optional boolean, false by default. Return just an array of IDs
+        of messages successfully claimed, without returning the actual message
+
+        For more information see https://redis.io/commands/xclaim
         """
         if not isinstance(min_idle_time, int) or min_idle_time < 0:
             raise DataError("XCLAIM min_idle_time must be a non negative integer")
@@ -3968,11 +3984,15 @@ class StreamCommands(CommandsProtocol):
     ) -> ResponseT:
         """
         Read stream values within an interval.
+
         name: name of the stream.
+
         start: first stream ID. defaults to '-',
                meaning the earliest available.
+
         finish: last stream ID. defaults to '+',
                 meaning the latest available.
+
         count: if set, only return this many items, beginning with the
                earliest available.
 
@@ -3995,10 +4015,13 @@ class StreamCommands(CommandsProtocol):
     ) -> ResponseT:
         """
         Block and monitor multiple streams for new data.
+
         streams: a dict of stream names to stream IDs, where
                    IDs indicate the last ID already seen.
+
         count: if set, only return this many items, beginning with the
                earliest available.
+
         block: number of milliseconds to wait, if nothing already present.
 
         For more information see https://redis.io/commands/xread
@@ -4033,12 +4056,17 @@ class StreamCommands(CommandsProtocol):
     ) -> ResponseT:
         """
         Read from a stream via a consumer group.
+
         groupname: name of the consumer group.
+
         consumername: name of the requesting consumer.
+
         streams: a dict of stream names to stream IDs, where
                IDs indicate the last ID already seen.
+
         count: if set, only return this many items, beginning with the
                earliest available.
+
         block: number of milliseconds to wait, if nothing already present.
         noack: do not add messages to the PEL
 
@@ -4073,11 +4101,15 @@ class StreamCommands(CommandsProtocol):
     ) -> ResponseT:
         """
         Read stream values within an interval, in reverse order.
+
         name: name of the stream
+
         start: first stream ID. defaults to '+',
                meaning the latest available.
+
         finish: last stream ID. defaults to '-',
                 meaning the earliest available.
+
         count: if set, only return this many items, beginning with the
                latest available.
 
@@ -5394,8 +5426,10 @@ class ScriptCommands(CommandsProtocol):
         self, sync_type: Union[Literal["SYNC"], Literal["ASYNC"]] = None
     ) -> ResponseT:
         """Flush all scripts from the script cache.
+
         ``sync_type`` is by default SYNC (synchronous) but it can also be
                       ASYNC.
+
         For more information see  https://redis.io/commands/script-flush
         """
 
@@ -5708,11 +5742,14 @@ class GeoCommands(CommandsProtocol):
         area specified by a given shape. This command extends the
         GEORADIUS command, so in addition to searching within circular
         areas, it supports searching within rectangular areas.
+
         This command should be used in place of the deprecated
         GEORADIUS and GEORADIUSBYMEMBER commands.
+
         ``member`` Use the position of the given existing
          member in the sorted set. Can't be given with ``longitude``
          and ``latitude``.
+
         ``longitude`` and ``latitude`` Use the position given by
         this coordinates. Can't be given with ``member``
         ``radius`` Similar to GEORADIUS, search inside circular
@@ -5721,17 +5758,23 @@ class GeoCommands(CommandsProtocol):
         ``height`` and ``width`` Search inside an axis-aligned
         rectangle, determined by the given height and width.
         Can't be given with ``radius``
+
         ``unit`` must be one of the following : m, km, mi, ft.
         `m` for meters (the default value), `km` for kilometers,
         `mi` for miles and `ft` for feet.
+
         ``sort`` indicates to return the places in a sorted way,
         ASC for nearest to furthest and DESC for furthest to nearest.
+
         ``count`` limit the results to the first count matching items.
+
         ``any`` is set to True, the command will return as soon as
         enough matches are found. Can't be provided without ``count``
+
         ``withdist`` indicates to return the distances of each place.
         ``withcoord`` indicates to return the latitude and longitude of
         each place.
+
         ``withhash`` indicates to return the geohash string of each place.
 
         For more information see https://redis.io/commands/geosearch
