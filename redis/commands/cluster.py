@@ -30,10 +30,12 @@ from .core import (
     AsyncACLCommands,
     AsyncDataAccessCommands,
     AsyncFunctionCommands,
+    AsyncGearsCommands,
     AsyncManagementCommands,
     AsyncScriptCommands,
     DataAccessCommands,
     FunctionCommands,
+    GearsCommands,
     ManagementCommands,
     PubSubCommands,
     ResponseT,
@@ -696,7 +698,6 @@ class ClusterManagementCommands(ManagementCommands):
         return self.execute_command("REDISGEARS_2.REFRESHCLUSTER", **kwargs)
 
 
-
 class AsyncClusterManagementCommands(
     ClusterManagementCommands, AsyncManagementCommands
 ):
@@ -871,6 +872,7 @@ class RedisClusterCommands(
     ClusterDataAccessCommands,
     ScriptCommands,
     FunctionCommands,
+    GearsCommands,
     RedisModuleCommands,
 ):
     """
@@ -900,6 +902,7 @@ class AsyncRedisClusterCommands(
     AsyncClusterDataAccessCommands,
     AsyncScriptCommands,
     AsyncFunctionCommands,
+    AsyncGearsCommands,
 ):
     """
     A class for all Redis Cluster commands
