@@ -2478,7 +2478,7 @@ class TestClusterRedisCommands:
         self.try_delete_libs(r, "lib1")
         assert r.tfunction_load(self.generate_lib_code("lib1"))
         assert r.tfcall("lib1", "foo") == b"bar"
-        assert r.tfcall("lib1", "foo", _async=True) == b"bar"
+        assert r.tfcall_async("lib1", "foo") == b"bar"
 
         assert r.tfunction_delete("lib1")
 

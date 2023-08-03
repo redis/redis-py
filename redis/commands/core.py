@@ -6168,7 +6168,7 @@ class GearsCommands:
 
         return self.execute_command("TFUNCTION LIST", *pieces)
 
-    def tfcall(
+    def _tfcall(
         self,
         lib_name: str,
         func_name: str,
@@ -6176,17 +6176,6 @@ class GearsCommands:
         _async: bool = False,
         *args: List,
     ) -> ResponseT:
-        """
-        Trigger a sync or async (Coroutine) function.
-
-        ``lib_name`` - the library name contains the function.
-        ``func_name`` - the function name to run.
-        ``keys`` - the keys that will be touched by the function.
-        ``_async`` - If True, Invoke an async function (Coroutine.
-        ``args`` - Additional argument to pass to the function.
-
-        For more information see https://redis.io/commands/tfcall/
-        """
         pieces = [f"{lib_name}.{func_name}"]
         if keys is not None:
             pieces.append(len(keys))
@@ -6198,6 +6187,44 @@ class GearsCommands:
         if _async:
             return self.execute_command("TFCALLASYNC", *pieces)
         return self.execute_command("TFCALL", *pieces)
+
+    def tfcall(
+        self,
+        lib_name: str,
+        func_name: str,
+        keys: KeysT = None,
+        *args: List,
+    ) -> ResponseT:
+        """
+        Invoke a function.
+
+        ``lib_name`` - the library name contains the function.
+        ``func_name`` - the function name to run.
+        ``keys`` - the keys that will be touched by the function.
+        ``args`` - Additional argument to pass to the function.
+
+        For more information see https://redis.io/commands/tfcall/
+        """
+        return self._tfcall(lib_name, func_name, keys, False, *args)
+
+    def tfcall_async(
+        self,
+        lib_name: str,
+        func_name: str,
+        keys: KeysT = None,
+        *args: List,
+    ) -> ResponseT:
+        """
+        Invoke an async function (coroutine).
+
+        ``lib_name`` - the library name contains the function.
+        ``func_name`` - the function name to run.
+        ``keys`` - the keys that will be touched by the function.
+        ``args`` - Additional argument to pass to the function.
+
+        For more information see https://redis.io/commands/tfcall/
+        """
+        return self._tfcall(lib_name, func_name, keys, True, *args)
 
 
 AsyncGearsCommands = GearsCommands
