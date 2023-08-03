@@ -48,29 +48,8 @@ Connecting to an OSS Redis Cluster with RESP 3
     >>> r = RedisCluster(startup_nodes=[ClusterNode('localhost', 6379), ClusterNode('localhost', 6380)], protocol=3)
     >>> r.ping()
 
-New Features
-------------
-
-Sharded pubsub
-~~~~~~~~~~~~~~
-
-`Sharded pubsub <https://redis.io/docs/interact/pubsub/#:~:text=Sharded%20Pub%2FSub%20helps%20to,the%20shard%20of%20a%20cluster.>`_ is a feature introduced with Redis 7.0, and fully supported by redis-py as of 5.0. It helps scale the usage of pub/sub in cluster mode, by having the cluster shard messages to nodes that own a slot for a shard channel. Here, the cluster ensures the published shard messages are forwarded to the appropriate nodes. Clients subscribe to a channel by connecting to either the master responsible for the slot, or any of its replicas.
-
-This makes use of the `SSUBSCRIBE <https://redis.io/commands/ssubscribe>`_ and `SPUBLISH <https://redis.io/commands/spublish>`_ commands within Redis.
-
-The following, is a simplified example:
-
-.. code:: python
-
-    >>> from redis.cluster import RedisCluster, ClusterNode
-    >>> r = RedisCluster(startup_nodes=[ClusterNode('localhost', 6379), ClusterNode('localhost', 6380)], protocol=3)
-    >>> p = r.pubsub()
-    >>> p.ssubscribe('foo')
-    >>> # assume someone sends a message along the channel via a publish
-    >>> message = p.get_sharded_message()
-
 Push notifications
-~~~~~~~~~~~~~~~~~~
+------------------
 
 Push notifications are a way that redis sends out of band data. The RESP 3 protocol includes a `push type <https://github.com/redis/redis-specifications/blob/master/protocol/RESP3.md#push-type>`_ that allows our client to intercept these out of band messages. By default, clients will log simple messages, but redis-py includes the ability to bring your own function processor.
 
@@ -79,7 +58,7 @@ This means that should you want to perform something, on a given push notificati
 .. code:: python
 
     >> from redis import Redis
-    >> 
+    >>
     >> def our_func(message):
     >>    if message.find("This special thing happened"):
     >>        raise IOError("This was the message: \n" + message)

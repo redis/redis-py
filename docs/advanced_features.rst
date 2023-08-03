@@ -421,6 +421,24 @@ supported:
    >>> r.pubsub_numpat()
    1204
 
+Sharded pubsub
+~~~~~~~~~~~~~~
+
+`Sharded pubsub <https://redis.io/docs/interact/pubsub/#:~:text=Sharded%20Pub%2FSub%20helps%20to,the%20shard%20of%20a%20cluster.>`_ is a feature introduced with Redis 7.0, and fully supported by redis-py as of 5.0. It helps scale the usage of pub/sub in cluster mode, by having the cluster shard messages to nodes that own a slot for a shard channel. Here, the cluster ensures the published shard messages are forwarded to the appropriate nodes. Clients subscribe to a channel by connecting to either the master responsible for the slot, or any of its replicas.
+
+This makes use of the `SSUBSCRIBE <https://redis.io/commands/ssubscribe>`_ and `SPUBLISH <https://redis.io/commands/spublish>`_ commands within Redis.
+
+The following, is a simplified example:
+
+.. code:: python
+
+    >>> from redis.cluster import RedisCluster, ClusterNode
+    >>> r = RedisCluster(startup_nodes=[ClusterNode('localhost', 6379), ClusterNode('localhost', 6380)])
+    >>> p = r.pubsub()
+    >>> p.ssubscribe('foo')
+    >>> # assume someone sends a message along the channel via a publish
+    >>> message = p.get_sharded_message()
+
 Monitor
 ~~~~~~~
 
