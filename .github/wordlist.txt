@@ -68,6 +68,7 @@ backoff
 bdb
 behaviour
 bool
+boolean
 booleans
 bysource
 charset
@@ -79,6 +80,7 @@ firsttimersonly
 fo
 genindex
 gmail
+hiredis
 http
 idx
 iff
@@ -105,6 +107,7 @@ oss
 performant
 pmessage
 png
+pre
 psubscribe
 pubsub
 punsubscribe
@@ -118,9 +121,11 @@ redismodules
 reinitialization
 replicaof
 repo
+runtime
 sedrik
 ssl
 str
+stunnel
 subcommands
 thevalueofmykey
 timeseries
