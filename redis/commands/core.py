@@ -6070,12 +6070,6 @@ class ClusterCommands(CommandsProtocol):
         """
         return self.execute_command("READONLY", **kwargs)
 
-    def gears_refresh_cluster(self, **kwargs) -> ResponseT:
-        """
-        On an OSS cluster, before executing any gears function, you must call this command. # noqa
-        """
-        return self.execute_command("REDISGEARS_2.REFRESHCLUSTER", **kwargs)
-
 
 AsyncClusterCommands = ClusterCommands
 
