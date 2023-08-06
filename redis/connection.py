@@ -39,6 +39,7 @@ from redis.utils import (
     CRYPTOGRAPHY_AVAILABLE,
     HIREDIS_AVAILABLE,
     HIREDIS_PACK_AVAILABLE,
+    get_lib_version,
     str_if_bytes,
 )
 
@@ -605,6 +606,8 @@ class AbstractConnection:
         socket_read_size=65536,
         health_check_interval=0,
         client_name=None,
+        lib_name="redis-py",
+        lib_version=get_lib_version(),
         username=None,
         retry=None,
         redis_connect_func=None,
@@ -628,6 +631,8 @@ class AbstractConnection:
         self.pid = os.getpid()
         self.db = db
         self.client_name = client_name
+        self.lib_name = lib_name
+        self.lib_version = lib_version
         self.credential_provider = credential_provider
         self.password = password
         self.username = username
