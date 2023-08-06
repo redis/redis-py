@@ -268,10 +268,15 @@ async def test_connection_disconect_race(parser_class, connect_args):
     async def open_connection(*args, **kwargs):
         return reader, writer
 
+    async def dummy_method(*args, **kwargs):
+        pass
+
     # get dummy stream objects for the connection
     with patch.object(asyncio, "open_connection", open_connection):
         # disable the initial version handshake
-        with patch.multiple(conn, send_command=mock.DEFAULT, read_response=DEFAULT):
+        with patch.multiple(
+            conn, send_command=dummy_method, read_response=dummy_method
+        ):
             await conn.connect()
 
     vals = await asyncio.gather(do_read(), do_close())
