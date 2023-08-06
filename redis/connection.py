@@ -141,6 +141,8 @@ class AbstractConnection:
         socket_read_size=65536,
         health_check_interval=0,
         client_name=None,
+        lib_name="redis-py",
+        lib_version=get_lib_version(),
         username=None,
         retry=None,
         redis_connect_func=None,
@@ -165,6 +167,8 @@ class AbstractConnection:
         self.pid = os.getpid()
         self.db = db
         self.client_name = client_name
+        self.lib_name = lib_name
+        self.lib_version = lib_version
         self.credential_provider = credential_provider
         self.password = password
         self.username = username
@@ -363,10 +367,12 @@ class AbstractConnection:
 
         try:
             # set the library name and version
-            self.send_command("CLIENT", "SETINFO", "LIB-NAME", "redis-py")
-            self.read_response()
-            self.send_command("CLIENT", "SETINFO", "LIB-VER", get_lib_version())
-            self.read_response()
+            if self.lib_name:
+                self.send_command("CLIENT", "SETINFO", "LIB-NAME", self.lib_name)
+                self.read_response()
+            if self.lib_version:
+                self.send_command("CLIENT", "SETINFO", "LIB-VER", self.lib_version)
+                self.read_response()
         except ResponseError:
             pass
 

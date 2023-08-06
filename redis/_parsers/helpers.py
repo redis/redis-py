@@ -628,10 +628,11 @@ def parse_client_info(value):
     Parsing client-info in ACL Log in following format.
     "key1=value1 key2=value2 key3=value3"
     """
+    value = str_if_bytes(value)
     if value[-1] == "\n":
-        value = value[:1]
+        value = value[:-1]
     client_info = {}
-    infos = str_if_bytes(value).split(" ")
+    infos = value.split(" ")
     for info in infos:
         key, value = info.split("=")
         client_info[key] = value

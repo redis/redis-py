@@ -556,11 +556,23 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("7.2.0")
     def test_client_setinfo(self, r: redis.Redis):
+        r.ping()
+        info = r.client_info()
+        assert info["lib-name"] == "redis-py"
+        assert info["lib-ver"] == redis.__version__
         assert r.client_setinfo("lib-name", "test")
         assert r.client_setinfo("lib-ver", "123")
         info = r.client_info()
         assert info["lib-name"] == "test"
         assert info["lib-ver"] == "123"
+        r2 = redis.Redis(lib_name="test2", lib_version="1234")
+        info = r2.client_info()
+        assert info["lib-name"] == "test2"
+        assert info["lib-ver"] == "1234"
+        r3 = redis.Redis(lib_name=None, lib_version=None)
+        info = r3.client_info()
+        assert info["lib-name"] == ""
+        assert info["lib-ver"] == ""
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.9")

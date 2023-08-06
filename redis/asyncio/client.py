@@ -62,7 +62,13 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.typing import ChannelT, EncodableT, KeyT
-from redis.utils import HIREDIS_AVAILABLE, _set_info_logger, safe_str, str_if_bytes
+from redis.utils import (
+    HIREDIS_AVAILABLE,
+    _set_info_logger,
+    get_lib_version,
+    safe_str,
+    str_if_bytes,
+)
 
 PubSubHandler = Callable[[Dict[str, str]], Awaitable[None]]
 _KeyT = TypeVar("_KeyT", bound=KeyT)
@@ -187,6 +193,8 @@ class Redis(
         single_connection_client: bool = False,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
+        lib_name: Optional[str] = "redis-py",
+        lib_version: Optional[str] = get_lib_version(),
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
         auto_close_connection_pool: bool = True,
@@ -229,6 +237,8 @@ class Redis(
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
+                "lib_name": lib_name,
+                "lib_version": lib_version,
                 "redis_connect_func": redis_connect_func,
                 "protocol": protocol,
             }
