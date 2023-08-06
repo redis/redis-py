@@ -439,6 +439,20 @@ The following, is a simplified example:
     >>> # assume someone sends a message along the channel via a publish
     >>> message = p.get_sharded_message()
 
+Similarly, the same process can be used to acquire sharded pubsub messages, that have already been sent to a specific node, by passing the node to get_sharded_message:
+
+.. code:: python
+
+    >>> from redis.cluster import RedisCluster, ClusterNode
+    >>> first_node = ClusterNode['localhost', 6379]
+    >>> second_node = ClusterNode['localhost', 6380]
+    >>> r = RedisCluster(startup_nodes=[first_node, second_node])
+    >>> p = r.pubsub()
+    >>> p.ssubscribe('foo')
+    >>> # assume someone sends a message along the channel via a publish
+    >>> message = p.get_sharded_message(target_node=second_node)
+
+
 Monitor
 ~~~~~~~
 
