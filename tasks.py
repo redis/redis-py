@@ -21,7 +21,7 @@ def devenv(c):
 def build_docs(c):
     """Generates the sphinx documentation."""
     run("pip install -r docs/requirements.txt")
-    run("make html")
+    run("make -C docs html")
 
 
 @task

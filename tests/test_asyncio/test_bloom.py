@@ -365,7 +365,7 @@ async def test_tdigest_reset(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
-@pytest.mark.experimental
+@pytest.mark.onlynoncluster
 async def test_tdigest_merge(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("to-tDigest", 10)
     assert await decoded_r.tdigest().create("from-tDigest", 10)

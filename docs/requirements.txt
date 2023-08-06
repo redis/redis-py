@@ -5,3 +5,4 @@ sphinx_gallery
 ipython
 sphinx-autodoc-typehints
 furo
+pandoc

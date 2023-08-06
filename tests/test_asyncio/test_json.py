@@ -112,6 +112,7 @@ async def test_mgetshouldsucceed(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
+@pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.6.0", "ReJSON")
 async def test_mset(decoded_r: redis.Redis):
     await decoded_r.json().mset(
