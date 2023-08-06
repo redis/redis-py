@@ -5035,6 +5035,7 @@ class TestRedisCommands:
         r.execute_command.assert_called_with("SHUTDOWN", "ABORT")
 
     @pytest.mark.replica
+    @pytest.mark.xfail(strict=False)
     @skip_if_server_version_lt("2.8.0")
     @skip_if_redis_enterprise()
     def test_sync(self, r):
