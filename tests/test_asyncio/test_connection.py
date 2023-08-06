@@ -1,7 +1,7 @@
 import asyncio
 import socket
 import types
-from unittest.mock import DEFAULT, patch
+from unittest.mock import patch
 
 import pytest
 import redis
