@@ -633,7 +633,7 @@ def parse_client_info(value):
         value = value[:-1]
     client_info = {}
     infos = value.split(" ")
-    for info in infos:
+    for info in str_if_bytes(value).strip().split():
         key, value = info.split("=")
         client_info[key] = value
 
