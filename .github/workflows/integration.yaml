@@ -81,7 +81,7 @@ jobs:
            sleep 10 # time to settle
            invoke ${{matrix.test-type}}-tests
 
-       - uses: actions/upload-artifact@v2
+       - uses: actions/upload-artifact@v3
          if: success() || failure()
          with:
            name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}
