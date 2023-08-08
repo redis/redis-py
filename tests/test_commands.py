@@ -1791,6 +1791,57 @@ class TestRedisCommands:
         assert r.substr("a", 3, 5) == b"345"
         assert r.substr("a", 3, -2) == b"345678"
 
+    def generate_lib_code(self, lib_name):
+        return f"""#!js api_version=1.0 name={lib_name}\n redis.registerFunction('foo', ()=>{{return 'bar'}})"""  # noqa
+
+    def try_delete_libs(self, r, *lib_names):
+        for lib_name in lib_names:
+            try:
+                r.tfunction_delete(lib_name)
+            except Exception:
+                pass
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.1.140")
+    def test_tfunction_load_delete(self, r):
+        self.try_delete_libs(r, "lib1")
+        lib_code = self.generate_lib_code("lib1")
+        assert r.tfunction_load(lib_code)
+        assert r.tfunction_delete("lib1")
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.1.140")
+    def test_tfunction_list(self, r):
+        self.try_delete_libs(r, "lib1", "lib2", "lib3")
+        assert r.tfunction_load(self.generate_lib_code("lib1"))
+        assert r.tfunction_load(self.generate_lib_code("lib2"))
+        assert r.tfunction_load(self.generate_lib_code("lib3"))
+
+        # test error thrown when verbose > 4
+        with pytest.raises(redis.exceptions.DataError):
+            assert r.tfunction_list(verbose=8)
+
+        functions = r.tfunction_list(verbose=1)
+        assert len(functions) == 3
+
+        expected_names = [b"lib1", b"lib2", b"lib3"]
+        actual_names = [functions[0][13], functions[1][13], functions[2][13]]
+
+        assert sorted(expected_names) == sorted(actual_names)
+        assert r.tfunction_delete("lib1")
+        assert r.tfunction_delete("lib2")
+        assert r.tfunction_delete("lib3")
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.1.140")
+    def test_tfcall(self, r):
+        self.try_delete_libs(r, "lib1")
+        assert r.tfunction_load(self.generate_lib_code("lib1"))
+        assert r.tfcall("lib1", "foo") == b"bar"
+        assert r.tfcall_async("lib1", "foo") == b"bar"
+
+        assert r.tfunction_delete("lib1")
+
     def test_ttl(self, r):
         r["a"] = "1"
         assert r.expire("a", 10)
