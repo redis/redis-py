@@ -123,6 +123,7 @@ replicaof
 repo
 runtime
 sedrik
+sharded
 ssl
 str
 stunnel
