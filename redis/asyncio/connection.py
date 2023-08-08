@@ -357,9 +357,7 @@ class AbstractConnection:
         if self.lib_name:
             await self.send_command("CLIENT", "SETINFO", "LIB-NAME", self.lib_name)
         if self.lib_version:
-            await self.send_command(
-                "CLIENT", "SETINFO", "LIB-VER", self.lib_version
-            )
+            await self.send_command("CLIENT", "SETINFO", "LIB-VER", self.lib_version)
         # if a database is specified, switch to it. Also pipeline this
         if self.db:
             await self.send_command("SELECT", self.db)
@@ -373,7 +371,6 @@ class AbstractConnection:
         if self.db:
             if str_if_bytes(await self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
-            
 
         # if a database is specified, switch to it
         if self.db:
