@@ -44,13 +44,13 @@ Looking for a high-level library to handle object mapping? See [redis-om-python]
 
 The most recent version of this library supports redis version [5.0](https://github.com/redis/redis/blob/5.0/00-RELEASENOTES), [6.0](https://github.com/redis/redis/blob/6.0/00-RELEASENOTES), [6.2](https://github.com/redis/redis/blob/6.2/00-RELEASENOTES), and [7.0](https://github.com/redis/redis/blob/7.0/00-RELEASENOTES).
 
-The table below higlights version compatibility of the most-recent library versions and redis versions.
+The table below highlights version compatibility of the most-recent library versions and redis versions.
 
 | Library version | Supported redis versions |
 |-----------------|-------------------|
 | 3.5.3 | <= 6.2 Family of releases |
 | >= 4.5.0 | Version 5.0 to 7.0 |
-| >= 5.0.0 | Versiond 5.0 to current |
+| >= 5.0.0 | Version 5.0 to current |
 
 
 ## Usage
