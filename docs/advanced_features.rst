@@ -177,20 +177,48 @@ the server.
    ...     pipe.set('foo1', 'bar1').get('foo1').execute()
    [True, b'bar1']
 
-Please note: - RedisCluster pipelines currently only support key-based
-commands. - The pipeline gets its ‘read_from_replicas’ value from the
-cluster’s parameter. Thus, if read from replications is enabled in the
-cluster instance, the pipeline will also direct read commands to
-replicas. - The ‘transaction’ option is NOT supported in cluster-mode.
-In non-cluster mode, the ‘transaction’ option is available when
-executing pipelines. This wraps the pipeline commands with MULTI/EXEC
-commands, and effectively turns the pipeline commands into a single
-transaction block. This means that all commands are executed
-sequentially without any interruptions from other clients. However, in
-cluster-mode this is not possible, because commands are partitioned
-according to their respective destination nodes. This means that we can
-not turn the pipeline commands into one transaction block, because in
-most cases they are split up into several smaller pipelines.
+Please note:
+
+-  RedisCluster pipelines currently only support key-based commands.
+-  The pipeline gets its ‘read_from_replicas’ value from the
+   cluster’s parameter. Thus, if read from replications is enabled in
+   the cluster instance, the pipeline will also direct read commands to
+   replicas.
+
+
+Transactions in clusters
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Transactions are supported in cluster-mode with one caveat: all keys of
+all commands issued on a transaction pipeline must reside on the
+same slot. This is similar to the limitation of multikey commands in
+cluster. The reason behind this is that the Redis engine does not offer
+a mechanism to block or exchange key data across nodes on the fly. A
+client may add some logic to abstract engine limitations when running
+on a cluster, such as the pipeline behavior explained on the previous
+block, but there is no simple way that a client can enforce atomicity
+across nodes on a distributed system.
+
+The compromise of limiting the transaction pipeline to same-slot keys
+is exactly that: a compromise. While this behavior is differnet from
+non-transactional cluster pipelines, it simplifies migration of clients
+from standalone to cluster under some circumstances. Note that application
+code that issues multi/exec commands on a standalone client without
+embedding them within a pipeline would eventually get ‘AttributeError’s.
+With this approach, if the application uses ‘client.pipeline(transaction=True)’,
+then switching the client with a cluster-aware instance would simplify
+code changes (to some extent). This may be true for application code that
+makes use of hash keys, since its transactions may are already be
+mapping all commands to the same slot.
+
+An alternative is some kind of two-step commit solution, where a slot
+validation is run before the actual commands are run. This could work
+with controlled node maintenance but does not cover single node failures.
+
+Cluster transaction support (pipeline/multi/exec) was originally developed by
+Scopely and contributed to redis-py under the MIT License.
+
+
 
 Publish / Subscribe
 -------------------

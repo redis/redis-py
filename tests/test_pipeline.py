@@ -330,7 +330,6 @@ class TestPipeline:
         assert result == [True]
         assert r["c"] == b"4"
 
-    @pytest.mark.onlynoncluster
     def test_transaction_callable_returns_value_from_callable(self, r):
         def callback(pipe):
             # No need to do anything here since we only want the return value

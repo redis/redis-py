@@ -3009,23 +3009,9 @@ class TestClusterPipeline:
         They maybe implemented in the future.
         """
         pipe = r.pipeline()
-        with pytest.raises(RedisClusterException):
-            pipe.multi()
-
-        with pytest.raises(RedisClusterException):
-            pipe.immediate_execute_command()
-
-        with pytest.raises(RedisClusterException):
-            pipe._execute_transaction(None, None, None)
 
         with pytest.raises(RedisClusterException):
             pipe.load_scripts()
-
-        with pytest.raises(RedisClusterException):
-            pipe.watch()
-
-        with pytest.raises(RedisClusterException):
-            pipe.unwatch()
 
         with pytest.raises(RedisClusterException):
             pipe.script_load_for_pipeline(None)
@@ -3038,14 +3024,6 @@ class TestClusterPipeline:
         Currently some arguments is blocked when using in cluster mode.
         They maybe implemented in the future.
         """
-        with pytest.raises(RedisClusterException) as ex:
-            r.pipeline(transaction=True)
-
-        assert (
-            str(ex.value).startswith("transaction is deprecated in cluster mode")
-            is True
-        )
-
         with pytest.raises(RedisClusterException) as ex:
             r.pipeline(shard_hint=True)
 
@@ -3103,7 +3081,7 @@ class TestClusterPipeline:
             pipe.delete("a")
             assert pipe.execute() == [1]
 
-    def test_multi_delete_unsupported(self, r):
+    def test_multi_delete_unsupported_cross_slot(self, r):
         """
         Test that multi delete operation is unsupported
         """
@@ -3112,6 +3090,16 @@ class TestClusterPipeline:
             r["b"] = 2
             with pytest.raises(RedisClusterException):
                 pipe.delete("a", "b")
+
+    def test_multi_delete_supported_single_slot(self, r):
+        """
+        Test that multi delete operation is unsupported
+        """
+        with r.pipeline(transaction=False) as pipe:
+            r["{key}:a"] = 1
+            r["{key}:b"] = 2
+            pipe.delete("{key}:a", "{key}:b")
+            assert pipe.execute()
 
     def test_unlink_single(self, r):
         """
