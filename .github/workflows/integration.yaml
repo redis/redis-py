@@ -30,7 +30,7 @@ jobs:
      runs-on: ubuntu-latest
      steps:
        - uses: actions/checkout@v3
-       - uses: pypa/gh-action-pip-audit@v1.0.0
+       - uses: pypa/gh-action-pip-audit@v1.0.8
          with:
            inputs: requirements.txt dev_requirements.txt
            ignore-vulns: |
@@ -81,7 +81,7 @@ jobs:
            sleep 10 # time to settle
            invoke ${{matrix.test-type}}-tests
 
-       - uses: actions/upload-artifact@v2
+       - uses: actions/upload-artifact@v3
          if: success() || failure()
          with:
            name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}
