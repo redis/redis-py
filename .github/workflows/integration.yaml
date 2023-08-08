@@ -30,7 +30,7 @@ jobs:
      runs-on: ubuntu-latest
      steps:
        - uses: actions/checkout@v3
-       - uses: pypa/gh-action-pip-audit@v1.0.0
+       - uses: pypa/gh-action-pip-audit@v1.0.8
          with:
            inputs: requirements.txt dev_requirements.txt
            ignore-vulns: |
