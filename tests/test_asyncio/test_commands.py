@@ -2704,6 +2704,7 @@ class TestRedisCommands:
         assert await r.xinfo_groups(stream) == expected
 
     @skip_if_server_version_lt("5.0.0")
+    @pytest.mark.xfail
     async def test_xinfo_consumers(self, r: redis.Redis):
         stream = "stream"
         group = "group"

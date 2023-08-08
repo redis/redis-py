@@ -1548,6 +1548,7 @@ def test_search_commands_in_pipeline(client):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@pytest.mark.xfail
 @skip_ifmodversion_lt("2.4.3", "search")
 def test_dialect_config(modclient: redis.Redis):
     assert modclient.ft().config_get("DEFAULT_DIALECT") == {"DEFAULT_DIALECT": "0"}

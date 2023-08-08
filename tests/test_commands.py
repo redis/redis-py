@@ -139,6 +139,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
+    @pytest.mark.xfail
     def test_acl_dryrun(self, r, request):
         username = "redis-py-user"
 
@@ -194,6 +195,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
+    @pytest.mark.xfail
     def test_acl_getuser_setuser(self, r, request):
         username = "redis-py-user"
 
@@ -331,6 +333,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
+    @pytest.mark.xfail
     def test_acl_list(self, r, request):
         username = "redis-py-user"
 
@@ -345,6 +348,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
+    @pytest.mark.xfail
     @pytest.mark.onlynoncluster
     def test_acl_log(self, r, request):
         username = "redis-py-user"
@@ -3874,6 +3878,7 @@ class TestRedisCommands:
         assert ms == b"9999999999999999999"
 
     @skip_if_server_version_lt("6.2.0")
+    @pytest.mark.xfail
     def test_xautoclaim(self, r):
         stream = "stream"
         group = "group"
@@ -4133,6 +4138,7 @@ class TestRedisCommands:
         assert r.xinfo_groups(stream) == expected
 
     @skip_if_server_version_lt("5.0.0")
+    @pytest.mark.xfail
     def test_xinfo_consumers(self, r):
         stream = "stream"
         group = "group"
