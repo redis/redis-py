@@ -27,7 +27,7 @@ from redis.exceptions import (
 )
 from redis.lock import Lock
 from redis.retry import Retry
-from redis.utils import safe_str, str_if_bytes
+from redis.utils import get_lib_version, safe_str, str_if_bytes
 
 SYM_EMPTY = b""
 EMPTY_RESPONSE = "EMPTY_RESPONSE"
@@ -643,7 +643,11 @@ def parse_client_info(value):
     "key1=value1 key2=value2 key3=value3"
     """
     client_info = {}
+    value = str_if_bytes(value)
+    if value[-1] == "\n":
+        value = value[:-1]
     infos = str_if_bytes(value).split(" ")
+    infos = value.split(" ")
     for info in infos:
         key, value = info.split("=")
         client_info[key] = value
@@ -754,6 +758,7 @@ class AbstractRedis:
         "CLIENT SETNAME": bool_ok,
         "CLIENT UNBLOCK": lambda r: r and int(r) == 1 or False,
         "CLIENT PAUSE": bool_ok,
+        "CLIENT SETINFO": bool_ok,
         "CLIENT GETREDIR": int,
         "CLIENT TRACKINGINFO": lambda r: list(map(str_if_bytes, r)),
         "CLUSTER ADDSLOTS": bool_ok,
@@ -949,6 +954,8 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
         single_connection_client=False,
         health_check_interval=0,
         client_name=None,
+        lib_name="redis-py",
+        lib_version=get_lib_version(),
         username=None,
         retry=None,
         redis_connect_func=None,
@@ -999,6 +1006,8 @@ class Redis(AbstractRedis, RedisModuleCommands, CoreCommands, SentinelCommands):
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
+                "lib_name": lib_name,
+                "lib_version": lib_version,
                 "redis_connect_func": redis_connect_func,
                 "credential_provider": credential_provider,
             }

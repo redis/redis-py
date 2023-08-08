@@ -1,3 +1,4 @@
+import sys
 from contextlib import contextmanager
 from functools import wraps
 from typing import Any, Dict, Mapping, Union
@@ -12,6 +13,10 @@ except ImportError:
     HIREDIS_AVAILABLE = False
     HIREDIS_PACK_AVAILABLE = False
 
+if sys.version_info >= (3, 8):
+    from importlib import metadata
+else:
+    import importlib_metadata as metadata
 try:
     import cryptography  # noqa
 
@@ -110,3 +115,11 @@ def deprecated_function(reason="", version="", name=None):
         return wrapper
 
     return decorator
+
+
+def get_lib_version():
+    try:
+        libver = metadata.version("redis")
+    except metadata.PackageNotFoundError:
+        libver = "99.99.99"
+    return libver
