@@ -643,12 +643,7 @@ def parse_client_info(value):
     "key1=value1 key2=value2 key3=value3"
     """
     client_info = {}
-    value = str_if_bytes(value)
-    if value[-1] == "\n":
-        value = value[:-1]
-    infos = str_if_bytes(value).split(" ")
-    infos = value.split(" ")
-    for info in infos:
+    for info in str_if_bytes(value).strip().split():
         key, value = info.split("=")
         client_info[key] = value
 

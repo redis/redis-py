@@ -783,6 +783,21 @@ class AbstractConnection:
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Error setting client name")
 
+        try:
+            # set the library name and version
+            if self.lib_name:
+                self.send_command("CLIENT", "SETINFO", "LIB-NAME", self.lib_name)
+                self.read_response()
+        except ResponseError:
+            pass
+
+        try:
+            if self.lib_version:
+                self.send_command("CLIENT", "SETINFO", "LIB-VER", self.lib_version)
+                self.read_response()
+        except ResponseError:
+            pass
+
         # if a database is specified, switch to it
         if self.db:
             self.send_command("SELECT", self.db)
