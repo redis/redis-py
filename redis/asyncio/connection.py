@@ -368,13 +368,8 @@ class AbstractConnection:
                 await self.read_response()
             except ResponseError:
                 pass
-        if self.db:
-            if str_if_bytes(await self.read_response()) != "OK":
-                raise ConnectionError("Invalid Database")
 
-        # if a database is specified, switch to it
         if self.db:
-            await self.send_command("SELECT", self.db)
             if str_if_bytes(await self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
