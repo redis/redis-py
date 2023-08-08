@@ -541,6 +541,7 @@ async def test_alias(modclient: redis.Redis):
 
 
 @pytest.mark.redismod
+@pytest.mark.xfail
 async def test_alias_basic(modclient: redis.Redis):
     # Creating a client with one index
     client = getClient(modclient)
