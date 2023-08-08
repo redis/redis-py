@@ -370,6 +370,10 @@ class AbstractConnection:
             if self.lib_name:
                 self.send_command("CLIENT", "SETINFO", "LIB-NAME", self.lib_name)
                 self.read_response()
+        except ResponseError:
+            pass
+
+        try:
             if self.lib_version:
                 self.send_command("CLIENT", "SETINFO", "LIB-VER", self.lib_version)
                 self.read_response()
