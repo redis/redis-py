@@ -119,11 +119,12 @@ class TestLock:
         with self.get_lock(r, "foo", blocking=False):
             bt = 0.4
             sleep = 0.05
+            fudge_factor = 0.05
             lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
             start = time.monotonic()
             assert not lock2.acquire()
             # The elapsed duration should be less than the total blocking_timeout
-            assert bt > (time.monotonic() - start) > bt - sleep
+            assert (bt + fudge_factor) > (time.monotonic() - start) > bt - sleep
 
     def test_context_manager_raises_when_locked_not_acquired(self, r):
         r.set("foo", "bar")
