@@ -131,6 +131,7 @@ def pytest_sessionstart(session):
         enterprise = info["enterprise"]
     except redis.ConnectionError:
         # provide optimistic defaults
+        info = {}
         version = "10.0.0"
         arch_bits = 64
         cluster_enabled = False
@@ -145,9 +146,7 @@ def pytest_sessionstart(session):
     # module info
     try:
         REDIS_INFO["modules"] = info["modules"]
-    except redis.exceptions.ConnectionError:
-        pass
-    except KeyError:
+    except (KeyError, redis.exceptions.ConnectionError):
         pass
 
     if cluster_enabled:

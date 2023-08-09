@@ -30,10 +30,12 @@ from .core import (
     AsyncACLCommands,
     AsyncDataAccessCommands,
     AsyncFunctionCommands,
+    AsyncGearsCommands,
     AsyncManagementCommands,
     AsyncScriptCommands,
     DataAccessCommands,
     FunctionCommands,
+    GearsCommands,
     ManagementCommands,
     PubSubCommands,
     ResponseT,
@@ -689,6 +691,12 @@ class ClusterManagementCommands(ManagementCommands):
         self.read_from_replicas = False
         return self.execute_command("READWRITE", target_nodes=target_nodes)
 
+    def gears_refresh_cluster(self, **kwargs) -> ResponseT:
+        """
+        On an OSS cluster, before executing any gears function, you must call this command. # noqa
+        """
+        return self.execute_command("REDISGEARS_2.REFRESHCLUSTER", **kwargs)
+
 
 class AsyncClusterManagementCommands(
     ClusterManagementCommands, AsyncManagementCommands
@@ -864,6 +872,7 @@ class RedisClusterCommands(
     ClusterDataAccessCommands,
     ScriptCommands,
     FunctionCommands,
+    GearsCommands,
     RedisModuleCommands,
 ):
     """
@@ -893,6 +902,7 @@ class AsyncRedisClusterCommands(
     AsyncClusterDataAccessCommands,
     AsyncScriptCommands,
     AsyncFunctionCommands,
+    AsyncGearsCommands,
 ):
     """
     A class for all Redis Cluster commands

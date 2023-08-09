@@ -49,7 +49,7 @@ from redis.exceptions import (
     TimeoutError,
 )
 from redis.typing import EncodableT
-from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
+from redis.utils import HIREDIS_AVAILABLE, get_lib_version, str_if_bytes
 
 from .._parsers import (
     BaseParser,
@@ -101,6 +101,8 @@ class AbstractConnection:
         "db",
         "username",
         "client_name",
+        "lib_name",
+        "lib_version",
         "credential_provider",
         "password",
         "socket_timeout",
@@ -140,6 +142,8 @@ class AbstractConnection:
         socket_read_size: int = 65536,
         health_check_interval: float = 0,
         client_name: Optional[str] = None,
+        lib_name: Optional[str] = "redis-py",
+        lib_version: Optional[str] = get_lib_version(),
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
         redis_connect_func: Optional[ConnectCallbackT] = None,
@@ -157,6 +161,8 @@ class AbstractConnection:
         self.pid = os.getpid()
         self.db = db
         self.client_name = client_name
+        self.lib_name = lib_name
+        self.lib_version = lib_version
         self.credential_provider = credential_provider
         self.password = password
         self.username = username
@@ -347,9 +353,23 @@ class AbstractConnection:
             if str_if_bytes(await self.read_response()) != "OK":
                 raise ConnectionError("Error setting client name")
 
-        # if a database is specified, switch to it
+        # set the library name and version, pipeline for lower startup latency
+        if self.lib_name:
+            await self.send_command("CLIENT", "SETINFO", "LIB-NAME", self.lib_name)
+        if self.lib_version:
+            await self.send_command("CLIENT", "SETINFO", "LIB-VER", self.lib_version)
+        # if a database is specified, switch to it. Also pipeline this
         if self.db:
             await self.send_command("SELECT", self.db)
+
+        # read responses from pipeline
+        for _ in (sent for sent in (self.lib_name, self.lib_version) if sent):
+            try:
+                await self.read_response()
+            except ResponseError:
+                pass
+
+        if self.db:
             if str_if_bytes(await self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
