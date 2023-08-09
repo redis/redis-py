@@ -63,7 +63,7 @@ from redis.exceptions import (
     TryAgainError,
 )
 from redis.typing import AnyKeyT, EncodableT, KeyT
-from redis.utils import dict_merge, safe_str, str_if_bytes
+from redis.utils import dict_merge, get_lib_version, safe_str, str_if_bytes
 
 TargetNodesT = TypeVar(
     "TargetNodesT", str, "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
@@ -238,6 +238,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         username: Optional[str] = None,
         password: Optional[str] = None,
         client_name: Optional[str] = None,
+        lib_name: Optional[str] = "redis-py",
+        lib_version: Optional[str] = get_lib_version(),
         # Encoding related kwargs
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
@@ -288,6 +290,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "username": username,
             "password": password,
             "client_name": client_name,
+            "lib_name": lib_name,
+            "lib_version": lib_version,
             # Encoding related kwargs
             "encoding": encoding,
             "encoding_errors": encoding_errors,
