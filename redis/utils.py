@@ -1,4 +1,5 @@
 import logging
+import sys
 from contextlib import contextmanager
 from functools import wraps
 from typing import Any, Dict, Mapping, Union
@@ -26,6 +27,11 @@ try:
     CRYPTOGRAPHY_AVAILABLE = True
 except ImportError:
     CRYPTOGRAPHY_AVAILABLE = False
+
+if sys.version_info >= (3, 8):
+    from importlib import metadata
+else:
+    import importlib_metadata as metadata
 
 
 def from_url(url, **kwargs):
@@ -131,3 +137,11 @@ def _set_info_logger():
         handler = logging.StreamHandler()
         handler.setLevel(logging.INFO)
         logger.addHandler(handler)
+
+
+def get_lib_version():
+    try:
+        libver = metadata.version("redis")
+    except metadata.PackageNotFoundError:
+        libver = "99.99.99"
+    return libver

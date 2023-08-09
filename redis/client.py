@@ -31,7 +31,13 @@ from redis.exceptions import (
 )
 from redis.lock import Lock
 from redis.retry import Retry
-from redis.utils import HIREDIS_AVAILABLE, _set_info_logger, safe_str, str_if_bytes
+from redis.utils import (
+    HIREDIS_AVAILABLE,
+    _set_info_logger,
+    get_lib_version,
+    safe_str,
+    str_if_bytes,
+)
 
 SYM_EMPTY = b""
 EMPTY_RESPONSE = "EMPTY_RESPONSE"
@@ -171,6 +177,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         single_connection_client=False,
         health_check_interval=0,
         client_name=None,
+        lib_name="redis-py",
+        lib_version=get_lib_version(),
         username=None,
         retry=None,
         redis_connect_func=None,
@@ -222,6 +230,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
+                "lib_name": lib_name,
+                "lib_version": lib_version,
                 "redis_connect_func": redis_connect_func,
                 "credential_provider": credential_provider,
                 "protocol": protocol,

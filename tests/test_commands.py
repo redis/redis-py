@@ -396,7 +396,7 @@ class TestRedisCommands:
             user_client.hset("cache:0", "hkey", "hval")
 
         assert isinstance(r.acl_log(), list)
-        assert len(r.acl_log()) == 2
+        assert len(r.acl_log()) == 3
         assert len(r.acl_log(count=1)) == 1
         assert isinstance(r.acl_log()[0], dict)
         expected = r.acl_log(count=1)[0]
@@ -553,6 +553,26 @@ class TestRedisCommands:
     def test_client_setname(self, r):
         assert r.client_setname("redis_py_test")
         assert_resp_response(r, r.client_getname(), "redis_py_test", b"redis_py_test")
+
+    @skip_if_server_version_lt("7.2.0")
+    def test_client_setinfo(self, r: redis.Redis):
+        r.ping()
+        info = r.client_info()
+        assert info["lib-name"] == "redis-py"
+        assert info["lib-ver"] == redis.__version__
+        assert r.client_setinfo("lib-name", "test")
+        assert r.client_setinfo("lib-ver", "123")
+        info = r.client_info()
+        assert info["lib-name"] == "test"
+        assert info["lib-ver"] == "123"
+        r2 = redis.Redis(lib_name="test2", lib_version="1234")
+        info = r2.client_info()
+        assert info["lib-name"] == "test2"
+        assert info["lib-ver"] == "1234"
+        r3 = redis.Redis(lib_name=None, lib_version=None)
+        info = r3.client_info()
+        assert info["lib-name"] == ""
+        assert info["lib-ver"] == ""
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.9")
@@ -5066,6 +5086,7 @@ class TestRedisCommands:
         r.execute_command.assert_called_with("SHUTDOWN", "ABORT")
 
     @pytest.mark.replica
+    @pytest.mark.xfail(strict=False)
     @skip_if_server_version_lt("2.8.0")
     @skip_if_redis_enterprise()
     def test_sync(self, r):

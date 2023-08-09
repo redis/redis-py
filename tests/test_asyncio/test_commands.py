@@ -273,7 +273,7 @@ class TestRedisCommands:
             await user_client.hset("cache:0", "hkey", "hval")
 
         assert isinstance(await r.acl_log(), list)
-        assert len(await r.acl_log()) == 2
+        assert len(await r.acl_log()) == 3
         assert len(await r.acl_log(count=1)) == 1
         assert isinstance((await r.acl_log())[0], dict)
         expected = (await r.acl_log(count=1))[0]
@@ -354,6 +354,26 @@ class TestRedisCommands:
         assert_resp_response(
             r, await r.client_getname(), "redis_py_test", b"redis_py_test"
         )
+
+    @skip_if_server_version_lt("7.2.0")
+    async def test_client_setinfo(self, r: redis.Redis):
+        await r.ping()
+        info = await r.client_info()
+        assert info["lib-name"] == "redis-py"
+        assert info["lib-ver"] == redis.__version__
+        assert await r.client_setinfo("lib-name", "test")
+        assert await r.client_setinfo("lib-ver", "123")
+        info = await r.client_info()
+        assert info["lib-name"] == "test"
+        assert info["lib-ver"] == "123"
+        r2 = redis.asyncio.Redis(lib_name="test2", lib_version="1234")
+        info = await r2.client_info()
+        assert info["lib-name"] == "test2"
+        assert info["lib-ver"] == "1234"
+        r3 = redis.asyncio.Redis(lib_name=None, lib_version=None)
+        info = await r3.client_info()
+        assert info["lib-name"] == ""
+        assert info["lib-ver"] == ""
 
     @skip_if_server_version_lt("2.6.9")
     @pytest.mark.onlynoncluster
