@@ -37,6 +37,7 @@ class Query:
         self._language = None
         self._expander = None
         self._dialect = None
+        self._payload = None
 
     def query_string(self):
         """Return the query string of this query only."""
@@ -213,6 +214,8 @@ class Query:
             args += ["EXPANDER", self._expander]
         if self._dialect:
             args += ["DIALECT", self._dialect]
+        if self._payload:
+            args += ["PAYLOAD", self._payload]
 
         return args
 
@@ -306,6 +309,15 @@ class Query:
         - **dialect** - dialect version to execute the query under
         """
         self._dialect = dialect
+        return self
+
+    def payload(self, payload):
+        """
+        Add a payload field to the query.
+
+        - **payload** - payload
+        """
+        self._payload = payload
         return self
 
 
