@@ -24,7 +24,7 @@ The following trivial Lua script accepts two parameters: the name of a
 key and a multiplier value. The script fetches the value stored in the
 key, multiplies it with the multiplier value and returns the result.
 
-.. code:: pycon
+.. code:: python
 
    >>> r = redis.Redis()
    >>> lua = """
@@ -47,7 +47,7 @@ function. Script instances accept the following optional arguments:
 
 Continuing the example from above:
 
-.. code:: pycon
+.. code:: python
 
    >>> r.set('foo', 2)
    >>> multiply(keys=['foo'], args=[5])
@@ -60,7 +60,7 @@ executes the script and returns the result, 10.
 Script instances can be executed using a different client instance, even
 one that points to a completely different Redis server.
 
-.. code:: pycon
+.. code:: python
 
    >>> r2 = redis.Redis('redis2.example.com')
    >>> r2.set('foo', 3)
@@ -79,7 +79,7 @@ should be passed as the client argument when calling the script. Care is
 taken to ensure that the script is registered in Redis's script cache
 just prior to pipeline execution.
 
-.. code:: pycon
+.. code:: python
 
    >>> pipe = r.pipeline()
    >>> pipe.set('foo', 5)

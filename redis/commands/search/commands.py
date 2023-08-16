@@ -63,6 +63,86 @@ WITHPAYLOADS = "WITHPAYLOADS"
 class SearchCommands:
     """Search commands."""
 
+    def _parse_results(self, cmd, res, **kwargs):
+        if self.client.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
+            return res
+        else:
+            return self._RESP2_MODULE_CALLBACKS[cmd](res, **kwargs)
+
+    def _parse_info(self, res, **kwargs):
+        it = map(to_string, res)
+        return dict(zip(it, it))
+
+    def _parse_search(self, res, **kwargs):
+        return Result(
+            res,
+            not kwargs["query"]._no_content,
+            duration=kwargs["duration"],
+            has_payload=kwargs["query"]._with_payloads,
+            with_scores=kwargs["query"]._with_scores,
+        )
+
+    def _parse_aggregate(self, res, **kwargs):
+        return self._get_aggregate_result(res, kwargs["query"], kwargs["has_cursor"])
+
+    def _parse_profile(self, res, **kwargs):
+        query = kwargs["query"]
+        if isinstance(query, AggregateRequest):
+            result = self._get_aggregate_result(res[0], query, query._cursor)
+        else:
+            result = Result(
+                res[0],
+                not query._no_content,
+                duration=kwargs["duration"],
+                has_payload=query._with_payloads,
+                with_scores=query._with_scores,
+            )
+
+        return result, parse_to_dict(res[1])
+
+    def _parse_spellcheck(self, res, **kwargs):
+        corrections = {}
+        if res == 0:
+            return corrections
+
+        for _correction in res:
+            if isinstance(_correction, int) and _correction == 0:
+                continue
+
+            if len(_correction) != 3:
+                continue
+            if not _correction[2]:
+                continue
+            if not _correction[2][0]:
+                continue
+
+            # For spellcheck output
+            # 1)  1) "TERM"
+            #     2) "{term1}"
+            #     3)  1)  1)  "{score1}"
+            #             2)  "{suggestion1}"
+            #         2)  1)  "{score2}"
+            #             2)  "{suggestion2}"
+            #
+            # Following dictionary will be made
+            # corrections = {
+            #     '{term1}': [
+            #         {'score': '{score1}', 'suggestion': '{suggestion1}'},
+            #         {'score': '{score2}', 'suggestion': '{suggestion2}'}
+            #     ]
+            # }
+            corrections[_correction[1]] = [
+                {"score": _item[0], "suggestion": _item[1]} for _item in _correction[2]
+            ]
+
+        return corrections
+
+    def _parse_config_get(self, res, **kwargs):
+        return {kvs[0]: kvs[1] for kvs in res} if res else {}
+
+    def _parse_syndump(self, res, **kwargs):
+        return {res[i]: res[i + 1] for i in range(0, len(res), 2)}
+
     def batch_indexer(self, chunk_size=100):
         """
         Create a new batch indexer from the client with a given chunk size
@@ -368,11 +448,10 @@ class SearchCommands:
         """
 
         res = self.execute_command(INFO_CMD, self.index_name)
-        it = map(to_string, res)
-        return dict(zip(it, it))
+        return self._parse_results(INFO_CMD, res)
 
     def get_params_args(
-        self, query_params: Union[Dict[str, Union[str, int, float]], None]
+        self, query_params: Union[Dict[str, Union[str, int, float, bytes]], None]
     ):
         if query_params is None:
             return []
@@ -385,7 +464,9 @@ class SearchCommands:
                 args.append(value)
         return args
 
-    def _mk_query_args(self, query, query_params: Dict[str, Union[str, int, float]]):
+    def _mk_query_args(
+        self, query, query_params: Union[Dict[str, Union[str, int, float, bytes]], None]
+    ):
         args = [self.index_name]
 
         if isinstance(query, str):
@@ -402,7 +483,7 @@ class SearchCommands:
     def search(
         self,
         query: Union[str, Query],
-        query_params: Dict[str, Union[str, int, float]] = None,
+        query_params: Union[Dict[str, Union[str, int, float, bytes]], None] = None,
     ):
         """
         Search the index for a given query, and return a result of documents
@@ -422,12 +503,8 @@ class SearchCommands:
         if isinstance(res, Pipeline):
             return res
 
-        return Result(
-            res,
-            not query._no_content,
-            duration=(time.time() - st) * 1000.0,
-            has_payload=query._with_payloads,
-            with_scores=query._with_scores,
+        return self._parse_results(
+            SEARCH_CMD, res, query=query, duration=(time.time() - st) * 1000.0
         )
 
     def explain(
@@ -473,7 +550,9 @@ class SearchCommands:
         cmd += self.get_params_args(query_params)
 
         raw = self.execute_command(*cmd)
-        return self._get_aggregate_result(raw, query, has_cursor)
+        return self._parse_results(
+            AGGREGATE_CMD, raw, query=query, has_cursor=has_cursor
+        )
 
     def _get_aggregate_result(self, raw, query, has_cursor):
         if has_cursor:
@@ -531,18 +610,9 @@ class SearchCommands:
 
         res = self.execute_command(*cmd)
 
-        if isinstance(query, AggregateRequest):
-            result = self._get_aggregate_result(res[0], query, query._cursor)
-        else:
-            result = Result(
-                res[0],
-                not query._no_content,
-                duration=(time.time() - st) * 1000.0,
-                has_payload=query._with_payloads,
-                with_scores=query._with_scores,
-            )
-
-        return result, parse_to_dict(res[1])
+        return self._parse_results(
+            PROFILE_CMD, res, query=query, duration=(time.time() - st) * 1000.0
+        )
 
     def spellcheck(self, query, distance=None, include=None, exclude=None):
         """
@@ -568,43 +638,9 @@ class SearchCommands:
         if exclude:
             cmd.extend(["TERMS", "EXCLUDE", exclude])
 
-        raw = self.execute_command(*cmd)
+        res = self.execute_command(*cmd)
 
-        corrections = {}
-        if raw == 0:
-            return corrections
-
-        for _correction in raw:
-            if isinstance(_correction, int) and _correction == 0:
-                continue
-
-            if len(_correction) != 3:
-                continue
-            if not _correction[2]:
-                continue
-            if not _correction[2][0]:
-                continue
-
-            # For spellcheck output
-            # 1)  1) "TERM"
-            #     2) "{term1}"
-            #     3)  1)  1)  "{score1}"
-            #             2)  "{suggestion1}"
-            #         2)  1)  "{score2}"
-            #             2)  "{suggestion2}"
-            #
-            # Following dictionary will be made
-            # corrections = {
-            #     '{term1}': [
-            #         {'score': '{score1}', 'suggestion': '{suggestion1}'},
-            #         {'score': '{score2}', 'suggestion': '{suggestion2}'}
-            #     ]
-            # }
-            corrections[_correction[1]] = [
-                {"score": _item[0], "suggestion": _item[1]} for _item in _correction[2]
-            ]
-
-        return corrections
+        return self._parse_results(SPELLCHECK_CMD, res)
 
     def dict_add(self, name, *terms):
         """Adds terms to a dictionary.
@@ -670,12 +706,8 @@ class SearchCommands:
         For more information see `FT.CONFIG GET <https://redis.io/commands/ft.config-get>`_.
         """  # noqa
         cmd = [CONFIG_CMD, "GET", option]
-        res = {}
-        raw = self.execute_command(*cmd)
-        if raw:
-            for kvs in raw:
-                res[kvs[0]] = kvs[1]
-        return res
+        res = self.execute_command(*cmd)
+        return self._parse_results(CONFIG_CMD, res)
 
     def tagvals(self, tagfield):
         """
@@ -810,12 +842,12 @@ class SearchCommands:
         if with_payloads:
             args.append(WITHPAYLOADS)
 
-        ret = self.execute_command(*args)
+        res = self.execute_command(*args)
         results = []
-        if not ret:
+        if not res:
             return results
 
-        parser = SuggestionParser(with_scores, with_payloads, ret)
+        parser = SuggestionParser(with_scores, with_payloads, res)
         return [s for s in parser]
 
     def synupdate(self, groupid, skipinitial=False, *terms):
@@ -851,8 +883,8 @@ class SearchCommands:
 
         For more information see `FT.SYNDUMP <https://redis.io/commands/ft.syndump>`_.
         """  # noqa
-        raw = self.execute_command(SYNDUMP_CMD, self.index_name)
-        return {raw[i]: raw[i + 1] for i in range(0, len(raw), 2)}
+        res = self.execute_command(SYNDUMP_CMD, self.index_name)
+        return self._parse_results(SYNDUMP_CMD, res)
 
 
 class AsyncSearchCommands(SearchCommands):
@@ -865,8 +897,7 @@ class AsyncSearchCommands(SearchCommands):
         """
 
         res = await self.execute_command(INFO_CMD, self.index_name)
-        it = map(to_string, res)
-        return dict(zip(it, it))
+        return self._parse_results(INFO_CMD, res)
 
     async def search(
         self,
@@ -891,12 +922,8 @@ class AsyncSearchCommands(SearchCommands):
         if isinstance(res, Pipeline):
             return res
 
-        return Result(
-            res,
-            not query._no_content,
-            duration=(time.time() - st) * 1000.0,
-            has_payload=query._with_payloads,
-            with_scores=query._with_scores,
+        return self._parse_results(
+            SEARCH_CMD, res, query=query, duration=(time.time() - st) * 1000.0
         )
 
     async def aggregate(
@@ -927,7 +954,9 @@ class AsyncSearchCommands(SearchCommands):
         cmd += self.get_params_args(query_params)
 
         raw = await self.execute_command(*cmd)
-        return self._get_aggregate_result(raw, query, has_cursor)
+        return self._parse_results(
+            AGGREGATE_CMD, raw, query=query, has_cursor=has_cursor
+        )
 
     async def spellcheck(self, query, distance=None, include=None, exclude=None):
         """
@@ -953,28 +982,9 @@ class AsyncSearchCommands(SearchCommands):
         if exclude:
             cmd.extend(["TERMS", "EXCLUDE", exclude])
 
-        raw = await self.execute_command(*cmd)
+        res = await self.execute_command(*cmd)
 
-        corrections = {}
-        if raw == 0:
-            return corrections
-
-        for _correction in raw:
-            if isinstance(_correction, int) and _correction == 0:
-                continue
-
-            if len(_correction) != 3:
-                continue
-            if not _correction[2]:
-                continue
-            if not _correction[2][0]:
-                continue
-
-            corrections[_correction[1]] = [
-                {"score": _item[0], "suggestion": _item[1]} for _item in _correction[2]
-            ]
-
-        return corrections
+        return self._parse_results(SPELLCHECK_CMD, res)
 
     async def config_set(self, option, value):
         """Set runtime configuration option.
@@ -1001,11 +1011,8 @@ class AsyncSearchCommands(SearchCommands):
         """  # noqa
         cmd = [CONFIG_CMD, "GET", option]
         res = {}
-        raw = await self.execute_command(*cmd)
-        if raw:
-            for kvs in raw:
-                res[kvs[0]] = kvs[1]
-        return res
+        res = await self.execute_command(*cmd)
+        return self._parse_results(CONFIG_CMD, res)
 
     async def load_document(self, id):
         """

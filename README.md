@@ -13,11 +13,9 @@ The Python interface to the Redis key-value store.
 
 ---------------------------------------------
 
-## Python Notice
+**Note: ** redis-py 5.0 will be the last version of redis-py to support Python 3.7, as it has reached [end of life](https://devguide.python.org/versions/). redis-py 5.1 will support Python 3.8+.
 
-redis-py 4.3.x will be the last generation of redis-py to support python 3.6 as it has been [End of Life'd](https://www.python.org/dev/peps/pep-0494/#schedule-last-security-only-release).  Async support was introduced in redis-py 4.2.x thanks to [aioredis](https://github.com/aio-libs/aioredis-py), which necessitates this change. We will continue to maintain 3.6 support as long as possible - but the plan is for redis-py version 4.4+ to officially remove 3.6.
-
----------------------------
+---------------------------------------------
 
 ## Installation
 
@@ -37,10 +35,23 @@ For faster performance, install redis with hiredis support, this provides a comp
 By default, if hiredis >= 1.0 is available, redis-py will attempt to use it for response parsing.
 
 ``` bash
-$ pip install redis[hiredis]
+$ pip install "redis[hiredis]"
 ```
 
 Looking for a high-level library to handle object mapping? See [redis-om-python](https://github.com/redis/redis-om-python)!
+
+## Supported Redis Versions
+
+The most recent version of this library supports redis version [5.0](https://github.com/redis/redis/blob/5.0/00-RELEASENOTES), [6.0](https://github.com/redis/redis/blob/6.0/00-RELEASENOTES), [6.2](https://github.com/redis/redis/blob/6.2/00-RELEASENOTES), and [7.0](https://github.com/redis/redis/blob/7.0/00-RELEASENOTES).
+
+The table below highlights version compatibility of the most-recent library versions and redis versions.
+
+| Library version | Supported redis versions |
+|-----------------|-------------------|
+| 3.5.3 | <= 6.2 Family of releases |
+| >= 4.5.0 | Version 5.0 to 7.0 |
+| >= 5.0.0 | Version 5.0 to current |
+
 
 ## Usage
 
@@ -56,6 +67,15 @@ b'bar'
 ```
 
 The above code connects to localhost on port 6379, sets a value in Redis, and retrieves it. All responses are returned as bytes in Python, to receive decoded strings, set *decode_responses=True*.  For this, and more connection options, see [these examples](https://redis.readthedocs.io/en/stable/examples.html).
+
+
+#### RESP3 Support
+To enable support for RESP3, ensure you have at least version 5.0 of the client, and change your connection object to include *protocol=3*
+
+``` python
+>>> import redis
+>>> r = redis.Redis(host='localhost', port=6379, db=0, protocol=3)
+```
 
 ### Connection Pools
 

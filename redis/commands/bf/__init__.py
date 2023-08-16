@@ -1,6 +1,6 @@
-from redis.client import bool_ok
+from redis._parsers.helpers import bool_ok
 
-from ..helpers import parse_to_list
+from ..helpers import get_protocol_version, parse_to_list
 from .commands import *  # noqa
 from .info import BFInfo, CFInfo, CMSInfo, TDigestInfo, TopKInfo
 
@@ -91,20 +91,29 @@ class CMSBloom(CMSCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
-        MODULE_CALLBACKS = {
+        _MODULE_CALLBACKS = {
             CMS_INITBYDIM: bool_ok,
             CMS_INITBYPROB: bool_ok,
             # CMS_INCRBY: spaceHolder,
             # CMS_QUERY: spaceHolder,
             CMS_MERGE: bool_ok,
+        }
+
+        _RESP2_MODULE_CALLBACKS = {
             CMS_INFO: CMSInfo,
         }
+        _RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.commandmixin = CMSCommands
         self.execute_command = client.execute_command
 
-        for k, v in MODULE_CALLBACKS.items():
+        if get_protocol_version(self.client) in ["3", 3]:
+            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
+        else:
+            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
+
+        for k, v in _MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)
 
 
@@ -112,21 +121,30 @@ class TOPKBloom(TOPKCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
-        MODULE_CALLBACKS = {
+        _MODULE_CALLBACKS = {
             TOPK_RESERVE: bool_ok,
-            TOPK_ADD: parse_to_list,
-            TOPK_INCRBY: parse_to_list,
             # TOPK_QUERY: spaceHolder,
             # TOPK_COUNT: spaceHolder,
-            TOPK_LIST: parse_to_list,
-            TOPK_INFO: TopKInfo,
         }
+
+        _RESP2_MODULE_CALLBACKS = {
+            TOPK_ADD: parse_to_list,
+            TOPK_INCRBY: parse_to_list,
+            TOPK_INFO: TopKInfo,
+            TOPK_LIST: parse_to_list,
+        }
+        _RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.commandmixin = TOPKCommands
         self.execute_command = client.execute_command
 
-        for k, v in MODULE_CALLBACKS.items():
+        if get_protocol_version(self.client) in ["3", 3]:
+            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
+        else:
+            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
+
+        for k, v in _MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)
 
 
@@ -134,7 +152,7 @@ class CFBloom(CFCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
-        MODULE_CALLBACKS = {
+        _MODULE_CALLBACKS = {
             CF_RESERVE: bool_ok,
             # CF_ADD: spaceHolder,
             # CF_ADDNX: spaceHolder,
@@ -145,14 +163,23 @@ class CFBloom(CFCommands, AbstractBloom):
             # CF_COUNT: spaceHolder,
             # CF_SCANDUMP: spaceHolder,
             # CF_LOADCHUNK: spaceHolder,
+        }
+
+        _RESP2_MODULE_CALLBACKS = {
             CF_INFO: CFInfo,
         }
+        _RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.commandmixin = CFCommands
         self.execute_command = client.execute_command
 
-        for k, v in MODULE_CALLBACKS.items():
+        if get_protocol_version(self.client) in ["3", 3]:
+            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
+        else:
+            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
+
+        for k, v in _MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)
 
 
@@ -160,28 +187,35 @@ class TDigestBloom(TDigestCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
-        MODULE_CALLBACKS = {
+        _MODULE_CALLBACKS = {
             TDIGEST_CREATE: bool_ok,
             # TDIGEST_RESET: bool_ok,
             # TDIGEST_ADD: spaceHolder,
             # TDIGEST_MERGE: spaceHolder,
+        }
+
+        _RESP2_MODULE_CALLBACKS = {
+            TDIGEST_BYRANK: parse_to_list,
+            TDIGEST_BYREVRANK: parse_to_list,
             TDIGEST_CDF: parse_to_list,
-            TDIGEST_QUANTILE: parse_to_list,
+            TDIGEST_INFO: TDigestInfo,
             TDIGEST_MIN: float,
             TDIGEST_MAX: float,
             TDIGEST_TRIMMED_MEAN: float,
-            TDIGEST_INFO: TDigestInfo,
-            TDIGEST_RANK: parse_to_list,
-            TDIGEST_REVRANK: parse_to_list,
-            TDIGEST_BYRANK: parse_to_list,
-            TDIGEST_BYREVRANK: parse_to_list,
+            TDIGEST_QUANTILE: parse_to_list,
         }
+        _RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.commandmixin = TDigestCommands
         self.execute_command = client.execute_command
 
-        for k, v in MODULE_CALLBACKS.items():
+        if get_protocol_version(self.client) in ["3", 3]:
+            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
+        else:
+            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
+
+        for k, v in _MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)
 
 
@@ -189,7 +223,7 @@ class BFBloom(BFCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
-        MODULE_CALLBACKS = {
+        _MODULE_CALLBACKS = {
             BF_RESERVE: bool_ok,
             # BF_ADD: spaceHolder,
             # BF_MADD: spaceHolder,
@@ -199,12 +233,21 @@ class BFBloom(BFCommands, AbstractBloom):
             # BF_SCANDUMP: spaceHolder,
             # BF_LOADCHUNK: spaceHolder,
             # BF_CARD: spaceHolder,
+        }
+
+        _RESP2_MODULE_CALLBACKS = {
             BF_INFO: BFInfo,
         }
+        _RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.commandmixin = BFCommands
         self.execute_command = client.execute_command
 
-        for k, v in MODULE_CALLBACKS.items():
+        if get_protocol_version(self.client) in ["3", 3]:
+            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
+        else:
+            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
+
+        for k, v in _MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)

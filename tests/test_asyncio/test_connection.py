@@ -4,17 +4,19 @@ import types
 from unittest.mock import patch
 
 import pytest
-
 import redis
-from redis.asyncio.connection import (
-    BaseParser,
-    Connection,
-    PythonParser,
-    UnixDomainSocketConnection,
+from redis._parsers import (
+    _AsyncHiredisParser,
+    _AsyncRESP2Parser,
+    _AsyncRESP3Parser,
+    _AsyncRESPBase,
 )
+from redis.asyncio import Redis
+from redis.asyncio.connection import Connection, UnixDomainSocketConnection, parse_url
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
+from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 
 from .compat import mock
@@ -28,11 +30,11 @@ async def test_invalid_response(create_redis):
     raw = b"x"
     fake_stream = MockStream(raw + b"\r\n")
 
-    parser: BaseParser = r.connection._parser
+    parser: _AsyncRESPBase = r.connection._parser
     with mock.patch.object(parser, "_stream", fake_stream):
         with pytest.raises(InvalidResponse) as cm:
             await parser.read_response()
-    if isinstance(parser, PythonParser):
+    if isinstance(parser, _AsyncRESPBase):
         assert str(cm.value) == f"Protocol Error: {raw!r}"
     else:
         assert (
@@ -41,25 +43,69 @@ async def test_invalid_response(create_redis):
     await r.connection.disconnect()
 
 
+@pytest.mark.onlynoncluster
+async def test_single_connection():
+    """Test that concurrent requests on a single client are synchronised."""
+    r = Redis(single_connection_client=True)
+
+    init_call_count = 0
+    command_call_count = 0
+    in_use = False
+
+    class Retry_:
+        async def call_with_retry(self, _, __):
+            # If we remove the single-client lock, this error gets raised as two
+            # coroutines will be vying for the `in_use` flag due to the two
+            # asymmetric sleep calls
+            nonlocal command_call_count
+            nonlocal in_use
+            if in_use is True:
+                raise ValueError("Commands should be executed one at a time.")
+            in_use = True
+            await asyncio.sleep(0.01)
+            command_call_count += 1
+            await asyncio.sleep(0.03)
+            in_use = False
+            return "foo"
+
+    mock_conn = mock.MagicMock()
+    mock_conn.retry = Retry_()
+
+    async def get_conn(_):
+        # Validate only one client is created in single-client mode when
+        # concurrent requests are made
+        nonlocal init_call_count
+        await asyncio.sleep(0.01)
+        init_call_count += 1
+        return mock_conn
+
+    with mock.patch.object(r.connection_pool, "get_connection", get_conn):
+        with mock.patch.object(r.connection_pool, "release"):
+            await asyncio.gather(r.set("a", "b"), r.set("c", "d"))
+
+    assert init_call_count == 1
+    assert command_call_count == 2
+
+
 @skip_if_server_version_lt("4.0.0")
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
-async def test_loading_external_modules(modclient):
+async def test_loading_external_modules(r):
     def inner():
         pass
 
-    modclient.load_external_module("myfuncname", inner)
-    assert getattr(modclient, "myfuncname") == inner
-    assert isinstance(getattr(modclient, "myfuncname"), types.FunctionType)
+    r.load_external_module("myfuncname", inner)
+    assert getattr(r, "myfuncname") == inner
+    assert isinstance(getattr(r, "myfuncname"), types.FunctionType)
 
     # and call it
     from redis.commands import RedisModuleCommands
 
     j = RedisModuleCommands.json
-    modclient.load_external_module("sometestfuncname", j)
+    r.load_external_module("sometestfuncname", j)
 
     # d = {'hello': 'world!'}
-    # mod = j(modclient)
+    # mod = j(r)
     # mod.set("fookey", ".", d)
     # assert mod.get('fookey') == d
 
@@ -79,9 +125,11 @@ async def test_can_run_concurrent_commands(r):
     assert all(await asyncio.gather(*(r.ping() for _ in range(10))))
 
 
-async def test_connect_retry_on_timeout_error():
+async def test_connect_retry_on_timeout_error(connect_args):
     """Test that the _connect function is retried in case of a timeout"""
-    conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 3))
+    conn = Connection(
+        retry_on_timeout=True, retry=Retry(NoBackoff(), 3), **connect_args
+    )
     origin_connect = conn._connect
     conn._connect = mock.AsyncMock()
 
@@ -137,7 +185,7 @@ async def test_connection_parse_response_resume(r: redis.Redis):
     conn._parser._stream = MockStream(message, interrupt_every=2)
     for i in range(100):
         try:
-            response = await conn.read_response()
+            response = await conn.read_response(disconnect_on_error=False)
             break
         except MockStream.TestError:
             pass
@@ -146,3 +194,132 @@ async def test_connection_parse_response_resume(r: redis.Redis):
         pytest.fail("didn't receive a response")
     assert response
     assert i > 0
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.parametrize(
+    "parser_class",
+    [_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisParser],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser", "AsyncHiredisParser"],
+)
+async def test_connection_disconect_race(parser_class, connect_args):
+    """
+    This test reproduces the case in issue #2349
+    where a connection is closed while the parser is reading to feed the
+    internal buffer.The stream `read()` will succeed, but when it returns,
+    another task has already called `disconnect()` and is waiting for
+    close to finish.  When we attempts to feed the buffer, we will fail
+    since the buffer is no longer there.
+
+    This test verifies that a read in progress can finish even
+    if the `disconnect()` method is called.
+    """
+    if parser_class == _AsyncHiredisParser and not HIREDIS_AVAILABLE:
+        pytest.skip("Hiredis not available")
+
+    connect_args["parser_class"] = parser_class
+
+    conn = Connection(**connect_args)
+
+    cond = asyncio.Condition()
+    # 0 == initial
+    # 1 == reader is reading
+    # 2 == closer has closed and is waiting for close to finish
+    state = 0
+
+    # Mock read function, which wait for a close to happen before returning
+    # Can either be invoked as two `read()` calls (HiredisParser)
+    # or as a `readline()` followed by `readexact()` (PythonParser)
+    chunks = [b"$13\r\n", b"Hello, World!\r\n"]
+
+    async def read(_=None):
+        nonlocal state
+        async with cond:
+            if state == 0:
+                state = 1  # we are reading
+                cond.notify()
+                # wait until the closing task has done
+                await cond.wait_for(lambda: state == 2)
+        return chunks.pop(0)
+
+    # function closes the connection while reader is still blocked reading
+    async def do_close():
+        nonlocal state
+        async with cond:
+            await cond.wait_for(lambda: state == 1)
+            state = 2
+            cond.notify()
+        await conn.disconnect()
+
+    async def do_read():
+        return await conn.read_response()
+
+    reader = mock.AsyncMock()
+    writer = mock.AsyncMock()
+    writer.transport = mock.Mock()
+    writer.transport.get_extra_info.side_effect = None
+
+    # for HiredisParser
+    reader.read.side_effect = read
+    # for PythonParser
+    reader.readline.side_effect = read
+    reader.readexactly.side_effect = read
+
+    async def open_connection(*args, **kwargs):
+        return reader, writer
+
+    async def dummy_method(*args, **kwargs):
+        pass
+
+    # get dummy stream objects for the connection
+    with patch.object(asyncio, "open_connection", open_connection):
+        # disable the initial version handshake
+        with patch.multiple(
+            conn, send_command=dummy_method, read_response=dummy_method
+        ):
+            await conn.connect()
+
+    vals = await asyncio.gather(do_read(), do_close())
+    assert vals == [b"Hello, World!", None]
+
+
+@pytest.mark.onlynoncluster
+def test_create_single_connection_client_from_url():
+    client = Redis.from_url("redis://localhost:6379/0?", single_connection_client=True)
+    assert client.single_connection_client is True
+
+
+@pytest.mark.parametrize("from_url", (True, False))
+async def test_pool_auto_close(request, from_url):
+    """Verify that basic Redis instances have auto_close_connection_pool set to True"""
+
+    url: str = request.config.getoption("--redis-url")
+    url_args = parse_url(url)
+
+    async def get_redis_connection():
+        if from_url:
+            return Redis.from_url(url)
+        return Redis(**url_args)
+
+    r1 = await get_redis_connection()
+    assert r1.auto_close_connection_pool is True
+    await r1.close()
+
+
+@pytest.mark.parametrize("from_url", (True, False))
+async def test_pool_auto_close_disable(request, from_url):
+    """Verify that auto_close_connection_pool can be disabled"""
+
+    url: str = request.config.getoption("--redis-url")
+    url_args = parse_url(url)
+
+    async def get_redis_connection():
+        if from_url:
+            return Redis.from_url(url, auto_close_connection_pool=False)
+        url_args["auto_close_connection_pool"] = False
+        return Redis(**url_args)
+
+    r1 = await get_redis_connection()
+    assert r1.auto_close_connection_pool is False
+    await r1.connection_pool.disconnect()
+    await r1.close()

@@ -6,10 +6,13 @@ import time
 from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from redis._parsers import CommandsParser, Encoder
+from redis._parsers.helpers import parse_scan
 from redis.backoff import default_backoff
-from redis.client import CaseInsensitiveDict, PubSub, Redis, parse_scan
-from redis.commands import READ_COMMANDS, CommandsParser, RedisClusterCommands
-from redis.connection import ConnectionPool, DefaultParser, Encoder, parse_url
+from redis.client import CaseInsensitiveDict, PubSub, Redis
+from redis.commands import READ_COMMANDS, RedisClusterCommands
+from redis.commands.helpers import list_or_args
+from redis.connection import ConnectionPool, DefaultParser, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
     AskError,
@@ -31,6 +34,7 @@ from redis.exceptions import (
 from redis.lock import Lock
 from redis.retry import Retry
 from redis.utils import (
+    HIREDIS_AVAILABLE,
     dict_merge,
     list_keys_to_dict,
     merge_result,
@@ -97,6 +101,8 @@ def parse_cluster_shards(resp, **options):
     """
     Parse CLUSTER SHARDS response.
     """
+    if isinstance(resp[0], dict):
+        return resp
     shards = []
     for x in resp:
         shard = {"slots": [], "nodes": []}
@@ -111,6 +117,13 @@ def parse_cluster_shards(resp, **options):
         shards.append(shard)
 
     return shards
+
+
+def parse_cluster_myshardid(resp, **options):
+    """
+    Parse CLUSTER MYSHARDID response.
+    """
+    return resp.decode("utf-8")
 
 
 PRIMARY = "primary"
@@ -130,13 +143,17 @@ REDIS_ALLOWED_KEYS = (
     "encoding_errors",
     "errors",
     "host",
+    "lib_name",
+    "lib_version",
     "max_connections",
     "nodes_flag",
     "redis_connect_func",
     "password",
     "port",
+    "queue_class",
     "retry",
     "retry_on_timeout",
+    "protocol",
     "socket_connect_timeout",
     "socket_keepalive",
     "socket_keepalive_options",
@@ -210,6 +227,7 @@ class AbstractRedisCluster:
                 "ACL WHOAMI",
                 "AUTH",
                 "CLIENT LIST",
+                "CLIENT SETINFO",
                 "CLIENT SETNAME",
                 "CLIENT GETNAME",
                 "CONFIG SET",
@@ -219,6 +237,8 @@ class AbstractRedisCluster:
                 "PUBSUB CHANNELS",
                 "PUBSUB NUMPAT",
                 "PUBSUB NUMSUB",
+                "PUBSUB SHARDCHANNELS",
+                "PUBSUB SHARDNUMSUB",
                 "PING",
                 "INFO",
                 "SHUTDOWN",
@@ -229,6 +249,7 @@ class AbstractRedisCluster:
                 "SLOWLOG LEN",
                 "SLOWLOG RESET",
                 "WAIT",
+                "WAITAOF",
                 "SAVE",
                 "MEMORY PURGE",
                 "MEMORY MALLOC-STATS",
@@ -244,7 +265,6 @@ class AbstractRedisCluster:
                 "CLIENT INFO",
                 "CLIENT KILL",
                 "READONLY",
-                "READWRITE",
                 "CLUSTER INFO",
                 "CLUSTER MEET",
                 "CLUSTER NODES",
@@ -265,6 +285,11 @@ class AbstractRedisCluster:
                 "READONLY",
                 "READWRITE",
                 "TIME",
+                "TFUNCTION LOAD",
+                "TFUNCTION DELETE",
+                "TFUNCTION LIST",
+                "TFCALL",
+                "TFCALLASYNC",
                 "GRAPH.CONFIG",
                 "LATENCY HISTORY",
                 "LATENCY LATEST",
@@ -281,6 +306,7 @@ class AbstractRedisCluster:
                 "FUNCTION LIST",
                 "FUNCTION LOAD",
                 "FUNCTION RESTORE",
+                "REDISGEARS_2.REFRESHCLUSTER",
                 "SCAN",
                 "SCRIPT EXISTS",
                 "SCRIPT FLUSH",
@@ -340,14 +366,17 @@ class AbstractRedisCluster:
     CLUSTER_COMMANDS_RESPONSE_CALLBACKS = {
         "CLUSTER SLOTS": parse_cluster_slots,
         "CLUSTER SHARDS": parse_cluster_shards,
+        "CLUSTER MYSHARDID": parse_cluster_myshardid,
     }
 
     RESULT_CALLBACKS = dict_merge(
-        list_keys_to_dict(["PUBSUB NUMSUB"], parse_pubsub_numsub),
+        list_keys_to_dict(["PUBSUB NUMSUB", "PUBSUB SHARDNUMSUB"], parse_pubsub_numsub),
         list_keys_to_dict(
             ["PUBSUB NUMPAT"], lambda command, res: sum(list(res.values()))
         ),
-        list_keys_to_dict(["KEYS", "PUBSUB CHANNELS"], merge_result),
+        list_keys_to_dict(
+            ["KEYS", "PUBSUB CHANNELS", "PUBSUB SHARDCHANNELS"], merge_result
+        ),
         list_keys_to_dict(
             [
                 "PING",
@@ -465,6 +494,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         read_from_replicas: bool = False,
         dynamic_startup_nodes: bool = True,
         url: Optional[str] = None,
+        address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
         **kwargs,
     ):
         """
@@ -513,6 +543,12 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             reinitialize_steps to 1.
             To avoid reinitializing the cluster on moved errors, set
             reinitialize_steps to 0.
+        :param address_remap:
+            An optional callable which, when provided with an internal network
+            address of a node, e.g. a `(host, port)` tuple, will return the address
+            where the node is reachable.  This can be used to map the addresses at
+            which the nodes _think_ they are, to addresses at which a client may
+            reach them, such as when they sit behind a proxy.
 
          :**kwargs:
              Extra arguments that will be sent into Redis instance when created
@@ -588,12 +624,12 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         self.read_from_replicas = read_from_replicas
         self.reinitialize_counter = 0
         self.reinitialize_steps = reinitialize_steps
-        self.nodes_manager = None
         self.nodes_manager = NodesManager(
             startup_nodes=startup_nodes,
             from_url=from_url,
             require_full_coverage=require_full_coverage,
             dynamic_startup_nodes=dynamic_startup_nodes,
+            address_remap=address_remap,
             **kwargs,
         )
 
@@ -1269,6 +1305,7 @@ class NodesManager:
         lock=None,
         dynamic_startup_nodes=True,
         connection_pool_class=ConnectionPool,
+        address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
         **kwargs,
     ):
         self.nodes_cache = {}
@@ -1280,6 +1317,7 @@ class NodesManager:
         self._require_full_coverage = require_full_coverage
         self._dynamic_startup_nodes = dynamic_startup_nodes
         self.connection_pool_class = connection_pool_class
+        self.address_remap = address_remap
         self._moved_exception = None
         self.connection_kwargs = kwargs
         self.read_load_balancer = LoadBalancer()
@@ -1502,6 +1540,7 @@ class NodesManager:
                 if host == "":
                     host = startup_node.host
                 port = int(primary_node[1])
+                host, port = self.remap_host_port(host, port)
 
                 target_node = self._get_or_create_cluster_node(
                     host, port, PRIMARY, tmp_nodes_cache
@@ -1518,6 +1557,7 @@ class NodesManager:
                         for replica_node in replica_nodes:
                             host = str_if_bytes(replica_node[0])
                             port = replica_node[1]
+                            host, port = self.remap_host_port(host, port)
 
                             target_replica_node = self._get_or_create_cluster_node(
                                 host, port, REPLICA, tmp_nodes_cache
@@ -1591,6 +1631,16 @@ class NodesManager:
             # The read_load_balancer is None, do nothing
             pass
 
+    def remap_host_port(self, host: str, port: int) -> Tuple[str, int]:
+        """
+        Remap the host and port returned from the cluster to a different
+        internal value.  Useful if the client is not connecting directly
+        to the cluster.
+        """
+        if self.address_remap:
+            return self.address_remap((host, port))
+        return host, port
+
 
 class ClusterPubSub(PubSub):
     """
@@ -1601,7 +1651,15 @@ class ClusterPubSub(PubSub):
     https://redis-py-cluster.readthedocs.io/en/stable/pubsub.html
     """
 
-    def __init__(self, redis_cluster, node=None, host=None, port=None, **kwargs):
+    def __init__(
+        self,
+        redis_cluster,
+        node=None,
+        host=None,
+        port=None,
+        push_handler_func=None,
+        **kwargs,
+    ):
         """
         When a pubsub instance is created without specifying a node, a single
         node will be transparently chosen for the pubsub connection on the
@@ -1623,8 +1681,13 @@ class ClusterPubSub(PubSub):
             else redis_cluster.get_redis_connection(self.node).connection_pool
         )
         self.cluster = redis_cluster
+        self.node_pubsub_mapping = {}
+        self._pubsubs_generator = self._pubsubs_generator()
         super().__init__(
-            **kwargs, connection_pool=connection_pool, encoder=redis_cluster.encoder
+            connection_pool=connection_pool,
+            encoder=redis_cluster.encoder,
+            push_handler_func=push_handler_func,
+            **kwargs,
         )
 
     def set_pubsub_node(self, cluster, node=None, host=None, port=None):
@@ -1676,9 +1739,9 @@ class ClusterPubSub(PubSub):
                 f"Node {host}:{port} doesn't exist in the cluster"
             )
 
-    def execute_command(self, *args, **kwargs):
+    def execute_command(self, *args):
         """
-        Execute a publish/subscribe command.
+        Execute a subscribe/unsubscribe command.
 
         Taken code from redis-py and tweak to make it work within a cluster.
         """
@@ -1708,8 +1771,93 @@ class ClusterPubSub(PubSub):
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
+            if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
+                self.connection._parser.set_push_handler(self.push_handler_func)
         connection = self.connection
         self._execute(connection, connection.send_command, *args)
+
+    def _get_node_pubsub(self, node):
+        try:
+            return self.node_pubsub_mapping[node.name]
+        except KeyError:
+            pubsub = node.redis_connection.pubsub(
+                push_handler_func=self.push_handler_func
+            )
+            self.node_pubsub_mapping[node.name] = pubsub
+            return pubsub
+
+    def _sharded_message_generator(self):
+        for _ in range(len(self.node_pubsub_mapping)):
+            pubsub = next(self._pubsubs_generator)
+            message = pubsub.get_message()
+            if message is not None:
+                return message
+        return None
+
+    def _pubsubs_generator(self):
+        while True:
+            for pubsub in self.node_pubsub_mapping.values():
+                yield pubsub
+
+    def get_sharded_message(
+        self, ignore_subscribe_messages=False, timeout=0.0, target_node=None
+    ):
+        if target_node:
+            message = self.node_pubsub_mapping[target_node.name].get_message(
+                ignore_subscribe_messages=ignore_subscribe_messages, timeout=timeout
+            )
+        else:
+            message = self._sharded_message_generator()
+        if message is None:
+            return None
+        elif str_if_bytes(message["type"]) == "sunsubscribe":
+            if message["channel"] in self.pending_unsubscribe_shard_channels:
+                self.pending_unsubscribe_shard_channels.remove(message["channel"])
+                self.shard_channels.pop(message["channel"], None)
+                node = self.cluster.get_node_from_key(message["channel"])
+                if self.node_pubsub_mapping[node.name].subscribed is False:
+                    self.node_pubsub_mapping.pop(node.name)
+        if not self.channels and not self.patterns and not self.shard_channels:
+            # There are no subscriptions anymore, set subscribed_event flag
+            # to false
+            self.subscribed_event.clear()
+        if self.ignore_subscribe_messages or ignore_subscribe_messages:
+            return None
+        return message
+
+    def ssubscribe(self, *args, **kwargs):
+        if args:
+            args = list_or_args(args[0], args[1:])
+        s_channels = dict.fromkeys(args)
+        s_channels.update(kwargs)
+        for s_channel, handler in s_channels.items():
+            node = self.cluster.get_node_from_key(s_channel)
+            pubsub = self._get_node_pubsub(node)
+            if handler:
+                pubsub.ssubscribe(**{s_channel: handler})
+            else:
+                pubsub.ssubscribe(s_channel)
+            self.shard_channels.update(pubsub.shard_channels)
+            self.pending_unsubscribe_shard_channels.difference_update(
+                self._normalize_keys({s_channel: None})
+            )
+            if pubsub.subscribed and not self.subscribed:
+                self.subscribed_event.set()
+                self.health_check_response_counter = 0
+
+    def sunsubscribe(self, *args):
+        if args:
+            args = list_or_args(args[0], args[1:])
+        else:
+            args = self.shard_channels
+
+        for s_channel in args:
+            node = self.cluster.get_node_from_key(s_channel)
+            p = self._get_node_pubsub(node)
+            p.sunsubscribe(s_channel)
+            self.pending_unsubscribe_shard_channels.update(
+                p.pending_unsubscribe_shard_channels
+            )
 
     def get_redis_connection(self):
         """
@@ -1717,6 +1865,15 @@ class ClusterPubSub(PubSub):
         """
         if self.node is not None:
             return self.node.redis_connection
+
+    def disconnect(self):
+        """
+        Disconnect the pubsub connection.
+        """
+        if self.connection:
+            self.connection.disconnect()
+        for pubsub in self.node_pubsub_mapping.values():
+            pubsub.connection.disconnect()
 
 
 class ClusterPipeline(RedisCluster):
@@ -2135,6 +2292,17 @@ class ClusterPipeline(RedisCluster):
             )
 
         return self.execute_command("DEL", names[0])
+
+    def unlink(self, *names):
+        """
+        "Unlink a key specified by ``names``"
+        """
+        if len(names) != 1:
+            raise RedisClusterException(
+                "unlinking multiple keys is not implemented in pipeline command"
+            )
+
+        return self.execute_command("UNLINK", names[0])
 
 
 def block_pipeline_command(name: str) -> Callable[..., Any]:

@@ -6,18 +6,17 @@ from unittest.mock import Mock
 from urllib.parse import urlparse
 
 import pytest
-from packaging.version import Version
-
 import redis
+from packaging.version import Version
 from redis.backoff import NoBackoff
 from redis.connection import parse_url
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
 
 REDIS_INFO = {}
-default_redis_url = "redis://localhost:6379/9"
-default_redismod_url = "redis://localhost:36379"
-default_redis_unstable_url = "redis://localhost:6378"
+default_redis_url = "redis://localhost:6379/0"
+default_protocol = "2"
+default_redismod_url = "redis://localhost:6379"
 
 # default ssl client ignores verification for the purpose of testing
 default_redis_ssl_url = "rediss://localhost:6666"
@@ -73,6 +72,7 @@ class BooleanOptionalAction(argparse.Action):
 
 
 def pytest_addoption(parser):
+
     parser.addoption(
         "--redis-url",
         default=default_redis_url,
@@ -81,14 +81,11 @@ def pytest_addoption(parser):
     )
 
     parser.addoption(
-        "--redismod-url",
-        default=default_redismod_url,
+        "--protocol",
+        default=default_protocol,
         action="store",
-        help="Connection string to redis server"
-        " with loaded modules,"
-        " defaults to `%(default)s`",
+        help="Protocol version, defaults to `%(default)s`",
     )
-
     parser.addoption(
         "--redis-ssl-url",
         default=default_redis_ssl_url,
@@ -105,13 +102,6 @@ def pytest_addoption(parser):
         " defaults to `%(default)s`",
     )
 
-    parser.addoption(
-        "--redis-unstable-url",
-        default=default_redis_unstable_url,
-        action="store",
-        help="Redis unstable (latest version) connection string "
-        "defaults to %(default)s`",
-    )
     parser.addoption(
         "--uvloop", action=BooleanOptionalAction, help="Run tests with uvloop"
     )
@@ -141,6 +131,7 @@ def pytest_sessionstart(session):
         enterprise = info["enterprise"]
     except redis.ConnectionError:
         # provide optimistic defaults
+        info = {}
         version = "10.0.0"
         arch_bits = 64
         cluster_enabled = False
@@ -152,14 +143,10 @@ def pytest_sessionstart(session):
     # store REDIS_INFO in config so that it is available from "condition strings"
     session.config.REDIS_INFO = REDIS_INFO
 
-    # module info, if the second redis is running
+    # module info
     try:
-        redismod_url = session.config.getoption("--redismod-url")
-        info = _get_info(redismod_url)
         REDIS_INFO["modules"] = info["modules"]
-    except redis.exceptions.ConnectionError:
-        pass
-    except KeyError:
+    except (KeyError, redis.exceptions.ConnectionError):
         pass
 
     if cluster_enabled:
@@ -289,6 +276,9 @@ def _get_client(
         redis_url = request.config.getoption("--redis-url")
     else:
         redis_url = from_url
+    if "protocol" not in redis_url:
+        kwargs["protocol"] = request.config.getoption("--protocol")
+
     cluster_mode = REDIS_INFO["cluster_enabled"]
     if not cluster_mode:
         url_options = parse_url(redis_url)
@@ -332,20 +322,15 @@ def cluster_teardown(client, flushdb):
     client.disconnect_connection_pools()
 
 
-# specifically set to the zero database, because creating
-# an index on db != 0 raises a ResponseError in redis
 @pytest.fixture()
-def modclient(request, **kwargs):
-    rmurl = request.config.getoption("--redismod-url")
-    with _get_client(
-        redis.Redis, request, from_url=rmurl, decode_responses=True, **kwargs
-    ) as client:
+def r(request):
+    with _get_client(redis.Redis, request) as client:
         yield client
 
 
 @pytest.fixture()
-def r(request):
-    with _get_client(redis.Redis, request) as client:
+def decoded_r(request):
+    with _get_client(redis.Redis, request, decode_responses=True) as client:
         yield client
 
 
@@ -385,7 +370,7 @@ def mock_cluster_resp_ok(request, **kwargs):
 @pytest.fixture()
 def mock_cluster_resp_int(request, **kwargs):
     r = _get_client(redis.Redis, request, **kwargs)
-    return _gen_cluster_mock_resp(r, "2")
+    return _gen_cluster_mock_resp(r, 2)
 
 
 @pytest.fixture()
@@ -441,16 +426,7 @@ def mock_cluster_resp_slaves(request, **kwargs):
 def master_host(request):
     url = request.config.getoption("--redis-url")
     parts = urlparse(url)
-    yield parts.hostname, parts.port
-
-
-@pytest.fixture()
-def unstable_r(request):
-    url = request.config.getoption("--redis-unstable-url")
-    with _get_client(
-        redis.Redis, request, from_url=url, decode_responses=True
-    ) as client:
-        yield client
+    return parts.hostname, (parts.port or 6379)
 
 
 def wait_for_command(client, monitor, command, key=None):
@@ -472,3 +448,34 @@ def wait_for_command(client, monitor, command, key=None):
             return monitor_response
         if key in monitor_response["command"]:
             return None
+
+
+def is_resp2_connection(r):
+    if isinstance(r, redis.Redis) or isinstance(r, redis.asyncio.Redis):
+        protocol = r.connection_pool.connection_kwargs.get("protocol")
+    elif isinstance(r, redis.cluster.AbstractRedisCluster):
+        protocol = r.nodes_manager.connection_kwargs.get("protocol")
+    return protocol in ["2", 2, None]
+
+
+def get_protocol_version(r):
+    if isinstance(r, redis.Redis) or isinstance(r, redis.asyncio.Redis):
+        return r.connection_pool.connection_kwargs.get("protocol")
+    elif isinstance(r, redis.cluster.AbstractRedisCluster):
+        return r.nodes_manager.connection_kwargs.get("protocol")
+
+
+def assert_resp_response(r, response, resp2_expected, resp3_expected):
+    protocol = get_protocol_version(r)
+    if protocol in [2, "2", None]:
+        assert response == resp2_expected
+    else:
+        assert response == resp3_expected
+
+
+def assert_resp_response_in(r, response, resp2_expected, resp3_expected):
+    protocol = get_protocol_version(r)
+    if protocol in [2, "2", None]:
+        assert response in resp2_expected
+    else:
+        assert response in resp3_expected

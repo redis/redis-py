@@ -1,6 +1,6 @@
 import os
 from json import JSONDecodeError, loads
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from redis.exceptions import DataError
 from redis.utils import deprecated_function
@@ -31,8 +31,8 @@ class JSONCommands:
         name: str,
         path: str,
         scalar: int,
-        start: Optional[int] = 0,
-        stop: Optional[int] = -1,
+        start: Optional[int] = None,
+        stop: Optional[int] = None,
     ) -> List[Union[int, None]]:
         """
         Return the index of ``scalar`` in the JSON array under ``path`` at key
@@ -43,9 +43,13 @@ class JSONCommands:
 
         For more information see `JSON.ARRINDEX <https://redis.io/commands/json.arrindex>`_.
         """  # noqa
-        return self.execute_command(
-            "JSON.ARRINDEX", name, str(path), self._encode(scalar), start, stop
-        )
+        pieces = [name, str(path), self._encode(scalar)]
+        if start is not None:
+            pieces.append(start)
+            if stop is not None:
+                pieces.append(stop)
+
+        return self.execute_command("JSON.ARRINDEX", *pieces)
 
     def arrinsert(
         self, name: str, path: str, index: int, *args: List[JsonType]
@@ -248,6 +252,46 @@ class JSONCommands:
         elif xx:
             pieces.append("XX")
         return self.execute_command("JSON.SET", *pieces)
+
+    def mset(self, triplets: List[Tuple[str, str, JsonType]]) -> Optional[str]:
+        """
+        Set the JSON value at key ``name`` under the ``path`` to ``obj``
+        for one or more keys.
+
+        ``triplets`` is a list of one or more triplets of key, path, value.
+
+        For the purpose of using this within a pipeline, this command is also
+        aliased to JSON.MSET.
+
+        For more information see `JSON.MSET <https://redis.io/commands/json.mset>`_.
+        """
+        pieces = []
+        for triplet in triplets:
+            pieces.extend([triplet[0], str(triplet[1]), self._encode(triplet[2])])
+        return self.execute_command("JSON.MSET", *pieces)
+
+    def merge(
+        self,
+        name: str,
+        path: str,
+        obj: JsonType,
+        decode_keys: Optional[bool] = False,
+    ) -> Optional[str]:
+        """
+        Merges a given JSON value into matching paths. Consequently, JSON values
+        at matching paths are updated, deleted, or expanded with new children
+
+        ``decode_keys`` If set to True, the keys of ``obj`` will be decoded
+        with utf-8.
+
+        For more information see `JSON.MERGE <https://redis.io/commands/json.merge>`_.
+        """
+        if decode_keys:
+            obj = decode_dict_keys(obj)
+
+        pieces = [name, str(path), self._encode(obj)]
+
+        return self.execute_command("JSON.MERGE", *pieces)
 
     def set_file(
         self,

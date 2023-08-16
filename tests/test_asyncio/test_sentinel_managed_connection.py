@@ -1,7 +1,6 @@
 import socket
 
 import pytest
-
 from redis.asyncio.retry import Retry
 from redis.asyncio.sentinel import SentinelManagedConnection
 from redis.backoff import NoBackoff

@@ -2,11 +2,10 @@
 
 import time
 
+import redis
 import uptrace
 from opentelemetry import trace
 from opentelemetry.instrumentation.redis import RedisInstrumentor
-
-import redis
 
 tracer = trace.get_tracer("app_or_package_name", "1.0.0")
 

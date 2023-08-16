@@ -30,10 +30,12 @@ from .core import (
     AsyncACLCommands,
     AsyncDataAccessCommands,
     AsyncFunctionCommands,
+    AsyncGearsCommands,
     AsyncManagementCommands,
     AsyncScriptCommands,
     DataAccessCommands,
     FunctionCommands,
+    GearsCommands,
     ManagementCommands,
     PubSubCommands,
     ResponseT,
@@ -44,7 +46,6 @@ from .redismodules import RedisModuleCommands
 
 if TYPE_CHECKING:
     from redis.asyncio.cluster import TargetNodesT
-
 
 # Not complete, but covers the major ones
 # https://redis.io/commands
@@ -634,6 +635,14 @@ class ClusterManagementCommands(ManagementCommands):
         """
         return self.execute_command("CLUSTER SHARDS", target_nodes=target_nodes)
 
+    def cluster_myshardid(self, target_nodes=None):
+        """
+        Returns the shard ID of the node.
+
+        For more information see https://redis.io/commands/cluster-myshardid/
+        """
+        return self.execute_command("CLUSTER MYSHARDID", target_nodes=target_nodes)
+
     def cluster_links(self, target_node: "TargetNodesT") -> ResponseT:
         """
         Each node in a Redis Cluster maintains a pair of long-lived TCP link with each
@@ -681,6 +690,12 @@ class ClusterManagementCommands(ManagementCommands):
         # Reset read from replicas flag
         self.read_from_replicas = False
         return self.execute_command("READWRITE", target_nodes=target_nodes)
+
+    def gears_refresh_cluster(self, **kwargs) -> ResponseT:
+        """
+        On an OSS cluster, before executing any gears function, you must call this command. # noqa
+        """
+        return self.execute_command("REDISGEARS_2.REFRESHCLUSTER", **kwargs)
 
 
 class AsyncClusterManagementCommands(
@@ -857,6 +872,7 @@ class RedisClusterCommands(
     ClusterDataAccessCommands,
     ScriptCommands,
     FunctionCommands,
+    GearsCommands,
     RedisModuleCommands,
 ):
     """
@@ -886,6 +902,7 @@ class AsyncRedisClusterCommands(
     AsyncClusterDataAccessCommands,
     AsyncScriptCommands,
     AsyncFunctionCommands,
+    AsyncGearsCommands,
 ):
     """
     A class for all Redis Cluster commands

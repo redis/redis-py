@@ -24,6 +24,12 @@ from typing import (
     cast,
 )
 
+from redis._parsers.helpers import (
+    _RedisCallbacks,
+    _RedisCallbacksRESP2,
+    _RedisCallbacksRESP3,
+    bool_ok,
+)
 from redis.asyncio.connection import (
     Connection,
     ConnectionPool,
@@ -37,7 +43,6 @@ from redis.client import (
     NEVER_DECODE,
     AbstractRedis,
     CaseInsensitiveDict,
-    bool_ok,
 )
 from redis.commands import (
     AsyncCoreCommands,
@@ -57,7 +62,13 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.typing import ChannelT, EncodableT, KeyT
-from redis.utils import safe_str, str_if_bytes
+from redis.utils import (
+    HIREDIS_AVAILABLE,
+    _set_info_logger,
+    get_lib_version,
+    safe_str,
+    str_if_bytes,
+)
 
 PubSubHandler = Callable[[Dict[str, str]], Awaitable[None]]
 _KeyT = TypeVar("_KeyT", bound=KeyT)
@@ -99,7 +110,13 @@ class Redis(
     response_callbacks: MutableMapping[Union[str, bytes], ResponseCallbackT]
 
     @classmethod
-    def from_url(cls, url: str, **kwargs):
+    def from_url(
+        cls,
+        url: str,
+        single_connection_client: bool = False,
+        auto_close_connection_pool: bool = True,
+        **kwargs,
+    ):
         """
         Return a Redis client object configured from the given URL
 
@@ -123,10 +140,13 @@ class Redis(
 
         There are several ways to specify a database number. The first value
         found will be used:
-            1. A ``db`` querystring option, e.g. redis://localhost?db=0
-            2. If using the redis:// or rediss:// schemes, the path argument
+
+        1. A ``db`` querystring option, e.g. redis://localhost?db=0
+
+        2. If using the redis:// or rediss:// schemes, the path argument
                of the url, e.g. redis://localhost/0
-            3. A ``db`` keyword argument to this function.
+
+        3. A ``db`` keyword argument to this function.
 
         If none of these options are specified, the default db=0 is used.
 
@@ -140,7 +160,12 @@ class Redis(
 
         """
         connection_pool = ConnectionPool.from_url(url, **kwargs)
-        return cls(connection_pool=connection_pool)
+        redis = cls(
+            connection_pool=connection_pool,
+            single_connection_client=single_connection_client,
+        )
+        redis.auto_close_connection_pool = auto_close_connection_pool
+        return redis
 
     def __init__(
         self,
@@ -171,11 +196,14 @@ class Redis(
         single_connection_client: bool = False,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
+        lib_name: Optional[str] = "redis-py",
+        lib_version: Optional[str] = get_lib_version(),
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
         auto_close_connection_pool: bool = True,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
+        protocol: Optional[int] = 2,
     ):
         """
         Initialize a new Redis client.
@@ -212,7 +240,10 @@ class Redis(
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
+                "lib_name": lib_name,
+                "lib_version": lib_version,
                 "redis_connect_func": redis_connect_func,
+                "protocol": protocol,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -251,7 +282,17 @@ class Redis(
         self.single_connection_client = single_connection_client
         self.connection: Optional[Connection] = None
 
-        self.response_callbacks = CaseInsensitiveDict(self.__class__.RESPONSE_CALLBACKS)
+        self.response_callbacks = CaseInsensitiveDict(_RedisCallbacks)
+
+        if self.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
+            self.response_callbacks.update(_RedisCallbacksRESP3)
+        else:
+            self.response_callbacks.update(_RedisCallbacksRESP2)
+
+        # If using a single connection client, we need to lock creation-of and use-of
+        # the client in order to avoid race conditions such as using asyncio.gather
+        # on a set of redis commands
+        self._single_conn_lock = asyncio.Lock()
 
     def __repr__(self):
         return f"{self.__class__.__name__}<{self.connection_pool!r}>"
@@ -260,8 +301,10 @@ class Redis(
         return self.initialize().__await__()
 
     async def initialize(self: _RedisT) -> _RedisT:
-        if self.single_connection_client and self.connection is None:
-            self.connection = await self.connection_pool.get_connection("_")
+        if self.single_connection_client:
+            async with self._single_conn_lock:
+                if self.connection is None:
+                    self.connection = await self.connection_pool.get_connection("_")
         return self
 
     def set_response_callback(self, command: str, callback: ResponseCallbackT):
@@ -448,7 +491,7 @@ class Redis(
     _DEL_MESSAGE = "Unclosed Redis client"
 
     def __del__(self, _warnings: Any = warnings) -> None:
-        if self.connection is not None:
+        if hasattr(self, "connection") and (self.connection is not None):
             _warnings.warn(
                 f"Unclosed client session {self!r}", ResourceWarning, source=self
             )
@@ -501,6 +544,8 @@ class Redis(
         command_name = args[0]
         conn = self.connection or await pool.get_connection(command_name, **options)
 
+        if self.single_connection_client:
+            await self._single_conn_lock.acquire()
         try:
             return await conn.retry.call_with_retry(
                 lambda: self._send_command_parse_response(
@@ -509,6 +554,8 @@ class Redis(
                 lambda error: self._disconnect_raise(conn, error),
             )
         finally:
+            if self.single_connection_client:
+                self._single_conn_lock.release()
             if not self.connection:
                 await pool.release(conn)
 
@@ -642,6 +689,7 @@ class PubSub:
         shard_hint: Optional[str] = None,
         ignore_subscribe_messages: bool = False,
         encoder=None,
+        push_handler_func: Optional[Callable] = None,
     ):
         self.connection_pool = connection_pool
         self.shard_hint = shard_hint
@@ -650,18 +698,21 @@ class PubSub:
         # we need to know the encoding options for this connection in order
         # to lookup channel and pattern names for callback handlers.
         self.encoder = encoder
+        self.push_handler_func = push_handler_func
         if self.encoder is None:
             self.encoder = self.connection_pool.get_encoder()
         if self.encoder.decode_responses:
-            self.health_check_response: Iterable[Union[str, bytes]] = [
-                "pong",
+            self.health_check_response = [
+                ["pong", self.HEALTH_CHECK_MESSAGE],
                 self.HEALTH_CHECK_MESSAGE,
             ]
         else:
             self.health_check_response = [
-                b"pong",
+                [b"pong", self.encoder.encode(self.HEALTH_CHECK_MESSAGE)],
                 self.encoder.encode(self.HEALTH_CHECK_MESSAGE),
             ]
+        if self.push_handler_func is None:
+            _set_info_logger()
         self.channels = {}
         self.pending_unsubscribe_channels = set()
         self.patterns = {}
@@ -691,6 +742,11 @@ class PubSub:
             self.pending_unsubscribe_patterns = set()
 
     def close(self) -> Awaitable[NoReturn]:
+        # In case a connection property does not yet exist
+        # (due to a crash earlier in the Redis() constructor), return
+        # immediately as there is nothing to clean-up.
+        if not hasattr(self, "connection"):
+            return
         return self.reset()
 
     async def on_connect(self, connection: Connection):
@@ -741,6 +797,8 @@ class PubSub:
             self.connection.register_connect_callback(self.on_connect)
         else:
             await self.connection.connect()
+        if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
+            self.connection._parser.set_push_handler(self.push_handler_func)
 
     async def _disconnect_raise_connect(self, conn, error):
         """
@@ -781,9 +839,15 @@ class PubSub:
             await conn.connect()
 
         read_timeout = None if block else timeout
-        response = await self._execute(conn, conn.read_response, timeout=read_timeout)
+        response = await self._execute(
+            conn,
+            conn.read_response,
+            timeout=read_timeout,
+            disconnect_on_error=False,
+            push_request=True,
+        )
 
-        if conn.health_check_interval and response == self.health_check_response:
+        if conn.health_check_interval and response in self.health_check_response:
             # ignore the health check message as user might not expect it
             return None
         return response
@@ -911,8 +975,8 @@ class PubSub:
         """
         Ping the Redis server
         """
-        message = "" if message is None else message
-        return self.execute_command("PING", message)
+        args = ["PING", message] if message is not None else ["PING"]
+        return self.execute_command(*args)
 
     async def handle_message(self, response, ignore_subscribe_messages=False):
         """
@@ -920,6 +984,10 @@ class PubSub:
         with a message handler, the handler is invoked instead of a parsed
         message being returned.
         """
+        if response is None:
+            return None
+        if isinstance(response, bytes):
+            response = [b"pong", response] if response != b"PONG" else [b"pong", b""]
         message_type = str_if_bytes(response[0])
         if message_type == "pmessage":
             message = {
