@@ -42,7 +42,7 @@ class TestRedisAutoReleaseConnectionPool:
         new_conn = await self.create_two_conn(r)
         assert new_conn != r.connection
         assert self.get_total_connected_connections(r.connection_pool) == 2
-        await r.close()
+        await r.aclose()
         assert self.has_no_connected_connections(r.connection_pool)
 
     async def test_do_not_auto_disconnect_redis_created_pool(self, r2: redis.Redis):
@@ -52,7 +52,7 @@ class TestRedisAutoReleaseConnectionPool:
         )
         new_conn = await self.create_two_conn(r2)
         assert self.get_total_connected_connections(r2.connection_pool) == 2
-        await r2.close()
+        await r2.aclose()
         assert r2.connection_pool._in_use_connections == {new_conn}
         assert new_conn.is_connected
         assert len(r2.connection_pool._available_connections) == 1
@@ -61,7 +61,7 @@ class TestRedisAutoReleaseConnectionPool:
     async def test_auto_release_override_true_manual_created_pool(self, r: redis.Redis):
         assert r.auto_close_connection_pool is True, "This is from the class fixture"
         await self.create_two_conn(r)
-        await r.close()
+        await r.aclose()
         assert self.get_total_connected_connections(r.connection_pool) == 2, (
             "The connection pool should not be disconnected as a manually created "
             "connection pool was passed in in conftest.py"
@@ -72,7 +72,7 @@ class TestRedisAutoReleaseConnectionPool:
     async def test_close_override(self, r: redis.Redis, auto_close_conn_pool):
         r.auto_close_connection_pool = auto_close_conn_pool
         await self.create_two_conn(r)
-        await r.close(close_connection_pool=True)
+        await r.aclose(close_connection_pool=True)
         assert self.has_no_connected_connections(r.connection_pool)
 
     @pytest.mark.parametrize("auto_close_conn_pool", [True, False])
@@ -81,7 +81,7 @@ class TestRedisAutoReleaseConnectionPool:
     ):
         r.auto_close_connection_pool = auto_close_conn_pool
         new_conn = await self.create_two_conn(r)
-        await r.close(close_connection_pool=False)
+        await r.aclose(close_connection_pool=False)
         assert not self.has_no_connected_connections(r.connection_pool)
         assert r.connection_pool._in_use_connections == {new_conn}
         assert r.connection_pool._available_connections[0].is_connected

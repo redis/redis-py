@@ -302,7 +302,22 @@ async def test_pool_auto_close(request, from_url):
 
     r1 = await get_redis_connection()
     assert r1.auto_close_connection_pool is True
-    await r1.close()
+    await r1.aclose()
+
+
+async def test_close_is_aclose(request):
+    """Verify close() calls aclose()"""
+    calls = 0
+
+    async def mock_aclose(self):
+        nonlocal calls
+        calls += 1
+
+    url: str = request.config.getoption("--redis-url")
+    r1 = await Redis.from_url(url)
+    with patch.object(r1, "aclose", mock_aclose):
+        await r1.close()
+        assert calls == 1
 
 
 async def test_pool_from_url_deprecation(request):
@@ -326,7 +341,7 @@ async def test_pool_auto_close_disable(request):
     r1 = await get_redis_connection()
     assert r1.auto_close_connection_pool is False
     await r1.connection_pool.disconnect()
-    await r1.close()
+    await r1.aclose()
 
 
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
