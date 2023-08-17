@@ -7,7 +7,7 @@ import redis.asyncio as redis
 from redis.asyncio.connection import Connection, to_bool
 from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
-from .compat import mock
+from .compat import aclosing, mock
 from .conftest import asynccontextmanager
 from .test_pubsub import wait_for_message
 
@@ -134,6 +134,16 @@ class TestConnectionPool:
             connection = await pool.get_connection("_")
             assert isinstance(connection, DummyConnection)
             assert connection.kwargs == connection_kwargs
+
+    async def test_aclosing(self):
+        connection_kwargs = {"foo": "bar", "biz": "baz"}
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            max_connections=None,
+            **connection_kwargs,
+        )
+        async with aclosing(pool):
+            pass
 
     async def test_multiple_connections(self, master_host):
         connection_kwargs = {"host": master_host[0]}
