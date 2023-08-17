@@ -527,7 +527,7 @@ class Redis(
         return await self.initialize()
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        await self.close()
+        await self.aclose()
 
     _DEL_MESSAGE = "Unclosed Redis client"
 
@@ -539,7 +539,7 @@ class Redis(
             context = {"client": self, "message": self._DEL_MESSAGE}
             asyncio.get_running_loop().call_exception_handler(context)
 
-    async def close(self, close_connection_pool: Optional[bool] = None) -> None:
+    async def aclose(self, close_connection_pool: Optional[bool] = None) -> None:
         """
         Closes Redis client connection
 
@@ -556,6 +556,12 @@ class Redis(
             close_connection_pool is None and self.auto_close_connection_pool
         ):
             await self.connection_pool.disconnect()
+
+    async def close(self, close_connection_pool: Optional[bool] = None) -> None:
+        """
+        Alias for aclose(), for backwards compatibility
+        """
+        await self.aclose(close_connection_pool)
 
     async def _send_command_parse_response(self, conn, command_name, *args, **options):
         """
