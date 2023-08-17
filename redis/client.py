@@ -1217,6 +1217,10 @@ class Pipeline(Redis):
             self.connection_pool.release(self.connection)
             self.connection = None
 
+    def close(self):
+        """Close the pipeline"""
+        self.reset()
+
     def multi(self):
         """
         Start a transactional block of the pipeline after WATCH commands
