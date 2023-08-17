@@ -14,7 +14,6 @@ from typing import (
     List,
     Mapping,
     MutableMapping,
-    NoReturn,
     Optional,
     Set,
     Tuple,
@@ -770,13 +769,18 @@ class PubSub:
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        await self.reset()
+        await self.aclose()
 
     def __del__(self):
         if self.connection:
             self.connection.clear_connect_callbacks()
 
-    async def reset(self):
+    async def aclose(self):
+        # In case a connection property does not yet exist
+        # (due to a crash earlier in the Redis() constructor), return
+        # immediately as there is nothing to clean-up.
+        if not hasattr(self, "connection"):
+            return
         async with self._lock:
             if self.connection:
                 await self.connection.disconnect()
@@ -788,13 +792,13 @@ class PubSub:
             self.patterns = {}
             self.pending_unsubscribe_patterns = set()
 
-    def close(self) -> Awaitable[NoReturn]:
-        # In case a connection property does not yet exist
-        # (due to a crash earlier in the Redis() constructor), return
-        # immediately as there is nothing to clean-up.
-        if not hasattr(self, "connection"):
-            return
-        return self.reset()
+    async def close(self) -> None:
+        """Alias for aclose(), for backwards compatibility"""
+        await self.aclose()
+
+    async def reset(self) -> None:
+        """alias for aclose(), for backwards compatibility"""
+        await self.aclose()
 
     async def on_connect(self, connection: Connection):
         """Re-subscribe to any channels and patterns previously subscribed to"""
@@ -1270,14 +1274,14 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         # valid since this connection has died. raise a WatchError, which
         # indicates the user should retry this transaction.
         if self.watching:
-            await self.reset()
+            await self.aclose()
             raise WatchError(
                 "A ConnectionError occurred on while watching one or more keys"
             )
         # if retry_on_timeout is not set, or the error is not
         # a TimeoutError, raise it
         if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
-            await self.reset()
+            await self.aclose()
             raise
 
     async def immediate_execute_command(self, *args, **options):
