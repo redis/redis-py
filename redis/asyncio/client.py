@@ -1242,6 +1242,10 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             await self.connection_pool.release(self.connection)
             self.connection = None
 
+    async def aclose(self) -> None:
+        """Alias for reset(), a standard method name for cleanup"""
+        await self.reset()
+
     def multi(self):
         """
         Start a transactional block of the pipeline after WATCH commands
