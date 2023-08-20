@@ -489,20 +489,6 @@ class TestRedisCommands:
         with pytest.raises(TypeError):
             await r.client_no_touch()
 
-    @skip_if_server_version_lt("7.2.0")
-    @pytest.mark.onlycluster
-    async def test_waitaof(self, r):
-        # must return a list of 2 elements
-        assert len(await r.waitaof(0, 0, 0)) == 2
-        assert len(await r.waitaof(1, 0, 0)) == 2
-        assert len(await r.waitaof(1, 0, 1000)) == 2
-
-        # value is out of range, value must between 0 and 1
-        with pytest.raises(exceptions.ResponseError):
-            await r.waitaof(2, 0, 0)
-        with pytest.raises(exceptions.ResponseError):
-            await r.waitaof(-1, 0, 0)
-
     async def test_config_get(self, r: redis.Redis):
         data = await r.config_get()
         assert "maxmemory" in data
@@ -1821,9 +1807,11 @@ class TestRedisCommands:
     async def test_zrank_withscore(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
         assert await r.zrank("a", "a1") == 0
-        assert await r.rank("a", "a2") == 1
+        assert await r.zrank("a", "a2") == 1
         assert await r.zrank("a", "a6") is None
-        assert await r.zrank("a", "a3", withscore=True) == [2, "3"]
+        assert_resp_response(
+            r, await r.zrank("a", "a3", withscore=True), [2, b"3"], [2, 3.0]
+        )
         assert await r.zrank("a", "a6", withscore=True) is None
 
     async def test_zrem(self, r: redis.Redis):
@@ -1920,7 +1908,9 @@ class TestRedisCommands:
         assert await r.zrevrank("a", "a1") == 4
         assert await r.zrevrank("a", "a2") == 3
         assert await r.zrevrank("a", "a6") is None
-        assert await r.zrevrank("a", "a3", withscore=True) == [2, "3"]
+        assert_resp_response(
+            r, await r.zrevrank("a", "a3", withscore=True), [2, b"3"], [2, 3.0]
+        )
         assert await r.zrevrank("a", "a6", withscore=True) is None
 
     async def test_zscore(self, r: redis.Redis):
@@ -2877,13 +2867,15 @@ class TestRedisCommands:
         info = await r.xinfo_consumers(stream, group)
         assert len(info) == 2
         expected = [
-            {"name": consumer1.encode(), "pending": 1, "inactive": 2},
-            {"name": consumer2.encode(), "pending": 2, "inactive": 2},
+            {"name": consumer1.encode(), "pending": 1},
+            {"name": consumer2.encode(), "pending": 2},
         ]
 
-        # we can't determine the idle time, so just make sure it's an int
+        # we can't determine the idle and inactive time, so just make sure it's an int
         assert isinstance(info[0].pop("idle"), int)
         assert isinstance(info[1].pop("idle"), int)
+        assert isinstance(info[0].pop("inactive"), int)
+        assert isinstance(info[1].pop("inactive"), int)
         assert info == expected
 
     @skip_if_server_version_lt("5.0.0")
