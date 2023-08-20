@@ -3557,7 +3557,7 @@ class TestRedisCommands:
         )
 
     @skip_unless_arch_bits(64)
-    @skip_if_server_version_lt("7.2.0")
+    @skip_if_server_version_lt("3.2.0")
     def test_geopos(self, r):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
@@ -3570,7 +3570,7 @@ class TestRedisCommands:
             r,
             r.geopos("barcelona", "place1", "place2"),
             [
-                (2.19093829393386841, 41.43379028184083),
+                (2.19093829393386841, 41.43379028184083523),
                 (2.18737632036209106, 41.40634178640635099),
             ],
             [
@@ -3619,7 +3619,7 @@ class TestRedisCommands:
         )[0] in [b"place1", b"place3", b"\x80place2"]
 
     @skip_unless_arch_bits(64)
-    @skip_if_server_version_lt("7.2.0")
+    @skip_if_server_version_lt("6.2.0")
     def test_geosearch_member(self, r):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
@@ -3652,7 +3652,7 @@ class TestRedisCommands:
                 b"place1",
                 0.0,
                 3471609698139488,
-                (2.1909382939338684, 41.43379028184083),
+                (2.1909382939338684, 41.433790281840835),
             ],
         ]
 
@@ -3672,7 +3672,7 @@ class TestRedisCommands:
         ) == [b"place2", b"place1"]
 
     @skip_unless_arch_bits(64)
-    @skip_if_server_version_lt("7.2.0")
+    @skip_if_server_version_lt("6.2.0")
     def test_geosearch_with(self, r):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
@@ -3697,7 +3697,7 @@ class TestRedisCommands:
                 b"place1",
                 0.0881,
                 3471609698139488,
-                (2.19093829393386841, 41.43379028184083),
+                (2.19093829393386841, 41.43379028184083523),
             ]
         ]
         assert r.geosearch(
@@ -3708,7 +3708,7 @@ class TestRedisCommands:
             unit="km",
             withdist=True,
             withcoord=True,
-        ) == [[b"place1", 0.0881, (2.19093829393386841, 41.43379028184083)]]
+        ) == [[b"place1", 0.0881, (2.19093829393386841, 41.43379028184083523)]]
         assert r.geosearch(
             "barcelona",
             longitude=2.191,
@@ -3717,7 +3717,9 @@ class TestRedisCommands:
             unit="km",
             withhash=True,
             withcoord=True,
-        ) == [[b"place1", 3471609698139488, (2.19093829393386841, 41.43379028184083)]]
+        ) == [
+            [b"place1", 3471609698139488, (2.19093829393386841, 41.43379028184083523)]
+        ]
         # test no values.
         assert (
             r.geosearch(
@@ -3796,7 +3798,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_unless_arch_bits(64)
-    @skip_if_server_version_lt("7.2.0")
+    @skip_if_server_version_lt("6.2.0")
     def test_geosearchstore_dist(self, r):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
@@ -3814,7 +3816,7 @@ class TestRedisCommands:
             storedist=True,
         )
         # instead of save the geo score, the distance is saved.
-        assert r.zscore("places_barcelona", "place1") == 88.05060698338646
+        assert r.zscore("places_barcelona", "place1") == 88.05060698409301
 
     @skip_if_server_version_lt("3.2.0")
     def test_georadius_Issue2609(self, r):
@@ -3857,7 +3859,7 @@ class TestRedisCommands:
         assert r.georadius("barcelona", 2.191, 41.433, 1, unit="km") == [b"place1"]
 
     @skip_unless_arch_bits(64)
-    @skip_if_server_version_lt("7.2.0")
+    @skip_if_server_version_lt("3.2.0")
     def test_georadius_with(self, r):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
@@ -3883,17 +3885,19 @@ class TestRedisCommands:
                 b"place1",
                 0.0881,
                 3471609698139488,
-                (2.19093829393386841, 41.43379028184083),
+                (2.19093829393386841, 41.43379028184083523),
             ]
         ]
 
         assert r.georadius(
             "barcelona", 2.191, 41.433, 1, unit="km", withdist=True, withcoord=True
-        ) == [[b"place1", 0.0881, (2.19093829393386841, 41.43379028184083)]]
+        ) == [[b"place1", 0.0881, (2.19093829393386841, 41.43379028184083523)]]
 
         assert r.georadius(
             "barcelona", 2.191, 41.433, 1, unit="km", withhash=True, withcoord=True
-        ) == [[b"place1", 3471609698139488, (2.19093829393386841, 41.43379028184083)]]
+        ) == [
+            [b"place1", 3471609698139488, (2.19093829393386841, 41.43379028184083523)]
+        ]
 
         # test no values.
         assert (
@@ -3957,7 +3961,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_unless_arch_bits(64)
-    @skip_if_server_version_lt("7.2.0")
+    @skip_if_server_version_lt("3.2.0")
     def test_georadius_store_dist(self, r):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
@@ -3968,10 +3972,10 @@ class TestRedisCommands:
         r.geoadd("barcelona", values)
         r.georadius("barcelona", 2.191, 41.433, 1000, store_dist="places_barcelona")
         # instead of save the geo score, the distance is saved.
-        assert r.zscore("places_barcelona", "place1") == 88.05060698338646
+        assert r.zscore("places_barcelona", "place1") == 88.05060698409301
 
     @skip_unless_arch_bits(64)
-    @skip_if_server_version_lt("7.2.0")
+    @skip_if_server_version_lt("3.2.0")
     def test_georadiusmember(self, r):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
@@ -3999,7 +4003,7 @@ class TestRedisCommands:
                 b"place1",
                 0.0,
                 3471609698139488,
-                (2.1909382939338684, 41.43379028184083),
+                (2.1909382939338684, 41.433790281840835),
             ],
         ]
 

@@ -2421,7 +2421,7 @@ class TestRedisCommands:
             [b"sp3e9yg3kd0", b"sp3e9cbc3t0", None],
         )
 
-    @skip_if_server_version_lt("7.2.0")
+    @skip_if_server_version_lt("3.2.0")
     async def test_geopos(self, r: redis.Redis):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
@@ -2435,7 +2435,7 @@ class TestRedisCommands:
             r,
             await r.geopos("barcelona", "place1", "place2"),
             [
-                (2.19093829393386841, 41.43379028184083),
+                (2.19093829393386841, 41.43379028184083523),
                 (2.18737632036209106, 41.40634178640635099),
             ],
             [
@@ -2490,7 +2490,7 @@ class TestRedisCommands:
         ]
 
     @skip_unless_arch_bits(64)
-    @skip_if_server_version_lt("7.2.0")
+    @skip_if_server_version_lt("3.2.0")
     async def test_georadius_with(self, r: redis.Redis):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
@@ -2516,17 +2516,19 @@ class TestRedisCommands:
                 b"place1",
                 0.0881,
                 3471609698139488,
-                (2.19093829393386841, 41.43379028184083),
+                (2.19093829393386841, 41.43379028184083523),
             ]
         ]
 
         assert await r.georadius(
             "barcelona", 2.191, 41.433, 1, unit="km", withdist=True, withcoord=True
-        ) == [[b"place1", 0.0881, (2.19093829393386841, 41.43379028184083)]]
+        ) == [[b"place1", 0.0881, (2.19093829393386841, 41.43379028184083523)]]
 
         assert await r.georadius(
             "barcelona", 2.191, 41.433, 1, unit="km", withhash=True, withcoord=True
-        ) == [[b"place1", 3471609698139488, (2.19093829393386841, 41.43379028184083)]]
+        ) == [
+            [b"place1", 3471609698139488, (2.19093829393386841, 41.43379028184083523)]
+        ]
 
         # test no values.
         assert (
@@ -2588,7 +2590,7 @@ class TestRedisCommands:
         assert await r.zrange("places_barcelona", 0, -1) == [b"place1"]
 
     @skip_unless_arch_bits(64)
-    @skip_if_server_version_lt("7.2.0")
+    @skip_if_server_version_lt("3.2.0")
     @pytest.mark.onlynoncluster
     async def test_georadius_store_dist(self, r: redis.Redis):
         values = (2.1909389952632, 41.433791470673, "place1") + (
@@ -2602,10 +2604,10 @@ class TestRedisCommands:
             "barcelona", 2.191, 41.433, 1000, store_dist="places_barcelona"
         )
         # instead of save the geo score, the distance is saved.
-        assert await r.zscore("places_barcelona", "place1") == 88.05060698338646
+        assert await r.zscore("places_barcelona", "place1") == 88.05060698409301
 
     @skip_unless_arch_bits(64)
-    @skip_if_server_version_lt("7.2.0")
+    @skip_if_server_version_lt("3.2.0")
     async def test_georadiusmember(self, r: redis.Redis):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
@@ -2633,7 +2635,7 @@ class TestRedisCommands:
                 b"place1",
                 0.0,
                 3471609698139488,
-                (2.1909382939338684, 41.43379028184083),
+                (2.1909382939338684, 41.433790281840835),
             ],
         ]
 
