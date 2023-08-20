@@ -267,6 +267,7 @@ class AbstractRedisCluster:
                 "READONLY",
                 "CLUSTER INFO",
                 "CLUSTER MEET",
+                "CLUSTER MYSHARDID"
                 "CLUSTER NODES",
                 "CLUSTER REPLICAS",
                 "CLUSTER RESET",
