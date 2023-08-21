@@ -899,7 +899,7 @@ class PubSub:
         self.pending_unsubscribe_patterns.difference_update(new_patterns)
         return ret_val
 
-    def punsubscribe(self, *args: ChannelT) -> Awaitable:
+    async def punsubscribe(self, *args: ChannelT) -> Awaitable:
         """
         Unsubscribe from the supplied patterns. If empty, unsubscribe from
         all patterns.
@@ -912,7 +912,7 @@ class PubSub:
             parsed_args = []
             patterns = self.patterns
         self.pending_unsubscribe_patterns.update(patterns)
-        return self.execute_command("PUNSUBSCRIBE", *parsed_args)
+        return await self.execute_command("PUNSUBSCRIBE", *parsed_args)
 
     async def subscribe(self, *args: ChannelT, **kwargs: Callable):
         """
@@ -935,7 +935,7 @@ class PubSub:
         self.pending_unsubscribe_channels.difference_update(new_channels)
         return ret_val
 
-    def unsubscribe(self, *args) -> Awaitable:
+    async def unsubscribe(self, *args) -> Awaitable:
         """
         Unsubscribe from the supplied channels. If empty, unsubscribe from
         all channels
@@ -947,7 +947,7 @@ class PubSub:
             parsed_args = []
             channels = self.channels
         self.pending_unsubscribe_channels.update(channels)
-        return self.execute_command("UNSUBSCRIBE", *parsed_args)
+        return await self.execute_command("UNSUBSCRIBE", *parsed_args)
 
     async def listen(self) -> AsyncIterator:
         """Listen for messages on channels this client has been subscribed to"""
