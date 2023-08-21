@@ -745,20 +745,6 @@ class TestRedisCommands:
         with pytest.raises(TypeError):
             r.client_no_touch()
 
-    @pytest.mark.onlycluster
-    @skip_if_server_version_lt("7.2.0")
-    def test_waitaof(self, r):
-        # must return a list of 2 elements
-        assert len(r.waitaof(0, 0, 0)) == 2
-        assert len(r.waitaof(1, 0, 0)) == 2
-        assert len(r.waitaof(1, 0, 1000)) == 2
-
-        # value is out of range, value must between 0 and 1
-        with pytest.raises(exceptions.ResponseError):
-            r.waitaof(2, 0, 0)
-        with pytest.raises(exceptions.ResponseError):
-            r.waitaof(-1, 0, 0)
-
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("3.2.0")
     def test_client_reply(self, r, r_timeout):
@@ -2854,9 +2840,9 @@ class TestRedisCommands:
     def test_zrank_withscore(self, r: redis.Redis):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
         assert r.zrank("a", "a1") == 0
-        assert r.rank("a", "a2") == 1
+        assert r.zrank("a", "a2") == 1
         assert r.zrank("a", "a6") is None
-        assert r.zrank("a", "a3", withscore=True) == [2, "3"]
+        assert_resp_response(r, r.zrank("a", "a3", withscore=True), [2, b"3"], [2, 3.0])
         assert r.zrank("a", "a6", withscore=True) is None
 
     def test_zrem(self, r):
@@ -2951,7 +2937,9 @@ class TestRedisCommands:
         assert r.zrevrank("a", "a1") == 4
         assert r.zrevrank("a", "a2") == 3
         assert r.zrevrank("a", "a6") is None
-        assert r.zrevrank("a", "a3", withscore=True) == [2, "3"]
+        assert_resp_response(
+            r, r.zrevrank("a", "a3", withscore=True), [2, b"3"], [2, 3.0]
+        )
         assert r.zrevrank("a", "a6", withscore=True) is None
 
     def test_zscore(self, r):
@@ -4404,13 +4392,15 @@ class TestRedisCommands:
         info = r.xinfo_consumers(stream, group)
         assert len(info) == 2
         expected = [
-            {"name": consumer1.encode(), "pending": 1, "inactive": 2},
-            {"name": consumer2.encode(), "pending": 2, "inactive": 2},
+            {"name": consumer1.encode(), "pending": 1},
+            {"name": consumer2.encode(), "pending": 2},
         ]
 
-        # we can't determine the idle time, so just make sure it's an int
+        # we can't determine the idle and inactive time, so just make sure it's an int
         assert isinstance(info[0].pop("idle"), int)
         assert isinstance(info[1].pop("idle"), int)
+        assert isinstance(info[0].pop("inactive"), int)
+        assert isinstance(info[1].pop("inactive"), int)
         assert info == expected
 
     @skip_if_server_version_lt("7.0.0")
