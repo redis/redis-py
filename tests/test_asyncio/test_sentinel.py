@@ -246,7 +246,8 @@ async def test_reset(cluster, sentinel):
 @pytest.mark.parametrize("method_name", ["master_for", "slave_for"])
 async def test_auto_close_pool(cluster, sentinel, method_name):
     """
-    Check that the connection pool created by the sentinel client is automatically closed
+    Check that the connection pool created by the sentinel client is
+    automatically closed
     """
 
     method = getattr(sentinel, method_name)
@@ -259,7 +260,7 @@ async def test_auto_close_pool(cluster, sentinel, method_name):
         nonlocal calls
         calls += 1
 
-    with mock.patch.object(pool, "disconnect", mock_disconnect) as disconnect:
+    with mock.patch.object(pool, "disconnect", mock_disconnect):
         await client.close()
 
     assert calls == 1

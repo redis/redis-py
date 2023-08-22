@@ -381,4 +381,3 @@ class Sentinel(AsyncSentinelCommands):
         )
         client.auto_close_connection_pool = auto_close_connection_pool
         return client
-
