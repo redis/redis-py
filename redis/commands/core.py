@@ -2014,6 +2014,8 @@ class BasicKeyCommands(CommandsProtocol):
             options[EMPTY_RESPONSE] = []
         return self.execute_command("MGET", *args, **options)
 
+    mget_nonatomic = mget
+
     def mset(self, mapping: Mapping[AnyKeyT, EncodableT]) -> ResponseT:
         """
         Sets key/values based on a mapping. Mapping is a dictionary of
@@ -2026,6 +2028,8 @@ class BasicKeyCommands(CommandsProtocol):
         for pair in mapping.items():
             items.extend(pair)
         return self.execute_command("MSET", *items)
+
+    mset_nonatomic = mset
 
     def msetnx(self, mapping: Mapping[AnyKeyT, EncodableT]) -> ResponseT:
         """
