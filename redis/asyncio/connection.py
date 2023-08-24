@@ -2,11 +2,9 @@ import asyncio
 import copy
 import enum
 import inspect
-import os
 import socket
 import ssl
 import sys
-import threading
 import weakref
 from abc import abstractmethod
 from itertools import chain
@@ -41,7 +39,6 @@ from redis.credentials import CredentialProvider, UsernamePasswordCredentialProv
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
-    ChildDeadlockedError,
     ConnectionError,
     DataError,
     RedisError,
@@ -97,7 +94,6 @@ class AbstractConnection:
     """Manages communication to and from a Redis server"""
 
     __slots__ = (
-        "pid",
         "db",
         "username",
         "client_name",
@@ -158,7 +154,6 @@ class AbstractConnection:
                 "1. 'password' and (optional) 'username'\n"
                 "2. 'credential_provider'"
             )
-        self.pid = os.getpid()
         self.db = db
         self.client_name = client_name
         self.lib_name = lib_name
@@ -381,12 +376,11 @@ class AbstractConnection:
                 if not self.is_connected:
                     return
                 try:
-                    if os.getpid() == self.pid:
-                        self._writer.close()  # type: ignore[union-attr]
-                        # wait for close to finish, except when handling errors and
-                        # forcefully disconnecting.
-                        if not nowait:
-                            await self._writer.wait_closed()  # type: ignore[union-attr]
+                    self._writer.close()  # type: ignore[union-attr]
+                    # wait for close to finish, except when handling errors and
+                    # forcefully disconnecting.
+                    if not nowait:
+                        await self._writer.wait_closed()  # type: ignore[union-attr]
                 except OSError:
                     pass
                 finally:
@@ -1004,15 +998,6 @@ class ConnectionPool:
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
 
-        # a lock to protect the critical section in _checkpid().
-        # this lock is acquired when the process id changes, such as
-        # after a fork. during this time, multiple threads in the child
-        # process could attempt to acquire this lock. the first thread
-        # to acquire the lock will reset the data structures and lock
-        # object of this pool. subsequent threads acquiring this lock
-        # will notice the first thread already did the work and simply
-        # release the lock.
-        self._fork_lock = threading.Lock()
         self._lock = asyncio.Lock()
         self._created_connections: int
         self._available_connections: List[AbstractConnection]
@@ -1032,67 +1017,8 @@ class ConnectionPool:
         self._available_connections = []
         self._in_use_connections = set()
 
-        # this must be the last operation in this method. while reset() is
-        # called when holding _fork_lock, other threads in this process
-        # can call _checkpid() which compares self.pid and os.getpid() without
-        # holding any lock (for performance reasons). keeping this assignment
-        # as the last operation ensures that those other threads will also
-        # notice a pid difference and block waiting for the first thread to
-        # release _fork_lock. when each of these threads eventually acquire
-        # _fork_lock, they will notice that another thread already called
-        # reset() and they will immediately release _fork_lock and continue on.
-        self.pid = os.getpid()
-
-    def _checkpid(self):
-        # _checkpid() attempts to keep ConnectionPool fork-safe on modern
-        # systems. this is called by all ConnectionPool methods that
-        # manipulate the pool's state such as get_connection() and release().
-        #
-        # _checkpid() determines whether the process has forked by comparing
-        # the current process id to the process id saved on the ConnectionPool
-        # instance. if these values are the same, _checkpid() simply returns.
-        #
-        # when the process ids differ, _checkpid() assumes that the process
-        # has forked and that we're now running in the child process. the child
-        # process cannot use the parent's file descriptors (e.g., sockets).
-        # therefore, when _checkpid() sees the process id change, it calls
-        # reset() in order to reinitialize the child's ConnectionPool. this
-        # will cause the child to make all new connection objects.
-        #
-        # _checkpid() is protected by self._fork_lock to ensure that multiple
-        # threads in the child process do not call reset() multiple times.
-        #
-        # there is an extremely small chance this could fail in the following
-        # scenario:
-        #   1. process A calls _checkpid() for the first time and acquires
-        #      self._fork_lock.
-        #   2. while holding self._fork_lock, process A forks (the fork()
-        #      could happen in a different thread owned by process A)
-        #   3. process B (the forked child process) inherits the
-        #      ConnectionPool's state from the parent. that state includes
-        #      a locked _fork_lock. process B will not be notified when
-        #      process A releases the _fork_lock and will thus never be
-        #      able to acquire the _fork_lock.
-        #
-        # to mitigate this possible deadlock, _checkpid() will only wait 5
-        # seconds to acquire _fork_lock. if _fork_lock cannot be acquired in
-        # that time it is assumed that the child is deadlocked and a
-        # redis.ChildDeadlockedError error is raised.
-        if self.pid != os.getpid():
-            acquired = self._fork_lock.acquire(timeout=5)
-            if not acquired:
-                raise ChildDeadlockedError
-            # reset() the instance for the new process if another thread
-            # hasn't already done so
-            try:
-                if self.pid != os.getpid():
-                    self.reset()
-            finally:
-                self._fork_lock.release()
-
     async def get_connection(self, command_name, *keys, **options):
         """Get a connection from the pool"""
-        self._checkpid()
         async with self._lock:
             try:
                 connection = self._available_connections.pop()
@@ -1141,7 +1067,6 @@ class ConnectionPool:
 
     async def release(self, connection: AbstractConnection):
         """Releases the connection back to the pool"""
-        self._checkpid()
         async with self._lock:
             try:
                 self._in_use_connections.remove(connection)
@@ -1150,18 +1075,7 @@ class ConnectionPool:
                 # that the pool doesn't actually own
                 pass
 
-            if self.owns_connection(connection):
-                self._available_connections.append(connection)
-            else:
-                # pool doesn't own this connection. do not add it back
-                # to the pool and decrement the count so that another
-                # connection can take its place if needed
-                self._created_connections -= 1
-                await connection.disconnect()
-                return
-
-    def owns_connection(self, connection: AbstractConnection):
-        return connection.pid == self.pid
+            self._available_connections.append(connection)
 
     async def disconnect(self, inuse_connections: bool = True):
         """
@@ -1171,7 +1085,6 @@ class ConnectionPool:
         current in use, potentially by other tasks. Otherwise only disconnect
         connections that are idle in the pool.
         """
-        self._checkpid()
         async with self._lock:
             if inuse_connections:
                 connections: Iterable[AbstractConnection] = chain(
@@ -1259,17 +1172,6 @@ class BlockingConnectionPool(ConnectionPool):
         # disconnect them later.
         self._connections = []
 
-        # this must be the last operation in this method. while reset() is
-        # called when holding _fork_lock, other threads in this process
-        # can call _checkpid() which compares self.pid and os.getpid() without
-        # holding any lock (for performance reasons). keeping this assignment
-        # as the last operation ensures that those other threads will also
-        # notice a pid difference and block waiting for the first thread to
-        # release _fork_lock. when each of these threads eventually acquire
-        # _fork_lock, they will notice that another thread already called
-        # reset() and they will immediately release _fork_lock and continue on.
-        self.pid = os.getpid()
-
     def make_connection(self):
         """Make a fresh connection."""
         connection = self.connection_class(**self.connection_kwargs)
@@ -1288,8 +1190,6 @@ class BlockingConnectionPool(ConnectionPool):
         create new connections when we need to, i.e.: the actual number of
         connections will only increase in response to demand.
         """
-        # Make sure we haven't changed process.
-        self._checkpid()
 
         # Try and get a connection from the pool. If one isn't available within
         # self.timeout then raise a ``ConnectionError``.
@@ -1331,17 +1231,6 @@ class BlockingConnectionPool(ConnectionPool):
 
     async def release(self, connection: AbstractConnection):
         """Releases the connection back to the pool."""
-        # Make sure we haven't changed process.
-        self._checkpid()
-        if not self.owns_connection(connection):
-            # pool doesn't own this connection. do not add it back
-            # to the pool. instead add a None value which is a placeholder
-            # that will cause the pool to recreate the connection if
-            # its needed.
-            await connection.disconnect()
-            self.pool.put_nowait(None)
-            return
-
         # Put the connection back into the pool.
         try:
             self.pool.put_nowait(connection)
@@ -1352,7 +1241,6 @@ class BlockingConnectionPool(ConnectionPool):
 
     async def disconnect(self, inuse_connections: bool = True):
         """Disconnects all connections in the pool."""
-        self._checkpid()
         async with self._lock:
             resp = await asyncio.gather(
                 *(connection.disconnect() for connection in self._connections),
