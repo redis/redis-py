@@ -32,6 +32,9 @@ class Retry:
             set(self._supported_errors + tuple(specified_errors))
         )
 
+    def is_supported_error(self, error):
+        return isinstance(error, self._supported_errors)
+
     def call_with_retry(self, do, fail):
         """
         Execute an operation that might fail and returns its result, or

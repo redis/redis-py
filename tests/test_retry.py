@@ -9,6 +9,8 @@ from redis.exceptions import (
     BusyLoadingError,
     ConnectionError,
     ReadOnlyError,
+    RedisClusterException,
+    RedisError,
     TimeoutError,
 )
 from redis.retry import Retry
@@ -121,6 +123,16 @@ class TestRetry:
 
         assert self.actual_attempts == 5
         assert self.actual_failures == 5
+
+    @pytest.mark.parametrize("exception_class", [ConnectionError, TimeoutError])
+    def test_is_supported_error_true(self, exception_class):
+        retry = Retry(BackoffMock(), -1)
+        assert retry.is_supported_error(exception_class())
+
+    @pytest.mark.parametrize("exception_class", [RedisClusterException, RedisError])
+    def test_is_supported_error_false(self, exception_class):
+        retry = Retry(BackoffMock(), -1)
+        assert not retry.is_supported_error(exception_class())
 
 
 @pytest.mark.onlynoncluster

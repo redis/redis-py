@@ -1091,7 +1091,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     # The nodes and slots cache were reinitialized.
                     # Try again with the new cluster setup.
                     retry_attempts -= 1
-                    if self.retry and isinstance(e, self.retry._supported_errors):
+                    if self.retry and self.retry.is_supported_error(e):
                         backoff = self.retry._backoff.compute(
                             self.cluster_error_retry_attempts - retry_attempts
                         )
@@ -2100,20 +2100,19 @@ class ClusterPipeline(RedisCluster):
                         redis_node = self.get_redis_connection(node)
                         try:
                             connection = get_connection(redis_node, c.args)
-                        except (ConnectionError, TimeoutError) as e:
+                        except BaseException as e:
                             for n in nodes.values():
                                 n.connection_pool.release(n.connection)
                                 n.connection = None
                             nodes = {}
-                            if self.retry and isinstance(
-                                e, self.retry._supported_errors
-                            ):
+                            if self.retry and self.retry.is_supported_error(e):
                                 backoff = self.retry._backoff.compute(attempts_count)
                                 if backoff > 0:
                                     time.sleep(backoff)
-                            self.nodes_manager.initialize()
-                            if is_default_node:
-                                self.replace_default_node()
+                            if isinstance(e, (ConnectionError, TimeoutError)):
+                                self.nodes_manager.initialize()
+                                if is_default_node:
+                                    self.replace_default_node()
                             raise
                         nodes[node_name] = NodeCommands(
                             redis_node.parse_response,
@@ -2229,6 +2228,8 @@ class ClusterPipeline(RedisCluster):
                 if n.connection:
                     n.connection.disconnect()
                     n.connection_pool.release(n.connection)
+            if len(nodes) > 0:
+                time.sleep(0.25)
             raise
 
     def _fail_on_redirect(self, allow_redirections):
