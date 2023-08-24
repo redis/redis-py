@@ -1757,7 +1757,9 @@ class TestClusterRedisCommands:
             assert r.zinter(["{foo}a", "{foo}b", "{foo}c"]) == [b"a3", b"a1"]
             # invalid aggregation
             with pytest.raises(DataError):
-                r.zinter(["{foo}a", "{foo}b", "{foo}c"], aggregate="foo", withscores=True)
+                r.zinter(
+                    ["{foo}a", "{foo}b", "{foo}c"], aggregate="foo", withscores=True
+                )
             # aggregate with SUM
             assert r.zinter(["{foo}a", "{foo}b", "{foo}c"], withscores=True) == [
                 (b"a3", 8),
@@ -1772,10 +1774,9 @@ class TestClusterRedisCommands:
                 ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN", withscores=True
             ) == [(b"a1", 1), (b"a3", 1)]
             # with weights
-            assert r.zinter({"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True) == [
-                (b"a3", 20),
-                (b"a1", 23),
-            ]
+            assert r.zinter(
+                {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True
+            ) == [(b"a3", 20), (b"a1", 23)]
 
     def test_cluster_zinterstore_sum(self, r):
         with pytest.raises(Exception):
@@ -1783,7 +1784,10 @@ class TestClusterRedisCommands:
             r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
             r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
             assert r.zinterstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"]) == 2
-            assert r.zrange("{foo}d", 0, -1, withscores=True) == [(b"a3", 8), (b"a1", 9)]
+            assert r.zrange("{foo}d", 0, -1, withscores=True) == [
+                (b"a3", 8),
+                (b"a1", 9),
+            ]
 
     def test_cluster_zinterstore_max(self, r):
         with pytest.raises(Exception):
@@ -1794,7 +1798,10 @@ class TestClusterRedisCommands:
                 r.zinterstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="MAX")
                 == 2
             )
-            assert r.zrange("{foo}d", 0, -1, withscores=True) == [(b"a3", 5), (b"a1", 6)]
+            assert r.zrange("{foo}d", 0, -1, withscores=True) == [
+                (b"a3", 5),
+                (b"a1", 6),
+            ]
 
     def test_cluster_zinterstore_min(self, r):
         with pytest.raises(Exception):
@@ -1805,7 +1812,10 @@ class TestClusterRedisCommands:
                 r.zinterstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN")
                 == 2
             )
-            assert r.zrange("{foo}d", 0, -1, withscores=True) == [(b"a1", 1), (b"a3", 3)]
+            assert r.zrange("{foo}d", 0, -1, withscores=True) == [
+                (b"a1", 1),
+                (b"a3", 3),
+            ]
 
     def test_cluster_zinterstore_with_weight(self, r):
         with pytest.raises(Exception):
@@ -1813,7 +1823,10 @@ class TestClusterRedisCommands:
             r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
             r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
             assert r.zinterstore("{foo}d", {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}) == 2
-            assert r.zrange("{foo}d", 0, -1, withscores=True) == [(b"a3", 20), (b"a1", 23)]
+            assert r.zrange("{foo}d", 0, -1, withscores=True) == [
+                (b"a3", 20),
+                (b"a1", 23),
+            ]
 
     @skip_if_server_version_lt("4.9.0")
     def test_cluster_bzpopmax(self, r):
@@ -1868,7 +1881,12 @@ class TestClusterRedisCommands:
             r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
             r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
             # sum
-            assert r.zunion(["{foo}a", "{foo}b", "{foo}c"]) == [b"a2", b"a4", b"a3", b"a1"]
+            assert r.zunion(["{foo}a", "{foo}b", "{foo}c"]) == [
+                b"a2",
+                b"a4",
+                b"a3",
+                b"a1",
+            ]
             assert r.zunion(["{foo}a", "{foo}b", "{foo}c"], withscores=True) == [
                 (b"a2", 3),
                 (b"a4", 4),
@@ -1884,12 +1902,9 @@ class TestClusterRedisCommands:
                 ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN", withscores=True
             ) == [(b"a1", 1), (b"a2", 1), (b"a3", 1), (b"a4", 4)]
             # with weight
-            assert r.zunion({"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True) == [
-                (b"a2", 5),
-                (b"a4", 12),
-                (b"a3", 20),
-                (b"a1", 23),
-            ]
+            assert r.zunion(
+                {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True
+            ) == [(b"a2", 5), (b"a4", 12), (b"a3", 20), (b"a1", 23)]
 
     def test_cluster_zunionstore_sum(self, r):
         assert r.zunionstore("{foo}d", ["{foo}" + str(i) for i in range(0, 256)]) == 0
@@ -2061,7 +2076,11 @@ class TestClusterRedisCommands:
 
             r.geoadd("{foo}barcelona", values)
             r.georadius(
-                "{foo}barcelona", 2.191, 41.433, 1000, store_dist="{foo}places_barcelona"
+                "{foo}barcelona",
+                2.191,
+                41.433,
+                1000,
+                store_dist="{foo}places_barcelona",
             )
             # instead of save the geo score, the distance is saved.
             assert r.zscore("{foo}places_barcelona", "place1") == 88.05060698409301

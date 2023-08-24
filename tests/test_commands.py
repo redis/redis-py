@@ -3026,38 +3026,37 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     def test_sort_all_options(self, r):
-        with pytest.raises(Exception):
-            r["user:1:username"] = "zeus"
-            r["user:2:username"] = "titan"
-            r["user:3:username"] = "hermes"
-            r["user:4:username"] = "hercules"
-            r["user:5:username"] = "apollo"
-            r["user:6:username"] = "athena"
-            r["user:7:username"] = "hades"
-            r["user:8:username"] = "dionysus"
+        r["user:1:username"] = "zeus"
+        r["user:2:username"] = "titan"
+        r["user:3:username"] = "hermes"
+        r["user:4:username"] = "hercules"
+        r["user:5:username"] = "apollo"
+        r["user:6:username"] = "athena"
+        r["user:7:username"] = "hades"
+        r["user:8:username"] = "dionysus"
 
-            r["user:1:favorite_drink"] = "yuengling"
-            r["user:2:favorite_drink"] = "rum"
-            r["user:3:favorite_drink"] = "vodka"
-            r["user:4:favorite_drink"] = "milk"
-            r["user:5:favorite_drink"] = "pinot noir"
-            r["user:6:favorite_drink"] = "water"
-            r["user:7:favorite_drink"] = "gin"
-            r["user:8:favorite_drink"] = "apple juice"
+        r["user:1:favorite_drink"] = "yuengling"
+        r["user:2:favorite_drink"] = "rum"
+        r["user:3:favorite_drink"] = "vodka"
+        r["user:4:favorite_drink"] = "milk"
+        r["user:5:favorite_drink"] = "pinot noir"
+        r["user:6:favorite_drink"] = "water"
+        r["user:7:favorite_drink"] = "gin"
+        r["user:8:favorite_drink"] = "apple juice"
 
-            r.rpush("gods", "5", "8", "3", "1", "2", "7", "6", "4")
-            num = r.sort(
-                "gods",
-                start=2,
-                num=4,
-                by="user:*:username",
-                get="user:*:favorite_drink",
-                desc=True,
-                alpha=True,
-                store="sorted",
-            )
-            assert num == 4
-            assert r.lrange("sorted", 0, 10) == [b"vodka", b"milk", b"gin", b"apple juice"]
+        r.rpush("gods", "5", "8", "3", "1", "2", "7", "6", "4")
+        num = r.sort(
+            "gods",
+            start=2,
+            num=4,
+            by="user:*:username",
+            get="user:*:favorite_drink",
+            desc=True,
+            alpha=True,
+            store="sorted",
+        )
+        assert num == 4
+        assert r.lrange("sorted", 0, 10) == [b"vodka", b"milk", b"gin", b"apple juice"]
 
     @skip_if_server_version_lt("7.0.0")
     @pytest.mark.onlynoncluster
@@ -3604,7 +3603,11 @@ class TestRedisCommands:
             assert r.georadius(
                 "barcelona", 2.191, 41.433, 1, unit="km", withhash=True, withcoord=True
             ) == [
-                [b"place1", 3471609698139488, (2.19093829393386841, 41.43379028184083523)]
+                [
+                    b"place1",
+                    3471609698139488,
+                    (2.19093829393386841, 41.43379028184083523),
+                ]
             ]
 
             # test no values.
@@ -3704,7 +3707,12 @@ class TestRedisCommands:
             assert r.georadiusbymember("barcelona", "place1", 10) == [b"place1"]
 
             assert r.georadiusbymember(
-                "barcelona", "place1", 4000, withdist=True, withcoord=True, withhash=True
+                "barcelona",
+                "place1",
+                4000,
+                withdist=True,
+                withcoord=True,
+                withhash=True,
             ) == [
                 [
                     b"\x80place2",
@@ -3729,9 +3737,9 @@ class TestRedisCommands:
                 b"\x80place2",
             )
             r.geoadd("barcelona", values)
-            assert r.georadiusbymember("barcelona", "place1", 4000, count=1, any=True) == [
-                b"\x80place2"
-            ]
+            assert r.georadiusbymember(
+                "barcelona", "place1", 4000, count=1, any=True
+            ) == [b"\x80place2"]
 
     @skip_if_server_version_lt("5.0.0")
     def test_xack(self, r):
@@ -3863,7 +3871,12 @@ class TestRedisCommands:
                 stream, group, consumer1, min_idle_time=0, start_id=0, justid=True
             ) == [message_id1, message_id2]
             assert r.xautoclaim(
-                stream, group, consumer1, min_idle_time=0, start_id=message_id2, justid=True
+                stream,
+                group,
+                consumer1,
+                min_idle_time=0,
+                start_id=message_id2,
+                justid=True,
             ) == [message_id2]
 
     @skip_if_server_version_lt("6.2.0")
@@ -4234,7 +4247,9 @@ class TestRedisCommands:
 
             response = r.xpending_range(stream, group, min="-", max="+", count=5)
             assert len(response) == 2
-            response = r.xpending_range(stream, group, min="-", max="+", count=5, idle=1000)
+            response = r.xpending_range(
+                stream, group, min="-", max="+", count=5, idle=1000
+            )
             assert len(response) == 0
 
     def test_xpending_range_negative(self, r):
@@ -4292,7 +4307,10 @@ class TestRedisCommands:
             expected = [
                 [
                     stream.encode(),
-                    [get_stream_message(r, stream, m1), get_stream_message(r, stream, m2)],
+                    [
+                        get_stream_message(r, stream, m1),
+                        get_stream_message(r, stream, m2),
+                    ],
                 ]
             ]
             # xread starting at 0 returns both messages
@@ -4322,7 +4340,10 @@ class TestRedisCommands:
             expected = [
                 [
                     stream.encode(),
-                    [get_stream_message(r, stream, m1), get_stream_message(r, stream, m2)],
+                    [
+                        get_stream_message(r, stream, m1),
+                        get_stream_message(r, stream, m2),
+                    ],
                 ]
             ]
             # xread starting at 0 returns both messages
@@ -4333,7 +4354,10 @@ class TestRedisCommands:
 
             expected = [[stream.encode(), [get_stream_message(r, stream, m1)]]]
             # xread with count=1 returns only the first message
-            assert r.xreadgroup(group, consumer, streams={stream: ">"}, count=1) == expected
+            assert (
+                r.xreadgroup(group, consumer, streams={stream: ">"}, count=1)
+                == expected
+            )
 
             r.xgroup_destroy(stream, group)
 
@@ -4349,7 +4373,11 @@ class TestRedisCommands:
             r.xgroup_destroy(stream, group)
             r.xgroup_create(stream, group, "0")
             assert (
-                len(r.xreadgroup(group, consumer, streams={stream: ">"}, noack=True)[0][1])
+                len(
+                    r.xreadgroup(group, consumer, streams={stream: ">"}, noack=True)[0][
+                        1
+                    ]
+                )
                 == 2
             )
             # now there should be nothing pending

@@ -883,8 +883,14 @@ class Connection:
         # server. If you need to send `COMMAND GETKEYS` to the server, please reach out
         # to Doogie and Zach to discuss the use case.
         # ref: https://github.com/redis/redis/pull/12380
-        if len(args) > 1 and args[0].lower() == b'command' and args[1].lower().startswith(b'getkeys'):
-            raise Exception(f'Redis command "{args[0].decode()} {args[1].decode()}" is not supported')
+        if (
+            len(args) > 1
+            and args[0].lower() == b"command"
+            and args[1].lower().startswith(b"getkeys")
+        ):
+            raise Exception(
+                f'Redis command "command {args[1].decode()}" is not supported'
+            )
 
         buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
 

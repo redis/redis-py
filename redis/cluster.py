@@ -9,8 +9,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from redis.backoff import default_backoff
 from redis.client import CaseInsensitiveDict, PubSub, Redis, parse_scan
 from redis.commands import READ_COMMANDS, CommandsParser, RedisClusterCommands
-from redis.connection import ConnectionPool, DefaultParser, Encoder, parse_url
 from redis.commands.helpers import list_or_args
+from redis.connection import ConnectionPool, DefaultParser, Encoder, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
     AskError,
