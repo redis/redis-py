@@ -137,7 +137,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         single_connection_client = kwargs.pop("single_connection_client", False)
         connection_pool = ConnectionPool.from_url(url, **kwargs)
         return cls(
-            connection_pool=connection_pool,
+            from_pool=connection_pool,
             single_connection_client=single_connection_client,
         )
 
@@ -152,6 +152,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         socket_keepalive=None,
         socket_keepalive_options=None,
         connection_pool=None,
+        from_pool=None,
         unix_socket_path=None,
         encoding="utf-8",
         encoding_errors="strict",
@@ -198,7 +199,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             if `True`, connection pool is not used. In that case `Redis`
             instance use is not thread safe.
         """
-        if not connection_pool:
+        if not connection_pool and not from_pool:
             if charset is not None:
                 warnings.warn(
                     DeprecationWarning(
@@ -274,8 +275,20 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_ocsp_expected_cert": ssl_ocsp_expected_cert,
                         }
                     )
-            connection_pool = ConnectionPool(**kwargs)
-        self.connection_pool = connection_pool
+            from_pool = ConnectionPool(**kwargs)
+        
+        if from_pool is not None:
+            # internal connection pool, expected to be closed by Redis instance
+            if connection_pool is not None:
+                raise ValueError(
+                    "Cannot use both from_pool and connection_pool arguments")
+            self.connection_pool = from_pool
+            self.auto_close_connection_pool = True  # the Redis instance closes the pool
+        else:
+            # external connection pool, expected to be closed by caller
+            self.connection_pool = connection_pool
+            self.auto_close_connection_pool = False  # the user is expected to close the pool
+
         self.connection = None
         if single_connection_client:
             self.connection = self.connection_pool.get_connection("_")
@@ -476,6 +489,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if conn:
             self.connection = None
             self.connection_pool.release(conn)
+
+        if self.auto_close_connection_pool:
+            self.connection_pool.disconnect()
 
     def _send_command_parse_response(self, conn, command_name, *args, **options):
         """
