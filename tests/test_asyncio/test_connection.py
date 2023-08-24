@@ -125,9 +125,11 @@ async def test_can_run_concurrent_commands(r):
     assert all(await asyncio.gather(*(r.ping() for _ in range(10))))
 
 
-async def test_connect_retry_on_timeout_error():
+async def test_connect_retry_on_timeout_error(connect_args):
     """Test that the _connect function is retried in case of a timeout"""
-    conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 3))
+    conn = Connection(
+        retry_on_timeout=True, retry=Retry(NoBackoff(), 3), **connect_args
+    )
     origin_connect = conn._connect
     conn._connect = mock.AsyncMock()
 
@@ -200,7 +202,7 @@ async def test_connection_parse_response_resume(r: redis.Redis):
     [_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisParser],
     ids=["AsyncRESP2Parser", "AsyncRESP3Parser", "AsyncHiredisParser"],
 )
-async def test_connection_disconect_race(parser_class):
+async def test_connection_disconect_race(parser_class, connect_args):
     """
     This test reproduces the case in issue #2349
     where a connection is closed while the parser is reading to feed the
@@ -215,10 +217,9 @@ async def test_connection_disconect_race(parser_class):
     if parser_class == _AsyncHiredisParser and not HIREDIS_AVAILABLE:
         pytest.skip("Hiredis not available")
 
-    args = {}
-    args["parser_class"] = parser_class
+    connect_args["parser_class"] = parser_class
 
-    conn = Connection(**args)
+    conn = Connection(**connect_args)
 
     cond = asyncio.Condition()
     # 0 == initial
@@ -267,8 +268,16 @@ async def test_connection_disconect_race(parser_class):
     async def open_connection(*args, **kwargs):
         return reader, writer
 
+    async def dummy_method(*args, **kwargs):
+        pass
+
+    # get dummy stream objects for the connection
     with patch.object(asyncio, "open_connection", open_connection):
-        await conn.connect()
+        # disable the initial version handshake
+        with patch.multiple(
+            conn, send_command=dummy_method, read_response=dummy_method
+        ):
+            await conn.connect()
 
     vals = await asyncio.gather(do_read(), do_close())
     assert vals == [b"Hello, World!", None]

@@ -2425,11 +2425,62 @@ class TestClusterRedisCommands:
             user_client.hset("{cache}:0", "hkey", "hval")
 
         assert isinstance(r.acl_log(target_nodes=node), list)
-        assert len(r.acl_log(target_nodes=node)) == 2
+        assert len(r.acl_log(target_nodes=node)) == 3
         assert len(r.acl_log(count=1, target_nodes=node)) == 1
         assert isinstance(r.acl_log(target_nodes=node)[0], dict)
         assert "client-info" in r.acl_log(count=1, target_nodes=node)[0]
         assert r.acl_log_reset(target_nodes=node)
+
+    def generate_lib_code(self, lib_name):
+        return f"""#!js api_version=1.0 name={lib_name}\n redis.registerFunction('foo', ()=>{{return 'bar'}})"""  # noqa
+
+    def try_delete_libs(self, r, *lib_names):
+        for lib_name in lib_names:
+            try:
+                r.tfunction_delete(lib_name)
+            except Exception:
+                pass
+
+    @skip_if_server_version_lt("7.1.140")
+    def test_tfunction_load_delete(self, r):
+        r.gears_refresh_cluster()
+        self.try_delete_libs(r, "lib1")
+        lib_code = self.generate_lib_code("lib1")
+        assert r.tfunction_load(lib_code)
+        assert r.tfunction_delete("lib1")
+
+    @skip_if_server_version_lt("7.1.140")
+    def test_tfunction_list(self, r):
+        r.gears_refresh_cluster()
+        self.try_delete_libs(r, "lib1", "lib2", "lib3")
+        assert r.tfunction_load(self.generate_lib_code("lib1"))
+        assert r.tfunction_load(self.generate_lib_code("lib2"))
+        assert r.tfunction_load(self.generate_lib_code("lib3"))
+
+        # test error thrown when verbose > 4
+        with pytest.raises(DataError):
+            assert r.tfunction_list(verbose=8)
+
+        functions = r.tfunction_list(verbose=1)
+        assert len(functions) == 3
+
+        expected_names = [b"lib1", b"lib2", b"lib3"]
+        actual_names = [functions[0][13], functions[1][13], functions[2][13]]
+
+        assert sorted(expected_names) == sorted(actual_names)
+        assert r.tfunction_delete("lib1")
+        assert r.tfunction_delete("lib2")
+        assert r.tfunction_delete("lib3")
+
+    @skip_if_server_version_lt("7.1.140")
+    def test_tfcall(self, r):
+        r.gears_refresh_cluster()
+        self.try_delete_libs(r, "lib1")
+        assert r.tfunction_load(self.generate_lib_code("lib1"))
+        assert r.tfcall("lib1", "foo") == b"bar"
+        assert r.tfcall_async("lib1", "foo") == b"bar"
+
+        assert r.tfunction_delete("lib1")
 
 
 @pytest.mark.onlycluster

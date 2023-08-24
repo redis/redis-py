@@ -253,3 +253,15 @@ class AsyncContextManager:
 
 def asynccontextmanager(func):
     return _asynccontextmanager(func)
+
+
+# helpers to get the connection arguments for this run
+@pytest.fixture()
+def redis_url(request):
+    return request.config.getoption("--redis-url")
+
+
+@pytest.fixture()
+def connect_args(request):
+    url = request.config.getoption("--redis-url")
+    return parse_url(url)
