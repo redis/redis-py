@@ -2,13 +2,14 @@ import binascii
 import datetime
 import re
 import time
+from contextlib import nullcontext
 from string import ascii_letters
 from unittest import mock
 
 import pytest
 
 import redis
-from redis import exceptions
+from redis import RedisCluster, exceptions
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, parse_info
 
 from .conftest import (
@@ -47,6 +48,10 @@ def get_stream_message(client, stream, message_id):
     response = client.xrange(stream, min=message_id, max=message_id)
     assert len(response) == 1
     return response[0]
+
+
+def raise_if_redis_cluster(r):
+    return pytest.raises(Exception) if isinstance(r, RedisCluster) else nullcontext()
 
 
 # RESPONSE CALLBACKS
@@ -1670,7 +1675,7 @@ class TestRedisCommands:
     @skip_if_server_version_gte("7.0.0")
     @skip_if_redis_enterprise()
     def test_stralgo_lcs(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             key1 = "{foo}key1"
             key2 = "{foo}key2"
             value1 = "ohmytext"
@@ -2342,39 +2347,35 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     def test_zinterstore_sum(self, r):
-        with pytest.raises(Exception):
-            r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
-            r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
-            r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
-            assert r.zinterstore("d", ["a", "b", "c"]) == 2
-            assert r.zrange("d", 0, -1, withscores=True) == [(b"a3", 8), (b"a1", 9)]
+        r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert r.zinterstore("d", ["a", "b", "c"]) == 2
+        assert r.zrange("d", 0, -1, withscores=True) == [(b"a3", 8), (b"a1", 9)]
 
     @pytest.mark.onlynoncluster
     def test_zinterstore_max(self, r):
-        with pytest.raises(Exception):
-            r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
-            r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
-            r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
-            assert r.zinterstore("d", ["a", "b", "c"], aggregate="MAX") == 2
-            assert r.zrange("d", 0, -1, withscores=True) == [(b"a3", 5), (b"a1", 6)]
+        r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert r.zinterstore("d", ["a", "b", "c"], aggregate="MAX") == 2
+        assert r.zrange("d", 0, -1, withscores=True) == [(b"a3", 5), (b"a1", 6)]
 
     @pytest.mark.onlynoncluster
     def test_zinterstore_min(self, r):
-        with pytest.raises(Exception):
-            r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-            r.zadd("b", {"a1": 2, "a2": 3, "a3": 5})
-            r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
-            assert r.zinterstore("d", ["a", "b", "c"], aggregate="MIN") == 2
-            assert r.zrange("d", 0, -1, withscores=True) == [(b"a1", 1), (b"a3", 3)]
+        r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
+        r.zadd("b", {"a1": 2, "a2": 3, "a3": 5})
+        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert r.zinterstore("d", ["a", "b", "c"], aggregate="MIN") == 2
+        assert r.zrange("d", 0, -1, withscores=True) == [(b"a1", 1), (b"a3", 3)]
 
     @pytest.mark.onlynoncluster
     def test_zinterstore_with_weight(self, r):
-        with pytest.raises(Exception):
-            r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
-            r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
-            r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
-            assert r.zinterstore("d", {"a": 1, "b": 2, "c": 3}) == 2
-            assert r.zrange("d", 0, -1, withscores=True) == [(b"a3", 20), (b"a1", 23)]
+        r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert r.zinterstore("d", {"a": 1, "b": 2, "c": 3}) == 2
+        assert r.zrange("d", 0, -1, withscores=True) == [(b"a3", 20), (b"a1", 23)]
 
     @skip_if_server_version_lt("4.9.0")
     def test_zpopmax(self, r):
@@ -2907,81 +2908,75 @@ class TestRedisCommands:
 
     # SORT
     def test_sort_basic(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             r.rpush("a", "3", "2", "1", "4")
             assert r.sort("a") == [b"1", b"2", b"3", b"4"]
 
     def test_sort_limited(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             r.rpush("a", "3", "2", "1", "4")
             assert r.sort("a", start=1, num=2) == [b"2", b"3"]
 
     @pytest.mark.onlynoncluster
     def test_sort_by(self, r):
-        with pytest.raises(Exception):
-            r["score:1"] = 8
-            r["score:2"] = 3
-            r["score:3"] = 5
-            r.rpush("a", "3", "2", "1")
-            assert r.sort("a", by="score:*") == [b"2", b"3", b"1"]
+        r["score:1"] = 8
+        r["score:2"] = 3
+        r["score:3"] = 5
+        r.rpush("a", "3", "2", "1")
+        assert r.sort("a", by="score:*") == [b"2", b"3", b"1"]
 
     @pytest.mark.onlynoncluster
     def test_sort_get(self, r):
-        with pytest.raises(Exception):
-            r["user:1"] = "u1"
-            r["user:2"] = "u2"
-            r["user:3"] = "u3"
-            r.rpush("a", "2", "3", "1")
-            assert r.sort("a", get="user:*") == [b"u1", b"u2", b"u3"]
+        r["user:1"] = "u1"
+        r["user:2"] = "u2"
+        r["user:3"] = "u3"
+        r.rpush("a", "2", "3", "1")
+        assert r.sort("a", get="user:*") == [b"u1", b"u2", b"u3"]
 
     @pytest.mark.onlynoncluster
     def test_sort_get_multi(self, r):
-        with pytest.raises(Exception):
-            r["user:1"] = "u1"
-            r["user:2"] = "u2"
-            r["user:3"] = "u3"
-            r.rpush("a", "2", "3", "1")
-            assert r.sort("a", get=("user:*", "#")) == [
-                b"u1",
-                b"1",
-                b"u2",
-                b"2",
-                b"u3",
-                b"3",
-            ]
+        r["user:1"] = "u1"
+        r["user:2"] = "u2"
+        r["user:3"] = "u3"
+        r.rpush("a", "2", "3", "1")
+        assert r.sort("a", get=("user:*", "#")) == [
+            b"u1",
+            b"1",
+            b"u2",
+            b"2",
+            b"u3",
+            b"3",
+        ]
 
     @pytest.mark.onlynoncluster
     def test_sort_get_groups_two(self, r):
-        with pytest.raises(Exception):
-            r["user:1"] = "u1"
-            r["user:2"] = "u2"
-            r["user:3"] = "u3"
-            r.rpush("a", "2", "3", "1")
-            assert r.sort("a", get=("user:*", "#"), groups=True) == [
-                (b"u1", b"1"),
-                (b"u2", b"2"),
-                (b"u3", b"3"),
-            ]
+        r["user:1"] = "u1"
+        r["user:2"] = "u2"
+        r["user:3"] = "u3"
+        r.rpush("a", "2", "3", "1")
+        assert r.sort("a", get=("user:*", "#"), groups=True) == [
+            (b"u1", b"1"),
+            (b"u2", b"2"),
+            (b"u3", b"3"),
+        ]
 
     @pytest.mark.onlynoncluster
     def test_sort_groups_string_get(self, r):
-        with pytest.raises(Exception):
-            r["user:1"] = "u1"
-            r["user:2"] = "u2"
-            r["user:3"] = "u3"
-            r.rpush("a", "2", "3", "1")
-            with pytest.raises(exceptions.DataError):
-                r.sort("a", get="user:*", groups=True)
+        r["user:1"] = "u1"
+        r["user:2"] = "u2"
+        r["user:3"] = "u3"
+        r.rpush("a", "2", "3", "1")
+        with pytest.raises(exceptions.DataError):
+            r.sort("a", get="user:*", groups=True)
 
     @pytest.mark.onlynoncluster
     def test_sort_groups_just_one_get(self, r):
-        with pytest.raises(Exception):
-            r["user:1"] = "u1"
-            r["user:2"] = "u2"
-            r["user:3"] = "u3"
-            r.rpush("a", "2", "3", "1")
-            with pytest.raises(exceptions.DataError):
-                r.sort("a", get=["user:*"], groups=True)
+        r["user:1"] = "u1"
+        r["user:2"] = "u2"
+        r["user:3"] = "u3"
+        r.rpush("a", "2", "3", "1")
+        with pytest.raises(exceptions.DataError):
+            r.sort("a", get=["user:*"], groups=True)
 
     def test_sort_groups_no_get(self, r):
         r["user:1"] = "u1"
@@ -2993,36 +2988,34 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     def test_sort_groups_three_gets(self, r):
-        with pytest.raises(Exception):
-            r["user:1"] = "u1"
-            r["user:2"] = "u2"
-            r["user:3"] = "u3"
-            r["door:1"] = "d1"
-            r["door:2"] = "d2"
-            r["door:3"] = "d3"
-            r.rpush("a", "2", "3", "1")
-            assert r.sort("a", get=("user:*", "door:*", "#"), groups=True) == [
-                (b"u1", b"d1", b"1"),
-                (b"u2", b"d2", b"2"),
-                (b"u3", b"d3", b"3"),
-            ]
+        r["user:1"] = "u1"
+        r["user:2"] = "u2"
+        r["user:3"] = "u3"
+        r["door:1"] = "d1"
+        r["door:2"] = "d2"
+        r["door:3"] = "d3"
+        r.rpush("a", "2", "3", "1")
+        assert r.sort("a", get=("user:*", "door:*", "#"), groups=True) == [
+            (b"u1", b"d1", b"1"),
+            (b"u2", b"d2", b"2"),
+            (b"u3", b"d3", b"3"),
+        ]
 
     def test_sort_desc(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             r.rpush("a", "2", "3", "1")
             assert r.sort("a", desc=True) == [b"3", b"2", b"1"]
 
     def test_sort_alpha(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             r.rpush("a", "e", "c", "b", "d", "a")
             assert r.sort("a", alpha=True) == [b"a", b"b", b"c", b"d", b"e"]
 
     @pytest.mark.onlynoncluster
     def test_sort_store(self, r):
-        with pytest.raises(Exception):
-            r.rpush("a", "2", "3", "1")
-            assert r.sort("a", store="sorted_values") == 3
-            assert r.lrange("sorted_values", 0, -1) == [b"1", b"2", b"3"]
+        r.rpush("a", "2", "3", "1")
+        assert r.sort("a", store="sorted_values") == 3
+        assert r.lrange("sorted_values", 0, -1) == [b"1", b"2", b"3"]
 
     @pytest.mark.onlynoncluster
     def test_sort_all_options(self, r):
@@ -3061,17 +3054,16 @@ class TestRedisCommands:
     @skip_if_server_version_lt("7.0.0")
     @pytest.mark.onlynoncluster
     def test_sort_ro(self, r):
-        with pytest.raises(Exception):
-            r["score:1"] = 8
-            r["score:2"] = 3
-            r["score:3"] = 5
-            r.rpush("a", "3", "2", "1")
-            assert r.sort_ro("a", by="score:*") == [b"2", b"3", b"1"]
-            r.rpush("b", "2", "3", "1")
-            assert r.sort_ro("b", desc=True) == [b"3", b"2", b"1"]
+        r["score:1"] = 8
+        r["score:2"] = 3
+        r["score:3"] = 5
+        r.rpush("a", "3", "2", "1")
+        assert r.sort_ro("a", by="score:*") == [b"2", b"3", b"1"]
+        r.rpush("b", "2", "3", "1")
+        assert r.sort_ro("b", desc=True) == [b"3", b"2", b"1"]
 
     def test_sort_issue_924(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             # Tests for issue https://github.com/andymccurdy/redis-py/issues/924
             r.execute_command("SADD", "issue#924", 1)
             r.execute_command("SORT", "issue#924")
@@ -3529,7 +3521,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("3.2.0")
     def test_georadius(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             values = (2.1909389952632, 41.433791470673, "place1") + (
                 2.1873744593677,
                 41.406342043777,
@@ -3542,7 +3534,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("3.2.0")
     def test_georadius_no_values(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             values = (2.1909389952632, 41.433791470673, "place1") + (
                 2.1873744593677,
                 41.406342043777,
@@ -3554,7 +3546,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("3.2.0")
     def test_georadius_units(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             values = (2.1909389952632, 41.433791470673, "place1") + (
                 2.1873744593677,
                 41.406342043777,
@@ -3567,7 +3559,7 @@ class TestRedisCommands:
     @skip_unless_arch_bits(64)
     @skip_if_server_version_lt("3.2.0")
     def test_georadius_with(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             values = (2.1909389952632, 41.433791470673, "place1") + (
                 2.1873744593677,
                 41.406342043777,
@@ -3627,7 +3619,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("6.2.0")
     def test_georadius_count(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             values = (2.1909389952632, 41.433791470673, "place1") + (
                 2.1873744593677,
                 41.406342043777,
@@ -3642,7 +3634,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("3.2.0")
     def test_georadius_sort(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             values = (2.1909389952632, 41.433791470673, "place1") + (
                 2.1873744593677,
                 41.406342043777,
@@ -3662,37 +3654,35 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("3.2.0")
     def test_georadius_store(self, r):
-        with pytest.raises(Exception):
-            values = (2.1909389952632, 41.433791470673, "place1") + (
-                2.1873744593677,
-                41.406342043777,
-                "place2",
-            )
+        values = (2.1909389952632, 41.433791470673, "place1") + (
+            2.1873744593677,
+            41.406342043777,
+            "place2",
+        )
 
-            r.geoadd("barcelona", values)
-            r.georadius("barcelona", 2.191, 41.433, 1000, store="places_barcelona")
-            assert r.zrange("places_barcelona", 0, -1) == [b"place1"]
+        r.geoadd("barcelona", values)
+        r.georadius("barcelona", 2.191, 41.433, 1000, store="places_barcelona")
+        assert r.zrange("places_barcelona", 0, -1) == [b"place1"]
 
     @pytest.mark.onlynoncluster
     @skip_unless_arch_bits(64)
     @skip_if_server_version_lt("3.2.0")
     def test_georadius_store_dist(self, r):
-        with pytest.raises(Exception):
-            values = (2.1909389952632, 41.433791470673, "place1") + (
-                2.1873744593677,
-                41.406342043777,
-                "place2",
-            )
+        values = (2.1909389952632, 41.433791470673, "place1") + (
+            2.1873744593677,
+            41.406342043777,
+            "place2",
+        )
 
-            r.geoadd("barcelona", values)
-            r.georadius("barcelona", 2.191, 41.433, 1000, store_dist="places_barcelona")
-            # instead of save the geo score, the distance is saved.
-            assert r.zscore("places_barcelona", "place1") == 88.05060698409301
+        r.geoadd("barcelona", values)
+        r.georadius("barcelona", 2.191, 41.433, 1000, store_dist="places_barcelona")
+        # instead of save the geo score, the distance is saved.
+        assert r.zscore("places_barcelona", "place1") == 88.05060698409301
 
     @skip_unless_arch_bits(64)
     @skip_if_server_version_lt("3.2.0")
     def test_georadiusmember(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             values = (2.1909389952632, 41.433791470673, "place1") + (
                 2.1873744593677,
                 41.406342043777,
@@ -3730,7 +3720,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("6.2.0")
     def test_georadiusmember_count(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             values = (2.1909389952632, 41.433791470673, "place1") + (
                 2.1873744593677,
                 41.406342043777,
@@ -3743,7 +3733,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("5.0.0")
     def test_xack(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             stream = "stream"
             group = "group"
             consumer = "consumer"
@@ -3842,7 +3832,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("6.2.0")
     def test_xautoclaim(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             stream = "stream"
             group = "group"
             consumer1 = "consumer1"
@@ -3893,7 +3883,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("5.0.0")
     def test_xclaim(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             stream = "stream"
             group = "group"
             consumer1 = "consumer1"
@@ -4041,7 +4031,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("5.0.0")
     def test_xgroup_delconsumer(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             stream = "stream"
             group = "group"
             consumer = "consumer"
@@ -4060,7 +4050,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("6.2.0")
     def test_xgroup_createconsumer(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             stream = "stream"
             group = "group"
             consumer = "consumer"
@@ -4110,7 +4100,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("5.0.0")
     def test_xinfo_consumers(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             stream = "stream"
             group = "group"
             consumer1 = "consumer1"
@@ -4170,7 +4160,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("5.0.0")
     def test_xpending(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             stream = "stream"
             group = "group"
             consumer1 = "consumer1"
@@ -4200,7 +4190,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("5.0.0")
     def test_xpending_range(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             stream = "stream"
             group = "group"
             consumer1 = "consumer1"
@@ -4232,7 +4222,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("6.2.0")
     def test_xpending_range_idle(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             stream = "stream"
             group = "group"
             consumer1 = "consumer1"
@@ -4299,7 +4289,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("5.0.0")
     def test_xread(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             stream = "stream"
             m1 = r.xadd(stream, {"foo": "bar"})
             m2 = r.xadd(stream, {"bing": "baz"})
@@ -4329,7 +4319,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("5.0.0")
     def test_xreadgroup(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             stream = "stream"
             group = "group"
             consumer = "consumer"
@@ -4595,7 +4585,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("4.0.0")
     def test_memory_usage(self, r):
-        with pytest.raises(Exception):
+        with raise_if_redis_cluster(r):
             r.set("foo", "bar")
             assert isinstance(r.memory_usage("foo"), int)
 

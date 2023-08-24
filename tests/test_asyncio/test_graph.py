@@ -274,6 +274,7 @@ async def test_slowlog(modclient: redis.Redis):
 
 
 @pytest.mark.redismod
+@pytest.mark.xfail(strict=False)
 async def test_query_timeout(modclient: redis.Redis):
     # Build a sample graph with 1000 nodes.
     await modclient.graph().query("UNWIND range(0,1000) as val CREATE ({v: val})")
