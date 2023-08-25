@@ -899,7 +899,7 @@ class PubSub:
         self.pending_unsubscribe_patterns.difference_update(new_patterns)
         return ret_val
 
-    async def punsubscribe(self, *args: ChannelT) -> Awaitable:
+    async def punsubscribe(self, *args: ChannelT) -> int:
         """
         Unsubscribe from the supplied patterns. If empty, unsubscribe from
         all patterns.
@@ -935,7 +935,7 @@ class PubSub:
         self.pending_unsubscribe_channels.difference_update(new_channels)
         return ret_val
 
-    async def unsubscribe(self, *args) -> Awaitable:
+    async def unsubscribe(self, *args) -> int:
         """
         Unsubscribe from the supplied channels. If empty, unsubscribe from
         all channels
