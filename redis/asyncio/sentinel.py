@@ -340,12 +340,9 @@ class Sentinel(AsyncSentinelCommands):
 
         connection_pool = connection_pool_class(service_name, self, **connection_kwargs)
         # The Redis object "owns" the pool
-        auto_close_connection_pool = True
-        client = redis_class(
-            connection_pool=connection_pool,
+        return redis_class(
+            from_pool=connection_pool,
         )
-        client.auto_close_connection_pool = auto_close_connection_pool
-        return client
 
     def slave_for(
         self,
@@ -377,9 +374,6 @@ class Sentinel(AsyncSentinelCommands):
 
         connection_pool = connection_pool_class(service_name, self, **connection_kwargs)
         # The Redis object "owns" the pool
-        auto_close_connection_pool = True
-        client = redis_class(
-            connection_pool=connection_pool,
+        return redis_class(
+            from_pool=connection_pool,
         )
-        client.auto_close_connection_pool = auto_close_connection_pool
-        return client

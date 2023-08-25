@@ -114,7 +114,6 @@ class Redis(
         cls,
         url: str,
         single_connection_client: bool = False,
-        auto_close_connection_pool: bool = True,
         **kwargs,
     ):
         """
@@ -160,12 +159,10 @@ class Redis(
 
         """
         connection_pool = ConnectionPool.from_url(url, **kwargs)
-        redis = cls(
-            connection_pool=connection_pool,
+        return cls(
+            from_pool=connection_pool,
             single_connection_client=single_connection_client,
         )
-        redis.auto_close_connection_pool = auto_close_connection_pool
-        return redis
 
     def __init__(
         self,
@@ -179,6 +176,7 @@ class Redis(
         socket_keepalive: Optional[bool] = None,
         socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
         connection_pool: Optional[ConnectionPool] = None,
+        from_pool: Optional[ConnectionPool] = None,
         unix_socket_path: Optional[str] = None,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
@@ -200,6 +198,7 @@ class Redis(
         lib_version: Optional[str] = get_lib_version(),
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
+        # deprecated. create a pool and use connection_pool instead
         auto_close_connection_pool: bool = True,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
@@ -213,14 +212,9 @@ class Redis(
         To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
         """
         kwargs: Dict[str, Any]
-        # auto_close_connection_pool only has an effect if connection_pool is
-        # None. This is a similar feature to the missing __del__ to resolve #1103,
-        # but it accounts for whether a user wants to manually close the connection
-        # pool, as a similar feature to ConnectionPool's __del__.
-        self.auto_close_connection_pool = (
-            auto_close_connection_pool if connection_pool is None else False
-        )
-        if not connection_pool:
+
+        if not connection_pool and not from_pool:
+            # Create internal connection pool, expected to be closed by Redis instance
             if not retry_on_error:
                 retry_on_error = []
             if retry_on_timeout is True:
@@ -277,8 +271,28 @@ class Redis(
                             "ssl_check_hostname": ssl_check_hostname,
                         }
                     )
-            connection_pool = ConnectionPool(**kwargs)
-        self.connection_pool = connection_pool
+            # backwards compatibility.  This arg only used if no pool
+            # is provided
+            if auto_close_connection_pool:
+                from_pool = ConnectionPool(**kwargs)
+            else:
+                connection_pool = ConnectionPool(**kwargs)
+
+        if from_pool is not None:
+            # internal connection pool, expected to be closed by Redis instance
+            if connection_pool is not None:
+                raise ValueError(
+                    "Cannot use both from_pool and connection_pool arguments"
+                )
+            self.connection_pool = from_pool
+            self.auto_close_connection_pool = True  # the Redis instance closes the pool
+        else:
+            # external connection pool, expected to be closed by caller
+            self.connection_pool = connection_pool
+            self.auto_close_connection_pool = (
+                False  # the user is expected to close the pool
+            )
+
         self.single_connection_client = single_connection_client
         self.connection: Optional[Connection] = None
 
