@@ -355,7 +355,7 @@ async def test_redis_connection_pool(request, from_url):
 
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
 async def test_redis_from_pool(request, from_url):
-    """Verify that basic Redis instances using `from_pool`
+    """Verify that basic Redis instances created using `from_pool()`
     have auto_close_connection_pool set to True"""
 
     url: str = request.config.getoption("--redis-url")
@@ -369,7 +369,7 @@ async def test_redis_from_pool(request, from_url):
             pool = ConnectionPool.from_url(url)
         else:
             pool = ConnectionPool(**url_args)
-        return Redis(from_pool=pool)
+        return Redis.from_pool(pool)
 
     called = 0
 
@@ -382,4 +382,30 @@ async def test_redis_from_pool(request, from_url):
             assert r1.auto_close_connection_pool is True
 
     assert called == 1
+    await pool.disconnect()
+
+
+@pytest.mark.parametrize("auto_close", (True, False))
+async def test_redis_pool_auto_close_arg(request, auto_close):
+    """test that redis instance where pool is provided have
+    auto_close_connection_pool set to False, regardless of arg"""
+
+    url: str = request.config.getoption("--redis-url")
+    pool = ConnectionPool.from_url(url)
+
+    async def get_redis_connection():
+        client = Redis(connection_pool=pool, auto_close_connection_pool=auto_close)
+        return client
+
+    called = 0
+
+    async def mock_disconnect(_):
+        nonlocal called
+        called += 1
+
+    with patch.object(ConnectionPool, "disconnect", mock_disconnect):
+        async with await get_redis_connection() as r1:
+            assert r1.auto_close_connection_pool is False
+
+    assert called == 0
     await pool.disconnect()

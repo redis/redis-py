@@ -4,7 +4,7 @@ import threading
 import time
 import warnings
 from itertools import chain
-from typing import Optional
+from typing import Optional, Type
 
 from redis._parsers.helpers import (
     _RedisCallbacks,
@@ -136,10 +136,28 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         """
         single_connection_client = kwargs.pop("single_connection_client", False)
         connection_pool = ConnectionPool.from_url(url, **kwargs)
-        return cls(
-            from_pool=connection_pool,
+        client = cls(
+            connection_pool=connection_pool,
             single_connection_client=single_connection_client,
         )
+        client.auto_close_connection_pool = True
+        return client
+
+    @classmethod
+    def from_pool(
+        cls: Type["Redis"],
+        connection_pool: ConnectionPool,
+    ) -> "Redis":
+        """
+        Return a Redis client from the given connection pool.
+        The Redis client will take ownership of the connection pool and
+        close it when the Redis client is closed.
+        """
+        client = cls(
+            connection_pool=connection_pool,
+        )
+        client.auto_close_connection_pool = True
+        return client
 
     def __init__(
         self,
@@ -152,7 +170,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         socket_keepalive=None,
         socket_keepalive_options=None,
         connection_pool=None,
-        from_pool=None,
         unix_socket_path=None,
         encoding="utf-8",
         encoding_errors="strict",
@@ -199,7 +216,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             if `True`, connection pool is not used. In that case `Redis`
             instance use is not thread safe.
         """
-        if not connection_pool and not from_pool:
+        if not connection_pool:
             if charset is not None:
                 warnings.warn(
                     DeprecationWarning(
@@ -275,20 +292,12 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_ocsp_expected_cert": ssl_ocsp_expected_cert,
                         }
                     )
-            from_pool = ConnectionPool(**kwargs)
-        
-        if from_pool is not None:
-            # internal connection pool, expected to be closed by Redis instance
-            if connection_pool is not None:
-                raise ValueError(
-                    "Cannot use both from_pool and connection_pool arguments")
-            self.connection_pool = from_pool
-            self.auto_close_connection_pool = True  # the Redis instance closes the pool
+            connection_pool = ConnectionPool(**kwargs)
+            self.auto_close_connection_pool = True
         else:
-            # external connection pool, expected to be closed by caller
-            self.connection_pool = connection_pool
-            self.auto_close_connection_pool = False  # the user is expected to close the pool
+            self.auto_close_connection_pool = False
 
+        self.connection_pool = connection_pool
         self.connection = None
         if single_connection_client:
             self.connection = self.connection_pool.get_connection("_")

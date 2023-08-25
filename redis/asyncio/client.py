@@ -159,10 +159,28 @@ class Redis(
 
         """
         connection_pool = ConnectionPool.from_url(url, **kwargs)
-        return cls(
-            from_pool=connection_pool,
+        client = cls(
+            connection_pool=connection_pool,
             single_connection_client=single_connection_client,
         )
+        client.auto_close_connection_pool = True
+        return client
+
+    @classmethod
+    def from_pool(
+        cls: Type["Redis"],
+        connection_pool: ConnectionPool,
+    ) -> "Redis":
+        """
+        Return a Redis client from the given connection pool.
+        The Redis client will take ownership of the connection pool and
+        close it when the Redis client is closed.
+        """
+        client = cls(
+            connection_pool=connection_pool,
+        )
+        client.auto_close_connection_pool = True
+        return client
 
     def __init__(
         self,
@@ -176,7 +194,6 @@ class Redis(
         socket_keepalive: Optional[bool] = None,
         socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
         connection_pool: Optional[ConnectionPool] = None,
-        from_pool: Optional[ConnectionPool] = None,
         unix_socket_path: Optional[str] = None,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
@@ -213,7 +230,7 @@ class Redis(
         """
         kwargs: Dict[str, Any]
 
-        if not connection_pool and not from_pool:
+        if not connection_pool:
             # Create internal connection pool, expected to be closed by Redis instance
             if not retry_on_error:
                 retry_on_error = []
@@ -271,28 +288,14 @@ class Redis(
                             "ssl_check_hostname": ssl_check_hostname,
                         }
                     )
-            # backwards compatibility.  This arg only used if no pool
-            # is provided
-            if auto_close_connection_pool:
-                from_pool = ConnectionPool(**kwargs)
-            else:
-                connection_pool = ConnectionPool(**kwargs)
-
-        if from_pool is not None:
-            # internal connection pool, expected to be closed by Redis instance
-            if connection_pool is not None:
-                raise ValueError(
-                    "Cannot use both from_pool and connection_pool arguments"
-                )
-            self.connection_pool = from_pool
-            self.auto_close_connection_pool = True  # the Redis instance closes the pool
+            # This arg only used if no pool is passed in
+            self.auto_close_connection_pool = auto_close_connection_pool
+            connection_pool = ConnectionPool(**kwargs)
         else:
-            # external connection pool, expected to be closed by caller
-            self.connection_pool = connection_pool
-            self.auto_close_connection_pool = (
-                False  # the user is expected to close the pool
-            )
+            # If a pool is passed in, do not close it
+            self.auto_close_connection_pool = False
 
+        self.connection_pool = connection_pool
         self.single_connection_client = single_connection_client
         self.connection: Optional[Connection] = None
 
