@@ -998,7 +998,6 @@ class ConnectionPool:
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
 
-        self._lock = asyncio.Lock()
         self._created_connections: int
         self._available_connections: List[AbstractConnection]
         self._in_use_connections: Set[AbstractConnection]
@@ -1012,19 +1011,17 @@ class ConnectionPool:
         )
 
     def reset(self):
-        self._lock = asyncio.Lock()
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()
 
     async def get_connection(self, command_name, *keys, **options):
         """Get a connection from the pool"""
-        async with self._lock:
-            try:
-                connection = self._available_connections.pop()
-            except IndexError:
-                connection = self.make_connection()
-            self._in_use_connections.add(connection)
+        try:
+            connection = self._available_connections.pop()
+        except IndexError:
+            connection = self.make_connection()
+        self._in_use_connections.add(connection)
 
         try:
             # ensure this connection is connected to Redis
@@ -1067,11 +1064,10 @@ class ConnectionPool:
 
     async def release(self, connection: AbstractConnection):
         """Releases the connection back to the pool"""
-        async with self._lock:
-            # Connections should always be returned to the correct pool,
-            # not doing so is an error that will cause an exception here.
-            self._in_use_connections.remove(connection)
-            self._available_connections.append(connection)
+        # Connections should always be returned to the correct pool,
+        # not doing so is an error that will cause an exception here.
+        self._in_use_connections.remove(connection)
+        self._available_connections.append(connection)
 
     async def disconnect(self, inuse_connections: bool = True):
         """
@@ -1081,20 +1077,19 @@ class ConnectionPool:
         current in use, potentially by other tasks. Otherwise only disconnect
         connections that are idle in the pool.
         """
-        async with self._lock:
-            if inuse_connections:
-                connections: Iterable[AbstractConnection] = chain(
-                    self._available_connections, self._in_use_connections
-                )
-            else:
-                connections = self._available_connections
-            resp = await asyncio.gather(
-                *(connection.disconnect() for connection in connections),
-                return_exceptions=True,
+        if inuse_connections:
+            connections: Iterable[AbstractConnection] = chain(
+                self._available_connections, self._in_use_connections
             )
-            exc = next((r for r in resp if isinstance(r, BaseException)), None)
-            if exc:
-                raise exc
+        else:
+            connections = self._available_connections
+        resp = await asyncio.gather(
+            *(connection.disconnect() for connection in connections),
+            return_exceptions=True,
+        )
+        exc = next((r for r in resp if isinstance(r, BaseException)), None)
+        if exc:
+            raise exc
 
     def set_retry(self, retry: "Retry") -> None:
         for conn in self._available_connections:
@@ -1154,6 +1149,7 @@ class BlockingConnectionPool(ConnectionPool):
             max_connections=max_connections,
             **connection_kwargs,
         )
+        self._lock = asyncio.Lock()
 
     def reset(self):
         # Create and fill up a queue with ``None`` values.
