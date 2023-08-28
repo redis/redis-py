@@ -1068,13 +1068,9 @@ class ConnectionPool:
     async def release(self, connection: AbstractConnection):
         """Releases the connection back to the pool"""
         async with self._lock:
-            try:
-                self._in_use_connections.remove(connection)
-            except KeyError:
-                # Gracefully fail when a connection is returned to this pool
-                # that the pool doesn't actually own
-                pass
-
+            # Connections should always be returned to the correct pool,
+            # not doing so is an error that will cause an exception here.
+            self._in_use_connections.remove(connection)
             self._available_connections.append(connection)
 
     async def disconnect(self, inuse_connections: bool = True):
