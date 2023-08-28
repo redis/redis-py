@@ -1109,7 +1109,7 @@ class ConnectionPool:
 
 class BlockingConnectionPool(ConnectionPool):
     """
-    Thread-safe blocking connection pool::
+    A blocking connection pool::
 
         >>> from redis.client import Redis
         >>> client = Redis(connection_pool=BlockingConnectionPool())
@@ -1117,7 +1117,7 @@ class BlockingConnectionPool(ConnectionPool):
     It performs the same function as the default
     :py:class:`~redis.ConnectionPool` implementation, in that,
     it maintains a pool of reusable connections that can be shared by
-    multiple redis clients (safely across threads if required).
+    multiple async redis clients.
 
     The difference is that, in the event that a client tries to get a
     connection from the pool when all of connections are in use, rather than
@@ -1160,7 +1160,7 @@ class BlockingConnectionPool(ConnectionPool):
         )
 
     def reset(self):
-        # Create and fill up a thread safe queue with ``None`` values.
+        # Create and fill up a queue with ``None`` values.
         self.pool = self.queue_class(self.max_connections)
         while True:
             try:
