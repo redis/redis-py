@@ -967,11 +967,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         # redis server to parse the keys. Besides, there is a bug in redis<7.0
         # where `self._get_command_keys()` fails anyway. So, we special case
         # EVAL/EVALSHA.
-        if command in ("EVAL", "EVALSHA"):
+        if command.upper() in ("EVAL", "EVALSHA"):
             # command syntax: EVAL "script body" num_keys ...
             if len(args) <= 2:
                 raise RedisClusterException(f"Invalid args in command: {args}")
-            num_actual_keys = args[2]
+            num_actual_keys = int(args[2])
             eval_keys = args[3 : 3 + num_actual_keys]
             # if there are 0 keys, that means the script can be run on any node
             # so we can just return a random slot
@@ -983,7 +983,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             if keys is None or len(keys) == 0:
                 # FCALL can call a function with 0 keys, that means the function
                 #  can be run on any node so we can just return a random slot
-                if command in ("FCALL", "FCALL_RO"):
+                if command.upper() in ("FCALL", "FCALL_RO"):
                     return random.randrange(0, REDIS_CLUSTER_HASH_SLOTS)
                 raise RedisClusterException(
                     "No way to dispatch this command to Redis Cluster. "
