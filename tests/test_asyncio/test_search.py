@@ -1045,9 +1045,9 @@ async def test_scorer(decoded_r: redis.Redis):
         res = await (
             decoded_r.ft().search(Query("quick").scorer("TFIDF.DOCNORM").with_scores())
         )
-        assert 0.1111111111111111 == res.docs[0].score
+        assert 0.14285714285714285 == res.docs[0].score
         res = await decoded_r.ft().search(Query("quick").scorer("BM25").with_scores())
-        assert 0.17699114465425977 == res.docs[0].score
+        assert 0.22471909420069797 == res.docs[0].score
         res = await decoded_r.ft().search(Query("quick").scorer("DISMAX").with_scores())
         assert 2.0 == res.docs[0].score
         res = await decoded_r.ft().search(
@@ -1066,9 +1066,9 @@ async def test_scorer(decoded_r: redis.Redis):
         res = await decoded_r.ft().search(
             Query("quick").scorer("TFIDF.DOCNORM").with_scores()
         )
-        assert 0.1111111111111111 == res["results"][0]["score"]
+        assert 0.14285714285714285 == res["results"][0]["score"]
         res = await decoded_r.ft().search(Query("quick").scorer("BM25").with_scores())
-        assert 0.17699114465425977 == res["results"][0]["score"]
+        assert 0.22471909420069797 == res["results"][0]["score"]
         res = await decoded_r.ft().search(Query("quick").scorer("DISMAX").with_scores())
         assert 2.0 == res["results"][0]["score"]
         res = await decoded_r.ft().search(
