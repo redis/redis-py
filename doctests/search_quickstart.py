@@ -234,7 +234,9 @@ assert res.docs[0].id == "bicycle:0"
 # REMOVE_END
 
 # STEP_START query_single_term_limit_fields
-res = index.search(Query("@model:Jigger").return_field("$.price", as_field="price"))
+res = index.search(
+    Query("@model:Jigger").return_field("$.price", as_field="price")
+)
 print(res)
 # >>> [Document {'id': 'bicycle:0', 'payload': None, 'price': '270'}]
 # STEP_END
@@ -284,7 +286,9 @@ assert res.docs[0].id == "bicycle:4"
 
 # STEP_START query_fuzzy_matching
 res = index.search(
-    Query("@description:%analitics%").dialect(  # Note the typo in the word "analytics"
+    Query(
+        "@description:%analitics%"
+    ).dialect(  # Note the typo in the word "analytics"
         2
     )
 )
@@ -308,7 +312,9 @@ assert res.docs[0].id == "bicycle:3"
 
 # STEP_START query_fuzzy_matching_level2
 res = index.search(
-    Query("@description:%%analitycs%%").dialect(  # Note 2 typos in the word "analytics"
+    Query(
+        "@description:%%analitycs%%"
+    ).dialect(  # Note 2 typos in the word "analytics"
         2
     )
 )
