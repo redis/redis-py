@@ -5,14 +5,20 @@ import sys
 from typing import Optional
 from unittest.mock import patch
 
-import async_timeout
+# the functionality is available in 3.11.x but has a major issue before
+# 3.11.3. See https://github.com/redis/redis-py/issues/2633
+if sys.version_info >= (3, 11, 3):
+    from asyncio import timeout as async_timeout
+else:
+    from async_timeout import timeout as async_timeout
+
 import pytest
 import pytest_asyncio
-
 import redis.asyncio as redis
 from redis.exceptions import ConnectionError
 from redis.typing import EncodableT
-from tests.conftest import skip_if_server_version_lt
+from redis.utils import HIREDIS_AVAILABLE
+from tests.conftest import get_protocol_version, skip_if_server_version_lt
 
 from .compat import create_task, mock
 
@@ -21,7 +27,7 @@ def with_timeout(t):
     def wrapper(corofunc):
         @functools.wraps(corofunc)
         async def run(*args, **kwargs):
-            async with async_timeout.timeout(t):
+            async with async_timeout(t):
                 return await corofunc(*args, **kwargs)
 
         return run
@@ -417,6 +423,24 @@ class TestPubSubMessages:
 
 
 @pytest.mark.onlynoncluster
+class TestPubSubRESP3Handler:
+    def my_handler(self, message):
+        self.message = ["my handler", message]
+
+    @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+    async def test_push_handler(self, r):
+        if get_protocol_version(r) in [2, "2", None]:
+            return
+        p = r.pubsub(push_handler_func=self.my_handler)
+        await p.subscribe("foo")
+        assert await wait_for_message(p) is None
+        assert self.message == ["my handler", [b"subscribe", b"foo", 1]]
+        assert await r.publish("foo", "test message") == 1
+        assert await wait_for_message(p) is None
+        assert self.message == ["my handler", [b"message", b"foo", b"test message"]]
+
+
+@pytest.mark.onlynoncluster
 class TestPubSubAutoDecoding:
     """These tests only validate that we get unicode values back"""
 
@@ -648,22 +672,19 @@ class TestPubSubReconnect:
 
         async def loop():
             # must make sure the task exits
-            async with async_timeout.timeout(2):
+            async with async_timeout(2):
                 nonlocal interrupt
                 await pubsub.subscribe("foo")
                 while True:
-                    # print("loop")
                     try:
                         try:
                             await pubsub.connect()
                             await loop_step()
-                            # print("succ")
                         except redis.ConnectionError:
                             await asyncio.sleep(0.1)
                     except asyncio.CancelledError:
                         # we use a cancel to interrupt the "listen"
                         # when we perform a disconnect
-                        # print("cancel", interrupt)
                         if interrupt:
                             interrupt = False
                         else:
@@ -677,7 +698,7 @@ class TestPubSubReconnect:
 
         task = asyncio.get_running_loop().create_task(loop())
         # get the initial connect message
-        async with async_timeout.timeout(1):
+        async with async_timeout(1):
             message = await messages.get()
         assert message == {
             "channel": b"foo",
@@ -776,7 +797,7 @@ class TestPubSubRun:
             if n == 1:
                 break
             await asyncio.sleep(0.1)
-        async with async_timeout.timeout(0.1):
+        async with async_timeout(0.1):
             message = await messages.get()
         task.cancel()
         # we expect a cancelled error, not the Runtime error
@@ -839,7 +860,7 @@ class TestPubSubAutoReconnect:
         Test that a socket error will cause reconnect
         """
         try:
-            async with async_timeout.timeout(self.timeout):
+            async with async_timeout(self.timeout):
                 await self.mysetup(r, method)
                 # now, disconnect the connection, and wait for it to be re-established
                 async with self.cond:
@@ -868,7 +889,7 @@ class TestPubSubAutoReconnect:
         Test that a manual disconnect() will cause reconnect
         """
         try:
-            async with async_timeout.timeout(self.timeout):
+            async with async_timeout(self.timeout):
                 await self.mysetup(r, method)
                 # now, disconnect the connection, and wait for it to be re-established
                 async with self.cond:
@@ -896,7 +917,6 @@ class TestPubSubAutoReconnect:
                 try:
                     if self.state == 4:
                         break
-                    # print("state a ", self.state)
                     got_msg = await self.get_message()
                     assert got_msg
                     if self.state in (1, 2):
@@ -914,7 +934,6 @@ class TestPubSubAutoReconnect:
     async def loop_step_get_message(self):
         # get a single message via get_message
         message = await self.pubsub.get_message(timeout=0.1)
-        # print(message)
         if message is not None:
             await self.messages.put(message)
             return True
@@ -923,7 +942,7 @@ class TestPubSubAutoReconnect:
     async def loop_step_listen(self):
         # get a single message via listen()
         try:
-            async with async_timeout.timeout(0.1):
+            async with async_timeout(0.1):
                 async for message in self.pubsub.listen():
                     await self.messages.put(message)
                     return True
@@ -947,7 +966,7 @@ class TestBaseException:
         assert pubsub.connection.is_connected
 
         async def get_msg_or_timeout(timeout=0.1):
-            async with async_timeout.timeout(timeout):
+            async with async_timeout(timeout):
                 # blocking method to return messages
                 while True:
                     response = await pubsub.parse_response(block=True)
@@ -967,6 +986,9 @@ class TestBaseException:
         # the timeout on the read should not cause disconnect
         assert pubsub.connection.is_connected
 
+    @pytest.mark.skipif(
+        sys.version_info < (3, 8), reason="requires python 3.8 or higher"
+    )
     async def test_base_exception(self, r: redis.Redis):
         """
         Manually trigger a BaseException inside the parser's .read_response method
@@ -991,13 +1013,15 @@ class TestBaseException:
         assert msg is not None
         # timeout waiting for another message which never arrives
         assert pubsub.connection.is_connected
-        with patch("redis.asyncio.connection.PythonParser.read_response") as mock1:
+        with patch("redis._parsers._AsyncRESP2Parser.read_response") as mock1, patch(
+            "redis._parsers._AsyncHiredisParser.read_response"
+        ) as mock2, patch("redis._parsers._AsyncRESP3Parser.read_response") as mock3:
             mock1.side_effect = BaseException("boom")
-            with patch("redis.asyncio.connection.HiredisParser.read_response") as mock2:
-                mock2.side_effect = BaseException("boom")
+            mock2.side_effect = BaseException("boom")
+            mock3.side_effect = BaseException("boom")
 
-                with pytest.raises(BaseException):
-                    await get_msg()
+            with pytest.raises(BaseException):
+                await get_msg()
 
         # the timeout on the read should not cause disconnect
         assert pubsub.connection.is_connected

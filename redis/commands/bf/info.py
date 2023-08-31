@@ -16,6 +16,15 @@ class BFInfo(object):
         self.insertedNum = response["Number of items inserted"]
         self.expansionRate = response["Expansion rate"]
 
+    def get(self, item):
+        try:
+            return self.__getitem__(item)
+        except AttributeError:
+            return None
+
+    def __getitem__(self, item):
+        return getattr(self, item)
+
 
 class CFInfo(object):
     size = None
@@ -38,6 +47,15 @@ class CFInfo(object):
         self.expansionRate = response["Expansion rate"]
         self.maxIteration = response["Max iterations"]
 
+    def get(self, item):
+        try:
+            return self.__getitem__(item)
+        except AttributeError:
+            return None
+
+    def __getitem__(self, item):
+        return getattr(self, item)
+
 
 class CMSInfo(object):
     width = None
@@ -49,6 +67,9 @@ class CMSInfo(object):
         self.width = response["width"]
         self.depth = response["depth"]
         self.count = response["count"]
+
+    def __getitem__(self, item):
+        return getattr(self, item)
 
 
 class TopKInfo(object):
@@ -63,6 +84,9 @@ class TopKInfo(object):
         self.width = response["width"]
         self.depth = response["depth"]
         self.decay = response["decay"]
+
+    def __getitem__(self, item):
+        return getattr(self, item)
 
 
 class TDigestInfo(object):
@@ -85,3 +109,12 @@ class TDigestInfo(object):
         self.unmerged_weight = response["Unmerged weight"]
         self.total_compressions = response["Total compressions"]
         self.memory_usage = response["Memory usage"]
+
+    def get(self, item):
+        try:
+            return self.__getitem__(item)
+        except AttributeError:
+            return None
+
+    def __getitem__(self, item):
+        return getattr(self, item)

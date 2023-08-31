@@ -287,8 +287,10 @@ assert res.docs[0].id == "bicycle:4"
 # STEP_START query_fuzzy_matching
 res = index.search(
     Query(
-        "@description:%analitics%"  # Note the typo in the word "analytics"
-    ).dialect(2)
+        "@description:%analitics%"
+    ).dialect(  # Note the typo in the word "analytics"
+        2
+    )
 )
 print(res)
 # >>> Result{1 total, docs: [
@@ -311,8 +313,10 @@ assert res.docs[0].id == "bicycle:3"
 # STEP_START query_fuzzy_matching_level2
 res = index.search(
     Query(
-        "@description:%%analitycs%%"  # Note 2 typos in the word "analytics"
-    ).dialect(2)
+        "@description:%%analitycs%%"
+    ).dialect(  # Note 2 typos in the word "analytics"
+        2
+    )
 )
 print(res)
 # >>> Result{1 total, docs: [

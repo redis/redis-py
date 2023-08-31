@@ -60,7 +60,6 @@ TDIGEST_BYREVRANK = "TDIGEST.BYREVRANK"
 class BFCommands:
     """Bloom Filter commands."""
 
-    # region Bloom Filter Functions
     def create(self, key, errorRate, capacity, expansion=None, noScale=None):
         """
         Create a new Bloom Filter `key` with desired probability of false positives
@@ -178,7 +177,6 @@ class BFCommands:
 class CFCommands:
     """Cuckoo Filter commands."""
 
-    # region Cuckoo Filter Functions
     def create(
         self, key, capacity, expansion=None, bucket_size=None, max_iterations=None
     ):
@@ -488,7 +486,6 @@ class TDigestCommands:
 class CMSCommands:
     """Count-Min Sketch Commands"""
 
-    # region Count-Min Sketch Functions
     def initbydim(self, key, width, depth):
         """
         Initialize a Count-Min Sketch `key` to dimensions (`width`, `depth`) specified by user.

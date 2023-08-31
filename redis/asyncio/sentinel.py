@@ -67,11 +67,14 @@ class SentinelManagedConnection(Connection):
         self,
         disable_decoding: bool = False,
         timeout: Optional[float] = None,
+        *,
+        disconnect_on_error: Optional[float] = True,
     ):
         try:
             return await super().read_response(
                 disable_decoding=disable_decoding,
                 timeout=timeout,
+                disconnect_on_error=disconnect_on_error,
             )
         except ReadOnlyError:
             if self.connection_pool.is_master:
@@ -220,13 +223,13 @@ class Sentinel(AsyncSentinelCommands):
             kwargs.pop("once")
 
         if once:
+            await random.choice(self.sentinels).execute_command(*args, **kwargs)
+        else:
             tasks = [
                 asyncio.Task(sentinel.execute_command(*args, **kwargs))
                 for sentinel in self.sentinels
             ]
             await asyncio.gather(*tasks)
-        else:
-            await random.choice(self.sentinels).execute_command(*args, **kwargs)
         return True
 
     def __repr__(self):
@@ -254,10 +257,12 @@ class Sentinel(AsyncSentinelCommands):
         Returns a pair (address, port) or raises MasterNotFoundError if no
         master is found.
         """
+        collected_errors = list()
         for sentinel_no, sentinel in enumerate(self.sentinels):
             try:
                 masters = await sentinel.sentinel_masters()
-            except (ConnectionError, TimeoutError):
+            except (ConnectionError, TimeoutError) as e:
+                collected_errors.append(f"{sentinel} - {e!r}")
                 continue
             state = masters.get(service_name)
             if state and self.check_master_state(state, service_name):
@@ -267,7 +272,11 @@ class Sentinel(AsyncSentinelCommands):
                     self.sentinels[0],
                 )
                 return state["ip"], state["port"]
-        raise MasterNotFoundError(f"No master found for {service_name!r}")
+
+        error_info = ""
+        if len(collected_errors) > 0:
+            error_info = f" : {', '.join(collected_errors)}"
+        raise MasterNotFoundError(f"No master found for {service_name!r}{error_info}")
 
     def filter_slaves(
         self, slaves: Iterable[Mapping]

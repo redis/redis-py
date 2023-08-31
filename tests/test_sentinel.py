@@ -1,7 +1,6 @@
 import socket
 
 import pytest
-
 import redis.sentinel
 from redis import exceptions
 from redis.sentinel import (
@@ -96,6 +95,15 @@ def test_discover_master(sentinel, master_ip):
 def test_discover_master_error(sentinel):
     with pytest.raises(MasterNotFoundError):
         sentinel.discover_master("xxx")
+
+
+@pytest.mark.onlynoncluster
+def test_dead_pool(sentinel):
+    master = sentinel.master_for("mymaster", db=9)
+    conn = master.connection_pool.get_connection("_")
+    conn.disconnect()
+    del master
+    conn.connect()
 
 
 @pytest.mark.onlynoncluster

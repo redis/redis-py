@@ -1,3 +1,5 @@
+import logging
+import sys
 from contextlib import contextmanager
 from functools import wraps
 from typing import Any, Dict, Mapping, Union
@@ -7,8 +9,17 @@ try:
 
     # Only support Hiredis >= 1.0:
     HIREDIS_AVAILABLE = not hiredis.__version__.startswith("0.")
+    HIREDIS_PACK_AVAILABLE = hasattr(hiredis, "pack_command")
 except ImportError:
     HIREDIS_AVAILABLE = False
+    HIREDIS_PACK_AVAILABLE = False
+
+try:
+    import ssl  # noqa
+
+    SSL_AVAILABLE = True
+except ImportError:
+    SSL_AVAILABLE = False
 
 try:
     import cryptography  # noqa
@@ -16,6 +27,11 @@ try:
     CRYPTOGRAPHY_AVAILABLE = True
 except ImportError:
     CRYPTOGRAPHY_AVAILABLE = False
+
+if sys.version_info >= (3, 8):
+    from importlib import metadata
+else:
+    import importlib_metadata as metadata
 
 
 def from_url(url, **kwargs):
@@ -108,3 +124,24 @@ def deprecated_function(reason="", version="", name=None):
         return wrapper
 
     return decorator
+
+
+def _set_info_logger():
+    """
+    Set up a logger that log info logs to stdout.
+    (This is used by the default push response handler)
+    """
+    if "push_response" not in logging.root.manager.loggerDict.keys():
+        logger = logging.getLogger("push_response")
+        logger.setLevel(logging.INFO)
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.INFO)
+        logger.addHandler(handler)
+
+
+def get_lib_version():
+    try:
+        libver = metadata.version("redis")
+    except metadata.PackageNotFoundError:
+        libver = "99.99.99"
+    return libver

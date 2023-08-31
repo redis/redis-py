@@ -32,7 +32,8 @@ jobs:
         run: |
           pip install -r dev_requirements.txt
           pip install -r requirements.txt
-          isort --check-only --diff doctests/*.py
+          pip install -r doctests/requirements.txt
+          isort -l 80 --profile black --check-only --diff doctests/*.py
           black -l 80 --target-version py39 --check --diff doctests/*.py
 
       - name: run tests
