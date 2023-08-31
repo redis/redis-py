@@ -5,7 +5,7 @@ from typing import Dict, Optional, Union
 from redis.client import Pipeline
 from redis.utils import deprecated_function
 
-from ..helpers import parse_to_dict
+from ..helpers import get_protocol_version, parse_to_dict
 from ._util import to_string
 from .aggregation import AggregateRequest, AggregateResult, Cursor
 from .document import Document
@@ -64,7 +64,7 @@ class SearchCommands:
     """Search commands."""
 
     def _parse_results(self, cmd, res, **kwargs):
-        if self.client.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
+        if get_protocol_version(self.client) in ["3", 3]:
             return res
         else:
             return self._RESP2_MODULE_CALLBACKS[cmd](res, **kwargs)
