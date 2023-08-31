@@ -694,6 +694,17 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT TRACKINGINFO", **kwargs)
 
+    def client_caching(self, mode: str, **kwargs) -> ResponseT:
+        """
+        This command controls the tracking of the keys in the next command executed
+        by the connection, when tracking is enabled in OPTIN or OPTOUT mode.
+
+        ``mode`` can be YES or NO.
+
+        See https://redis.io/commands/client-caching
+        """
+        return self.execute_command("CLIENT CACHING", mode, **kwargs)
+
     def client_setname(self, name: str, **kwargs) -> ResponseT:
         """
         Sets the current connection name
