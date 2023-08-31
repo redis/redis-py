@@ -7,12 +7,7 @@ import numpy as np
 import pandas as pd
 import redis
 import requests
-from redis.commands.search.field import (
-    NumericField,
-    TagField,
-    TextField,
-    VectorField,
-)
+from redis.commands.search.field import NumericField, TagField, TextField, VectorField
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
 from sentence_transformers import SentenceTransformer
@@ -136,9 +131,7 @@ schema = (
     ),
 )
 definition = IndexDefinition(prefix=["bikes:"], index_type=IndexType.JSON)
-res = client.ft("idx:bikes_vss").create_index(
-    fields=schema, definition=definition
-)
+res = client.ft("idx:bikes_vss").create_index(fields=schema, definition=definition)
 # >>> 'OK'
 # STEP_END
 # REMOVE_START
@@ -166,8 +159,7 @@ res = client.ft("idx:bikes_vss").search(query).docs
 # REMOVE_START
 
 assert all(
-    item in [x.__dict__["id"] for x in res]
-    for item in ["bikes:008", "bikes:009"]
+    item in [x.__dict__["id"] for x in res] for item in ["bikes:008", "bikes:009"]
 )
 # REMOVE_END
 
@@ -179,8 +171,7 @@ res = client.ft("idx:bikes_vss").search(query).docs
 # STEP_END
 # REMOVE_START
 assert all(
-    item in [x.__dict__["id"] for x in res]
-    for item in ["bikes:008", "bikes:009"]
+    item in [x.__dict__["id"] for x in res] for item in ["bikes:008", "bikes:009"]
 )
 # REMOVE_END
 
@@ -230,11 +221,7 @@ def create_query_table(query, queries, encoded_queries, extra_params={}):
             client.ft("idx:bikes_vss")
             .search(
                 query,
-                {
-                    "query_vector": np.array(
-                        encoded_query, dtype=np.float32
-                    ).tobytes()
-                }
+                {"query_vector": np.array(encoded_query, dtype=np.float32).tobytes()}
                 | extra_params,
             )
             .docs
@@ -301,8 +288,6 @@ range_query = (
     .paging(0, 4)
     .dialect(2)
 )
-create_query_table(
-    range_query, queries[:1], encoded_queries[:1], {"range": 0.55}
-)
+create_query_table(range_query, queries[:1], encoded_queries[:1], {"range": 0.55})
 # >>> | Bike for small kids |    0.52 | bikes:001 | Velorim    |... (+1 more result)
 # STEP_END

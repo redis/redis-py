@@ -33,7 +33,7 @@ jobs:
           pip install -r dev_requirements.txt
           pip install -r requirements.txt
           isort --check-only --diff doctests/*.py
-          black -l 80 --target-version py39 --check --diff doctests/*.py
+          black --target-version py39 --check --diff doctests/*.py
 
       - name: run tests
         run: |
