@@ -4,7 +4,6 @@ exclude =
     *.egg-info,
     *.pyc,
     .git,
-    .tox,
     .venv*,
     build,
     docs/*,
