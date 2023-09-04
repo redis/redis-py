@@ -8,7 +8,7 @@ setup(
     long_description_content_type="text/markdown",
     keywords=["Redis", "key-value store", "database"],
     license="MIT",
-    version="5.0.0rc2",
+    version="5.0.0",
     packages=find_packages(
         include=[
             "redis",
@@ -23,6 +23,8 @@ setup(
             "redis.parsers",
         ]
     ),
+    package_data={"redis": ["py.typed"]},
+    include_package_data=True,
     url="https://github.com/redis/redis-py",
     project_urls={
         "Documentation": "https://redis.readthedocs.io/en/latest/",

@@ -335,11 +335,15 @@ class Sentinel(AsyncSentinelCommands):
         kwargs["is_master"] = True
         connection_kwargs = dict(self.connection_kwargs)
         connection_kwargs.update(kwargs)
-        return redis_class(
-            connection_pool=connection_pool_class(
-                service_name, self, **connection_kwargs
-            )
+
+        connection_pool = connection_pool_class(service_name, self, **connection_kwargs)
+        # The Redis object "owns" the pool
+        auto_close_connection_pool = True
+        client = redis_class(
+            connection_pool=connection_pool,
         )
+        client.auto_close_connection_pool = auto_close_connection_pool
+        return client
 
     def slave_for(
         self,
@@ -368,8 +372,12 @@ class Sentinel(AsyncSentinelCommands):
         kwargs["is_master"] = False
         connection_kwargs = dict(self.connection_kwargs)
         connection_kwargs.update(kwargs)
-        return redis_class(
-            connection_pool=connection_pool_class(
-                service_name, self, **connection_kwargs
-            )
+
+        connection_pool = connection_pool_class(service_name, self, **connection_kwargs)
+        # The Redis object "owns" the pool
+        auto_close_connection_pool = True
+        client = redis_class(
+            connection_pool=connection_pool,
         )
+        client.auto_close_connection_pool = auto_close_connection_pool
+        return client

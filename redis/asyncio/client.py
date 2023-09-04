@@ -62,7 +62,13 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.typing import ChannelT, EncodableT, KeyT
-from redis.utils import HIREDIS_AVAILABLE, _set_info_logger, safe_str, str_if_bytes
+from redis.utils import (
+    HIREDIS_AVAILABLE,
+    _set_info_logger,
+    get_lib_version,
+    safe_str,
+    str_if_bytes,
+)
 
 PubSubHandler = Callable[[Dict[str, str]], Awaitable[None]]
 _KeyT = TypeVar("_KeyT", bound=KeyT)
@@ -104,7 +110,13 @@ class Redis(
     response_callbacks: MutableMapping[Union[str, bytes], ResponseCallbackT]
 
     @classmethod
-    def from_url(cls, url: str, **kwargs):
+    def from_url(
+        cls,
+        url: str,
+        single_connection_client: bool = False,
+        auto_close_connection_pool: bool = True,
+        **kwargs,
+    ):
         """
         Return a Redis client object configured from the given URL
 
@@ -128,10 +140,13 @@ class Redis(
 
         There are several ways to specify a database number. The first value
         found will be used:
-            1. A ``db`` querystring option, e.g. redis://localhost?db=0
-            2. If using the redis:// or rediss:// schemes, the path argument
+
+        1. A ``db`` querystring option, e.g. redis://localhost?db=0
+
+        2. If using the redis:// or rediss:// schemes, the path argument
                of the url, e.g. redis://localhost/0
-            3. A ``db`` keyword argument to this function.
+
+        3. A ``db`` keyword argument to this function.
 
         If none of these options are specified, the default db=0 is used.
 
@@ -144,12 +159,13 @@ class Redis(
         arguments always win.
 
         """
-        single_connection_client = kwargs.pop("single_connection_client", False)
         connection_pool = ConnectionPool.from_url(url, **kwargs)
-        return cls(
+        redis = cls(
             connection_pool=connection_pool,
             single_connection_client=single_connection_client,
         )
+        redis.auto_close_connection_pool = auto_close_connection_pool
+        return redis
 
     def __init__(
         self,
@@ -180,6 +196,8 @@ class Redis(
         single_connection_client: bool = False,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
+        lib_name: Optional[str] = "redis-py",
+        lib_version: Optional[str] = get_lib_version(),
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
         auto_close_connection_pool: bool = True,
@@ -222,6 +240,8 @@ class Redis(
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
+                "lib_name": lib_name,
+                "lib_version": lib_version,
                 "redis_connect_func": redis_connect_func,
                 "protocol": protocol,
             }
