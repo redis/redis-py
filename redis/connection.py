@@ -513,7 +513,10 @@ class AbstractConnection:
             self.next_health_check = time() + self.health_check_interval
 
         if isinstance(response, ResponseError):
-            raise response
+            try:
+                raise response
+            finally:
+                del response  # avoid creating ref cycles
         return response
 
     def pack_command(self, *args):
