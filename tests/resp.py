@@ -420,3 +420,25 @@ def parse_chunks(buffers: List[bytes]) -> Tuple[List[Any], bytes]:
                 except NeedMoreData:
                     break
         return result, parser.get_unparsed()
+
+
+class RespServer:
+    """A simple, dummy, REDIS server for unit tests.
+    Accepts RESP commands and returns RESP responses.
+    """
+
+    _CLIENT_NAME = "test-suite-client"
+    _SUCCESS_RESP = b"+OK" + CRNL
+    _ERROR_RESP = b"-ERR" + CRNL
+    _SUPPORTED_CMDS = {f"CLIENT SETNAME {_CLIENT_NAME}": _SUCCESS_RESP}
+
+    def command(self, cmd: Any) -> bytes:
+        """Process a single command and return the response"""
+        if not isinstance(cmd, list):
+            return f"-ERR unknown command {cmd!r}\r\n".encode()
+
+        # currently supports only a single command
+        command = " ".join(cmd)
+        if command in self._SUPPORTED_CMDS:
+            return self._SUPPORTED_CMDS[command]
+        return self._ERROR_RESP
