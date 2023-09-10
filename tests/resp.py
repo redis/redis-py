@@ -192,7 +192,6 @@ class RespGeneratorParser:
         """
         return data.decode(self.encoding, errors=self.errorhandler)
 
-    # a stateful RESP parser implemented via a generator
     def parse(
         self,
         buffer: bytes,
@@ -340,8 +339,9 @@ class NeedMoreData(RuntimeError):
 
 class RespParser:
     """
-    A class for simple RESP protocol decoding for unit tests
-    Uses a RespGeneratorParser to produce data.
+    A class for simple RESP protocol decoding for unit tests.
+    Uses a RespGeneratorParser to produce data, and can
+    produce top-level objects for as long as there is data available.
     """
 
     def __init__(self) -> None:
@@ -355,7 +355,8 @@ class RespParser:
     def parse(self, buffer: bytes) -> Optional[Any]:
         """
         Parse a buffer of data, return a tuple of a single top-level primitive and the
-        remaining buffer or raise NeedMoreData if more data is needed
+        remaining buffer or raise NeedMoreData if more data is needed to
+        produce a value.
         """
         if self.generator is None:
             # create a new parser generator, initializing it with
@@ -372,7 +373,7 @@ class RespParser:
             self.consumed.append(buffer)
             raise NeedMoreData()
 
-        # got a value, close the parser, store the remaining buffer
+        # got a value, close the generator, store the remaining buffer
         self.generator.close()
         self.generator = None
         value, remaining = parsed
@@ -427,18 +428,105 @@ class RespServer:
     Accepts RESP commands and returns RESP responses.
     """
 
-    _CLIENT_NAME = "test-suite-client"
-    _SUCCESS_RESP = b"+OK" + CRNL
-    _ERROR_RESP = b"-ERR" + CRNL
-    _SUPPORTED_CMDS = {f"CLIENT SETNAME {_CLIENT_NAME}": _SUCCESS_RESP}
+    handlers = {}
+
+    def __init__(self):
+        self.protocol = 2
+        self.server_ver = self.get_server_version()
+        self.auth = []
+        self.client_name = ""
+
+    # patchable methods for testing
+
+    def get_server_version(self):
+        return 6
+
+    def on_auth(self, auth):
+        pass
+
+    def on_setname(self, name):
+        pass
+
+    def on_protocol(self, proto):
+        pass
 
     def command(self, cmd: Any) -> bytes:
         """Process a single command and return the response"""
-        if not isinstance(cmd, list):
-            return f"-ERR unknown command {cmd!r}\r\n".encode()
+        result = self._command(cmd)
+        return RespEncoder(self.protocol).encode(result)
 
-        # currently supports only a single command
-        command = " ".join(cmd)
-        if command in self._SUPPORTED_CMDS:
-            return self._SUPPORTED_CMDS[command]
-        return self._ERROR_RESP
+    def _command(self, cmd: Any) -> Any:
+        if not isinstance(cmd, list):
+            return ErrorStr("ERR", "unknown command {cmd!r}")
+
+        # handle registered commands
+        command = cmd[0].upper()
+        args = cmd[1:]
+        if command in self.handlers:
+            return self.handlers[command](self, args)
+
+        return ErrorStr("ERR", "unknown command {cmd!r}")
+
+    def handle_auth(self, args):
+        self.auth = args[:]
+        self.on_auth(self.auth)
+        expect = 2 if self.server_ver >= 6 else 1
+        if len(args) != expect:
+            return ErrorStr("ERR", "wrong number of arguments" " for 'AUTH' command")
+        return "OK"
+
+    handlers["AUTH"] = handle_auth
+
+    def handle_client(self, args):
+        if args[0] == "SETNAME":
+            return self.handle_setname(args[1:])
+        return ErrorStr("ERR", "unknown subcommand or wrong number of arguments")
+
+    handlers["CLIENT"] = handle_client
+
+    def handle_setname(self, args):
+        if len(args) != 1:
+            return ErrorStr("ERR", "wrong number of arguments")
+        self.client_name = args[0]
+        self.on_setname(self.client_name)
+        return "OK"
+
+    def handle_hello(self, args):
+        if self.server_ver < 6:
+            return ErrorStr("ERR", "unknown command 'HELLO'")
+        proto = self.protocol
+        if args:
+            proto = args.pop(0)
+            if str(proto) not in ["2", "3"]:
+                return ErrorStr(
+                    "NOPROTO", "sorry this protocol version is not supported"
+                )
+
+        while args:
+            cmd = args.pop(0).upper()
+            if cmd == "AUTH":
+                auth_args = args[:2]
+                args = args[2:]
+                res = self.handle_auth(auth_args)
+                if res != "OK":
+                    return res
+                continue
+            if cmd == "SETNAME":
+                setname_args = args[:1]
+                args = args[1:]
+                res = self.handle_setname(setname_args)
+                if res != "OK":
+                    return res
+                continue
+            return ErrorStr("ERR", "unknown subcommand or wrong number of arguments")
+
+        self.protocol = int(proto)
+        self.on_protocol(self.protocol)
+        result = {
+            "server": "redistester",
+            "version": "0.0.1",
+            "proto": self.protocol,
+        }
+        return result
+
+    handlers["HELLO"] = handle_hello
