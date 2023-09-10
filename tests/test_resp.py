@@ -1,6 +1,14 @@
 import pytest
 
-from .resp import PushData, VerbatimString, encode, parse_all, parse_chunks
+from .resp import (
+    Attribute,
+    ErrorStr,
+    PushData,
+    VerbatimStr,
+    encode,
+    parse_all,
+    parse_chunks,
+)
 
 
 @pytest.fixture(params=[2, 3])
@@ -13,9 +21,9 @@ class TestEncoder:
         assert encode("foo") == b"+foo\r\n"
 
     def test_long_str(self):
-        text = "fooling around with the sword in the mud"
-        assert len(text) == 40
-        assert encode(text) == b"$40\r\n" + text.encode() + b"\r\n"
+        text = 3 * "fooling around with the sword in the mud"
+        assert len(text) == 120
+        assert encode(text) == b"$120\r\n" + text.encode() + b"\r\n"
 
     # test strings with control characters
     def test_str_with_ctrl_chars(self):
@@ -66,6 +74,13 @@ class TestEncoder:
         else:
             assert data == b"%2\r\n:1\r\n:2\r\n:3\r\n:4\r\n"
 
+    def test_attribute(self, resp_version):
+        data = encode(Attribute({1: 2, 3: 4}), protocol=resp_version)
+        if resp_version == 2:
+            assert data == b"*4\r\n:1\r\n:2\r\n:3\r\n:4\r\n"
+        else:
+            assert data == b"|2\r\n:1\r\n:2\r\n:3\r\n:4\r\n"
+
     def test_nested_array(self):
         assert encode([1, [2, 3]]) == b"*2\r\n:1\r\n*2\r\n:2\r\n:3\r\n"
 
@@ -102,6 +117,14 @@ class TestEncoder:
             assert data == b":0\r\n"
         else:
             assert data == b"f\r\n"
+
+    def test_errorstr(self, resp_version):
+        err = ErrorStr("foo", "bar\r\nbaz")
+        data = encode(err, protocol=resp_version)
+        if resp_version == 2:
+            assert data == b"-FOO bar\\r\\nbaz\r\n"
+        else:
+            assert data == b"!12\r\nFOO bar\r\nbaz\r\n"
 
 
 @pytest.mark.parametrize("chunk_size", [0, 1, 2, -2])
@@ -154,7 +177,7 @@ class TestParser:
     def test_invalid_token(self, chunk_size):
         with pytest.raises(ValueError):
             self.parse_data(chunk_size, b")foo\r\n")
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(ValueError):
             self.parse_data(chunk_size, b"!foo\r\n")
 
     def test_multiple_ints(self, chunk_size):
@@ -185,12 +208,30 @@ class TestParser:
 
     def test_bulk_string(self, chunk_size):
         parsed = parse_all(b"$3\r\nfoo\r\nbar")
-        assert parsed == ([b"foo"], b"bar")
+        assert parsed == (["foo"], b"bar")
 
     def test_bulk_string_with_ctrl_chars(self, chunk_size):
         parsed = self.parse_data(chunk_size, b"$8\r\nfoo\r\nbar\r\n")
-        assert parsed == ([b"foo\r\nbar"], b"")
+        assert parsed == (["foo\r\nbar"], b"")
 
-    def test_verbatim_string(self, chunk_size):
+    def test_verbatimstr(self, chunk_size):
         parsed = self.parse_data(chunk_size, b"=3\r\ntxt:foo\r\nbar")
-        assert parsed == ([VerbatimString(b"foo", "txt")], b"bar")
+        assert parsed == ([VerbatimStr("foo", "txt")], b"bar")
+
+    def test_errorstr(self, chunk_size):
+        parsed = self.parse_data(chunk_size, b"-FOO bar\r\nbaz")
+        assert parsed == ([ErrorStr("foo", "bar")], b"baz")
+
+    def test_errorstr_resp3(self, chunk_size):
+        parsed = self.parse_data(chunk_size, b"!12\r\nFOO bar\r\nbaz\r\n")
+        assert parsed == ([ErrorStr("foo", "bar\r\nbaz")], b"")
+
+    def test_attribute_map(self, chunk_size):
+        parsed = self.parse_data(chunk_size, b"|2\r\n:1\r\n:2\r\n:3\r\n:4\r\n")
+        assert parsed == ([Attribute({1: 2, 3: 4})], b"")
+
+    def test_surrogateescape(self, chunk_size):
+        data = b"foo\xff"
+        parsed = self.parse_data(chunk_size, b"$4\r\n" + data + b"\r\nbar")
+        assert parsed == ([data.decode(errors="surrogateescape")], b"bar")
+        assert parsed[0][0].encode("utf-8", "surrogateescape") == data

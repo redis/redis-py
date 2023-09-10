@@ -6,19 +6,37 @@ from typing import Any, Generator, List, Optional, Tuple, Union
 CRNL = b"\r\n"
 
 
-class VerbatimString(bytes):
+class VerbatimStr(str):
     """
     A string that is encoded as a resp3 verbatim string
     """
 
-    def __new__(cls, value: bytes, hint: str) -> "VerbatimString":
-        return bytes.__new__(cls, value)
+    def __new__(cls, value: str, hint: str) -> "VerbatimStr":
+        return str.__new__(cls, value)
 
-    def __init__(self, value: bytes, hint: str) -> None:
+    def __init__(self, value: str, hint: str) -> None:
         self.hint = hint
 
     def __repr__(self) -> str:
-        return f"VerbatimString({super().__repr__()}, {self.hint!r})"
+        return f"VerbatimStr({super().__repr__()}, {self.hint!r})"
+
+
+class ErrorStr(str):
+    """
+    A string to be encoded as a resp3 error
+    """
+
+    def __new__(cls, code: str, value: str) -> "ErrorStr":
+        return str.__new__(cls, value)
+
+    def __init__(self, code: str, value: str) -> None:
+        self.code = code.upper()
+
+    def __repr__(self) -> str:
+        return f"ErrorString({self.code!r}, {super().__repr__()})"
+
+    def __str__(self):
+        return f"{self.code} {super().__str__()}"
 
 
 class PushData(list):
@@ -30,19 +48,43 @@ class PushData(list):
         return f"PushData({super().__repr__()})"
 
 
-class RespEncoder:
+class Attribute(dict):
     """
-    A class for simple RESP protocol encoding for unit tests
+    A special type of map indicating data from a attribute response
     """
 
-    def __init__(self, protocol: int = 2, encoding: str = "utf-8") -> None:
+    def __repr__(self) -> str:
+        return f"Attribute({super().__repr__()})"
+
+
+class RespEncoder:
+    """
+    A class for simple RESP protocol encoder for unit tests
+    """
+
+    def __init__(
+        self, protocol: int = 2, encoding: str = "utf-8", errorhander="strict"
+    ) -> None:
         self.protocol = protocol
         self.encoding = encoding
+        self.errorhandler = errorhander
+
+    def apply_encoding(self, value: str) -> bytes:
+        return value.encode(self.encoding, errors=self.errorhandler)
+
+    def has_crnl(self, value: bytes) -> bool:
+        """check if either cr or nl is in the value"""
+        return b"\r" in value or b"\n" in value
+
+    def escape_crln(self, value: bytes) -> bytes:
+        """remove any cr or nl from the value"""
+        return value.replace(b"\r", b"\\r").replace(b"\n", b"\\n")
 
     def encode(self, data: Any, hint: Optional[str] = None) -> bytes:
         if isinstance(data, dict):
             if self.protocol > 2:
-                result = f"%{len(data)}\r\n".encode()
+                code = "|" if isinstance(data, Attribute) else "%"
+                result = f"{code}{len(data)}\r\n".encode()
                 for key, val in data.items():
                     result += self.encode(key) + self.encode(val)
                 return result
@@ -54,10 +96,8 @@ class RespEncoder:
                 return self.encode(mylist)
 
         elif isinstance(data, list):
-            if isinstance(data, PushData) and self.protocol > 2:
-                result = f">{len(data)}\r\n".encode()
-            else:
-                result = f"*{len(data)}\r\n".encode()
+            code = ">" if isinstance(data, PushData) and self.protocol > 2 else "*"
+            result = f"{code}{len(data)}\r\n".encode()
             for val in data:
                 result += self.encode(val)
             return result
@@ -71,11 +111,18 @@ class RespEncoder:
             else:
                 return self.encode(list(data))
 
+        elif isinstance(data, ErrorStr):
+            enc = self.apply_encoding(str(data))
+            if self.protocol > 2:
+                if len(enc) > 80 or self.has_crnl(enc):
+                    return f"!{len(enc)}\r\n".encode() + enc + b"\r\n"
+            return b"-" + self.escape_crln(enc) + b"\r\n"
+
         elif isinstance(data, str):
-            enc = data.encode(self.encoding)
+            enc = self.apply_encoding(data)
             # long strings or strings with control characters must be encoded as bulk
             # strings
-            if hint or len(enc) > 20 or b"\r" in enc or b"\n" in enc:
+            if hint or len(enc) > 80 or self.has_crnl(enc):
                 return self.encode_bulkstr(enc, hint)
             return b"+" + enc + b"\r\n"
 
@@ -158,7 +205,7 @@ def resp_parse(
 
     elif code == b"+":  # simple string
         # we decode them automatically
-        yield arg.decode(), rest
+        yield arg.decode(errors="surrogateescape"), rest
 
     elif code == b"$":  # bulk string
         count = int(arg)
@@ -168,8 +215,9 @@ def resp_parse(
             assert incoming is not None
             rest += incoming
         bulkstr = rest[:count]
-        # bulk strings are not decoded, could contain binary data
-        yield bulkstr, rest[expect:]
+        # we decode them automatically.  Can be encoded
+        # back to binary if necessary with "surrogatescape"
+        yield bulkstr.decode(errors="surrogateescape"), rest[expect:]
 
     elif code == b"=":  # verbatim strings
         count = int(arg)
@@ -179,9 +227,9 @@ def resp_parse(
             assert incoming is not None
             rest += incoming
         hint = rest[:3]
-        result = rest[4 : (count + 4)]
-        # verbatim strings are not decoded, could contain binary data
-        yield VerbatimString(result, hint.decode()), rest[expect:]
+        result = rest[4: (count + 4)]
+        yield VerbatimStr(result.decode(errors="surrogateescape"),
+                          hint.decode()), rest[expect:]
 
     elif code in b"*>":  # array or push data
         count = int(arg)
@@ -214,7 +262,7 @@ def resp_parse(
             result_set.add(value)
         yield result_set, rest
 
-    elif code == b"%":  # map
+    elif code in b"%|":  # map or attribute
         count = int(arg)
         result_map = {}
         for _ in range(count):
@@ -232,10 +280,29 @@ def resp_parse(
                     parsed = parser.send(incoming)
             value, rest = parsed
             result_map[key] = value
+        if code == b"|":
+            yield Attribute(result_map), rest
         yield result_map, rest
+
+    elif code == b"-":  # error
+        # we decode them automatically
+        decoded = arg.decode(errors="surrogateescape")
+        code, value = decoded.split(" ", 1)
+        yield ErrorStr(code, value), rest
+
+    elif code == b"!":  # resp3 error
+        count = int(arg)
+        expect = count + 2  # +2 for the trailing CRNL
+        while len(rest) < expect:
+            incoming = yield (None)
+            assert incoming is not None
+            rest += incoming
+        bulkstr = rest[:count]
+        decoded = bulkstr.decode(errors="surrogateescape")
+        code, value = decoded.split(" ", 1)
+        yield ErrorStr(code, value), rest[expect:]
+
     else:
-        if code in b"-!":
-            raise NotImplementedError(f"resp opcode '{code.decode()}' not implemented")
         raise ValueError(f"Unknown opcode '{code.decode()}'")
 
 
