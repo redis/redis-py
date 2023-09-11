@@ -114,6 +114,7 @@ class Redis(
         cls,
         url: str,
         single_connection_client: bool = False,
+        auto_close_connection_pool: bool = True,
         **kwargs,
     ):
         """
@@ -163,7 +164,13 @@ class Redis(
             connection_pool=connection_pool,
             single_connection_client=single_connection_client,
         )
-        client.auto_close_connection_pool = True
+        # We should probably deprecate the `auto_close_connection_pool`
+        # argument.
+        # If the caller doesn't want the pool auto-closed, a better
+        # pattern is to create the pool manually (maybe using from_url()),
+        # pass it in using the `connection_pool`, and hold on to it to close
+        # it later.
+        client.auto_close_connection_pool = auto_close_connection_pool
         return client
 
     @classmethod
