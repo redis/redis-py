@@ -132,7 +132,6 @@ thevalueofmykey
 timeseries
 toctree
 topk
-tox
 triaging
 txt
 un
