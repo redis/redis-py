@@ -175,7 +175,7 @@ async def get_mocked_redis_client(*args, **kwargs) -> RedisCluster:
 
 
 def mock_node_resp(node: ClusterNode, response: Any) -> ClusterNode:
-    connection = mock.AsyncMock()
+    connection = mock.AsyncMock(spec=Connection)
     connection.is_connected = True
     connection.read_response.return_value = response
     while node._free:
@@ -185,7 +185,7 @@ def mock_node_resp(node: ClusterNode, response: Any) -> ClusterNode:
 
 
 def mock_node_resp_exc(node: ClusterNode, exc: Exception) -> ClusterNode:
-    connection = mock.AsyncMock()
+    connection = mock.AsyncMock(spec=Connection)
     connection.is_connected = True
     connection.read_response.side_effect = exc
     while node._free:

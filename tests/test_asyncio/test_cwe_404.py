@@ -213,8 +213,9 @@ async def test_cluster(master_host):
             p.send_event.clear()
 
     async def wait_for_send():
-        asyncio.wait(
-            [p.send_event.wait() for p in proxies], return_when=asyncio.FIRST_COMPLETED
+        await asyncio.wait(
+            [asyncio.Task(p.send_event.wait()) for p in proxies],
+            return_when=asyncio.FIRST_COMPLETED,
         )
 
     @contextlib.contextmanager
@@ -228,11 +229,10 @@ async def test_cluster(master_host):
         for p in proxies:
             await stack.enter_async_context(p)
 
-        with contextlib.closing(
-            RedisCluster.from_url(
-                f"redis://127.0.0.1:{remap_base}", address_remap=remap
-            )
-        ) as r:
+        r = RedisCluster.from_url(
+            f"redis://127.0.0.1:{remap_base}", address_remap=remap
+        )
+        try:
             await r.initialize()
             await r.set("foo", "foo")
             await r.set("bar", "bar")
@@ -257,3 +257,5 @@ async def test_cluster(master_host):
                 assert await r.get("foo") == b"foo"
 
             await asyncio.gather(*[doit() for _ in range(10)])
+        finally:
+            await r.close()
