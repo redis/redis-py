@@ -135,7 +135,7 @@ class Query:
     def timeout(self, timeout):
         """overrides the timeout parameter of the module"""
         if isinstance(timeout, int) and timeout >= 0:
-            self._timeout = timeou
+            self._timeout = timeout
         else:
             raise AttributeError("TIMEOUT requires a non negative integer.")
         return self
