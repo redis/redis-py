@@ -2266,6 +2266,5 @@ def test_query_timeout(r: redis.Redis):
     assert q1.get_args() == ["foo", "TIMEOUT", 5000, "LIMIT", 0, 10]
     q1 = Query("foo").timeout(0)
     assert q1.get_args() == ["foo", "TIMEOUT", 0, "LIMIT", 0, 10]
-    q2 = Query("foo").timeout("not_a_number")
     with pytest.raises(AttributeError):
-        r.ft().search(q2)
+        Query("foo").timeout("not_a_number")
