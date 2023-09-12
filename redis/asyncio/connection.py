@@ -1297,10 +1297,10 @@ class BlockingConnectionPool(ConnectionPool):
         try:
             async with async_timeout(self.timeout):
                 connection = await self.pool.get()
-        except (asyncio.QueueEmpty, asyncio.TimeoutError):
+        except (asyncio.QueueEmpty, asyncio.TimeoutError) as exception:
             # Note that this is not caught by the redis client and will be
             # raised unless handled by application code. If you want never to
-            raise ConnectionError("No connection available.")
+            raise ConnectionError("No connection available.") from exception
 
         # If the ``connection`` is actually ``None`` then that's a cue to make
         # a new connection to add to the pool.
