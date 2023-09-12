@@ -134,7 +134,10 @@ class Query:
 
     def timeout(self, timeout):
         """overrides the timeout parameter of the module"""
-        self._timeout = timeout
+        if isinstance(timeout, int) and timeout >= 0:
+            self._timeout = timeou
+        else:
+            raise AttributeError("TIMEOUT requires a non negative integer.")
         return self
 
     def in_order(self):
@@ -194,10 +197,8 @@ class Query:
             args += self._ids
         if self._slop >= 0:
             args += ["SLOP", self._slop]
-        if isinstance(self._timeout, int) and self._timeout >= 0:
+        if self._timeout is not None:
             args += ["TIMEOUT", self._timeout]
-        else:
-            raise AttributeError("TIMEOUT requires a non negative integer.")
         if self._in_order:
             args.append("INORDER")
         if self._return_fields:
