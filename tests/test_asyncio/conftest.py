@@ -8,7 +8,7 @@ import redis.asyncio as redis
 from packaging.version import Version
 from redis._parsers import _AsyncHiredisParser, _AsyncRESP2Parser
 from redis.asyncio.client import Monitor
-from redis.asyncio.connection import parse_url
+from redis.asyncio.connection import Connection, parse_url
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.utils import HIREDIS_AVAILABLE
@@ -138,23 +138,25 @@ async def decoded_r(create_redis):
 
 
 def _gen_cluster_mock_resp(r, response):
-    connection = mock.AsyncMock()
+    connection = mock.AsyncMock(spec=Connection)
     connection.retry = Retry(NoBackoff(), 0)
     connection.read_response.return_value = response
-    r.connection = connection
-    return r
+    with mock.patch.object(r, "connection", connection):
+        yield r
 
 
 @pytest_asyncio.fixture()
 async def mock_cluster_resp_ok(create_redis, **kwargs):
     r = await create_redis(**kwargs)
-    return _gen_cluster_mock_resp(r, "OK")
+    for mocked in _gen_cluster_mock_resp(r, "OK"):
+        yield mocked
 
 
 @pytest_asyncio.fixture()
 async def mock_cluster_resp_int(create_redis, **kwargs):
     r = await create_redis(**kwargs)
-    return _gen_cluster_mock_resp(r, 2)
+    for mocked in _gen_cluster_mock_resp(r, 2):
+        yield mocked
 
 
 @pytest_asyncio.fixture()
@@ -168,7 +170,8 @@ async def mock_cluster_resp_info(create_redis, **kwargs):
         "cluster_my_epoch:2\r\ncluster_stats_messages_sent:170262\r\n"
         "cluster_stats_messages_received:105653\r\n"
     )
-    return _gen_cluster_mock_resp(r, response)
+    for mocked in _gen_cluster_mock_resp(r, response):
+        yield mocked
 
 
 @pytest_asyncio.fixture()
@@ -192,7 +195,8 @@ async def mock_cluster_resp_nodes(create_redis, **kwargs):
         "fbb23ed8cfa23f17eaf27ff7d0c410492a1093d6 172.17.0.7:7002 "
         "master,fail - 1447829446956 1447829444948 1 disconnected\n"
     )
-    return _gen_cluster_mock_resp(r, response)
+    for mocked in _gen_cluster_mock_resp(r, response):
+        yield mocked
 
 
 @pytest_asyncio.fixture()
@@ -203,7 +207,8 @@ async def mock_cluster_resp_slaves(create_redis, **kwargs):
         "slave 19efe5a631f3296fdf21a5441680f893e8cc96ec 0 "
         "1447836789290 3 connected']"
     )
-    return _gen_cluster_mock_resp(r, response)
+    for mocked in _gen_cluster_mock_resp(r, response):
+        yield mocked
 
 
 async def wait_for_command(
