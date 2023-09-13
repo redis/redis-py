@@ -801,7 +801,7 @@ class PubSub:
 
     @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="reset")
     async def reset(self) -> None:
-        """alias for aclose(), for backwards compatibility"""
+        """Alias for aclose(), for backwards compatibility"""
         await self.aclose()
 
     async def on_connect(self, connection: Connection):
