@@ -2264,6 +2264,8 @@ def test_withsuffixtrie(client: redis.Redis):
 def test_query_timeout(r: redis.Redis):
     q1 = Query("foo").timeout(5000)
     assert q1.get_args() == ["foo", "TIMEOUT", 5000, "LIMIT", 0, 10]
+    q1 = Query("foo").timeout(0)
+    assert q1.get_args() == ["foo", "TIMEOUT", 0, "LIMIT", 0, 10]
     q2 = Query("foo").timeout("not_a_number")
     with pytest.raises(redis.ResponseError):
         r.ft().search(q2)
