@@ -1,5 +1,4 @@
 import asyncio
-import os
 import re
 
 import pytest
@@ -94,7 +93,9 @@ class DummyConnection(Connection):
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
-        self.pid = os.getpid()
+
+    def repr_pieces(self):
+        return [("id", id(self)), ("kwargs", self.kwargs)]
 
     async def connect(self):
         pass
