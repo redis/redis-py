@@ -115,7 +115,7 @@ class _RedisTCPServer(socketserver.TCPServer):
         return connstream, fromaddr
 
 
-if hasattr(socket, "UnixStreamServer"):
+if hasattr(socketserver, "UnixStreamServer"):
 
     class _RedisUDSServer(socketserver.UnixStreamServer):
         def __init__(self, *args, **kw) -> None:
