@@ -21,6 +21,7 @@ from redis.exceptions import (
     ConnectionError,
     DataError,
     MasterDownError,
+    MaxConnectionsError,
     MovedError,
     RedisClusterException,
     RedisError,
@@ -386,7 +387,12 @@ class AbstractRedisCluster:
         list_keys_to_dict(["SCRIPT FLUSH"], lambda command, res: all(res.values())),
     )
 
-    ERRORS_ALLOW_RETRY = (ConnectionError, TimeoutError, ClusterDownError)
+    ERRORS_ALLOW_RETRY = (
+        ClusterDownError,
+        ConnectionError,
+        MaxConnectionsError,
+        TimeoutError,
+    )
 
     def replace_default_node(self, target_node: "ClusterNode" = None) -> None:
         """Replace the default cluster node.
@@ -1142,7 +1148,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                         response, **kwargs
                     )
                 return response
-            except AuthenticationError:
+            except (AuthenticationError, MaxConnectionsError):
                 raise
             except (ConnectionError, TimeoutError) as e:
                 # Connection retries are being handled in the node's
@@ -2034,7 +2040,12 @@ class ClusterPipeline(RedisCluster):
                     allow_redirections=allow_redirections,
                     attempts_count=self.cluster_error_retry_attempts - retry_attempts,
                 )
-            except (ClusterDownError, ConnectionError, TimeoutError) as e:
+            except (
+                ClusterDownError,
+                ConnectionError,
+                MaxConnectionsError,
+                TimeoutError,
+            ) as e:
                 if retry_attempts > 0:
                     # Try again with the new cluster setup. All other errors
                     # should be raised.
@@ -2109,7 +2120,7 @@ class ClusterPipeline(RedisCluster):
                                 backoff = self.retry._backoff.compute(attempts_count)
                                 if backoff > 0:
                                     time.sleep(backoff)
-                            if isinstance(e, (ConnectionError, TimeoutError)):
+                            if type(e) in (ConnectionError, TimeoutError):
                                 self.nodes_manager.initialize()
                                 if is_default_node:
                                     self.replace_default_node()

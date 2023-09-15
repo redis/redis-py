@@ -33,9 +33,11 @@ from redis.connection import BlockingConnectionPool, Connection, ConnectionPool
 from redis.crc import key_slot
 from redis.exceptions import (
     AskError,
+    AuthenticationError,
     ClusterDownError,
     ConnectionError,
     DataError,
+    MaxConnectionsError,
     MovedError,
     NoPermissionError,
     RedisClusterException,
@@ -820,6 +822,21 @@ class TestRedisClusterObj:
                 with pytest.raises(error):
                     rc.get("bar")
                 assert compute.call_count == rc.cluster_error_retry_attempts
+
+    @pytest.mark.parametrize("error", [AuthenticationError, MaxConnectionsError])
+    def test_skip_initialize(self, r, error):
+        for n in r.nodes_manager.nodes_cache.values():
+            n.redis_connection.connection_pool.max_connections = 3
+            for _ in range(0, n.redis_connection.connection_pool.max_connections):
+                n.redis_connection.connection_pool.get_connection("GET")
+
+        with patch.object(NodesManager, "initialize") as i:
+            with pytest.raises(MaxConnectionsError):
+                r.get("a")
+            assert i.call_count == 0
+
+        for n in r.nodes_manager.nodes_cache.values():
+            n.redis_connection.connection_pool.reset()
 
     @pytest.mark.parametrize("reinitialize_steps", [2, 10, 99])
     def test_recover_slot_not_covered_error(self, request, reinitialize_steps):
@@ -3079,7 +3096,49 @@ class TestClusterPipeline:
         result = p.execute()
         assert result == []
 
+    @pytest.mark.parametrize("error", [AuthenticationError, MaxConnectionsError])
+    def test_error_does_not_trigger_initialize(self, r, error):
+        with patch("redis.cluster.get_connection") as get_connection:
+
+            def raise_error(target_node, *args, **kwargs):
+                get_connection.failed_calls += 1
+                raise error("mocked error")
+
+            get_connection.side_effect = raise_error
+
+            r.set_retry(Retry(ConstantBackoff(0.1), 5))
+            pipeline = r.pipeline()
+
+            with patch.object(NodesManager, "initialize") as i:
+                with pytest.raises(error):
+                    pipeline.get("bar")
+                    pipeline.get("bar")
+                    pipeline.execute()
+                assert i.call_count == 0
+
     @pytest.mark.parametrize("error", [ConnectionError, TimeoutError])
+    def test_error_trigger_initialize(self, r, error):
+        with patch("redis.cluster.get_connection") as get_connection:
+
+            def raise_error(target_node, *args, **kwargs):
+                get_connection.failed_calls += 1
+                raise error("mocked error")
+
+            get_connection.side_effect = raise_error
+
+            r.set_retry(Retry(ConstantBackoff(0.1), 5))
+            pipeline = r.pipeline()
+
+            with patch.object(NodesManager, "initialize") as i:
+                with pytest.raises(error):
+                    pipeline.get("bar")
+                    pipeline.get("bar")
+                    pipeline.execute()
+                assert i.call_count == r.cluster_error_retry_attempts + 1
+
+    @pytest.mark.parametrize(
+        "error", [ConnectionError, TimeoutError, MaxConnectionsError]
+    )
     def test_additional_backoff_cluster_pipeline(self, r, error):
         with patch.object(ConstantBackoff, "compute") as compute:
 

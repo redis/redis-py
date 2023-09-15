@@ -8,6 +8,7 @@ import pytest
 
 import redis
 from redis.connection import ssl_available, to_bool
+from redis.exceptions import MaxConnectionsError
 
 from .conftest import _get_client, skip_if_redis_enterprise, skip_if_server_version_lt
 from .test_pubsub import wait_for_message
@@ -63,7 +64,7 @@ class TestConnectionPool:
         pool = self.get_pool(max_connections=2, connection_kwargs=connection_kwargs)
         pool.get_connection("_")
         pool.get_connection("_")
-        with pytest.raises(redis.ConnectionError):
+        with pytest.raises(MaxConnectionsError):
             pool.get_connection("_")
 
     def test_reuse_previously_released_connection(self, master_host):
@@ -142,7 +143,7 @@ class TestBlockingConnectionPool:
         pool.get_connection("_")
 
         start = time.time()
-        with pytest.raises(redis.ConnectionError):
+        with pytest.raises(MaxConnectionsError):
             pool.get_connection("_")
         # we should have waited at least 0.1 seconds
         assert time.time() - start >= 0.1

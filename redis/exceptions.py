@@ -202,4 +202,9 @@ class SlotNotCoveredError(RedisClusterException):
 
 
 class MaxConnectionsError(ConnectionError):
+    """
+    Indicates that a connection pool ran out of connections and
+    can't create more due to maximum connection count limitation
+    """
+
     ...
