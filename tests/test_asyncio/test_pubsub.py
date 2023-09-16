@@ -240,7 +240,8 @@ class TestPubSubSubscribeUnsubscribe:
         assert p.subscribed is False
         await p.subscribe("foo")
         assert p.subscribed is True
-        await p.close()
+        with pytest.deprecated_call():
+            await p.close()
         assert p.subscribed is False
 
     async def test_reset_is_aclose(self, r: redis.Redis):
@@ -251,7 +252,8 @@ class TestPubSubSubscribeUnsubscribe:
         assert p.subscribed is False
         await p.subscribe("foo")
         assert p.subscribed is True
-        await p.reset()
+        with pytest.deprecated_call():
+            await p.reset()
         assert p.subscribed is False
 
     async def test_ignore_all_subscribe_messages(self, r: redis.Redis):

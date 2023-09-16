@@ -319,6 +319,9 @@ async def test_close_is_aclose(request):
         await r1.close()
         assert calls == 1
 
+    with pytest.deprecated_call():
+        await r1.close()
+
 
 async def test_pool_from_url_deprecation(request):
     url: str = request.config.getoption("--redis-url")

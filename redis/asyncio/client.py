@@ -64,6 +64,7 @@ from redis.typing import ChannelT, EncodableT, KeyT
 from redis.utils import (
     HIREDIS_AVAILABLE,
     _set_info_logger,
+    deprecated_function,
     get_lib_version,
     safe_str,
     str_if_bytes,
@@ -556,6 +557,7 @@ class Redis(
         ):
             await self.connection_pool.disconnect()
 
+    @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="close")
     async def close(self, close_connection_pool: Optional[bool] = None) -> None:
         """
         Alias for aclose(), for backwards compatibility
@@ -792,10 +794,12 @@ class PubSub:
             self.patterns = {}
             self.pending_unsubscribe_patterns = set()
 
+    @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="close")
     async def close(self) -> None:
         """Alias for aclose(), for backwards compatibility"""
         await self.aclose()
 
+    @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="reset")
     async def reset(self) -> None:
         """alias for aclose(), for backwards compatibility"""
         await self.aclose()

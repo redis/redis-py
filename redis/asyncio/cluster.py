@@ -62,7 +62,13 @@ from redis.exceptions import (
     TryAgainError,
 )
 from redis.typing import AnyKeyT, EncodableT, KeyT
-from redis.utils import dict_merge, get_lib_version, safe_str, str_if_bytes
+from redis.utils import (
+    deprecated_function,
+    dict_merge,
+    get_lib_version,
+    safe_str,
+    str_if_bytes,
+)
 
 TargetNodesT = TypeVar(
     "TargetNodesT", str, "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
@@ -411,6 +417,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     await self.nodes_manager.aclose()
                     await self.nodes_manager.aclose("startup_nodes")
 
+    @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="close")
     async def close(self) -> None:
         """alias for aclose() for backwards compatibility"""
         await self.aclose()
