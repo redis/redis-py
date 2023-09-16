@@ -274,7 +274,7 @@ class TestRedisClusterObj:
 
     async def test_aclosing(self) -> None:
         cluster = await get_mocked_redis_client(host=default_host, port=default_port)
-        called = 1
+        called = 0
 
         async def mock_aclose():
             nonlocal called
@@ -292,10 +292,9 @@ class TestRedisClusterObj:
         args
         """
         cluster = await get_mocked_redis_client(host=default_host, port=default_port)
+        called = 0
 
-        called = 1
-
-        async def mock_aclose(_):
+        async def mock_aclose():
             nonlocal called
             called += 1
 
