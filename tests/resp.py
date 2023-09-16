@@ -169,141 +169,167 @@ def encode(value: Any, protocol: int = 2, hint: Optional[str] = None) -> bytes:
     return RespEncoder(protocol).encode(value, hint)
 
 
-# a stateful RESP parser implemented via a generator
-def resp_parse(
-    buffer: bytes,
-) -> Generator[Optional[Tuple[Any, bytes]], Union[None, bytes], None]:
+class RespGeneratorParser:
     """
-    A stateful, generator based, RESP parser.
-    Returns a generator producing at most a single top-level primitive.
-    Yields tuple of (data_item, unparsed), or None if more data is needed.
-    It is fed more data with generator.send()
+    A wrapper class around a stateful RESP parsing generator,
+    allowing custom string decoding rules.
     """
-    # Read the first line of resp or yield to get more data
-    while CRNL not in buffer:
-        incoming = yield None
-        assert incoming is not None
-        buffer += incoming
-    cmd, rest = buffer.split(CRNL, 1)
 
-    code, arg = cmd[:1], cmd[1:]
+    def __init__(self, encoding: str = "utf-8", errorhandler: str = "surrogateescape"):
+        """
+        Create a new parser, optionally specifying the encoding and errorhandler.
+        If `encoding` is None, bytes will be returned as-is.
+        The default settings are utf-8 encoding and surrogateescape errorhandler,
+        which can decode all possible byte sequences,
+        allowing decoded data to be re-encoded back to bytes.
+        """
+        self.encoding = encoding
+        self.errorhandler = errorhandler
 
-    if code == b":" or code == b"(":  # integer, resp3 large int
-        yield int(arg), rest
+    def decode_bytes(self, data: bytes) -> str:
+        """
+        decode the data as a string,
+        """
+        return data.decode(self.encoding, errors=self.errorhandler)
 
-    elif code == b"t":  # resp3 true
-        yield True, rest
-
-    elif code == b"f":  # resp3 false
-        yield False, rest
-
-    elif code == b"_":  # resp3 null
-        yield None, rest
-
-    elif code == b",":  # resp3 double
-        yield float(arg), rest
-
-    elif code == b"+":  # simple string
-        # we decode them automatically
-        yield arg.decode(errors="surrogateescape"), rest
-
-    elif code == b"$":  # bulk string
-        count = int(arg)
-        expect = count + 2  # +2 for the trailing CRNL
-        while len(rest) < expect:
-            incoming = yield (None)
+    # a stateful RESP parser implemented via a generator
+    def parse(
+        self,
+        buffer: bytes,
+    ) -> Generator[Optional[Tuple[Any, bytes]], Union[None, bytes], None]:
+        """
+        A stateful, generator based, RESP parser.
+        Returns a generator producing at most a single top-level primitive.
+        Yields tuple of (data_item, unparsed), or None if more data is needed.
+        It is fed more data with generator.send()
+        """
+        # Read the first line of resp or yield to get more data
+        while CRNL not in buffer:
+            incoming = yield None
             assert incoming is not None
-            rest += incoming
-        bulkstr = rest[:count]
-        # we decode them automatically.  Can be encoded
-        # back to binary if necessary with "surrogatescape"
-        yield bulkstr.decode(errors="surrogateescape"), rest[expect:]
+            buffer += incoming
+        cmd, rest = buffer.split(CRNL, 1)
 
-    elif code == b"=":  # verbatim strings
-        count = int(arg)
-        expect = count + 4 + 2  # 4 type and colon +2 for the trailing CRNL
-        while len(rest) < expect:
-            incoming = yield (None)
-            assert incoming is not None
-            rest += incoming
-        hint = rest[:3]
-        result = rest[4: (count + 4)]
-        yield VerbatimStr(result.decode(errors="surrogateescape"),
-                          hint.decode()), rest[expect:]
+        code, arg = cmd[:1], cmd[1:]
 
-    elif code in b"*>":  # array or push data
-        count = int(arg)
-        result_array = []
-        for _ in range(count):
-            # recursively parse the next array item
-            with closing(resp_parse(rest)) as parser:
-                parsed = parser.send(None)
-                while parsed is None:
-                    incoming = yield None
-                    parsed = parser.send(incoming)
-            value, rest = parsed
-            result_array.append(value)
-        if code == b">":
-            yield PushData(result_array), rest
+        if code == b":" or code == b"(":  # integer, resp3 large int
+            yield int(arg), rest
+
+        elif code == b"t":  # resp3 true
+            yield True, rest
+
+        elif code == b"f":  # resp3 false
+            yield False, rest
+
+        elif code == b"_":  # resp3 null
+            yield None, rest
+
+        elif code == b",":  # resp3 double
+            yield float(arg), rest
+
+        elif code == b"+":  # simple string
+            # we decode them automatically
+            yield self.decode_bytes(arg), rest
+
+        elif code == b"$":  # bulk string
+            count = int(arg)
+            expect = count + 2  # +2 for the trailing CRNL
+            while len(rest) < expect:
+                incoming = yield (None)
+                assert incoming is not None
+                rest += incoming
+            bulkstr = rest[:count]
+            yield self.decode_bytes(bulkstr), rest[expect:]
+
+        elif code == b"=":  # verbatim strings
+            count = int(arg)
+            expect = count + 4 + 2  # 4 type and colon +2 for the trailing CRNL
+            while len(rest) < expect:
+                incoming = yield (None)
+                assert incoming is not None
+                rest += incoming
+            string = self.decode_bytes(rest[: (count + 4)])
+            if string[3] != ":":
+                raise ValueError(f"Expected colon after hint, got {bulkstr[3]}")
+            hint = string[:3]
+            string = string[4 : (count + 4)]
+            yield VerbatimStr(string, hint), rest[expect:]
+
+        elif code in b"*>":  # array or push data
+            count = int(arg)
+            result_array = []
+            for _ in range(count):
+                # recursively parse the next array item
+                with closing(self.parse(rest)) as parser:
+                    parsed = parser.send(None)
+                    while parsed is None:
+                        incoming = yield None
+                        parsed = parser.send(incoming)
+                value, rest = parsed
+                result_array.append(value)
+            if code == b">":
+                yield PushData(result_array), rest
+            else:
+                yield result_array, rest
+
+        elif code == b"~":  # set
+            count = int(arg)
+            result_set = set()
+            for _ in range(count):
+                # recursively parse the next set item
+                with closing(self.parse(rest)) as parser:
+                    parsed = parser.send(None)
+                    while parsed is None:
+                        incoming = yield None
+                        parsed = parser.send(incoming)
+                value, rest = parsed
+                result_set.add(value)
+            yield result_set, rest
+
+        elif code in b"%|":  # map or attribute
+            count = int(arg)
+            result_map = {}
+            for _ in range(count):
+                # recursively parse the next key, and value
+                with closing(self.parse(rest)) as parser:
+                    parsed = parser.send(None)
+                    while parsed is None:
+                        incoming = yield None
+                        parsed = parser.send(incoming)
+                key, rest = parsed
+                with closing(self.parse(rest)) as parser:
+                    parsed = parser.send(None)
+                    while parsed is None:
+                        incoming = yield None
+                        parsed = parser.send(incoming)
+                value, rest = parsed
+                result_map[key] = value
+            if code == b"|":
+                yield Attribute(result_map), rest
+            yield result_map, rest
+
+        elif code == b"-":  # error
+            # we decode them automatically
+            decoded = self.decode_bytes(arg)
+            assert isinstance(decoded, str)
+            code, value = decoded.split(" ", 1)
+            yield ErrorStr(code, value), rest
+
+        elif code == b"!":  # resp3 error
+            count = int(arg)
+            expect = count + 2  # +2 for the trailing CRNL
+            while len(rest) < expect:
+                incoming = yield (None)
+                assert incoming is not None
+                rest += incoming
+            bulkstr = rest[:count]
+            decoded = self.decode_bytes(bulkstr)
+            assert isinstance(decoded, str)
+            code, value = decoded.split(" ", 1)
+            yield ErrorStr(code, value), rest[expect:]
+
         else:
-            yield result_array, rest
-
-    elif code == b"~":  # set
-        count = int(arg)
-        result_set = set()
-        for _ in range(count):
-            # recursively parse the next set item
-            with closing(resp_parse(rest)) as parser:
-                parsed = parser.send(None)
-                while parsed is None:
-                    incoming = yield None
-                    parsed = parser.send(incoming)
-            value, rest = parsed
-            result_set.add(value)
-        yield result_set, rest
-
-    elif code in b"%|":  # map or attribute
-        count = int(arg)
-        result_map = {}
-        for _ in range(count):
-            # recursively parse the next key, and value
-            with closing(resp_parse(rest)) as parser:
-                parsed = parser.send(None)
-                while parsed is None:
-                    incoming = yield None
-                    parsed = parser.send(incoming)
-            key, rest = parsed
-            with closing(resp_parse(rest)) as parser:
-                parsed = parser.send(None)
-                while parsed is None:
-                    incoming = yield None
-                    parsed = parser.send(incoming)
-            value, rest = parsed
-            result_map[key] = value
-        if code == b"|":
-            yield Attribute(result_map), rest
-        yield result_map, rest
-
-    elif code == b"-":  # error
-        # we decode them automatically
-        decoded = arg.decode(errors="surrogateescape")
-        code, value = decoded.split(" ", 1)
-        yield ErrorStr(code, value), rest
-
-    elif code == b"!":  # resp3 error
-        count = int(arg)
-        expect = count + 2  # +2 for the trailing CRNL
-        while len(rest) < expect:
-            incoming = yield (None)
-            assert incoming is not None
-            rest += incoming
-        bulkstr = rest[:count]
-        decoded = bulkstr.decode(errors="surrogateescape")
-        code, value = decoded.split(" ", 1)
-        yield ErrorStr(code, value), rest[expect:]
-
-    else:
-        raise ValueError(f"Unknown opcode '{code.decode()}'")
+            raise ValueError(f"Unknown opcode '{code.decode()}'")
 
 
 class NeedMoreData(RuntimeError):
@@ -315,10 +341,12 @@ class NeedMoreData(RuntimeError):
 class RespParser:
     """
     A class for simple RESP protocol decoding for unit tests
+    Uses a RespGeneratorParser to produce data.
     """
 
     def __init__(self) -> None:
-        self.parser: Optional[
+        self.parser = RespGeneratorParser()
+        self.generator: Optional[
             Generator[Optional[Tuple[Any, bytes]], Union[None, bytes], None]
         ] = None
         # which has not resulted in a parsed value
@@ -329,24 +357,24 @@ class RespParser:
         Parse a buffer of data, return a tuple of a single top-level primitive and the
         remaining buffer or raise NeedMoreData if more data is needed
         """
-        if self.parser is None:
+        if self.generator is None:
             # create a new parser generator, initializing it with
             # any unparsed data from previous calls
             buffer = b"".join(self.consumed) + buffer
             del self.consumed[:]
-            self.parser = resp_parse(buffer)
-            parsed = self.parser.send(None)
+            self.generator = self.parser.parse(buffer)
+            parsed = self.generator.send(None)
         else:
             # sen more data to the parser
-            parsed = self.parser.send(buffer)
+            parsed = self.generator.send(buffer)
 
         if parsed is None:
             self.consumed.append(buffer)
             raise NeedMoreData()
 
         # got a value, close the parser, store the remaining buffer
-        self.parser.close()
-        self.parser = None
+        self.generator.close()
+        self.generator = None
         value, remaining = parsed
         self.consumed = [remaining]
         return value
@@ -355,9 +383,9 @@ class RespParser:
         return b"".join(self.consumed)
 
     def close(self) -> None:
-        if self.parser is not None:
-            self.parser.close()
-            self.parser = None
+        if self.generator is not None:
+            self.generator.close()
+            self.generator = None
         del self.consumed[:]
 
 
