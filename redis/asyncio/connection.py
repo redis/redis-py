@@ -216,12 +216,12 @@ class AbstractConnection:
     def is_connected(self):
         return self._reader is not None and self._writer is not None
 
-    def register_connect_callback(self, callback):
+    def _register_connect_callback(self, callback):
         wm = weakref.WeakMethod(callback)
         if wm not in self._connect_callbacks:
             self._connect_callbacks.append(wm)
 
-    def deregister_connect_callback(self, callback):
+    def _deregister_connect_callback(self, callback):
         try:
             self._connect_callbacks.remove(weakref.WeakMethod(callback))
         except ValueError:

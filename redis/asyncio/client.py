@@ -792,7 +792,7 @@ class PubSub:
         async with self._lock:
             if self.connection:
                 await self.connection.disconnect()
-                self.connection.deregister_connect_callback(self.on_connect)
+                self.connection._deregister_connect_callback(self.on_connect)
                 await self.connection_pool.release(self.connection)
                 self.connection = None
             self.channels = {}
@@ -855,7 +855,7 @@ class PubSub:
             )
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
-            self.connection.register_connect_callback(self.on_connect)
+            self.connection._register_connect_callback(self.on_connect)
         else:
             await self.connection.connect()
         if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
