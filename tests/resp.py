@@ -361,7 +361,7 @@ class RespParser:
             # create a new parser generator, initializing it with
             # any unparsed data from previous calls
             buffer = b"".join(self.consumed) + buffer
-            del self.consumed[:]
+            self.consumed.clear()
             self.generator = self.parser.parse(buffer)
             parsed = self.generator.send(None)
         else:
@@ -386,7 +386,7 @@ class RespParser:
         if self.generator is not None:
             self.generator.close()
             self.generator = None
-        del self.consumed[:]
+        self.consumed.clear()
 
 
 def parse_all(buffer: bytes) -> Tuple[List[Any], bytes]:
