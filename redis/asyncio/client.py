@@ -114,7 +114,7 @@ class Redis(
         cls,
         url: str,
         single_connection_client: bool = False,
-        auto_close_connection_pool: bool = True,
+        auto_close_connection_pool: Optional[bool] = None,
         **kwargs,
     ):
         """
@@ -164,12 +164,17 @@ class Redis(
             connection_pool=connection_pool,
             single_connection_client=single_connection_client,
         )
-        # We should probably deprecate the `auto_close_connection_pool`
-        # argument.
-        # If the caller doesn't want the pool auto-closed, a better
-        # pattern is to create the pool manually (maybe using from_url()),
-        # pass it in using the `connection_pool`, and hold on to it to close
-        # it later.
+        if auto_close_connection_pool is not None:
+            warnings.warn(
+                DeprecationWarning(
+                    '"auto_close_connection_pool" is deprecated '
+                    "since version 5.0.0. "
+                    "Please create a ConnectionPool explicitly and "
+                    "provide to the Redis() constructor instead."
+                )
+            )
+        else:
+            auto_close_connection_pool = True
         client.auto_close_connection_pool = auto_close_connection_pool
         return client
 
@@ -223,7 +228,7 @@ class Redis(
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
         # deprecated. create a pool and use connection_pool instead
-        auto_close_connection_pool: bool = True,
+        auto_close_connection_pool: Optional[bool] = None,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
@@ -236,6 +241,18 @@ class Redis(
         To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
         """
         kwargs: Dict[str, Any]
+
+        if auto_close_connection_pool is not None:
+            warnings.warn(
+                DeprecationWarning(
+                    '"auto_close_connection_pool" is deprecated '
+                    "since version 5.0.0. "
+                    "Please create a ConnectionPool explicitly and "
+                    "provide to the Redis() constructor instead."
+                )
+            )
+        else:
+            auto_close_connection_pool = True
 
         if not connection_pool:
             # Create internal connection pool, expected to be closed by Redis instance

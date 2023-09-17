@@ -305,15 +305,23 @@ async def test_pool_auto_close(request, from_url):
     await r1.close()
 
 
+async def test_pool_from_url_deprecation(request):
+    url: str = request.config.getoption("--redis-url")
+
+    with pytest.deprecated_call():
+        return Redis.from_url(url, auto_close_connection_pool=False)
+
+
 async def test_pool_auto_close_disable(request):
-    """Verify that auto_close_connection_pool can be disabled"""
+    """Verify that auto_close_connection_pool can be disabled (deprecated)"""
 
     url: str = request.config.getoption("--redis-url")
     url_args = parse_url(url)
 
     async def get_redis_connection():
         url_args["auto_close_connection_pool"] = False
-        return Redis(**url_args)
+        with pytest.deprecated_call():
+            return Redis(**url_args)
 
     r1 = await get_redis_connection()
     assert r1.auto_close_connection_pool is False
@@ -394,7 +402,8 @@ async def test_redis_pool_auto_close_arg(request, auto_close):
     pool = ConnectionPool.from_url(url)
 
     async def get_redis_connection():
-        client = Redis(connection_pool=pool, auto_close_connection_pool=auto_close)
+        with pytest.deprecated_call():
+            client = Redis(connection_pool=pool, auto_close_connection_pool=auto_close)
         return client
 
     called = 0
