@@ -1,6 +1,5 @@
 import itertools
 from contextlib import closing
-from types import NoneType
 from typing import Any, Generator, List, Optional, Tuple, Union
 
 CRNL = b"\r\n"
@@ -145,7 +144,7 @@ class RespEncoder:
                 return f",{data}\r\n".encode()  # resp3 double
             return f"+{data}\r\n".encode()  # simple string
 
-        elif isinstance(data, NoneType):
+        elif data is None:
             if self.protocol > 2:
                 return b"_\r\n"  # resp3 null
             return b"$-1\r\n"  # Null bulk string
