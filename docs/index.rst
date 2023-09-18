@@ -64,15 +64,16 @@ Module Documentation
 .. toctree::
    :maxdepth: 1
 
-   backoff
    connections
+   clustering
    exceptions
+   backoff
    lock
    retry
-   advanced_features
-   clustering
    lua_scripting
    opentelemetry
+   resp3_features
+   advanced_features
    examples
 
 Contributing
@@ -86,4 +87,4 @@ Contributing
 License
 *******
 
-This projectis licensed under the `MIT license <https://github.com/redis/redis-py/blob/master/LICENSE>`_.
+This project is licensed under the `MIT license <https://github.com/redis/redis-py/blob/master/LICENSE>`_.

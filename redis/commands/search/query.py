@@ -194,7 +194,7 @@ class Query:
             args += self._ids
         if self._slop >= 0:
             args += ["SLOP", self._slop]
-        if self._timeout:
+        if self._timeout is not None:
             args += ["TIMEOUT", self._timeout]
         if self._in_order:
             args.append("INORDER")

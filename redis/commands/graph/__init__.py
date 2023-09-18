@@ -1,3 +1,5 @@
+import warnings
+
 from ..helpers import quote_string, random_string, stringify_param_value
 from .commands import AsyncGraphCommands, GraphCommands
 from .edge import Edge  # noqa
@@ -18,6 +20,12 @@ class Graph(GraphCommands):
         """
         Create a new graph.
         """
+        warnings.warn(
+            DeprecationWarning(
+                "RedisGraph support is deprecated as of Redis Stack 7.2 \
+                (https://redis.com/blog/redisgraph-eol/)"
+            )
+        )
         self.NAME = name  # Graph key
         self.client = client
         self.execute_command = client.execute_command

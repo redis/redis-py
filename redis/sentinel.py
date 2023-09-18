@@ -55,12 +55,17 @@ class SentinelManagedConnection(Connection):
         return self.retry.call_with_retry(self._connect_retry, lambda error: None)
 
     def read_response(
-        self, disable_decoding=False, *, disconnect_on_error: Optional[bool] = False
+        self,
+        disable_decoding=False,
+        *,
+        disconnect_on_error: Optional[bool] = False,
+        push_request: Optional[bool] = False,
     ):
         try:
             return super().read_response(
                 disable_decoding=disable_decoding,
                 disconnect_on_error=disconnect_on_error,
+                push_request=push_request,
             )
         except ReadOnlyError:
             if self.connection_pool.is_master:
@@ -348,10 +353,8 @@ class Sentinel(SentinelCommands):
         kwargs["is_master"] = True
         connection_kwargs = dict(self.connection_kwargs)
         connection_kwargs.update(kwargs)
-        return redis_class(
-            connection_pool=connection_pool_class(
-                service_name, self, **connection_kwargs
-            )
+        return redis_class.from_pool(
+            connection_pool_class(service_name, self, **connection_kwargs)
         )
 
     def slave_for(
@@ -381,8 +384,6 @@ class Sentinel(SentinelCommands):
         kwargs["is_master"] = False
         connection_kwargs = dict(self.connection_kwargs)
         connection_kwargs.update(kwargs)
-        return redis_class(
-            connection_pool=connection_pool_class(
-                service_name, self, **connection_kwargs
-            )
+        return redis_class.from_pool(
+            connection_pool_class(service_name, self, **connection_kwargs)
         )

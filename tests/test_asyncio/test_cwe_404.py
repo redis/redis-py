@@ -2,7 +2,6 @@ import asyncio
 import contextlib
 
 import pytest
-
 from redis.asyncio import Redis
 from redis.asyncio.cluster import RedisCluster
 from redis.asyncio.connection import async_timeout
@@ -50,22 +49,22 @@ class DelayProxy:
     async def handle(self, reader, writer):
         # establish connection to redis
         redis_reader, redis_writer = await asyncio.open_connection(*self.redis_addr)
-        try:
-            pipe1 = asyncio.create_task(
-                self.pipe(reader, redis_writer, "to redis:", self.send_event)
-            )
-            pipe2 = asyncio.create_task(self.pipe(redis_reader, writer, "from redis:"))
-            await asyncio.gather(pipe1, pipe2)
-        finally:
-            redis_writer.close()
+        pipe1 = asyncio.create_task(
+            self.pipe(reader, redis_writer, "to redis:", self.send_event)
+        )
+        pipe2 = asyncio.create_task(self.pipe(redis_reader, writer, "from redis:"))
+        await asyncio.gather(pipe1, pipe2)
 
     async def stop(self):
-        # clean up enough so that we can reuse the looper
+        # shutdown the server
         self.task.cancel()
         try:
             await self.task
         except asyncio.CancelledError:
             pass
+        await self.server.wait_closed()
+        # do we need to close individual connections too?
+        # prudently close all async generators
         loop = self.server.get_loop()
         await loop.shutdown_asyncgens()
 
@@ -76,16 +75,25 @@ class DelayProxy:
         name="",
         event: asyncio.Event = None,
     ):
-        while True:
-            data = await reader.read(1000)
-            if not data:
-                break
-            # print(f"{name} read {len(data)} delay {self.delay}")
-            if event:
-                event.set()
-            await asyncio.sleep(self.delay)
-            writer.write(data)
-            await writer.drain()
+        try:
+            while True:
+                data = await reader.read(1000)
+                if not data:
+                    break
+                # print(f"{name} read {len(data)} delay {self.delay}")
+                if event:
+                    event.set()
+                await asyncio.sleep(self.delay)
+                writer.write(data)
+                await writer.drain()
+        finally:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except RuntimeError:
+                # ignore errors on close pertaining to no event loop. Don't want
+                # to clutter the test output with errors if being garbage collected
+                pass
 
 
 @pytest.mark.onlynoncluster
@@ -183,7 +191,7 @@ async def test_standalone_pipeline(delay, master_host):
 async def test_cluster(master_host):
 
     delay = 0.1
-    cluster_port = 6372
+    cluster_port = 16379
     remap_base = 7372
     n_nodes = 6
     hostname, _ = master_host
@@ -205,8 +213,9 @@ async def test_cluster(master_host):
             p.send_event.clear()
 
     async def wait_for_send():
-        asyncio.wait(
-            [p.send_event.wait() for p in proxies], return_when=asyncio.FIRST_COMPLETED
+        await asyncio.wait(
+            [asyncio.Task(p.send_event.wait()) for p in proxies],
+            return_when=asyncio.FIRST_COMPLETED,
         )
 
     @contextlib.contextmanager
@@ -220,11 +229,10 @@ async def test_cluster(master_host):
         for p in proxies:
             await stack.enter_async_context(p)
 
-        with contextlib.closing(
-            RedisCluster.from_url(
-                f"redis://127.0.0.1:{remap_base}", address_remap=remap
-            )
-        ) as r:
+        r = RedisCluster.from_url(
+            f"redis://127.0.0.1:{remap_base}", address_remap=remap
+        )
+        try:
             await r.initialize()
             await r.set("foo", "foo")
             await r.set("bar", "bar")
@@ -249,3 +257,5 @@ async def test_cluster(master_host):
                 assert await r.get("foo") == b"foo"
 
             await asyncio.gather(*[doit() for _ in range(10)])
+        finally:
+            await r.close()

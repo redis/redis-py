@@ -18,16 +18,15 @@ from typing import (
     Union,
 )
 
-from redis.asyncio.client import ResponseCallbackT
-from redis.asyncio.connection import (
-    Connection,
-    DefaultParser,
-    Encoder,
-    SSLConnection,
-    parse_url,
+from redis._parsers import AsyncCommandsParser, Encoder
+from redis._parsers.helpers import (
+    _RedisCallbacks,
+    _RedisCallbacksRESP2,
+    _RedisCallbacksRESP3,
 )
+from redis.asyncio.client import ResponseCallbackT
+from redis.asyncio.connection import Connection, DefaultParser, SSLConnection, parse_url
 from redis.asyncio.lock import Lock
-from redis.asyncio.parser import CommandsParser
 from redis.asyncio.retry import Retry
 from redis.backoff import default_backoff
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis
@@ -63,7 +62,7 @@ from redis.exceptions import (
     TryAgainError,
 )
 from redis.typing import AnyKeyT, EncodableT, KeyT
-from redis.utils import dict_merge, safe_str, str_if_bytes
+from redis.utils import dict_merge, get_lib_version, safe_str, str_if_bytes
 
 TargetNodesT = TypeVar(
     "TargetNodesT", str, "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
@@ -238,6 +237,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         username: Optional[str] = None,
         password: Optional[str] = None,
         client_name: Optional[str] = None,
+        lib_name: Optional[str] = "redis-py",
+        lib_version: Optional[str] = get_lib_version(),
         # Encoding related kwargs
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
@@ -258,6 +259,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_certfile: Optional[str] = None,
         ssl_check_hostname: bool = False,
         ssl_keyfile: Optional[str] = None,
+        protocol: Optional[int] = 2,
         address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
     ) -> None:
         if db:
@@ -288,6 +290,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "username": username,
             "password": password,
             "client_name": client_name,
+            "lib_name": lib_name,
+            "lib_version": lib_version,
             # Encoding related kwargs
             "encoding": encoding,
             "encoding_errors": encoding_errors,
@@ -299,6 +303,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_keepalive_options": socket_keepalive_options,
             "socket_timeout": socket_timeout,
             "retry": retry,
+            "protocol": protocol,
         }
 
         if ssl:
@@ -331,7 +336,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             self.retry.update_supported_errors(retry_on_error)
             kwargs.update({"retry": self.retry})
 
-        kwargs["response_callbacks"] = self.__class__.RESPONSE_CALLBACKS.copy()
+        kwargs["response_callbacks"] = _RedisCallbacks.copy()
+        if kwargs.get("protocol") in ["3", 3]:
+            kwargs["response_callbacks"].update(_RedisCallbacksRESP3)
+        else:
+            kwargs["response_callbacks"].update(_RedisCallbacksRESP2)
         self.connection_kwargs = kwargs
 
         if startup_nodes:
@@ -358,7 +367,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self.cluster_error_retry_attempts = cluster_error_retry_attempts
         self.connection_error_retry_attempts = connection_error_retry_attempts
         self.reinitialize_counter = 0
-        self.commands_parser = CommandsParser()
+        self.commands_parser = AsyncCommandsParser()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.response_callbacks = kwargs["response_callbacks"]
@@ -579,13 +588,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         # EVAL/EVALSHA.
         # - issue: https://github.com/redis/redis/issues/9493
         # - fix: https://github.com/redis/redis/pull/9733
-        if command in ("EVAL", "EVALSHA"):
+        if command.upper() in ("EVAL", "EVALSHA"):
             # command syntax: EVAL "script body" num_keys ...
             if len(args) < 2:
                 raise RedisClusterException(
                     f"Invalid args in command: {command, *args}"
                 )
-            keys = args[2 : 2 + args[1]]
+            keys = args[2 : 2 + int(args[1])]
             # if there are 0 keys, that means the script can be run on any node
             # so we can just return a random slot
             if not keys:
@@ -595,7 +604,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             if not keys:
                 # FCALL can call a function with 0 keys, that means the function
                 #  can be run on any node so we can just return a random slot
-                if command in ("FCALL", "FCALL_RO"):
+                if command.upper() in ("FCALL", "FCALL_RO"):
                     return random.randrange(0, REDIS_CLUSTER_HASH_SLOTS)
                 raise RedisClusterException(
                     "No way to dispatch this command to Redis Cluster. "

@@ -4,15 +4,15 @@ from unittest import mock
 from unittest.mock import patch
 
 import pytest
-
 import redis
+from redis import ConnectionPool, Redis
+from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis.backoff import NoBackoff
 from redis.connection import (
     Connection,
-    HiredisParser,
-    PythonParser,
     SSLConnection,
     UnixDomainSocketConnection,
+    parse_url,
 )
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
 from redis.retry import Retry
@@ -35,22 +35,22 @@ def test_invalid_response(r):
 
 @skip_if_server_version_lt("4.0.0")
 @pytest.mark.redismod
-def test_loading_external_modules(modclient):
+def test_loading_external_modules(r):
     def inner():
         pass
 
-    modclient.load_external_module("myfuncname", inner)
-    assert getattr(modclient, "myfuncname") == inner
-    assert isinstance(getattr(modclient, "myfuncname"), types.FunctionType)
+    r.load_external_module("myfuncname", inner)
+    assert getattr(r, "myfuncname") == inner
+    assert isinstance(getattr(r, "myfuncname"), types.FunctionType)
 
     # and call it
     from redis.commands import RedisModuleCommands
 
     j = RedisModuleCommands.json
-    modclient.load_external_module("sometestfuncname", j)
+    r.load_external_module("sometestfuncname", j)
 
     # d = {'hello': 'world!'}
-    # mod = j(modclient)
+    # mod = j(r)
     # mod.set("fookey", ".", d)
     # assert mod.get('fookey') == d
 
@@ -134,7 +134,9 @@ class TestConnection:
 
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize(
-    "parser_class", [PythonParser, HiredisParser], ids=["PythonParser", "HiredisParser"]
+    "parser_class",
+    [_RESP2Parser, _RESP3Parser, _HiredisParser],
+    ids=["RESP2Parser", "RESP3Parser", "HiredisParser"],
 )
 def test_connection_parse_response_resume(r: redis.Redis, parser_class):
     """
@@ -142,7 +144,7 @@ def test_connection_parse_response_resume(r: redis.Redis, parser_class):
     be that PythonParser or HiredisParser,
     can be interrupted at IO time and then resume parsing.
     """
-    if parser_class is HiredisParser and not HIREDIS_AVAILABLE:
+    if parser_class is _HiredisParser and not HIREDIS_AVAILABLE:
         pytest.skip("Hiredis not available)")
     args = dict(r.connection_pool.connection_kwargs)
     args["parser_class"] = parser_class
@@ -154,7 +156,7 @@ def test_connection_parse_response_resume(r: redis.Redis, parser_class):
     )
     mock_socket = MockSocket(message, interrupt_every=2)
 
-    if isinstance(conn._parser, PythonParser):
+    if isinstance(conn._parser, _RESP2Parser) or isinstance(conn._parser, _RESP3Parser):
         conn._parser._buffer._sock = mock_socket
     else:
         conn._parser._sock = mock_socket
@@ -213,3 +215,84 @@ def test_create_single_connection_client_from_url():
         "redis://localhost:6379/0?", single_connection_client=True
     )
     assert client.connection is not None
+
+
+@pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
+def test_pool_auto_close(request, from_url):
+    """Verify that basic Redis instances have auto_close_connection_pool set to True"""
+
+    url: str = request.config.getoption("--redis-url")
+    url_args = parse_url(url)
+
+    def get_redis_connection():
+        if from_url:
+            return Redis.from_url(url)
+        return Redis(**url_args)
+
+    r1 = get_redis_connection()
+    assert r1.auto_close_connection_pool is True
+    r1.close()
+
+
+@pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
+def test_redis_connection_pool(request, from_url):
+    """Verify that basic Redis instances using `connection_pool`
+    have auto_close_connection_pool set to False"""
+
+    url: str = request.config.getoption("--redis-url")
+    url_args = parse_url(url)
+
+    pool = None
+
+    def get_redis_connection():
+        nonlocal pool
+        if from_url:
+            pool = ConnectionPool.from_url(url)
+        else:
+            pool = ConnectionPool(**url_args)
+        return Redis(connection_pool=pool)
+
+    called = 0
+
+    def mock_disconnect(_):
+        nonlocal called
+        called += 1
+
+    with patch.object(ConnectionPool, "disconnect", mock_disconnect):
+        with get_redis_connection() as r1:
+            assert r1.auto_close_connection_pool is False
+
+    assert called == 0
+    pool.disconnect()
+
+
+@pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
+def test_redis_from_pool(request, from_url):
+    """Verify that basic Redis instances created using `from_pool()`
+    have auto_close_connection_pool set to True"""
+
+    url: str = request.config.getoption("--redis-url")
+    url_args = parse_url(url)
+
+    pool = None
+
+    def get_redis_connection():
+        nonlocal pool
+        if from_url:
+            pool = ConnectionPool.from_url(url)
+        else:
+            pool = ConnectionPool(**url_args)
+        return Redis.from_pool(pool)
+
+    called = 0
+
+    def mock_disconnect(_):
+        nonlocal called
+        called += 1
+
+    with patch.object(ConnectionPool, "disconnect", mock_disconnect):
+        with get_redis_connection() as r1:
+            assert r1.auto_close_connection_pool is True
+
+    assert called == 1
+    pool.disconnect()
