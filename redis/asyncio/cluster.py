@@ -588,13 +588,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         # EVAL/EVALSHA.
         # - issue: https://github.com/redis/redis/issues/9493
         # - fix: https://github.com/redis/redis/pull/9733
-        if command in ("EVAL", "EVALSHA"):
+        if command.upper() in ("EVAL", "EVALSHA"):
             # command syntax: EVAL "script body" num_keys ...
             if len(args) < 2:
                 raise RedisClusterException(
                     f"Invalid args in command: {command, *args}"
                 )
-            keys = args[2 : 2 + args[1]]
+            keys = args[2 : 2 + int(args[1])]
             # if there are 0 keys, that means the script can be run on any node
             # so we can just return a random slot
             if not keys:
@@ -604,7 +604,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             if not keys:
                 # FCALL can call a function with 0 keys, that means the function
                 #  can be run on any node so we can just return a random slot
-                if command in ("FCALL", "FCALL_RO"):
+                if command.upper() in ("FCALL", "FCALL_RO"):
                     return random.randrange(0, REDIS_CLUSTER_HASH_SLOTS)
                 raise RedisClusterException(
                     "No way to dispatch this command to Redis Cluster. "
