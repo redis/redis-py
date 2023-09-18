@@ -434,7 +434,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
     _DEL_MESSAGE = "Unclosed RedisCluster client"
 
     def __del__(
-        self, _warn: Any = warnings.warn, _grl: Any = asyncio.get_running_loop
+        self,
+        _warn: Any = warnings.warn,
+        _grl: Any = asyncio.get_running_loop,
     ) -> None:
         if hasattr(self, "_initialize") and not self._initialize:
             _warn(f"{self._DEL_MESSAGE} {self!r}", ResourceWarning, source=self)
@@ -972,7 +974,9 @@ class ClusterNode:
     _DEL_MESSAGE = "Unclosed ClusterNode object"
 
     def __del__(
-        self, _warn: Any = warnings.warn, _grl: Any = asyncio.get_running_loop
+        self,
+        _warn: Any = warnings.warn,
+        _grl: Any = asyncio.get_running_loop,
     ) -> None:
         for connection in self._connections:
             if connection.is_connected:

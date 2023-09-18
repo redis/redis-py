@@ -535,7 +535,9 @@ class Redis(
     # passing _warnings and _grl as argument default since they may be gone
     # by the time __del__ is called at shutdown
     def __del__(
-        self, _warn: Any = warnings.warn, _grl: Any = asyncio.get_running_loop
+        self,
+        _warn: Any = warnings.warn,
+        _grl: Any = asyncio.get_running_loop,
     ) -> None:
         if hasattr(self, "connection") and (self.connection is not None):
             _warn(f"Unclosed client session {self!r}", ResourceWarning, source=self)
