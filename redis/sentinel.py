@@ -353,10 +353,8 @@ class Sentinel(SentinelCommands):
         kwargs["is_master"] = True
         connection_kwargs = dict(self.connection_kwargs)
         connection_kwargs.update(kwargs)
-        return redis_class(
-            connection_pool=connection_pool_class(
-                service_name, self, **connection_kwargs
-            )
+        return redis_class.from_pool(
+            connection_pool_class(service_name, self, **connection_kwargs)
         )
 
     def slave_for(
@@ -386,8 +384,6 @@ class Sentinel(SentinelCommands):
         kwargs["is_master"] = False
         connection_kwargs = dict(self.connection_kwargs)
         connection_kwargs.update(kwargs)
-        return redis_class(
-            connection_pool=connection_pool_class(
-                service_name, self, **connection_kwargs
-            )
+        return redis_class.from_pool(
+            connection_pool_class(service_name, self, **connection_kwargs)
         )

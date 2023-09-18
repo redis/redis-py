@@ -1,4 +1,5 @@
 import socket
+from unittest import mock
 
 import pytest
 import redis.sentinel
@@ -240,3 +241,28 @@ def test_flushconfig(cluster, sentinel):
 def test_reset(cluster, sentinel):
     cluster.master["is_odown"] = True
     assert sentinel.sentinel_reset("mymaster")
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.parametrize("method_name", ["master_for", "slave_for"])
+def test_auto_close_pool(cluster, sentinel, method_name):
+    """
+    Check that the connection pool created by the sentinel client is
+    automatically closed
+    """
+
+    method = getattr(sentinel, method_name)
+    client = method("mymaster", db=9)
+    pool = client.connection_pool
+    assert client.auto_close_connection_pool is True
+    calls = 0
+
+    def mock_disconnect():
+        nonlocal calls
+        calls += 1
+
+    with mock.patch.object(pool, "disconnect", mock_disconnect):
+        client.close()
+
+    assert calls == 1
+    pool.disconnect()

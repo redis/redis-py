@@ -1106,8 +1106,8 @@ class BlockingConnectionPool(ConnectionPool):
     """
     A blocking connection pool::
 
-        >>> from redis.asyncio.client import Redis
-        >>> client = Redis(connection_pool=BlockingConnectionPool())
+        >>> from redis.asyncio import Redis, BlockingConnectionPool
+        >>> client = Redis.from_pool(BlockingConnectionPool())
 
     It performs the same function as the default
     :py:class:`~redis.asyncio.ConnectionPool` implementation, in that,

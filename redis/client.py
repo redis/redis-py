@@ -4,7 +4,7 @@ import threading
 import time
 import warnings
 from itertools import chain
-from typing import Optional
+from typing import Optional, Type
 
 from redis._parsers.helpers import (
     _RedisCallbacks,
@@ -136,10 +136,28 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         """
         single_connection_client = kwargs.pop("single_connection_client", False)
         connection_pool = ConnectionPool.from_url(url, **kwargs)
-        return cls(
+        client = cls(
             connection_pool=connection_pool,
             single_connection_client=single_connection_client,
         )
+        client.auto_close_connection_pool = True
+        return client
+
+    @classmethod
+    def from_pool(
+        cls: Type["Redis"],
+        connection_pool: ConnectionPool,
+    ) -> "Redis":
+        """
+        Return a Redis client from the given connection pool.
+        The Redis client will take ownership of the connection pool and
+        close it when the Redis client is closed.
+        """
+        client = cls(
+            connection_pool=connection_pool,
+        )
+        client.auto_close_connection_pool = True
+        return client
 
     def __init__(
         self,
@@ -275,6 +293,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                         }
                     )
             connection_pool = ConnectionPool(**kwargs)
+            self.auto_close_connection_pool = True
+        else:
+            self.auto_close_connection_pool = False
+
         self.connection_pool = connection_pool
         self.connection = None
         if single_connection_client:
@@ -476,6 +498,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if conn:
             self.connection = None
             self.connection_pool.release(conn)
+
+        if self.auto_close_connection_pool:
+            self.connection_pool.disconnect()
 
     def _send_command_parse_response(self, conn, command_name, *args, **options):
         """

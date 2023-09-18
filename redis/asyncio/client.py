@@ -114,7 +114,7 @@ class Redis(
         cls,
         url: str,
         single_connection_client: bool = False,
-        auto_close_connection_pool: bool = True,
+        auto_close_connection_pool: Optional[bool] = None,
         **kwargs,
     ):
         """
@@ -160,12 +160,39 @@ class Redis(
 
         """
         connection_pool = ConnectionPool.from_url(url, **kwargs)
-        redis = cls(
+        client = cls(
             connection_pool=connection_pool,
             single_connection_client=single_connection_client,
         )
-        redis.auto_close_connection_pool = auto_close_connection_pool
-        return redis
+        if auto_close_connection_pool is not None:
+            warnings.warn(
+                DeprecationWarning(
+                    '"auto_close_connection_pool" is deprecated '
+                    "since version 5.0.0. "
+                    "Please create a ConnectionPool explicitly and "
+                    "provide to the Redis() constructor instead."
+                )
+            )
+        else:
+            auto_close_connection_pool = True
+        client.auto_close_connection_pool = auto_close_connection_pool
+        return client
+
+    @classmethod
+    def from_pool(
+        cls: Type["Redis"],
+        connection_pool: ConnectionPool,
+    ) -> "Redis":
+        """
+        Return a Redis client from the given connection pool.
+        The Redis client will take ownership of the connection pool and
+        close it when the Redis client is closed.
+        """
+        client = cls(
+            connection_pool=connection_pool,
+        )
+        client.auto_close_connection_pool = True
+        return client
 
     def __init__(
         self,
@@ -200,7 +227,8 @@ class Redis(
         lib_version: Optional[str] = get_lib_version(),
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
-        auto_close_connection_pool: bool = True,
+        # deprecated. create a pool and use connection_pool instead
+        auto_close_connection_pool: Optional[bool] = None,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
@@ -213,14 +241,21 @@ class Redis(
         To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
         """
         kwargs: Dict[str, Any]
-        # auto_close_connection_pool only has an effect if connection_pool is
-        # None. This is a similar feature to the missing __del__ to resolve #1103,
-        # but it accounts for whether a user wants to manually close the connection
-        # pool, as a similar feature to ConnectionPool's __del__.
-        self.auto_close_connection_pool = (
-            auto_close_connection_pool if connection_pool is None else False
-        )
+
+        if auto_close_connection_pool is not None:
+            warnings.warn(
+                DeprecationWarning(
+                    '"auto_close_connection_pool" is deprecated '
+                    "since version 5.0.0. "
+                    "Please create a ConnectionPool explicitly and "
+                    "provide to the Redis() constructor instead."
+                )
+            )
+        else:
+            auto_close_connection_pool = True
+
         if not connection_pool:
+            # Create internal connection pool, expected to be closed by Redis instance
             if not retry_on_error:
                 retry_on_error = []
             if retry_on_timeout is True:
@@ -277,7 +312,13 @@ class Redis(
                             "ssl_check_hostname": ssl_check_hostname,
                         }
                     )
+            # This arg only used if no pool is passed in
+            self.auto_close_connection_pool = auto_close_connection_pool
             connection_pool = ConnectionPool(**kwargs)
+        else:
+            # If a pool is passed in, do not close it
+            self.auto_close_connection_pool = False
+
         self.connection_pool = connection_pool
         self.single_connection_client = single_connection_client
         self.connection: Optional[Connection] = None
