@@ -2823,13 +2823,13 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("RPUSH", name, *values)
 
-    def rpushx(self, name: str, value: str) -> Union[Awaitable[int], int]:
+    def rpushx(self, name: str, *values: str) -> Union[Awaitable[int], int]:
         """
         Push ``value`` onto the tail of the list ``name`` if ``name`` exists
 
         For more information see https://redis.io/commands/rpushx
         """
-        return self.execute_command("RPUSHX", name, value)
+        return self.execute_command("RPUSHX", name, *values)
 
     def lpos(
         self,
