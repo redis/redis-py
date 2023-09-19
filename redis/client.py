@@ -571,7 +571,7 @@ class Monitor:
     listen() method yields commands from monitor.
     """
 
-    monitor_re = re.compile(r"\[(\d+) (.*)\] (.*)")
+    monitor_re = re.compile(r"\[(\d+) (.*?)\] (.*)")
     command_re = re.compile(r'"(.*?)(?<!\\)"')
 
     def __init__(self, connection_pool):
