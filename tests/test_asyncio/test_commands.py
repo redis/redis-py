@@ -3213,7 +3213,6 @@ class TestRedisCommands:
         assert isinstance(await r.memory_usage("foo"), int)
 
     @skip_if_server_version_lt("4.0.0")
-    @pytest.mark.onlynoncluster
     async def test_module_list(self, r: redis.Redis):
         assert isinstance(await r.module_list(), list)
         for x in await r.module_list():

@@ -32,11 +32,13 @@ from .core import (
     AsyncFunctionCommands,
     AsyncGearsCommands,
     AsyncManagementCommands,
+    AsyncModuleCommands,
     AsyncScriptCommands,
     DataAccessCommands,
     FunctionCommands,
     GearsCommands,
     ManagementCommands,
+    ModuleCommands,
     PubSubCommands,
     ResponseT,
     ScriptCommands,
@@ -873,6 +875,7 @@ class RedisClusterCommands(
     ScriptCommands,
     FunctionCommands,
     GearsCommands,
+    ModuleCommands,
     RedisModuleCommands,
 ):
     """
@@ -903,6 +906,7 @@ class AsyncRedisClusterCommands(
     AsyncScriptCommands,
     AsyncFunctionCommands,
     AsyncGearsCommands,
+    AsyncModuleCommands,
 ):
     """
     A class for all Redis Cluster commands

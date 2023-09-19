@@ -4909,7 +4909,6 @@ class TestRedisCommands:
     def test_latency_reset(self, r: redis.Redis):
         assert r.latency_reset() == 0
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
     def test_module_list(self, r):
