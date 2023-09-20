@@ -1,6 +1,6 @@
 import itertools
 import time
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from redis.client import Pipeline
 from redis.utils import deprecated_function
@@ -220,7 +220,7 @@ class SearchCommands:
 
         return self.execute_command(*args)
 
-    def alter_schema_add(self, fields):
+    def alter_schema_add(self, fields: List[str]):
         """
         Alter the existing search index by adding new fields. The index
         must already exist.
@@ -240,7 +240,7 @@ class SearchCommands:
 
         return self.execute_command(*args)
 
-    def dropindex(self, delete_documents=False):
+    def dropindex(self, delete_documents: bool = False):
         """
         Drop the index if it exists.
         Replaced `drop_index` in RediSearch 2.0.
@@ -322,15 +322,15 @@ class SearchCommands:
     )
     def add_document(
         self,
-        doc_id,
-        nosave=False,
-        score=1.0,
-        payload=None,
-        replace=False,
-        partial=False,
-        language=None,
-        no_create=False,
-        **fields,
+        doc_id: str,
+        nosave: bool = False,
+        score: float = 1.0,
+        payload: bool = None,
+        replace: bool = False,
+        partial: bool = False,
+        language: Union[str, None] = None,
+        no_create: str = False,
+        **fields: List[str],
     ):
         """
         Add a single document to the index.
@@ -554,7 +554,7 @@ class SearchCommands:
             AGGREGATE_CMD, raw, query=query, has_cursor=has_cursor
         )
 
-    def _get_aggregate_result(self, raw, query, has_cursor):
+    def _get_aggregate_result(self, raw: List, query: str, has_cursor: bool):
         if has_cursor:
             if isinstance(query, Cursor):
                 query.cid = raw[1]
@@ -642,7 +642,7 @@ class SearchCommands:
 
         return self._parse_results(SPELLCHECK_CMD, res)
 
-    def dict_add(self, name, *terms):
+    def dict_add(self, name: str, *terms: List[str]):
         """Adds terms to a dictionary.
 
         ### Parameters
@@ -656,7 +656,7 @@ class SearchCommands:
         cmd.extend(terms)
         return self.execute_command(*cmd)
 
-    def dict_del(self, name, *terms):
+    def dict_del(self, name: str, *terms: List[str]):
         """Deletes terms from a dictionary.
 
         ### Parameters
@@ -670,7 +670,7 @@ class SearchCommands:
         cmd.extend(terms)
         return self.execute_command(*cmd)
 
-    def dict_dump(self, name):
+    def dict_dump(self, name: str):
         """Dumps all terms in the given dictionary.
 
         ### Parameters
@@ -682,7 +682,7 @@ class SearchCommands:
         cmd = [DICT_DUMP_CMD, name]
         return self.execute_command(*cmd)
 
-    def config_set(self, option, value):
+    def config_set(self, option: str, value: str) -> bool:
         """Set runtime configuration option.
 
         ### Parameters
@@ -696,7 +696,7 @@ class SearchCommands:
         raw = self.execute_command(*cmd)
         return raw == "OK"
 
-    def config_get(self, option):
+    def config_get(self, option: str) -> str:
         """Get runtime configuration option value.
 
         ### Parameters
@@ -709,7 +709,7 @@ class SearchCommands:
         res = self.execute_command(*cmd)
         return self._parse_results(CONFIG_CMD, res)
 
-    def tagvals(self, tagfield):
+    def tagvals(self, tagfield: str):
         """
         Return a list of all possible tag values
 
@@ -722,7 +722,7 @@ class SearchCommands:
 
         return self.execute_command(TAGVALS_CMD, self.index_name, tagfield)
 
-    def aliasadd(self, alias):
+    def aliasadd(self, alias: str):
         """
         Alias a search index - will fail if alias already exists
 
@@ -735,7 +735,7 @@ class SearchCommands:
 
         return self.execute_command(ALIAS_ADD_CMD, alias, self.index_name)
 
-    def aliasupdate(self, alias):
+    def aliasupdate(self, alias: str):
         """
         Updates an alias - will fail if alias does not already exist
 
@@ -748,7 +748,7 @@ class SearchCommands:
 
         return self.execute_command(ALIAS_UPDATE_CMD, alias, self.index_name)
 
-    def aliasdel(self, alias):
+    def aliasdel(self, alias: str):
         """
         Removes an alias to a search index
 
@@ -783,7 +783,7 @@ class SearchCommands:
 
         return pipe.execute()[-1]
 
-    def suglen(self, key):
+    def suglen(self, key: str) -> int:
         """
         Return the number of entries in the AutoCompleter index.
 
@@ -791,7 +791,7 @@ class SearchCommands:
         """  # noqa
         return self.execute_command(SUGLEN_COMMAND, key)
 
-    def sugdel(self, key, string):
+    def sugdel(self, key: str, string: str) -> int:
         """
         Delete a string from the AutoCompleter index.
         Returns 1 if the string was found and deleted, 0 otherwise.
@@ -801,8 +801,14 @@ class SearchCommands:
         return self.execute_command(SUGDEL_COMMAND, key, string)
 
     def sugget(
-        self, key, prefix, fuzzy=False, num=10, with_scores=False, with_payloads=False
-    ):
+        self,
+        key: str,
+        prefix: str,
+        fuzzy: bool = False,
+        num: int = 10,
+        with_scores: bool = False,
+        with_payloads: bool = False,
+    ) -> List[SuggestionParser]:
         """
         Get a list of suggestions from the AutoCompleter, for a given prefix.
 
@@ -850,7 +856,7 @@ class SearchCommands:
         parser = SuggestionParser(with_scores, with_payloads, res)
         return [s for s in parser]
 
-    def synupdate(self, groupid, skipinitial=False, *terms):
+    def synupdate(self, groupid: str, skipinitial: bool = False, *terms: List[str]):
         """
         Updates a synonym group.
         The command is used to create or update a synonym group with
@@ -986,7 +992,7 @@ class AsyncSearchCommands(SearchCommands):
 
         return self._parse_results(SPELLCHECK_CMD, res)
 
-    async def config_set(self, option, value):
+    async def config_set(self, option: str, value: str) -> bool:
         """Set runtime configuration option.
 
         ### Parameters
@@ -1000,7 +1006,7 @@ class AsyncSearchCommands(SearchCommands):
         raw = await self.execute_command(*cmd)
         return raw == "OK"
 
-    async def config_get(self, option):
+    async def config_get(self, option: str) -> str:
         """Get runtime configuration option value.
 
         ### Parameters
@@ -1053,8 +1059,14 @@ class AsyncSearchCommands(SearchCommands):
         return (await pipe.execute())[-1]
 
     async def sugget(
-        self, key, prefix, fuzzy=False, num=10, with_scores=False, with_payloads=False
-    ):
+        self,
+        key: str,
+        prefix: str,
+        fuzzy: bool = False,
+        num: int = 10,
+        with_scores: bool = False,
+        with_payloads: bool = False,
+    ) -> List[SuggestionParser]:
         """
         Get a list of suggestions from the AutoCompleter, for a given prefix.
 

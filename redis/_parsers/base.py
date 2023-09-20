@@ -46,7 +46,6 @@ NO_AUTH_SET_ERROR = {
 
 
 class BaseParser(ABC):
-
     EXCEPTION_CLASSES = {
         "ERR": {
             "max number of clients reached": ConnectionError,

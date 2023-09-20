@@ -1,8 +1,12 @@
-from .aggregation import Reducer, SortDirection
+from typing import Union
+
+from .aggregation import Asc, Desc, Reducer, SortDirection
 
 
 class FieldOnlyReducer(Reducer):
-    def __init__(self, field):
+    """See https://redis.io/docs/interact/search-and-query/search/aggregations/"""
+
+    def __init__(self, field: str) -> None:
         super().__init__(field)
         self._field = field
 
@@ -14,7 +18,7 @@ class count(Reducer):
 
     NAME = "COUNT"
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
 
@@ -25,7 +29,7 @@ class sum(FieldOnlyReducer):
 
     NAME = "SUM"
 
-    def __init__(self, field):
+    def __init__(self, field: str) -> None:
         super().__init__(field)
 
 
@@ -36,7 +40,7 @@ class min(FieldOnlyReducer):
 
     NAME = "MIN"
 
-    def __init__(self, field):
+    def __init__(self, field: str) -> None:
         super().__init__(field)
 
 
@@ -47,7 +51,7 @@ class max(FieldOnlyReducer):
 
     NAME = "MAX"
 
-    def __init__(self, field):
+    def __init__(self, field: str) -> None:
         super().__init__(field)
 
 
@@ -58,7 +62,7 @@ class avg(FieldOnlyReducer):
 
     NAME = "AVG"
 
-    def __init__(self, field):
+    def __init__(self, field: str) -> None:
         super().__init__(field)
 
 
@@ -69,7 +73,7 @@ class tolist(FieldOnlyReducer):
 
     NAME = "TOLIST"
 
-    def __init__(self, field):
+    def __init__(self, field: str) -> None:
         super().__init__(field)
 
 
@@ -81,7 +85,7 @@ class count_distinct(FieldOnlyReducer):
 
     NAME = "COUNT_DISTINCT"
 
-    def __init__(self, field):
+    def __init__(self, field: str) -> None:
         super().__init__(field)
 
 
@@ -103,7 +107,7 @@ class quantile(Reducer):
 
     NAME = "QUANTILE"
 
-    def __init__(self, field, pct):
+    def __init__(self, field: str, pct: float) -> None:
         super().__init__(field, str(pct))
         self._field = field
 
@@ -115,7 +119,7 @@ class stddev(FieldOnlyReducer):
 
     NAME = "STDDEV"
 
-    def __init__(self, field):
+    def __init__(self, field: str) -> None:
         super().__init__(field)
 
 
@@ -126,7 +130,7 @@ class first_value(Reducer):
 
     NAME = "FIRST_VALUE"
 
-    def __init__(self, field, *byfields):
+    def __init__(self, field: str, *byfields: Union[Asc, Desc]) -> None:
         """
         Selects the first value of the given field within the group.
 
@@ -166,7 +170,7 @@ class random_sample(Reducer):
 
     NAME = "RANDOM_SAMPLE"
 
-    def __init__(self, field, size):
+    def __init__(self, field: str, size: int) -> None:
         """
         ### Parameter
 

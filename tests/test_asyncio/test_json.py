@@ -490,7 +490,6 @@ async def test_json_mget_dollar(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 async def test_numby_commands_dollar(decoded_r: redis.Redis):
-
     # Test NUMINCRBY
     await decoded_r.json().set(
         "doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]}
@@ -546,7 +545,6 @@ async def test_numby_commands_dollar(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 async def test_strappend_dollar(decoded_r: redis.Redis):
-
     await decoded_r.json().set(
         "doc1", "$", {"a": "foo", "nested1": {"a": "hello"}, "nested2": {"a": 31}}
     )
@@ -578,7 +576,6 @@ async def test_strappend_dollar(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 async def test_strlen_dollar(decoded_r: redis.Redis):
-
     # Test multi
     await decoded_r.json().set(
         "doc1", "$", {"a": "foo", "nested1": {"a": "hello"}, "nested2": {"a": 31}}
@@ -713,7 +710,6 @@ async def test_arrinsert_dollar(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 async def test_arrlen_dollar(decoded_r: redis.Redis):
-
     await decoded_r.json().set(
         "doc1",
         "$",
@@ -802,7 +798,6 @@ async def test_arrpop_dollar(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 async def test_arrtrim_dollar(decoded_r: redis.Redis):
-
     await decoded_r.json().set(
         "doc1",
         "$",
@@ -960,7 +955,6 @@ async def test_type_dollar(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 async def test_clear_dollar(decoded_r: redis.Redis):
-
     await decoded_r.json().set(
         "doc1",
         "$",

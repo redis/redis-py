@@ -4,7 +4,6 @@ from redis import DataError
 
 
 class Field:
-
     NUMERIC = "NUMERIC"
     TEXT = "TEXT"
     WEIGHT = "WEIGHT"
