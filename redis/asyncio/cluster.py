@@ -433,14 +433,18 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
     _DEL_MESSAGE = "Unclosed RedisCluster client"
 
-    def __del__(self) -> None:
+    def __del__(
+        self,
+        _warn: Any = warnings.warn,
+        _grl: Any = asyncio.get_running_loop,
+    ) -> None:
         if hasattr(self, "_initialize") and not self._initialize:
-            warnings.warn(f"{self._DEL_MESSAGE} {self!r}", ResourceWarning, source=self)
+            _warn(f"{self._DEL_MESSAGE} {self!r}", ResourceWarning, source=self)
             try:
                 context = {"client": self, "message": self._DEL_MESSAGE}
-                asyncio.get_running_loop().call_exception_handler(context)
+                _grl().call_exception_handler(context)
             except RuntimeError:
-                ...
+                pass
 
     async def on_connect(self, connection: Connection) -> None:
         await connection.on_connect()
@@ -969,17 +973,20 @@ class ClusterNode:
 
     _DEL_MESSAGE = "Unclosed ClusterNode object"
 
-    def __del__(self) -> None:
+    def __del__(
+        self,
+        _warn: Any = warnings.warn,
+        _grl: Any = asyncio.get_running_loop,
+    ) -> None:
         for connection in self._connections:
             if connection.is_connected:
-                warnings.warn(
-                    f"{self._DEL_MESSAGE} {self!r}", ResourceWarning, source=self
-                )
+                _warn(f"{self._DEL_MESSAGE} {self!r}", ResourceWarning, source=self)
+
                 try:
                     context = {"client": self, "message": self._DEL_MESSAGE}
-                    asyncio.get_running_loop().call_exception_handler(context)
+                    _grl().call_exception_handler(context)
                 except RuntimeError:
-                    ...
+                    pass
                 break
 
     async def disconnect(self) -> None:

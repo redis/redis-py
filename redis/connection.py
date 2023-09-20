@@ -237,11 +237,16 @@ class AbstractConnection:
         else:
             return PythonRespSerializer(self._buffer_cutoff, self.encoder.encode)
 
-    def register_connect_callback(self, callback):
-        self._connect_callbacks.append(weakref.WeakMethod(callback))
+    def _register_connect_callback(self, callback):
+        wm = weakref.WeakMethod(callback)
+        if wm not in self._connect_callbacks:
+            self._connect_callbacks.append(wm)
 
-    def clear_connect_callbacks(self):
-        self._connect_callbacks = []
+    def _deregister_connect_callback(self, callback):
+        try:
+            self._connect_callbacks.remove(weakref.WeakMethod(callback))
+        except ValueError:
+            pass
 
     def set_parser(self, parser_class):
         """
@@ -279,6 +284,8 @@ class AbstractConnection:
 
         # run any user callbacks. right now the only internal callback
         # is for pubsub channel/pattern resubscription
+        # first, remove any dead weakrefs
+        self._connect_callbacks = [ref for ref in self._connect_callbacks if ref()]
         for ref in self._connect_callbacks:
             callback = ref()
             if callback:
