@@ -62,7 +62,13 @@ from redis.exceptions import (
     TryAgainError,
 )
 from redis.typing import AnyKeyT, EncodableT, KeyT
-from redis.utils import dict_merge, get_lib_version, safe_str, str_if_bytes
+from redis.utils import (
+    deprecated_function,
+    dict_merge,
+    get_lib_version,
+    safe_str,
+    str_if_bytes,
+)
 
 TargetNodesT = TypeVar(
     "TargetNodesT", str, "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
@@ -395,12 +401,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                         )
                         self._initialize = False
                     except BaseException:
-                        await self.nodes_manager.close()
-                        await self.nodes_manager.close("startup_nodes")
+                        await self.nodes_manager.aclose()
+                        await self.nodes_manager.aclose("startup_nodes")
                         raise
         return self
 
-    async def close(self) -> None:
+    async def aclose(self) -> None:
         """Close all connections & client if initialized."""
         if not self._initialize:
             if not self._lock:
@@ -408,14 +414,19 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             async with self._lock:
                 if not self._initialize:
                     self._initialize = True
-                    await self.nodes_manager.close()
-                    await self.nodes_manager.close("startup_nodes")
+                    await self.nodes_manager.aclose()
+                    await self.nodes_manager.aclose("startup_nodes")
+
+    @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="close")
+    async def close(self) -> None:
+        """alias for aclose() for backwards compatibility"""
+        await self.aclose()
 
     async def __aenter__(self) -> "RedisCluster":
         return await self.initialize()
 
     async def __aexit__(self, exc_type: None, exc_value: None, traceback: None) -> None:
-        await self.close()
+        await self.aclose()
 
     def __await__(self) -> Generator[Any, None, "RedisCluster"]:
         return self.initialize().__await__()
@@ -767,13 +778,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 self.nodes_manager.startup_nodes.pop(target_node.name, None)
                 # Hard force of reinitialize of the node/slots setup
                 # and try again with the new setup
-                await self.close()
+                await self.aclose()
                 raise
             except ClusterDownError:
                 # ClusterDownError can occur during a failover and to get
                 # self-healed, we will try to reinitialize the cluster layout
                 # and retry executing the command
-                await self.close()
+                await self.aclose()
                 await asyncio.sleep(0.25)
                 raise
             except MovedError as e:
@@ -790,7 +801,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     self.reinitialize_steps
                     and self.reinitialize_counter % self.reinitialize_steps == 0
                 ):
-                    await self.close()
+                    await self.aclose()
                     # Reset the counter
                     self.reinitialize_counter = 0
                 else:
@@ -1323,7 +1334,7 @@ class NodesManager:
         # If initialize was called after a MovedError, clear it
         self._moved_exception = None
 
-    async def close(self, attr: str = "nodes_cache") -> None:
+    async def aclose(self, attr: str = "nodes_cache") -> None:
         self.default_node = None
         await asyncio.gather(
             *(
@@ -1471,7 +1482,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                     if type(e) in self.__class__.ERRORS_ALLOW_RETRY:
                         # Try again with the new cluster setup.
                         exception = e
-                        await self._client.close()
+                        await self._client.aclose()
                         await asyncio.sleep(0.25)
                     else:
                         # All other errors should be raised.

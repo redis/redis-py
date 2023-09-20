@@ -2,6 +2,7 @@ import pytest
 import redis
 from tests.conftest import skip_if_server_version_lt
 
+from .compat import aclosing, mock
 from .conftest import wait_for_command
 
 
@@ -285,6 +286,24 @@ class TestPipeline:
             unwatch_command = await wait_for_command(r, m, "UNWATCH")
             assert unwatch_command is not None
             assert unwatch_command["command"] == "UNWATCH"
+
+    @pytest.mark.onlynoncluster
+    async def test_aclose_is_reset(self, r):
+        async with r.pipeline() as pipe:
+            called = 0
+
+            async def mock_reset():
+                nonlocal called
+                called += 1
+
+            with mock.patch.object(pipe, "reset", mock_reset):
+                await pipe.aclose()
+                assert called == 1
+
+    @pytest.mark.onlynoncluster
+    async def test_aclosing(self, r):
+        async with aclosing(r.pipeline()):
+            pass
 
     @pytest.mark.onlynoncluster
     async def test_transaction_callable(self, r):
