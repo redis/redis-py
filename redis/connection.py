@@ -1106,14 +1106,14 @@ class ConnectionPool:
             decode_responses=kwargs.get("decode_responses", False),
         )
 
-    def make_connection(self) -> type[Connection]:
+    def make_connection(self) -> "Connection":
         "Create a new connection"
         if self._created_connections >= self.max_connections:
             raise ConnectionError("Too many connections")
         self._created_connections += 1
         return self.connection_class(**self.connection_kwargs)
 
-    def release(self, connection: type[Connection]) -> None:
+    def release(self, connection: "Connection") -> None:
         "Releases the connection back to the pool"
         self._checkpid()
         with self._lock:
@@ -1134,7 +1134,7 @@ class ConnectionPool:
                 connection.disconnect()
                 return
 
-    def owns_connection(self, connection: type[Connection]) -> int:
+    def owns_connection(self, connection: "Connection") -> int:
         return connection.pid == self.pid
 
     def disconnect(self, inuse_connections: bool = True) -> None:
