@@ -1064,7 +1064,7 @@ class ConnectionPool:
             finally:
                 self._fork_lock.release()
 
-    def get_connection(self, command_name: str, *keys, **options) -> type[Connection]:
+    def get_connection(self, command_name: str, *keys, **options) -> "Connection":
         "Get a connection from the pool"
         self._checkpid()
         with self._lock:
