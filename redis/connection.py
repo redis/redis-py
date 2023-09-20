@@ -145,10 +145,10 @@ class AbstractConnection:
         lib_version: float = get_lib_version(),
         username: Union[str, None] = None,
         retry: Union[Any, None] = None,
-        redis_connect_func: Union[None, Callable["..."]] = None,
+        redis_connect_func: Union[None, Callable[[], None]] = None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
-        command_packer: (Any | HiredisRespSerializer | PythonRespSerializer) = None,
+        command_packer: Union[Callable[[], None], None] = None,
     ):
         """
         Initialize a new Connection.

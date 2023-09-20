@@ -266,7 +266,7 @@ class AggregateRequest:
         self._aggregateplan.extend(ret)
         return self
 
-    def filter(self, expressions: Union(str, List[str])) -> "AggregateRequest":
+    def filter(self, expressions: Union[str, List[str]]) -> "AggregateRequest":
         """
         Specify filter for post-query results using predicates relating to
         values in the result set.

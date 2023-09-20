@@ -108,7 +108,7 @@ class Query:
         return self
 
     def highlight(
-        self, fields: Union[List[str], None] = None, tags: List[str, str] = None
+        self, fields: Union[List[str], None] = None, tags: List[str] = None
     ) -> None:
         """
         Apply specified markup to matched term(s) within the returned field(s).

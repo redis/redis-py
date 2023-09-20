@@ -367,7 +367,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.connection_pool, self.response_callbacks, transaction, shard_hint
         )
 
-    def transaction(self, func: Callable["..."], *watches, **kwargs) -> None:
+    def transaction(
+        self, func: Callable[["Pipeline"], None], *watches, **kwargs
+    ) -> None:
         """
         Convenience method for executing the callable `func` as a transaction
         while watching all keys specified in `watches`. The 'func' callable
@@ -651,7 +653,7 @@ class PubSub:
         shard_hint=None,
         ignore_subscribe_messages: bool = False,
         encoder: Union[None, "Encoder"] = None,
-        push_handler_func: Union[None, Callable["..."]] = None,
+        push_handler_func: Union[None, Callable[[str], None]] = None,
     ):
         self.connection_pool = connection_pool
         self.shard_hint = shard_hint
@@ -1124,7 +1126,9 @@ class PubSubWorkerThread(threading.Thread):
         pubsub,
         sleep_time: float,
         daemon: bool = False,
-        exception_handler: Union[Callable["..."], None] = None,
+        exception_handler: Union[
+            Callable[[Exception, "PubSub", "PubSubWorkerThread"], None], None
+        ] = None,
     ):
         super().__init__()
         self.daemon = daemon
