@@ -328,7 +328,7 @@ class SearchCommands:
         payload: bool = None,
         replace: bool = False,
         partial: bool = False,
-        language: Union[str, None] = None,
+        language: Optional[str] = None,
         no_create: str = False,
         **fields: List[str],
     ):

@@ -1,4 +1,4 @@
-from typing import List, Union
+from typing import List, Optional, Union
 
 
 class Query:
@@ -23,23 +23,23 @@ class Query:
         self._num: int = 10
         self._no_content: bool = False
         self._no_stopwords: bool = False
-        self._fields: Union[List[str], None] = None
+        self._fields: Optional[List[str]] = None
         self._verbatim: bool = False
         self._with_payloads: bool = False
         self._with_scores: bool = False
-        self._scorer: bool = False
+        self._scorer: Optional[str] = None
         self._filters: List = list()
-        self._ids: Union[List[str], None] = None
+        self._ids: Optional[List[str]] = None
         self._slop: int = -1
-        self._timeout: Union[float, None] = None
+        self._timeout: Optional[float] = None
         self._in_order: bool = False
-        self._sortby: Union[SortbyField, None] = None
+        self._sortby: Optional[SortbyField] = None
         self._return_fields: List = []
         self._summarize_fields: List = []
         self._highlight_fields: List = []
-        self._language: Union[str, None] = None
-        self._expander: Union[str, None] = None
-        self._dialect: Union[int, None] = None
+        self._language: Optional[str] = None
+        self._expander: Optional[str] = None
+        self._dialect: Optional[int] = None
 
     def query_string(self) -> str:
         """Return the query string of this query only."""
@@ -56,7 +56,7 @@ class Query:
         self._return_fields += fields
         return self
 
-    def return_field(self, field: str, as_field: Union[str, None] = None) -> "Query":
+    def return_field(self, field: str, as_field: Optional[str] = None) -> "Query":
         """Add field to return fields (Optional: add 'AS' name
         to the field)."""
         self._return_fields.append(field)
@@ -71,10 +71,10 @@ class Query:
 
     def summarize(
         self,
-        fields: Union[None, List] = None,
-        context_len: Union[None, int] = None,
-        num_frags: Union[None, int] = None,
-        sep: [Union, str] = None,
+        fields: Optional[List] = None,
+        context_len: Optional[int] = None,
+        num_frags: Optional[int] = None,
+        sep: Optional[str] = None,
     ) -> "Query":
         """
         Return an abridged format of the field, containing only the segments of
@@ -108,7 +108,7 @@ class Query:
         return self
 
     def highlight(
-        self, fields: Union[List[str], None] = None, tags: List[str] = None
+        self, fields: Optional[List[str]] = None, tags: Optional [List[str]] = None
     ) -> None:
         """
         Apply specified markup to matched term(s) within the returned field(s).

@@ -328,7 +328,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         self.get_connection_kwargs().update({"retry": retry})
         self.connection_pool.set_retry(retry)
 
-    def set_response_callback(self, command, callback) -> None:
+    def set_response_callback(self, command: str, callback: Callable) -> None:
         """Set a custom Response Callback"""
         self.response_callbacks[command] = callback
 
@@ -394,10 +394,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     def lock(
         self,
         name: str,
-        timeout: Union[None, float] = None,
+        timeout: Optional[float] = None,
         sleep: float = 0.1,
         blocking: bool = True,
-        blocking_timeout: Union[None, float] = None,
+        blocking_timeout: Optional[float] = None,
         lock_class: Union[None, Any] = None,
         thread_local: bool = True,
     ):
@@ -1099,7 +1099,9 @@ class PubSub:
         return message
 
     def run_in_thread(
-        self, sleep_time=0, daemon=False, exception_handler=None
+        self, sleep_time: int = 0,
+        daemon: bool = False,
+        exception_handler: Optional[Callable] = None,
     ) -> "PubSubWorkerThread":
         for channel, handler in self.channels.items():
             if handler is None:
