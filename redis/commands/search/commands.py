@@ -554,7 +554,9 @@ class SearchCommands:
             AGGREGATE_CMD, raw, query=query, has_cursor=has_cursor
         )
 
-    def _get_aggregate_result(self, raw: List, query: Union[str, Query, AggregateRequest], has_cursor: bool):
+    def _get_aggregate_result(
+        self, raw: List, query: Union[str, Query, AggregateRequest], has_cursor: bool
+    ):
         if has_cursor:
             if isinstance(query, Cursor):
                 query.cid = raw[1]

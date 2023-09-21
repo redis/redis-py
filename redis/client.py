@@ -1099,7 +1099,8 @@ class PubSub:
         return message
 
     def run_in_thread(
-        self, sleep_time: int = 0,
+        self,
+        sleep_time: int = 0,
         daemon: bool = False,
         exception_handler: Optional[Callable] = None,
     ) -> "PubSubWorkerThread":

@@ -108,7 +108,7 @@ class Query:
         return self
 
     def highlight(
-        self, fields: Optional[List[str]] = None, tags: Optional [List[str]] = None
+        self, fields: Optional[List[str]] = None, tags: Optional[List[str]] = None
     ) -> None:
         """
         Apply specified markup to matched term(s) within the returned field(s).
