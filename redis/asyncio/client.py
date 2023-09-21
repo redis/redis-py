@@ -227,7 +227,6 @@ class Redis(
         lib_version: Optional[str] = get_lib_version(),
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
-        # deprecated. create a pool and use connection_pool instead
         auto_close_connection_pool: Optional[bool] = None,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
@@ -241,7 +240,9 @@ class Redis(
         To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
         """
         kwargs: Dict[str, Any]
-
+        # auto_close_connection_pool only has an effect if connection_pool is
+        # None. It is assumed that if connection_pool is not None, the user
+        # wants to manage the connection pool themselves.
         if auto_close_connection_pool is not None:
             warnings.warn(
                 DeprecationWarning(
@@ -531,13 +532,20 @@ class Redis(
 
     _DEL_MESSAGE = "Unclosed Redis client"
 
-    def __del__(self, _warnings: Any = warnings) -> None:
+    # passing _warnings and _grl as argument default since they may be gone
+    # by the time __del__ is called at shutdown
+    def __del__(
+        self,
+        _warn: Any = warnings.warn,
+        _grl: Any = asyncio.get_running_loop,
+    ) -> None:
         if hasattr(self, "connection") and (self.connection is not None):
-            _warnings.warn(
-                f"Unclosed client session {self!r}", ResourceWarning, source=self
-            )
-            context = {"client": self, "message": self._DEL_MESSAGE}
-            asyncio.get_running_loop().call_exception_handler(context)
+            _warn(f"Unclosed client session {self!r}", ResourceWarning, source=self)
+            try:
+                context = {"client": self, "message": self._DEL_MESSAGE}
+                _grl().call_exception_handler(context)
+            except RuntimeError:
+                pass
 
     async def aclose(self, close_connection_pool: Optional[bool] = None) -> None:
         """
@@ -775,7 +783,7 @@ class PubSub:
 
     def __del__(self):
         if self.connection:
-            self.connection.clear_connect_callbacks()
+            self.connection._deregister_connect_callback(self.on_connect)
 
     async def aclose(self):
         # In case a connection property does not yet exist
@@ -786,7 +794,7 @@ class PubSub:
         async with self._lock:
             if self.connection:
                 await self.connection.disconnect()
-                self.connection.clear_connect_callbacks()
+                self.connection._deregister_connect_callback(self.on_connect)
                 await self.connection_pool.release(self.connection)
                 self.connection = None
             self.channels = {}
@@ -849,7 +857,7 @@ class PubSub:
             )
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
-            self.connection.register_connect_callback(self.on_connect)
+            self.connection._register_connect_callback(self.on_connect)
         else:
             await self.connection.connect()
         if self.push_handler_func is not None and not HIREDIS_AVAILABLE:

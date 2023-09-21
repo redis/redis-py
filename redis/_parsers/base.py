@@ -137,12 +137,6 @@ class AsyncBaseParser(BaseParser):
         self._stream: Optional[StreamReader] = None
         self._read_size = socket_read_size
 
-    def __del__(self):
-        try:
-            self.on_disconnect()
-        except Exception:
-            pass
-
     async def can_read_destructive(self) -> bool:
         raise NotImplementedError()
 
