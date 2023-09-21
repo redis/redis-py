@@ -15,5 +15,3 @@ ujson>=4.2.0
 wheel>=0.30.0
 urllib3<2
 uvloop
-types-requests
-types-pyOpenSSL
