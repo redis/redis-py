@@ -652,7 +652,7 @@ class PubSub:
         connection_pool,
         shard_hint=None,
         ignore_subscribe_messages: bool = False,
-        encoder: Union[None, "Encoder"] = None,
+        encoder: Optional["Encoder"] = None,
         push_handler_func: Union[None, Callable[[str], None]] = None,
     ):
         self.connection_pool = connection_pool
