@@ -2457,7 +2457,6 @@ class NodeCommands:
         """ """
         connection = self.connection
         for c in self.commands:
-
             # if there is a result on this command,
             # it means we ran into an exception
             # like a connection error. Trying to parse

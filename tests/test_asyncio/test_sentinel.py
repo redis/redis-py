@@ -72,7 +72,6 @@ class SentinelTestCluster:
 
 @pytest_asyncio.fixture()
 async def cluster(master_ip):
-
     cluster = SentinelTestCluster(ip=master_ip)
     saved_Redis = redis.asyncio.sentinel.Redis
     redis.asyncio.sentinel.Redis = cluster.client

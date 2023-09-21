@@ -108,7 +108,6 @@ async def test_add(decoded_r: redis.Redis):
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
 async def test_add_duplicate_policy(r: redis.Redis):
-
     # Test for duplicate policy BLOCK
     assert 1 == await r.ts().add("time-serie-add-ooo-block", 1, 5.0)
     with pytest.raises(Exception):

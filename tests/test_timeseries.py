@@ -104,7 +104,6 @@ def test_add(client):
 
 @skip_ifmodversion_lt("1.4.0", "timeseries")
 def test_add_duplicate_policy(client):
-
     # Test for duplicate policy BLOCK
     assert 1 == client.ts().add("time-serie-add-ooo-block", 1, 5.0)
     with pytest.raises(Exception):

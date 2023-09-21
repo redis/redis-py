@@ -396,7 +396,6 @@ class TestPipeline:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.0.0")
     async def test_pipeline_discard(self, r):
-
         # empty pipeline should raise an error
         async with r.pipeline() as pipe:
             pipe.set("key", "someval")

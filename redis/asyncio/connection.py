@@ -1155,7 +1155,6 @@ class BlockingConnectionPool(ConnectionPool):
         queue_class: Type[asyncio.Queue] = asyncio.LifoQueue,  # deprecated
         **connection_kwargs,
     ):
-
         super().__init__(
             connection_class=connection_class,
             max_connections=max_connections,
