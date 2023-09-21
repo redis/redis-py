@@ -2277,5 +2277,12 @@ def test_geoshape(client: redis.Redis):
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
     client.hset("small", "geom", 'POLYGON((1 1, 1 100, 100 100, 100 1, 1 1))')
     client.hset("large", "geom", 'POLYGON((1 1, 1 200, 200 200, 200 1, 1 1))')
-    result = client.ft().search('@geom:[WITHIN $poly]', {'poly': 'POLYGON((0 0, 0 150, 150 150, 150 0, 0 0))'})
-    result = client.ft().search('@geom:[CONTAINS $poly]', {'poly': 'POLYGON((2 2, 2 50, 50 50, 50 2, 2 2))'})
+    q1 = Query("@geom:[WITHIN $poly]").dialect(3)
+    qp1 = {'poly': 'POLYGON((0 0, 0 150, 150 150, 150 0, 0 0))'}
+    q2 = Query("@geom:[CONTAINS $poly]").dialect(3)
+    qp2 = {'poly': 'POLYGON((2 2, 2 50, 50 50, 50 2, 2 2))'}
+    result = client.ft().search(q1, query_params=qp1)
+    assert len(result.docs) == 1
+    assert result.docs[0]["id"] == "small"
+    result = client.ft().search(q2, query_params=qp2)
+    assert len(result.docs) == 2

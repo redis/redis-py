@@ -104,7 +104,7 @@ class GeoShapeField(Field):
     def __init__(self, name: str, coord_system=None, **kwargs):
         args = [Field.GEOSHAPE]
         if coord_system:
-            args.extend(["COORD_SYSTEM", coord_system])
+            args.append(coord_system)
         Field.__init__(self, name, args=args, **kwargs)
 
 
