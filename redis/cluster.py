@@ -6,10 +6,13 @@ import time
 from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from redis._parsers import CommandsParser, Encoder
+from redis._parsers.helpers import parse_scan
 from redis.backoff import default_backoff
-from redis.client import CaseInsensitiveDict, PubSub, Redis, parse_scan
-from redis.commands import READ_COMMANDS, CommandsParser, RedisClusterCommands
-from redis.connection import ConnectionPool, DefaultParser, Encoder, parse_url
+from redis.client import CaseInsensitiveDict, PubSub, Redis
+from redis.commands import READ_COMMANDS, RedisClusterCommands
+from redis.commands.helpers import list_or_args
+from redis.connection import ConnectionPool, DefaultParser, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
     AskError,
@@ -31,6 +34,7 @@ from redis.exceptions import (
 from redis.lock import Lock
 from redis.retry import Retry
 from redis.utils import (
+    HIREDIS_AVAILABLE,
     dict_merge,
     list_keys_to_dict,
     merge_result,
@@ -97,6 +101,8 @@ def parse_cluster_shards(resp, **options):
     """
     Parse CLUSTER SHARDS response.
     """
+    if isinstance(resp[0], dict):
+        return resp
     shards = []
     for x in resp:
         shard = {"slots": [], "nodes": []}
@@ -137,6 +143,8 @@ REDIS_ALLOWED_KEYS = (
     "encoding_errors",
     "errors",
     "host",
+    "lib_name",
+    "lib_version",
     "max_connections",
     "nodes_flag",
     "redis_connect_func",
@@ -145,6 +153,7 @@ REDIS_ALLOWED_KEYS = (
     "queue_class",
     "retry",
     "retry_on_timeout",
+    "protocol",
     "socket_connect_timeout",
     "socket_keepalive",
     "socket_keepalive_options",
@@ -218,6 +227,7 @@ class AbstractRedisCluster:
                 "ACL WHOAMI",
                 "AUTH",
                 "CLIENT LIST",
+                "CLIENT SETINFO",
                 "CLIENT SETNAME",
                 "CLIENT GETNAME",
                 "CONFIG SET",
@@ -227,6 +237,8 @@ class AbstractRedisCluster:
                 "PUBSUB CHANNELS",
                 "PUBSUB NUMPAT",
                 "PUBSUB NUMSUB",
+                "PUBSUB SHARDCHANNELS",
+                "PUBSUB SHARDNUMSUB",
                 "PING",
                 "INFO",
                 "SHUTDOWN",
@@ -253,9 +265,9 @@ class AbstractRedisCluster:
                 "CLIENT INFO",
                 "CLIENT KILL",
                 "READONLY",
-                "READWRITE",
                 "CLUSTER INFO",
                 "CLUSTER MEET",
+                "CLUSTER MYSHARDID",
                 "CLUSTER NODES",
                 "CLUSTER REPLICAS",
                 "CLUSTER RESET",
@@ -274,10 +286,19 @@ class AbstractRedisCluster:
                 "READONLY",
                 "READWRITE",
                 "TIME",
+                "TFUNCTION LOAD",
+                "TFUNCTION DELETE",
+                "TFUNCTION LIST",
+                "TFCALL",
+                "TFCALLASYNC",
                 "GRAPH.CONFIG",
                 "LATENCY HISTORY",
                 "LATENCY LATEST",
                 "LATENCY RESET",
+                "MODULE LIST",
+                "MODULE LOAD",
+                "MODULE UNLOAD",
+                "MODULE LOADEX",
             ],
             DEFAULT_NODE,
         ),
@@ -290,6 +311,7 @@ class AbstractRedisCluster:
                 "FUNCTION LIST",
                 "FUNCTION LOAD",
                 "FUNCTION RESTORE",
+                "REDISGEARS_2.REFRESHCLUSTER",
                 "SCAN",
                 "SCRIPT EXISTS",
                 "SCRIPT FLUSH",
@@ -353,11 +375,13 @@ class AbstractRedisCluster:
     }
 
     RESULT_CALLBACKS = dict_merge(
-        list_keys_to_dict(["PUBSUB NUMSUB"], parse_pubsub_numsub),
+        list_keys_to_dict(["PUBSUB NUMSUB", "PUBSUB SHARDNUMSUB"], parse_pubsub_numsub),
         list_keys_to_dict(
             ["PUBSUB NUMPAT"], lambda command, res: sum(list(res.values()))
         ),
-        list_keys_to_dict(["KEYS", "PUBSUB CHANNELS"], merge_result),
+        list_keys_to_dict(
+            ["KEYS", "PUBSUB CHANNELS", "PUBSUB SHARDCHANNELS"], merge_result
+        ),
         list_keys_to_dict(
             [
                 "PING",
@@ -947,11 +971,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         # redis server to parse the keys. Besides, there is a bug in redis<7.0
         # where `self._get_command_keys()` fails anyway. So, we special case
         # EVAL/EVALSHA.
-        if command in ("EVAL", "EVALSHA"):
+        if command.upper() in ("EVAL", "EVALSHA"):
             # command syntax: EVAL "script body" num_keys ...
             if len(args) <= 2:
                 raise RedisClusterException(f"Invalid args in command: {args}")
-            num_actual_keys = args[2]
+            num_actual_keys = int(args[2])
             eval_keys = args[3 : 3 + num_actual_keys]
             # if there are 0 keys, that means the script can be run on any node
             # so we can just return a random slot
@@ -963,7 +987,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             if keys is None or len(keys) == 0:
                 # FCALL can call a function with 0 keys, that means the function
                 #  can be run on any node so we can just return a random slot
-                if command in ("FCALL", "FCALL_RO"):
+                if command.upper() in ("FCALL", "FCALL_RO"):
                     return random.randrange(0, REDIS_CLUSTER_HASH_SLOTS)
                 raise RedisClusterException(
                     "No way to dispatch this command to Redis Cluster. "
@@ -1632,7 +1656,15 @@ class ClusterPubSub(PubSub):
     https://redis-py-cluster.readthedocs.io/en/stable/pubsub.html
     """
 
-    def __init__(self, redis_cluster, node=None, host=None, port=None, **kwargs):
+    def __init__(
+        self,
+        redis_cluster,
+        node=None,
+        host=None,
+        port=None,
+        push_handler_func=None,
+        **kwargs,
+    ):
         """
         When a pubsub instance is created without specifying a node, a single
         node will be transparently chosen for the pubsub connection on the
@@ -1654,8 +1686,13 @@ class ClusterPubSub(PubSub):
             else redis_cluster.get_redis_connection(self.node).connection_pool
         )
         self.cluster = redis_cluster
+        self.node_pubsub_mapping = {}
+        self._pubsubs_generator = self._pubsubs_generator()
         super().__init__(
-            **kwargs, connection_pool=connection_pool, encoder=redis_cluster.encoder
+            connection_pool=connection_pool,
+            encoder=redis_cluster.encoder,
+            push_handler_func=push_handler_func,
+            **kwargs,
         )
 
     def set_pubsub_node(self, cluster, node=None, host=None, port=None):
@@ -1707,9 +1744,9 @@ class ClusterPubSub(PubSub):
                 f"Node {host}:{port} doesn't exist in the cluster"
             )
 
-    def execute_command(self, *args, **kwargs):
+    def execute_command(self, *args):
         """
-        Execute a publish/subscribe command.
+        Execute a subscribe/unsubscribe command.
 
         Taken code from redis-py and tweak to make it work within a cluster.
         """
@@ -1738,9 +1775,94 @@ class ClusterPubSub(PubSub):
             )
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
-            self.connection.register_connect_callback(self.on_connect)
+            self.connection._register_connect_callback(self.on_connect)
+            if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
+                self.connection._parser.set_push_handler(self.push_handler_func)
         connection = self.connection
         self._execute(connection, connection.send_command, *args)
+
+    def _get_node_pubsub(self, node):
+        try:
+            return self.node_pubsub_mapping[node.name]
+        except KeyError:
+            pubsub = node.redis_connection.pubsub(
+                push_handler_func=self.push_handler_func
+            )
+            self.node_pubsub_mapping[node.name] = pubsub
+            return pubsub
+
+    def _sharded_message_generator(self):
+        for _ in range(len(self.node_pubsub_mapping)):
+            pubsub = next(self._pubsubs_generator)
+            message = pubsub.get_message()
+            if message is not None:
+                return message
+        return None
+
+    def _pubsubs_generator(self):
+        while True:
+            for pubsub in self.node_pubsub_mapping.values():
+                yield pubsub
+
+    def get_sharded_message(
+        self, ignore_subscribe_messages=False, timeout=0.0, target_node=None
+    ):
+        if target_node:
+            message = self.node_pubsub_mapping[target_node.name].get_message(
+                ignore_subscribe_messages=ignore_subscribe_messages, timeout=timeout
+            )
+        else:
+            message = self._sharded_message_generator()
+        if message is None:
+            return None
+        elif str_if_bytes(message["type"]) == "sunsubscribe":
+            if message["channel"] in self.pending_unsubscribe_shard_channels:
+                self.pending_unsubscribe_shard_channels.remove(message["channel"])
+                self.shard_channels.pop(message["channel"], None)
+                node = self.cluster.get_node_from_key(message["channel"])
+                if self.node_pubsub_mapping[node.name].subscribed is False:
+                    self.node_pubsub_mapping.pop(node.name)
+        if not self.channels and not self.patterns and not self.shard_channels:
+            # There are no subscriptions anymore, set subscribed_event flag
+            # to false
+            self.subscribed_event.clear()
+        if self.ignore_subscribe_messages or ignore_subscribe_messages:
+            return None
+        return message
+
+    def ssubscribe(self, *args, **kwargs):
+        if args:
+            args = list_or_args(args[0], args[1:])
+        s_channels = dict.fromkeys(args)
+        s_channels.update(kwargs)
+        for s_channel, handler in s_channels.items():
+            node = self.cluster.get_node_from_key(s_channel)
+            pubsub = self._get_node_pubsub(node)
+            if handler:
+                pubsub.ssubscribe(**{s_channel: handler})
+            else:
+                pubsub.ssubscribe(s_channel)
+            self.shard_channels.update(pubsub.shard_channels)
+            self.pending_unsubscribe_shard_channels.difference_update(
+                self._normalize_keys({s_channel: None})
+            )
+            if pubsub.subscribed and not self.subscribed:
+                self.subscribed_event.set()
+                self.health_check_response_counter = 0
+
+    def sunsubscribe(self, *args):
+        if args:
+            args = list_or_args(args[0], args[1:])
+        else:
+            args = self.shard_channels
+
+        for s_channel in args:
+            node = self.cluster.get_node_from_key(s_channel)
+            p = self._get_node_pubsub(node)
+            p.sunsubscribe(s_channel)
+            self.pending_unsubscribe_shard_channels.update(
+                p.pending_unsubscribe_shard_channels
+            )
 
     def get_redis_connection(self):
         """
@@ -1748,6 +1870,15 @@ class ClusterPubSub(PubSub):
         """
         if self.node is not None:
             return self.node.redis_connection
+
+    def disconnect(self):
+        """
+        Disconnect the pubsub connection.
+        """
+        if self.connection:
+            self.connection.disconnect()
+        for pubsub in self.node_pubsub_mapping.values():
+            pubsub.connection.disconnect()
 
 
 class ClusterPipeline(RedisCluster):
@@ -2326,7 +2457,6 @@ class NodeCommands:
         """ """
         connection = self.connection
         for c in self.commands:
-
             # if there is a result on this command,
             # it means we ran into an exception
             # like a connection error. Trying to parse

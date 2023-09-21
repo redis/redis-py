@@ -1,7 +1,17 @@
 import redis
 
 from ...asyncio.client import Pipeline as AsyncioPipeline
-from .commands import AsyncSearchCommands, SearchCommands
+from .commands import (
+    AGGREGATE_CMD,
+    CONFIG_CMD,
+    INFO_CMD,
+    PROFILE_CMD,
+    SEARCH_CMD,
+    SPELLCHECK_CMD,
+    SYNDUMP_CMD,
+    AsyncSearchCommands,
+    SearchCommands,
+)
 
 
 class Search(SearchCommands):
@@ -17,7 +27,6 @@ class Search(SearchCommands):
         """
 
         def __init__(self, client, chunk_size=1000):
-
             self.client = client
             self.execute_command = client.execute_command
             self._pipeline = client.pipeline(transaction=False, shard_hint=None)
@@ -85,11 +94,20 @@ class Search(SearchCommands):
 
         If conn is not None, we employ an already existing redis connection
         """
-        self.MODULE_CALLBACKS = {}
+        self._MODULE_CALLBACKS = {}
         self.client = client
         self.index_name = index_name
         self.execute_command = client.execute_command
         self._pipeline = client.pipeline
+        self._RESP2_MODULE_CALLBACKS = {
+            INFO_CMD: self._parse_info,
+            SEARCH_CMD: self._parse_search,
+            AGGREGATE_CMD: self._parse_aggregate,
+            PROFILE_CMD: self._parse_profile,
+            SPELLCHECK_CMD: self._parse_spellcheck,
+            CONFIG_CMD: self._parse_config_get,
+            SYNDUMP_CMD: self._parse_syndump,
+        }
 
     def pipeline(self, transaction=True, shard_hint=None):
         """Creates a pipeline for the SEARCH module, that can be used for executing
@@ -97,7 +115,7 @@ class Search(SearchCommands):
         """
         p = Pipeline(
             connection_pool=self.client.connection_pool,
-            response_callbacks=self.MODULE_CALLBACKS,
+            response_callbacks=self._MODULE_CALLBACKS,
             transaction=transaction,
             shard_hint=shard_hint,
         )
@@ -155,7 +173,7 @@ class AsyncSearch(Search, AsyncSearchCommands):
         """
         p = AsyncPipeline(
             connection_pool=self.client.connection_pool,
-            response_callbacks=self.MODULE_CALLBACKS,
+            response_callbacks=self._MODULE_CALLBACKS,
             transaction=transaction,
             shard_hint=shard_hint,
         )

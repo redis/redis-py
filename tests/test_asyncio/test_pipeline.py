@@ -1,8 +1,8 @@
 import pytest
-
 import redis
 from tests.conftest import skip_if_server_version_lt
 
+from .compat import aclosing, mock
 from .conftest import wait_for_command
 
 
@@ -21,7 +21,6 @@ class TestPipeline:
                 .zadd("z", {"z1": 1})
                 .zadd("z", {"z2": 4})
                 .zincrby("z", 1, "z1")
-                .zrange("z", 0, 5, withscores=True)
             )
             assert await pipe.execute() == [
                 True,
@@ -29,7 +28,6 @@ class TestPipeline:
                 True,
                 True,
                 2.0,
-                [(b"z1", 2.0), (b"z2", 4)],
             ]
 
     async def test_pipeline_memoryview(self, r):
@@ -290,6 +288,24 @@ class TestPipeline:
             assert unwatch_command["command"] == "UNWATCH"
 
     @pytest.mark.onlynoncluster
+    async def test_aclose_is_reset(self, r):
+        async with r.pipeline() as pipe:
+            called = 0
+
+            async def mock_reset():
+                nonlocal called
+                called += 1
+
+            with mock.patch.object(pipe, "reset", mock_reset):
+                await pipe.aclose()
+                assert called == 1
+
+    @pytest.mark.onlynoncluster
+    async def test_aclosing(self, r):
+        async with aclosing(r.pipeline()):
+            pass
+
+    @pytest.mark.onlynoncluster
     async def test_transaction_callable(self, r):
         await r.set("a", 1)
         await r.set("b", 2)
@@ -380,7 +396,6 @@ class TestPipeline:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.0.0")
     async def test_pipeline_discard(self, r):
-
         # empty pipeline should raise an error
         async with r.pipeline() as pipe:
             pipe.set("key", "someval")

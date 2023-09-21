@@ -2,7 +2,6 @@ import asyncio
 
 import pytest
 import pytest_asyncio
-
 from redis.asyncio.lock import Lock
 from redis.exceptions import LockError, LockNotOwnedError
 
@@ -235,7 +234,6 @@ class TestLockClassSelection:
     def test_lock_class_argument(self, r):
         class MyLock:
             def __init__(self, *args, **kwargs):
-
                 pass
 
         lock = r.lock("foo", lock_class=MyLock)

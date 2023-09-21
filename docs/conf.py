@@ -60,7 +60,7 @@ master_doc = "index"
 
 # General information about the project.
 project = "redis-py"
-copyright = "2022, Redis Inc"
+copyright = "2023, Redis Inc"
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -287,4 +287,4 @@ texinfo_documents = [
 epub_title = "redis-py"
 epub_author = "Redis Inc"
 epub_publisher = "Redis Inc"
-epub_copyright = "2022, Redis Inc"
+epub_copyright = "2023, Redis Inc"

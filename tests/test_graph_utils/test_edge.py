@@ -1,11 +1,9 @@
 import pytest
-
 from redis.commands.graph import edge, node
 
 
 @pytest.mark.redismod
 def test_init():
-
     with pytest.raises(AssertionError):
         edge.Edge(None, None, None)
         edge.Edge(node.Node(), None, None)

@@ -1,8 +1,8 @@
 import socket
+from unittest import mock
 
 import pytest
 import pytest_asyncio
-
 import redis.asyncio.sentinel
 from redis import exceptions
 from redis.asyncio.sentinel import (
@@ -72,7 +72,6 @@ class SentinelTestCluster:
 
 @pytest_asyncio.fixture()
 async def cluster(master_ip):
-
     cluster = SentinelTestCluster(ip=master_ip)
     saved_Redis = redis.asyncio.sentinel.Redis
     redis.asyncio.sentinel.Redis = cluster.client
@@ -240,3 +239,28 @@ async def test_flushconfig(cluster, sentinel):
 async def test_reset(cluster, sentinel):
     cluster.master["is_odown"] = True
     assert await sentinel.sentinel_reset("mymaster")
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.parametrize("method_name", ["master_for", "slave_for"])
+async def test_auto_close_pool(cluster, sentinel, method_name):
+    """
+    Check that the connection pool created by the sentinel client is
+    automatically closed
+    """
+
+    method = getattr(sentinel, method_name)
+    client = method("mymaster", db=9)
+    pool = client.connection_pool
+    assert client.auto_close_connection_pool is True
+    calls = 0
+
+    async def mock_disconnect():
+        nonlocal calls
+        calls += 1
+
+    with mock.patch.object(pool, "disconnect", mock_disconnect):
+        await client.close()
+
+    assert calls == 1
+    await pool.disconnect()

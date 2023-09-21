@@ -69,12 +69,14 @@ class SentinelManagedConnection(Connection):
         timeout: Optional[float] = None,
         *,
         disconnect_on_error: Optional[float] = True,
+        push_request: Optional[bool] = False,
     ):
         try:
             return await super().read_response(
                 disable_decoding=disable_decoding,
                 timeout=timeout,
                 disconnect_on_error=disconnect_on_error,
+                push_request=push_request,
             )
         except ReadOnlyError:
             if self.connection_pool.is_master:
@@ -335,11 +337,10 @@ class Sentinel(AsyncSentinelCommands):
         kwargs["is_master"] = True
         connection_kwargs = dict(self.connection_kwargs)
         connection_kwargs.update(kwargs)
-        return redis_class(
-            connection_pool=connection_pool_class(
-                service_name, self, **connection_kwargs
-            )
-        )
+
+        connection_pool = connection_pool_class(service_name, self, **connection_kwargs)
+        # The Redis object "owns" the pool
+        return redis_class.from_pool(connection_pool)
 
     def slave_for(
         self,
@@ -368,8 +369,7 @@ class Sentinel(AsyncSentinelCommands):
         kwargs["is_master"] = False
         connection_kwargs = dict(self.connection_kwargs)
         connection_kwargs.update(kwargs)
-        return redis_class(
-            connection_pool=connection_pool_class(
-                service_name, self, **connection_kwargs
-            )
-        )
+
+        connection_pool = connection_pool_class(service_name, self, **connection_kwargs)
+        # The Redis object "owns" the pool
+        return redis_class.from_pool(connection_pool)

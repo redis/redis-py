@@ -403,7 +403,7 @@ class ManagementCommands(CommandsProtocol):
     Redis management commands
     """
 
-    def auth(self, password, username=None, **kwargs):
+    def auth(self, password: str, username: Optional[str] = None, **kwargs):
         """
         Authenticates the user. If you do not pass username, Redis will try to
         authenticate for the "default" user. If you do pass username, it will
@@ -517,6 +517,7 @@ class ManagementCommands(CommandsProtocol):
         """
         Returns a list of currently connected clients.
         If type of client specified, only that type will be returned.
+
         :param _type: optional. one of the client types (normal, master,
          replica, pubsub)
         :param client_id: optional. a list of client ids
@@ -559,16 +560,17 @@ class ManagementCommands(CommandsProtocol):
     ) -> ResponseT:
         """
         Enable and disable redis server replies.
+
         ``reply`` Must be ON OFF or SKIP,
-            ON - The default most with server replies to commands
-            OFF - Disable server responses to commands
-            SKIP - Skip the response of the immediately following command.
+        ON - The default most with server replies to commands
+        OFF - Disable server responses to commands
+        SKIP - Skip the response of the immediately following command.
 
         Note: When setting OFF or SKIP replies, you will need a client object
         with a timeout specified in seconds, and will need to catch the
         TimeoutError.
-              The test_client_reply unit test illustrates this, and
-              conftest.py has a client with a timeout.
+        The test_client_reply unit test illustrates this, and
+        conftest.py has a client with a timeout.
 
         See https://redis.io/commands/client-reply
         """
@@ -706,6 +708,13 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT SETNAME", name, **kwargs)
 
+    def client_setinfo(self, attr: str, value: str, **kwargs) -> ResponseT:
+        """
+        Sets the current connection library name or version
+        For mor information see https://redis.io/commands/client-setinfo
+        """
+        return self.execute_command("CLIENT SETINFO", attr, value, **kwargs)
+
     def client_unblock(
         self, client_id: int, error: bool = False, **kwargs
     ) -> ResponseT:
@@ -724,19 +733,21 @@ class ManagementCommands(CommandsProtocol):
 
     def client_pause(self, timeout: int, all: bool = True, **kwargs) -> ResponseT:
         """
-        Suspend all the Redis clients for the specified amount of time
-        :param timeout: milliseconds to pause clients
+        Suspend all the Redis clients for the specified amount of time.
+
 
         For more information see https://redis.io/commands/client-pause
+
+        :param timeout: milliseconds to pause clients
         :param all: If true (default) all client commands are blocked.
-             otherwise, clients are only blocked if they attempt to execute
-             a write command.
-             For the WRITE mode, some commands have special behavior:
-                 EVAL/EVALSHA: Will block client for all scripts.
-                 PUBLISH: Will block client.
-                 PFCOUNT: Will block client.
-                 WAIT: Acknowledgments will be delayed, so this command will
-                 appear blocked.
+        otherwise, clients are only blocked if they attempt to execute
+        a write command.
+        For the WRITE mode, some commands have special behavior:
+        EVAL/EVALSHA: Will block client for all scripts.
+        PUBLISH: Will block client.
+        PFCOUNT: Will block client.
+        WAIT: Acknowledgments will be delayed, so this command will
+        appear blocked.
         """
         args = ["CLIENT PAUSE", str(timeout)]
         if not isinstance(timeout, int):
@@ -1215,9 +1226,11 @@ class ManagementCommands(CommandsProtocol):
     def replicaof(self, *args, **kwargs) -> ResponseT:
         """
         Update the replication settings of a redis replica, on the fly.
+
         Examples of valid arguments include:
-            NO ONE (set no replication)
-            host port (set to the host and port of a redis server)
+
+        NO ONE (set no replication)
+        host port (set to the host and port of a redis server)
 
         For more information see  https://redis.io/commands/replicaof
         """
@@ -2810,13 +2823,13 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("RPUSH", name, *values)
 
-    def rpushx(self, name: str, value: str) -> Union[Awaitable[int], int]:
+    def rpushx(self, name: str, *values: str) -> Union[Awaitable[int], int]:
         """
         Push ``value`` onto the tail of the list ``name`` if ``name`` exists
 
         For more information see https://redis.io/commands/rpushx
         """
-        return self.execute_command("RPUSHX", name, value)
+        return self.execute_command("RPUSHX", name, *values)
 
     def lpos(
         self,
@@ -3365,9 +3378,13 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(keys, args)
         return self.execute_command("SINTERSTORE", dest, *args)
 
-    def sismember(self, name: str, value: str) -> Union[Awaitable[bool], bool]:
+    def sismember(
+        self, name: str, value: str
+    ) -> Union[Awaitable[Union[Literal[0], Literal[1]]], Union[Literal[0], Literal[1]]]:
         """
-        Return a boolean indicating if ``value`` is a member of set ``name``
+        Return whether ``value`` is a member of set ``name``:
+        - 1 if the value is a member of the set.
+        - 0 if the value is not a member of the set or if key does not exist.
 
         For more information see https://redis.io/commands/sismember
         """
@@ -3599,27 +3616,37 @@ class StreamCommands(CommandsProtocol):
     ) -> ResponseT:
         """
         Changes the ownership of a pending message.
+
         name: name of the stream.
+
         groupname: name of the consumer group.
+
         consumername: name of a consumer that claims the message.
+
         min_idle_time: filter messages that were idle less than this amount of
         milliseconds
-        message_ids: non-empty list or tuple of message IDs to claim
-        idle: optional. Set the idle time (last time it was delivered) of the
-         message in ms
-        time: optional integer. This is the same as idle but instead of a
-         relative amount of milliseconds, it sets the idle time to a specific
-         Unix time (in milliseconds).
-        retrycount: optional integer. set the retry counter to the specified
-         value. This counter is incremented every time a message is delivered
-         again.
-        force: optional boolean, false by default. Creates the pending message
-         entry in the PEL even if certain specified IDs are not already in the
-         PEL assigned to a different client.
-        justid: optional boolean, false by default. Return just an array of IDs
-         of messages successfully claimed, without returning the actual message
 
-         For more information see https://redis.io/commands/xclaim
+        message_ids: non-empty list or tuple of message IDs to claim
+
+        idle: optional. Set the idle time (last time it was delivered) of the
+        message in ms
+
+        time: optional integer. This is the same as idle but instead of a
+        relative amount of milliseconds, it sets the idle time to a specific
+        Unix time (in milliseconds).
+
+        retrycount: optional integer. set the retry counter to the specified
+        value. This counter is incremented every time a message is delivered
+        again.
+
+        force: optional boolean, false by default. Creates the pending message
+        entry in the PEL even if certain specified IDs are not already in the
+        PEL assigned to a different client.
+
+        justid: optional boolean, false by default. Return just an array of IDs
+        of messages successfully claimed, without returning the actual message
+
+        For more information see https://redis.io/commands/xclaim
         """
         if not isinstance(min_idle_time, int) or min_idle_time < 0:
             raise DataError("XCLAIM min_idle_time must be a non negative integer")
@@ -3871,11 +3898,15 @@ class StreamCommands(CommandsProtocol):
     ) -> ResponseT:
         """
         Read stream values within an interval.
+
         name: name of the stream.
+
         start: first stream ID. defaults to '-',
                meaning the earliest available.
+
         finish: last stream ID. defaults to '+',
                 meaning the latest available.
+
         count: if set, only return this many items, beginning with the
                earliest available.
 
@@ -3898,10 +3929,13 @@ class StreamCommands(CommandsProtocol):
     ) -> ResponseT:
         """
         Block and monitor multiple streams for new data.
+
         streams: a dict of stream names to stream IDs, where
                    IDs indicate the last ID already seen.
+
         count: if set, only return this many items, beginning with the
                earliest available.
+
         block: number of milliseconds to wait, if nothing already present.
 
         For more information see https://redis.io/commands/xread
@@ -3936,12 +3970,17 @@ class StreamCommands(CommandsProtocol):
     ) -> ResponseT:
         """
         Read from a stream via a consumer group.
+
         groupname: name of the consumer group.
+
         consumername: name of the requesting consumer.
+
         streams: a dict of stream names to stream IDs, where
                IDs indicate the last ID already seen.
+
         count: if set, only return this many items, beginning with the
                earliest available.
+
         block: number of milliseconds to wait, if nothing already present.
         noack: do not add messages to the PEL
 
@@ -3976,11 +4015,15 @@ class StreamCommands(CommandsProtocol):
     ) -> ResponseT:
         """
         Read stream values within an interval, in reverse order.
+
         name: name of the stream
+
         start: first stream ID. defaults to '+',
                meaning the latest available.
+
         finish: last stream ID. defaults to '-',
                 meaning the earliest available.
+
         count: if set, only return this many items, beginning with the
                latest available.
 
@@ -5147,6 +5190,15 @@ class PubSubCommands(CommandsProtocol):
         """
         return self.execute_command("PUBLISH", channel, message, **kwargs)
 
+    def spublish(self, shard_channel: ChannelT, message: EncodableT) -> ResponseT:
+        """
+        Posts a message to the given shard channel.
+        Returns the number of clients that received the message
+
+        For more information see https://redis.io/commands/spublish
+        """
+        return self.execute_command("SPUBLISH", shard_channel, message)
+
     def pubsub_channels(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
         """
         Return a list of channels that have at least one subscriber
@@ -5154,6 +5206,14 @@ class PubSubCommands(CommandsProtocol):
         For more information see https://redis.io/commands/pubsub-channels
         """
         return self.execute_command("PUBSUB CHANNELS", pattern, **kwargs)
+
+    def pubsub_shardchannels(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
+        """
+        Return a list of shard_channels that have at least one subscriber
+
+        For more information see https://redis.io/commands/pubsub-shardchannels
+        """
+        return self.execute_command("PUBSUB SHARDCHANNELS", pattern, **kwargs)
 
     def pubsub_numpat(self, **kwargs) -> ResponseT:
         """
@@ -5171,6 +5231,15 @@ class PubSubCommands(CommandsProtocol):
         For more information see https://redis.io/commands/pubsub-numsub
         """
         return self.execute_command("PUBSUB NUMSUB", *args, **kwargs)
+
+    def pubsub_shardnumsub(self, *args: ChannelT, **kwargs) -> ResponseT:
+        """
+        Return a list of (shard_channel, number of subscribers) tuples
+        for each channel given in ``*args``
+
+        For more information see https://redis.io/commands/pubsub-shardnumsub
+        """
+        return self.execute_command("PUBSUB SHARDNUMSUB", *args, **kwargs)
 
 
 AsyncPubSubCommands = PubSubCommands
@@ -5271,8 +5340,10 @@ class ScriptCommands(CommandsProtocol):
         self, sync_type: Union[Literal["SYNC"], Literal["ASYNC"]] = None
     ) -> ResponseT:
         """Flush all scripts from the script cache.
+
         ``sync_type`` is by default SYNC (synchronous) but it can also be
                       ASYNC.
+
         For more information see  https://redis.io/commands/script-flush
         """
 
@@ -5585,11 +5656,14 @@ class GeoCommands(CommandsProtocol):
         area specified by a given shape. This command extends the
         GEORADIUS command, so in addition to searching within circular
         areas, it supports searching within rectangular areas.
+
         This command should be used in place of the deprecated
         GEORADIUS and GEORADIUSBYMEMBER commands.
+
         ``member`` Use the position of the given existing
          member in the sorted set. Can't be given with ``longitude``
          and ``latitude``.
+
         ``longitude`` and ``latitude`` Use the position given by
         this coordinates. Can't be given with ``member``
         ``radius`` Similar to GEORADIUS, search inside circular
@@ -5598,17 +5672,23 @@ class GeoCommands(CommandsProtocol):
         ``height`` and ``width`` Search inside an axis-aligned
         rectangle, determined by the given height and width.
         Can't be given with ``radius``
+
         ``unit`` must be one of the following : m, km, mi, ft.
         `m` for meters (the default value), `km` for kilometers,
         `mi` for miles and `ft` for feet.
+
         ``sort`` indicates to return the places in a sorted way,
         ASC for nearest to furthest and DESC for furthest to nearest.
+
         ``count`` limit the results to the first count matching items.
+
         ``any`` is set to True, the command will return as soon as
         enough matches are found. Can't be provided without ``count``
+
         ``withdist`` indicates to return the distances of each place.
         ``withcoord`` indicates to return the latitude and longitude of
         each place.
+
         ``withhash`` indicates to return the geohash string of each place.
 
         For more information see https://redis.io/commands/geosearch
@@ -6032,6 +6112,131 @@ class FunctionCommands:
 AsyncFunctionCommands = FunctionCommands
 
 
+class GearsCommands:
+    def tfunction_load(
+        self, lib_code: str, replace: bool = False, config: Union[str, None] = None
+    ) -> ResponseT:
+        """
+        Load a new library to RedisGears.
+
+        ``lib_code`` - the library code.
+        ``config`` - a string representation of a JSON object
+        that will be provided to the library on load time,
+        for more information refer to
+        https://github.com/RedisGears/RedisGears/blob/master/docs/function_advance_topics.md#library-configuration
+        ``replace`` - an optional argument, instructs RedisGears to replace the
+        function if its already exists
+
+        For more information see https://redis.io/commands/tfunction-load/
+        """
+        pieces = []
+        if replace:
+            pieces.append("REPLACE")
+        if config is not None:
+            pieces.extend(["CONFIG", config])
+        pieces.append(lib_code)
+        return self.execute_command("TFUNCTION LOAD", *pieces)
+
+    def tfunction_delete(self, lib_name: str) -> ResponseT:
+        """
+        Delete a library from RedisGears.
+
+        ``lib_name`` the library name to delete.
+
+        For more information see https://redis.io/commands/tfunction-delete/
+        """
+        return self.execute_command("TFUNCTION DELETE", lib_name)
+
+    def tfunction_list(
+        self,
+        with_code: bool = False,
+        verbose: int = 0,
+        lib_name: Union[str, None] = None,
+    ) -> ResponseT:
+        """
+        List the functions with additional information about each function.
+
+        ``with_code`` Show libraries code.
+        ``verbose`` output verbosity level, higher number will increase verbosity level
+        ``lib_name`` specifying a library name (can be used multiple times to show multiple libraries in a single command) # noqa
+
+        For more information see https://redis.io/commands/tfunction-list/
+        """
+        pieces = []
+        if with_code:
+            pieces.append("WITHCODE")
+        if verbose >= 1 and verbose <= 3:
+            pieces.append("v" * verbose)
+        else:
+            raise DataError("verbose can be 1, 2 or 3")
+        if lib_name is not None:
+            pieces.append("LIBRARY")
+            pieces.append(lib_name)
+
+        return self.execute_command("TFUNCTION LIST", *pieces)
+
+    def _tfcall(
+        self,
+        lib_name: str,
+        func_name: str,
+        keys: KeysT = None,
+        _async: bool = False,
+        *args: List,
+    ) -> ResponseT:
+        pieces = [f"{lib_name}.{func_name}"]
+        if keys is not None:
+            pieces.append(len(keys))
+            pieces.extend(keys)
+        else:
+            pieces.append(0)
+        if args is not None:
+            pieces.extend(args)
+        if _async:
+            return self.execute_command("TFCALLASYNC", *pieces)
+        return self.execute_command("TFCALL", *pieces)
+
+    def tfcall(
+        self,
+        lib_name: str,
+        func_name: str,
+        keys: KeysT = None,
+        *args: List,
+    ) -> ResponseT:
+        """
+        Invoke a function.
+
+        ``lib_name`` - the library name contains the function.
+        ``func_name`` - the function name to run.
+        ``keys`` - the keys that will be touched by the function.
+        ``args`` - Additional argument to pass to the function.
+
+        For more information see https://redis.io/commands/tfcall/
+        """
+        return self._tfcall(lib_name, func_name, keys, False, *args)
+
+    def tfcall_async(
+        self,
+        lib_name: str,
+        func_name: str,
+        keys: KeysT = None,
+        *args: List,
+    ) -> ResponseT:
+        """
+        Invoke an async function (coroutine).
+
+        ``lib_name`` - the library name contains the function.
+        ``func_name`` - the function name to run.
+        ``keys`` - the keys that will be touched by the function.
+        ``args`` - Additional argument to pass to the function.
+
+        For more information see https://redis.io/commands/tfcall/
+        """
+        return self._tfcall(lib_name, func_name, keys, True, *args)
+
+
+AsyncGearsCommands = GearsCommands
+
+
 class DataAccessCommands(
     BasicKeyCommands,
     HyperlogCommands,
@@ -6075,6 +6280,7 @@ class CoreCommands(
     PubSubCommands,
     ScriptCommands,
     FunctionCommands,
+    GearsCommands,
 ):
     """
     A class containing all of the implemented redis commands. This class is
@@ -6091,6 +6297,7 @@ class AsyncCoreCommands(
     AsyncPubSubCommands,
     AsyncScriptCommands,
     AsyncFunctionCommands,
+    AsyncGearsCommands,
 ):
     """
     A class containing all of the implemented redis commands. This class is

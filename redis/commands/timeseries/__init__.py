@@ -1,6 +1,7 @@
 import redis
+from redis._parsers.helpers import bool_ok
 
-from ..helpers import parse_to_list
+from ..helpers import get_protocol_version, parse_to_list
 from .commands import (
     ALTER_CMD,
     CREATE_CMD,
@@ -32,27 +33,36 @@ class TimeSeries(TimeSeriesCommands):
     def __init__(self, client=None, **kwargs):
         """Create a new RedisTimeSeries client."""
         # Set the module commands' callbacks
-        self.MODULE_CALLBACKS = {
-            CREATE_CMD: redis.client.bool_ok,
-            ALTER_CMD: redis.client.bool_ok,
-            CREATERULE_CMD: redis.client.bool_ok,
+        self._MODULE_CALLBACKS = {
+            ALTER_CMD: bool_ok,
+            CREATE_CMD: bool_ok,
+            CREATERULE_CMD: bool_ok,
+            DELETERULE_CMD: bool_ok,
+        }
+
+        _RESP2_MODULE_CALLBACKS = {
             DEL_CMD: int,
-            DELETERULE_CMD: redis.client.bool_ok,
-            RANGE_CMD: parse_range,
-            REVRANGE_CMD: parse_range,
+            GET_CMD: parse_get,
+            INFO_CMD: TSInfo,
+            MGET_CMD: parse_m_get,
             MRANGE_CMD: parse_m_range,
             MREVRANGE_CMD: parse_m_range,
-            GET_CMD: parse_get,
-            MGET_CMD: parse_m_get,
-            INFO_CMD: TSInfo,
+            RANGE_CMD: parse_range,
+            REVRANGE_CMD: parse_range,
             QUERYINDEX_CMD: parse_to_list,
         }
+        _RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.execute_command = client.execute_command
 
-        for key, value in self.MODULE_CALLBACKS.items():
-            self.client.set_response_callback(key, value)
+        if get_protocol_version(self.client) in ["3", 3]:
+            self._MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
+        else:
+            self._MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
+
+        for k, v in self._MODULE_CALLBACKS.items():
+            self.client.set_response_callback(k, v)
 
     def pipeline(self, transaction=True, shard_hint=None):
         """Creates a pipeline for the TimeSeries module, that can be used
@@ -83,7 +93,7 @@ class TimeSeries(TimeSeriesCommands):
         else:
             p = Pipeline(
                 connection_pool=self.client.connection_pool,
-                response_callbacks=self.MODULE_CALLBACKS,
+                response_callbacks=self._MODULE_CALLBACKS,
                 transaction=transaction,
                 shard_hint=shard_hint,
             )

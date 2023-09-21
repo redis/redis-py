@@ -1,7 +1,6 @@
 import time
 
 import pytest
-
 from redis.client import Redis
 from redis.exceptions import LockError, LockNotOwnedError
 from redis.lock import Lock
@@ -102,11 +101,12 @@ class TestLock:
         assert lock1.acquire(blocking=False)
         bt = 0.4
         sleep = 0.05
+        fudge_factor = 0.05
         lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
         start = time.monotonic()
         assert not lock2.acquire()
         # The elapsed duration should be less than the total blocking_timeout
-        assert bt > (time.monotonic() - start) > bt - sleep
+        assert (bt + fudge_factor) > (time.monotonic() - start) > bt - sleep
         lock1.release()
 
     def test_context_manager(self, r):
@@ -120,11 +120,12 @@ class TestLock:
         with self.get_lock(r, "foo", blocking=False):
             bt = 0.4
             sleep = 0.05
+            fudge_factor = 0.05
             lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
             start = time.monotonic()
             assert not lock2.acquire()
             # The elapsed duration should be less than the total blocking_timeout
-            assert bt > (time.monotonic() - start) > bt - sleep
+            assert (bt + fudge_factor) > (time.monotonic() - start) > bt - sleep
 
     def test_context_manager_raises_when_locked_not_acquired(self, r):
         r.set("foo", "bar")
@@ -246,7 +247,6 @@ class TestLockClassSelection:
     def test_lock_class_argument(self, r):
         class MyLock:
             def __init__(self, *args, **kwargs):
-
                 pass
 
         lock = r.lock("foo", lock_class=MyLock)

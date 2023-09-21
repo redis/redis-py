@@ -1,13 +1,14 @@
 import os
 import re
 import time
+from contextlib import closing
 from threading import Thread
 from unittest import mock
 
 import pytest
-
 import redis
-from redis.connection import ssl_available, to_bool
+from redis.connection import to_bool
+from redis.utils import SSL_AVAILABLE
 
 from .conftest import _get_client, skip_if_redis_enterprise, skip_if_server_version_lt
 from .test_pubsub import wait_for_message
@@ -50,6 +51,16 @@ class TestConnectionPool:
         connection = pool.get_connection("_")
         assert isinstance(connection, DummyConnection)
         assert connection.kwargs == connection_kwargs
+
+    def test_closing(self):
+        connection_kwargs = {"foo": "bar", "biz": "baz"}
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            max_connections=None,
+            **connection_kwargs,
+        )
+        with closing(pool):
+            pass
 
     def test_multiple_connections(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
@@ -425,7 +436,7 @@ class TestConnectionPoolUnixSocketURLParsing:
         assert pool.connection_class == MyConnection
 
 
-@pytest.mark.skipif(not ssl_available, reason="SSL not installed")
+@pytest.mark.skipif(not SSL_AVAILABLE, reason="SSL not installed")
 class TestSSLConnectionURLParsing:
     def test_host(self):
         pool = redis.ConnectionPool.from_url("rediss://my.host")
