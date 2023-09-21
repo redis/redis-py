@@ -1135,13 +1135,13 @@ class NodesManager:
         if remove_old:
             for name in list(old.keys()):
                 if name not in new:
-                    asyncio.create_task(old.pop(name).disconnect())
+                    task = asyncio.create_task(old.pop(name).disconnect())  # noqa
 
         for name, node in new.items():
             if name in old:
                 if old[name] is node:
                     continue
-                asyncio.create_task(old[name].disconnect())
+                task = asyncio.create_task(old[name].disconnect())  # noqa
             old[name] = node
 
     def _update_moved_slots(self) -> None:
