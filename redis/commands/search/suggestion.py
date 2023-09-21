@@ -10,7 +10,7 @@ class Suggestion:
     """
 
     def __init__(
-        self, string: str, score=1.0, payload: Union[str, None] = None
+        self, string: str, score: float = 1.0, payload: Optional[str] = None
     ) -> None:
         self.string = to_string(string)
         self.payload = to_string(payload)
