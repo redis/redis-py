@@ -148,7 +148,7 @@ class AbstractConnection:
         redis_connect_func: Optional[Callable[[], None]] = None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
-        command_packer: Union[Callable[[], None], None] = None,
+        command_packer: Optional[Callable[[], None]] = None,
     ):
         """
         Initialize a new Connection.
