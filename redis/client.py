@@ -50,7 +50,7 @@ NEVER_DECODE = "NEVER_DECODE"
 class CaseInsensitiveDict(dict):
     "Case insensitive dict implementation. Assumes string keys only."
 
-    def __init__(self, data) -> None:
+    def __init__(self, data: Dict[str, str]) -> None:
         for k, v in data.items():
             self[k.upper()] = v
 
