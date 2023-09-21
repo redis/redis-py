@@ -27,7 +27,7 @@ class SuggestionParser:
     the return value depending on what objects were requested
     """
 
-    def __init__(self, with_scores: bool, with_payloads, ret) -> None:
+    def __init__(self, with_scores: bool, with_payloads: bool, ret) -> None:
         self.with_scores = with_scores
         self.with_payloads = with_payloads
 
