@@ -1123,7 +1123,7 @@ class NodesManager:
             if name in old:
                 if old[name] is node:
                     continue
-                task = asyncio.create_task(old[name].disconnect())
+                task = asyncio.create_task(old[name].disconnect())  # noqa
             old[name] = node
 
     def _update_moved_slots(self) -> None:
