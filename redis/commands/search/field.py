@@ -14,6 +14,7 @@ class Field:
     SORTABLE = "SORTABLE"
     NOINDEX = "NOINDEX"
     AS = "AS"
+    GEOSHAPE = "GEOSHAPE"
 
     def __init__(
         self,
@@ -90,6 +91,21 @@ class NumericField(Field):
 
     def __init__(self, name: str, **kwargs):
         Field.__init__(self, name, args=[Field.NUMERIC], **kwargs)
+
+
+class GeoShapeField(Field):
+    """
+    GeoShapeField is used to enable within/contain indexing/searching
+    """
+
+    SPHERICAL = "SPHERICAL"
+    FLAT = "FLAT"
+
+    def __init__(self, name: str, coord_system=None, **kwargs):
+        args = [Field.GEOSHAPE]
+        if coord_system:
+            args.extend(["COORD_SYSTEM", coord_system])
+        Field.__init__(self, name, args=args, **kwargs)
 
 
 class GeoField(Field):
