@@ -972,7 +972,7 @@ class ConnectionPool:
     def __init__(
         self,
         connection_class=Connection,
-        max_connections: Union[int, None] = None,
+        max_connections: Optional[int] = None,
         **connection_kwargs,
     ):
         max_connections = max_connections or 2**31
