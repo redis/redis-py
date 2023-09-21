@@ -129,9 +129,9 @@ class AbstractConnection:
     def __init__(
         self,
         db: int = 0,
-        password: Union[str, None] = None,
-        socket_timeout: Union[float, None] = None,
-        socket_connect_timeout: Union[float, None] = None,
+        password: Optional[str] = None,
+        socket_timeout: Optional[float] = None,
+        socket_connect_timeout: Optional[float] = None,
         retry_on_timeout: bool = False,
         retry_on_error=SENTINEL,
         encoding: str = "utf-8",
