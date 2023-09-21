@@ -17,6 +17,7 @@ from redis.commands.search.field import (
     TagField,
     TextField,
     VectorField,
+    GeoShapeField,
 )
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType
 from redis.commands.search.query import GeoFilter, NumericFilter, Query
@@ -2269,3 +2270,12 @@ def test_query_timeout(r: redis.Redis):
     q2 = Query("foo").timeout("not_a_number")
     with pytest.raises(redis.ResponseError):
         r.ft().search(q2)
+
+
+def test_geoshape(client: redis.Redis):
+    client.ft().create_index((GeoShapeField("geom", GeoShapeField.FLAT)))
+    waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
+    client.hset("small", "geom", 'POLYGON((1 1, 1 100, 100 100, 100 1, 1 1))')
+    client.hset("large", "geom", 'POLYGON((1 1, 1 200, 200 200, 200 1, 1 1))')
+    result = client.ft().search('@geom:[WITHIN $poly]', {'poly': 'POLYGON((0 0, 0 150, 150 150, 150 0, 0 0))'})
+    result = client.ft().search('@geom:[CONTAINS $poly]', {'poly': 'POLYGON((2 2, 2 50, 50 50, 50 2, 2 2))'})
