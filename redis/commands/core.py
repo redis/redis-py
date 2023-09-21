@@ -403,7 +403,7 @@ class ManagementCommands(CommandsProtocol):
     Redis management commands
     """
 
-    def auth(self, password, username=None, **kwargs):
+    def auth(self, password: str, username: Optional[str] = None, **kwargs):
         """
         Authenticates the user. If you do not pass username, Redis will try to
         authenticate for the "default" user. If you do pass username, it will

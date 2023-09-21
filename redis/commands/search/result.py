@@ -69,5 +69,5 @@ class Result:
             )
             self.docs.append(doc)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Result{{{self.total} total, docs: {self.docs}}}"

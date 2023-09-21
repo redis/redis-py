@@ -464,7 +464,6 @@ def test_json_mget_dollar(client):
 
 
 def test_numby_commands_dollar(client):
-
     # Test NUMINCRBY
     client.json().set("doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]})
     # Test multi
@@ -508,7 +507,6 @@ def test_numby_commands_dollar(client):
 
 
 def test_strappend_dollar(client):
-
     client.json().set(
         "doc1", "$", {"a": "foo", "nested1": {"a": "hello"}, "nested2": {"a": 31}}
     )
@@ -539,7 +537,6 @@ def test_strappend_dollar(client):
 
 
 def test_strlen_dollar(client):
-
     # Test multi
     client.json().set(
         "doc1", "$", {"a": "foo", "nested1": {"a": "hello"}, "nested2": {"a": 31}}
@@ -672,7 +669,6 @@ def test_arrinsert_dollar(client):
 
 
 def test_arrlen_dollar(client):
-
     client.json().set(
         "doc1",
         "$",
@@ -762,7 +758,6 @@ def test_arrpop_dollar(client):
 
 
 def test_arrtrim_dollar(client):
-
     client.json().set(
         "doc1",
         "$",
@@ -1015,7 +1010,6 @@ def test_toggle_dollar(client):
 
 
 def test_resp_dollar(client):
-
     data = {
         "L1": {
             "a": {
@@ -1244,7 +1238,6 @@ def test_resp_dollar(client):
 
 
 def test_arrindex_dollar(client):
-
     client.json().set(
         "store",
         "$",

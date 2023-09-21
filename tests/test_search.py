@@ -87,7 +87,6 @@ def createIndex(client, num_docs=100, definition=None):
 
     r = csv.reader(bzfp, delimiter=";")
     for n, line in enumerate(r):
-
         play, chapter, _, text = line[1], line[2], line[4], line[5]
 
         key = f"{play}:{chapter}".lower()
@@ -821,7 +820,6 @@ def test_spell_check(client):
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
 
     if is_resp2_connection(client):
-
         # test spellcheck
         res = client.ft().spellcheck("impornant")
         assert "important" == res["impornant"][0]["suggestion"]
@@ -2101,7 +2099,6 @@ def test_numeric_params(client):
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
 def test_geo_params(client):
-
     client.ft().create_index((GeoField("g")))
     client.hset("doc1", mapping={"g": "29.69465, 34.95126"})
     client.hset("doc2", mapping={"g": "29.69350, 34.94737"})

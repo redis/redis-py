@@ -243,10 +243,8 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
             ]
             res = self.push_handler_func(response)
             if not push_request:
-                return await (
-                    self._read_response(
-                        disable_decoding=disable_decoding, push_request=push_request
-                    )
+                return await self._read_response(
+                    disable_decoding=disable_decoding, push_request=push_request
                 )
             else:
                 return res
