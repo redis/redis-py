@@ -13,11 +13,11 @@ from redis.commands.json.path import Path
 from redis.commands.search import Search
 from redis.commands.search.field import (
     GeoField,
+    GeoShapeField,
     NumericField,
     TagField,
     TextField,
     VectorField,
-    GeoShapeField,
 )
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType
 from redis.commands.search.query import GeoFilter, NumericFilter, Query
