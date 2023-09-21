@@ -1117,7 +1117,7 @@ class NodesManager:
         if remove_old:
             for name in list(old.keys()):
                 if name not in new:
-                    task = asyncio.create_task(old.pop(name).disconnect())
+                    task = asyncio.create_task(old.pop(name).disconnect())  # noqa
 
         for name, node in new.items():
             if name in old:
