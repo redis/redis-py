@@ -2268,7 +2268,7 @@ def test_query_timeout(r: redis.Redis):
     with pytest.raises(redis.ResponseError):
         r.ft().search(q2)
 
-
+@pytest.mark.redismod
 def test_geoshape(client: redis.Redis):
     client.ft().create_index((GeoShapeField("geom", GeoShapeField.FLAT)))
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
