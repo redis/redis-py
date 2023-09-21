@@ -2272,12 +2272,12 @@ def test_query_timeout(r: redis.Redis):
 def test_geoshape(client: redis.Redis):
     client.ft().create_index((GeoShapeField("geom", GeoShapeField.FLAT)))
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
-    client.hset("small", "geom", 'POLYGON((1 1, 1 100, 100 100, 100 1, 1 1))')
-    client.hset("large", "geom", 'POLYGON((1 1, 1 200, 200 200, 200 1, 1 1))')
+    client.hset("small", "geom", "POLYGON((1 1, 1 100, 100 100, 100 1, 1 1))")
+    client.hset("large", "geom", "POLYGON((1 1, 1 200, 200 200, 200 1, 1 1))")
     q1 = Query("@geom:[WITHIN $poly]").dialect(3)
-    qp1 = {'poly': 'POLYGON((0 0, 0 150, 150 150, 150 0, 0 0))'}
+    qp1 = {"poly": "POLYGON((0 0, 0 150, 150 150, 150 0, 0 0))"}
     q2 = Query("@geom:[CONTAINS $poly]").dialect(3)
-    qp2 = {'poly': 'POLYGON((2 2, 2 50, 50 50, 50 2, 2 2))'}
+    qp2 = {"poly": "POLYGON((2 2, 2 50, 50 50, 50 2, 2 2))"}
     result = client.ft().search(q1, query_params=qp1)
     assert len(result.docs) == 1
     assert result.docs[0]["id"] == "small"
