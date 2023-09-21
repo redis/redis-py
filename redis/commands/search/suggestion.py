@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Optional
 
 from ._util import to_string
 
