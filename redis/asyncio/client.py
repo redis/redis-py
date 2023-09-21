@@ -783,7 +783,7 @@ class PubSub:
 
     def __del__(self):
         if self.connection:
-            self.connection.clear_connect_callbacks()
+            self.connection._deregister_connect_callback(self.on_connect)
 
     async def aclose(self):
         # In case a connection property does not yet exist
