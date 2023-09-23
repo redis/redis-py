@@ -173,7 +173,11 @@ class JSONCommands:
     forget = delete
 
     def get(
-        self, name: str, *args, no_escape: Optional[bool] = False
+        self,
+        name: str,
+        *args,
+        no_escape: Optional[bool] = False,
+        ignore_response_callbacks: Optional[bool] = False,
     ) -> List[JsonType]:
         """
         Get the object stored as a JSON value at key ``name``.
@@ -181,6 +185,8 @@ class JSONCommands:
         ``args`` is zero or more paths, and defaults to root path
         ```no_escape`` is a boolean flag to add no_escape option to get
         non-ascii characters
+        ``ignore_response_callbacks`` is a boolean flag to ignore response callbacks
+        or not
 
         For more information see `JSON.GET <https://redis.io/commands/json.get>`_.
         """  # noqa
@@ -198,7 +204,11 @@ class JSONCommands:
         # Handle case where key doesn't exist. The JSONDecoder would raise a
         # TypeError exception since it can't decode None
         try:
-            return self.execute_command("JSON.GET", *pieces)
+            return self.execute_command(
+                "JSON.GET",
+                *pieces,
+                ignore_response_callbacks=ignore_response_callbacks,
+            )
         except TypeError:
             return None
 

@@ -1532,3 +1532,15 @@ def test_set_path(client):
     assert_resp_response(
         client, client.json().get(jsonfile.rsplit(".")[0]), res, [[res]]
     )
+
+
+@pytest.mark.onlynoncluster
+def test_json_get_response_callbacks_behaviour(client):
+    bar = {
+        "qwe": "rty",
+        "asd": 123,
+    }
+    client.json().set("foo", Path.root_path(), bar)
+    assert isinstance(client.execute_command("JSON.GET", "foo"), str)
+    assert isinstance(client.json().get("foo"), dict)
+    assert isinstance(client.execute_command("JSON.GET", "foo"), str)

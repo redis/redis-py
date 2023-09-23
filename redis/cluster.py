@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from redis._parsers import CommandsParser, Encoder
 from redis._parsers.helpers import parse_scan
 from redis.backoff import default_backoff
-from redis.client import CaseInsensitiveDict, PubSub, Redis
+from redis.client import IGNORE_RESPONSE_CALLBACKS, CaseInsensitiveDict, PubSub, Redis
 from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args
 from redis.connection import ConnectionPool, DefaultParser, parse_url
@@ -1064,6 +1064,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         is_default_node = False
         target_nodes = None
         passed_targets = kwargs.pop("target_nodes", None)
+        ignore_response_callbacks = kwargs.pop(IGNORE_RESPONSE_CALLBACKS, False)
         if passed_targets is not None and not self._is_nodes_flag(passed_targets):
             target_nodes = self._parse_target_nodes(passed_targets)
             target_nodes_specified = True
@@ -1098,7 +1099,12 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     ):
                         is_default_node = True
                 for node in target_nodes:
-                    res[node.name] = self._execute_command(node, *args, **kwargs)
+                    res[node.name] = self._execute_command(
+                        node,
+                        *args,
+                        **kwargs,
+                        ignore_response_callbacks=ignore_response_callbacks,
+                    )
                 # Return the processed result
                 return self._process_result(args[0], res, **kwargs)
             except Exception as e:
@@ -1119,6 +1125,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         Send a command to a node in the cluster
         """
         command = args[0]
+        ignore_response_callbacks = kwargs.pop(IGNORE_RESPONSE_CALLBACKS, False)
         redis_node = None
         connection = None
         redirect_addr = None
@@ -1149,7 +1156,10 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
 
                 connection.send_command(*args)
                 response = redis_node.parse_response(connection, command, **kwargs)
-                if command in self.cluster_response_callbacks:
+                if (
+                    command in self.cluster_response_callbacks
+                    and not ignore_response_callbacks
+                ):
                     response = self.cluster_response_callbacks[command](
                         response, **kwargs
                     )
@@ -2230,7 +2240,14 @@ class ClusterPipeline(RedisCluster):
         # to the sequence of commands issued in the stack in pipeline.execute()
         response = []
         for c in sorted(stack, key=lambda x: x.position):
-            if c.args[0] in self.cluster_response_callbacks:
+            ignore_response_callbacks = c.options.pop(
+                IGNORE_RESPONSE_CALLBACKS,
+                False,
+            )
+            if (
+                c.args[0] in self.cluster_response_callbacks
+                and not ignore_response_callbacks
+            ):
                 c.result = self.cluster_response_callbacks[c.args[0]](
                     c.result, **c.options
                 )
