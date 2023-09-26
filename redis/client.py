@@ -94,7 +94,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     """
 
     @classmethod
-    def from_url(cls, url: str, **kwargs) -> None:
+    def from_url(cls, url: str, **kwargs) -> "Redis":
         """
         Return a Redis client object configured from the given URL
 
