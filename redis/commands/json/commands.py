@@ -121,7 +121,7 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.OBJKEYS", name, str(path))
 
-    def objlen(self, name: str, path: Optional[str] = Path.root_path()) -> int:
+    def objlen(self, name: str, path: Optional[str] = Path.root_path()) -> List[Union[int, None]]:
         """Return the length of the dictionary JSON value under ``path`` at key
         ``name``.
 
