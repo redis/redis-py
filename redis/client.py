@@ -1100,7 +1100,7 @@ class PubSub:
 
     def run_in_thread(
         self,
-        sleep_time: int = 0,
+        sleep_time: float = 0.0,
         daemon: bool = False,
         exception_handler: Optional[Callable] = None,
     ) -> "PubSubWorkerThread":
