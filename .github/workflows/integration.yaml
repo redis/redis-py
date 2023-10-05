@@ -57,7 +57,7 @@ jobs:
        max-parallel: 15
        fail-fast: false
        matrix:
-         python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', 'pypy-3.7', 'pypy-3.8', 'pypy-3.9']
+         python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12', 'pypy-3.7', 'pypy-3.8', 'pypy-3.9']
          test-type: ['standalone', 'cluster']
          connection-type: ['hiredis', 'plain']
      env:
@@ -89,7 +89,7 @@ jobs:
 
        - name: Upload codecov coverage
          uses: codecov/codecov-action@v3
-         if: ${{matrix.python-version == '3.11'}}
+         if: ${{matrix.python-version == '3.12'}}
          with:
            fail_ci_if_error: false
 
@@ -111,7 +111,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.7', '3.11']
+        python-version: ['3.7', '3.12']
         test-type: ['standalone', 'cluster']
         connection-type: ['hiredis', 'plain']
         protocol: ['3']
@@ -160,7 +160,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', 'pypy-3.7', 'pypy-3.8', 'pypy-3.9']
+        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12', 'pypy-3.7', 'pypy-3.8', 'pypy-3.9']
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4

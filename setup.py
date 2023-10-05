@@ -38,7 +38,7 @@ setup(
     install_requires=[
         'importlib-metadata >= 1.0; python_version < "3.8"',
         'typing-extensions; python_version<"3.8"',
-        'async-timeout>=4.0.2; python_full_version<="3.11.2"',
+        'async-timeout>=4.0.2"',
     ],
     classifiers=[
         "Development Status :: 5 - Production/Stable",
@@ -54,11 +54,12 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: PyPy",
     ],
     extras_require={
         "hiredis": ["hiredis>=1.0.0"],
-        "ocsp": ["cryptography>=36.0.1", "pyopenssl==20.0.1", "requests>=2.26.0"],
+        "ocsp": ["cryptography>=36.0.1", "pyopenssl==23.2.1", "requests>=2.31.0"],
     },
 )
