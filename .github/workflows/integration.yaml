@@ -29,7 +29,7 @@ jobs:
      name: Dependency audit
      runs-on: ubuntu-latest
      steps:
-       - uses: actions/checkout@v3
+       - uses: actions/checkout@v4
        - uses: pypa/gh-action-pip-audit@v1.0.8
          with:
            inputs: requirements.txt dev_requirements.txt
@@ -40,7 +40,7 @@ jobs:
      name: Code linters
      runs-on: ubuntu-latest
      steps:
-       - uses: actions/checkout@v3
+       - uses: actions/checkout@v4
        - uses: actions/setup-python@v4
          with:
            python-version: 3.9
@@ -64,7 +64,7 @@ jobs:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
      name: Python ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}} tests
      steps:
-       - uses: actions/checkout@v3
+       - uses: actions/checkout@v4
        - uses: actions/setup-python@v4
          with:
            python-version: ${{ matrix.python-version }}
@@ -119,7 +119,7 @@ jobs:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: RESP3 [${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
@@ -146,7 +146,7 @@ jobs:
       matrix:
         extension: ['tar.gz', 'whl']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions/setup-python@v4
         with:
           python-version: 3.9
@@ -162,7 +162,7 @@ jobs:
       matrix:
         python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12', 'pypy-3.7', 'pypy-3.8', 'pypy-3.9']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
