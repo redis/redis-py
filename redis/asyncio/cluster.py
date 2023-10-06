@@ -1195,7 +1195,11 @@ class NodesManager:
                 node_idx = self.read_load_balancer.get_server_index(
                     primary_name, len(self.slots_cache[slot])
                 )
-                return self.slots_cache[slot][node_idx]
+
+                # we use the node returned by RR in the load balancer
+                # if it's part of the slots cache, otherwise we use primary
+                node = node_idx if node_idx in self.slots_cache[slot] else 0
+                return self.slots_cache[slot][node]
             return self.slots_cache[slot][0]
         except (IndexError, TypeError):
             raise SlotNotCoveredError(
