@@ -1027,7 +1027,18 @@ class ConnectionPool:
         )
 
     async def get_connection(self, command_name, *keys, **options):
-        """Get a connection from the pool"""
+        """Get a connected connection from the pool"""
+        connection = self.get_available_connection()
+        try:
+            await self.ensure_connection(connection)
+        except BaseException:
+            await self.release(connection)
+            raise
+
+        return connection
+
+    def get_available_connection(self):
+        """Get a connection from the pool, without making sure it is connected"""
         try:
             connection = self._available_connections.pop()
         except IndexError:
@@ -1035,13 +1046,6 @@ class ConnectionPool:
                 raise ConnectionError("Too many connections") from None
             connection = self.make_connection()
         self._in_use_connections.add(connection)
-
-        try:
-            await self.ensure_connection(connection)
-        except BaseException:
-            await self.release(connection)
-            raise
-
         return connection
 
     def get_encoder(self):
@@ -1166,12 +1170,20 @@ class BlockingConnectionPool(ConnectionPool):
     async def get_connection(self, command_name, *keys, **options):
         """Gets a connection from the pool, blocking until one is available"""
         try:
-            async with async_timeout(self.timeout):
-                async with self._condition:
+            async with self._condition:
+                async with async_timeout(self.timeout):
                     await self._condition.wait_for(self.can_get_connection)
-                    return await super().get_connection(command_name, *keys, **options)
+                    connection = super().get_available_connection()
         except asyncio.TimeoutError as err:
             raise ConnectionError("No connection available.") from err
+
+        # We now perform the connection check outside of the lock.
+        try:
+            await self.ensure_connection(connection)
+            return connection
+        except BaseException:
+            await self.release(connection)
+            raise
 
     async def release(self, connection: AbstractConnection):
         """Releases the connection back to the pool."""
