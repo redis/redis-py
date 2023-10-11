@@ -1028,7 +1028,7 @@ class ConnectionPool:
 
     async def get_connection(self, command_name, *keys, **options):
         """Get a connected connection from the pool"""
-        connection = self.get_available_connection()
+        connection = await self.get_available_connection()
         try:
             await self.ensure_connection(connection)
         except BaseException:
@@ -1037,7 +1037,7 @@ class ConnectionPool:
 
         return connection
 
-    def get_available_connection(self):
+    async def get_available_connection(self):
         """Get a connection from the pool, without making sure it is connected"""
         try:
             connection = self._available_connections.pop()
@@ -1167,23 +1167,15 @@ class BlockingConnectionPool(ConnectionPool):
         self._condition = asyncio.Condition()
         self.timeout = timeout
 
-    async def get_connection(self, command_name, *keys, **options):
+    async def get_available_connection(self):
         """Gets a connection from the pool, blocking until one is available"""
         try:
             async with self._condition:
                 async with async_timeout(self.timeout):
                     await self._condition.wait_for(self.can_get_connection)
-                    connection = super().get_available_connection()
+                    return await super().get_available_connection()
         except asyncio.TimeoutError as err:
             raise ConnectionError("No connection available.") from err
-
-        # We now perform the connection check outside of the lock.
-        try:
-            await self.ensure_connection(connection)
-            return connection
-        except BaseException:
-            await self.release(connection)
-            raise
 
     async def release(self, connection: AbstractConnection):
         """Releases the connection back to the pool."""
