@@ -206,7 +206,7 @@ class AbstractConnection:
 
     def __repr__(self):
         repr_args = ",".join((f"{k}={v}" for k, v in self.repr_pieces()))
-        return f"{self.__class__.__name__}<{repr_args}>"
+        return f"<{self.__class__.__module__}.{self.__class__.__name__}({repr_args})>"
 
     @abstractmethod
     def repr_pieces(self):
@@ -1011,8 +1011,8 @@ class ConnectionPool:
 
     def __repr__(self):
         return (
-            f"{self.__class__.__name__}"
-            f"<{self.connection_class(**self.connection_kwargs)!r}>"
+            f"<{self.__class__.__module__}.{self.__class__.__name__}"
+            f"({self.connection_class(**self.connection_kwargs)!r})>"
         )
 
     def reset(self):
