@@ -5,6 +5,7 @@ import inspect
 import socket
 import ssl
 import sys
+import warnings
 import weakref
 from abc import abstractmethod
 from itertools import chain
@@ -203,6 +204,24 @@ class AbstractConnection:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
             self.protocol = protocol
+
+    def __del__(self, _warnings: Any = warnings):
+        # For some reason, the individual streams don't get properly garbage
+        # collected and therefore produce no resource warnings.  We add one
+        # here, in the same style as those from the stdlib.
+        if getattr(self, "_writer", None):
+            _warnings.warn(
+                f"unclosed Connection {self!r}", ResourceWarning, source=self
+            )
+            self._close()
+
+    def _close(self):
+        """
+        Internal method to silently close the connection without waiting
+        """
+        if self._writer:
+            self._writer.close()
+            self._writer = self._reader = None
 
     def __repr__(self):
         repr_args = ",".join((f"{k}={v}" for k, v in self.repr_pieces()))
@@ -1017,7 +1036,7 @@ class ConnectionPool:
 
     def reset(self):
         self._available_connections = []
-        self._in_use_connections = set()
+        self._in_use_connections = weakref.WeakSet()
 
     def can_get_connection(self) -> bool:
         """Return True if a connection can be retrieved from the pool."""
