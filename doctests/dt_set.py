@@ -36,15 +36,15 @@ r.sadd("bikes:racing:france", "bike:1", "bike:2", "bike:3")
 r.sadd("bikes:racing:usa", "bike:1", "bike:4")
 # HIDE_END
 res5 = r.sismember("bikes:racing:usa", "bike:1")
-print(res5)  # >>> True
+print(res5)  # >>> 1
 
 res6 = r.sismember("bikes:racing:usa", "bike:2")
-print(res6)  # >>> False
+print(res6)  # >>> 1
 # STEP_END
 
 # REMOVE_START
-assert res5 is True
-assert res6 is False
+assert res5 == 1
+assert res6 == 0
 # REMOVE_END
 
 # STEP_START sinter
@@ -88,15 +88,15 @@ assert res10 == {"bike:1", "bike:2", "bike:3"}
 
 # STEP_START smismember
 res11 = r.sismember("bikes:racing:france", "bike:1")
-print(res11)  # >>> True
+print(res11)  # >>> 1
 
 res12 = r.smismember("bikes:racing:france", "bike:2", "bike:3", "bike:4")
-print(res12)  # >>> [True, True, False]
+print(res12)  # >>> [1, 1, 0]
 # STEP_END
 
 # REMOVE_START
-assert res11 is True
-assert res12 == [True, True, False]
+assert res11 == 1
+assert res12 == [1, 1, 0]
 # REMOVE_END
 
 # STEP_START sdiff
