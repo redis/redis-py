@@ -436,3 +436,50 @@ async def test_redis_pool_auto_close_arg(request, auto_close):
 
     assert called == 0
     await pool.disconnect()
+
+
+async def test_client_garbage_collection(request):
+    """
+    Test that a Redis client will call _close() on any
+    connection that it holds at time of destruction
+    """
+
+    url: str = request.config.getoption("--redis-url")
+    pool = ConnectionPool.from_url(url)
+
+    # create a client with a connection from the pool
+    client = Redis(connection_pool=pool, single_connection_client=True)
+    await client.initialize()
+    with mock.patch.object(client, "connection") as a:
+        # we cannot, in unittests, or from asyncio, reliably trigger garbage collection
+        # so we must just invoke the handler
+        client.__del__()
+        assert a._close.called
+
+    await client.aclose()
+    await pool.aclose()
+
+
+async def test_connection_garbage_collection(request):
+    """
+    Test that a Connection object will call close() on the
+    stream that it holds.
+    """
+
+    url: str = request.config.getoption("--redis-url")
+    pool = ConnectionPool.from_url(url)
+
+    # create a client with a connection from the pool
+    client = Redis(connection_pool=pool, single_connection_client=True)
+    await client.initialize()
+    conn = client.connection
+
+    with mock.patch.object(conn, "_reader"):
+        with mock.patch.object(conn, "_writer") as a:
+            # we cannot, in unittests, or from asyncio, reliably trigger garbage collection
+            # so we must just invoke the handler
+            conn.__del__()
+            assert a.close.called
+
+    await client.aclose()
+    await pool.aclose()
