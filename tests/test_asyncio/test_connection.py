@@ -478,8 +478,8 @@ async def test_connection_garbage_collection(request):
 
     with mock.patch.object(conn, "_reader"):
         with mock.patch.object(conn, "_writer") as a:
-            # we cannot, in unittests, or from asyncio, reliably trigger garbage collection
-            # so we must just invoke the handler
+            # we cannot, in unittests, or from asyncio, reliably trigger
+            # garbage collection so we must just invoke the handler
             with pytest.warns(ResourceWarning):
                 conn.__del__()
                 assert a.close.called
