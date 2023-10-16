@@ -85,6 +85,8 @@ async def test_single_connection():
 
     assert init_call_count == 1
     assert command_call_count == 2
+    r.connection = None  # it was a Mock
+    await r.aclose()
 
 
 @skip_if_server_version_lt("4.0.0")
@@ -143,6 +145,7 @@ async def test_connect_retry_on_timeout_error(connect_args):
     conn._connect.side_effect = mock_connect
     await conn.connect()
     assert conn._connect.call_count == 3
+    await conn.disconnect()
 
 
 async def test_connect_without_retry_on_os_error():
@@ -194,6 +197,7 @@ async def test_connection_parse_response_resume(r: redis.Redis):
         pytest.fail("didn't receive a response")
     assert response
     assert i > 0
+    await conn.disconnect()
 
 
 @pytest.mark.onlynoncluster
