@@ -15,6 +15,8 @@ class DelayProxy:
         self.send_event = asyncio.Event()
         self.server = None
         self.task = None
+        self.cond = asyncio.Condition()
+        self.running = 0
 
     async def __aenter__(self):
         await self.start()
@@ -63,10 +65,10 @@ class DelayProxy:
         except asyncio.CancelledError:
             pass
         await self.server.wait_closed()
-        # do we need to close individual connections too?
-        # prudently close all async generators
-        loop = self.server.get_loop()
-        await loop.shutdown_asyncgens()
+        # Server does not wait for all spawned tasks.  We must do that also to ensure
+        # that all sockets are closed.
+        async with self.cond:
+            await self.cond.wait_for(lambda: self.running == 0)
 
     async def pipe(
         self,
@@ -75,6 +77,7 @@ class DelayProxy:
         name="",
         event: asyncio.Event = None,
     ):
+        self.running += 1
         try:
             while True:
                 data = await reader.read(1000)
@@ -94,6 +97,10 @@ class DelayProxy:
                 # ignore errors on close pertaining to no event loop. Don't want
                 # to clutter the test output with errors if being garbage collected
                 pass
+            async with self.cond:
+                self.running -= 1
+                if self.running == 0:
+                    self.cond.notify_all()
 
 
 @pytest.mark.onlynoncluster

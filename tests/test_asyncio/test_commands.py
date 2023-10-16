@@ -370,10 +370,12 @@ class TestRedisCommands:
         info = await r2.client_info()
         assert info["lib-name"] == "test2"
         assert info["lib-ver"] == "1234"
+        await r2.aclose()
         r3 = redis.asyncio.Redis(lib_name=None, lib_version=None)
         info = await r3.client_info()
         assert info["lib-name"] == ""
         assert info["lib-ver"] == ""
+        await r3.aclose()
 
     @skip_if_server_version_lt("2.6.9")
     @pytest.mark.onlynoncluster
