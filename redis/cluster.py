@@ -2196,7 +2196,7 @@ class ClusterPipeline(RedisCluster):
         )
         if attempt and allow_redirections:
             # RETRY MAGIC HAPPENS HERE!
-            # send these remaing commands one at a time using `execute_command`
+            # send these remaining commands one at a time using `execute_command`
             # in the main client. This keeps our retry logic
             # in one place mostly,
             # and allows us to be more confident in correctness of behavior.

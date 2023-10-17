@@ -61,7 +61,7 @@ def _check_certificate(issuer_cert, ocsp_bytes, validate=True):
             )
     else:
         raise ConnectionError(
-            "failed to retrieve a sucessful response from the ocsp responder"
+            "failed to retrieve a successful response from the ocsp responder"
         )
 
     if ocsp_response.this_update >= datetime.datetime.now():
@@ -266,7 +266,7 @@ class OCSPVerifier:
         return url
 
     def check_certificate(self, server, cert, issuer_url):
-        """Checks the validitity of an ocsp server for an issuer"""
+        """Checks the validity of an ocsp server for an issuer"""
 
         r = requests.get(issuer_url)
         if not r.ok:
