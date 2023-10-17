@@ -2,6 +2,7 @@ import asyncio
 import logging
 import socket
 import ssl
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -19,6 +20,7 @@ _logger = logging.getLogger(__name__)
 
 
 _CLIENT_NAME = "test-suite-client"
+PY37 = sys.version_info[:2] == (3, 7)
 
 
 @pytest.fixture
@@ -77,14 +79,15 @@ async def test_tcp_ssl_connect(tcp_address):
         (6, 3, True, True),
     ],
 )
-# @pytest.mark.parametrize("use_protocol", [2, 3])
-# @pytest.mark.parametrize("use_auth", [False, True])
 async def test_tcp_auth(
     tcp_address, use_protocol, use_auth, use_server_ver, use_client_name
 ):
     """
     Test that various initial handshake cases are handled correctly by the client
     """
+    if use_protocol == 3 and PY37:
+        pytest.skip("Python 3.7 does not support protocol 3 for asyncio")
+
     got_auth = []
     got_protocol = None
     got_name = None
