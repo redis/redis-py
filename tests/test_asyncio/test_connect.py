@@ -73,6 +73,8 @@ async def _assert_connect(conn, server_address, certfile=None, keyfile=None):
         try:
             return await _redis_request_handler(reader, writer, stop_event)
         finally:
+            writer.close()
+            await writer.wait_closed()
             finished.set()
 
     if isinstance(server_address, str):

@@ -546,6 +546,7 @@ class Redis(
                 _grl().call_exception_handler(context)
             except RuntimeError:
                 pass
+            self.connection._close()
 
     async def aclose(self, close_connection_pool: Optional[bool] = None) -> None:
         """
