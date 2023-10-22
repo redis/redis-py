@@ -34,3 +34,4 @@ async def test_connect_retry_on_timeout_error(connect_args):
     conn._connect.side_effect = mock_connect
     await conn.connect()
     assert conn._connect.call_count == 3
+    await conn.disconnect()
