@@ -137,6 +137,7 @@ REDIS_ALLOWED_KEYS = (
     "redis_connect_func",
     "password",
     "port",
+    "queue_class",  # queue_class is added in redis-py 4.5 (https://github.com/redis/redis-py/pull/2577)
     "retry",
     "retry_on_timeout",
     "socket_connect_timeout",
@@ -150,6 +151,7 @@ REDIS_ALLOWED_KEYS = (
     "ssl_cert_reqs",
     "ssl_keyfile",
     "ssl_password",
+    "timeout",  # added timeout to support injecting BlockingConnectionPool timeout
     "unix_socket_path",
     "username",
 )
