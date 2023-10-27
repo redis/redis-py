@@ -1118,3 +1118,22 @@ class TestBaseException:
 
         # the timeout on the read should not cause disconnect
         assert is_connected()
+
+
+@pytest.mark.onlynoncluster
+class TestConnectionLeak:
+    def test_connection_leak(self, r: redis.Redis):
+        pubsub = r.pubsub()
+
+        def test():
+            tid = threading.get_ident()
+            pubsub.subscribe(f"foo{tid}")
+
+        threads = [threading.Thread(target=test) for _ in range(10)]
+        for thread in threads:
+            thread.start()
+
+        for thread in threads:
+            thread.join()
+
+        assert r.connection_pool._created_connections == 2

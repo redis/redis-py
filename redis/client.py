@@ -1392,6 +1392,7 @@ class PubSub:
             self.health_check_response = ["pong", self.HEALTH_CHECK_MESSAGE]
         else:
             self.health_check_response = [b"pong", self.health_check_response_b]
+        self._connection_lock = threading.Lock()
         self.reset()
 
     def __enter__(self):
@@ -1465,12 +1466,14 @@ class PubSub:
         # subscribed to one or more channels
 
         if self.connection is None:
-            self.connection = self.connection_pool.get_connection(
-                "pubsub", self.shard_hint
-            )
-            # register a callback that re-subscribes to any channels we
-            # were listening to when we were disconnected
-            self.connection.register_connect_callback(self.on_connect)
+            with self._connection_lock:
+                if self.connection is None:
+                    self.connection = self.connection_pool.get_connection(
+                        "pubsub", self.shard_hint
+                    )
+                    # register a callback that re-subscribes to any channels we
+                    # were listening to when we were disconnected
+                    self.connection.register_connect_callback(self.on_connect)
         connection = self.connection
         kwargs = {"check_health": not self.subscribed}
         if not self.subscribed:
