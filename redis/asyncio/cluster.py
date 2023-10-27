@@ -1198,7 +1198,7 @@ class NodesManager:
 
                 # we use the node returned by RR in the load balancer
                 # if it's part of the slots cache, otherwise we use primary
-                node = node_idx if node_idx in self.slots_cache[slot] else 0
+                node = node_idx if node_idx < len(self.slots_cache[slot]) else 0
                 return self.slots_cache[slot][node]
             return self.slots_cache[slot][0]
         except (IndexError, TypeError):
