@@ -4919,7 +4919,7 @@ class HashCommands(CommandsProtocol):
     see: https://redis.io/topics/data-types-intro#redis-hashes
     """
 
-    def hdel(self, name: str, *keys: List) -> Union[Awaitable[int], int]:
+    def hdel(self, name: str, *keys: str) -> Union[Awaitable[int], int]:
         """
         Delete ``keys`` from hash ``name``
 
