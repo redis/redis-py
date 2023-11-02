@@ -14,7 +14,6 @@ from typing import (
     List,
     Mapping,
     MutableMapping,
-    NoReturn,
     Optional,
     Set,
     Tuple,
@@ -67,6 +66,7 @@ from redis.typing import ChannelT, EncodableT, KeyT
 from redis.utils import (
     HIREDIS_AVAILABLE,
     _set_info_logger,
+    deprecated_function,
     get_lib_version,
     safe_str,
     str_if_bytes,
@@ -229,7 +229,6 @@ class Redis(
         lib_version: Optional[str] = get_lib_version(),
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
-        # deprecated. create a pool and use connection_pool instead
         auto_close_connection_pool: Optional[bool] = None,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
@@ -243,7 +242,9 @@ class Redis(
         To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
         """
         kwargs: Dict[str, Any]
-
+        # auto_close_connection_pool only has an effect if connection_pool is
+        # None. It is assumed that if connection_pool is not None, the user
+        # wants to manage the connection pool themselves.
         if auto_close_connection_pool is not None:
             warnings.warn(
                 DeprecationWarning(
@@ -529,19 +530,27 @@ class Redis(
         return await self.initialize()
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        await self.close()
+        await self.aclose()
 
     _DEL_MESSAGE = "Unclosed Redis client"
 
-    def __del__(self, _warnings: Any = warnings) -> None:
+    # passing _warnings and _grl as argument default since they may be gone
+    # by the time __del__ is called at shutdown
+    def __del__(
+        self,
+        _warn: Any = warnings.warn,
+        _grl: Any = asyncio.get_running_loop,
+    ) -> None:
         if hasattr(self, "connection") and (self.connection is not None):
-            _warnings.warn(
-                f"Unclosed client session {self!r}", ResourceWarning, source=self
-            )
-            context = {"client": self, "message": self._DEL_MESSAGE}
-            asyncio.get_running_loop().call_exception_handler(context)
+            _warn(f"Unclosed client session {self!r}", ResourceWarning, source=self)
+            try:
+                context = {"client": self, "message": self._DEL_MESSAGE}
+                _grl().call_exception_handler(context)
+            except RuntimeError:
+                pass
+            self.connection._close()
 
-    async def close(self, close_connection_pool: Optional[bool] = None) -> None:
+    async def aclose(self, close_connection_pool: Optional[bool] = None) -> None:
         """
         Closes Redis client connection
 
@@ -558,6 +567,13 @@ class Redis(
             close_connection_pool is None and self.auto_close_connection_pool
         ):
             await self.connection_pool.disconnect()
+
+    @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="close")
+    async def close(self, close_connection_pool: Optional[bool] = None) -> None:
+        """
+        Alias for aclose(), for backwards compatibility
+        """
+        await self.aclose(close_connection_pool)
 
     async def _send_command_parse_response(self, conn, command_name, *args, **options):
         """
@@ -775,17 +791,22 @@ class PubSub:
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        await self.reset()
+        await self.aclose()
 
     def __del__(self):
         if self.connection:
-            self.connection.clear_connect_callbacks()
+            self.connection._deregister_connect_callback(self.on_connect)
 
-    async def reset(self):
+    async def aclose(self):
+        # In case a connection property does not yet exist
+        # (due to a crash earlier in the Redis() constructor), return
+        # immediately as there is nothing to clean-up.
+        if not hasattr(self, "connection"):
+            return
         async with self._lock:
             if self.connection:
                 await self.connection.disconnect()
-                self.connection.clear_connect_callbacks()
+                self.connection._deregister_connect_callback(self.on_connect)
                 await self.connection_pool.release(self.connection)
                 self.connection = None
             self.channels = {}
@@ -793,13 +814,15 @@ class PubSub:
             self.patterns = {}
             self.pending_unsubscribe_patterns = set()
 
-    def close(self) -> Awaitable[NoReturn]:
-        # In case a connection property does not yet exist
-        # (due to a crash earlier in the Redis() constructor), return
-        # immediately as there is nothing to clean-up.
-        if not hasattr(self, "connection"):
-            return
-        return self.reset()
+    @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="close")
+    async def close(self) -> None:
+        """Alias for aclose(), for backwards compatibility"""
+        await self.aclose()
+
+    @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="reset")
+    async def reset(self) -> None:
+        """Alias for aclose(), for backwards compatibility"""
+        await self.aclose()
 
     async def on_connect(self, connection: Connection):
         """Re-subscribe to any channels and patterns previously subscribed to"""
@@ -846,7 +869,7 @@ class PubSub:
             )
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
-            self.connection.register_connect_callback(self.on_connect)
+            self.connection._register_connect_callback(self.on_connect)
         else:
             await self.connection.connect()
         if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
@@ -1243,6 +1266,10 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             await self.connection_pool.release(self.connection)
             self.connection = None
 
+    async def aclose(self) -> None:
+        """Alias for reset(), a standard method name for cleanup"""
+        await self.reset()
+
     def multi(self):
         """
         Start a transactional block of the pipeline after WATCH commands
@@ -1275,14 +1302,14 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         # valid since this connection has died. raise a WatchError, which
         # indicates the user should retry this transaction.
         if self.watching:
-            await self.reset()
+            await self.aclose()
             raise WatchError(
                 "A ConnectionError occurred on while watching one or more keys"
             )
         # if retry_on_timeout is not set, or the error is not
         # a TimeoutError, raise it
         if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
-            await self.reset()
+            await self.aclose()
             raise
 
     async def immediate_execute_command(self, *args, **options):

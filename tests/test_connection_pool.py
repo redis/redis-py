@@ -1,6 +1,7 @@
 import os
 import re
 import time
+from contextlib import closing
 from threading import Thread
 from unittest import mock
 
@@ -50,6 +51,16 @@ class TestConnectionPool:
         connection = pool.get_connection("_")
         assert isinstance(connection, DummyConnection)
         assert connection.kwargs == connection_kwargs
+
+    def test_closing(self):
+        connection_kwargs = {"foo": "bar", "biz": "baz"}
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            max_connections=None,
+            **connection_kwargs,
+        )
+        with closing(pool):
+            pass
 
     def test_multiple_connections(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}

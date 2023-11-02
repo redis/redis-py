@@ -1785,7 +1785,7 @@ class ClusterPubSub(PubSub):
             )
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
-            self.connection.register_connect_callback(self.on_connect)
+            self.connection._register_connect_callback(self.on_connect)
             if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
                 self.connection._parser.set_push_handler(self.push_handler_func)
         connection = self.connection
@@ -2474,7 +2474,6 @@ class NodeCommands:
         """ """
         connection = self.connection
         for c in self.commands:
-
             # if there is a result on this command,
             # it means we ran into an exception
             # like a connection error. Trying to parse

@@ -9,7 +9,7 @@ from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
-from typing import Optional, Type, Union
+from typing import Any, Callable, List, Optional, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
@@ -55,7 +55,7 @@ else:
 
 
 class HiredisRespSerializer:
-    def pack(self, *args):
+    def pack(self, *args: List):
         """Pack a series of arguments into the Redis protocol"""
         output = []
 
@@ -128,27 +128,27 @@ class AbstractConnection:
 
     def __init__(
         self,
-        db=0,
-        password=None,
-        socket_timeout=None,
-        socket_connect_timeout=None,
-        retry_on_timeout=False,
+        db: int = 0,
+        password: Optional[str] = None,
+        socket_timeout: Optional[float] = None,
+        socket_connect_timeout: Optional[float] = None,
+        retry_on_timeout: bool = False,
         retry_on_error=SENTINEL,
-        encoding="utf-8",
-        encoding_errors="strict",
-        decode_responses=False,
+        encoding: str = "utf-8",
+        encoding_errors: str = "strict",
+        decode_responses: bool = False,
         parser_class=DefaultParser,
-        socket_read_size=65536,
-        health_check_interval=0,
-        client_name=None,
-        lib_name="redis-py",
-        lib_version=get_lib_version(),
-        username=None,
-        retry=None,
-        redis_connect_func=None,
+        socket_read_size: int = 65536,
+        health_check_interval: int = 0,
+        client_name: Optional[str] = None,
+        lib_name: Optional[str] = "redis-py",
+        lib_version: Optional[str] = get_lib_version(),
+        username: Optional[str] = None,
+        retry: Union[Any, None] = None,
+        redis_connect_func: Optional[Callable[[], None]] = None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
-        command_packer=None,
+        command_packer: Optional[Callable[[], None]] = None,
     ):
         """
         Initialize a new Connection.
@@ -237,11 +237,16 @@ class AbstractConnection:
         else:
             return PythonRespSerializer(self._buffer_cutoff, self.encoder.encode)
 
-    def register_connect_callback(self, callback):
-        self._connect_callbacks.append(weakref.WeakMethod(callback))
+    def _register_connect_callback(self, callback):
+        wm = weakref.WeakMethod(callback)
+        if wm not in self._connect_callbacks:
+            self._connect_callbacks.append(wm)
 
-    def clear_connect_callbacks(self):
-        self._connect_callbacks = []
+    def _deregister_connect_callback(self, callback):
+        try:
+            self._connect_callbacks.remove(weakref.WeakMethod(callback))
+        except ValueError:
+            pass
 
     def set_parser(self, parser_class):
         """
@@ -279,6 +284,8 @@ class AbstractConnection:
 
         # run any user callbacks. right now the only internal callback
         # is for pubsub channel/pattern resubscription
+        # first, remove any dead weakrefs
+        self._connect_callbacks = [ref for ref in self._connect_callbacks if ref()]
         for ref in self._connect_callbacks:
             callback = ref()
             if callback:
@@ -970,7 +977,10 @@ class ConnectionPool:
         return cls(**kwargs)
 
     def __init__(
-        self, connection_class=Connection, max_connections=None, **connection_kwargs
+        self,
+        connection_class=Connection,
+        max_connections: Optional[int] = None,
+        **connection_kwargs,
     ):
         max_connections = max_connections or 2**31
         if not isinstance(max_connections, int) or max_connections < 0:
@@ -991,13 +1001,13 @@ class ConnectionPool:
         self._fork_lock = threading.Lock()
         self.reset()
 
-    def __repr__(self):
+    def __repr__(self) -> (str, str):
         return (
             f"{type(self).__name__}"
             f"<{repr(self.connection_class(**self.connection_kwargs))}>"
         )
 
-    def reset(self):
+    def reset(self) -> None:
         self._lock = threading.Lock()
         self._created_connections = 0
         self._available_connections = []
@@ -1014,7 +1024,7 @@ class ConnectionPool:
         # reset() and they will immediately release _fork_lock and continue on.
         self.pid = os.getpid()
 
-    def _checkpid(self):
+    def _checkpid(self) -> None:
         # _checkpid() attempts to keep ConnectionPool fork-safe on modern
         # systems. this is called by all ConnectionPool methods that
         # manipulate the pool's state such as get_connection() and release().
@@ -1061,7 +1071,7 @@ class ConnectionPool:
             finally:
                 self._fork_lock.release()
 
-    def get_connection(self, command_name, *keys, **options):
+    def get_connection(self, command_name: str, *keys, **options) -> "Connection":
         "Get a connection from the pool"
         self._checkpid()
         with self._lock:
@@ -1094,7 +1104,7 @@ class ConnectionPool:
 
         return connection
 
-    def get_encoder(self):
+    def get_encoder(self) -> Encoder:
         "Return an encoder based on encoding settings"
         kwargs = self.connection_kwargs
         return Encoder(
@@ -1103,14 +1113,14 @@ class ConnectionPool:
             decode_responses=kwargs.get("decode_responses", False),
         )
 
-    def make_connection(self):
+    def make_connection(self) -> "Connection":
         "Create a new connection"
         if self._created_connections >= self.max_connections:
             raise ConnectionError("Too many connections")
         self._created_connections += 1
         return self.connection_class(**self.connection_kwargs)
 
-    def release(self, connection):
+    def release(self, connection: "Connection") -> None:
         "Releases the connection back to the pool"
         self._checkpid()
         with self._lock:
@@ -1131,10 +1141,10 @@ class ConnectionPool:
                 connection.disconnect()
                 return
 
-    def owns_connection(self, connection):
+    def owns_connection(self, connection: "Connection") -> int:
         return connection.pid == self.pid
 
-    def disconnect(self, inuse_connections=True):
+    def disconnect(self, inuse_connections: bool = True) -> None:
         """
         Disconnects connections in the pool
 
@@ -1153,6 +1163,10 @@ class ConnectionPool:
 
             for connection in connections:
                 connection.disconnect()
+
+    def close(self) -> None:
+        """Close the pool, disconnecting all connections"""
+        self.disconnect()
 
     def set_retry(self, retry: "Retry") -> None:
         self.connection_kwargs.update({"retry": retry})
@@ -1204,7 +1218,6 @@ class BlockingConnectionPool(ConnectionPool):
         queue_class=LifoQueue,
         **connection_kwargs,
     ):
-
         self.queue_class = queue_class
         self.timeout = timeout
         super().__init__(

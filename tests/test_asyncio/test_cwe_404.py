@@ -15,6 +15,8 @@ class DelayProxy:
         self.send_event = asyncio.Event()
         self.server = None
         self.task = None
+        self.cond = asyncio.Condition()
+        self.running = 0
 
     async def __aenter__(self):
         await self.start()
@@ -63,10 +65,10 @@ class DelayProxy:
         except asyncio.CancelledError:
             pass
         await self.server.wait_closed()
-        # do we need to close individual connections too?
-        # prudently close all async generators
-        loop = self.server.get_loop()
-        await loop.shutdown_asyncgens()
+        # Server does not wait for all spawned tasks.  We must do that also to ensure
+        # that all sockets are closed.
+        async with self.cond:
+            await self.cond.wait_for(lambda: self.running == 0)
 
     async def pipe(
         self,
@@ -75,6 +77,7 @@ class DelayProxy:
         name="",
         event: asyncio.Event = None,
     ):
+        self.running += 1
         try:
             while True:
                 data = await reader.read(1000)
@@ -94,22 +97,23 @@ class DelayProxy:
                 # ignore errors on close pertaining to no event loop. Don't want
                 # to clutter the test output with errors if being garbage collected
                 pass
+            async with self.cond:
+                self.running -= 1
+                if self.running == 0:
+                    self.cond.notify_all()
 
 
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
 async def test_standalone(delay, master_host):
-
     # create a tcp socket proxy that relays data to Redis and back,
     # inserting 0.1 seconds of delay
     async with DelayProxy(addr=("127.0.0.1", 5380), redis_addr=master_host) as dp:
-
         for b in [True, False]:
             # note that we connect to proxy, rather than to Redis directly
             async with Redis(
                 host="127.0.0.1", port=5380, single_connection_client=b
             ) as r:
-
                 await r.set("foo", "foo")
                 await r.set("bar", "bar")
 
@@ -189,7 +193,6 @@ async def test_standalone_pipeline(delay, master_host):
 
 @pytest.mark.onlycluster
 async def test_cluster(master_host):
-
     delay = 0.1
     cluster_port = 16379
     remap_base = 7372

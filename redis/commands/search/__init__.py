@@ -27,7 +27,6 @@ class Search(SearchCommands):
         """
 
         def __init__(self, client, chunk_size=1000):
-
             self.client = client
             self.execute_command = client.execute_command
             self._pipeline = client.pipeline(transaction=False, shard_hint=None)

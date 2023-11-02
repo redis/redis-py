@@ -46,7 +46,6 @@ NO_AUTH_SET_ERROR = {
 
 
 class BaseParser(ABC):
-
     EXCEPTION_CLASSES = {
         "ERR": {
             "max number of clients reached": ConnectionError,
@@ -137,12 +136,6 @@ class AsyncBaseParser(BaseParser):
     def __init__(self, socket_read_size: int):
         self._stream: Optional[StreamReader] = None
         self._read_size = socket_read_size
-
-    def __del__(self):
-        try:
-            self.on_disconnect()
-        except Exception:
-            pass
 
     async def can_read_destructive(self) -> bool:
         raise NotImplementedError()

@@ -13,6 +13,7 @@ from redis.commands.json.path import Path
 from redis.commands.search import Search
 from redis.commands.search.field import (
     GeoField,
+    GeoShapeField,
     NumericField,
     TagField,
     TextField,
@@ -86,7 +87,6 @@ def createIndex(client, num_docs=100, definition=None):
 
     r = csv.reader(bzfp, delimiter=";")
     for n, line in enumerate(r):
-
         play, chapter, _, text = line[1], line[2], line[4], line[5]
 
         key = f"{play}:{chapter}".lower()
@@ -820,7 +820,6 @@ def test_spell_check(client):
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
 
     if is_resp2_connection(client):
-
         # test spellcheck
         res = client.ft().spellcheck("impornant")
         assert "important" == res["impornant"][0]["suggestion"]
@@ -2100,7 +2099,6 @@ def test_numeric_params(client):
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
 def test_geo_params(client):
-
     client.ft().create_index((GeoField("g")))
     client.hset("doc1", mapping={"g": "29.69465, 34.95126"})
     client.hset("doc2", mapping={"g": "29.69350, 34.94737"})
@@ -2269,3 +2267,20 @@ def test_query_timeout(r: redis.Redis):
     q2 = Query("foo").timeout("not_a_number")
     with pytest.raises(redis.ResponseError):
         r.ft().search(q2)
+
+
+@pytest.mark.redismod
+def test_geoshape(client: redis.Redis):
+    client.ft().create_index((GeoShapeField("geom", GeoShapeField.FLAT)))
+    waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
+    client.hset("small", "geom", "POLYGON((1 1, 1 100, 100 100, 100 1, 1 1))")
+    client.hset("large", "geom", "POLYGON((1 1, 1 200, 200 200, 200 1, 1 1))")
+    q1 = Query("@geom:[WITHIN $poly]").dialect(3)
+    qp1 = {"poly": "POLYGON((0 0, 0 150, 150 150, 150 0, 0 0))"}
+    q2 = Query("@geom:[CONTAINS $poly]").dialect(3)
+    qp2 = {"poly": "POLYGON((2 2, 2 50, 50 50, 50 2, 2 2))"}
+    result = client.ft().search(q1, query_params=qp1)
+    assert len(result.docs) == 1
+    assert result.docs[0]["id"] == "small"
+    result = client.ft().search(q2, query_params=qp2)
+    assert len(result.docs) == 2

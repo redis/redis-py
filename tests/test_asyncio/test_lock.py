@@ -234,7 +234,6 @@ class TestLockClassSelection:
     def test_lock_class_argument(self, r):
         class MyLock:
             def __init__(self, *args, **kwargs):
-
                 pass
 
         lock = r.lock("foo", lock_class=MyLock)

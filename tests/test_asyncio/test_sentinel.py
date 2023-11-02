@@ -72,7 +72,6 @@ class SentinelTestCluster:
 
 @pytest_asyncio.fixture()
 async def cluster(master_ip):
-
     cluster = SentinelTestCluster(ip=master_ip)
     saved_Redis = redis.asyncio.sentinel.Redis
     redis.asyncio.sentinel.Redis = cluster.client
@@ -184,13 +183,13 @@ async def test_discover_slaves(cluster, sentinel):
 
 @pytest.mark.onlynoncluster
 async def test_master_for(cluster, sentinel, master_ip):
-    master = sentinel.master_for("mymaster", db=9)
-    assert await master.ping()
-    assert master.connection_pool.master_address == (master_ip, 6379)
+    async with sentinel.master_for("mymaster", db=9) as master:
+        assert await master.ping()
+        assert master.connection_pool.master_address == (master_ip, 6379)
 
     # Use internal connection check
-    master = sentinel.master_for("mymaster", db=9, check_connection=True)
-    assert await master.ping()
+    async with sentinel.master_for("mymaster", db=9, check_connection=True) as master:
+        assert await master.ping()
 
 
 @pytest.mark.onlynoncluster
@@ -198,16 +197,16 @@ async def test_slave_for(cluster, sentinel):
     cluster.slaves = [
         {"ip": "127.0.0.1", "port": 6379, "is_odown": False, "is_sdown": False}
     ]
-    slave = sentinel.slave_for("mymaster", db=9)
-    assert await slave.ping()
+    async with sentinel.slave_for("mymaster", db=9) as slave:
+        assert await slave.ping()
 
 
 @pytest.mark.onlynoncluster
 async def test_slave_for_slave_not_found_error(cluster, sentinel):
     cluster.master["is_odown"] = True
-    slave = sentinel.slave_for("mymaster", db=9)
-    with pytest.raises(SlaveNotFoundError):
-        await slave.ping()
+    async with sentinel.slave_for("mymaster", db=9) as slave:
+        with pytest.raises(SlaveNotFoundError):
+            await slave.ping()
 
 
 @pytest.mark.onlynoncluster
@@ -261,7 +260,7 @@ async def test_auto_close_pool(cluster, sentinel, method_name):
         calls += 1
 
     with mock.patch.object(pool, "disconnect", mock_disconnect):
-        await client.close()
+        await client.aclose()
 
     assert calls == 1
     await pool.disconnect()

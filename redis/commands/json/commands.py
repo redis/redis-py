@@ -80,7 +80,6 @@ class JSONCommands:
         path: Optional[str] = Path.root_path(),
         index: Optional[int] = -1,
     ) -> List[Union[str, None]]:
-
         """Pop the element at ``index`` in the array JSON value under
         ``path`` at key ``name``.
 

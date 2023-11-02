@@ -5,6 +5,7 @@ import inspect
 import socket
 import ssl
 import sys
+import warnings
 import weakref
 from abc import abstractmethod
 from itertools import chain
@@ -204,6 +205,24 @@ class AbstractConnection:
                 raise ConnectionError("protocol must be either 2 or 3")
             self.protocol = protocol
 
+    def __del__(self, _warnings: Any = warnings):
+        # For some reason, the individual streams don't get properly garbage
+        # collected and therefore produce no resource warnings.  We add one
+        # here, in the same style as those from the stdlib.
+        if getattr(self, "_writer", None):
+            _warnings.warn(
+                f"unclosed Connection {self!r}", ResourceWarning, source=self
+            )
+            self._close()
+
+    def _close(self):
+        """
+        Internal method to silently close the connection without waiting
+        """
+        if self._writer:
+            self._writer.close()
+            self._writer = self._reader = None
+
     def __repr__(self):
         repr_args = ",".join((f"{k}={v}" for k, v in self.repr_pieces()))
         return f"{self.__class__.__name__}<{repr_args}>"
@@ -216,11 +235,16 @@ class AbstractConnection:
     def is_connected(self):
         return self._reader is not None and self._writer is not None
 
-    def register_connect_callback(self, callback):
-        self._connect_callbacks.append(weakref.WeakMethod(callback))
+    def _register_connect_callback(self, callback):
+        wm = weakref.WeakMethod(callback)
+        if wm not in self._connect_callbacks:
+            self._connect_callbacks.append(wm)
 
-    def clear_connect_callbacks(self):
-        self._connect_callbacks = []
+    def _deregister_connect_callback(self, callback):
+        try:
+            self._connect_callbacks.remove(weakref.WeakMethod(callback))
+        except ValueError:
+            pass
 
     def set_parser(self, parser_class: Type[BaseParser]) -> None:
         """
@@ -263,6 +287,8 @@ class AbstractConnection:
 
         # run any user callbacks. right now the only internal callback
         # is for pubsub channel/pattern resubscription
+        # first, remove any dead weakrefs
+        self._connect_callbacks = [ref for ref in self._connect_callbacks if ref()]
         for ref in self._connect_callbacks:
             callback = ref()
             task = callback(self)
@@ -1010,7 +1036,7 @@ class ConnectionPool:
 
     def reset(self):
         self._available_connections = []
-        self._in_use_connections = set()
+        self._in_use_connections = weakref.WeakSet()
 
     def can_get_connection(self) -> bool:
         """Return True if a connection can be retrieved from the pool."""
@@ -1020,7 +1046,18 @@ class ConnectionPool:
         )
 
     async def get_connection(self, command_name, *keys, **options):
-        """Get a connection from the pool"""
+        """Get a connected connection from the pool"""
+        connection = self.get_available_connection()
+        try:
+            await self.ensure_connection(connection)
+        except BaseException:
+            await self.release(connection)
+            raise
+
+        return connection
+
+    def get_available_connection(self):
+        """Get a connection from the pool, without making sure it is connected"""
         try:
             connection = self._available_connections.pop()
         except IndexError:
@@ -1028,13 +1065,6 @@ class ConnectionPool:
                 raise ConnectionError("Too many connections") from None
             connection = self.make_connection()
         self._in_use_connections.add(connection)
-
-        try:
-            await self.ensure_connection(connection)
-        except BaseException:
-            await self.release(connection)
-            raise
-
         return connection
 
     def get_encoder(self):
@@ -1095,6 +1125,10 @@ class ConnectionPool:
         if exc:
             raise exc
 
+    async def aclose(self) -> None:
+        """Close the pool, disconnecting all connections"""
+        await self.disconnect()
+
     def set_retry(self, retry: "Retry") -> None:
         for conn in self._available_connections:
             conn.retry = retry
@@ -1144,7 +1178,6 @@ class BlockingConnectionPool(ConnectionPool):
         queue_class: Type[asyncio.Queue] = asyncio.LifoQueue,  # deprecated
         **connection_kwargs,
     ):
-
         super().__init__(
             connection_class=connection_class,
             max_connections=max_connections,
@@ -1156,12 +1189,20 @@ class BlockingConnectionPool(ConnectionPool):
     async def get_connection(self, command_name, *keys, **options):
         """Gets a connection from the pool, blocking until one is available"""
         try:
-            async with async_timeout(self.timeout):
-                async with self._condition:
+            async with self._condition:
+                async with async_timeout(self.timeout):
                     await self._condition.wait_for(self.can_get_connection)
-                    return await super().get_connection(command_name, *keys, **options)
+                    connection = super().get_available_connection()
         except asyncio.TimeoutError as err:
             raise ConnectionError("No connection available.") from err
+
+        # We now perform the connection check outside of the lock.
+        try:
+            await self.ensure_connection(connection)
+            return connection
+        except BaseException:
+            await self.release(connection)
+            raise
 
     async def release(self, connection: AbstractConnection):
         """Releases the connection back to the pool."""

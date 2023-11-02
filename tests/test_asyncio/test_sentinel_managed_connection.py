@@ -10,11 +10,11 @@ from .compat import mock
 pytestmark = pytest.mark.asyncio
 
 
-async def test_connect_retry_on_timeout_error():
+async def test_connect_retry_on_timeout_error(connect_args):
     """Test that the _connect function is retried in case of a timeout"""
     connection_pool = mock.AsyncMock()
     connection_pool.get_master_address = mock.AsyncMock(
-        return_value=("localhost", 6379)
+        return_value=(connect_args["host"], connect_args["port"])
     )
     conn = SentinelManagedConnection(
         retry_on_timeout=True,
@@ -34,3 +34,4 @@ async def test_connect_retry_on_timeout_error():
     conn._connect.side_effect = mock_connect
     await conn.connect()
     assert conn._connect.call_count == 3
+    await conn.disconnect()

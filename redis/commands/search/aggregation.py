@@ -1,8 +1,10 @@
+from typing import List, Union
+
 FIELDNAME = object()
 
 
 class Limit:
-    def __init__(self, offset=0, count=0):
+    def __init__(self, offset: int = 0, count: int = 0) -> None:
         self.offset = offset
         self.count = count
 
@@ -22,12 +24,12 @@ class Reducer:
 
     NAME = None
 
-    def __init__(self, *args):
+    def __init__(self, *args: List[str]) -> None:
         self._args = args
         self._field = None
         self._alias = None
 
-    def alias(self, alias):
+    def alias(self, alias: str) -> "Reducer":
         """
         Set the alias for this reducer.
 
@@ -51,7 +53,7 @@ class Reducer:
         return self
 
     @property
-    def args(self):
+    def args(self) -> List[str]:
         return self._args
 
 
@@ -62,7 +64,7 @@ class SortDirection:
 
     DIRSTRING = None
 
-    def __init__(self, field):
+    def __init__(self, field: str) -> None:
         self.field = field
 
 
@@ -87,7 +89,7 @@ class AggregateRequest:
     Aggregation request which can be passed to `Client.aggregate`.
     """
 
-    def __init__(self, query="*"):
+    def __init__(self, query: str = "*") -> None:
         """
         Create an aggregation request. This request may then be passed to
         `client.aggregate()`.
@@ -110,7 +112,7 @@ class AggregateRequest:
         self._cursor = []
         self._dialect = None
 
-    def load(self, *fields):
+    def load(self, *fields: List[str]) -> "AggregateRequest":
         """
         Indicate the fields to be returned in the response. These fields are
         returned in addition to any others implicitly specified.
@@ -126,7 +128,9 @@ class AggregateRequest:
             self._loadall = True
         return self
 
-    def group_by(self, fields, *reducers):
+    def group_by(
+        self, fields: List[str], *reducers: Union[Reducer, List[Reducer]]
+    ) -> "AggregateRequest":
         """
         Specify by which fields to group the aggregation.
 
@@ -151,7 +155,7 @@ class AggregateRequest:
         self._aggregateplan.extend(ret)
         return self
 
-    def apply(self, **kwexpr):
+    def apply(self, **kwexpr) -> "AggregateRequest":
         """
         Specify one or more projection expressions to add to each result
 
@@ -169,7 +173,7 @@ class AggregateRequest:
 
         return self
 
-    def limit(self, offset, num):
+    def limit(self, offset: int, num: int) -> "AggregateRequest":
         """
         Sets the limit for the most recent group or query.
 
@@ -215,7 +219,7 @@ class AggregateRequest:
         self._aggregateplan.extend(_limit.build_args())
         return self
 
-    def sort_by(self, *fields, **kwargs):
+    def sort_by(self, *fields: List[str], **kwargs) -> "AggregateRequest":
         """
         Indicate how the results should be sorted. This can also be used for
         *top-N* style queries
@@ -262,7 +266,7 @@ class AggregateRequest:
         self._aggregateplan.extend(ret)
         return self
 
-    def filter(self, expressions):
+    def filter(self, expressions: Union[str, List[str]]) -> "AggregateRequest":
         """
         Specify filter for post-query results using predicates relating to
         values in the result set.
@@ -280,7 +284,7 @@ class AggregateRequest:
 
         return self
 
-    def with_schema(self):
+    def with_schema(self) -> "AggregateRequest":
         """
         If set, the `schema` property will contain a list of `[field, type]`
         entries in the result object.
@@ -288,11 +292,11 @@ class AggregateRequest:
         self._with_schema = True
         return self
 
-    def verbatim(self):
+    def verbatim(self) -> "AggregateRequest":
         self._verbatim = True
         return self
 
-    def cursor(self, count=0, max_idle=0.0):
+    def cursor(self, count: int = 0, max_idle: float = 0.0) -> "AggregateRequest":
         args = ["WITHCURSOR"]
         if count:
             args += ["COUNT", str(count)]
@@ -301,7 +305,7 @@ class AggregateRequest:
         self._cursor = args
         return self
 
-    def build_args(self):
+    def build_args(self) -> List[str]:
         # @foo:bar ...
         ret = [self._query]
 
@@ -329,7 +333,7 @@ class AggregateRequest:
 
         return ret
 
-    def dialect(self, dialect):
+    def dialect(self, dialect: int) -> "AggregateRequest":
         """
         Add a dialect field to the aggregate command.
 
@@ -340,7 +344,7 @@ class AggregateRequest:
 
 
 class Cursor:
-    def __init__(self, cid):
+    def __init__(self, cid: int) -> None:
         self.cid = cid
         self.max_idle = 0
         self.count = 0
@@ -355,12 +359,12 @@ class Cursor:
 
 
 class AggregateResult:
-    def __init__(self, rows, cursor, schema):
+    def __init__(self, rows, cursor: Cursor, schema) -> None:
         self.rows = rows
         self.cursor = cursor
         self.schema = schema
 
-    def __repr__(self):
+    def __repr__(self) -> (str, str):
         cid = self.cursor.cid if self.cursor else -1
         return (
             f"<{self.__class__.__name__} at 0x{id(self):x} "

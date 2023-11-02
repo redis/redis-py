@@ -20,7 +20,7 @@ from redis.typing import EncodableT
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import get_protocol_version, skip_if_server_version_lt
 
-from .compat import create_task, mock
+from .compat import aclosing, create_task, mock
 
 
 def with_timeout(t):
@@ -84,9 +84,8 @@ def make_subscribe_test_data(pubsub, type):
 
 @pytest_asyncio.fixture()
 async def pubsub(r: redis.Redis):
-    p = r.pubsub()
-    yield p
-    await p.close()
+    async with r.pubsub() as p:
+        yield p
 
 
 @pytest.mark.onlynoncluster
@@ -122,7 +121,6 @@ class TestPubSubSubscribeUnsubscribe:
     async def _test_resubscribe_on_reconnection(
         self, p, sub_type, unsub_type, sub_func, unsub_func, keys
     ):
-
         for key in keys:
             assert await sub_func(key) is None
 
@@ -164,7 +162,6 @@ class TestPubSubSubscribeUnsubscribe:
     async def _test_subscribed_property(
         self, p, sub_type, unsub_type, sub_func, unsub_func, keys
     ):
-
         assert p.subscribed is False
         await sub_func(keys[0])
         # we're now subscribed even though we haven't processed the
@@ -217,6 +214,46 @@ class TestPubSubSubscribeUnsubscribe:
         kwargs = make_subscribe_test_data(pubsub, "pattern")
         await self._test_subscribed_property(**kwargs)
 
+    async def test_aclosing(self, r: redis.Redis):
+        p = r.pubsub()
+        async with aclosing(p):
+            assert p.subscribed is False
+            await p.subscribe("foo")
+            assert p.subscribed is True
+        assert p.subscribed is False
+
+    async def test_context_manager(self, r: redis.Redis):
+        p = r.pubsub()
+        async with p:
+            assert p.subscribed is False
+            await p.subscribe("foo")
+            assert p.subscribed is True
+        assert p.subscribed is False
+
+    async def test_close_is_aclose(self, r: redis.Redis):
+        """
+        Test backwards compatible close method
+        """
+        p = r.pubsub()
+        assert p.subscribed is False
+        await p.subscribe("foo")
+        assert p.subscribed is True
+        with pytest.deprecated_call():
+            await p.close()
+        assert p.subscribed is False
+
+    async def test_reset_is_aclose(self, r: redis.Redis):
+        """
+        Test backwards compatible reset method
+        """
+        p = r.pubsub()
+        assert p.subscribed is False
+        await p.subscribe("foo")
+        assert p.subscribed is True
+        with pytest.deprecated_call():
+            await p.reset()
+        assert p.subscribed is False
+
     async def test_ignore_all_subscribe_messages(self, r: redis.Redis):
         p = r.pubsub(ignore_subscribe_messages=True)
 
@@ -233,7 +270,7 @@ class TestPubSubSubscribeUnsubscribe:
             assert p.subscribed is True
             assert await wait_for_message(p) is None
         assert p.subscribed is False
-        await p.close()
+        await p.aclose()
 
     async def test_ignore_individual_subscribe_messages(self, pubsub):
         p = pubsub
@@ -350,7 +387,7 @@ class TestPubSubMessages:
         assert await r.publish("foo", "test message") == 1
         assert await wait_for_message(p) is None
         assert self.message == make_message("message", "foo", "test message")
-        await p.close()
+        await p.aclose()
 
     async def test_channel_async_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
@@ -359,7 +396,7 @@ class TestPubSubMessages:
         assert await r.publish("foo", "test message") == 1
         assert await wait_for_message(p) is None
         assert self.async_message == make_message("message", "foo", "test message")
-        await p.close()
+        await p.aclose()
 
     async def test_channel_sync_async_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
@@ -371,7 +408,7 @@ class TestPubSubMessages:
         assert await wait_for_message(p) is None
         assert self.message == make_message("message", "foo", "test message")
         assert self.async_message == make_message("message", "bar", "test message 2")
-        await p.close()
+        await p.aclose()
 
     @pytest.mark.onlynoncluster
     async def test_pattern_message_handler(self, r: redis.Redis):
@@ -383,7 +420,7 @@ class TestPubSubMessages:
         assert self.message == make_message(
             "pmessage", "foo", "test message", pattern="f*"
         )
-        await p.close()
+        await p.aclose()
 
     async def test_unicode_channel_message_handler(self, r: redis.Redis):
         p = r.pubsub(ignore_subscribe_messages=True)
@@ -394,7 +431,7 @@ class TestPubSubMessages:
         assert await r.publish(channel, "test message") == 1
         assert await wait_for_message(p) is None
         assert self.message == make_message("message", channel, "test message")
-        await p.close()
+        await p.aclose()
 
     @pytest.mark.onlynoncluster
     # see: https://redis-py-cluster.readthedocs.io/en/stable/pubsub.html
@@ -410,7 +447,7 @@ class TestPubSubMessages:
         assert self.message == make_message(
             "pmessage", channel, "test message", pattern=pattern
         )
-        await p.close()
+        await p.aclose()
 
     async def test_get_message_without_subscribe(self, r: redis.Redis, pubsub):
         p = pubsub
@@ -524,7 +561,7 @@ class TestPubSubAutoDecoding:
         await r.publish(self.channel, new_data)
         assert await wait_for_message(p) is None
         assert self.message == self.make_message("message", self.channel, new_data)
-        await p.close()
+        await p.aclose()
 
     async def test_pattern_message_handler(self, r: redis.Redis):
         p = r.pubsub(ignore_subscribe_messages=True)
@@ -546,7 +583,7 @@ class TestPubSubAutoDecoding:
         assert self.message == self.make_message(
             "pmessage", self.channel, new_data, pattern=self.pattern
         )
-        await p.close()
+        await p.aclose()
 
     async def test_context_manager(self, r: redis.Redis):
         async with r.pubsub() as pubsub:
@@ -556,7 +593,7 @@ class TestPubSubAutoDecoding:
         assert pubsub.connection is None
         assert pubsub.channels == {}
         assert pubsub.patterns == {}
-        await pubsub.close()
+        await pubsub.aclose()
 
 
 @pytest.mark.onlynoncluster
@@ -597,9 +634,9 @@ class TestPubSubSubcommands:
 
         channels = [(b"foo", 1), (b"bar", 2), (b"baz", 3)]
         assert await r.pubsub_numsub("foo", "bar", "baz") == channels
-        await p1.close()
-        await p2.close()
-        await p3.close()
+        await p1.aclose()
+        await p2.aclose()
+        await p3.aclose()
 
     @skip_if_server_version_lt("2.8.0")
     async def test_pubsub_numpat(self, r: redis.Redis):
@@ -608,7 +645,7 @@ class TestPubSubSubcommands:
         for i in range(3):
             assert (await wait_for_message(p))["type"] == "psubscribe"
         assert await r.pubsub_numpat() == 3
-        await p.close()
+        await p.aclose()
 
 
 @pytest.mark.onlynoncluster
@@ -621,7 +658,7 @@ class TestPubSubPings:
         assert await wait_for_message(p) == make_message(
             type="pong", channel=None, data="", pattern=None
         )
-        await p.close()
+        await p.aclose()
 
     @skip_if_server_version_lt("3.0.0")
     async def test_send_pubsub_ping_message(self, r: redis.Redis):
@@ -631,7 +668,7 @@ class TestPubSubPings:
         assert await wait_for_message(p) == make_message(
             type="pong", channel=None, data="hello world", pattern=None
         )
-        await p.close()
+        await p.aclose()
 
 
 @pytest.mark.onlynoncluster

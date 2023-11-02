@@ -100,7 +100,7 @@ async def create_redis(request):
                         # handle cases where a test disconnected a client
                         # just manually retry the flushdb
                         await client.flushdb()
-                await client.close()
+                await client.aclose()
                 await client.connection_pool.disconnect()
             else:
                 if flushdb:
@@ -110,7 +110,7 @@ async def create_redis(request):
                         # handle cases where a test disconnected a client
                         # just manually retry the flushdb
                         await client.flushdb(target_nodes="primaries")
-                await client.close()
+                await client.aclose()
 
         teardown_clients.append(teardown)
         return client
