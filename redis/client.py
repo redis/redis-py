@@ -41,7 +41,9 @@ from redis.utils import (
 )
 
 SYM_EMPTY = b""
+IGNORE_RESPONSE_CALLBACKS = "ignore_response_callbacks"
 EMPTY_RESPONSE = "EMPTY_RESPONSE"
+JSON_GET_COMMAND_NAME_LOWER_CASE = "json.get"
 
 # some responses (ie. dump) are binary, and just meant to never be decoded
 NEVER_DECODE = "NEVER_DECODE"
@@ -559,9 +561,18 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if EMPTY_RESPONSE in options:
             options.pop(EMPTY_RESPONSE)
 
-        if command_name in self.response_callbacks:
-            return self.response_callbacks[command_name](response, **options)
-        return response
+        if (
+            command_name.lower() == JSON_GET_COMMAND_NAME_LOWER_CASE
+            and IGNORE_RESPONSE_CALLBACKS not in options
+        ):
+            ignore_response_callbacks = True
+        else:
+            ignore_response_callbacks = options.pop(IGNORE_RESPONSE_CALLBACKS, False)
+
+        if command_name not in self.response_callbacks or ignore_response_callbacks:
+            return response
+
+        return self.response_callbacks[command_name](response, **options)
 
 
 StrictRedis = Redis
@@ -1377,7 +1388,15 @@ class Pipeline(Redis):
             if not isinstance(r, Exception):
                 args, options = cmd
                 command_name = args[0]
-                if command_name in self.response_callbacks:
+                ignore_response_callbacks = options.pop(
+                    IGNORE_RESPONSE_CALLBACKS,
+                    False,
+                )
+
+                if (
+                    command_name in self.response_callbacks
+                    and not ignore_response_callbacks
+                ):
                     r = self.response_callbacks[command_name](r, **options)
             data.append(r)
         return data

@@ -39,6 +39,8 @@ from redis.asyncio.lock import Lock
 from redis.asyncio.retry import Retry
 from redis.client import (
     EMPTY_RESPONSE,
+    IGNORE_RESPONSE_CALLBACKS,
+    JSON_GET_COMMAND_NAME_LOWER_CASE,
     NEVER_DECODE,
     AbstractRedis,
     CaseInsensitiveDict,
@@ -634,12 +636,21 @@ class Redis(
         if EMPTY_RESPONSE in options:
             options.pop(EMPTY_RESPONSE)
 
-        if command_name in self.response_callbacks:
+        if (
+            command_name.lower() == JSON_GET_COMMAND_NAME_LOWER_CASE
+            and IGNORE_RESPONSE_CALLBACKS not in options
+        ):
+            ignore_response_callbacks = True
+        else:
+            ignore_response_callbacks = options.pop(IGNORE_RESPONSE_CALLBACKS, False)
+
+        if command_name not in self.response_callbacks or ignore_response_callbacks:
+            return response
+        else:
             # Mypy bug: https://github.com/python/mypy/issues/10977
             command_name = cast(str, command_name)
             retval = self.response_callbacks[command_name](response, **options)
             return await retval if inspect.isawaitable(retval) else retval
-        return response
 
 
 StrictRedis = Redis
