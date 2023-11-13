@@ -1590,7 +1590,7 @@ class BasicKeyCommands(CommandsProtocol):
             raise DataError("Both start and end must be specified")
         if mode is not None:
             params.append(mode)
-        return self.execute_command("BITCOUNT", *params)
+        return self.execute_command("BITCOUNT", *params, keys=[key])
 
     def bitfield(
         self: Union["Redis", "AsyncRedis"],
@@ -1626,7 +1626,7 @@ class BasicKeyCommands(CommandsProtocol):
         items = items or []
         for encoding, offset in items:
             params.extend(["GET", encoding, offset])
-        return self.execute_command("BITFIELD_RO", *params)
+        return self.execute_command("BITFIELD_RO", *params, keys=[key])
 
     def bitop(self, operation: str, dest: KeyT, *keys: KeyT) -> ResponseT:
         """
@@ -1666,7 +1666,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         if mode is not None:
             params.append(mode)
-        return self.execute_command("BITPOS", *params)
+        return self.execute_command("BITPOS", *params, keys=[key])
 
     def copy(
         self,
@@ -1733,7 +1733,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/exists
         """
-        return self.execute_command("EXISTS", *names)
+        return self.execute_command("EXISTS", *names, keys=names)
 
     __contains__ = exists
 
@@ -1826,7 +1826,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/get
         """
-        return self.execute_command("GET", name)
+        return self.execute_command("GET", name, keys=[name])
 
     def getdel(self, name: KeyT) -> ResponseT:
         """
@@ -1920,7 +1920,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/getbit
         """
-        return self.execute_command("GETBIT", name, offset)
+        return self.execute_command("GETBIT", name, offset, keys=[name])
 
     def getrange(self, key: KeyT, start: int, end: int) -> ResponseT:
         """
@@ -1929,7 +1929,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/getrange
         """
-        return self.execute_command("GETRANGE", key, start, end)
+        return self.execute_command("GETRANGE", key, start, end, keys=[key])
 
     def getset(self, name: KeyT, value: EncodableT) -> ResponseT:
         """
@@ -2012,6 +2012,7 @@ class BasicKeyCommands(CommandsProtocol):
         options = {}
         if not args:
             options[EMPTY_RESPONSE] = []
+        options["keys"] = keys
         return self.execute_command("MGET", *args, **options)
 
     def mset(self, mapping: Mapping[AnyKeyT, EncodableT]) -> ResponseT:
@@ -2458,14 +2459,14 @@ class BasicKeyCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/strlen
         """
-        return self.execute_command("STRLEN", name)
+        return self.execute_command("STRLEN", name, keys=[name])
 
     def substr(self, name: KeyT, start: int, end: int = -1) -> ResponseT:
         """
         Return a substring of the string at key ``name``. ``start`` and ``end``
         are 0-based integers specifying the portion of the string to return.
         """
-        return self.execute_command("SUBSTR", name, start, end)
+        return self.execute_command("SUBSTR", name, start, end, keys=[name])
 
     def touch(self, *args: KeyT) -> ResponseT:
         """
@@ -2490,7 +2491,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/type
         """
-        return self.execute_command("TYPE", name)
+        return self.execute_command("TYPE", name, keys=[name])
 
     def watch(self, *names: KeyT) -> None:
         """
@@ -2543,7 +2544,7 @@ class BasicKeyCommands(CommandsProtocol):
             pieces.extend(["MINMATCHLEN", minmatchlen])
         if withmatchlen:
             pieces.append("WITHMATCHLEN")
-        return self.execute_command("LCS", *pieces)
+        return self.execute_command("LCS", *pieces, keys=[key1, key2])
 
 
 class AsyncBasicKeyCommands(BasicKeyCommands):
@@ -2682,7 +2683,7 @@ class ListCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/lindex
         """
-        return self.execute_command("LINDEX", name, index)
+        return self.execute_command("LINDEX", name, index, keys=[name])
 
     def linsert(
         self, name: str, where: str, refvalue: str, value: str
@@ -2704,7 +2705,7 @@ class ListCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/llen
         """
-        return self.execute_command("LLEN", name)
+        return self.execute_command("LLEN", name, keys=[name])
 
     def lpop(
         self,
@@ -2751,7 +2752,7 @@ class ListCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/lrange
         """
-        return self.execute_command("LRANGE", name, start, end)
+        return self.execute_command("LRANGE", name, start, end, keys=[name])
 
     def lrem(self, name: str, count: int, value: str) -> Union[Awaitable[int], int]:
         """
@@ -2874,7 +2875,7 @@ class ListCommands(CommandsProtocol):
         if maxlen is not None:
             pieces.extend(["MAXLEN", maxlen])
 
-        return self.execute_command("LPOS", *pieces)
+        return self.execute_command("LPOS", *pieces, keys=[name])
 
     def sort(
         self,
@@ -2946,6 +2947,7 @@ class ListCommands(CommandsProtocol):
                 )
 
         options = {"groups": len(get) if groups else None}
+        options["keys"] = [name]
         return self.execute_command("SORT", *pieces, **options)
 
     def sort_ro(
@@ -3319,7 +3321,7 @@ class SetCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/scard
         """
-        return self.execute_command("SCARD", name)
+        return self.execute_command("SCARD", name, keys=[name])
 
     def sdiff(self, keys: List, *args: List) -> Union[Awaitable[list], list]:
         """
@@ -3328,7 +3330,7 @@ class SetCommands(CommandsProtocol):
         For more information see https://redis.io/commands/sdiff
         """
         args = list_or_args(keys, args)
-        return self.execute_command("SDIFF", *args)
+        return self.execute_command("SDIFF", *args, keys=args)
 
     def sdiffstore(
         self, dest: str, keys: List, *args: List
@@ -3349,7 +3351,7 @@ class SetCommands(CommandsProtocol):
         For more information see https://redis.io/commands/sinter
         """
         args = list_or_args(keys, args)
-        return self.execute_command("SINTER", *args)
+        return self.execute_command("SINTER", *args, keys=args)
 
     def sintercard(
         self, numkeys: int, keys: List[str], limit: int = 0
@@ -3364,7 +3366,7 @@ class SetCommands(CommandsProtocol):
         For more information see https://redis.io/commands/sintercard
         """
         args = [numkeys, *keys, "LIMIT", limit]
-        return self.execute_command("SINTERCARD", *args)
+        return self.execute_command("SINTERCARD", *args, keys=keys)
 
     def sinterstore(
         self, dest: str, keys: List, *args: List
@@ -3388,7 +3390,7 @@ class SetCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/sismember
         """
-        return self.execute_command("SISMEMBER", name, value)
+        return self.execute_command("SISMEMBER", name, value, keys=[name])
 
     def smembers(self, name: str) -> Union[Awaitable[Set], Set]:
         """
@@ -3396,7 +3398,7 @@ class SetCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/smembers
         """
-        return self.execute_command("SMEMBERS", name)
+        return self.execute_command("SMEMBERS", name, keys=[name])
 
     def smismember(
         self, name: str, values: List, *args: List
@@ -3413,7 +3415,7 @@ class SetCommands(CommandsProtocol):
         For more information see https://redis.io/commands/smismember
         """
         args = list_or_args(values, args)
-        return self.execute_command("SMISMEMBER", name, *args)
+        return self.execute_command("SMISMEMBER", name, *args, keys=[name])
 
     def smove(self, src: str, dst: str, value: str) -> Union[Awaitable[bool], bool]:
         """
@@ -3462,7 +3464,7 @@ class SetCommands(CommandsProtocol):
         For more information see https://redis.io/commands/sunion
         """
         args = list_or_args(keys, args)
-        return self.execute_command("SUNION", *args)
+        return self.execute_command("SUNION", *args, keys=args)
 
     def sunionstore(
         self, dest: str, keys: List, *args: List
@@ -3820,7 +3822,7 @@ class StreamCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/xlen
         """
-        return self.execute_command("XLEN", name)
+        return self.execute_command("XLEN", name, keys=[name])
 
     def xpending(self, name: KeyT, groupname: GroupT) -> ResponseT:
         """
@@ -3830,7 +3832,7 @@ class StreamCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/xpending
         """
-        return self.execute_command("XPENDING", name, groupname)
+        return self.execute_command("XPENDING", name, groupname, keys=[name])
 
     def xpending_range(
         self,
@@ -3919,7 +3921,7 @@ class StreamCommands(CommandsProtocol):
             pieces.append(b"COUNT")
             pieces.append(str(count))
 
-        return self.execute_command("XRANGE", name, *pieces)
+        return self.execute_command("XRANGE", name, *pieces, keys=[name])
 
     def xread(
         self,
@@ -3957,7 +3959,7 @@ class StreamCommands(CommandsProtocol):
         keys, values = zip(*streams.items())
         pieces.extend(keys)
         pieces.extend(values)
-        return self.execute_command("XREAD", *pieces)
+        return self.execute_command("XREAD", *pieces, keys=keys)
 
     def xreadgroup(
         self,
@@ -4036,7 +4038,7 @@ class StreamCommands(CommandsProtocol):
             pieces.append(b"COUNT")
             pieces.append(str(count))
 
-        return self.execute_command("XREVRANGE", name, *pieces)
+        return self.execute_command("XREVRANGE", name, *pieces, keys=[name])
 
     def xtrim(
         self,
@@ -4175,7 +4177,7 @@ class SortedSetCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/zcard
         """
-        return self.execute_command("ZCARD", name)
+        return self.execute_command("ZCARD", name, keys=[name])
 
     def zcount(self, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT) -> ResponseT:
         """
@@ -4184,7 +4186,7 @@ class SortedSetCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/zcount
         """
-        return self.execute_command("ZCOUNT", name, min, max)
+        return self.execute_command("ZCOUNT", name, min, max, keys=[name])
 
     def zdiff(self, keys: KeysT, withscores: bool = False) -> ResponseT:
         """
@@ -4196,7 +4198,7 @@ class SortedSetCommands(CommandsProtocol):
         pieces = [len(keys), *keys]
         if withscores:
             pieces.append("WITHSCORES")
-        return self.execute_command("ZDIFF", *pieces)
+        return self.execute_command("ZDIFF", *pieces, keys=keys)
 
     def zdiffstore(self, dest: KeyT, keys: KeysT) -> ResponseT:
         """
@@ -4264,7 +4266,7 @@ class SortedSetCommands(CommandsProtocol):
         For more information see https://redis.io/commands/zintercard
         """
         args = [numkeys, *keys, "LIMIT", limit]
-        return self.execute_command("ZINTERCARD", *args)
+        return self.execute_command("ZINTERCARD", *args, keys=keys)
 
     def zlexcount(self, name, min, max):
         """
@@ -4273,7 +4275,7 @@ class SortedSetCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/zlexcount
         """
-        return self.execute_command("ZLEXCOUNT", name, min, max)
+        return self.execute_command("ZLEXCOUNT", name, min, max, keys=[name])
 
     def zpopmax(self, name: KeyT, count: Union[int, None] = None) -> ResponseT:
         """
@@ -4456,6 +4458,7 @@ class SortedSetCommands(CommandsProtocol):
         if withscores:
             pieces.append("WITHSCORES")
         options = {"withscores": withscores, "score_cast_func": score_cast_func}
+        options["keys"] = [name]
         return self.execute_command(*pieces, **options)
 
     def zrange(
@@ -4544,6 +4547,7 @@ class SortedSetCommands(CommandsProtocol):
         if withscores:
             pieces.append(b"WITHSCORES")
         options = {"withscores": withscores, "score_cast_func": score_cast_func}
+        options["keys"] = name
         return self.execute_command(*pieces, **options)
 
     def zrangestore(
@@ -4618,7 +4622,7 @@ class SortedSetCommands(CommandsProtocol):
         pieces = ["ZRANGEBYLEX", name, min, max]
         if start is not None and num is not None:
             pieces.extend([b"LIMIT", start, num])
-        return self.execute_command(*pieces)
+        return self.execute_command(*pieces, keys=[name])
 
     def zrevrangebylex(
         self,
@@ -4642,7 +4646,7 @@ class SortedSetCommands(CommandsProtocol):
         pieces = ["ZREVRANGEBYLEX", name, max, min]
         if start is not None and num is not None:
             pieces.extend(["LIMIT", start, num])
-        return self.execute_command(*pieces)
+        return self.execute_command(*pieces, keys=[name])
 
     def zrangebyscore(
         self,
@@ -4676,6 +4680,7 @@ class SortedSetCommands(CommandsProtocol):
         if withscores:
             pieces.append("WITHSCORES")
         options = {"withscores": withscores, "score_cast_func": score_cast_func}
+        options["keys"] = [name]
         return self.execute_command(*pieces, **options)
 
     def zrevrangebyscore(
@@ -4710,6 +4715,7 @@ class SortedSetCommands(CommandsProtocol):
         if withscores:
             pieces.append("WITHSCORES")
         options = {"withscores": withscores, "score_cast_func": score_cast_func}
+        options["keys"] = [name]
         return self.execute_command(*pieces, **options)
 
     def zrank(
@@ -4727,8 +4733,8 @@ class SortedSetCommands(CommandsProtocol):
         For more information see https://redis.io/commands/zrank
         """
         if withscore:
-            return self.execute_command("ZRANK", name, value, "WITHSCORE")
-        return self.execute_command("ZRANK", name, value)
+            return self.execute_command("ZRANK", name, value, "WITHSCORE", keys=[name])
+        return self.execute_command("ZRANK", name, value, keys=[name])
 
     def zrem(self, name: KeyT, *values: FieldT) -> ResponseT:
         """
@@ -4786,8 +4792,10 @@ class SortedSetCommands(CommandsProtocol):
         For more information see https://redis.io/commands/zrevrank
         """
         if withscore:
-            return self.execute_command("ZREVRANK", name, value, "WITHSCORE")
-        return self.execute_command("ZREVRANK", name, value)
+            return self.execute_command(
+                "ZREVRANK", name, value, "WITHSCORE", keys=[name]
+            )
+        return self.execute_command("ZREVRANK", name, value, keys=[name])
 
     def zscore(self, name: KeyT, value: EncodableT) -> ResponseT:
         """
@@ -4795,7 +4803,7 @@ class SortedSetCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/zscore
         """
-        return self.execute_command("ZSCORE", name, value)
+        return self.execute_command("ZSCORE", name, value, keys=[name])
 
     def zunion(
         self,
@@ -4842,7 +4850,7 @@ class SortedSetCommands(CommandsProtocol):
         if not members:
             raise DataError("ZMSCORE members must be a non-empty list")
         pieces = [key] + members
-        return self.execute_command("ZMSCORE", *pieces)
+        return self.execute_command("ZMSCORE", *pieces, keys=[key])
 
     def _zaggregate(
         self,
@@ -4872,6 +4880,7 @@ class SortedSetCommands(CommandsProtocol):
                 raise DataError("aggregate can be sum, min or max.")
         if options.get("withscores", False):
             pieces.append(b"WITHSCORES")
+        options["keys"] = keys
         return self.execute_command(*pieces, **options)
 
 
@@ -4933,7 +4942,7 @@ class HashCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/hexists
         """
-        return self.execute_command("HEXISTS", name, key)
+        return self.execute_command("HEXISTS", name, key, keys=[name])
 
     def hget(
         self, name: str, key: str
@@ -4943,7 +4952,7 @@ class HashCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/hget
         """
-        return self.execute_command("HGET", name, key)
+        return self.execute_command("HGET", name, key, keys=[name])
 
     def hgetall(self, name: str) -> Union[Awaitable[dict], dict]:
         """
@@ -4951,7 +4960,7 @@ class HashCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/hgetall
         """
-        return self.execute_command("HGETALL", name)
+        return self.execute_command("HGETALL", name, keys=[name])
 
     def hincrby(
         self, name: str, key: str, amount: int = 1
@@ -4979,7 +4988,7 @@ class HashCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/hkeys
         """
-        return self.execute_command("HKEYS", name)
+        return self.execute_command("HKEYS", name, keys=[name])
 
     def hlen(self, name: str) -> Union[Awaitable[int], int]:
         """
@@ -4987,7 +4996,7 @@ class HashCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/hlen
         """
-        return self.execute_command("HLEN", name)
+        return self.execute_command("HLEN", name, keys=[name])
 
     def hset(
         self,
@@ -5054,7 +5063,7 @@ class HashCommands(CommandsProtocol):
         For more information see https://redis.io/commands/hmget
         """
         args = list_or_args(keys, args)
-        return self.execute_command("HMGET", name, *args)
+        return self.execute_command("HMGET", name, *args, keys=[name])
 
     def hvals(self, name: str) -> Union[Awaitable[List], List]:
         """
@@ -5062,7 +5071,7 @@ class HashCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/hvals
         """
-        return self.execute_command("HVALS", name)
+        return self.execute_command("HVALS", name, keys=[name])
 
     def hstrlen(self, name: str, key: str) -> Union[Awaitable[int], int]:
         """
@@ -5071,7 +5080,7 @@ class HashCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/hstrlen
         """
-        return self.execute_command("HSTRLEN", name, key)
+        return self.execute_command("HSTRLEN", name, key, keys=[name])
 
 
 AsyncHashCommands = HashCommands
@@ -5464,7 +5473,7 @@ class GeoCommands(CommandsProtocol):
             raise DataError("GEODIST invalid unit")
         elif unit:
             pieces.append(unit)
-        return self.execute_command("GEODIST", *pieces)
+        return self.execute_command("GEODIST", *pieces, keys=[name])
 
     def geohash(self, name: KeyT, *values: FieldT) -> ResponseT:
         """
@@ -5473,7 +5482,7 @@ class GeoCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/geohash
         """
-        return self.execute_command("GEOHASH", name, *values)
+        return self.execute_command("GEOHASH", name, *values, keys=[name])
 
     def geopos(self, name: KeyT, *values: FieldT) -> ResponseT:
         """
@@ -5483,7 +5492,7 @@ class GeoCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/geopos
         """
-        return self.execute_command("GEOPOS", name, *values)
+        return self.execute_command("GEOPOS", name, *values, keys=[name])
 
     def georadius(
         self,
@@ -5822,6 +5831,8 @@ class GeoCommands(CommandsProtocol):
         ):
             if kwargs[arg_name]:
                 pieces.append(byte_repr)
+
+        kwargs["keys"] = [args[0] if command == "GEOSEARCH" else args[1]]
 
         return self.execute_command(command, *pieces, **kwargs)
 

@@ -12,8 +12,7 @@ class _Cache:
         self.key_commands_map = defaultdict(set)
         self.commands_ttl_list = []
 
-    def set(self, command, response):
-        keys_in_command = self.get_keys_from_command(command)
+    def set(self, command, response, keys_in_command):
         if len(self.cache) >= self.max_size:
             self._evict()
         self.cache[command] = {
@@ -94,7 +93,3 @@ class _Cache:
         if key in self.key_commands_map:
             for command in self.key_commands_map[key]:
                 self.delete(command)
-
-    def get_keys_from_command(self, command):
-        # Implement your function to extract keys from a Redis command here
-        pass

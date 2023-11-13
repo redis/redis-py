@@ -550,13 +550,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             return None
         return self.client_cache.get(command)
 
-    def add_to_local_cache(self, command, response):
+    def add_to_local_cache(self, command, response, keys):
         if (
             self.client_cache is not None
             and (self.cache_blacklist == [] or command[0] not in self.cache_blacklist)
             and (self.cache_whitelist == [] or command[0] in self.cache_whitelist)
         ):
-            self.client_cache.set(command, response)
+            self.client_cache.set(command, response, keys)
 
     def delete_from_local_cache(self, command):
         if self.client_cache is not None:
@@ -565,12 +565,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
         """Execute a command and return a parsed response"""
+        command_name = args[0]
+        keys = options.pop("keys", None)
         response_from_cache = self.get_from_local_cache(args)
         if response_from_cache is not None:
             return response_from_cache
         else:
             pool = self.connection_pool
-            command_name = args[0]
             conn = self.connection or pool.get_connection(command_name, **options)
 
             try:
@@ -580,7 +581,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                     ),
                     lambda error: self._disconnect_raise(conn, error),
                 )
-                self.add_to_local_cache(args, response)
+                self.add_to_local_cache(args, response, keys)
             finally:
                 if not self.connection:
                     pool.release(conn)

@@ -425,7 +425,7 @@ class TimeSeriesCommands:
             bucket_timestamp,
             empty,
         )
-        return self.execute_command(RANGE_CMD, *params)
+        return self.execute_command(RANGE_CMD, *params, keys=[key])
 
     def revrange(
         self,
@@ -497,7 +497,7 @@ class TimeSeriesCommands:
             bucket_timestamp,
             empty,
         )
-        return self.execute_command(REVRANGE_CMD, *params)
+        return self.execute_command(REVRANGE_CMD, *params, keys=[key])
 
     def __mrange_params(
         self,
@@ -721,7 +721,7 @@ class TimeSeriesCommands:
         """  # noqa
         params = [key]
         self._append_latest(params, latest)
-        return self.execute_command(GET_CMD, *params)
+        return self.execute_command(GET_CMD, *params, keys=[key])
 
     def mget(
         self,
@@ -761,7 +761,7 @@ class TimeSeriesCommands:
 
         For more information: https://redis.io/commands/ts.info/
         """  # noqa
-        return self.execute_command(INFO_CMD, key)
+        return self.execute_command(INFO_CMD, key, keys=[key])
 
     def queryindex(self, filters: List[str]):
         """# noqa
