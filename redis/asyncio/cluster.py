@@ -460,22 +460,32 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
     def get_nodes(self) -> List["ClusterNode"]:
         """Get all nodes of the cluster."""
+        if self._initialize:
+            raise RedisClusterException('execute `await RedisCluster.initialize()` first')
         return list(self.nodes_manager.nodes_cache.values())
 
     def get_primaries(self) -> List["ClusterNode"]:
         """Get the primary nodes of the cluster."""
+        if self._initialize:
+            raise RedisClusterException('execute `await RedisCluster.initialize()` first')
         return self.nodes_manager.get_nodes_by_server_type(PRIMARY)
 
     def get_replicas(self) -> List["ClusterNode"]:
         """Get the replica nodes of the cluster."""
+        if self._initialize:
+            raise RedisClusterException('execute `await RedisCluster.initialize()` first')
         return self.nodes_manager.get_nodes_by_server_type(REPLICA)
 
     def get_random_node(self) -> "ClusterNode":
         """Get a random node of the cluster."""
+        if self._initialize:
+            raise RedisClusterException('execute `await RedisCluster.initialize()` first')
         return random.choice(list(self.nodes_manager.nodes_cache.values()))
 
     def get_default_node(self) -> "ClusterNode":
         """Get the default node of the client."""
+        if self._initialize:
+            raise RedisClusterException('execute `await RedisCluster.initialize()` first')
         return self.nodes_manager.default_node
 
     def set_default_node(self, node: "ClusterNode") -> None:
@@ -496,6 +506,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         node_name: Optional[str] = None,
     ) -> Optional["ClusterNode"]:
         """Get node by (host, port) or node_name."""
+        if self._initialize:
+            raise RedisClusterException('execute `await RedisCluster.initialize()` first')
         return self.nodes_manager.get_node(host, port, node_name)
 
     def get_node_from_key(
@@ -512,6 +524,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
         :raises SlotNotCoveredError: if the key is not covered by any slot.
         """
+        if self._initialize:
+            raise RedisClusterException('execute `await RedisCluster.initialize()` first')
         slot = self.keyslot(key)
         slot_cache = self.nodes_manager.slots_cache.get(slot)
         if not slot_cache:
