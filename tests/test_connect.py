@@ -75,6 +75,8 @@ def test_tcp_ssl_connect(tcp_address):
         (6, 3, True, True),
     ],
 )
+# @pytest.mark.parametrize("use_protocol", [2, 3])
+# @pytest.mark.parametrize("use_auth", [False, True])
 def test_tcp_auth(tcp_address, use_protocol, use_auth, use_server_ver, use_client_name):
     """
     Test that various initial handshake cases are handled correctly by the client
