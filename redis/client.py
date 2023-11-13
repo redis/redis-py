@@ -13,6 +13,7 @@ from redis._parsers.helpers import (
     _RedisCallbacksRESP3,
     bool_ok,
 )
+from redis.cache import _Cache
 from redis.commands import (
     CoreCommands,
     RedisModuleCommands,
@@ -33,6 +34,8 @@ from redis.exceptions import (
 from redis.lock import Lock
 from redis.retry import Retry
 from redis.utils import (
+    DEFAULT_BLACKLIST,
+    DEFAULT_WHITELIST,
     HIREDIS_AVAILABLE,
     _set_info_logger,
     get_lib_version,
@@ -203,6 +206,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
+        client_caching: bool = False,
+        client_cache: Optional[_Cache] = None,
+        cache_max_size: int = 100,
+        cache_ttl: int = 0,
+        cache_eviction_policy: str = "lru",
+        cache_blacklist: List[str] = DEFAULT_BLACKLIST,
+        cache_whitelist: List[str] = DEFAULT_WHITELIST,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -309,6 +319,12 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.response_callbacks.update(_RedisCallbacksRESP3)
         else:
             self.response_callbacks.update(_RedisCallbacksRESP2)
+
+        self.client_cache = client_cache
+        self.cache_blacklist = cache_blacklist
+        self.cache_whitelist = cache_whitelist
+        if client_caching:
+            self.client_cache = _Cache(cache_max_size, cache_ttl, cache_eviction_policy)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}<{repr(self.connection_pool)}>"
@@ -525,23 +541,49 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ):
             raise error
 
+    def get_from_local_cache(self, command):
+        if (
+            self.client_cache is None
+            or command[0] in self.cache_blacklist
+            or command[0] not in self.cache_whitelist
+        ):
+            return None
+        return self.client_cache.get(command)
+
+    def add_to_local_cache(self, command, response):
+        if (
+            self.client_cache is not None
+            and (self.cache_blacklist == [] or command[0] not in self.cache_blacklist)
+            and (self.cache_whitelist == [] or command[0] in self.cache_whitelist)
+        ):
+            self.client_cache.set(command, response)
+
+    def delete_from_local_cache(self, command):
+        if self.client_cache is not None:
+            self.client_cache.delete(command)
+
     # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
         """Execute a command and return a parsed response"""
-        pool = self.connection_pool
-        command_name = args[0]
-        conn = self.connection or pool.get_connection(command_name, **options)
+        response_from_cache = self.get_from_local_cache(args)
+        if response_from_cache is not None:
+            return response_from_cache
+        else:
+            pool = self.connection_pool
+            command_name = args[0]
+            conn = self.connection or pool.get_connection(command_name, **options)
 
-        try:
-            return conn.retry.call_with_retry(
-                lambda: self._send_command_parse_response(
-                    conn, command_name, *args, **options
-                ),
-                lambda error: self._disconnect_raise(conn, error),
-            )
-        finally:
-            if not self.connection:
-                pool.release(conn)
+            try:
+                response = conn.retry.call_with_retry(
+                    lambda: self._send_command_parse_response(
+                        conn, command_name, *args, **options
+                    ),
+                    lambda error: self._disconnect_raise(conn, error),
+                )
+                self.add_to_local_cache(args, response)
+            finally:
+                if not self.connection:
+                    pool.release(conn)
 
     def parse_response(self, connection, command_name, **options):
         """Parses a response from the Redis server"""
