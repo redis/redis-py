@@ -1060,6 +1060,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             list<ClusterNode>
             dict<Any, ClusterNode>
         """
+        kwargs.pop("keys", None)  # the keys is used only for client side caching
         target_nodes_specified = False
         is_default_node = False
         target_nodes = None
@@ -1962,6 +1963,7 @@ class ClusterPipeline(RedisCluster):
         """
         Wrapper function for pipeline_execute_command
         """
+        kwargs.pop("keys", None)  # the keys is used only for client side caching
         return self.pipeline_execute_command(*args, **kwargs)
 
     def pipeline_execute_command(self, *args, **options):

@@ -597,6 +597,7 @@ class Redis(
     async def execute_command(self, *args, **options):
         """Execute a command and return a parsed response"""
         await self.initialize()
+        options.pop("keys", None)  # the keys is used only for client side caching
         pool = self.connection_pool
         command_name = args[0]
         conn = self.connection or await pool.get_connection(command_name, **options)
@@ -1275,6 +1276,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
     def execute_command(
         self, *args, **kwargs
     ) -> Union["Pipeline", Awaitable["Pipeline"]]:
+        kwargs.pop("keys", None)  # the keys is used only for client side caching
         if (self.watching or args[0] == "WATCH") and not self.explicit_transaction:
             return self.immediate_execute_command(*args, **kwargs)
         return self.pipeline_execute_command(*args, **kwargs)
