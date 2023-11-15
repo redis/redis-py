@@ -5,7 +5,6 @@ import hashlib
 import warnings
 from typing import (
     TYPE_CHECKING,
-    Any,
     AsyncIterator,
     Awaitable,
     Callable,
@@ -37,6 +36,7 @@ from redis.typing import (
     KeysT,
     KeyT,
     PatternT,
+    ResponseT,
     ScriptTextT,
     StreamIdT,
     TimeoutSecT,
@@ -48,8 +48,6 @@ from .helpers import list_or_args
 if TYPE_CHECKING:
     from redis.asyncio.client import Redis as AsyncRedis
     from redis.client import Redis
-
-ResponseT = Union[Awaitable, Any]
 
 
 class ACLCommands(CommandsProtocol):

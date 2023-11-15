@@ -13,7 +13,12 @@ from redis._parsers.helpers import (
     _RedisCallbacksRESP3,
     bool_ok,
 )
-from redis.cache import _Cache
+from redis.cache import (
+    DEFAULT_BLACKLIST,
+    DEFAULT_EVICTION_POLICY,
+    DEFAULT_WHITELIST,
+    _Cache,
+)
 from redis.commands import (
     CoreCommands,
     RedisModuleCommands,
@@ -33,9 +38,8 @@ from redis.exceptions import (
 )
 from redis.lock import Lock
 from redis.retry import Retry
+from redis.typing import KeysT, ResponseT
 from redis.utils import (
-    DEFAULT_BLACKLIST,
-    DEFAULT_WHITELIST,
     HIREDIS_AVAILABLE,
     _set_info_logger,
     get_lib_version,
@@ -206,11 +210,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
-        client_caching: bool = False,
+        cache_enable: bool = False,
         client_cache: Optional[_Cache] = None,
         cache_max_size: int = 100,
         cache_ttl: int = 0,
-        cache_eviction_policy: str = "lru",
+        cache_eviction_policy: str = DEFAULT_EVICTION_POLICY,
         cache_blacklist: List[str] = DEFAULT_BLACKLIST,
         cache_whitelist: List[str] = DEFAULT_WHITELIST,
     ) -> None:
@@ -321,10 +325,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.response_callbacks.update(_RedisCallbacksRESP2)
 
         self.client_cache = client_cache
-        self.cache_blacklist = cache_blacklist
-        self.cache_whitelist = cache_whitelist
-        if client_caching:
+        if cache_enable:
             self.client_cache = _Cache(cache_max_size, cache_ttl, cache_eviction_policy)
+        if self.client_cache is not None:
+            self.cache_blacklist = cache_blacklist
+            self.cache_whitelist = cache_whitelist
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}<{repr(self.connection_pool)}>"
@@ -541,7 +546,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ):
             raise error
 
-    def get_from_local_cache(self, command):
+    def _get_from_local_cache(self, command: str):
+        """
+        If the command is in the local cache, return the response
+        """
         if (
             self.client_cache is None
             or command[0] in self.cache_blacklist
@@ -550,7 +558,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             return None
         return self.client_cache.get(command)
 
-    def add_to_local_cache(self, command, response, keys):
+    def _add_to_local_cache(self, command: str, response: ResponseT, keys: List[KeysT]):
+        """
+        Add the command and response to the local cache if the command
+        is allowed to be cached
+        """
         if (
             self.client_cache is not None
             and (self.cache_blacklist == [] or command[0] not in self.cache_blacklist)
@@ -558,16 +570,21 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ):
             self.client_cache.set(command, response, keys)
 
-    def delete_from_local_cache(self, command):
-        if self.client_cache is not None:
+    def delete_from_local_cache(self, command: str):
+        """
+        Delete the command from the local cache
+        """
+        try:
             self.client_cache.delete(command)
+        except AttributeError:
+            pass
 
     # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
         """Execute a command and return a parsed response"""
         command_name = args[0]
         keys = options.pop("keys", None)
-        response_from_cache = self.get_from_local_cache(args)
+        response_from_cache = self._get_from_local_cache(args)
         if response_from_cache is not None:
             return response_from_cache
         else:
@@ -581,7 +598,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                     ),
                     lambda error: self._disconnect_raise(conn, error),
                 )
-                self.add_to_local_cache(args, response, keys)
+                self._add_to_local_cache(args, response, keys)
             finally:
                 if not self.connection:
                     pool.release(conn)
