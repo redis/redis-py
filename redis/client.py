@@ -599,6 +599,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                     lambda error: self._disconnect_raise(conn, error),
                 )
                 self._add_to_local_cache(args, response, keys)
+                return response
             finally:
                 if not self.connection:
                     pool.release(conn)
