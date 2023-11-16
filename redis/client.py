@@ -326,7 +326,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         self.client_cache = client_cache
         if cache_enable:
-            self.client_cache = _LocalChace(cache_max_size, cache_ttl, cache_eviction_policy)
+            self.client_cache = _LocalChace(
+                cache_max_size, cache_ttl, cache_eviction_policy
+            )
         if self.client_cache is not None:
             self.cache_blacklist = cache_blacklist
             self.cache_whitelist = cache_whitelist
