@@ -96,8 +96,9 @@ class _RESP3Parser(_RESPBase):
                 pass
         # map response
         elif byte == b"%":
-            # we use this approach and not dict comprehension here
-            # because this dict comprehension fails in python 3.7
+            # We cannot use a dict-comprehension to parse stream.
+            # Evaluation order of key:val expression in dict comprehension only
+            # became defined to be left-right in version 3.8
             resp_dict = {}
             for _ in range(int(response)):
                 key = self._read_response(disable_decoding=disable_decoding)
@@ -225,12 +226,16 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
                 pass
         # map response
         elif byte == b"%":
-            response = {
-                (await self._read_response(disable_decoding=disable_decoding)): (
-                    await self._read_response(disable_decoding=disable_decoding)
+            # We cannot use a dict-comprehension to parse stream.
+            # Evaluation order of key:val expression in dict comprehension only
+            # became defined to be left-right in version 3.8
+            resp_dict = {}
+            for _ in range(int(response)):
+                key = await self._read_response(disable_decoding=disable_decoding)
+                resp_dict[key] = await self._read_response(
+                    disable_decoding=disable_decoding, push_request=push_request
                 )
-                for _ in range(int(response))
-            }
+            response = resp_dict
         # push response
         elif byte == b">":
             response = [
