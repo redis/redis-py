@@ -159,7 +159,7 @@ class EvictionPolicy(Enum):
     RANDOM = "random"
 
 
-class _Cache:
+class _LocalChace:
     """
     A caching mechanism for storing redis commands and their responses.
 

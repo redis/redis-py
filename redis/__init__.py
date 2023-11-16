@@ -2,7 +2,7 @@ import sys
 
 from redis import asyncio  # noqa
 from redis.backoff import default_backoff
-from redis.cache import _Cache
+from redis.cache import _LocalChace
 from redis.client import Redis, StrictRedis
 from redis.cluster import RedisCluster
 from redis.connection import (
@@ -62,7 +62,7 @@ except AttributeError:
     VERSION = tuple([99, 99, 99])
 
 __all__ = [
-    "_Cache",
+    "_LocalChace",
     "AuthenticationError",
     "AuthenticationWrongNumberOfArgsError",
     "BlockingConnectionPool",

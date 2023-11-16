@@ -17,7 +17,7 @@ from redis.cache import (
     DEFAULT_BLACKLIST,
     DEFAULT_EVICTION_POLICY,
     DEFAULT_WHITELIST,
-    _Cache,
+    _LocalChace,
 )
 from redis.commands import (
     CoreCommands,
@@ -211,7 +211,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
         cache_enable: bool = False,
-        client_cache: Optional[_Cache] = None,
+        client_cache: Optional[_LocalChace] = None,
         cache_max_size: int = 100,
         cache_ttl: int = 0,
         cache_eviction_policy: str = DEFAULT_EVICTION_POLICY,
@@ -326,7 +326,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         self.client_cache = client_cache
         if cache_enable:
-            self.client_cache = _Cache(cache_max_size, cache_ttl, cache_eviction_policy)
+            self.client_cache = _LocalChace(cache_max_size, cache_ttl, cache_eviction_policy)
         if self.client_cache is not None:
             self.cache_blacklist = cache_blacklist
             self.cache_whitelist = cache_whitelist
@@ -1314,7 +1314,7 @@ class Pipeline(Redis):
         self.explicit_transaction = True
 
     def execute_command(self, *args, **kwargs):
-        kwargs.pop("keys", None)  # the keys is used only for client side caching
+        kwargs.pop("keys", None)  # the keys are used only for client side caching
         if (self.watching or args[0] == "WATCH") and not self.explicit_transaction:
             return self.immediate_execute_command(*args, **kwargs)
         return self.pipeline_execute_command(*args, **kwargs)
