@@ -95,9 +95,14 @@ class CommandsParser(AbstractCommandsParser):
             return None
 
         cmd_name = args[0].lower()
+
+        is_memory_usage = False
+        if cmd_name == 'memory usage':
+            is_memory_usage = True
+
         if cmd_name not in self.commands:
             # try to split the command name and to take only the main command,
-            # e.g. 'memory' for 'memory usage'
+            # e.g. 'memory' for 'memory stats'
             cmd_name_split = cmd_name.split()
             cmd_name = cmd_name_split[0]
             if cmd_name in self.commands:
@@ -131,8 +136,10 @@ class CommandsParser(AbstractCommandsParser):
                             command = self.parse_subcommand(subcmd)
                             is_subcmd = True
 
-                # The command doesn't have keys in it
                 if not is_subcmd:
+                    if is_memory_usage:
+                        return [args[1]]
+                    # The command doesn't have keys in it
                     return None
             last_key_pos = command["last_key_pos"]
             if last_key_pos < 0:
@@ -217,9 +224,14 @@ class AsyncCommandsParser(AbstractCommandsParser):
             return None
 
         cmd_name = args[0].lower()
+
+        is_memory_usage = False
+        if cmd_name == 'memory usage':
+            is_memory_usage = True
+
         if cmd_name not in self.commands:
             # try to split the command name and to take only the main command,
-            # e.g. 'memory' for 'memory usage'
+            # e.g. 'memory' for 'memory stats'
             cmd_name_split = cmd_name.split()
             cmd_name = cmd_name_split[0]
             if cmd_name in self.commands:
@@ -255,6 +267,8 @@ class AsyncCommandsParser(AbstractCommandsParser):
 
                 # The command doesn't have keys in it
                 if not is_subcmd:
+                    if is_memory_usage:
+                        return [args[1]]
                     return None
             last_key_pos = command["last_key_pos"]
             if last_key_pos < 0:
