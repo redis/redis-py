@@ -5,7 +5,7 @@ def list_to_dict(aList):
     return {nativestr(aList[i][0]): nativestr(aList[i][1]) for i in range(len(aList))}
 
 
-def parse_range(response):
+def parse_range(response, **kwargs):
     """Parse range response. Used by TS.RANGE and TS.REVRANGE."""
     return [tuple((r[0], float(r[1]))) for r in response]
 

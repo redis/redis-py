@@ -23,6 +23,7 @@ from redis.typing import (
     KeysT,
     KeyT,
     PatternT,
+    ResponseT,
 )
 
 from .core import (
@@ -40,7 +41,6 @@ from .core import (
     ManagementCommands,
     ModuleCommands,
     PubSubCommands,
-    ResponseT,
     ScriptCommands,
 )
 from .helpers import list_or_args

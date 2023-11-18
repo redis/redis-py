@@ -13,6 +13,12 @@ from redis._parsers.helpers import (
     _RedisCallbacksRESP3,
     bool_ok,
 )
+from redis.cache import (
+    DEFAULT_BLACKLIST,
+    DEFAULT_EVICTION_POLICY,
+    DEFAULT_WHITELIST,
+    _LocalChace,
+)
 from redis.commands import (
     CoreCommands,
     RedisModuleCommands,
@@ -32,6 +38,7 @@ from redis.exceptions import (
 )
 from redis.lock import Lock
 from redis.retry import Retry
+from redis.typing import KeysT, ResponseT
 from redis.utils import (
     HIREDIS_AVAILABLE,
     _set_info_logger,
@@ -203,6 +210,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
+        cache_enable: bool = False,
+        client_cache: Optional[_LocalChace] = None,
+        cache_max_size: int = 100,
+        cache_ttl: int = 0,
+        cache_eviction_policy: str = DEFAULT_EVICTION_POLICY,
+        cache_blacklist: List[str] = DEFAULT_BLACKLIST,
+        cache_whitelist: List[str] = DEFAULT_WHITELIST,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -309,6 +323,15 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.response_callbacks.update(_RedisCallbacksRESP3)
         else:
             self.response_callbacks.update(_RedisCallbacksRESP2)
+
+        self.client_cache = client_cache
+        if cache_enable:
+            self.client_cache = _LocalChace(
+                cache_max_size, cache_ttl, cache_eviction_policy
+            )
+        if self.client_cache is not None:
+            self.cache_blacklist = cache_blacklist
+            self.cache_whitelist = cache_whitelist
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}<{repr(self.connection_pool)}>"
@@ -525,23 +548,63 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ):
             raise error
 
+    def _get_from_local_cache(self, command: str):
+        """
+        If the command is in the local cache, return the response
+        """
+        if (
+            self.client_cache is None
+            or command[0] in self.cache_blacklist
+            or command[0] not in self.cache_whitelist
+        ):
+            return None
+        return self.client_cache.get(command)
+
+    def _add_to_local_cache(self, command: str, response: ResponseT, keys: List[KeysT]):
+        """
+        Add the command and response to the local cache if the command
+        is allowed to be cached
+        """
+        if (
+            self.client_cache is not None
+            and (self.cache_blacklist == [] or command[0] not in self.cache_blacklist)
+            and (self.cache_whitelist == [] or command[0] in self.cache_whitelist)
+        ):
+            self.client_cache.set(command, response, keys)
+
+    def delete_from_local_cache(self, command: str):
+        """
+        Delete the command from the local cache
+        """
+        try:
+            self.client_cache.delete(command)
+        except AttributeError:
+            pass
+
     # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
         """Execute a command and return a parsed response"""
-        pool = self.connection_pool
         command_name = args[0]
-        conn = self.connection or pool.get_connection(command_name, **options)
+        keys = options.pop("keys", None)
+        response_from_cache = self._get_from_local_cache(args)
+        if response_from_cache is not None:
+            return response_from_cache
+        else:
+            pool = self.connection_pool
+            conn = self.connection or pool.get_connection(command_name, **options)
 
-        try:
-            return conn.retry.call_with_retry(
-                lambda: self._send_command_parse_response(
-                    conn, command_name, *args, **options
-                ),
-                lambda error: self._disconnect_raise(conn, error),
-            )
-        finally:
-            if not self.connection:
-                pool.release(conn)
+            try:
+                response = conn.retry.call_with_retry(
+                    lambda: self._send_command_parse_response(
+                        conn, command_name, *args, **options
+                    ),
+                    lambda error: self._disconnect_raise(conn, error),
+                )
+                self._add_to_local_cache(args, response, keys)
+                return response
+            finally:
+                if not self.connection:
+                    pool.release(conn)
 
     def parse_response(self, connection, command_name, **options):
         """Parses a response from the Redis server"""
@@ -1100,7 +1163,7 @@ class PubSub:
 
     def run_in_thread(
         self,
-        sleep_time: int = 0,
+        sleep_time: float = 0.0,
         daemon: bool = False,
         exception_handler: Optional[Callable] = None,
     ) -> "PubSubWorkerThread":
@@ -1253,6 +1316,7 @@ class Pipeline(Redis):
         self.explicit_transaction = True
 
     def execute_command(self, *args, **kwargs):
+        kwargs.pop("keys", None)  # the keys are used only for client side caching
         if (self.watching or args[0] == "WATCH") and not self.explicit_transaction:
             return self.immediate_execute_command(*args, **kwargs)
         return self.pipeline_execute_command(*args, **kwargs)

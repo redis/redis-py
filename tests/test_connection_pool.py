@@ -359,6 +359,31 @@ class TestConnectionPoolURLParsing:
         )
 
 
+class TestBlockingConnectionPoolURLParsing:
+    def test_extra_typed_querystring_options(self):
+        pool = redis.BlockingConnectionPool.from_url(
+            "redis://localhost/2?socket_timeout=20&socket_connect_timeout=10"
+            "&socket_keepalive=&retry_on_timeout=Yes&max_connections=10&timeout=42"
+        )
+
+        assert pool.connection_class == redis.Connection
+        assert pool.connection_kwargs == {
+            "host": "localhost",
+            "db": 2,
+            "socket_timeout": 20.0,
+            "socket_connect_timeout": 10.0,
+            "retry_on_timeout": True,
+        }
+        assert pool.max_connections == 10
+        assert pool.timeout == 42.0
+
+    def test_invalid_extra_typed_querystring_options(self):
+        with pytest.raises(ValueError):
+            redis.BlockingConnectionPool.from_url(
+                "redis://localhost/2?timeout=_not_a_float_"
+            )
+
+
 class TestConnectionPoolUnixSocketURLParsing:
     def test_defaults(self):
         pool = redis.ConnectionPool.from_url("unix:///socket")
