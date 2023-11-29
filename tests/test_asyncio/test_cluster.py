@@ -2461,6 +2461,19 @@ class TestNodesManager:
             await rc.aclose()
         assert "Cluster mode is not enabled on this node" in str(e.value)
 
+    async def test_init_slots_cache_cluster_mode_disabled(self) -> None:
+        """
+        Test that creating calling something which tries to access `nodes_cache`
+        on a RedisCluster fails if the cluster has not been initialized/accessed yet
+        """
+        with pytest.raises(RedisClusterException) as e:
+            rc = await get_mocked_redis_client(
+                host=default_host, port=default_port, cluster_slots=default_cluster_slots
+            )
+            rc.get_primaries()
+            await rc.aclose()
+        assert "execute `await RedisCluster.initialize()` first" in str(e.value)
+
     async def test_empty_startup_nodes(self) -> None:
         """
         It should not be possible to create a node manager with no nodes
