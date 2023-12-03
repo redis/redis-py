@@ -198,10 +198,16 @@ class _AsyncHiredisParser(AsyncBaseParser):
         if not self._connected:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
 
-        response = self._reader.gets()
+        if disable_decoding:
+            response = self._reader.gets(False)
+        else:
+            response = self._reader.gets()
         while response is False:
             await self.read_from_socket()
-            response = self._reader.gets()
+            if disable_decoding:
+                response = self._reader.gets(False)
+            else:
+                response = self._reader.gets()
 
         # if the response is a ConnectionError or the response is a list and
         # the first item is a ConnectionError, raise it as something bad
