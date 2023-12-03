@@ -404,7 +404,7 @@ def test_cache_sync(client):
     # Client B will try to get Client A out of sync by:
     # 1. deleting the graph
     # 2. reconstructing the graph in a different order, this will casuse
-    #    a differance in the current mapping between string IDs and the
+    #    a difference in the current mapping between string IDs and the
     #    mapping Client A is aware of
     #
     # Client A should pick up on the changes by comparing graph versions
