@@ -253,7 +253,7 @@ async def test_cluster(master_host):
             with pytest.raises(asyncio.CancelledError):
                 await t
 
-            # try a number of requests to excercise all the connections
+            # try a number of requests to exercise all the connections
             async def doit():
                 assert await r.get("bar") == b"bar"
                 assert await r.ping()
