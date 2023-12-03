@@ -1503,7 +1503,7 @@ async def test_withsuffixtrie(decoded_r: redis.Redis):
         assert "WITHSUFFIXTRIE" not in info["attributes"][0]["flags"]
         assert await decoded_r.ft().dropindex("idx")
 
-        # create withsuffixtrie index (text fiels)
+        # create withsuffixtrie index (text fields)
         assert await decoded_r.ft().create_index((TextField("t", withsuffixtrie=True)))
         waitForIndex(decoded_r, getattr(decoded_r.ft(), "index_name", "idx"))
         info = await decoded_r.ft().info()

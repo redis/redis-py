@@ -2227,7 +2227,7 @@ def test_withsuffixtrie(client: redis.Redis):
         assert "WITHSUFFIXTRIE" not in info["attributes"][0]
         assert client.ft().dropindex("idx")
 
-        # create withsuffixtrie index (text fiels)
+        # create withsuffixtrie index (text fields)
         assert client.ft().create_index((TextField("t", withsuffixtrie=True)))
         waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
         info = client.ft().info()
@@ -2244,7 +2244,7 @@ def test_withsuffixtrie(client: redis.Redis):
         assert "WITHSUFFIXTRIE" not in info["attributes"][0]["flags"]
         assert client.ft().dropindex("idx")
 
-        # create withsuffixtrie index (text fiels)
+        # create withsuffixtrie index (text fields)
         assert client.ft().create_index((TextField("t", withsuffixtrie=True)))
         waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
         info = client.ft().info()
