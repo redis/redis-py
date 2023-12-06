@@ -76,6 +76,10 @@ except redis.exceptions.ResponseError as e:
     print(e)  # >>> WRONGID
 # STEP_END
 
+# STEP_START xadd_7
+# Not yet implemented
+# STEP_END
+
 # STEP_START xrange_all
 res11 = r.xrange("race:france", "-", "+")
 print(
