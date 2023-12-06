@@ -1429,7 +1429,8 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         self._command_stack = []
 
     def __bool__(self) -> bool:
-        return bool(self._command_stack)
+        "Pipeline instances should  always evaluate to True on Python 3+"
+        return True
 
     def __len__(self) -> int:
         return len(self._command_stack)
