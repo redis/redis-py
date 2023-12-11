@@ -24,7 +24,10 @@ class SentinelManagedConnection(Connection):
 
     def __repr__(self):
         pool = self.connection_pool
-        s = f"{type(self).__name__}<service={pool.service_name}%s>"
+        s = (
+            f"<{type(self).__module__}.{type(self).__name__}"
+            f"(service={pool.service_name}%s)>"
+        )
         if self.host:
             host_info = f",host={self.host},port={self.port}"
             s = s % host_info
@@ -162,7 +165,10 @@ class SentinelConnectionPool(ConnectionPool):
 
     def __repr__(self):
         role = "master" if self.is_master else "slave"
-        return f"{type(self).__name__}<service={self.service_name}({role})"
+        return (
+            f"<{type(self).__module__}.{type(self).__name__}"
+            f"(service={self.service_name}({role}))>"
+        )
 
     def reset(self):
         super().reset()
@@ -261,7 +267,10 @@ class Sentinel(SentinelCommands):
             sentinel_addresses.append(
                 "{host}:{port}".format_map(sentinel.connection_pool.connection_kwargs)
             )
-        return f'{type(self).__name__}<sentinels=[{",".join(sentinel_addresses)}]>'
+        return (
+            f"<{type(self).__module__}.{type(self).__name__}"
+            f'(sentinels=[{",".join(sentinel_addresses)}])>'
+        )
 
     def check_master_state(self, state, service_name):
         if not state["is_master"] or state["is_sdown"] or state["is_odown"]:

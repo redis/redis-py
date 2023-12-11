@@ -342,7 +342,10 @@ class Redis(
         self._single_conn_lock = asyncio.Lock()
 
     def __repr__(self):
-        return f"{self.__class__.__name__}<{self.connection_pool!r}>"
+        return (
+            f"<{self.__class__.__module__}.{self.__class__.__name__}"
+            f"({self.connection_pool!r})>"
+        )
 
     def __await__(self):
         return self.initialize().__await__()
