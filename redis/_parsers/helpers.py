@@ -322,7 +322,7 @@ def float_or_none(response):
     return float(response)
 
 
-def bool_ok(response):
+def bool_ok(response, **options):
     return str_if_bytes(response) == "OK"
 
 
