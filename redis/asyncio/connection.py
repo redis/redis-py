@@ -235,12 +235,24 @@ class AbstractConnection:
     def is_connected(self):
         return self._reader is not None and self._writer is not None
 
-    def _register_connect_callback(self, callback):
+    def register_connect_callback(self, callback):
+        """
+        Register a callback to be called when the connection is established either
+        initially or reconnected.  This allows listeners to issue commands that
+        are ephemeral to the connection, for example pub/sub subscription or
+        key tracking.  The callback must be a _method_ and will be kept as
+        a weak reference.
+        """
         wm = weakref.WeakMethod(callback)
         if wm not in self._connect_callbacks:
             self._connect_callbacks.append(wm)
 
-    def _deregister_connect_callback(self, callback):
+    def deregister_connect_callback(self, callback):
+        """
+        De-register a previously registered callback.  It will no-longer receive
+        notifications on connection events.  Calling this is not required when the
+        listener goes away, since the callbacks are kept as weak methods.
+        """
         try:
             self._connect_callbacks.remove(weakref.WeakMethod(callback))
         except ValueError:
