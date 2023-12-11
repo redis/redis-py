@@ -30,11 +30,14 @@ class SentinelManagedConnection(Connection):
 
     def __repr__(self):
         pool = self.connection_pool
-        s = f"{self.__class__.__name__}<service={pool.service_name}"
+        s = (
+            f"<{self.__class__.__module__}.{self.__class__.__name__}"
+            f"(service={pool.service_name}"
+        )
         if self.host:
             host_info = f",host={self.host},port={self.port}"
             s += host_info
-        return s + ">"
+        return s + ")>"
 
     async def connect_to(self, address):
         self.host, self.port = address
@@ -120,8 +123,8 @@ class SentinelConnectionPool(ConnectionPool):
 
     def __repr__(self):
         return (
-            f"{self.__class__.__name__}"
-            f"<service={self.service_name}({self.is_master and 'master' or 'slave'})>"
+            f"<{self.__class__.__module__}.{self.__class__.__name__}"
+            f"(service={self.service_name}({self.is_master and 'master' or 'slave'}))>"
         )
 
     def reset(self):
@@ -241,7 +244,10 @@ class Sentinel(AsyncSentinelCommands):
                 f"{sentinel.connection_pool.connection_kwargs['host']}:"
                 f"{sentinel.connection_pool.connection_kwargs['port']}"
             )
-        return f"{self.__class__.__name__}<sentinels=[{','.join(sentinel_addresses)}]>"
+        return (
+            f"<{self.__class__}.{self.__class__.__name__}"
+            f"(sentinels=[{','.join(sentinel_addresses)}])>"
+        )
 
     def check_master_state(self, state: dict, service_name: str) -> bool:
         if not state["is_master"] or state["is_sdown"] or state["is_odown"]:

@@ -320,7 +320,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.response_callbacks.update(_RedisCallbacksRESP2)
 
     def __repr__(self) -> str:
-        return f"{type(self).__name__}<{repr(self.connection_pool)}>"
+        return (
+            f"<{type(self).__module__}.{type(self).__name__}"
+            f"({repr(self.connection_pool)})>"
+        )
 
     def get_encoder(self) -> "Encoder":
         """Get the connection pool's encoder"""
