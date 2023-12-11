@@ -334,7 +334,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.cache_whitelist = cache_whitelist
 
     def __repr__(self) -> str:
-        return f"{type(self).__name__}<{repr(self.connection_pool)}>"
+        return (
+            f"<{type(self).__module__}.{type(self).__name__}"
+            f"({repr(self.connection_pool)})>"
+        )
 
     def get_encoder(self) -> "Encoder":
         """Get the connection pool's encoder"""
@@ -757,7 +760,7 @@ class PubSub:
     def reset(self) -> None:
         if self.connection:
             self.connection.disconnect()
-            self.connection._deregister_connect_callback(self.on_connect)
+            self.connection.deregister_connect_callback(self.on_connect)
             self.connection_pool.release(self.connection)
             self.connection = None
         self.health_check_response_counter = 0
@@ -817,7 +820,7 @@ class PubSub:
                     )
                     # register a callback that re-subscribes to any channels we
                     # were listening to when we were disconnected
-                    self.connection._register_connect_callback(self.on_connect)
+                    self.connection.register_connect_callback(self.on_connect)
                     if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
                         self.connection._parser.set_push_handler(self.push_handler_func)
         connection = self.connection

@@ -168,7 +168,7 @@ class Redis(
             warnings.warn(
                 DeprecationWarning(
                     '"auto_close_connection_pool" is deprecated '
-                    "since version 5.0.0. "
+                    "since version 5.0.1. "
                     "Please create a ConnectionPool explicitly and "
                     "provide to the Redis() constructor instead."
                 )
@@ -247,7 +247,7 @@ class Redis(
             warnings.warn(
                 DeprecationWarning(
                     '"auto_close_connection_pool" is deprecated '
-                    "since version 5.0.0. "
+                    "since version 5.0.1. "
                     "Please create a ConnectionPool explicitly and "
                     "provide to the Redis() constructor instead."
                 )
@@ -337,7 +337,10 @@ class Redis(
         self._single_conn_lock = asyncio.Lock()
 
     def __repr__(self):
-        return f"{self.__class__.__name__}<{self.connection_pool!r}>"
+        return (
+            f"<{self.__class__.__module__}.{self.__class__.__name__}"
+            f"({self.connection_pool!r})>"
+        )
 
     def __await__(self):
         return self.initialize().__await__()
@@ -566,7 +569,7 @@ class Redis(
         ):
             await self.connection_pool.disconnect()
 
-    @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="close")
+    @deprecated_function(version="5.0.1", reason="Use aclose() instead", name="close")
     async def close(self, close_connection_pool: Optional[bool] = None) -> None:
         """
         Alias for aclose(), for backwards compatibility
@@ -785,7 +788,7 @@ class PubSub:
 
     def __del__(self):
         if self.connection:
-            self.connection._deregister_connect_callback(self.on_connect)
+            self.connection.deregister_connect_callback(self.on_connect)
 
     async def aclose(self):
         # In case a connection property does not yet exist
@@ -796,7 +799,7 @@ class PubSub:
         async with self._lock:
             if self.connection:
                 await self.connection.disconnect()
-                self.connection._deregister_connect_callback(self.on_connect)
+                self.connection.deregister_connect_callback(self.on_connect)
                 await self.connection_pool.release(self.connection)
                 self.connection = None
             self.channels = {}
@@ -804,12 +807,12 @@ class PubSub:
             self.patterns = {}
             self.pending_unsubscribe_patterns = set()
 
-    @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="close")
+    @deprecated_function(version="5.0.1", reason="Use aclose() instead", name="close")
     async def close(self) -> None:
         """Alias for aclose(), for backwards compatibility"""
         await self.aclose()
 
-    @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="reset")
+    @deprecated_function(version="5.0.1", reason="Use aclose() instead", name="reset")
     async def reset(self) -> None:
         """Alias for aclose(), for backwards compatibility"""
         await self.aclose()
@@ -859,7 +862,7 @@ class PubSub:
             )
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
-            self.connection._register_connect_callback(self.on_connect)
+            self.connection.register_connect_callback(self.on_connect)
         else:
             await self.connection.connect()
         if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
