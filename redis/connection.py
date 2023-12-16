@@ -92,34 +92,29 @@ class PythonRespSerializer:
 
         buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
 
+        def get_chunks(_args):
+            for _arg in map(self.encode, _args):
+                _arg_length = len(_arg)
+                yield SYM_EMPTY.join((SYM_DOLLAR, str(_arg_length).encode(), SYM_CRLF))
+                if isinstance(_arg, memoryview):
+                    yield _arg  # we yield it independently to avoid copying memoryview
+                    yield SYM_CRLF
+                else:
+                    yield SYM_EMPTY.join((_arg, SYM_CRLF))
+
         buffer_cutoff = self._buffer_cutoff
-        for arg in map(self.encode, args):
+        for arg in get_chunks(args):
             # to avoid large string mallocs, chunk the command into the
-            # output list if we're sending large values or memoryviews
-            arg_length = len(arg)
-            if (
-                len(buff) > buffer_cutoff
-                or arg_length > buffer_cutoff
-                or isinstance(arg, memoryview)
-            ):
-                buff = SYM_EMPTY.join(
-                    (buff, SYM_DOLLAR, str(arg_length).encode(), SYM_CRLF)
-                )
+            # output list if we're sending large values
+            if len(buff) + len(arg) > buffer_cutoff or isinstance(arg, memoryview):
                 output.append(buff)
+                buff = SYM_EMPTY
+            if isinstance(arg, memoryview):
                 output.append(arg)
-                buff = SYM_CRLF
             else:
-                buff = SYM_EMPTY.join(
-                    (
-                        buff,
-                        SYM_DOLLAR,
-                        str(arg_length).encode(),
-                        SYM_CRLF,
-                        arg,
-                        SYM_CRLF,
-                    )
-                )
+                buff = SYM_EMPTY.join((buff, arg))
         output.append(buff)
+
         return output
 
 

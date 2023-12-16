@@ -309,9 +309,9 @@ class TestPythonRespSerializer:
 
     def test_pack_buffer_cutoff_average(self):
         expected = [
-            b"*2\r\n$3\r\nGET\r\n$1\r\n",
-            b"a",
-            b"\r\n",
+            b"*2\r\n$3\r\n",
+            b"GET\r\n",
+            b"$1\r\na\r\n",
         ]
         assert b"".join(expected) == self.GET_A_ENCODED
 
@@ -322,11 +322,11 @@ class TestPythonRespSerializer:
 
     def test_pack_buffer_cutoff_min(self):
         expected = [
-            b"*2\r\n$3\r\n",
-            b"GET",
-            b"\r\n$1\r\n",
-            b"a",
-            b"\r\n",
+            b"*2\r\n",
+            b"$3\r\n",
+            b"GET\r\n",
+            b"$1\r\n",
+            b"a\r\n",
         ]
         assert b"".join(expected) == self.GET_A_ENCODED
 
