@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 import redis
 from redis import ConnectionPool, Redis
-from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
+from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser, Encoder
 from redis.backoff import NoBackoff
 from redis.connection import (
     Connection,
@@ -296,3 +296,54 @@ def test_redis_from_pool(request, from_url):
 
     assert called == 1
     pool.disconnect()
+
+
+class TestPythonRespSerializer:
+    GET_A_ENCODED = b"*2\r\n$3\r\nGET\r\n$1\r\na\r\n"
+
+    def test_pack_buffer_cutoff_max(self):
+        encoder = Encoder("utf-8", "strict", False)
+        serializer = redis.connection.PythonRespSerializer(buffer_cutoff=1000, encode=encoder.encode)
+        packed = serializer.pack("GET", "a")
+        assert packed == [self.GET_A_ENCODED]
+
+    def test_pack_buffer_cutoff_average(self):
+        expected = [
+            b"*2\r\n$3\r\nGET\r\n$1\r\n",
+            b"a",
+            b"\r\n",
+        ]
+        assert b"".join(expected) == self.GET_A_ENCODED
+
+        encoder = Encoder("utf-8", "strict", False)
+        serializer = redis.connection.PythonRespSerializer(buffer_cutoff=8, encode=encoder.encode)
+        packed = serializer.pack("GET", "a")
+        assert packed == expected
+
+    def test_pack_buffer_cutoff_min(self):
+        expected = [
+            b"*2\r\n$3\r\n",
+            b"GET",
+            b"\r\n$1\r\n",
+            b"a",
+            b"\r\n",
+        ]
+        assert b"".join(expected) == self.GET_A_ENCODED
+
+        encoder = Encoder("utf-8", "strict", False)
+        serializer = redis.connection.PythonRespSerializer(buffer_cutoff=1, encode=encoder.encode)
+        packed = serializer.pack("GET", "a")
+        assert packed == expected
+
+    def test_pack_memoryview(self):
+        expected = [
+            b"*2\r\n$3\r\n",
+            b"GET",  # memoryview stays independently to avoid copying
+            b"\r\n$1\r\na\r\n",
+        ]
+        assert b"".join(expected) == self.GET_A_ENCODED
+
+        encoder = Encoder("utf-8", "strict", False)
+        serializer = redis.connection.PythonRespSerializer(buffer_cutoff=1000, encode=encoder.encode)
+        packed = serializer.pack(memoryview(b"GET"), "a")
+        assert packed == expected
