@@ -35,7 +35,7 @@ else:
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.compat import Protocol, TypedDict
-from redis.connection import DEFAULT_RESP_VERSION
+from redis.connection import DEFAULT_RESP_VERSION, HiredisRespSerializer, PythonRespSerializer
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
@@ -47,7 +47,7 @@ from redis.exceptions import (
     TimeoutError,
 )
 from redis.typing import EncodableT
-from redis.utils import HIREDIS_AVAILABLE, get_lib_version, str_if_bytes
+from redis.utils import HIREDIS_AVAILABLE, get_lib_version, str_if_bytes, HIREDIS_PACK_AVAILABLE
 
 from .._parsers import (
     BaseParser,
@@ -147,6 +147,7 @@ class AbstractConnection:
         encoder_class: Type[Encoder] = Encoder,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
+        command_packer: Optional[Callable[[], None]] = None,
     ):
         if (username or password) and credential_provider is not None:
             raise DataError(
@@ -204,6 +205,7 @@ class AbstractConnection:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
             self.protocol = protocol
+        self._command_packer = self._construct_command_packer(command_packer)
 
     def __del__(self, _warnings: Any = warnings):
         # For some reason, the individual streams don't get properly garbage
@@ -234,6 +236,14 @@ class AbstractConnection:
     @property
     def is_connected(self):
         return self._reader is not None and self._writer is not None
+
+    def _construct_command_packer(self, packer):
+        if packer is not None:
+            return packer
+        elif HIREDIS_PACK_AVAILABLE:
+            return HiredisRespSerializer()
+        else:
+            return PythonRespSerializer(self._buffer_cutoff, self.encoder.encode)
 
     def register_connect_callback(self, callback):
         """
@@ -495,7 +505,8 @@ class AbstractConnection:
     async def send_command(self, *args: Any, **kwargs: Any) -> None:
         """Pack and send a command to the Redis server"""
         await self.send_packed_command(
-            self.pack_command(*args), check_health=kwargs.get("check_health", True)
+            self._command_packer.pack(*args),
+            check_health=kwargs.get("check_health", True),
         )
 
     async def can_read_destructive(self):
@@ -569,51 +580,9 @@ class AbstractConnection:
             raise response from None
         return response
 
-    def pack_command(self, *args: EncodableT) -> List[bytes]:
+    def pack_command(self, *args):
         """Pack a series of arguments into the Redis protocol"""
-        output = []
-        # the client might have included 1 or more literal arguments in
-        # the command name, e.g., 'CONFIG GET'. The Redis server expects these
-        # arguments to be sent separately, so split the first argument
-        # manually. These arguments should be bytestrings so that they are
-        # not encoded.
-        assert not isinstance(args[0], float)
-        if isinstance(args[0], str):
-            args = tuple(args[0].encode().split()) + args[1:]
-        elif b" " in args[0]:
-            args = tuple(args[0].split()) + args[1:]
-
-        buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
-
-        buffer_cutoff = self._buffer_cutoff
-        for arg in map(self.encoder.encode, args):
-            # to avoid large string mallocs, chunk the command into the
-            # output list if we're sending large values or memoryviews
-            arg_length = len(arg)
-            if (
-                len(buff) > buffer_cutoff
-                or arg_length > buffer_cutoff
-                or isinstance(arg, memoryview)
-            ):
-                buff = SYM_EMPTY.join(
-                    (buff, SYM_DOLLAR, str(arg_length).encode(), SYM_CRLF)
-                )
-                output.append(buff)
-                output.append(arg)
-                buff = SYM_CRLF
-            else:
-                buff = SYM_EMPTY.join(
-                    (
-                        buff,
-                        SYM_DOLLAR,
-                        str(arg_length).encode(),
-                        SYM_CRLF,
-                        arg,
-                        SYM_CRLF,
-                    )
-                )
-        output.append(buff)
-        return output
+        return self._command_packer.pack(*args)
 
     def pack_commands(self, commands: Iterable[Iterable[EncodableT]]) -> List[bytes]:
         """Pack multiple commands into the Redis protocol"""
