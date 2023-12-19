@@ -206,6 +206,7 @@ class Redis(
         socket_keepalive: Optional[bool] = None,
         socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
         connection_pool: Optional[ConnectionPool] = None,
+        connection_pool_class: Type = ConnectionPool,
         unix_socket_path: Optional[str] = None,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
@@ -315,7 +316,7 @@ class Redis(
                     )
             # This arg only used if no pool is passed in
             self.auto_close_connection_pool = auto_close_connection_pool
-            connection_pool = ConnectionPool(**kwargs)
+            connection_pool = connection_pool_class(**kwargs)
         else:
             # If a pool is passed in, do not close it
             self.auto_close_connection_pool = False
