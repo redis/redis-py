@@ -1,6 +1,7 @@
 import copy
 import re
 import threading
+import socket
 import time
 import warnings
 from itertools import chain
@@ -325,6 +326,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.response_callbacks.update(_RedisCallbacksRESP2)
 
         self.client_cache = client_cache
+        self.connection_lock = threading.Lock()
+        self.invalidations_listener_thread = threading.Thread(
+            target=self._invalidations_listener
+        )
         if cache_enable:
             self.client_cache = _LocalChace(
                 cache_max_size, cache_ttl, cache_eviction_policy
@@ -332,6 +337,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if self.client_cache is not None:
             self.cache_blacklist = cache_blacklist
             self.cache_whitelist = cache_whitelist
+            self.execute_command("CLIENT", "TRACKING", "ON")
+            self.connection._parser.set_invalidation_push_handler(
+                self._cache_invalidation_process
+            )
+            self.invalidations_listener_thread.start()
 
     def __repr__(self) -> str:
         return (
@@ -357,6 +367,30 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     def set_response_callback(self, command: str, callback: Callable) -> None:
         """Set a custom Response Callback"""
         self.response_callbacks[command] = callback
+
+    def _cache_invalidation_process(
+        self, data: List[Union[str, Optional[List[str]]]]
+    ) -> None:
+        if data[1] is not None:
+            for key in data[1]:
+                self.client_cache.invalidate(key)
+            else:
+                self.client_cache.flush()
+
+    def _invalidations_listener(self) -> None:
+        connection_lock = threading.Lock()
+        sock = self.connection._parser._sock
+        # TODO: socket keepalive
+        while self.connection is not None:
+            with connection_lock:
+                try:
+                    data_peek = sock.recv(65536, socket.MSG_PEEK)
+                    if data_peek:
+                        self.connection.read_response(push_request=True)
+                except (ConnectionError, ValueError):
+                    self.client_cache.flush()
+            time.sleep(0.5)
+        self.client_cache.flush()
 
     def load_external_module(self, funcname, func) -> None:
         """
@@ -530,6 +564,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         if self.auto_close_connection_pool:
             self.connection_pool.disconnect()
+        if self.client_cache:
+            self.invalidations_listener_thread.join()
 
     def _send_command_parse_response(self, conn, command_name, *args, **options):
         """
@@ -597,12 +633,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             conn = self.connection or pool.get_connection(command_name, **options)
 
             try:
-                response = conn.retry.call_with_retry(
-                    lambda: self._send_command_parse_response(
-                        conn, command_name, *args, **options
-                    ),
-                    lambda error: self._disconnect_raise(conn, error),
-                )
+                with self.connection_lock:
+                    response = conn.retry.call_with_retry(
+                        lambda: self._send_command_parse_response(
+                            conn, command_name, *args, **options
+                        ),
+                        lambda error: self._disconnect_raise(conn, error),
+                    )
                 self._add_to_local_cache(args, response, keys)
                 return response
             finally:
