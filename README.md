@@ -64,8 +64,7 @@ The table below highlights version compatibility of the most-recent library vers
 |-----------------|-------------------|
 | 3.5.3 | <= 6.2 Family of releases |
 | >= 4.5.0 | Version 5.0 to 7.0 |
-| >= 5.0.0 | Version 5.0 to current |
-
+| >= 5.0.0 | Version 5.0 to current _(caveat: an issue currently exists ( with >= 7.2 relating to `INFO commandstats` `cmdstat_client` incrementing `failed_calls` on every connection, which can affect telemetry and monitoring)_ |
 
 ## Usage
 
