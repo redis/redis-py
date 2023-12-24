@@ -18,7 +18,7 @@ from redis.cache import (
     DEFAULT_BLACKLIST,
     DEFAULT_EVICTION_POLICY,
     DEFAULT_WHITELIST,
-    _LocalChace,
+    _LocalCache,
 )
 from redis.commands import (
     CoreCommands,
@@ -212,7 +212,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
         cache_enable: bool = False,
-        client_cache: Optional[_LocalChace] = None,
+        client_cache: Optional[_LocalCache] = None,
         cache_max_size: int = 100,
         cache_ttl: int = 0,
         cache_eviction_policy: str = DEFAULT_EVICTION_POLICY,
@@ -330,8 +330,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         self.invalidations_listener_thread = threading.Thread(
             target=self._invalidations_listener
         )
+        self.invalidations_listener_thread.daemon = True
         if cache_enable:
-            self.client_cache = _LocalChace(
+            self.client_cache = _LocalCache(
                 cache_max_size, cache_ttl, cache_eviction_policy
             )
         if self.client_cache is not None:
@@ -382,6 +383,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         sock = self.connection._parser._sock
         # TODO: socket keepalive
         while self.connection is not None:
+            print("listening for invalidations")
             with connection_lock:
                 try:
                     data_peek = sock.recv(65536, socket.MSG_PEEK)
@@ -564,8 +566,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         if self.auto_close_connection_pool:
             self.connection_pool.disconnect()
-        if self.client_cache:
-            self.invalidations_listener_thread.join()
+        # if self.client_cache:
+        #     self.invalidations_listener_thread.join()
 
     def _send_command_parse_response(self, conn, command_name, *args, **options):
         """
