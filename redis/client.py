@@ -371,24 +371,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             else:
                 self.client_cache.flush()
 
-    # def _invalidations_listener(self) -> None:
-    #     connection_lock = threading.Lock()
-    #     sock = self.connection._parser._sock
-    #     # TODO: socket keepalive
-    #     while self.connection is not None:
-    #         print("listening for invalidations")
-    #         with connection_lock:
-    #             try:
-    #                 sock.setblocking(0)
-    #                 data_peek = sock.recv(65536, socket.MSG_PEEK)
-    #                 sock.setblocking(1)
-    #                 if data_peek:
-    #                     self.connection.read_response(push_request=True)
-    #             except (ConnectionError, ValueError):
-    #                 self.client_cache.flush()
-    #         time.sleep(0.5)
-    #     self.client_cache.flush()
-
     def load_external_module(self, funcname, func) -> None:
         """
         This function can be used to add externally defined redis modules,
