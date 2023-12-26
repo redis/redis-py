@@ -1,6 +1,5 @@
 import copy
 import re
-import socket
 import threading
 import time
 import warnings
@@ -326,11 +325,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.response_callbacks.update(_RedisCallbacksRESP2)
 
         self.client_cache = client_cache
-        self.connection_lock = threading.Lock()
-        self.invalidations_listener_thread = threading.Thread(
-            target=self._invalidations_listener
-        )
-        self.invalidations_listener_thread.daemon = True
         if cache_enable:
             self.client_cache = _LocalCache(
                 cache_max_size, cache_ttl, cache_eviction_policy
@@ -342,7 +336,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.connection._parser.set_invalidation_push_handler(
                 self._cache_invalidation_process
             )
-            self.invalidations_listener_thread.start()
 
     def __repr__(self) -> str:
         return (
@@ -378,21 +371,23 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             else:
                 self.client_cache.flush()
 
-    def _invalidations_listener(self) -> None:
-        connection_lock = threading.Lock()
-        sock = self.connection._parser._sock
-        # TODO: socket keepalive
-        while self.connection is not None:
-            print("listening for invalidations")
-            with connection_lock:
-                try:
-                    data_peek = sock.recv(65536, socket.MSG_PEEK)
-                    if data_peek:
-                        self.connection.read_response(push_request=True)
-                except (ConnectionError, ValueError):
-                    self.client_cache.flush()
-            time.sleep(0.5)
-        self.client_cache.flush()
+    # def _invalidations_listener(self) -> None:
+    #     connection_lock = threading.Lock()
+    #     sock = self.connection._parser._sock
+    #     # TODO: socket keepalive
+    #     while self.connection is not None:
+    #         print("listening for invalidations")
+    #         with connection_lock:
+    #             try:
+    #                 sock.setblocking(0)
+    #                 data_peek = sock.recv(65536, socket.MSG_PEEK)
+    #                 sock.setblocking(1)
+    #                 if data_peek:
+    #                     self.connection.read_response(push_request=True)
+    #             except (ConnectionError, ValueError):
+    #                 self.client_cache.flush()
+    #         time.sleep(0.5)
+    #     self.client_cache.flush()
 
     def load_external_module(self, funcname, func) -> None:
         """
@@ -566,8 +561,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         if self.auto_close_connection_pool:
             self.connection_pool.disconnect()
-        # if self.client_cache:
-        #     self.invalidations_listener_thread.join()
+        if self.client_cache:
+            self.client_cache.flush()
 
     def _send_command_parse_response(self, conn, command_name, *args, **options):
         """
@@ -599,6 +594,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             or command[0] not in self.cache_whitelist
         ):
             return None
+        while not self.connection._is_socket_empty():
+            self.connection.read_response(push_request=True)
         return self.client_cache.get(command)
 
     def _add_to_local_cache(self, command: str, response: ResponseT, keys: List[KeysT]):
@@ -635,13 +632,12 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             conn = self.connection or pool.get_connection(command_name, **options)
 
             try:
-                with self.connection_lock:
-                    response = conn.retry.call_with_retry(
-                        lambda: self._send_command_parse_response(
-                            conn, command_name, *args, **options
-                        ),
-                        lambda error: self._disconnect_raise(conn, error),
-                    )
+                response = conn.retry.call_with_retry(
+                    lambda: self._send_command_parse_response(
+                        conn, command_name, *args, **options
+                    ),
+                    lambda error: self._disconnect_raise(conn, error),
+                )
                 self._add_to_local_cache(args, response, keys)
                 return response
             finally:
