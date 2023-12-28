@@ -1,9 +1,11 @@
-# from redis.cache import _LocalCache, EvictionPolicy
 import time
 
+import pytest
 import redis
+from redis.utils import HIREDIS_AVAILABLE
 
 
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 def test_get_from_cache():
     r = redis.Redis(cache_enable=True, single_connection_client=True, protocol=3)
     r2 = redis.Redis(protocol=3)
@@ -23,6 +25,7 @@ def test_get_from_cache():
     assert r.get("foo") == b"barbar"
 
 
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 def test_cache_max_size():
     r = redis.Redis(
         cache_enable=True, cache_max_size=3, single_connection_client=True, protocol=3
@@ -46,6 +49,7 @@ def test_cache_max_size():
     assert r.client_cache.get(("GET", "foo")) is None
 
 
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 def test_cache_ttl():
     r = redis.Redis(
         cache_enable=True, cache_ttl=1, single_connection_client=True, protocol=3
@@ -62,6 +66,7 @@ def test_cache_ttl():
     assert r.client_cache.get(("GET", "foo")) is None
 
 
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 def test_cache_lfu_eviction():
     r = redis.Redis(
         cache_enable=True,
