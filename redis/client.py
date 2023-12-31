@@ -4,7 +4,7 @@ import threading
 import time
 import warnings
 from itertools import chain
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
 from redis._parsers.encoders import Encoder
 from redis._parsers.helpers import (
@@ -332,7 +332,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if self.client_cache is not None:
             self.cache_blacklist = cache_blacklist
             self.cache_whitelist = cache_whitelist
-            self.execute_command("CLIENT", "TRACKING", "ON")
+            self.client_tracking_on()
             self.connection._parser.set_invalidation_push_handler(
                 self._cache_invalidation_process
             )
@@ -580,7 +580,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.connection.read_response(push_request=True)
         return self.client_cache.get(command)
 
-    def _add_to_local_cache(self, command: str, response: ResponseT, keys: List[KeysT]):
+    def _add_to_local_cache(
+        self, command: Tuple[str], response: ResponseT, keys: List[KeysT]
+    ):
         """
         Add the command and response to the local cache if the command
         is allowed to be cached

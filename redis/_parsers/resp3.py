@@ -6,6 +6,8 @@ from ..typing import EncodableT
 from .base import _AsyncRESPBase, _RESPBase
 from .socket import SERVER_CLOSED_CONNECTION_ERROR
 
+_INVALIDATION_MESSAGE = b"invalidate"
+
 
 class _RESP3Parser(_RESPBase):
     """RESP3 protocol implementation"""
@@ -124,7 +126,7 @@ class _RESP3Parser(_RESPBase):
         return response
 
     def handle_push_response(self, response, disable_decoding, push_request):
-        if response[0] == b"invalidate":
+        if response[0] == _INVALIDATION_MESSAGE:
             res = self.invalidation_push_handler_func(response)
         else:
             res = self.pubsub_push_handler_func(response)
@@ -266,7 +268,7 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
         return response
 
     async def handle_push_response(self, response, disable_decoding, push_request):
-        if response[0] == b"invalidate":
+        if response[0] == _INVALIDATION_MESSAGE:
             res = self.invalidation_push_handler_func(response)
         else:
             res = self.pubsub_push_handler_func(response)

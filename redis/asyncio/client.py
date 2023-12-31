@@ -648,7 +648,9 @@ class Redis(
             await self.connection.read_response(push_request=True)
         return self.client_cache.get(command)
 
-    def _add_to_local_cache(self, command: str, response: ResponseT, keys: List[KeysT]):
+    def _add_to_local_cache(
+        self, command: Tuple[str], response: ResponseT, keys: List[KeysT]
+    ):
         """
         Add the command and response to the local cache if the command
         is allowed to be cached
