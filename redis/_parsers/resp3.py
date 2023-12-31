@@ -13,7 +13,7 @@ class _RESP3Parser(_RESPBase):
     def __init__(self, socket_read_size):
         super().__init__(socket_read_size)
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
-        self.inalidations_push_handler_func = None
+        self.invalidations_push_handler_func = None
 
     def handle_pubsub_push_response(self, response):
         logger = getLogger("push_response")
@@ -146,6 +146,7 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
     def __init__(self, socket_read_size):
         super().__init__(socket_read_size)
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
+        self.invalidations_push_handler_func = None
 
     def handle_pubsub_push_response(self, response):
         logger = getLogger("push_response")
@@ -256,13 +257,7 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
                 )
                 for _ in range(int(response))
             ]
-            res = self.pubsub_push_handler_func(response)
-            if not push_request:
-                return await self._read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
-                )
-            else:
-                return res
+            await self.handle_push_response(response, disable_decoding, push_request)
         else:
             raise InvalidResponse(f"Protocol Error: {raw!r}")
 
@@ -270,5 +265,20 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
             response = self.encoder.decode(response)
         return response
 
-    def set_push_handler(self, pubsub_push_handler_func):
+    async def handle_push_response(self, response, disable_decoding, push_request):
+        if response[0] == b"invalidate":
+            res = self.invalidation_push_handler_func(response)
+        else:
+            res = self.pubsub_push_handler_func(response)
+        if not push_request:
+            return await self._read_response(
+                disable_decoding=disable_decoding, push_request=push_request
+            )
+        else:
+            return res
+
+    def set_pubsub_push_handler(self, pubsub_push_handler_func):
         self.pubsub_push_handler_func = pubsub_push_handler_func
+
+    def set_invalidation_push_handler(self, invalidations_push_handler_func):
+        self.invalidation_push_handler_func = invalidations_push_handler_func

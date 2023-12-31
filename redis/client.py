@@ -836,7 +836,7 @@ class PubSub:
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
             if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
-                self.connection._parser.set_push_handler(self.push_handler_func)
+                self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
         connection = self.connection
         kwargs = {"check_health": not self.subscribed}
         if not self.subscribed:
