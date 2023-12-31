@@ -636,7 +636,7 @@ class Redis(
         """
         if data[1] is not None:
             for key in data[1]:
-                self.client_cache.invalidate(key)
+                self.client_cache.invalidate(str_if_bytes(key))
             else:
                 self.client_cache.flush()
 

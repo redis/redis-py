@@ -323,5 +323,6 @@ class _LocalCache:
         """
         if key not in self.key_commands_map:
             return
-        for command in self.key_commands_map[key]:
+        commands = list(self.key_commands_map[key])
+        for command in commands:
             self.delete(command)

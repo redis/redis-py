@@ -102,3 +102,28 @@ async def test_cache_lfu_eviction():
     assert r.client_cache.get(("GET", "foo2")) is None
 
     await r.aclose()
+
+
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+async def test_cache_decode_response():
+    r = redis.Redis(
+        decode_responses=True,
+        cache_enable=True,
+        single_connection_client=True,
+        protocol=3,
+    )
+    await r.set("foo", "bar")
+    # get key from redis and save in local cache
+    assert await r.get("foo") == "bar"
+    # get key from local cache
+    assert r.client_cache.get(("GET", "foo")) == "bar"
+    # change key in redis (cause invalidation)
+    await r.set("foo", "barbar")
+    # send any command to redis (process invalidation in background)
+    await r.ping()
+    # the command is not in the local cache anymore
+    assert r.client_cache.get(("GET", "foo")) is None
+    # get key from redis
+    assert await r.get("foo") == "barbar"
+
+    await r.aclose()

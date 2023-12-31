@@ -104,14 +104,13 @@ def test_cache_decode_response():
         single_connection_client=True,
         protocol=3,
     )
-    r2 = redis.Redis(protocol=3)
     r.set("foo", "bar")
     # get key from redis and save in local cache
     assert r.get("foo") == "bar"
     # get key from local cache
     assert r.client_cache.get(("GET", "foo")) == "bar"
     # change key in redis (cause invalidation)
-    r2.set("foo", "barbar")
+    r.set("foo", "barbar")
     # send any command to redis (process invalidation in background)
     r.ping()
     # the command is not in the local cache anymore
