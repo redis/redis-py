@@ -365,6 +365,12 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     def _cache_invalidation_process(
         self, data: List[Union[str, Optional[List[str]]]]
     ) -> None:
+        """
+        Invalidate (delete) all redis commands associated with a specific key.
+        `data` is a list of strings, where the first string is the invalidation message
+        and the second string is the list of keys to invalidate.
+        (if the list of keys is None, then all keys are invalidated)
+        """
         if data[1] is not None:
             for key in data[1]:
                 self.client_cache.invalidate(key)
