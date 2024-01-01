@@ -23,6 +23,7 @@ from redis.typing import (
     KeysT,
     KeyT,
     PatternT,
+    ResponseT,
 )
 
 from .core import (
@@ -40,7 +41,6 @@ from .core import (
     ManagementCommands,
     ModuleCommands,
     PubSubCommands,
-    ResponseT,
     ScriptCommands,
 )
 from .helpers import list_or_args
@@ -225,7 +225,7 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
         The keys are first split up into slots
         and then an DEL command is sent for every slot
 
-        Non-existant keys are ignored.
+        Non-existent keys are ignored.
         Returns the number of keys that were deleted.
 
         For more information see https://redis.io/commands/del
@@ -240,7 +240,7 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
         The keys are first split up into slots
         and then an TOUCH command is sent for every slot
 
-        Non-existant keys are ignored.
+        Non-existent keys are ignored.
         Returns the number of keys that were touched.
 
         For more information see https://redis.io/commands/touch
@@ -254,7 +254,7 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
         The keys are first split up into slots
         and then an TOUCH command is sent for every slot
 
-        Non-existant keys are ignored.
+        Non-existent keys are ignored.
         Returns the number of keys that were unlinked.
 
         For more information see https://redis.io/commands/unlink

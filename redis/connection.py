@@ -1,5 +1,6 @@
 import copy
 import os
+import select
 import socket
 import ssl
 import sys
@@ -217,7 +218,7 @@ class AbstractConnection:
 
     def __repr__(self):
         repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
-        return f"{self.__class__.__name__}<{repr_args}>"
+        return f"<{self.__class__.__module__}.{self.__class__.__name__}({repr_args})>"
 
     @abstractmethod
     def repr_pieces(self):
@@ -237,12 +238,24 @@ class AbstractConnection:
         else:
             return PythonRespSerializer(self._buffer_cutoff, self.encoder.encode)
 
-    def _register_connect_callback(self, callback):
+    def register_connect_callback(self, callback):
+        """
+        Register a callback to be called when the connection is established either
+        initially or reconnected.  This allows listeners to issue commands that
+        are ephemeral to the connection, for example pub/sub subscription or
+        key tracking.  The callback must be a _method_ and will be kept as
+        a weak reference.
+        """
         wm = weakref.WeakMethod(callback)
         if wm not in self._connect_callbacks:
             self._connect_callbacks.append(wm)
 
-    def _deregister_connect_callback(self, callback):
+    def deregister_connect_callback(self, callback):
+        """
+        De-register a previously registered callback.  It will no-longer receive
+        notifications on connection events.  Calling this is not required when the
+        listener goes away, since the callbacks are kept as weak methods.
+        """
         try:
             self._connect_callbacks.remove(weakref.WeakMethod(callback))
         except ValueError:
@@ -559,6 +572,11 @@ class AbstractConnection:
         if pieces:
             output.append(SYM_EMPTY.join(pieces))
         return output
+
+    def _is_socket_empty(self):
+        """Check if the socket is empty"""
+        r, _, _ = select.select([self._sock], [], [], 0)
+        return not bool(r)
 
 
 class Connection(AbstractConnection):
@@ -1004,8 +1022,8 @@ class ConnectionPool:
 
     def __repr__(self) -> (str, str):
         return (
-            f"{type(self).__name__}"
-            f"<{repr(self.connection_class(**self.connection_kwargs))}>"
+            f"<{type(self).__module__}.{type(self).__name__}"
+            f"({repr(self.connection_class(**self.connection_kwargs))})>"
         )
 
     def reset(self) -> None:
