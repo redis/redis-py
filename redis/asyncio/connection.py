@@ -645,6 +645,10 @@ class AbstractConnection:
             output.append(SYM_EMPTY.join(pieces))
         return output
 
+    def _is_socket_empty(self):
+        """Check if the socket is empty"""
+        return not self._reader.at_eof()
+
 
 class Connection(AbstractConnection):
     "Manages TCP communication to and from a Redis server"

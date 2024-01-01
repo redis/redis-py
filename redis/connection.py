@@ -1,5 +1,6 @@
 import copy
 import os
+import select
 import socket
 import ssl
 import sys
@@ -571,6 +572,11 @@ class AbstractConnection:
         if pieces:
             output.append(SYM_EMPTY.join(pieces))
         return output
+
+    def _is_socket_empty(self):
+        """Check if the socket is empty"""
+        r, _, _ = select.select([self._sock], [], [], 0)
+        return not bool(r)
 
 
 class Connection(AbstractConnection):
