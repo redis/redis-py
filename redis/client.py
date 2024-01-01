@@ -4,7 +4,7 @@ import threading
 import time
 import warnings
 from itertools import chain
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
 from redis._parsers.encoders import Encoder
 from redis._parsers.helpers import (
@@ -17,7 +17,7 @@ from redis.cache import (
     DEFAULT_BLACKLIST,
     DEFAULT_EVICTION_POLICY,
     DEFAULT_WHITELIST,
-    _LocalChace,
+    _LocalCache,
 )
 from redis.commands import (
     CoreCommands,
@@ -211,7 +211,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
         cache_enable: bool = False,
-        client_cache: Optional[_LocalChace] = None,
+        client_cache: Optional[_LocalCache] = None,
         cache_max_size: int = 100,
         cache_ttl: int = 0,
         cache_eviction_policy: str = DEFAULT_EVICTION_POLICY,
@@ -326,12 +326,16 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         self.client_cache = client_cache
         if cache_enable:
-            self.client_cache = _LocalChace(
+            self.client_cache = _LocalCache(
                 cache_max_size, cache_ttl, cache_eviction_policy
             )
         if self.client_cache is not None:
             self.cache_blacklist = cache_blacklist
             self.cache_whitelist = cache_whitelist
+            self.client_tracking_on()
+            self.connection._parser.set_invalidation_push_handler(
+                self._cache_invalidation_process
+            )
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}<{repr(self.connection_pool)}>"
@@ -354,6 +358,21 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     def set_response_callback(self, command: str, callback: Callable) -> None:
         """Set a custom Response Callback"""
         self.response_callbacks[command] = callback
+
+    def _cache_invalidation_process(
+        self, data: List[Union[str, Optional[List[str]]]]
+    ) -> None:
+        """
+        Invalidate (delete) all redis commands associated with a specific key.
+        `data` is a list of strings, where the first string is the invalidation message
+        and the second string is the list of keys to invalidate.
+        (if the list of keys is None, then all keys are invalidated)
+        """
+        if data[1] is not None:
+            for key in data[1]:
+                self.client_cache.invalidate(str_if_bytes(key))
+            else:
+                self.client_cache.flush()
 
     def load_external_module(self, funcname, func) -> None:
         """
@@ -527,6 +546,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         if self.auto_close_connection_pool:
             self.connection_pool.disconnect()
+        if self.client_cache:
+            self.client_cache.flush()
 
     def _send_command_parse_response(self, conn, command_name, *args, **options):
         """
@@ -558,9 +579,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             or command[0] not in self.cache_whitelist
         ):
             return None
+        while not self.connection._is_socket_empty():
+            self.connection.read_response(push_request=True)
         return self.client_cache.get(command)
 
-    def _add_to_local_cache(self, command: str, response: ResponseT, keys: List[KeysT]):
+    def _add_to_local_cache(
+        self, command: Tuple[str], response: ResponseT, keys: List[KeysT]
+    ):
         """
         Add the command and response to the local cache if the command
         is allowed to be cached
@@ -816,7 +841,7 @@ class PubSub:
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
             if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
-                self.connection._parser.set_push_handler(self.push_handler_func)
+                self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
         connection = self.connection
         kwargs = {"check_health": not self.subscribed}
         if not self.subscribed:
