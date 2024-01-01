@@ -159,7 +159,7 @@ class EvictionPolicy(Enum):
     RANDOM = "random"
 
 
-class _LocalChace:
+class _LocalCache:
     """
     A caching mechanism for storing redis commands and their responses.
 
@@ -220,6 +220,7 @@ class _LocalChace:
         if command in self.cache:
             if self._is_expired(command):
                 self.delete(command)
+                return
             self._update_access(command)
             return self.cache[command]["response"]
 
@@ -266,28 +267,28 @@ class _LocalChace:
         Args:
             command (str): The redis command.
         """
-        if self.eviction_policy == EvictionPolicy.LRU:
+        if self.eviction_policy == EvictionPolicy.LRU.value:
             self.cache.move_to_end(command)
-        elif self.eviction_policy == EvictionPolicy.LFU:
+        elif self.eviction_policy == EvictionPolicy.LFU.value:
             self.cache[command]["access_count"] = (
                 self.cache.get(command, {}).get("access_count", 0) + 1
             )
             self.cache.move_to_end(command)
-        elif self.eviction_policy == EvictionPolicy.RANDOM:
+        elif self.eviction_policy == EvictionPolicy.RANDOM.value:
             pass  # Random eviction doesn't require updates
 
     def _evict(self):
         """Evict a redis command from the cache based on the eviction policy."""
         if self._is_expired(self.commands_ttl_list[0]):
             self.delete(self.commands_ttl_list[0])
-        elif self.eviction_policy == EvictionPolicy.LRU:
+        elif self.eviction_policy == EvictionPolicy.LRU.value:
             self.cache.popitem(last=False)
-        elif self.eviction_policy == EvictionPolicy.LFU:
+        elif self.eviction_policy == EvictionPolicy.LFU.value:
             min_access_command = min(
                 self.cache, key=lambda k: self.cache[k].get("access_count", 0)
             )
             self.cache.pop(min_access_command)
-        elif self.eviction_policy == EvictionPolicy.RANDOM:
+        elif self.eviction_policy == EvictionPolicy.RANDOM.value:
             random_command = random.choice(list(self.cache.keys()))
             self.cache.pop(random_command)
 
@@ -322,5 +323,6 @@ class _LocalChace:
         """
         if key not in self.key_commands_map:
             return
-        for command in self.key_commands_map[key]:
+        commands = list(self.key_commands_map[key])
+        for command in commands:
             self.delete(command)
