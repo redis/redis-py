@@ -1060,6 +1060,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             list<ClusterNode>
             dict<Any, ClusterNode>
         """
+        kwargs.pop("keys", None)  # the keys are used only for client side caching
         target_nodes_specified = False
         is_default_node = False
         target_nodes = None
@@ -1775,9 +1776,9 @@ class ClusterPubSub(PubSub):
             )
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
-            self.connection._register_connect_callback(self.on_connect)
+            self.connection.register_connect_callback(self.on_connect)
             if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
-                self.connection._parser.set_push_handler(self.push_handler_func)
+                self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
         connection = self.connection
         self._execute(connection, connection.send_command, *args)
 
@@ -1962,6 +1963,7 @@ class ClusterPipeline(RedisCluster):
         """
         Wrapper function for pipeline_execute_command
         """
+        kwargs.pop("keys", None)  # the keys are used only for client side caching
         return self.pipeline_execute_command(*args, **kwargs)
 
     def pipeline_execute_command(self, *args, **options):
@@ -2196,7 +2198,7 @@ class ClusterPipeline(RedisCluster):
         )
         if attempt and allow_redirections:
             # RETRY MAGIC HAPPENS HERE!
-            # send these remaing commands one at a time using `execute_command`
+            # send these remaining commands one at a time using `execute_command`
             # in the main client. This keeps our retry logic
             # in one place mostly,
             # and allows us to be more confident in correctness of behavior.

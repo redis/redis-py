@@ -61,7 +61,7 @@ def test_stringify():
 
 
 @pytest.mark.redismod
-def test_comparision():
+def test_comparison():
     node1 = node.Node(node_id=1)
     node2 = node.Node(node_id=2)
     node3 = node.Node(node_id=3)

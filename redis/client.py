@@ -4,7 +4,7 @@ import threading
 import time
 import warnings
 from itertools import chain
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
 from redis._parsers.encoders import Encoder
 from redis._parsers.helpers import (
@@ -12,6 +12,12 @@ from redis._parsers.helpers import (
     _RedisCallbacksRESP2,
     _RedisCallbacksRESP3,
     bool_ok,
+)
+from redis.cache import (
+    DEFAULT_BLACKLIST,
+    DEFAULT_EVICTION_POLICY,
+    DEFAULT_WHITELIST,
+    _LocalCache,
 )
 from redis.commands import (
     CoreCommands,
@@ -32,6 +38,7 @@ from redis.exceptions import (
 )
 from redis.lock import Lock
 from redis.retry import Retry
+from redis.typing import KeysT, ResponseT
 from redis.utils import (
     HIREDIS_AVAILABLE,
     _set_info_logger,
@@ -203,6 +210,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
+        cache_enable: bool = False,
+        client_cache: Optional[_LocalCache] = None,
+        cache_max_size: int = 100,
+        cache_ttl: int = 0,
+        cache_eviction_policy: str = DEFAULT_EVICTION_POLICY,
+        cache_blacklist: List[str] = DEFAULT_BLACKLIST,
+        cache_whitelist: List[str] = DEFAULT_WHITELIST,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -310,8 +324,24 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         else:
             self.response_callbacks.update(_RedisCallbacksRESP2)
 
+        self.client_cache = client_cache
+        if cache_enable:
+            self.client_cache = _LocalCache(
+                cache_max_size, cache_ttl, cache_eviction_policy
+            )
+        if self.client_cache is not None:
+            self.cache_blacklist = cache_blacklist
+            self.cache_whitelist = cache_whitelist
+            self.client_tracking_on()
+            self.connection._parser.set_invalidation_push_handler(
+                self._cache_invalidation_process
+            )
+
     def __repr__(self) -> str:
-        return f"{type(self).__name__}<{repr(self.connection_pool)}>"
+        return (
+            f"<{type(self).__module__}.{type(self).__name__}"
+            f"({repr(self.connection_pool)})>"
+        )
 
     def get_encoder(self) -> "Encoder":
         """Get the connection pool's encoder"""
@@ -331,6 +361,21 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     def set_response_callback(self, command: str, callback: Callable) -> None:
         """Set a custom Response Callback"""
         self.response_callbacks[command] = callback
+
+    def _cache_invalidation_process(
+        self, data: List[Union[str, Optional[List[str]]]]
+    ) -> None:
+        """
+        Invalidate (delete) all redis commands associated with a specific key.
+        `data` is a list of strings, where the first string is the invalidation message
+        and the second string is the list of keys to invalidate.
+        (if the list of keys is None, then all keys are invalidated)
+        """
+        if data[1] is not None:
+            for key in data[1]:
+                self.client_cache.invalidate(str_if_bytes(key))
+            else:
+                self.client_cache.flush()
 
     def load_external_module(self, funcname, func) -> None:
         """
@@ -504,6 +549,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         if self.auto_close_connection_pool:
             self.connection_pool.disconnect()
+        if self.client_cache:
+            self.client_cache.flush()
 
     def _send_command_parse_response(self, conn, command_name, *args, **options):
         """
@@ -525,23 +572,67 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ):
             raise error
 
+    def _get_from_local_cache(self, command: str):
+        """
+        If the command is in the local cache, return the response
+        """
+        if (
+            self.client_cache is None
+            or command[0] in self.cache_blacklist
+            or command[0] not in self.cache_whitelist
+        ):
+            return None
+        while not self.connection._is_socket_empty():
+            self.connection.read_response(push_request=True)
+        return self.client_cache.get(command)
+
+    def _add_to_local_cache(
+        self, command: Tuple[str], response: ResponseT, keys: List[KeysT]
+    ):
+        """
+        Add the command and response to the local cache if the command
+        is allowed to be cached
+        """
+        if (
+            self.client_cache is not None
+            and (self.cache_blacklist == [] or command[0] not in self.cache_blacklist)
+            and (self.cache_whitelist == [] or command[0] in self.cache_whitelist)
+        ):
+            self.client_cache.set(command, response, keys)
+
+    def delete_from_local_cache(self, command: str):
+        """
+        Delete the command from the local cache
+        """
+        try:
+            self.client_cache.delete(command)
+        except AttributeError:
+            pass
+
     # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
         """Execute a command and return a parsed response"""
-        pool = self.connection_pool
         command_name = args[0]
-        conn = self.connection or pool.get_connection(command_name, **options)
+        keys = options.pop("keys", None)
+        response_from_cache = self._get_from_local_cache(args)
+        if response_from_cache is not None:
+            return response_from_cache
+        else:
+            pool = self.connection_pool
+            conn = self.connection or pool.get_connection(command_name, **options)
 
-        try:
-            return conn.retry.call_with_retry(
-                lambda: self._send_command_parse_response(
-                    conn, command_name, *args, **options
-                ),
-                lambda error: self._disconnect_raise(conn, error),
-            )
-        finally:
-            if not self.connection:
-                pool.release(conn)
+            try:
+                response = conn.retry.call_with_retry(
+                    lambda: self._send_command_parse_response(
+                        conn, command_name, *args, **options
+                    ),
+                    lambda error: self._disconnect_raise(conn, error),
+                )
+                self._add_to_local_cache(args, response, keys)
+                return response
+            finally:
+                if not self.connection:
+                    pool.release(conn)
 
     def parse_response(self, connection, command_name, **options):
         """Parses a response from the Redis server"""
@@ -693,7 +784,7 @@ class PubSub:
     def reset(self) -> None:
         if self.connection:
             self.connection.disconnect()
-            self.connection._deregister_connect_callback(self.on_connect)
+            self.connection.deregister_connect_callback(self.on_connect)
             self.connection_pool.release(self.connection)
             self.connection = None
         self.health_check_response_counter = 0
@@ -751,9 +842,9 @@ class PubSub:
             )
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
-            self.connection._register_connect_callback(self.on_connect)
+            self.connection.register_connect_callback(self.on_connect)
             if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
-                self.connection._parser.set_push_handler(self.push_handler_func)
+                self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
         connection = self.connection
         kwargs = {"check_health": not self.subscribed}
         if not self.subscribed:
@@ -1253,6 +1344,7 @@ class Pipeline(Redis):
         self.explicit_transaction = True
 
     def execute_command(self, *args, **kwargs):
+        kwargs.pop("keys", None)  # the keys are used only for client side caching
         if (self.watching or args[0] == "WATCH") and not self.explicit_transaction:
             return self.immediate_execute_command(*args, **kwargs)
         return self.pipeline_execute_command(*args, **kwargs)

@@ -92,7 +92,7 @@ The ‘target_nodes’ parameter is explained in the following section,
    >>> # target-node: default-node
    >>> rc.ping()
 
-Specfiying Target Nodes
+Specifying Target Nodes
 -----------------------
 
 As mentioned above, all non key-based RedisCluster commands accept the

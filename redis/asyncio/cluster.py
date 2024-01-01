@@ -682,6 +682,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         :raises RedisClusterException: if target_nodes is not provided & the command
             can't be mapped to a slot
         """
+        kwargs.pop("keys", None)  # the keys are used only for client side caching
         command = args[0]
         target_nodes = []
         target_nodes_specified = False
@@ -1428,7 +1429,8 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         self._command_stack = []
 
     def __bool__(self) -> bool:
-        return bool(self._command_stack)
+        "Pipeline instances should  always evaluate to True on Python 3+"
+        return True
 
     def __len__(self) -> int:
         return len(self._command_stack)
@@ -1447,6 +1449,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
               or List[:class:`~.ClusterNode`] or Dict[Any, :class:`~.ClusterNode`]
             - Rest of the kwargs are passed to the Redis connection
         """
+        kwargs.pop("keys", None)  # the keys are used only for client side caching
         self._command_stack.append(
             PipelineCommand(len(self._command_stack), *args, **kwargs)
         )
