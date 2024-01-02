@@ -41,7 +41,7 @@ jobs:
      runs-on: ubuntu-latest
      steps:
        - uses: actions/checkout@v4
-       - uses: actions/setup-python@v4
+       - uses: actions/setup-python@v5
          with:
            python-version: 3.9
            cache: 'pip'
@@ -65,7 +65,7 @@ jobs:
      name: Python ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}} tests
      steps:
        - uses: actions/checkout@v4
-       - uses: actions/setup-python@v4
+       - uses: actions/setup-python@v5
          with:
            python-version: ${{ matrix.python-version }}
            cache: 'pip'
@@ -120,7 +120,7 @@ jobs:
     name: RESP3 [${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
@@ -147,7 +147,7 @@ jobs:
         extension: ['tar.gz', 'whl']
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: 3.9
       - name: Run installed unit tests
@@ -163,7 +163,7 @@ jobs:
         python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', 'pypy-3.7', 'pypy-3.8', 'pypy-3.9']
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
