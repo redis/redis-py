@@ -1506,6 +1506,7 @@ def test_set_file(client):
 
 
 def test_set_path(client):
+    import os
     import json
     import tempfile
 
@@ -1524,4 +1525,8 @@ def test_set_path(client):
     res = {"hello": "world"}
     assert_resp_response(
         client, client.json().get(jsonfile.rsplit(".")[0]), res, [[res]]
+    )
+    assert client.json().set_path(Path.root_path(), root, full_path_as_key=False) == result
+    assert_resp_response(
+        client, client.json().get(os.path.basename(jsonfile).rsplit(".")[0]), res, [[res]]
     )

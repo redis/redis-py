@@ -324,6 +324,7 @@ class JSONCommands:
         nx: Optional[bool] = False,
         xx: Optional[bool] = False,
         decode_keys: Optional[bool] = False,
+        full_path_as_key: Optional[bool] = True,
     ) -> Dict[str, bool]:
         """
         Iterate over ``root_folder`` and set each JSON file to a value
@@ -333,6 +334,9 @@ class JSONCommands:
         ``xx`` if set to True, set ``value`` only if it exists.
         ``decode_keys`` If set to True, the keys of ``obj`` will be decoded
         with utf-8.
+        ``full_path_as_key`` If set to True, the name of the key will be the
+        full given root path, otherwise the name of the key will be the file
+        name without the full root path.
 
         """
         set_files_result = {}
@@ -340,7 +344,7 @@ class JSONCommands:
             for file in files:
                 file_path = os.path.join(root, file)
                 try:
-                    file_name = file_path.rsplit(".")[0]
+                    file_name = file_path.rsplit(".")[0] if full_path_as_key else file.rsplit(".")[0]
                     self.set_file(
                         file_name,
                         json_path,
