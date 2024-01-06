@@ -201,8 +201,9 @@ class TestRedisCommands:
             r.acl_genpass(-5)
             r.acl_genpass(5555)
 
-        r.acl_genpass(555)
+        password = r.acl_genpass(555)
         assert isinstance(password, (str, bytes))
+        assert len(password) == 139
 
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()

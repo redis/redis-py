@@ -12,6 +12,7 @@ from typing import (
     Iterable,
     Iterator,
     List,
+    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -20,7 +21,6 @@ from typing import (
     Union,
 )
 
-from redis.compat import Literal
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 from redis.typing import (
     AbsExpiryT,
@@ -97,6 +97,7 @@ class ACLCommands(CommandsProtocol):
                 b = int(bits)
                 if b < 0 or b > 4096:
                     raise ValueError
+                pieces.append(b)
             except ValueError:
                 raise DataError(
                     "genpass optionally accepts a bits argument, between 0 and 4096."

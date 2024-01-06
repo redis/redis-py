@@ -7,13 +7,13 @@ from typing import (
     Iterable,
     Iterator,
     List,
+    Literal,
     Mapping,
     NoReturn,
     Optional,
     Union,
 )
 
-from redis.compat import Literal
 from redis.crc import key_slot
 from redis.exceptions import RedisClusterException, RedisError
 from redis.typing import (

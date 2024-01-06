@@ -17,9 +17,11 @@ from typing import (
     List,
     Mapping,
     Optional,
+    Protocol,
     Set,
     Tuple,
     Type,
+    TypedDict,
     TypeVar,
     Union,
 )
@@ -34,7 +36,6 @@ else:
 
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.compat import Protocol, TypedDict
 from redis.connection import DEFAULT_RESP_VERSION
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
@@ -644,6 +645,10 @@ class AbstractConnection:
         if pieces:
             output.append(SYM_EMPTY.join(pieces))
         return output
+
+    def _is_socket_empty(self):
+        """Check if the socket is empty"""
+        return not self._reader.at_eof()
 
 
 class Connection(AbstractConnection):
