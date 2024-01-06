@@ -237,9 +237,6 @@ class AbstractConnection:
         if self.client_cache is not None:
             self.cache_blacklist = cache_blacklist
             self.cache_whitelist = cache_whitelist
-            self.send_command("CLIENT", "TRACKING", "ON")
-            self.read_response()
-            self._parser.set_invalidation_push_handler(self._cache_invalidation_process)
 
     def __repr__(self):
         repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
@@ -430,6 +427,12 @@ class AbstractConnection:
             self.send_command("SELECT", self.db)
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
+
+        # if client caching is enabled, start tracking
+        if self.client_cache:
+            self.send_command("CLIENT", "TRACKING", "ON")
+            self.read_response()
+            self._parser.set_invalidation_push_handler(self._cache_invalidation_process)
 
     def disconnect(self, *args):
         "Disconnects from the Redis server"
