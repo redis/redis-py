@@ -25,6 +25,12 @@ from typing import (
     cast,
 )
 
+from redis._cache import (
+    DEFAULT_BLACKLIST,
+    DEFAULT_EVICTION_POLICY,
+    DEFAULT_WHITELIST,
+    _LocalCache,
+)
 from redis._parsers.helpers import (
     _RedisCallbacks,
     _RedisCallbacksRESP2,
@@ -39,12 +45,6 @@ from redis.asyncio.connection import (
 )
 from redis.asyncio.lock import Lock
 from redis.asyncio.retry import Retry
-from redis.cache import (
-    DEFAULT_BLACKLIST,
-    DEFAULT_EVICTION_POLICY,
-    DEFAULT_WHITELIST,
-    _LocalCache,
-)
 from redis.client import (
     EMPTY_RESPONSE,
     NEVER_DECODE,
