@@ -26,6 +26,7 @@ async def test_get_from_cache():
     # get key from redis
     assert await r.get("foo") == b"barbar"
 
+    await r.flushdb()
     await r.aclose()
 
 
@@ -51,6 +52,7 @@ async def test_cache_max_size():
     # the first key is not in the local cache anymore
     assert cache.get(("GET", "foo")) is None
 
+    await r.flushdb()
     await r.aclose()
 
 
@@ -69,6 +71,7 @@ async def test_cache_ttl():
     # the key is not in the local cache anymore
     assert cache.get(("GET", "foo")) is None
 
+    await r.flushdb()
     await r.aclose()
 
 
@@ -96,6 +99,7 @@ async def test_cache_lfu_eviction():
     assert cache.get(("GET", "foo")) == b"bar"
     assert cache.get(("GET", "foo2")) is None
 
+    await r.flushdb()
     await r.aclose()
 
 
@@ -117,4 +121,20 @@ async def test_cache_decode_response():
     # get key from redis
     assert await r.get("foo") == "barbar"
 
+    await r.flushdb()
+    await r.aclose()
+
+
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+async def test_cache_blacklist():
+    cache = _LocalCache()
+    r = redis.Redis(client_cache=cache, cache_blacklist=["LLEN"], protocol=3)
+    # add list to redis
+    await r.lpush("mylist", "foo", "bar", "baz")
+    assert await r.llen("mylist") == 3
+    assert await r.lindex("mylist", 1) == b"bar"
+    assert cache.get(("LLEN", "mylist")) is None
+    assert cache.get(("LINDEX", "mylist", 1)) == b"bar"
+
+    await r.flushdb()
     await r.aclose()

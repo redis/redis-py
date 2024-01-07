@@ -26,6 +26,8 @@ def test_get_from_cache():
     # get key from redis
     assert r.get("foo") == b"barbar"
 
+    r.flushdb()
+
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 def test_cache_max_size():
@@ -49,6 +51,8 @@ def test_cache_max_size():
     # the first key is not in the local cache anymore
     assert cache.get(("GET", "foo")) is None
 
+    r.flushdb()
+
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 def test_cache_ttl():
@@ -64,6 +68,8 @@ def test_cache_ttl():
     time.sleep(1)
     # the key is not in the local cache anymore
     assert cache.get(("GET", "foo")) is None
+
+    r.flushdb()
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
@@ -90,6 +96,8 @@ def test_cache_lfu_eviction():
     assert cache.get(("GET", "foo")) == b"bar"
     assert cache.get(("GET", "foo2")) is None
 
+    r.flushdb()
+
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 def test_cache_decode_response():
@@ -108,3 +116,19 @@ def test_cache_decode_response():
     assert cache.get(("GET", "foo")) is None
     # get key from redis
     assert r.get("foo") == "barbar"
+
+    r.flushdb()
+
+
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+def test_cache_blacklist():
+    cache = _LocalCache()
+    r = redis.Redis(client_cache=cache, cache_blacklist=["LLEN"], protocol=3)
+    # add list to redis
+    r.lpush("mylist", "foo", "bar", "baz")
+    assert r.llen("mylist") == 3
+    assert r.lindex("mylist", 1) == b"bar"
+    assert cache.get(("LLEN", "mylist")) is None
+    assert cache.get(("LINDEX", "mylist", 1)) == b"bar"
+
+    r.flushdb()
