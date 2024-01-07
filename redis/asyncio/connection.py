@@ -678,7 +678,7 @@ class AbstractConnection:
             output.append(SYM_EMPTY.join(pieces))
         return output
 
-    def _is_socket_empty(self):
+    def _socket_is_empty(self):
         """Check if the socket is empty"""
         return not self._reader.at_eof()
 
@@ -692,10 +692,10 @@ class AbstractConnection:
         (if the list of keys is None, then all keys are invalidated)
         """
         if data[1] is not None:
+            self.client_cache.flush()
+        else:
             for key in data[1]:
                 self.client_cache.invalidate(str_if_bytes(key))
-            else:
-                self.client_cache.flush()
 
     async def _get_from_local_cache(self, command: str):
         """
@@ -707,7 +707,7 @@ class AbstractConnection:
             or command[0] not in self.cache_whitelist
         ):
             return None
-        while not self._is_socket_empty():
+        while not self._socket_is_empty():
             await self.read_response(push_request=True)
         return self.client_cache.get(command)
 
