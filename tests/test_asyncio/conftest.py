@@ -141,6 +141,7 @@ def _gen_cluster_mock_resp(r, response):
     connection = mock.AsyncMock(spec=Connection)
     connection.retry = Retry(NoBackoff(), 0)
     connection.read_response.return_value = response
+    connection.read_response.return_value = response
     with mock.patch.object(r, "connection", connection):
         yield r
 
