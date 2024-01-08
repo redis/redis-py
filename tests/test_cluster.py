@@ -479,6 +479,7 @@ class TestRedisClusterObj:
         redis_mock_node.execute_command.side_effect = mock_execute_command
         # Mock response value for all other commands
         redis_mock_node.parse_response.return_value = "MOCK_OK"
+        redis_mock_node._get_from_local_cache.return_value = None
         for node in r.get_nodes():
             if node.port != primary.port:
                 node.redis_connection = redis_mock_node
