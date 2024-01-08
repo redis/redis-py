@@ -210,6 +210,7 @@ def mock_node_resp(node, response):
 def mock_node_resp_func(node, func):
     connection = Mock()
     connection.read_response.side_effect = func
+    connection._get_from_local_cache.return_value = None
     node.redis_connection.connection = connection
     return node
 
