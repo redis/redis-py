@@ -202,6 +202,7 @@ def get_mocked_redis_client(func=None, *args, **kwargs):
 def mock_node_resp(node, response):
     connection = Mock()
     connection.read_response.return_value = response
+    connection._get_from_local_cache.return_value = None
     node.redis_connection.connection = connection
     return node
 
