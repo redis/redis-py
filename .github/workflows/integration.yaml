@@ -89,7 +89,6 @@ jobs:
 
        - name: Upload codecov coverage
          uses: codecov/codecov-action@v3
-         if: ${{matrix.python-version == '3.11'}}
          with:
            fail_ci_if_error: false
 
